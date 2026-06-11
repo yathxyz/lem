@@ -17,7 +17,7 @@ Status legend:
 | evil-org | n/a | no org buffers in Lem |
 | general (SPC leader) | ported | vi-mode leader = Space + full chord map (`src/keybindings.lisp`) |
 | vertico | ported/lem-builtin | prompt completion list opens instantly (`src/completion.lisp`) |
-| orderless | ported | `orderless-filter` wired into command/buffer prompts (`src/completion.lisp`) |
+| orderless | ported | `orderless-filter` wired into command/buffer prompts; Space re-filters instead of closing the popup, so multi-token input works (`src/completion.lisp`) |
 | marginalia | lem-builtin | M-x candidates show keybindings (kept by the wrapper) |
 | consult | ported/partial | project buffers `SPC SPC`, project-grep, isearch; no preview-on-move |
 | consult-eglot | partial | `SPC p s` → `lsp-document-symbol` (document-, not workspace-wide) |
