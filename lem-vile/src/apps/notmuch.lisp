@@ -201,7 +201,7 @@ A message is a hash-table carrying a \"headers\" key."
         (let ((value (gethash field headers)))
           (when value
             (insert-string point (format nil "~a: ~a~%" field
-                                         (notmuch-string value)))))))
+                                         (notmuch-string value))))))))
   (insert-string point (format nil "~%"))
   (let* ((body (gethash "body" message))
          (parts (nreverse (notmuch-collect-text-parts body '()))))

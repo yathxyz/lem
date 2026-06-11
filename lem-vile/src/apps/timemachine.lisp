@@ -117,9 +117,10 @@ When MESSAGE is non-NIL, echo a `rev k/N: date subject' line."
             (insert-string (buffer-point buffer) content)
             (buffer-start (buffer-point buffer)))
           (setf (buffer-value buffer *tm-index-key*) index)
-          (setf (buffer-name buffer)
-                (format nil "*timemachine: ~A @ ~A*"
-                        (file-namestring relpath) (tm-revision-hash rev)))
+          (let ((name (format nil "*timemachine: ~A @ ~A*"
+                              (file-namestring relpath) (tm-revision-hash rev))))
+            (unless (equal name (buffer-name buffer))
+              (ignore-errors (buffer-rename buffer name))))
           (setf (buffer-read-only-p buffer) t)
           (when message
             (message "rev ~D/~D: ~A ~A"
@@ -201,19 +202,23 @@ revision, q quits."
             (message "No git history for ~A" (file-namestring relpath))
             (return-from vile-git-timemachine))
           (let* ((mode (or (lem-core::get-file-mode (pathname relpath))
-                           'lem:fundamental-mode))
+                           'fundamental-mode))
                  (buffer (make-buffer
                           (format nil "*timemachine: ~A @ ~A*"
                                   (file-namestring relpath)
                                   (tm-revision-hash (aref revisions 0)))
                           :directory (namestring root))))
+            ;; Source file's major mode gives syntax highlighting; the
+            ;; timemachine minor mode supplies p/n/g/q (which, under vi-mode,
+            ;; outrank normal-state keys).
+            (change-buffer-mode buffer mode)
+            (save-excursion
+              (setf (current-buffer) buffer)
+              (enable-minor-mode 'vile-timemachine-mode))
             (setf (buffer-value buffer *tm-root-key*) root)
             (setf (buffer-value buffer *tm-relpath-key*) relpath)
             (setf (buffer-value buffer *tm-revisions-key*) revisions)
             (setf (buffer-value buffer *tm-index-key*) 0)
-            (change-buffer-mode buffer mode)
-            (vile-timemachine-mode t)
-            (change-buffer-mode buffer 'vile-timemachine-mode t)
             (tm-render buffer 0 :message t)
             (switch-to-buffer buffer)))))))
 
