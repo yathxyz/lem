@@ -1,0 +1,322 @@
+diff --git a/extensions/lsp-mode/lsp-mode.lisp b/extensions/lsp-mode/lsp-mode.lisp
+index b50d1d4..291f476 100644
+--- a/extensions/lsp-mode/lsp-mode.lisp
++++ b/extensions/lsp-mode/lsp-mode.lisp
+@@ -898,20 +898,44 @@ Use this when lsp-mode has side effects that you want to avoid."
+       (move-to-lsp-position end range-end)
+       (list start end))))
+
++(defun optional-completion-item-value (reader item)
++  (handler-case (funcall reader item)
++    (unbound-slot () nil)))
++
+ (defun convert-completion-items (point items)
+   (labels ((sort-items (items)
+              (sort items #'string< :key #'completion-item-sort-text))
+-           (label-and-points (item)
+-             (let ((text-edit
+-                     (handler-case (lsp:completion-item-text-edit item)
+-                       (unbound-slot () nil))))
+-               (if text-edit
+-                   (cons (lsp:text-edit-new-text text-edit)
+-                         (convert-to-range point (lsp:text-edit-range text-edit)))
+-                   (list (lsp:completion-item-label item) nil nil))))
++           (label-filter-insert-and-points (item)
++             (let* ((label (lsp:completion-item-label item))
++                    (filter-text
++                      (or (optional-completion-item-value
++                           #'lsp:completion-item-filter-text item)
++                          label))
++                    (insert-text
++                      (or (optional-completion-item-value
++                           #'lsp:completion-item-insert-text item)
++                          label))
++                    (text-edit
++                      (optional-completion-item-value
++                       #'lsp:completion-item-text-edit item)))
++               (typecase text-edit
++                 (lsp:text-edit
++                  (list* label
++                         filter-text
++                         (lsp:text-edit-new-text text-edit)
++                         (convert-to-range point (lsp:text-edit-range text-edit))))
++                 (lsp:insert-replace-edit
++                  (list* label
++                         filter-text
++                         (lsp:insert-replace-edit-new-text text-edit)
++                         (convert-to-range
++                          point
++                          (lsp:insert-replace-edit-replace text-edit))))
++                 (otherwise
++                  (list label filter-text insert-text nil nil)))))
+            (make-completion-item (item)
+-             (destructuring-bind (label start end)
+-                 (label-and-points item)
++             (destructuring-bind (label filter-text insert-text start end)
++                 (label-filter-insert-and-points item)
+                (declare (ignore end))
+                (make-instance
+                 'completion-item
+@@ -920,6 +944,8 @@ Use this when lsp-mode has side effects that you want to avoid."
+                 ;; the `end` position becomes mis-aligned and can't be used.
+                 ;; :end end
+                 :label label
++                :filter-text filter-text
++                :insert-text insert-text
+                 :detail (handler-case (lsp:completion-item-detail item)
+                           (unbound-slot () ""))
+                 :sort-text (handler-case (lsp:completion-item-sort-text item)
+@@ -974,7 +1000,7 @@ Use this when lsp-mode has side effects that you want to avoid."
+                         (if-let ((symbol-at-point (symbol-string-at-point point)))
+                           (completion-strings symbol-at-point
+                                               (convert-completion-response point response)
+-                                              :key #'lem/completion-mode::completion-item-label)
++                                              :key #'completion:completion-item-filter-text)
+                           (convert-completion-response point response))))))))
+
+ (defun completion-with-trigger-character (c)
+diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
+index 1e90e52..6a4d1f7 100644
+--- a/src/ext/completion-mode.lisp
++++ b/src/ext/completion-mode.lisp
+@@ -4,7 +4,10 @@
+            :make-completion-item
+            :completion-item
+            :completion-item-label
++           :completion-item-filter-text
++           :completion-item-insert-text
+            :completion-item-detail
++           :completion-item-accept-action
+            :run-completion
+            :completion-end
+            :completion-mode
+@@ -23,6 +26,12 @@
+     :initarg :spec
+     :reader context-spec
+     :type completion-spec)
++   (generation
++    :initform 0
++    :accessor context-generation)
++   (presented-generation
++    :initform 0
++    :accessor context-presented-generation)
+    (last-items
+     :initform '()
+     :accessor context-last-items)
+@@ -63,6 +72,16 @@
+     :initform ""
+     :reader completion-item-label
+     :type string)
++   (filter-text
++    :initarg :filter-text
++    :initform nil
++    :reader %completion-item-filter-text
++    :type (or null string))
++   (insert-text
++    :initarg :insert-text
++    :initform nil
++    :reader %completion-item-insert-text
++    :type (or null string))
+    (chunks
+     :initarg :chunks
+     :initform nil
+@@ -87,15 +106,32 @@
+     :initarg :focus-action
+     :initform nil
+     :reader completion-item-focus-action
++    :type (or null function))
++   (accept-action
++    :initarg :accept-action
++    :initform nil
++    :reader completion-item-accept-action
+     :type (or null function))))
+
++(defun completion-item-filter-text (item)
++  "Return ITEM's filtering text, falling back to its display label."
++  (or (%completion-item-filter-text item)
++      (completion-item-label item)))
++
++(defun completion-item-insert-text (item)
++  "Return ITEM's insertion text, falling back to its display label."
++  (or (%completion-item-insert-text item)
++      (completion-item-label item)))
++
+ (defmethod print-object ((obj completion-item) stream)
+   (print-unreadable-object (obj stream :type t)
+     (format stream "label: ~a" (completion-item-label obj))))
+
+ (defun make-completion-item (&rest initargs
+-                             &key label chunks detail start end focus-action)
+-  (declare (ignore label chunks detail start end focus-action))
++                             &key label filter-text insert-text chunks detail
++                               start end focus-action accept-action)
++  (declare (ignore label filter-text insert-text chunks detail
++                   start end focus-action accept-action))
+   (apply #'make-instance 'completion-item initargs))
+
+ (defvar *completion-mode-keymap* (make-keymap :description '*completion-mode-keymap*
+@@ -172,6 +208,7 @@
+
+ (defun completion-end ()
+   (when *completion-context*
++    (incf (context-generation *completion-context*))
+     (completion-mode nil)
+     (alexandria:when-let (popup-menu (context-popup-menu *completion-context*))
+       (popup-menu-quit popup-menu))
+@@ -179,7 +216,9 @@
+     (setf *completion-context* nil)))
+
+ (defun call-focus-action ()
+-  (when *completion-context*
++  (when (and *completion-context*
++             (= (context-presented-generation *completion-context*)
++                (context-generation *completion-context*)))
+     (alexandria:when-let* ((menu (context-popup-menu *completion-context*))
+                            (item (lem/popup-menu:get-focus-item menu))
+                            (fn (completion-item-focus-action item)))
+@@ -244,7 +283,15 @@
+   (when item
+     (multiple-value-bind (start end) (completion-item-range point item)
+       (delete-between-points start end)
+-      (insert-string point (subseq (completion-item-label item) 0 begin)))))
++      (insert-string point (subseq (completion-item-insert-text item) 0 begin)))))
++
++(defun completion-accept (point item)
++  "Insert ITEM as a final selection and run its acceptance action exactly once."
++  (when item
++    (completion-insert point item)
++    (completion-end)
++    (alexandria:when-let ((action (completion-item-accept-action item)))
++      (funcall action))))
+
+ (defun partial-match (strings)
+   (when strings
+@@ -261,7 +308,8 @@
+
+ (defun narrowing-down (context last-items)
+   (when last-items
+-    (let ((n (partial-match (mapcar #'completion-item-label last-items))))
++    (let ((n (partial-match
++              (mapcar #'completion-item-insert-text last-items))))
+       (multiple-value-bind (start end)
+           (completion-item-range (current-point) (first last-items))
+         (cond ((and n (plusp n) (< (count-characters start end) n))
+@@ -294,26 +342,28 @@
+         result)))
+
+ (defun compute-completion-items (context then)
+-  (flet ((update-items-and-then (items)
+-           (let ((items (limitation-items items)))
+-             (setf (context-last-items context) items)
+-             (funcall then items))))
+-    (let ((spec (context-spec context)))
+-      (if (spec-async-p spec)
+-          (call-async-function spec
+-                               (current-point)
+-                               #'update-items-and-then)
+-          (update-items-and-then (call-sync-function spec (current-point)))))))
+-
+-(defun start-completion (context items style)
++  (let ((generation (incf (context-generation context))))
++    (setf (context-last-items context) nil)
++    (flet ((return-items (items)
++             (funcall then (limitation-items items) generation)))
++      (let ((spec (context-spec context)))
++        (if (spec-async-p spec)
++            (call-async-function spec (current-point) #'return-items)
++            (return-items (call-sync-function spec (current-point))))))))
++
++(defun start-completion (context items style generation)
+   "Open popup menu for completions in the context provided"
+   (when items
++    (setf (context-presented-generation context) generation)
+     (setf (context-popup-menu context)
+           (apply #'display-popup-menu
+                  items
+                  :action-callback (lambda (item)
+-                                    (completion-insert (current-point) item)
+-                                    (completion-end))
++                                    (when (and
++                                           (eq context *completion-context*)
++                                           (= (context-presented-generation context)
++                                              (context-generation context)))
++                                      (completion-accept (current-point) item)))
+                  :print-spec (make-print-spec items)
+                  (when style `(:style ,style))))
+     (completion-mode t)
+@@ -326,12 +376,15 @@
+ (defun continue-completion (context)
+   (compute-completion-items
+    context
+-   (lambda (items)
+-     (cond ((null items)
+-            (completion-end))
+-           (t
+-            (when *completion-context*
+-              (popup-menu-update (context-popup-menu *completion-context*)
++   (lambda (items generation)
++     (when (and (eq context *completion-context*)
++                (= generation (context-generation context)))
++       (setf (context-last-items context) items)
++       (cond ((null items)
++              (completion-end))
++             ((context-popup-menu context)
++              (setf (context-presented-generation context) generation)
++              (popup-menu-update (context-popup-menu context)
+                                  items
+                                  :print-spec (make-print-spec items))
+               (call-focus-action))))))
+@@ -344,7 +397,9 @@ creates a new completion-context and sets *completion-context*"
+   (when *completion-context*
+     (completion-end))
+   (let* ((spec (ensure-completion-spec completion-spec))
+-         (context (make-instance 'completion-context :spec spec)))
++         (context (make-instance 'completion-context :spec spec))
++         (origin-buffer (current-buffer))
++         (origin-tick (buffer-modified-tick origin-buffer)))
+     (setf *completion-context* context)
+     (with-point ((before-point (current-point)))
+       (if (spec-async-p (context-spec context))
+@@ -352,21 +407,34 @@ creates a new completion-context and sets *completion-context*"
+                                                                     :point before-point)))
+             (compute-completion-items
+              context
+-             (lambda (items)
++             (lambda (items generation)
+                (lem/loading-spinner:stop-loading-spinner spinner)
+                (when (and (eq context *completion-context*)
++                          (= generation (context-generation context)))
++                 (if (and (eq origin-buffer (current-buffer))
++                          (= origin-tick (buffer-modified-tick origin-buffer))
+                           (point= before-point (current-point)))
+-                 (start-completion context items style)
+-                 (when then
+-                   (funcall then))))))
++                     (progn
++                       (setf (context-last-items context) items)
++                       (if items
++                           (progn
++                             (start-completion context items style generation)
++                             (when then
++                               (funcall then)))
++                           (completion-end)))
++                     (completion-end))))))
+           (compute-completion-items
+            context
+-           (lambda (items)
+-             (when items
++           (lambda (items generation)
++             (when (and (eq context *completion-context*)
++                        (= generation (context-generation context)))
++               (setf (context-last-items context) items)
+                (cond
++                 ((null items)
++                  (completion-end))
+                  ((alexandria:length= items 1)
+-                  (completion-insert (current-point) (first items)))
++                  (completion-accept (current-point) (first items)))
+                  (t
+-                  (start-completion context items style)
++                  (start-completion context items style generation)
+                   (when then
+                     (funcall then)))))))))))

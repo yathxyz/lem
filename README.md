@@ -52,6 +52,8 @@ of writing `.fasl` files into the source tree.
 - Prescient-style literal/regexp/initialism filtering and persistent learned
   ranking in command, buffer, and custom prompts; file prompts retain Lem's
   path-aware matching and gain the same ranking
+- completion candidates keep display, filtering, and insertion text separate;
+  acceptance callbacks are explicit and stale asynchronous results are rejected
 - LSP specs: rust-analyzer, pyright, harper-ls, and flake-aware nixd
 - legit (magit) + jj dispatch on `SPC g g`, git-gutter, git-timemachine
 - roam-lite notes, root-level roam dailies, journal, and i/t/r capture over
@@ -67,9 +69,9 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 
 ## Testing
 
-`nix flake check` runs the package, compile, boot, completion, notes, and parity-ledger
-checks. The ledger can also be validated directly, and the interactive TUI
-checks are exposed as flake apps:
+`nix flake check` runs the package, compile, boot, completion, completion-lifecycle,
+notes, and parity-ledger checks. The ledger can also be validated directly, and
+the interactive TUI checks are exposed as flake apps:
 
 ```sh
 nix flake check
@@ -77,6 +79,7 @@ python3 scripts/check-parity-ledger.py
 nix run .#compile-check
 nix run .#boot-test
 nix run .#completion-test
+nix run .#completion-lifecycle-test
 nix run .#notes-test
 nix run .#interactive-test
 nix run .#structural-test
@@ -92,6 +95,6 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 ./scripts/test-on-ex44.sh
 ```
 
-Pass `check`, `compile`, `boot`, `completion`, `interactive`, `structural`, or
-`notes` to run only that gate. `LEM_YATH_TEST_HOST` and
+Pass `check`, `compile`, `boot`, `completion`, `completion-lifecycle`,
+`interactive`, `structural`, or `notes` to run only that gate. `LEM_YATH_TEST_HOST` and
 `LEM_YATH_REMOTE_ROOT` override the SSH host and remote cache directory.

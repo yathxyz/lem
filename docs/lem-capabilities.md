@@ -275,6 +275,14 @@ whether the list opens instantly or on TAB. Core has fuzzy primitives, but no
 Orderless component dispatch or persistent Prescient ranking; lem-yath adds the
 prompt behavior described in `src/completion.lisp`.
 
+Lem-yath carries `patches/lem-completion-lifecycle.patch` against the pinned Lem
+revision. It separates display, filter, and insertion text, adds a final-accept
+callback, and rejects stale asynchronous generations before they can update the
+popup. The LSP adapter consequently honors plain `filterText`, `insertText`,
+`TextEdit`, and `InsertReplaceEdit` new-text precedence. Tracked replacement
+ranges, snippet expansion, completion resolve, additional edits, and completion
+commands remain separate gaps.
+
 ### consult-like commands (verified)
 - `M-x`: `execute-command` (bound `M-x`); command completion via `completion-command`
   (`prompt.lisp:151`).
