@@ -1,7 +1,7 @@
 ;;;; Editing defaults. Emacs side: indent-tabs-mode nil, tab-width 4,
 ;;;; ws-butler (trim trailing whitespace on save), raised undo limits.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (setf (variable-value 'tab-width :global) 4)
 

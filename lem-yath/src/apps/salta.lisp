@@ -1,10 +1,10 @@
-;;;; vile apps/salta -- Supabase/PostgREST client for Salta (port of salta.el).
+;;;; lem-yath apps/salta -- Supabase/PostgREST client for Salta (port of salta.el).
 ;;;; Searches properties, views contractor rates/financials, browses payments
 ;;;; and the revenue/cost/profit "reckoner", over the same REST views and RPCs.
 ;;;; HTTP is curl (uiop) on a background thread; results are marshalled back
 ;;;; onto the editor thread with send-event. yason handles JSON.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 ;;; --- credentials ----------------------------------------------------------
 
@@ -331,11 +331,11 @@ ON-SUCCESS with the result on the editor thread. Errors are reported."
          (error (e)
            (let ((msg (princ-to-string e)))
              (send-event (lambda () (message "Salta: ~a" msg)))))))
-     :name "vile/salta")))
+     :name "lem-yath/salta")))
 
 ;;; --- commands -------------------------------------------------------------
 
-(define-command vile-salta-find-property () ()
+(define-command lem-yath-salta-find-property () ()
   "Fuzzy-search properties via the fuzzy_search_properties RPC."
   (let ((query (prompt-for-string "Search properties: ")))
     (when (plusp (length (string-trim " " query)))
@@ -361,7 +361,7 @@ ON-SUCCESS with the result on the editor thread. Errors are reported."
                               (if (equal s "") "" (format nil "~,2f"
                                                           (salta-number s)))))))
               results "application_id"
-              (lambda () (vile-salta-find-property)))))))))
+              (lambda () (lem-yath-salta-find-property)))))))))
 
 (defun salta-property-detail-id (id)
   "Fetch and render full detail for application ID."
@@ -432,7 +432,7 @@ ON-SUCCESS with the result on the editor thread. Errors are reported."
              payments))
           (lambda () (salta-property-detail-id id))))))))
 
-(define-command vile-salta-property-detail () ()
+(define-command lem-yath-salta-property-detail () ()
   "Show full detail for a property (prompts for the application id)."
   (let ((id (or (and (mode-active-p (current-buffer) 'salta-list-mode)
                      (salta-current-row-id))
@@ -478,7 +478,7 @@ ON-SUCCESS with the result on the editor thread. Errors are reported."
                   (insert-string point (format nil "  ~22a ~,1f%~%" "Margin:"
                                                 (* 100d0 (/ profit revenue)))))))))))))
 
-(define-command vile-salta-property-reckoner () ()
+(define-command lem-yath-salta-property-reckoner () ()
   "Show the reckoner (revenue/cost/profit) for a property."
   (let ((id (or (and (mode-active-p (current-buffer) 'salta-list-mode)
                      (salta-current-row-id))
@@ -523,7 +523,7 @@ Loads (and caches) the contractor list on a background thread when needed."
                          rows))
            (choose *salta-contractor-cache*))))))
 
-(define-command vile-salta-contractor-rates () ()
+(define-command lem-yath-salta-contractor-rates () ()
   "Show the latest rate card for a contractor."
   (salta-read-contractor
    "Contractor: "
@@ -553,9 +553,9 @@ Loads (and caches) the contractor list on a background thread when needed."
                   ("Amount" 12 ,(lambda (r) (salta-money (salta-aget "rate_amount" r))))
                   ("Unit" 14 "rate_unit"))
                 rates))
-             (lambda () (vile-salta-contractor-rates))))))))))
+             (lambda () (lem-yath-salta-contractor-rates))))))))))
 
-(define-command vile-salta-contractor-financials () ()
+(define-command lem-yath-salta-contractor-financials () ()
   "Show the financial summary for a contractor."
   (salta-read-contractor
    "Contractor: "
@@ -582,7 +582,7 @@ Loads (and caches) the contractor list on a background thread when needed."
                 ("Paid" ,(lambda (d) (salta-money (salta-aget "total_paid_amount" d))))
                 ("Outstanding" ,(lambda (d) (salta-money (salta-aget "outstanding_amount" d)))))
               fin))
-           (lambda () (vile-salta-contractor-financials)))))))))
+           (lambda () (lem-yath-salta-contractor-financials)))))))))
 
 (defun salta-payments-show (params buffer-name refresh-fn)
   "Fetch rpt_payments with PARAMS and render the list in BUFFER-NAME."
@@ -601,7 +601,7 @@ Loads (and caches) the contractor list on a background thread when needed."
             ("Date" 12 ,(lambda (r) (salta-date (salta-aget "created_at" r)))))
           data "pay_commit_id" refresh-fn)))))
 
-(define-command vile-salta-payments () ()
+(define-command lem-yath-salta-payments () ()
   "Browse recent payment runs. With a contractor filter when chosen."
   (let ((params '(("order" . "created_at.desc") ("limit" . "100"))))
     (if (prompt-for-y-or-n-p "Filter by contractor?")
@@ -612,15 +612,15 @@ Loads (and caches) the contractor list on a background thread when needed."
              (salta-payments-show
               (append params `(("contractor_id" . ,(format nil "eq.~a" cid))))
               (format nil "*salta-payments: ~a*" name)
-              (lambda () (vile-salta-payments))))))
+              (lambda () (lem-yath-salta-payments))))))
         (salta-payments-show params "*salta-payments*"
-                             (lambda () (vile-salta-payments))))))
+                             (lambda () (lem-yath-salta-payments))))))
 
 ;;; --- bindings (global keymap, mirroring salta.el's C-c s prefix) ----------
 
-(define-key *global-keymap* "C-c s s" 'vile-salta-find-property)
-(define-key *global-keymap* "C-c s d" 'vile-salta-property-detail)
-(define-key *global-keymap* "C-c s r" 'vile-salta-property-reckoner)
-(define-key *global-keymap* "C-c s c" 'vile-salta-contractor-rates)
-(define-key *global-keymap* "C-c s f" 'vile-salta-contractor-financials)
-(define-key *global-keymap* "C-c s p" 'vile-salta-payments)
+(define-key *global-keymap* "C-c s s" 'lem-yath-salta-find-property)
+(define-key *global-keymap* "C-c s d" 'lem-yath-salta-property-detail)
+(define-key *global-keymap* "C-c s r" 'lem-yath-salta-property-reckoner)
+(define-key *global-keymap* "C-c s c" 'lem-yath-salta-contractor-rates)
+(define-key *global-keymap* "C-c s f" 'lem-yath-salta-contractor-financials)
+(define-key *global-keymap* "C-c s p" 'lem-yath-salta-payments)

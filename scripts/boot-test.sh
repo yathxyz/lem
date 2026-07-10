@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Boot Lem with the VILE config inside tmux and assert a clean load.
+# Boot Lem with the lem-yath config inside tmux and assert a clean load.
 # Safe to run concurrently: session/report names are unique per invocation.
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$here/scripts/tui-driver.sh"
 
-id="${VILE_CHECK_ID:-$$}"
-session="vile-boot-$id"
+id="${LEM_YATH_CHECK_ID:-$$}"
+session="lem-yath-boot-$id"
 tmp="${TMPDIR:-/tmp}"
-report="$tmp/vile-boot-report-$id"
+report="$tmp/lem-yath-boot-report-$id"
 rm -f "$report"
 
-lem_start_vile_eval "$session" \
-  "(uiop:symbol-call :vile :write-boot-report $(vile_lisp_string "$report"))" \
-  --log-filename "$tmp/vile-lem-$id.log"
+lem_start_lem-yath_eval "$session" \
+  "(uiop:symbol-call :lem-yath :write-boot-report $(lem-yath_lisp_string "$report"))" \
+  --log-filename "$tmp/lem-yath-lem-$id.log"
 
 ok=0
 for _ in $(seq 1 120); do

@@ -1,5 +1,5 @@
 {
-  description = "VILE: yanni's Lem editor configuration";
+  description = "lem-yath: yanni's Lem editor configuration";
 
   inputs = {
     lem.url = "github:lem-project/lem";
@@ -64,16 +64,16 @@
             meta.description = description;
           };
 
-          vile = pkgs.writeShellApplication {
-            name = "vile";
+          lemYath = pkgs.writeShellApplication {
+            name = "lem";
             runtimeInputs = coreRuntimeInputs;
             text = ''
               cache_home="''${XDG_CACHE_HOME:-''${HOME:-/tmp}/.cache}"
-              asdf_cache="$cache_home/vile/asdf"
+              asdf_cache="$cache_home/lem-yath/asdf"
               mkdir -p "$asdf_cache"
 
-              export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-vile:$asdf_cache:/nix/store:/nix/store''${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
-              exec ${lemNcurses}/bin/lem -q --eval '(load #P"${self}/lem-vile/init.lisp")' "$@"
+              export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-yath:$asdf_cache:/nix/store:/nix/store''${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
+              exec ${lemNcurses}/bin/lem -q --eval '(load #P"${self}/lem-yath/init.lisp")' "$@"
             '';
           };
 
@@ -86,7 +86,7 @@
                 text = ''
                   export TERM=''${TERM:-xterm-256color}
                   export LEM_BIN=${lemNcurses}/bin/lem
-                  export VILE_SOURCE=${self}/lem-vile
+                  export LEM_YATH_SOURCE=${self}/lem-yath
                   exec bash ${self}/scripts/${script} "$@"
                 '';
               };
@@ -95,7 +95,7 @@
 
           mkCheck =
             name: script:
-            pkgs.runCommand "vile-${name}-check"
+            pkgs.runCommand "lem-yath-${name}-check"
               {
                 nativeBuildInputs = [ lemNcurses ] ++ testInputs;
               }
@@ -104,7 +104,7 @@
                 export HOME=$TMPDIR/home
                 export XDG_CACHE_HOME=$TMPDIR/cache
                 export LEM_BIN=${lemNcurses}/bin/lem
-                export VILE_CHECK_ID=nix-${name}
+                export LEM_YATH_CHECK_ID=nix-${name}
 
                 mkdir -p "$HOME" "$XDG_CACHE_HOME"
                 cp -R ${self} source
@@ -117,23 +117,23 @@
         in
         rec {
           packages = {
-            default = vile;
-            inherit vile;
+            default = lemYath;
+            lem-yath = lemYath;
             lem-ncurses = lemNcurses;
           };
 
           apps = {
-            default = mkApp "${vile}/bin/vile" "Run VILE on Lem ncurses";
-            vile = apps.default;
-            lem = mkApp "${lemNcurses}/bin/lem" "Run upstream Lem ncurses";
-            compile-check = mkTestApp "vile-compile-check" "compile-check.sh";
-            boot-test = mkTestApp "vile-boot-test" "boot-test.sh";
-            orderless-test = mkTestApp "vile-orderless-test" "orderless-test.sh";
-            interactive-test = mkTestApp "vile-interactive-test" "interactive-test.sh";
+            default = mkApp "${lemYath}/bin/lem" "Run yanni's configured Lem (ncurses)";
+            lem-yath = apps.default;
+            lem-upstream = mkApp "${lemNcurses}/bin/lem" "Run upstream Lem ncurses without config";
+            compile-check = mkTestApp "lem-yath-compile-check" "compile-check.sh";
+            boot-test = mkTestApp "lem-yath-boot-test" "boot-test.sh";
+            orderless-test = mkTestApp "lem-yath-orderless-test" "orderless-test.sh";
+            interactive-test = mkTestApp "lem-yath-interactive-test" "interactive-test.sh";
           };
 
           checks = {
-            package = vile;
+            package = lemYath;
             compile = mkCheck "compile" "compile-check.sh";
             boot = mkCheck "boot" "boot-test.sh";
           };
@@ -142,7 +142,7 @@
             packages = [ lemNcurses ] ++ extendedRuntimeInputs ++ testInputs ++ [ pkgs.nixfmt-rfc-style ];
             shellHook = ''
               export LEM_BIN=${lemNcurses}/bin/lem
-              export VILE_SOURCE=$PWD/lem-vile
+              export LEM_YATH_SOURCE=$PWD/lem-yath
             '';
           };
 

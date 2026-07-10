@@ -1,4 +1,4 @@
-# emacs → lem
+# lem-yath: emacs → lem
 
 A faithful port of my Nix-managed Emacs configuration
 (`~/proj/nix/computer/home/config/emacs`, ~9,100 lines of elisp, ~100 packages)
@@ -9,7 +9,7 @@ terminal (ncurses) frontend, multi-threaded SBCL image.
 
 | Path | Purpose |
 |---|---|
-| `lem-vile/` | The port: ASDF system `vile` (core modules in `src/`, app ports in `src/apps/`) |
+| `lem-yath/` | The port: ASDF system `lem-yath` (core modules in `src/`, app ports in `src/apps/`) |
 | `docs/emacs-inventory.md` | Extracted feature inventory of the Emacs config |
 | `docs/lem-capabilities.md` | Survey of Lem's real APIs (grounded in source) |
 | `docs/port-map.md` | Emacs package → Lem equivalent mapping + gap report |
@@ -18,21 +18,25 @@ terminal (ncurses) frontend, multi-threaded SBCL image.
 
 ## Run
 
-The flake pins upstream Lem and exposes this port as a runnable app:
+The flake pins upstream Lem and exposes this port as a runnable app. The
+wrapper binary is named `lem`, so installing it gives the configured editor
+under the usual name (unconfigured upstream stays reachable as `nix run
+.#lem-upstream`):
 
 ```sh
 nix run
 ```
 
-For development:
+For development, the dev shell puts the flake-pinned upstream `lem` on PATH
+and points `LEM_YATH_SOURCE` at the working tree:
 
 ```sh
 nix develop
-vile
+lem -q --eval '(load #P"lem-yath/init.lisp")'
 ```
 
 The wrapper starts Lem without the user's normal init file, loads
-`lem-vile/init.lisp`, and keeps ASDF build outputs under the user cache instead
+`lem-yath/init.lisp`, and keeps ASDF build outputs under the user cache instead
 of writing `.fasl` files into the source tree.
 
 ## What's in the port
@@ -46,7 +50,7 @@ of writing `.fasl` files into the source tree.
 - legit (magit) + jj dispatch on `SPC g g`, git-gutter, git-timemachine
 - roam-lite notes, dailies, journal, capture over `$WORKDIR`
 - streaming OpenRouter LLM client + claude/codex/grok CLI backends
-- app ports under `lem-vile/src/apps/`: agenda, citar, devdocs, elfeed
+- app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
   (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli
 
 See `docs/port-map.md` for the per-package disposition and known divergences.
@@ -64,5 +68,5 @@ nix run .#orderless-test
 nix run .#interactive-test
 ```
 
-The underlying scripts remain parallel-safe via `VILE_CHECK_ID` and accept
-`LEM_BIN`/`VILE_SOURCE` overrides for direct debugging.
+The underlying scripts remain parallel-safe via `LEM_YATH_CHECK_ID` and accept
+`LEM_BIN`/`LEM_YATH_SOURCE` overrides for direct debugging.

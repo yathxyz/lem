@@ -3,7 +3,7 @@
 ;;;; (evil-nerd-commenter), surround (evil-surround) and a 2-char snipe
 ;;;; (evil-snipe). Leader bindings themselves live in keybindings.lisp.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (lem-vi-mode:vi-mode)
 
@@ -61,12 +61,12 @@
                                     (t
                                      (insert-string p (concatenate 'string cmt " ")))))))))))
 
-(lem-vi-mode:define-operator vile-comment-operator (start end type) ("<R>")
+(lem-vi-mode:define-operator lem-yath-comment-operator (start end type) ("<R>")
     (:move-point nil)
   (toggle-comment-lines start end))
 
-(define-key lem-vi-mode:*normal-keymap* "g c" 'vile-comment-operator)
-(define-key lem-vi-mode:*visual-keymap* "g c" 'vile-comment-operator)
+(define-key lem-vi-mode:*normal-keymap* "g c" 'lem-yath-comment-operator)
+(define-key lem-vi-mode:*visual-keymap* "g c" 'lem-yath-comment-operator)
 
 ;;; --- surround (evil-surround) ----------------------------------------------
 ;;; Visual `S` wraps the selection; `g s {motion}` wraps a motion;
@@ -88,7 +88,7 @@
         (let ((s (string char)))
           (values s s)))))
 
-(lem-vi-mode:define-operator vile-surround-operator (start end type) ("<R>")
+(lem-vi-mode:define-operator lem-yath-surround-operator (start end type) ("<R>")
     (:move-point nil)
   (multiple-value-bind (open close)
       (surround-pair (prompt-for-character "Surround with: "))
@@ -108,7 +108,7 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
         (values (copy-point back :temporary)
                 (copy-point fwd :temporary))))))
 
-(define-command vile-surround-delete () ()
+(define-command lem-yath-surround-delete () ()
   "Delete the nearest surrounding pair (ds in evil-surround)."
   (multiple-value-bind (open close)
       (surround-pair (prompt-for-character "Delete surround: "))
@@ -121,7 +121,7 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
             (t
              (message "No surrounding ~a...~a found" open close))))))
 
-(define-command vile-surround-change () ()
+(define-command lem-yath-surround-change () ()
   "Change the nearest surrounding pair (cs in evil-surround)."
   (multiple-value-bind (old-open old-close)
       (surround-pair (prompt-for-character "Change surround: "))
@@ -138,10 +138,10 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
               (t
                (message "No surrounding ~a...~a found" old-open old-close)))))))
 
-(define-key lem-vi-mode:*visual-keymap* "S" 'vile-surround-operator)
-(define-key lem-vi-mode:*normal-keymap* "g s" 'vile-surround-operator)
-(define-key lem-vi-mode:*normal-keymap* "d s" 'vile-surround-delete)
-(define-key lem-vi-mode:*normal-keymap* "c s" 'vile-surround-change)
+(define-key lem-vi-mode:*visual-keymap* "S" 'lem-yath-surround-operator)
+(define-key lem-vi-mode:*normal-keymap* "g s" 'lem-yath-surround-operator)
+(define-key lem-vi-mode:*normal-keymap* "d s" 'lem-yath-surround-delete)
+(define-key lem-vi-mode:*normal-keymap* "c s" 'lem-yath-surround-change)
 
 ;;; --- snipe (evil-snipe): s/S 2-char incremental motion ----------------------
 
@@ -162,16 +162,16 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
              (move-point (current-point) p)
              (message "snipe: ~a not found" target)))))))
 
-(define-command vile-snipe-forward () ()
+(define-command lem-yath-snipe-forward () ()
   "Jump forward to a 2-character sequence (evil-snipe `s`)."
   (snipe :forward))
 
-(define-command vile-snipe-backward () ()
+(define-command lem-yath-snipe-backward () ()
   "Jump backward to a 2-character sequence (evil-snipe `S`)."
   (snipe :backward))
 
-(define-key lem-vi-mode:*normal-keymap* "s" 'vile-snipe-forward)
-(define-key lem-vi-mode:*normal-keymap* "S" 'vile-snipe-backward)
+(define-key lem-vi-mode:*normal-keymap* "s" 'lem-yath-snipe-forward)
+(define-key lem-vi-mode:*normal-keymap* "S" 'lem-yath-snipe-backward)
 
 ;;; --- structural editing for lisp buffers (lispy/lispyville) -----------------
 

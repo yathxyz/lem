@@ -1,6 +1,6 @@
 ;;;; Shared helpers: paths, processes, fuzzy matching, boot reporting.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defparameter *boot-ok* nil)
 
@@ -87,7 +87,7 @@ ON-EXIT, if given, is called on the editor thread with the exit code."
              (append-line buffer (format nil "~%[exit ~a]" code))
              (when on-exit
                (send-event (lambda () (funcall on-exit code)))))))
-       :name (format nil "vile/~a" buffer-name)))
+       :name (format nil "lem-yath/~a" buffer-name)))
     buffer))
 
 ;;; --- boot report (consumed by scripts/boot-test.sh) -----------------------
@@ -97,7 +97,7 @@ ON-EXIT, if given, is called on the editor thread with the exit code."
   (with-open-file (s path :direction :output
                           :if-exists :supersede
                           :if-does-not-exist :create)
-    (let ((boot-error (symbol-value (find-symbol "*VILE-BOOT-ERROR*" :lem-user))))
+    (let ((boot-error (symbol-value (find-symbol "*LEM-YATH-BOOT-ERROR*" :lem-user))))
       (format s "boot-error: ~a~%" (or boot-error "none"))
       (format s "boot-ok: ~a~%" (boot-ok-p))
       (format s "vi-mode: ~a~%" (typep (current-global-mode) 'lem-vi-mode:vi-mode))
@@ -111,7 +111,7 @@ ON-EXIT, if given, is called on the editor thread with the exit code."
             (format s "~a: ~a~%" label
                     (and spec (lem-lsp-mode/spec:get-spec-command spec))))))
       (format s "commands: ~{~a~^ ~}~%"
-              (loop :for name :in '("VILE-VCS-STATUS" "VILE-ROAM-FIND" "VILE-LLM-SEND"
-                                    "VILE-COMPILE" "VILE-CAPTURE" "VILE-FORMAT-BUFFER")
-                    :collect (if (find-symbol name :vile) "t" name)))))
+              (loop :for name :in '("LEM-YATH-VCS-STATUS" "LEM-YATH-ROAM-FIND" "LEM-YATH-LLM-SEND"
+                                    "LEM-YATH-COMPILE" "LEM-YATH-CAPTURE" "LEM-YATH-FORMAT-BUFFER")
+                    :collect (if (find-symbol name :lem-yath) "t" name)))))
   path)

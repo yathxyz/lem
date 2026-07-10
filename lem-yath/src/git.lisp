@@ -1,33 +1,33 @@
 ;;;; Git/VCS: magit -> legit, plus the custom jj/git smart dispatch
-;;;; (vile-vcs-status) and git-gutter, mirroring init-evil.el.
+;;;; (lem-yath-vcs-status) and git-gutter, mirroring init-evil.el.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defun jj-root ()
   (find-up (or (ignore-errors (buffer-directory (current-buffer)))
                (uiop:getcwd))
            ".jj"))
 
-(define-command vile-jj-log () ()
+(define-command lem-yath-jj-log () ()
   "Jujutsu status + log in a buffer (majutsu-lite)."
   (let ((root (jj-root)))
     (unless root
       (message "Not inside a jj repository")
-      (return-from vile-jj-log))
+      (return-from lem-yath-jj-log))
     (stream-to-buffer
      (list "sh" "-c" "jj st --color=never; echo; jj log --color=never -n 30")
-     "*vile-jj*"
+     "*lem-yath-jj*"
      :directory root)))
 
-(define-command vile-legit-status () ()
+(define-command lem-yath-legit-status () ()
   "Open the legit status window (magit-status equivalent)."
   (uiop:symbol-call :lem/legit :legit-status))
 
-(define-command vile-vcs-status () ()
+(define-command lem-yath-vcs-status () ()
   "Smart VCS dispatch: jj repo -> jj log view, otherwise legit (git)."
   (if (jj-root)
-      (vile-jj-log)
-      (vile-legit-status)))
+      (lem-yath-jj-log)
+      (lem-yath-legit-status)))
 
 ;; Gutter diff indicators (git-gutter-mode on prog buffers in Emacs;
 ;; Lem's implementation is a global mode). Enabled after init: its

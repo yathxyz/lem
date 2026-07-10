@@ -2,7 +2,7 @@
 
 Status legend:
 - **lem-builtin** — feature ships in the Lem image; configured/enabled by the port
-- **ported** — reimplemented in Common Lisp in this repo (`lem-vile/src/...`)
+- **ported** — reimplemented in Common Lisp in this repo (`lem-yath/src/...`)
 - **n/a** — Emacs-plumbing with no meaning in Lem (or unused in the Emacs config itself)
 - **partial** — core workflow ported, listed aspects missing
 - **gap** — no Lem counterpart; not faithfully portable in scope (reason given)

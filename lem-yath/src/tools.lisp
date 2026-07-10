@@ -1,9 +1,9 @@
 ;;;; Project tools: compile (SPC c c), project buffer switching (SPC SPC),
 ;;;; duplicate-dwim (M-j).
 
-(in-package :vile)
+(in-package :lem-yath)
 
-(define-command vile-compile () ()
+(define-command lem-yath-compile () ()
   "Prompt for a shell command and stream its output into *compilation*.
 Runs from the project root; the worker runs on a background thread."
   (let* ((dir (or (ignore-errors
@@ -12,12 +12,12 @@ Runs from the project root; the worker runs on a background thread."
                   (ignore-errors (buffer-directory (current-buffer)))
                   (user-homedir-pathname)))
          (command (prompt-for-string (format nil "Compile [~a]: " dir)
-                                     :history-symbol 'vile-compile)))
+                                     :history-symbol 'lem-yath-compile)))
     (when (plusp (length command))
       (stream-to-buffer (list "sh" "-c" command) "*compilation*"
                         :directory dir))))
 
-(define-command vile-project-buffers () ()
+(define-command lem-yath-project-buffers () ()
   "Switch among buffers of the current project (consult-project-buffer)."
   (let* ((root (ignore-errors
                  (namestring
@@ -31,7 +31,7 @@ Runs from the project root; the worker runs on a background thread."
                         :collect (buffer-name b))))
     (unless names
       (message "No file buffers in this project")
-      (return-from vile-project-buffers))
+      (return-from lem-yath-project-buffers))
     (let ((choice (prompt-for-string
                    "Project buffer: "
                    :completion-function (lambda (s) (orderless-filter s names))
@@ -39,11 +39,11 @@ Runs from the project root; the worker runs on a background thread."
       (when choice
         (switch-to-buffer (get-buffer choice))))))
 
-(define-command vile-kill-current-buffer () ()
+(define-command lem-yath-kill-current-buffer () ()
   "Kill the current buffer without prompting (kill-current-buffer)."
   (kill-buffer (current-buffer)))
 
-(define-command vile-duplicate-line () ()
+(define-command lem-yath-duplicate-line () ()
   "Duplicate the current line below (duplicate-dwim approximation)."
   (with-point ((p (current-point)))
     (let ((text (line-string p)))

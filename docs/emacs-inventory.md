@@ -1,6 +1,6 @@
-# Emacs Configuration Feature Inventory ("VILE")
+# Emacs Configuration Feature Inventory ("lem-yath")
 
-Authoritative inventory for porting this Emacs config (config name: **VILE**, user `yanni`/`yath`) to the Lem editor (Common Lisp). Built from the elisp under `home/config/emacs/` and the Nix package declarations in `home/default.nix`.
+Authoritative inventory for porting this Emacs config (config name: **lem-yath**, user `yanni`/`yath`) to the Lem editor (Common Lisp). Built from the elisp under `home/config/emacs/` and the Nix package declarations in `home/default.nix`.
 
 Source root: `/home/yanni/proj/nix/computer/home/config/emacs/`
 Packages provided by Nix/Home-Manager (`package-enable-at-startup nil`); `use-package-always-ensure nil`.
@@ -9,7 +9,7 @@ Key environment:
 - `WORKDIR` env var (default `~/work`) is the notes/org root. `org-directory` = `$WORKDIR`.
 - `org-roam` directory = `$WORKDIR/roam/`.
 - Requires Emacs >= 30. `treesit-extra-load-path` from `$TREE_SITTER_GRAMMARS`.
-- Server/daemon: `vile/server-start-maybe` starts an Emacs server on init; `GIT_EDITOR`/`VISUAL`/`EDITOR` set to an `emacsclient --create-frame` invocation.
+- Server/daemon: `lem-yath/server-start-maybe` starts an Emacs server on init; `GIT_EDITOR`/`VISUAL`/`EDITOR` set to an `emacsclient --create-frame` invocation.
 
 ---
 
@@ -54,9 +54,9 @@ Explicit initial states: `gptel-context-buffer-mode` -> `emacs`.
 | `SPC m I` | `org-id-get-create` | Create/get Org ID on heading |
 | `SPC m a` | `org-agenda` | Org agenda |
 | `SPC o` | `org-capture` | Org capture |
-| `SPC g g` | `vile-vcs-status` | Smart VCS status: jj->majutsu, git->magit (auto-detect) |
-| `SPC g G` | `vile-magit-status` | Force Magit status at git root |
-| `SPC g J` | `vile-majutsu-status` | Force Majutsu (jj) log at jj root |
+| `SPC g g` | `lem-yath-vcs-status` | Smart VCS status: jj->majutsu, git->magit (auto-detect) |
+| `SPC g G` | `lem-yath-magit-status` | Force Magit status at git root |
+| `SPC g J` | `lem-yath-majutsu-status` | Force Majutsu (jj) log at jj root |
 | `SPC g t` | `git-timemachine` | Git time machine |
 | `SPC p f` | `project-find-file` | Project find file |
 | `SPC p g` | `project-find-regexp` | Project grep (regexp) |
@@ -214,7 +214,7 @@ Diagnostics policy (`yath/eglot-managed-diagnostics`): when an Eglot-managed buf
 
 **LSP server binaries required on PATH** (from `emacsRuntimeRequiredExecutables` + `emacsSharedDevTools`): `nixd`, `harper-ls` (pkg `harper`), `gopls`, `rust-analyzer`, `pyright-langserver` (pkg `pyright`), plus `emacs-lsp-booster`. Tooling binaries: `go`, `goimports` (gotools), `dlv`/`dlv-dap` (delve), `cargo`, `rustc`, `rustfmt`, `cargo-clippy` (clippy), `lldb-dap` (lldb), `python`, `debugpy`, `debugpy-adapter`, `pytest`, `ruff`, `black`, `mypy`, `clang-tools`, `gcc`, `gdb`, `gnumake`, `pkg-config`.
 
-Helpers: `vile/nixpkgs-build-outpath` (build a nixpkgs attr, return store path); `eglot-java` Google-style formatting init opts.
+Helpers: `lem-yath/nixpkgs-build-outpath` (build a nixpkgs attr, return store path); `eglot-java` Google-style formatting init opts.
 
 ---
 
@@ -230,10 +230,10 @@ Helpers: `vile/nixpkgs-build-outpath` (build a nixpkgs attr, return store path);
 | **majutsu** | deferred (custom trivialBuild from `0WD0/majutsu`) | `majutsu-log`, `majutsu-dispatch` — **Jujutsu (jj)** porcelain, magit-style |
 
 **Smart VCS dispatch** (custom, in `init-evil.el`):
-- `vile-vcs-status` (`SPC g g`): finds enclosing `.jj` -> opens `majutsu-log`; else `.git` -> `magit-status`; else `magit-status`. Operates from buffer-file dir.
-- `vile-magit-status` (`SPC g G`): force magit at git root.
-- `vile-majutsu-status` (`SPC g J`): force majutsu at jj root.
-- Helper roots: `vile-vcs--jj-root` (dominating `.jj`), `vile-vcs--git-root` (dominating `.git`).
+- `lem-yath-vcs-status` (`SPC g g`): finds enclosing `.jj` -> opens `majutsu-log`; else `.git` -> `magit-status`; else `magit-status`. Operates from buffer-file dir.
+- `lem-yath-magit-status` (`SPC g G`): force magit at git root.
+- `lem-yath-majutsu-status` (`SPC g J`): force majutsu at jj root.
+- Helper roots: `lem-yath-vcs--jj-root` (dominating `.jj`), `lem-yath-vcs--git-root` (dominating `.git`).
 
 `vc-handled-backends '(Git)` only. `magit`/`magit-todos`/`forge`/`git-gutter`/`git-timemachine` all loaded via `init-evil`.
 
@@ -363,7 +363,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **editorconfig**: `editorconfig-mode` on `prog-mode`.
 - **which-key**: deferred 1s.
 - **Startup**: early-init disables tool/scroll/menu/blink-cursor bars, silences startup messages, sets `gc-cons-threshold` huge + `file-name-handler-alist nil` for fast init (restored on `emacs-startup-hook`). Native-comp warnings silenced. `inhibit-startup-message`, empty scratch message.
-- **Server/daemon**: `vile/server-start-maybe` starts server on init; `recentf-auto-cleanup` differs under daemon; editor env vars point to `emacsclient`.
+- **Server/daemon**: `lem-yath/server-start-maybe` starts server on init; `recentf-auto-cleanup` differs under daemon; editor env vars point to `emacsclient`.
 - **xref/grep**: `xref-search-program 'ripgrep`; `grep-command "rg -nS --no-heading "`; extra ignored dirs (node_modules, build, dist, VCS).
 - **auto-revert**: `global-auto-revert-mode`, also non-file buffers. `repeat-mode`, `savehist-mode` (+ extra vars incl. kill-ring/registers/marks/search rings), `save-place-mode` (limit 600).
 - **`custom.el`**: `custom-safe-themes` (9 doom hashes), `newsticker-url-list` (many news/blog RSS feeds), `ede-project-directories`, warning suppression, and `safe-local-variable-values` (per-project org-roam db relocation, a gptel-context helper, `consult-outline` on `C-c i`, `smie-indent-basic 2`).

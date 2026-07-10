@@ -5,9 +5,9 @@
 ;;;;   rust -> rust-analyzer, nix -> nixd (+ flake-aware settings),
 ;;;;   python -> pyright, markdown -> harper-ls (prose linting).
 
-(in-package :vile)
+(in-package :lem-yath)
 
-(lem-lsp-mode:define-language-spec (vile-rust-spec lem-rust-mode:rust-mode)
+(lem-lsp-mode:define-language-spec (lem-yath-rust-spec lem-rust-mode:rust-mode)
   :language-id "rust"
   :root-uri-patterns '("Cargo.toml")
   :command '("rust-analyzer")
@@ -15,7 +15,7 @@
   :readme-url "https://rust-analyzer.github.io/"
   :connection-mode :stdio)
 
-(lem-lsp-mode:define-language-spec (vile-python-spec lem-python-mode:python-mode)
+(lem-lsp-mode:define-language-spec (lem-yath-python-spec lem-python-mode:python-mode)
   :language-id "python"
   :root-uri-patterns '("pyproject.toml" "setup.py" "requirements.txt" "poetry.lock")
   :command '("pyright-langserver" "--stdio")
@@ -23,7 +23,7 @@
   :readme-url "https://github.com/microsoft/pyright"
   :connection-mode :stdio)
 
-(lem-lsp-mode:define-language-spec (vile-markdown-spec lem-markdown-mode:markdown-mode)
+(lem-lsp-mode:define-language-spec (lem-yath-markdown-spec lem-markdown-mode:markdown-mode)
   :language-id "markdown"
   :root-uri-patterns '(".git")
   :command '("harper-ls" "--stdio")
@@ -53,7 +53,7 @@
         :when (executable-find candidate)
           :return candidate))
 
-(lem-lsp-mode:define-language-spec (vile-nix-spec lem-nix-mode:nix-mode)
+(lem-lsp-mode:define-language-spec (lem-yath-nix-spec lem-nix-mode:nix-mode)
   :language-id "nix"
   :root-uri-patterns '("flake.nix" "flake.lock" "default.nix" "shell.nix")
   :command '("nixd")
@@ -61,7 +61,7 @@
   :readme-url "https://github.com/nix-community/nixd"
   :connection-mode :stdio)
 
-(defmethod lem-lsp-mode:spec-initialization-options ((spec vile-nix-spec))
+(defmethod lem-lsp-mode:spec-initialization-options ((spec lem-yath-nix-spec))
   (let* ((root (nixd-flake-root))
          (expr (if root
                    (format nil "import (builtins.getFlake \"~a\").inputs.nixpkgs { }" root)
@@ -88,7 +88,7 @@
 
 ;;; --- format buffer (apheleia's SPC b f) ------------------------------------
 
-(define-command vile-format-buffer () ()
+(define-command lem-yath-format-buffer () ()
   "Format the current buffer via its LSP server (apheleia equivalent)."
   (handler-case (uiop:symbol-call :lem-lsp-mode :lsp-document-format)
     (error (e) (message "Format failed: ~a" e))))

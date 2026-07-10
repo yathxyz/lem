@@ -2,7 +2,7 @@
 ;;;; tab bar (tab-bar-mode), show-paren/highlight-line are Lem defaults.
 ;;;; The Emacs config loads no color theme by default, so neither do we.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (setf lem/line-numbers:*relative-line* t)
 (setf (variable-value 'lem/line-numbers:line-numbers :global) t)

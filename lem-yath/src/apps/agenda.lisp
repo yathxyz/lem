@@ -1,4 +1,4 @@
-;;;; vile apps/agenda -- an "agenda-lite" standing in for org-agenda +
+;;;; lem-yath apps/agenda -- an "agenda-lite" standing in for org-agenda +
 ;;;; org-super-agenda over org-agenda-files = $WORKDIR.
 ;;;;
 ;;;; Emacs uses org-agenda to collect TODO/SCHEDULED/DEADLINE items from every
@@ -8,9 +8,9 @@
 ;;;; Scanning runs on a background thread so large note trees don't block the
 ;;;; editor; the render is marshalled back via send-event.
 
-(in-package :vile)
+(in-package :lem-yath)
 
-(defparameter *agenda-buffer-name* "*vile-agenda*"
+(defparameter *agenda-buffer-name* "*lem-yath-agenda*"
   "Name of the read-only agenda buffer.")
 
 (defparameter *agenda-upcoming-days* 7
@@ -205,9 +205,9 @@ thread. Any failure degrades to an empty agenda rather than an unhandled error."
 
 ;;; --- mode & keymap -------------------------------------------------------
 
-(define-major-mode vile-agenda-mode nil
+(define-major-mode lem-yath-agenda-mode nil
     (:name "Agenda"
-     :keymap *vile-agenda-mode-keymap*)
+     :keymap *lem-yath-agenda-mode-keymap*)
   (setf (buffer-read-only-p (current-buffer)) t))
 
 (defun parse-entry-line-number (point)
@@ -220,7 +220,7 @@ thread. Any failure degrades to an empty agenda rather than an unhandled error."
         (ignore-errors
           (parse-integer (subseq string (aref gs 0) (aref ge 0))))))))
 
-(define-command vile-agenda-visit () ()
+(define-command lem-yath-agenda-visit () ()
   "Open the org file for the entry on the current line at its heading."
   (let ((file (text-property-at (current-point) :agenda-file)))
     (if (null file)
@@ -230,7 +230,7 @@ thread. Any failure degrades to an empty agenda rather than an unhandled error."
           (when line
             (goto-line line))))))
 
-(define-command vile-agenda-refresh () ()
+(define-command lem-yath-agenda-refresh () ()
   "Re-scan the org files and rebuild the agenda buffer."
   (let ((buffer (get-buffer *agenda-buffer-name*)))
     (when buffer
@@ -240,17 +240,17 @@ thread. Any failure degrades to an empty agenda rather than an unhandled error."
       (setf (buffer-read-only-p buffer) t)
       (redraw-display)
       (bt2:make-thread (lambda () (scan-and-render buffer))
-                       :name "vile/agenda-scan"))))
+                       :name "lem-yath/agenda-scan"))))
 
-(define-command vile-agenda () ()
+(define-command lem-yath-agenda () ()
   "Show a grouped agenda (Overdue/Today/Upcoming/TODOs) over $WORKDIR org files.
 Mirrors org-agenda + org-super-agenda. Scanning runs in the background."
   (let ((root (ignore-errors (workdir))))
     (unless (and root (uiop:directory-exists-p root))
       (message "No workdir; nothing to scan for the agenda.")
-      (return-from vile-agenda)))
+      (return-from lem-yath-agenda)))
   (let ((buffer (make-buffer *agenda-buffer-name*)))
-    (change-buffer-mode buffer 'vile-agenda-mode)
+    (change-buffer-mode buffer 'lem-yath-agenda-mode)
     (with-buffer-read-only buffer nil
       (erase-buffer buffer)
       (insert-string (buffer-end-point buffer) "Scanning..."))
@@ -258,12 +258,12 @@ Mirrors org-agenda + org-super-agenda. Scanning runs in the background."
     (pop-to-buffer buffer)
     (redraw-display)
     (bt2:make-thread (lambda () (scan-and-render buffer))
-                     :name "vile/agenda-scan")))
+                     :name "lem-yath/agenda-scan")))
 
-(define-key *vile-agenda-mode-keymap* "Return" 'vile-agenda-visit)
-(define-key *vile-agenda-mode-keymap* "g" 'vile-agenda-refresh)
-(define-key *vile-agenda-mode-keymap* "q" 'quit-active-window)
+(define-key *lem-yath-agenda-mode-keymap* "Return" 'lem-yath-agenda-visit)
+(define-key *lem-yath-agenda-mode-keymap* "g" 'lem-yath-agenda-refresh)
+(define-key *lem-yath-agenda-mode-keymap* "q" 'quit-active-window)
 
 ;;; --- leader binding ------------------------------------------------------
 
-(define-key lem-vi-mode:*normal-keymap* "Leader m a" 'vile-agenda)
+(define-key lem-vi-mode:*normal-keymap* "Leader m a" 'lem-yath-agenda)

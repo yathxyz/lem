@@ -1,4 +1,4 @@
-;;;; vile apps/pg -- pgmacs -> a psql-backed lite PostgreSQL client.
+;;;; lem-yath apps/pg -- pgmacs -> a psql-backed lite PostgreSQL client.
 ;;;;
 ;;;; pgmacs was declared in the Emacs config with NO custom config and NO
 ;;;; keybindings (M-x entry only), so this port adds no keybindings either.
@@ -6,13 +6,13 @@
 ;;;; aligned, read-only table. Connection info is session-only and defaults to
 ;;;; relying on the standard PG* environment variables.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defvar *pg-conninfo* ""
   "psql connection string (e.g. \"postgresql://user@host/db\").
 Empty means rely on the standard PG* environment variables.")
 
-(defvar *pg-buffer-name* "*vile-pg*")
+(defvar *pg-buffer-name* "*lem-yath-pg*")
 
 (defvar *pg-last-query* nil
   "The last SQL string run, so the result buffer's \"g\" can re-run it.")
@@ -114,17 +114,17 @@ Returns NIL when ROWS is empty."
 
 ;;; --- result buffer + mode --------------------------------------------------
 
-(define-major-mode vile-pg-mode ()
-    (:name "vile-pg"
-     :keymap *vile-pg-mode-keymap*
+(define-major-mode lem-yath-pg-mode ()
+    (:name "lem-yath-pg"
+     :keymap *lem-yath-pg-mode-keymap*
      :description "Read-only view of psql query results.
 \"q\" quits the window, \"g\" re-runs the last query.")
   (setf (buffer-read-only-p (current-buffer)) t))
 
 (defun pg-show (content)
-  "Display CONTENT in the read-only result buffer under vile-pg-mode."
+  "Display CONTENT in the read-only result buffer under lem-yath-pg-mode."
   (let ((buffer (make-buffer *pg-buffer-name*)))
-    (change-buffer-mode buffer 'vile-pg-mode)
+    (change-buffer-mode buffer 'lem-yath-pg-mode)
     (with-buffer-read-only buffer nil
       (erase-buffer buffer)
       (insert-string (buffer-end-point buffer) content))
@@ -173,24 +173,24 @@ Degrades gracefully when psql is missing. SQL is remembered for re-runs."
 
 ;;; --- commands --------------------------------------------------------------
 
-(define-command vile-pg-set-connection () ()
+(define-command lem-yath-pg-set-connection () ()
   "Set the psql connection string for this session (pgmacs connect).
 Empty input clears it, falling back to the PG* environment variables."
   (let ((conninfo (prompt-for-string "Conninfo (postgresql://user@host/db): "
                                      :initial-value *pg-conninfo*
-                                     :history-symbol 'vile-pg-conninfo)))
+                                     :history-symbol 'lem-yath-pg-conninfo)))
     (setf *pg-conninfo* (or conninfo ""))
     (if (plusp (length *pg-conninfo*))
         (message "psql connection set")
         (message "psql connection cleared (using PG* environment)"))))
 
-(define-command vile-pg-query () ()
+(define-command lem-yath-pg-query () ()
   "Prompt for SQL and show the result as an aligned table (pgmacs query)."
-  (let ((sql (prompt-for-string "SQL: " :history-symbol 'vile-pg)))
+  (let ((sql (prompt-for-string "SQL: " :history-symbol 'lem-yath-pg)))
     (when (plusp (length (string-trim '(#\Space #\Tab #\Newline) (or sql ""))))
       (pg-run sql))))
 
-(define-command vile-pg-tables () ()
+(define-command lem-yath-pg-tables () ()
   "List the tables in the connected database (pgmacs table list).
 Queries information_schema for a stable, CSV-friendly result."
   (pg-run
@@ -200,7 +200,7 @@ Queries information_schema for a stable, CSV-friendly result."
                 "WHERE table_schema NOT IN ('pg_catalog', 'information_schema') "
                 "ORDER BY table_schema, table_name")))
 
-(define-command vile-pg-refresh () ()
+(define-command lem-yath-pg-refresh () ()
   "Re-run the last query (bound to \"g\" in the result buffer)."
   (if *pg-last-query*
       (pg-run *pg-last-query*)
@@ -208,5 +208,5 @@ Queries information_schema for a stable, CSV-friendly result."
 
 ;;; --- result-buffer keys (no global/leader bindings; pgmacs had none) -------
 
-(define-key *vile-pg-mode-keymap* "q" 'quit-active-window)
-(define-key *vile-pg-mode-keymap* "g" 'vile-pg-refresh)
+(define-key *lem-yath-pg-mode-keymap* "q" 'quit-active-window)
+(define-key *lem-yath-pg-mode-keymap* "g" 'lem-yath-pg-refresh)

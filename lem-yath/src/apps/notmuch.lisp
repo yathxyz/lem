@@ -9,16 +9,16 @@
 ;;;; (JSON arrays -> lists, objects -> hash-tables with string keys, null -> NIL).
 ;;;; The `notmuch show` tree nests parts arbitrarily, so the walk is defensive.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defparameter *notmuch-default-query* "tag:inbox"
-  "Initial query offered by `vile-notmuch' (mirrors notmuch's inbox view).")
+  "Initial query offered by `lem-yath-notmuch' (mirrors notmuch's inbox view).")
 
 (defparameter *notmuch-search-limit* 100
   "Maximum number of threads requested from `notmuch search'.")
 
-(defparameter *notmuch-list-buffer-name* "*vile-mail*")
-(defparameter *notmuch-fetch-buffer-name* "*vile-fetchmail*")
+(defparameter *notmuch-list-buffer-name* "*lem-yath-mail*")
+(defparameter *notmuch-fetch-buffer-name* "*lem-yath-fetchmail*")
 
 ;;; --- helpers ---------------------------------------------------------------
 
@@ -63,9 +63,9 @@ Returns the parsed value, or NIL on any process/parse failure."
   ;; Nothing extra; the buffer is filled and made read-only by the caller.
   )
 
-(define-key *notmuch-search-mode-keymap* "Return" 'vile-notmuch-open-thread)
+(define-key *notmuch-search-mode-keymap* "Return" 'lem-yath-notmuch-open-thread)
 (define-key *notmuch-search-mode-keymap* "q" 'quit-active-window)
-(define-key *notmuch-search-mode-keymap* "g" 'vile-notmuch-refresh)
+(define-key *notmuch-search-mode-keymap* "g" 'lem-yath-notmuch-refresh)
 
 (defun notmuch-render-search (buffer threads query)
   "Fill BUFFER with one line per thread in THREADS (parsed search JSON).
@@ -117,20 +117,20 @@ Degrades to a message when notmuch is missing or the query fails."
          (pop-to-buffer buffer)
          (message "~d thread~:p" (length result)))))))
 
-(define-command vile-notmuch () ()
+(define-command lem-yath-notmuch () ()
   "Prompt for a notmuch query and show matching threads (M-x notmuch).
 Defaults to \"tag:inbox\"; results are newest-first, one thread per line."
   (unless (notmuch-available-p)
     (message "notmuch not found on PATH")
-    (return-from vile-notmuch))
+    (return-from lem-yath-notmuch))
   (let ((query (prompt-for-string "notmuch query: "
                                   :initial-value *notmuch-default-query*
-                                  :history-symbol 'vile-notmuch)))
+                                  :history-symbol 'lem-yath-notmuch)))
     (when (plusp (length query))
       (notmuch-search query))))
 
-(define-command vile-notmuch-refresh () ()
-  "Re-run the current query in the *vile-mail* list buffer (g)."
+(define-command lem-yath-notmuch-refresh () ()
+  "Re-run the current query in the *lem-yath-mail* list buffer (g)."
   (let ((buffer (current-buffer)))
     (let ((query (buffer-value buffer 'notmuch-query)))
       (if query
@@ -140,7 +140,7 @@ Defaults to \"tag:inbox\"; results are newest-first, one thread per line."
 ;;; --- thread show buffer ----------------------------------------------------
 
 (defun notmuch-thread-id-at-point ()
-  "The thread id for the line at point in the *vile-mail* buffer, or NIL."
+  "The thread id for the line at point in the *lem-yath-mail* buffer, or NIL."
   (let* ((buffer (current-buffer))
          (map (buffer-value buffer 'notmuch-line->id)))
     (when (hash-table-p map)
@@ -223,7 +223,7 @@ A message is a hash-table carrying a \"headers\" key."
       (message "notmuch show failed for ~a" thread-id)
       (return-from notmuch-show))
     (let* ((messages (nreverse (notmuch-collect-messages tree '())))
-           (buffer (make-buffer (format nil "*vile-mail: ~a*" thread-id))))
+           (buffer (make-buffer (format nil "*lem-yath-mail: ~a*" thread-id))))
       (with-buffer-read-only buffer nil
         (erase-buffer buffer)
         (let ((point (buffer-point buffer)))
@@ -235,8 +235,8 @@ A message is a hash-table carrying a \"headers\" key."
       (setf (buffer-read-only-p buffer) t)
       (pop-to-buffer buffer))))
 
-(define-command vile-notmuch-open-thread () ()
-  "Open the thread on the current *vile-mail* line in a read-only view (Return)."
+(define-command lem-yath-notmuch-open-thread () ()
+  "Open the thread on the current *lem-yath-mail* line in a read-only view (Return)."
   (let ((id (notmuch-thread-id-at-point)))
     (if id
         (notmuch-show id)
@@ -244,9 +244,9 @@ A message is a hash-table carrying a \"headers\" key."
 
 ;;; --- fetch mail ------------------------------------------------------------
 
-(define-command vile-fetchmail () ()
+(define-command lem-yath-fetchmail () ()
   "Fetch and index new mail: `mbsync -a && notmuch new' (yath/fetchmail).
-Streams progress into *vile-fetchmail*."
+Streams progress into *lem-yath-fetchmail*."
   (cond
     ((not (executable-find "mbsync"))
      (message "mbsync not found on PATH"))

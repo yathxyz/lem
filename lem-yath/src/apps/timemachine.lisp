@@ -1,4 +1,4 @@
-;;;; vile apps/timemachine -- git-timemachine port (SPC g t).
+;;;; lem-yath apps/timemachine -- git-timemachine port (SPC g t).
 ;;;;
 ;;;; Step through a file's git history one revision at a time, mirroring
 ;;;; Emacs's git-timemachine. For the file in the current buffer we collect
@@ -9,7 +9,7 @@
 ;;;; searched before state keymaps), so p/n/g/q work even in normal mode while
 ;;;; the buffer keeps the source file's major mode for syntax highlighting.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 ;;; --- state ----------------------------------------------------------------
 ;;
@@ -91,9 +91,9 @@ vector of TM-REVISION structs, newest first."
 
 ;;; --- navigation minor mode ------------------------------------------------
 
-(define-minor-mode vile-timemachine-mode
+(define-minor-mode lem-yath-timemachine-mode
     (:name "timemachine"
-     :keymap *vile-timemachine-keymap*)
+     :keymap *lem-yath-timemachine-keymap*)
   "Minor mode active in git-timemachine buffers; supplies p/n/g/q navigation.")
 
 (defun tm-buffer-p (buffer)
@@ -135,13 +135,13 @@ When MESSAGE is non-NIL, echo a `rev k/N: date subject' line."
           ((>= index n) (message "Already at the oldest revision"))
           (t (tm-render buffer index :message t)))))
 
-(define-command vile-timemachine-older () ()
+(define-command lem-yath-timemachine-older () ()
   "Show the previous (older) revision of the file."
   (let ((buffer (current-buffer)))
     (when (tm-buffer-p buffer)
       (tm-goto-index buffer (1+ (buffer-value buffer *tm-index-key*))))))
 
-(define-command vile-timemachine-newer () ()
+(define-command lem-yath-timemachine-newer () ()
   "Show the next (newer) revision of the file."
   (let ((buffer (current-buffer)))
     (when (tm-buffer-p buffer)
@@ -152,11 +152,11 @@ When MESSAGE is non-NIL, echo a `rev k/N: date subject' line."
   (format nil "~A ~A ~A"
           (tm-revision-hash rev) (tm-revision-date rev) (tm-revision-subject rev)))
 
-(define-command vile-timemachine-jump () ()
+(define-command lem-yath-timemachine-jump () ()
   "Jump to a revision chosen by fuzzy search over hash/date/subject."
   (let ((buffer (current-buffer)))
     (unless (tm-buffer-p buffer)
-      (return-from vile-timemachine-jump))
+      (return-from lem-yath-timemachine-jump))
     (let* ((revs (buffer-value buffer *tm-revisions-key*))
            (labels (map 'list #'tm-revision-label revs))
            (choice (prompt-for-string
@@ -170,7 +170,7 @@ When MESSAGE is non-NIL, echo a `rev k/N: date subject' line."
           (tm-render buffer index :message t)
           (message "No such revision")))))
 
-(define-command vile-timemachine-quit () ()
+(define-command lem-yath-timemachine-quit () ()
   "Quit the timemachine buffer."
   (let ((buffer (current-buffer)))
     (if (tm-buffer-p buffer)
@@ -181,26 +181,26 @@ When MESSAGE is non-NIL, echo a `rev k/N: date subject' line."
 
 ;;; --- entry point ----------------------------------------------------------
 
-(define-command vile-git-timemachine () ()
+(define-command lem-yath-git-timemachine () ()
   "Step through the git history of the file in the current buffer.
 Opens its newest revision read-only; p/n move older/newer, g jumps to a
 revision, q quits."
   (let ((filename (buffer-filename (current-buffer))))
     (unless filename
       (message "Buffer is not visiting a file")
-      (return-from vile-git-timemachine))
+      (return-from lem-yath-git-timemachine))
     (let ((root (tm-repo-root (directory-namestring filename))))
       (unless root
         (message "Not inside a git repository")
-        (return-from vile-git-timemachine))
+        (return-from lem-yath-git-timemachine))
       (let ((relpath (tm-relative-path filename root)))
         (unless relpath
           (message "File is outside the repository root")
-          (return-from vile-git-timemachine))
+          (return-from lem-yath-git-timemachine))
         (let ((revisions (tm-collect-history root relpath)))
           (unless revisions
             (message "No git history for ~A" (file-namestring relpath))
-            (return-from vile-git-timemachine))
+            (return-from lem-yath-git-timemachine))
           (let* ((mode (or (lem-core::get-file-mode (pathname relpath))
                            'fundamental-mode))
                  (buffer (make-buffer
@@ -214,7 +214,7 @@ revision, q quits."
             (change-buffer-mode buffer mode)
             (save-excursion
               (setf (current-buffer) buffer)
-              (enable-minor-mode 'vile-timemachine-mode))
+              (enable-minor-mode 'lem-yath-timemachine-mode))
             (setf (buffer-value buffer *tm-root-key*) root)
             (setf (buffer-value buffer *tm-relpath-key*) relpath)
             (setf (buffer-value buffer *tm-revisions-key*) revisions)
@@ -224,9 +224,9 @@ revision, q quits."
 
 ;;; --- keymap & leader binding ----------------------------------------------
 
-(define-key *vile-timemachine-keymap* "p" 'vile-timemachine-older)
-(define-key *vile-timemachine-keymap* "n" 'vile-timemachine-newer)
-(define-key *vile-timemachine-keymap* "g" 'vile-timemachine-jump)
-(define-key *vile-timemachine-keymap* "q" 'vile-timemachine-quit)
+(define-key *lem-yath-timemachine-keymap* "p" 'lem-yath-timemachine-older)
+(define-key *lem-yath-timemachine-keymap* "n" 'lem-yath-timemachine-newer)
+(define-key *lem-yath-timemachine-keymap* "g" 'lem-yath-timemachine-jump)
+(define-key *lem-yath-timemachine-keymap* "q" 'lem-yath-timemachine-quit)
 
-(define-key lem-vi-mode:*normal-keymap* "Leader g t" 'vile-git-timemachine)
+(define-key lem-vi-mode:*normal-keymap* "Leader g t" 'lem-yath-git-timemachine)

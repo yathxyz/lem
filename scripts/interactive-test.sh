@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Interactive-behavior tests for the VILE Lem port.
+# Interactive-behavior tests for the lem-yath Lem port.
 #
 # Drives a real Lem TUI in tmux (200x50) via scripts/tui-driver.sh and asserts
 # on captured screens. Each check prints PASS/FAIL; on FAIL the captured screen
 # is dumped. The script exits nonzero if any check fails. All tmux sessions are
 # killed on exit (trap), even on Ctrl-C / error.
 #
-# Session names are unique per invocation via VILE_CHECK_ID so it is safe to run
+# Session names are unique per invocation via LEM_YATH_CHECK_ID so it is safe to run
 # concurrently with other testers and with the boot/compile checks.
 #
-# Usage:  VILE_CHECK_ID=itest ./scripts/interactive-test.sh
+# Usage:  LEM_YATH_CHECK_ID=itest ./scripts/interactive-test.sh
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$here/scripts/tui-driver.sh"
 
-id="${VILE_CHECK_ID:-itest-$$}"
+id="${LEM_YATH_CHECK_ID:-itest-$$}"
 
 # How long to wait for the (slow) first boot of Lem before giving up.
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-40}"
@@ -63,7 +63,7 @@ fail() { # fail <check-name> <message> <session-for-screen-dump>
 boot_with_file() { # boot_with_file <session> <file> <wait-ere> <check-name>
   local s="$1" file="$2" ere="$3" check="$4"
   register_session "$s"
-  lem_start_vile "$s" "$file"
+  lem_start_lem-yath "$s" "$file"
   if ! lem_wait_for "$s" "$ere" "$BOOT_TIMEOUT"; then
     fail "$check" "Lem never opened $file (waited ${BOOT_TIMEOUT}s)" "$s"
     return 1
@@ -91,10 +91,10 @@ send_text() { # send_text <session> <string>
 # ===========================================================================
 # Fixtures
 # ===========================================================================
-SCRATCH=/tmp/vile-itest.txt
-LISPFIX=/tmp/vile-itest.lisp
-PYFIX=/tmp/vile-itest.py
-SNIPEFIX=/tmp/vile-itest-snipe.txt
+SCRATCH=/tmp/lem-yath-itest.txt
+LISPFIX=/tmp/lem-yath-itest.lisp
+PYFIX=/tmp/lem-yath-itest.py
+SNIPEFIX=/tmp/lem-yath-itest-snipe.txt
 
 printf 'first known line\nsecond known line\nthird known line\n' > "$SCRATCH"
 printf '(defun alpha ())\n(defun beta ())\n(defun gamma ())\n' > "$LISPFIX"
@@ -104,9 +104,9 @@ printf 'alpha beta gamma\n' > "$SNIPEFIX"
 # ===========================================================================
 # Check 1: Boot with a scratch file; vi NORMAL state shows in the modeline.
 # ===========================================================================
-S1="vile-it1-$id"
+S1="lem-yath-it1-$id"
 if boot_with_file "$S1" "$SCRATCH" 'first known line' "01-boot-normal"; then
-  if lem_wait_for "$S1" 'NORMAL[[:space:]].*vile-itest\.txt' "$WAIT_TIMEOUT"; then
+  if lem_wait_for "$S1" 'NORMAL[[:space:]].*lem-yath-itest\.txt' "$WAIT_TIMEOUT"; then
     pass "01-boot-normal" "modeline shows NORMAL + filename"
   elif lem_capture "$S1" | grep -qE 'NORMAL'; then
     # NORMAL present but maybe not on same modeline row as filename.
@@ -141,7 +141,7 @@ fi
 # Check 3: Leader chord SPC c c -> Compile prompt ("Compile [").
 # ===========================================================================
 # Fresh session to start from a clean NORMAL state (no leftover insert text).
-S3="vile-it3-$id"
+S3="lem-yath-it3-$id"
 if boot_with_file "$S3" "$SCRATCH" 'first known line' "03-leader-compile"; then
   # Make sure we are in NORMAL (Escape is harmless if already normal).
   tmux_cmd send-keys -t "$S3" Escape
@@ -164,7 +164,7 @@ fi
 gc_check() { # gc_check <session> <file> <wait-ere> <expected-comment-ere> <label>
   local s="$1" file="$2" wait_ere="$3" cmt_ere="$4" label="$5"
   register_session "$s"
-  lem_start_vile "$s" "$file"
+  lem_start_lem-yath "$s" "$file"
   if ! lem_wait_for "$s" "$wait_ere" "$BOOT_TIMEOUT"; then
     echo "  (gc/$label) file never opened" >&2
     return 2
@@ -184,8 +184,8 @@ gc_check() { # gc_check <session> <file> <wait-ere> <expected-comment-ere> <labe
   return 1
 }
 
-S4L="vile-it4l-$id"
-S4P="vile-it4p-$id"
+S4L="lem-yath-it4l-$id"
+S4P="lem-yath-it4p-$id"
 gc_lisp_rc=2
 gc_py_rc=2
 
@@ -214,7 +214,7 @@ fi
 #   "beta". We can't read cursor pos from the capture, so we land an "X" via
 #   insert and assert it sits immediately before "beta" -> "alpha Xbeta gamma".
 # ===========================================================================
-S5="vile-it5-$id"
+S5="lem-yath-it5-$id"
 if boot_with_file "$S5" "$SNIPEFIX" 'alpha beta gamma' "05-snipe"; then
   tmux_cmd send-keys -t "$S5" Escape
   sleep "$KEY_DELAY"
@@ -242,7 +242,7 @@ fi
 # ===========================================================================
 # Check 6: SPC f f opens the find-file prompt ("Find File: "), then Escape.
 # ===========================================================================
-S6="vile-it6-$id"
+S6="lem-yath-it6-$id"
 if boot_with_file "$S6" "$SCRATCH" 'first known line' "06-find-file"; then
   tmux_cmd send-keys -t "$S6" Escape
   sleep "$KEY_DELAY"
@@ -258,9 +258,9 @@ fi
 
 # ===========================================================================
 # Check 7: M-x orderless. Send M-x, type "roam find", assert completion popup
-#   shows "vile-roam-find".
+#   shows "lem-yath-roam-find".
 # ===========================================================================
-S7="vile-it7-$id"
+S7="lem-yath-it7-$id"
 if boot_with_file "$S7" "$SCRATCH" 'first known line' "07-mx-orderless"; then
   tmux_cmd send-keys -t "$S7" Escape
   sleep "$KEY_DELAY"
@@ -269,10 +269,10 @@ if boot_with_file "$S7" "$SCRATCH" 'first known line' "07-mx-orderless"; then
     sleep "$KEY_DELAY"
     send_text "$S7" "roam find"
     sleep 0.8
-    if lem_wait_for "$S7" 'vile-roam-find' "$WAIT_TIMEOUT"; then
-      pass "07-mx-orderless" "'roam find' matched vile-roam-find"
+    if lem_wait_for "$S7" 'lem-yath-roam-find' "$WAIT_TIMEOUT"; then
+      pass "07-mx-orderless" "'roam find' matched lem-yath-roam-find"
     else
-      fail "07-mx-orderless" "vile-roam-find not in completion popup" "$S7"
+      fail "07-mx-orderless" "lem-yath-roam-find not in completion popup" "$S7"
     fi
     tmux_cmd send-keys -t "$S7" Escape
     sleep "$KEY_DELAY"

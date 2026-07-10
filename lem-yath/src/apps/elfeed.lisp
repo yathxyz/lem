@@ -1,4 +1,4 @@
-;;;; vile apps/elfeed -- RSS reader (elfeed + elfeed-protocol, Fever API).
+;;;; lem-yath apps/elfeed -- RSS reader (elfeed + elfeed-protocol, Fever API).
 ;;;;
 ;;;; The Emacs config drove a Miniflux instance through elfeed-protocol's
 ;;;; Fever backend (http://rss.wg:8070/fever/, credentials in ~/.authinfo).
@@ -12,7 +12,7 @@
 ;;;;   ?api&items&with_ids=.. -> {"items":[{id,feed_id,title,url,html,...}]}
 ;;;;   ?api&feeds             -> {"feeds":[{id,title,...}]}
 
-(in-package :vile)
+(in-package :lem-yath)
 
 ;;; --- knobs -----------------------------------------------------------------
 
@@ -31,8 +31,8 @@
 (defparameter *elfeed-archive-url* "https://archive.ph/newest/"
   "Prefix for the archive.ph view (ports elfeed-show-archive).")
 
-(defparameter *elfeed-list-buffer-name* "*vile-feeds*")
-(defparameter *elfeed-entry-buffer-name* "*vile-feed-entry*")
+(defparameter *elfeed-list-buffer-name* "*lem-yath-feeds*")
+(defparameter *elfeed-entry-buffer-name* "*lem-yath-feed-entry*")
 
 ;;; --- per-buffer state ------------------------------------------------------
 ;;; The list buffer carries a vector of entry plists indexed by 0-based line,
@@ -283,7 +283,7 @@ url is empty or xdg-open is unavailable."
   (let ((buffer (make-buffer *elfeed-entry-buffer-name*)))
     (with-buffer-read-only buffer nil
       (erase-buffer buffer)
-      (change-buffer-mode buffer 'vile-feed-entry-mode)
+      (change-buffer-mode buffer 'lem-yath-feed-entry-mode)
       (let ((point (buffer-point buffer)))
         (insert-string point
                        (format nil "~a~%~a   ~a~%~a~%~%~a~%"
@@ -302,54 +302,54 @@ url is empty or xdg-open is unavailable."
 ;;; normal-state keymap; mode-specific-keymaps makes these major-mode keymaps
 ;;; win while a feeds buffer is current (see vi-mode special-binds.lisp).
 
-(define-major-mode vile-feeds-mode nil
-    (:name "vile-feeds"
-     :keymap *vile-feeds-mode-keymap*)
+(define-major-mode lem-yath-feeds-mode nil
+    (:name "lem-yath-feeds"
+     :keymap *lem-yath-feeds-mode-keymap*)
   (setf (buffer-read-only-p (current-buffer)) t))
 
-(define-major-mode vile-feed-entry-mode nil
-    (:name "vile-feed-entry"
-     :keymap *vile-feed-entry-mode-keymap*)
+(define-major-mode lem-yath-feed-entry-mode nil
+    (:name "lem-yath-feed-entry"
+     :keymap *lem-yath-feed-entry-mode-keymap*)
   (setf (buffer-read-only-p (current-buffer)) t))
 
-(defmethod lem-vi-mode/core:mode-specific-keymaps ((mode vile-feeds-mode))
-  (list *vile-feeds-mode-keymap*))
+(defmethod lem-vi-mode/core:mode-specific-keymaps ((mode lem-yath-feeds-mode))
+  (list *lem-yath-feeds-mode-keymap*))
 
-(defmethod lem-vi-mode/core:mode-specific-keymaps ((mode vile-feed-entry-mode))
-  (list *vile-feed-entry-mode-keymap*))
+(defmethod lem-vi-mode/core:mode-specific-keymaps ((mode lem-yath-feed-entry-mode))
+  (list *lem-yath-feed-entry-mode-keymap*))
 
-(define-command vile-elfeed-show-entry () ()
+(define-command lem-yath-elfeed-show-entry () ()
   "Show the entry under point in a readable, read-only buffer."
   (alexandria:if-let ((plist (elfeed-entry-at-point)))
     (elfeed-show-entry-plist plist)
     (message "No entry on this line")))
 
-(define-command vile-elfeed-open-url () ()
+(define-command lem-yath-elfeed-open-url () ()
   "Open the current entry's URL via xdg-open (elfeed b/visit)."
   (elfeed-open-external (elfeed-current-url)))
 
-(define-command vile-elfeed-archive () ()
+(define-command lem-yath-elfeed-archive () ()
   "Open the current entry via archive.ph (ports elfeed-show-archive)."
   (let ((url (elfeed-current-url)))
     (if (and url (plusp (length url)))
         (elfeed-open-external (concatenate 'string *elfeed-archive-url* url))
         (message "No URL for this entry"))))
 
-(define-command vile-elfeed-quit () ()
+(define-command lem-yath-elfeed-quit () ()
   "Close the active feeds/entry window (q)."
   (quit-active-window))
 
-(define-key *vile-feeds-mode-keymap* "Return" 'vile-elfeed-show-entry)
-(define-key *vile-feeds-mode-keymap* "b" 'vile-elfeed-open-url)
-(define-key *vile-feeds-mode-keymap* "A" 'vile-elfeed-archive)
-(define-key *vile-feeds-mode-keymap* "q" 'vile-elfeed-quit)
-(define-key *vile-feeds-mode-keymap* "g" 'vile-elfeed)
-(define-key *vile-feeds-mode-keymap* "n" 'next-line)
-(define-key *vile-feeds-mode-keymap* "p" 'previous-line)
+(define-key *lem-yath-feeds-mode-keymap* "Return" 'lem-yath-elfeed-show-entry)
+(define-key *lem-yath-feeds-mode-keymap* "b" 'lem-yath-elfeed-open-url)
+(define-key *lem-yath-feeds-mode-keymap* "A" 'lem-yath-elfeed-archive)
+(define-key *lem-yath-feeds-mode-keymap* "q" 'lem-yath-elfeed-quit)
+(define-key *lem-yath-feeds-mode-keymap* "g" 'lem-yath-elfeed)
+(define-key *lem-yath-feeds-mode-keymap* "n" 'next-line)
+(define-key *lem-yath-feeds-mode-keymap* "p" 'previous-line)
 
-(define-key *vile-feed-entry-mode-keymap* "b" 'vile-elfeed-open-url)
-(define-key *vile-feed-entry-mode-keymap* "A" 'vile-elfeed-archive)
-(define-key *vile-feed-entry-mode-keymap* "q" 'vile-elfeed-quit)
+(define-key *lem-yath-feed-entry-mode-keymap* "b" 'lem-yath-elfeed-open-url)
+(define-key *lem-yath-feed-entry-mode-keymap* "A" 'lem-yath-elfeed-archive)
+(define-key *lem-yath-feed-entry-mode-keymap* "q" 'lem-yath-elfeed-quit)
 
 ;;; --- the command ------------------------------------------------------------
 
@@ -380,23 +380,23 @@ Every step degrades gracefully to a (message ...) on the editor thread."
        (error (e)
          (let ((msg (princ-to-string e)))
            (send-event (lambda () (message "Feeds error: ~a" msg)))))))
-   :name "vile/elfeed")
+   :name "lem-yath/elfeed")
   (values))
 
-(define-command vile-elfeed () ()
-  "Open the unread RSS feed list (elfeed) in *vile-feeds*.
+(define-command lem-yath-elfeed () ()
+  "Open the unread RSS feed list (elfeed) in *lem-yath-feeds*.
 Reads rss.wg credentials from ~/.authinfo, derives the Fever api_key, and
 fetches unread items on a background thread; returns immediately."
   (multiple-value-bind (user password) (elfeed-credentials)
     (unless user
       (message "No ~~/.authinfo entry for machine ~a" *elfeed-machine*)
-      (return-from vile-elfeed))
+      (return-from lem-yath-elfeed))
     (let ((api-key (elfeed-api-key user password)))
       (unless api-key
         (message "Could not compute Fever api_key (md5sum missing?)")
-        (return-from vile-elfeed))
+        (return-from lem-yath-elfeed))
       (let ((buffer (make-buffer *elfeed-list-buffer-name*)))
-        (change-buffer-mode buffer 'vile-feeds-mode)
+        (change-buffer-mode buffer 'lem-yath-feeds-mode)
         (with-buffer-read-only buffer nil
           (erase-buffer buffer)
           (insert-string (buffer-point buffer) "Fetching unread feeds..."))
@@ -406,4 +406,4 @@ fetches unread items on a background thread; returns immediately."
 
 ;;; --- leader binding ---------------------------------------------------------
 
-(define-key lem-vi-mode:*normal-keymap* "Leader a r" 'vile-elfeed)
+(define-key lem-vi-mode:*normal-keymap* "Leader a r" 'lem-yath-elfeed)

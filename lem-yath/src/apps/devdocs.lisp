@@ -2,16 +2,16 @@
 ;;;; DevDocs in Emacs fetches a docset's index.json, lets you pick an entry,
 ;;;; then renders the entry's HTML page. We do the same over curl on a
 ;;;; background thread, strip the HTML to readable text with cl-ppcre, and show
-;;;; it in a read-only "*vile-devdocs*" buffer. No dexador/drakma in the image,
+;;;; it in a read-only "*lem-yath-devdocs*" buffer. No dexador/drakma in the image,
 ;;;; so all HTTP is curl via uiop; all buffer mutation is marshalled back onto
 ;;;; the editor thread with send-event. Offline degrades to a message.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defvar *devdocs-docsets*
   (list "go" "rust" "python~3.12" "nix" "javascript" "typescript")
-  "DevDocs slugs offered to `vile-devdocs-lookup', mirroring the languages in
-this config. `vile-devdocs-install' adds more for the current session.")
+  "DevDocs slugs offered to `lem-yath-devdocs-lookup', mirroring the languages in
+this config. `lem-yath-devdocs-install' adds more for the current session.")
 
 (defvar *devdocs-base-url* "https://documents.devdocs.io"
   "Where DevDocs serves index.json and the per-entry HTML pages.")
@@ -19,7 +19,7 @@ this config. `vile-devdocs-install' adds more for the current session.")
 (defvar *devdocs-index-cache* (make-hash-table :test 'equal)
   "Slug -> list of (name . path) entries, cached for the session.")
 
-(defvar *devdocs-buffer-name* "*vile-devdocs*")
+(defvar *devdocs-buffer-name* "*lem-yath-devdocs*")
 
 (defvar *devdocs-curl-timeout* "10"
   "curl --max-time for every DevDocs fetch (seconds, as a string).")
@@ -32,7 +32,7 @@ this config. `vile-devdocs-install' adds more for the current session.")
   (setf (buffer-read-only-p (current-buffer)) t))
 
 (define-key *devdocs-mode-keymap* "q" 'quit-active-window)
-(define-key *devdocs-mode-keymap* "b" 'vile-devdocs-open-in-browser)
+(define-key *devdocs-mode-keymap* "b" 'lem-yath-devdocs-open-in-browser)
 
 ;;; --- HTTP (curl) ------------------------------------------------------------
 
@@ -134,7 +134,7 @@ code blocks legible by turning block-level tags into newlines."
 ;;; --- rendering --------------------------------------------------------------
 
 (defun devdocs-show-text (slug path text)
-  "Populate the *vile-devdocs* buffer with TEXT (editor thread only).
+  "Populate the *lem-yath-devdocs* buffer with TEXT (editor thread only).
 Records SLUG/PATH on the buffer so the `b' browser fallback can use them."
   (let ((buffer (make-buffer *devdocs-buffer-name*)))
     (with-buffer-read-only buffer nil
@@ -162,7 +162,7 @@ Marshals the buffer update back onto the editor thread; degrades to a message."
           (if html
               (devdocs-show-text slug path (devdocs-html-to-text html))
               (message "DevDocs: couldn't fetch ~a (offline?)" name))))))
-   :name "vile/devdocs"))
+   :name "lem-yath/devdocs"))
 
 ;;; --- prompts ----------------------------------------------------------------
 
@@ -172,7 +172,7 @@ Marshals the buffer update back onto the editor thread; degrades to a message."
                      :completion-function
                      (lambda (s) (orderless-filter s *devdocs-docsets*))
                      :test-function (lambda (s) (plusp (length s)))
-                     :history-symbol 'vile-devdocs-docset))
+                     :history-symbol 'lem-yath-devdocs-docset))
 
 (defun devdocs-prompt-entry (entries)
   "Prompt for an entry name among ENTRIES (list of (name . path)), orderless."
@@ -181,11 +181,11 @@ Marshals the buffer update back onto the editor thread; degrades to a message."
                        :completion-function
                        (lambda (s) (orderless-filter s names))
                        :test-function (lambda (s) (member s names :test #'string=))
-                       :history-symbol 'vile-devdocs-entry)))
+                       :history-symbol 'lem-yath-devdocs-entry)))
 
 ;;; --- commands ---------------------------------------------------------------
 
-(define-command vile-devdocs-install () ()
+(define-command lem-yath-devdocs-install () ()
   "Add a docset slug to *devdocs-docsets* for this session (devdocs-install).
 Persisted only in the running image, mirroring how the Emacs command pulls a
 docset down on demand."
@@ -198,7 +198,7 @@ docset down on demand."
            (setf *devdocs-docsets* (append *devdocs-docsets* (list slug)))
            (message "DevDocs: added ~a" slug)))))
 
-(define-command vile-devdocs-lookup () ()
+(define-command lem-yath-devdocs-lookup () ()
   "Look up DevDocs documentation (devdocs-lookup, SPC h d).
 Pick a docset, then an entry; the page is fetched and rendered on a background
 thread, so the editor never blocks. Offline degrades to a message."
@@ -214,7 +214,7 @@ thread, so the editor never blocks. Offline degrades to a message."
                   (message "DevDocs: fetching ~a..." name)
                   (devdocs-fetch-and-show slug name path)))))))))
 
-(define-command vile-devdocs-open-in-browser () ()
+(define-command lem-yath-devdocs-open-in-browser () ()
   "Open the current DevDocs entry in a browser via xdg-open (fallback `b')."
   (let ((buffer (current-buffer)))
     (alexandria:if-let ((slug (buffer-value buffer 'devdocs-slug))
@@ -229,4 +229,4 @@ thread, so the editor never blocks. Offline degrades to a message."
 
 ;;; --- keybinding (SPC h d) ---------------------------------------------------
 
-(define-key lem-vi-mode:*normal-keymap* "Leader h d" 'vile-devdocs-lookup)
+(define-key lem-vi-mode:*normal-keymap* "Leader h d" 'lem-yath-devdocs-lookup)

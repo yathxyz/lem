@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# Force-recompile the vile system inside Lem, dumping full compiler
+# Force-recompile the lem-yath system inside Lem, dumping full compiler
 # diagnostics to a log (the TUI swallows them otherwise).
 # Safe to run concurrently: names are unique per invocation.
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$here/scripts/tui-driver.sh"
 
-id="${VILE_CHECK_ID:-$$}"
-session="vile-compile-$id"
+id="${LEM_YATH_CHECK_ID:-$$}"
+session="lem-yath-compile-$id"
 tmp="${TMPDIR:-/tmp}"
-log="$tmp/vile-compile-$id.log"
-form="$tmp/vile-compile-check-$id.lisp"
-check_src="$tmp/vile-compile-src-$id"
+log="$tmp/lem-yath-compile-$id.log"
+form="$tmp/lem-yath-compile-check-$id.lisp"
+check_src="$tmp/lem-yath-compile-src-$id"
 
 rm -rf "$check_src"
-cp -R "$VILE_SOURCE" "$check_src"
+cp -R "$LEM_YATH_SOURCE" "$check_src"
 chmod -R u+w "$check_src"
-VILE_SOURCE="$check_src"
-VILE_ASDF_CACHE="$tmp/vile-asdf-$id"
-vile_configure_asdf_output
+LEM_YATH_SOURCE="$check_src"
+LEM_YATH_ASDF_CACHE="$tmp/lem-yath-asdf-$id"
+lem-yath_configure_asdf_output
 
 cleanup() {
   lem_stop "$session"
-  rm -rf "$form" "$check_src" "$VILE_ASDF_CACHE"
+  rm -rf "$form" "$check_src" "$LEM_YATH_ASDF_CACHE"
 }
 trap cleanup EXIT INT TERM
 
@@ -32,8 +32,8 @@ cat > "$form" <<EOF
         (*standard-output* s))
     (handler-case
         (progn
-          (asdf:load-asd #P"$check_src/vile.asd")
-          (asdf:load-system "vile" :force t)
+          (asdf:load-asd #P"$check_src/lem-yath.asd")
+          (asdf:load-system "lem-yath" :force t)
           (format s "~%LOAD OK~%"))
       (error (e) (format s "~%TOP-ERROR: ~a~%" e)))
     (finish-output s)))

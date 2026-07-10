@@ -1,15 +1,15 @@
-;;;; vile apps/llm-cli -- CLI-agent LLM backends.
+;;;; lem-yath apps/llm-cli -- CLI-agent LLM backends.
 ;;;;
 ;;;; Ports the gptel CLI-agent backends from the Emacs config:
 ;;;;   gptel-claude-code.el -> :claude-code  (claude -p <prompt>)
 ;;;;   gptel-codex.el       -> :codex        (codex exec <prompt>)
 ;;;;   gptel-grok-build.el  -> :grok         (grok -p <prompt>)
 ;;;; Each launches its CLI non-interactively and streams stdout into the
-;;;; shared *vile-llm* buffer, reusing the OpenRouter path's UX. Unlike the
+;;;; shared *lem-yath-llm* buffer, reusing the OpenRouter path's UX. Unlike the
 ;;;; rich Emacs backends we do NOT parse agent-event JSON: plain text is fine.
-;;;; vile-llm-set-backend ports gptel's preset/backend switching surface.
+;;;; lem-yath-llm-set-backend ports gptel's preset/backend switching surface.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defparameter *llm-cli-commands*
   '((:claude-code "claude" ("-p"))
@@ -52,7 +52,7 @@ default without assuming a fixed flag spelling."
             (list prompt))))
 
 (defun llm-cli-stream (backend prompt)
-  "Run BACKEND's CLI for PROMPT, streaming stdout into the *vile-llm* buffer.
+  "Run BACKEND's CLI for PROMPT, streaming stdout into the *lem-yath-llm* buffer.
 Reuses the OpenRouter path's header/UX and the shared append helpers. Output
 is read on a bt2 worker thread and marshalled onto the editor thread by
 append-text; missing binary or launch failure degrades to a message."
@@ -82,7 +82,7 @@ append-text; missing binary or launch failure degrades to a message."
                      (append-line buffer
                                   (format nil "~%[~a exited ~a]"
                                           (first (llm-cli-spec backend)) code))))))
-           :name (format nil "vile/llm-~(~a~)" backend)))
+           :name (format nil "lem-yath/llm-~(~a~)" backend)))
       (error (e)
         (append-line buffer (format nil "~%[failed to launch: ~a]" e))))))
 
@@ -102,7 +102,7 @@ append-text; missing binary or launch failure degrades to a message."
               :when (llm-cli-available-p backend)
                 :collect backend)))
 
-(define-command vile-llm-set-backend () ()
+(define-command lem-yath-llm-set-backend () ()
   "Switch the active LLM backend (gptel preset/backend selection).
 Offers :openrouter plus whichever CLI-agent backends are installed, filtered
 orderless-style; sets *llm-backend* and confirms."
@@ -112,7 +112,7 @@ orderless-style; sets *llm-backend* and confirms."
                   "LLM backend: "
                   :completion-function (lambda (s) (orderless-filter s names))
                   :initial-value (string-downcase (symbol-name *llm-backend*))
-                  :history-symbol 'vile-llm-backend))
+                  :history-symbol 'lem-yath-llm-backend))
          (backend (find choice backends
                         :key (lambda (b) (string-downcase (symbol-name b)))
                         :test #'string-equal)))
@@ -122,4 +122,4 @@ orderless-style; sets *llm-backend* and confirms."
           (message "LLM backend: ~(~a~)" backend))
         (message "Unknown or unavailable backend: ~a" choice))))
 
-(define-key lem-vi-mode:*normal-keymap* "Leader g b" 'vile-llm-set-backend)
+(define-key lem-vi-mode:*normal-keymap* "Leader g b" 'lem-yath-llm-set-backend)

@@ -5,7 +5,7 @@
 ;;;; (marginalia-style) via the default item collector, which we reuse by
 ;;;; asking it for the full set and re-filtering.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defun completion-label (item)
   (handler-case (lem/completion-mode:completion-item-label item)
@@ -34,7 +34,7 @@
 ;; the space). In a prompt, Space must insert and re-filter instead; in
 ;; ordinary buffers the stock cancel behavior is right (a space ends the
 ;; symbol being completed).
-(define-command vile-completion-space () ()
+(define-command lem-yath-completion-space () ()
   "Insert a space; in a prompt, keep filtering the completion popup."
   (insert-character (current-point) #\Space)
   (let ((prompt (lem/prompt-window:current-prompt-window)))
@@ -43,4 +43,4 @@
         (lem/completion-mode:completion-end))))
 
 (define-key lem/completion-mode::*completion-mode-keymap*
-  "Space" 'vile-completion-space)
+  "Space" 'lem-yath-completion-space)

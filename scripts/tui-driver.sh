@@ -2,44 +2,44 @@
 # Sourceable tmux driver for testing Lem's TUI.
 # Conventions: one tmux session per test, 200x50 pane, all output via capture-pane.
 
-VILE_ROOT="${VILE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VILE_SOURCE="${VILE_SOURCE:-$VILE_ROOT/lem-vile}"
+LEM_YATH_ROOT="${LEM_YATH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+LEM_YATH_SOURCE="${LEM_YATH_SOURCE:-$LEM_YATH_ROOT/lem-yath}"
 TMUX_BIN="${TMUX_BIN:-tmux}"
-TMUX_SOCKET="${TMUX_SOCKET:-vile-${VILE_CHECK_ID:-$$}}"
+TMUX_SOCKET="${TMUX_SOCKET:-lem-yath-${LEM_YATH_CHECK_ID:-$$}}"
 
 if [ -z "${LEM_BIN:-}" ]; then
   if command -v lem >/dev/null 2>&1; then
     LEM_BIN="$(command -v lem)"
-  elif [ -x "$VILE_ROOT/result-lem/bin/lem" ]; then
-    LEM_BIN="$VILE_ROOT/result-lem/bin/lem"
+  elif [ -x "$LEM_YATH_ROOT/result-lem/bin/lem" ]; then
+    LEM_BIN="$LEM_YATH_ROOT/result-lem/bin/lem"
   else
     LEM_BIN=""
   fi
 fi
 
-vile_lisp_string() {
+lem-yath_lisp_string() {
   local value="${1//\\/\\\\}"
   value="${value//\"/\\\"}"
   printf '"%s"' "$value"
 }
 
-vile_load_form() {
-  printf '(load #P%s)' "$(vile_lisp_string "$VILE_SOURCE/init.lisp")"
+lem-yath_load_form() {
+  printf '(load #P%s)' "$(lem-yath_lisp_string "$LEM_YATH_SOURCE/init.lisp")"
 }
 
-vile_with_loaded_form() {
-  printf '(progn %s %s)' "$(vile_load_form)" "$1"
+lem-yath_with_loaded_form() {
+  printf '(progn %s %s)' "$(lem-yath_load_form)" "$1"
 }
 
-vile_configure_asdf_output() {
+lem-yath_configure_asdf_output() {
   local cache_home
   cache_home="${XDG_CACHE_HOME:-${HOME:-${TMPDIR:-/tmp}}/.cache}"
-  VILE_ASDF_CACHE="${VILE_ASDF_CACHE:-$cache_home/vile/asdf}"
-  mkdir -p "$VILE_ASDF_CACHE"
-  export ASDF_OUTPUT_TRANSLATIONS="$VILE_SOURCE:$VILE_ASDF_CACHE:/nix/store:/nix/store${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
+  LEM_YATH_ASDF_CACHE="${LEM_YATH_ASDF_CACHE:-$cache_home/lem-yath/asdf}"
+  mkdir -p "$LEM_YATH_ASDF_CACHE"
+  export ASDF_OUTPUT_TRANSLATIONS="$LEM_YATH_SOURCE:$LEM_YATH_ASDF_CACHE:/nix/store:/nix/store${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
 }
 
-vile_configure_asdf_output
+lem-yath_configure_asdf_output
 
 tmux_cmd() {
   "$TMUX_BIN" -L "$TMUX_SOCKET" "$@"
@@ -57,14 +57,14 @@ lem_start() { # lem_start <session> [lem-args...]
   tmux_cmd new-session -d -s "$s" -x 200 -y 50 "$command"
 }
 
-lem_start_vile() { # lem_start_vile <session> [lem-args...]
+lem_start_lem-yath() { # lem_start_lem-yath <session> [lem-args...]
   local s="$1"; shift
-  lem_start "$s" --eval "$(vile_load_form)" "$@"
+  lem_start "$s" --eval "$(lem-yath_load_form)" "$@"
 }
 
-lem_start_vile_eval() { # lem_start_vile_eval <session> <form> [lem-args...]
+lem_start_lem-yath_eval() { # lem_start_lem-yath_eval <session> <form> [lem-args...]
   local s="$1" form="$2"; shift 2
-  lem_start "$s" --eval "$(vile_with_loaded_form "$form")" "$@"
+  lem_start "$s" --eval "$(lem-yath_with_loaded_form "$form")" "$@"
 }
 
 lem_keys() { # lem_keys <session> <tmux-send-keys args...>

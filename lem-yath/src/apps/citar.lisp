@@ -1,4 +1,4 @@
-;;;; vile apps/citar -- citar -> a lite bibliography front-end over BibTeX.
+;;;; lem-yath apps/citar -- citar -> a lite bibliography front-end over BibTeX.
 ;;;;
 ;;;; Mirrors the Emacs citar setup: two bib files are searched in order
 ;;;; (~/work/librarium/nodes.bib then zotero.bib), candidates are presented as
@@ -9,7 +9,7 @@
 ;;;; A tolerant hand-rolled parser is used: there is no biblatex library in the
 ;;;; image, and the goal is graceful degradation, not a conformant reader.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defvar *citar-bib-files*
   (list (merge-pathnames "librarium/nodes.bib" (workdir))
@@ -223,7 +223,7 @@ keys, matching citar's lookup order."
                   prompt
                   :completion-function (lambda (s) (orderless-filter s labels))
                   :test-function (lambda (s) (plusp (length s)))
-                  :history-symbol 'vile-citar)))
+                  :history-symbol 'lem-yath-citar)))
     (cdr (assoc choice labeled :test #'string=))))
 
 ;;; --- resource resolution (citar-open) --------------------------------------
@@ -289,7 +289,7 @@ file field -> url -> note. Reports when nothing is available."
 
 ;;; --- commands --------------------------------------------------------------
 
-(define-command vile-citar-open () ()
+(define-command lem-yath-citar-open () ()
   "Pick a bibliography entry and open its resource (citar-open).
 Resolution order: the `file' field (pdf/html externally, else find-file),
 then `url' externally, then a note under $WORKDIR/roam/references/."
@@ -299,7 +299,7 @@ then `url' externally, then a note under $WORKDIR/roam/references/."
         (alexandria:when-let ((entry (citar-prompt-entry "Open citation: " entries)))
           (citar-open-entry entry)))))
 
-(define-command vile-citar-insert-key () ()
+(define-command lem-yath-citar-insert-key () ()
   "Pick a bibliography entry and insert @<key> at point (citar-insert-citation)."
   (let ((entries (citar-entries)))
     (if (null entries)
@@ -309,4 +309,4 @@ then `url' externally, then a note under $WORKDIR/roam/references/."
 
 ;;; --- keybindings -----------------------------------------------------------
 
-(define-key lem-vi-mode:*normal-keymap* "Leader y o" 'vile-citar-open)
+(define-key lem-vi-mode:*normal-keymap* "Leader y o" 'lem-yath-citar-open)

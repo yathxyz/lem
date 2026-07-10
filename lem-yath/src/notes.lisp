@@ -5,7 +5,7 @@
 ;;;;   $WORKDIR/roam/journal/  org-journal (%Y%m%d.org)
 ;;;;   $WORKDIR/{inbox,todo,readlist}.org   capture targets
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defun roam-directory ()
   (uiop:ensure-directory-pathname (merge-pathnames "roam/" (workdir))))
@@ -36,14 +36,14 @@ Uses fd when available (as org-roam did), else find."
     (prompt-for-string prompt
                        :completion-function (lambda (s) (orderless-filter s files))
                        :test-function (lambda (s) (plusp (length s)))
-                       :history-symbol 'vile-roam)))
+                       :history-symbol 'lem-yath-roam)))
 
-(define-command vile-roam-find () ()
+(define-command lem-yath-roam-find () ()
   "Find/open a roam note (org-roam-node-find)."
   (alexandria:when-let ((choice (prompt-for-note "Roam node: ")))
     (find-file (merge-pathnames choice (roam-directory)))))
 
-(define-command vile-roam-random () ()
+(define-command lem-yath-roam-random () ()
   "Open a random roam note (org-roam-node-random)."
   (let ((files (note-files)))
     (if files
@@ -51,7 +51,7 @@ Uses fd when available (as org-roam did), else find."
                                     (roam-directory)))
         (message "No notes found under ~a" (roam-directory)))))
 
-(define-command vile-roam-insert () ()
+(define-command lem-yath-roam-insert () ()
   "Insert a link to a roam note (org-roam-node-insert).
 Org-style link in .org buffers, markdown-style otherwise."
   (alexandria:when-let ((choice (prompt-for-note "Insert link to: ")))
@@ -73,7 +73,7 @@ Org-style link in .org buffers, markdown-style otherwise."
             (format nil "~4,'0d~2,'0d~2,'0d" year month day)
             (elt #("Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun") day-of-week))))
 
-(define-command vile-dailies-today () ()
+(define-command lem-yath-dailies-today () ()
   "Open today's daily note (org-roam-dailies-goto-today)."
   (multiple-value-bind (iso) (decoded-date-strings)
     (let ((path (merge-pathnames (format nil "daily/~a.org" iso) (roam-directory))))
@@ -83,7 +83,7 @@ Org-style link in .org buffers, markdown-style otherwise."
         (when new
           (insert-string (current-point) (format nil "#+title: ~a~%~%" iso)))))))
 
-(define-command vile-dailies-date () ()
+(define-command lem-yath-dailies-date () ()
   "Open a daily note by date (org-roam-dailies-goto-date)."
   (let ((date (prompt-for-string "Date (YYYY-MM-DD): ")))
     (when (plusp (length date))
@@ -94,7 +94,7 @@ Org-style link in .org buffers, markdown-style otherwise."
           (when new
             (insert-string (current-point) (format nil "#+title: ~a~%~%" date))))))))
 
-(define-command vile-journal-new-entry () ()
+(define-command lem-yath-journal-new-entry () ()
   "New org-journal entry in $WORKDIR/roam/journal/%Y%m%d.org."
   (multiple-value-bind (iso compact dow) (decoded-date-strings)
     (let ((path (merge-pathnames (format nil "journal/~a.org" compact)
@@ -120,7 +120,7 @@ Org-style link in .org buffers, markdown-style otherwise."
     ("reading" "readlist.org" "TODO "))
   "Template name, target file under $WORKDIR, optional TODO prefix.")
 
-(define-command vile-capture () ()
+(define-command lem-yath-capture () ()
   "Capture a line into inbox/todo/readlist under \"* Inbox\" (org-capture)."
   (let* ((names (mapcar #'first *capture-templates*))
          (choice (prompt-for-string
@@ -129,7 +129,7 @@ Org-style link in .org buffers, markdown-style otherwise."
                   :test-function (lambda (s) (member s names :test #'string=))))
          (template (assoc choice *capture-templates* :test #'string=)))
     (unless template
-      (return-from vile-capture))
+      (return-from lem-yath-capture))
     (destructuring-bind (name file prefix) template
       (declare (ignore name))
       (let ((text (prompt-for-string "Entry: ")))

@@ -1,7 +1,7 @@
-# VILE app-module porting conventions
+# lem-yath app-module porting conventions
 
-You are implementing ONE file under `lem-vile/src/apps/<name>.lisp`, replacing
-its stub. It is a component of the `vile` ASDF system (see `lem-vile/vile.asd`)
+You are implementing ONE file under `lem-yath/src/apps/<name>.lisp`, replacing
+its stub. It is a component of the `lem-yath` ASDF system (see `lem-yath/lem-yath.asd`)
 and loads into the nix-built `lem-ncurses` image.
 
 ## Hard rules
@@ -11,7 +11,7 @@ and loads into the nix-built `lem-ncurses` image.
    `docs/lem-capabilities.md`. Lem is NOT Emacs: there is no `with-current-buffer`,
    no `save-excursion`, different point/buffer APIs. When in doubt, read
    `vendor/lem/src/` and existing `vendor/lem/extensions/`.
-2. **Package**: file starts with a `;;;;` header comment then `(in-package :vile)`.
+2. **Package**: file starts with a `;;;;` header comment then `(in-package :lem-yath)`.
    Reference other packages with single colon only for verified exports;
    `package::symbol` only when the symbol exists but isn't exported.
 3. **Threading**: the editor runs on one thread. Background work uses
@@ -27,7 +27,7 @@ and loads into the nix-built `lem-ncurses` image.
 6. **CL style**: docstrings on every command; `defvar`/`defparameter` knobs at
    top; no dead code; small functions; follow `vendor/lem/STYLEGUIDE.md`.
 
-## Helpers already in `:vile` (src/base.lisp, src/llm.lisp, src/notes.lisp)
+## Helpers already in `:lem-yath` (src/base.lisp, src/llm.lisp, src/notes.lisp)
 
 - `(workdir)` → `$WORKDIR` or `~/work` as a directory pathname.
 - `(find-up start name)` → walk up to the dir containing file/dir `name`.
@@ -42,9 +42,9 @@ and loads into the nix-built `lem-ncurses` image.
 
 ## Commands & keybindings
 
-- Commands: `(define-command vile-<area>-<verb> () () "docstring" ...)`.
+- Commands: `(define-command lem-yath-<area>-<verb> () () "docstring" ...)`.
 - Leader bindings go at the END of your file, e.g.
-  `(define-key lem-vi-mode:*normal-keymap* "Leader y o" 'vile-citar-open)`.
+  `(define-key lem-vi-mode:*normal-keymap* "Leader y o" 'lem-yath-citar-open)`.
   The leader is SPC. Don't touch keys outside your assignment.
 - For list UIs: create a buffer, `(setf (buffer-read-only-p buffer) t)` after
   filling, and define a dedicated major mode with a keymap binding `Return`,
@@ -58,8 +58,8 @@ and loads into the nix-built `lem-ncurses` image.
 From the repo root, BOTH must pass (use a unique id to avoid collisions):
 
 ```sh
-VILE_CHECK_ID=<yourname> ./scripts/compile-check.sh   # must end with LOAD OK, no ERROR
-VILE_CHECK_ID=<yourname> ./scripts/boot-test.sh       # must print BOOT TEST PASSED
+LEM_YATH_CHECK_ID=<yourname> ./scripts/compile-check.sh   # must end with LOAD OK, no ERROR
+LEM_YATH_CHECK_ID=<yourname> ./scripts/boot-test.sh       # must print BOOT TEST PASSED
 ```
 
 Zero compile warnings about undefined functions/variables are tolerated for

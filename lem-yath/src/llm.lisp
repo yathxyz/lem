@@ -3,7 +3,7 @@
 ;;;; and marshalling chunks onto the editor thread with send-event.
 ;;;; CLI-agent backends (claude/codex/grok) live in apps/llm-cli.lisp.
 
-(in-package :vile)
+(in-package :lem-yath)
 
 (defvar *llm-model* "openrouter/auto"
   "Default model, matching gptel's OpenRouter default.")
@@ -13,7 +13,7 @@
 (defvar *llm-system-message* "Very short answers. Be helpful."
   "Same system message as the Emacs gptel setup.")
 
-(defvar *llm-buffer-name* "*vile-llm*")
+(defvar *llm-buffer-name* "*lem-yath-llm*")
 
 (defun llm-api-key ()
   (or (uiop:getenv "OPENROUTER_API_KEY")
@@ -94,7 +94,7 @@
                (if (and code (zerop code))
                    (append-text buffer (string #\Newline))
                    (append-line buffer (format nil "~%[llm request failed, curl exit ~a]" code))))))
-         :name "vile/llm")))))
+         :name "lem-yath/llm")))))
 
 (defvar *llm-backend* :openrouter
   "Active backend. CLI-agent backends (apps/llm-cli.lisp) add more.")
@@ -104,7 +104,7 @@
   (:method ((backend (eql :openrouter)) prompt)
     (llm-stream prompt)))
 
-(define-command vile-llm-send () ()
+(define-command lem-yath-llm-send () ()
   "Send region (or buffer up to point) to the LLM, streaming the reply
 (gptel-send)."
   (let ((text (string-trim '(#\Space #\Tab #\Newline) (llm-source-text))))
@@ -112,7 +112,7 @@
         (message "Nothing to send")
         (llm-backend-stream *llm-backend* text))))
 
-(define-command vile-llm-ask () ()
+(define-command lem-yath-llm-ask () ()
   "Prompt for an instruction, prepend it to the region/buffer text, send
 (gptel-menu's ad-hoc directive, approximately)."
   (let ((instruction (prompt-for-string "LLM instruction: "))
@@ -123,10 +123,10 @@
                               instruction
                               (format nil "~a~%~%~a" instruction text))))))
 
-(define-command vile-llm-set-model () ()
+(define-command lem-yath-llm-set-model () ()
   "Choose the OpenRouter model (gptel preset switching, simplified)."
   (let ((model (prompt-for-string "Model: " :initial-value *llm-model*
-                                            :history-symbol 'vile-llm-model)))
+                                            :history-symbol 'lem-yath-llm-model)))
     (when (plusp (length model))
       (setf *llm-model* model)
       (message "LLM model: ~a" model))))
