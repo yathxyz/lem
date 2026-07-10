@@ -32,9 +32,12 @@ lem-yath_with_loaded_form() {
 }
 
 lem-yath_configure_asdf_output() {
-  local cache_home
+  local cache_home source_key
   cache_home="${XDG_CACHE_HOME:-${HOME:-${TMPDIR:-/tmp}}/.cache}"
-  LEM_YATH_ASDF_CACHE="${LEM_YATH_ASDF_CACHE:-$cache_home/lem-yath/asdf}"
+  # Nix store sources all have normalized timestamps.  Namespace compiled
+  # output by source path so a new flake source cannot reuse an older FASL.
+  source_key=$(printf '%s' "$LEM_YATH_SOURCE" | sha256sum | cut -c1-16)
+  LEM_YATH_ASDF_CACHE="${LEM_YATH_ASDF_CACHE:-$cache_home/lem-yath/asdf/$source_key}"
   mkdir -p "$LEM_YATH_ASDF_CACHE"
   export ASDF_OUTPUT_TRANSLATIONS="$LEM_YATH_SOURCE:$LEM_YATH_ASDF_CACHE:/nix/store:/nix/store${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
 }

@@ -278,10 +278,38 @@ prompt behavior described in `src/completion.lisp`.
 Lem-yath carries `patches/lem-completion-lifecycle.patch` against the pinned Lem
 revision. It separates display, filter, and insertion text, adds a final-accept
 callback, and rejects stale asynchronous generations before they can update the
-popup. The LSP adapter consequently honors plain `filterText`, `insertText`,
+popup. Automatic contexts also keep a cancellable spinner, remember their origin
+buffer, display rather than insert synchronous singletons, and carry their own
+row-limit and cycling policy. Every asynchronous refresh revalidates its buffer,
+modification tick, and point before changing the menu.
+The LSP adapter consequently honors plain `filterText`, `insertText`,
 `TextEdit`, and `InsertReplaceEdit` new-text precedence. Tracked replacement
 ranges, snippet expansion, completion resolve, additional edits, and completion
 commands remain separate gaps.
+
+### Automatic in-buffer completion — `lem-yath/src/auto-completion.lisp` (verified)
+
+Lem-yath mirrors the active Corfu defaults with a 200 ms wall timer after
+insertion or backward deletion, a three-symbol threshold, ten visible rows, and
+non-cycling boundaries. Each request captures its window, buffer, modification
+tick, point, and logical generation. Pending input, leaving Vi insert state,
+opening a prompt, changing buffers, editing again, or canceling the context
+prevents an obsolete request from opening a popup. Read-only buffers and keyboard
+macros are excluded.
+
+The buffer's mode-local completion spec remains authoritative, as Eglot's CAPF is
+in the live Emacs setup. Where there is no mode provider, the configured Cape
+fallback order is reproduced: prefix-matched dynamic abbreviations from buffers
+with the same major mode, followed by file-at-point completion. File completion
+requires either `file:` or a slash with an existing parent directory and may open
+before three identifier characters, matching Cape's explicit file trigger.
+
+`scripts/auto-completion-test.sh` drives all of this through the ncurses editor,
+including the delay boundary, 12-candidate scrolling through a 10-row window,
+both non-cycling edges, rapid-typing debounce, provider exclusivity, singleton
+acceptance, whole-token and file-prefix replacement, unrelated movement and
+buffer-switch cleanup, Escape cancellation, and out-of-order asynchronous delivery.
+Multi-component Orderless input and its `M-Space` separator remain a tracked gap.
 
 ### consult-like commands (verified)
 - `M-x`: `execute-command` (bound `M-x`); command completion via `completion-command`

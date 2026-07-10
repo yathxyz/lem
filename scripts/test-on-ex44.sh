@@ -34,6 +34,9 @@ case "$test_name" in
   completion-lifecycle)
     remote_command='nix run path:$PWD#completion-lifecycle-test'
     ;;
+  auto-completion)
+    remote_command='nix run path:$PWD#auto-completion-test'
+    ;;
   interactive)
     remote_command='nix run path:$PWD#interactive-test'
     ;;
@@ -44,7 +47,7 @@ case "$test_name" in
     remote_command='nix run path:$PWD#notes-test'
     ;;
   *)
-    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|interactive|structural|notes]" >&2
+    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|interactive|structural|notes]" >&2
     exit 2
     ;;
 esac

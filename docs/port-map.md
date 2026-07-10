@@ -107,3 +107,5 @@ Status legend:
 - **org files** open as plain text; the workflows (capture/dailies/journal/agenda)
   operate on the same files but there is no org folding/links/tables UI.
 - **Completion previews**: no consult-style live preview while cycling candidates.
+- **In-buffer Orderless input**: automatic mode/Cape completion is active, but
+  multi-component matching and Corfu's `M-Space` separator are not yet present.

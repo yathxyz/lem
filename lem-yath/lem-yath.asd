@@ -15,6 +15,7 @@
                (:file "vi")
                (:file "structural")
                (:file "completion")
+               (:file "auto-completion")
                (:file "ide")
                (:file "git")
                (:file "notes")

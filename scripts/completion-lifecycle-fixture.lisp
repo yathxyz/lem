@@ -200,6 +200,28 @@
                           (lem/completion-mode::context-last-items context)))
                      "result-after-completion-end-rejected"))
 
+            (let* ((callback nil)
+                   (spec (lem/completion-mode:make-completion-spec
+                          (lambda (point then)
+                            (declare (ignore point))
+                            (setf callback then))
+                          :async t))
+                   (context (make-instance
+                             'lem/completion-mode::completion-context
+                             :spec spec))
+                   (item (lem/completion-mode:make-completion-item
+                          :label "REFRESH-STALE")))
+              (completion-lifecycle-clear-buffer)
+              (setf lem/completion-mode::*completion-context* context)
+              (lem/completion-mode::continue-completion context)
+              (insert-string (current-point) "background-edit")
+              (funcall callback (list item))
+              (check
+               (and (null lem/completion-mode::*completion-context*)
+                    (null
+                     (lem/completion-mode::context-last-items context)))
+               "edited-buffer-rejects-delayed-refresh-result"))
+
             (let ((callback nil)
                   (item (lem/completion-mode:make-completion-item
                          :label "DELAYED"
