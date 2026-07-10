@@ -130,6 +130,7 @@
             boot-test = mkTestApp "lem-yath-boot-test" "boot-test.sh";
             orderless-test = mkTestApp "lem-yath-orderless-test" "orderless-test.sh";
             interactive-test = mkTestApp "lem-yath-interactive-test" "interactive-test.sh";
+            structural-test = mkTestApp "lem-yath-structural-test" "structural-test.sh";
           };
 
           checks = {

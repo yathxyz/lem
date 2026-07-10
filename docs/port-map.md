@@ -44,7 +44,7 @@ Status legend:
 | just-mode / meson-mode / nginx-mode / nushell-ts-mode / typst-ts-mode | gap | open as fundamental (no Lem modes) |
 | yaml-mode | lem-builtin | `lem-yaml-mode` |
 | sqlite3 | n/a | elisp FFI library |
-| lispy / lispyville | lem-builtin | `lem-paredit-mode` on lisp buffers (`src/vi.lisp`); plus full SLIME via micros |
+| lispy / lispyville | ported | Paredit in Common Lisp, Clojure, Scheme/Racket, and Elisp; delimiter-safe Vim operators, atom motions, slurp/barf, drag, splice, split, raise, transpose, convolute, and list insertion/opening (`src/structural.lisp`, `scripts/structural-test.sh`); plus full SLIME via micros |
 | magit | lem-builtin | `lem/legit` (status/stage/commit/branch/push/pull/stash/rebase); `SPC g G` |
 | magit-todos | gap | no TODO section in legit |
 | forge | gap | no GitHub/GitLab integration |

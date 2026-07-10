@@ -19,6 +19,7 @@ configuration does not override it.
 | Insert controls | `C-u` deletes back to indentation, `M-Backspace` deletes a word, `C-n/C-p` retain ordinary line movement, `C-c i` sends to the LLM | interactive checks 16 and 20 plus boot/load checks |
 | Editing leader commands | Org ID creation, auto fill, visual-line wrapping, paragraph filling, variable help | interactive checks 17–19 plus exact leader-map check |
 | Region expansion | Repeated `SPC v` expands through word, nearest delimiter, line, and paragraph | interactive check 21 |
+| Lispy/Lispyville structural editing | Paredit smart insertion plus safe Vim operators, `W/E/B` atom motions, `>/<` slurp/barf, all configured additional and additional-insert transforms, comments/strings, and Lisp-family delimiters | `structural-test.sh` |
 
 Run the complete gate away from the laptop with:
 

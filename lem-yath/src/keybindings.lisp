@@ -110,7 +110,9 @@
 (define-key lem-vi-mode:*insert-keymap* "C-c i" 'lem-yath-llm-send)
 (define-key lem-vi-mode:*insert-keymap* "C-u" 'lem-yath-delete-back-to-indentation)
 (define-key lem-vi-mode:*insert-keymap* "M-Backspace"
-  'lem-vi-mode/commands:vi-kill-last-word)
+  'lem-yath-structural-kill-last-word)
+(define-key lem-vi-mode:*insert-keymap* "C-w"
+  'lem-yath-structural-kill-last-word)
 
 ;; The Emacs config unbinds Evil's C-n/C-p overrides so they retain ordinary
 ;; line movement (and completion keymaps can take precedence when active).

@@ -220,45 +220,79 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
 (define-command lem-yath-yank-or-surround (argument) (:universal-nil)
   "Run native `y`, or evil-surround `ys` when followed by s."
   (if (lem-vi-mode/visual:visual-p)
-      (call-command 'lem-vi-mode/commands:vi-yank argument)
+      (call-command (if (structural-editing-p)
+                        'lem-yath-structural-yank
+                        'lem-vi-mode/commands:vi-yank)
+                    argument)
       (let ((key (read-key)))
         (case (key-to-char key)
           (#\s
            (call-command 'lem-yath-surround-operator argument))
           (#\y
-           (call-command 'lem-yath-yank-lines argument))
+           (call-command (if (structural-editing-p)
+                             'lem-yath-structural-yank-lines
+                             'lem-yath-yank-lines)
+                         argument))
           (otherwise
-           (call-vi-operator 'lem-vi-mode/commands:vi-yank argument key))))))
+           (call-vi-operator (if (structural-editing-p)
+                                 'lem-yath-structural-yank
+                                 'lem-vi-mode/commands:vi-yank)
+                             argument key))))))
 
 (define-command lem-yath-delete-or-surround (argument) (:universal-nil)
   "Run native `d`, or evil-surround `ds` when followed by s."
   (if (lem-vi-mode/visual:visual-p)
-      (call-command 'lem-vi-mode/commands:vi-delete argument)
+      (call-command (if (structural-editing-p)
+                        'lem-yath-structural-delete
+                        'lem-vi-mode/commands:vi-delete)
+                    argument)
       (let ((key (read-key)))
         (case (key-to-char key)
           (#\s
            (lem-yath-surround-delete))
           (#\d
-           (call-command 'lem-yath-delete-lines argument))
+           (call-command (if (structural-editing-p)
+                             'lem-yath-structural-delete-lines
+                             'lem-yath-delete-lines)
+                         argument))
           (otherwise
-           (call-vi-operator 'lem-vi-mode/commands:vi-delete argument key))))))
+           (call-vi-operator (if (structural-editing-p)
+                                 'lem-yath-structural-delete
+                                 'lem-vi-mode/commands:vi-delete)
+                             argument key))))))
 
 (define-command lem-yath-change-or-surround (argument) (:universal-nil)
   "Run native `c`, or evil-surround `cs` when followed by s."
   (if (lem-vi-mode/visual:visual-p)
-      (call-command 'lem-vi-mode/commands:vi-change argument)
+      (call-command (if (structural-editing-p)
+                        'lem-yath-structural-change
+                        'lem-vi-mode/commands:vi-change)
+                    argument)
       (let ((key (read-key)))
         (case (key-to-char key)
           (#\s
            (lem-yath-surround-change))
           (#\c
-           (call-command 'lem-yath-change-lines argument))
+           (call-command (if (structural-editing-p)
+                             'lem-yath-structural-change-lines
+                             'lem-yath-change-lines)
+                         argument))
           (otherwise
-           (call-vi-operator 'lem-vi-mode/commands:vi-change argument key))))))
+           (call-vi-operator (if (structural-editing-p)
+                                 'lem-yath-structural-change
+                                 'lem-vi-mode/commands:vi-change)
+                             argument key))))))
+
+(define-command lem-yath-yank-line-dispatch (argument) (:universal-nil)
+  "Use Lispyville's safe y$ in structural buffers and Vim's whole-line Y elsewhere."
+  (call-command (if (structural-editing-p)
+                    'lem-yath-structural-yank-to-line-end
+                    'lem-yath-yank-lines)
+                argument))
 
 (define-key lem-vi-mode:*visual-keymap* "S" 'lem-yath-surround-operator)
 (define-key lem-vi-mode:*normal-keymap* "y" 'lem-yath-yank-or-surround)
-(define-key lem-vi-mode:*normal-keymap* "Y" 'lem-yath-yank-lines)
+(define-key lem-vi-mode:*normal-keymap* "Y" 'lem-yath-yank-line-dispatch)
 (define-key lem-vi-mode:*normal-keymap* "d" 'lem-yath-delete-or-surround)
 (define-key lem-vi-mode:*normal-keymap* "c" 'lem-yath-change-or-surround)
 
@@ -417,10 +451,3 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
           (alexandria:if-let ((range (expand-region-to-lines start end)))
             (setf (lem-vi-mode/visual:visual-range) range)
             (call-command 'lem-vi-mode/commands:vi-a-paragraph 1))))))
-
-;;; --- structural editing for lisp buffers (lispy/lispyville) -----------------
-
-(defun enable-paredit ()
-  (lem-paredit-mode:paredit-mode t))
-
-(add-hook lem-lisp-mode:*lisp-mode-hook* 'enable-paredit)

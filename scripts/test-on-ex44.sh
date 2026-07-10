@@ -17,7 +17,7 @@ esac
 
 case "$test_name" in
   all)
-    remote_command='nix flake check path:$PWD && nix run path:$PWD#interactive-test'
+    remote_command='nix flake check path:$PWD && nix run path:$PWD#interactive-test && nix run path:$PWD#structural-test'
     ;;
   check)
     remote_command='nix flake check path:$PWD'
@@ -34,8 +34,11 @@ case "$test_name" in
   interactive)
     remote_command='nix run path:$PWD#interactive-test'
     ;;
+  structural)
+    remote_command='nix run path:$PWD#structural-test'
+    ;;
   *)
-    echo "Usage: $0 [all|check|compile|boot|orderless|interactive]" >&2
+    echo "Usage: $0 [all|check|compile|boot|orderless|interactive|structural]" >&2
     exit 2
     ;;
 esac

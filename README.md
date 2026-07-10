@@ -14,6 +14,7 @@ terminal (ncurses) frontend, multi-threaded SBCL image.
 | `docs/lem-capabilities.md` | Survey of Lem's real APIs (grounded in source) |
 | `docs/port-map.md` | Emacs package → Lem equivalent mapping + gap report |
 | `docs/vi-parity.md` | Vim/Evil behavior matrix, evidence, and remaining gaps |
+| `docs/structural-editing.md` | Lispy/Lispyville key themes, safety model, and TUI evidence |
 | `docs/porting-conventions.md` | Hard rules every module follows |
 | `scripts/` | tmux-based TUI test harness |
 
@@ -44,7 +45,9 @@ of writing `.fasl` files into the source tree.
 
 - vi-mode with a Space leader reproducing every feasible SPC chord in normal
   and visual states (files, buffers, project, git, notes, LLM, help, navigation)
-- surround / snipe / comment operator (`gc`) / paredit on lisp buffers
+- surround / snipe / comment operator (`gc`) plus Lispyville-compatible,
+  delimiter-safe structural editing in Common Lisp, Clojure, Scheme/Racket,
+  and Emacs Lisp buffers
 - orderless (space-separated substring) filtering in command and buffer
   prompts, with multi-token input kept alive; file prompts retain Lem's stock
   completion behavior
@@ -68,6 +71,7 @@ nix run .#compile-check
 nix run .#boot-test
 nix run .#orderless-test
 nix run .#interactive-test
+nix run .#structural-test
 ```
 
 The underlying scripts remain parallel-safe via `LEM_YATH_CHECK_ID` and accept
@@ -80,6 +84,6 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 ./scripts/test-on-ex44.sh
 ```
 
-Pass `check`, `compile`, `boot`, `orderless`, or `interactive` to run only that
+Pass `check`, `compile`, `boot`, `orderless`, `interactive`, or `structural` to run only that
 gate. `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and
 remote cache directory.

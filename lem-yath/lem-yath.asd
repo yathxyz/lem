@@ -1,7 +1,7 @@
 ;;;; lem-yath -> Lem: a faithful port of the "lem-yath" Emacs configuration to Lem.
-;;;; All lem-* systems referenced by the sources are already present in the
-;;;; nix-built lem-ncurses image, so this system intentionally declares no
-;;;; dependencies on them.
+;;;; The nix-built Lem image already contains the editor systems referenced by
+;;;; these sources.  Do not list them as ASDF dependencies: doing so makes ASDF
+;;;; try to rebuild bundled extensions inside the immutable Nix store.
 
 (defsystem "lem-yath"
   :description "Port of yanni's Emacs (lem-yath) configuration to Lem."
@@ -13,6 +13,7 @@
                (:file "base")
                (:file "editing")
                (:file "vi")
+               (:file "structural")
                (:file "completion")
                (:file "ide")
                (:file "git")
