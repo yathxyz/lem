@@ -110,6 +110,64 @@
                   (check (null (search "stable " saved))
                          "tracking-reset-trims-newly-touched-line"))))
 
+            (let* ((path (editing-test-file "multiline.fixture"))
+                   (initial (format nil
+                                    "multi untouched  ~%body~%multi tail  ~%"))
+                   (expected (format nil
+                                     "multi untouched  ~%body left~%right~%multi tail  ~%")))
+              (editing-test-write-file path initial)
+              (let ((buffer (editing-test-open-buffer
+                             path 'editing-test-programming-mode)))
+                (editing-test-insert-at-line-end buffer 2
+                                                 (format nil " left  ~%right  "))
+                (check (= 2 (length (touched-line-points buffer)))
+                       "multiline-insertion-tracks-each-new-line")
+                (save-buffer buffer)
+                (check (string= expected (editing-test-file-contents path))
+                       "multiline-insertion-trims-only-new-lines")))
+
+            (let* ((path (editing-test-file "revert.fixture"))
+                   (external (format nil
+                                     "revert untouched  ~%revert touched~%revert tail  ~%"))
+                   (expected (format nil
+                                     "revert untouched  ~%revert touched~%revert tail  ~%")))
+              (editing-test-write-file path (format nil "old contents~%"))
+              (let ((buffer (editing-test-open-buffer
+                             path 'editing-test-programming-mode)))
+                (editing-test-write-file path external)
+                (lem-core/commands/file:sync-buffer-with-file-content buffer)
+                (check (not (buffer-modified-p buffer))
+                       "revert-leaves-buffer-clean")
+                (check (touched-line-points buffer)
+                       "revert-exercises-change-hooks")
+                (editing-test-insert-at-line-end buffer 2 "   ")
+                (check (= 1 (length (touched-line-points buffer)))
+                       "first-post-revert-edit-starts-new-tracking-epoch")
+                (save-buffer buffer)
+                (check (string= expected (editing-test-file-contents path))
+                       "post-revert-save-preserves-untouched-dirty-lines")))
+
+            (let* ((path (editing-test-file "failed-save.fixture"))
+                   (expected (format nil "failure untouched  ~%failure touched~%")))
+              (editing-test-write-file
+               path (format nil "failure untouched  ~%failure touched~%"))
+              (let ((buffer (editing-test-open-buffer
+                             path 'editing-test-programming-mode))
+                    (failed nil))
+                (editing-test-insert-at-line-end buffer 2 "  ")
+                (handler-case
+                    (lem/buffer/file::call-with-write-hook
+                     buffer (lambda () (error "intentional write failure")))
+                  (error () (setf failed t)))
+                (check failed "write-failure-propagates")
+                (check (touched-line-points buffer)
+                       "write-failure-retains-tracking-points")
+                (save-buffer buffer)
+                (check (null (touched-line-points buffer))
+                       "successful-retry-clears-tracking-points")
+                (check (string= expected (editing-test-file-contents path))
+                       "successful-retry-preserves-selective-trimming")))
+
             (let ((buffer (make-buffer "*editing-markup-predicate*")))
               (unwind-protect
                    (progn
@@ -121,6 +179,15 @@
                             "markdown-inherits-language-mode")
                      (check (not (programming-buffer-p buffer))
                             "markdown-excluded-from-programming-predicate"))
+                (delete-buffer buffer)))
+
+            (let ((buffer (make-buffer "*editing-html-predicate*")))
+              (unwind-protect
+                   (progn
+                     (setf (buffer-major-mode buffer)
+                           'lem-html-mode:html-mode)
+                     (check (not (programming-buffer-p buffer))
+                            "html-excluded-through-xml-mode-parent"))
                 (delete-buffer buffer)))
 
             (let* ((path (editing-test-file "prose.fixture"))

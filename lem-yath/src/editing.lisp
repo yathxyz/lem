@@ -56,6 +56,16 @@
       (push (copy-point line :right-inserting)
             (touched-line-points buffer)))))
 
+(defun begin-touched-line-epoch (point change)
+  "Discard stale markers before the first change to a clean buffer."
+  (declare (ignore change))
+  (let ((buffer (point-buffer point)))
+    (when (and *trim-trailing-whitespace*
+               (not *trimming-touched-lines*)
+               (programming-buffer-p buffer)
+               (not (buffer-modified-p buffer)))
+      (clear-touched-line-points buffer))))
+
 (defun track-touched-lines (start end old-length)
   "Record every surviving line affected by one buffer change."
   (declare (ignore old-length))
@@ -80,25 +90,34 @@
                 (delete-character cursor 1)))))
 
 (defun trim-touched-trailing-whitespace (buffer)
-  (unwind-protect
-       (when (and *trim-trailing-whitespace*
-                  (buffer-filename buffer)
-                  (programming-buffer-p buffer))
-         (let ((*trimming-touched-lines* t))
-           (dolist (point (touched-line-points buffer))
-             (trim-line-trailing-whitespace point))))
-    (clear-touched-line-points buffer)))
+  (when (and *trim-trailing-whitespace*
+             (buffer-filename buffer)
+             (programming-buffer-p buffer))
+    (let ((*trimming-touched-lines* t))
+      (dolist (point (touched-line-points buffer))
+        (trim-line-trailing-whitespace point)))))
 
 (defun trim-trailing-whitespace-hook (&rest args)
   (let ((buffer (or (first args) (current-buffer))))
     (when (typep buffer 'lem:buffer)
       (trim-touched-trailing-whitespace buffer))))
 
+(defun clear-touched-lines-after-save (&rest args)
+  (let ((buffer (or (first args) (current-buffer))))
+    (when (typep buffer 'lem:buffer)
+      (clear-touched-line-points buffer))))
+
+(add-hook (variable-value 'before-change-functions :global t)
+          'begin-touched-line-epoch)
+
 (add-hook (variable-value 'after-change-functions :global t)
           'track-touched-lines)
 
 (add-hook (variable-value 'before-save-hook :global t)
           'trim-trailing-whitespace-hook)
+
+(add-hook (variable-value 'after-save-hook :global t)
+          'clear-touched-lines-after-save)
 
 ;;; paragraph filling ---------------------------------------------------------
 
