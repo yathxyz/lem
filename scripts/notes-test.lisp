@@ -15,6 +15,65 @@
                  (error () t))))
       (handler-case
           (progn
+            (let* ((fixture-root
+                     (uiop:pathname-parent-directory-pathname
+                      (lem-yath::workdir)))
+                   (base (merge-pathnames "resolution-base/" fixture-root))
+                   (absolute (merge-pathnames "absolute-notes/" fixture-root))
+                   (missing (merge-pathnames "missing-notes/" fixture-root))
+                   (home-work (merge-pathnames
+                               "work/" (user-homedir-pathname)))
+                   (home-notes (merge-pathnames
+                                "notes/" (user-homedir-pathname))))
+              (ensure-directories-exist (merge-pathnames ".keep" base))
+              (ensure-directories-exist (merge-pathnames ".keep" absolute))
+              (check (string= (namestring (lem-yath::resolve-workdir nil base))
+                              (namestring home-work))
+                     "unset-workdir-falls-back-to-home-work")
+              (check (string= (namestring (lem-yath::resolve-workdir "" base))
+                              (namestring home-work))
+                     "empty-workdir-falls-back-to-home-work")
+              (check (string=
+                      (namestring (lem-yath::resolve-workdir "notes" base))
+                      (namestring (merge-pathnames "notes/" base)))
+                     "relative-workdir-resolves-against-launch-directory")
+              (check (string=
+                      (namestring
+                       (lem-yath::resolve-workdir (namestring absolute) base))
+                      (namestring absolute))
+                     "absolute-workdir-remains-absolute")
+              (check (string=
+                      (namestring (lem-yath::resolve-workdir "~/notes" base))
+                      (namestring home-notes))
+                     "tilde-workdir-expands-against-home")
+              (check (not (uiop:directory-exists-p missing))
+                     "nonexistent-workdir-starts-absent")
+              (check (string=
+                      (namestring
+                       (lem-yath::resolve-workdir (namestring missing) base))
+                      (namestring missing))
+                     "nonexistent-workdir-resolves-without-creation")
+              (check (not (uiop:directory-exists-p missing))
+                     "workdir-resolution-does-not-create-directory")
+              (check (string=
+                      (namestring (lem-yath::workdir))
+                      (namestring
+                       (uiop:ensure-directory-pathname
+                        (uiop:getenv "WORKDIR"))))
+                     "runtime-workdir-matches-absolute-environment")
+              (check (eq (lem-yath::workdir) lem-yath::*workdir*)
+                     "runtime-workdir-is-cached")
+              (let ((original (uiop:getenv "WORKDIR")))
+                (unwind-protect
+                     (progn
+                       (setf (uiop:getenv "WORKDIR") "")
+                       (check (string= "~/work"
+                                       (lem-yath::configured-workdir))
+                              "empty-configured-workdir-uses-fallback")
+                       (check (string= "~/work" (uiop:getenv "WORKDIR"))
+                              "fallback-is-exported-for-subprocesses"))
+                  (setf (uiop:getenv "WORKDIR") original))))
+
             (check (lem-yath::valid-iso-date-p "2024-02-29")
                    "leap-day-valid")
             (check (every #'rejected-date-p

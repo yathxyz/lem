@@ -27,9 +27,10 @@ and loads into the nix-built `lem-ncurses` image.
 6. **CL style**: docstrings on every command; `defvar`/`defparameter` knobs at
    top; no dead code; small functions; follow `vendor/lem/STYLEGUIDE.md`.
 
-## Helpers already in `:lem-yath` (src/base.lisp, src/llm.lisp, src/notes.lisp)
+## Helpers already in `:lem-yath` (src/base.lisp, src/workspace.lisp, src/llm.lisp, src/notes.lisp)
 
-- `(workdir)` → `$WORKDIR` or `~/work` as a directory pathname.
+- `(workdir)` → startup-cached, absolute `$WORKDIR` or `~/work` from
+  `src/workspace.lisp`.
 - `(find-up start name)` → walk up to the dir containing file/dir `name`.
 - `(executable-find name)` → full path or NIL.
 - `(prescient-filter input candidates :key fn)` → prompt candidate filter;

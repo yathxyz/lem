@@ -11,6 +11,7 @@
   :pathname "src/"
   :components ((:file "package")
                (:file "base")
+               (:file "workspace")
                (:file "editing")
                (:file "vi")
                (:file "structural")

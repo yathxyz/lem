@@ -8,12 +8,6 @@
 
 ;;; --- paths ---------------------------------------------------------------
 
-(defun workdir ()
-  "The notes root, mirroring $WORKDIR from the Emacs config (default ~/work)."
-  (uiop:ensure-directory-pathname
-   (or (uiop:getenv "WORKDIR")
-       (merge-pathnames "work/" (user-homedir-pathname)))))
-
 (defun find-up (start name)
   "Walk upward from directory START looking for file-or-directory NAME.
 Returns the containing directory pathname, or NIL."
