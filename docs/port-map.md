@@ -21,12 +21,12 @@ Status legend:
 | evil-org | partial | no Org major mode; shared-file workflows and `SPC m I` heading IDs work in plain buffers |
 | general (SPC leader) | ported/partial | vi-mode leader = Space in normal+visual with exact boot-time verification; remaining capability gaps are listed in `docs/vi-parity.md` |
 | vertico | ported/lem-builtin | prompt list opens immediately, shows up to 20 rows, and cycles; focused TUI coverage in `scripts/completion-test.sh` |
-| orderless | partial | the live Emacs config uses Orderless for Corfu/CAPF; Lem prompt filtering correctly follows Vertico-Prescient instead, while in-buffer Orderless remains open |
+| orderless | ported/partial | ordinary-buffer completion has escaped-space components, whole-query smart case, any-order literal/regexp filtering, and `~ = ^ ! ,` affix dispatch through `M-Space`; CL-PPCRE differs from Emacs regexp syntax, and `%` char-fold plus `&` annotation dispatch remain gaps (`src/orderless.lisp`) |
 | marginalia | partial | M-x keybindings, buffer paths, and provider-specific LSP/Lisp details exist; no general category annotation layer |
 | consult | ported/partial | project buffers `SPC SPC`, project-grep, isearch; no preview-on-move |
 | consult-eglot | gap | `SPC p s` currently invokes document symbols, not the configured workspace-symbol search |
-| corfu (TTY via Emacs 31) | ported/partial | Lem has an ncurses popup, correct display/filter/insert metadata, acceptance callbacks, stale-result rejection, and automatic identifier completion after the configured 3-character/0.2-second threshold; Orderless separator input remains open |
-| cape | ported/partial | automatic same-major-mode dabbrev then file-at-point fallbacks are composed and TUI-tested; Cape's broader provider library is not ported |
+| corfu (TTY via Emacs 31) | ported/partial | Lem has an ncurses popup, correct display/filter/insert metadata, acceptance callbacks, stale-result rejection, automatic identifier completion after the configured 3-character/0.2-second threshold, and local `M-Space` filtering with zero-match recovery; Corfu's wider command surface remains unported |
+| cape | ported/partial | automatic same-major-mode dabbrev and path-aware file-at-point fallbacks are composed and TUI-tested; raw dabbrev candidates feed Orderless, while Cape's broader provider library is not ported |
 | yasnippet (+ snippets) | gap | no snippet parser, placeholder session, mirrored fields, or imported private/community snippets |
 | prescient (+vertico-) | ported/partial | prompt literal/regexp/initialism filtering and persistent recency/frequency ranking are implemented; interactive toggles and char folding remain gaps |
 | embark (+consult) | gap | Lem has context menus and LSP code-action menus, but no generic target classifier/action maps behind `SPC e a` |

@@ -24,7 +24,9 @@
     lem/completion-mode::completion-previous-line
     lem/completion-mode::completion-end-of-buffer
     lem/completion-mode::completion-beginning-of-buffer
-    lem/completion-mode::completion-narrowing-down-or-next-line))
+    lem/completion-mode::completion-narrowing-down-or-next-line
+    lem-yath-completion-space
+    lem-yath-orderless-insert-separator))
 
 (defun auto-completion-symbol-bounds (point)
   (with-point ((start point)
@@ -105,11 +107,9 @@ directory already exists."
             (lem/abbrev::collect-buffer-words-order-proximity point)
             (mapcan #'lem/abbrev::scan-buffer-words (rest buffers)))))
     (remove-duplicates
-     (remove-if-not
+     (remove-if
       (lambda (word)
-        (and (not (string-equal prefix word))
-             (alexandria:starts-with-subseq
-              prefix word :test #'char-equal)))
+        (string-equal prefix word))
       words)
      :test #'string-equal)))
 
@@ -145,17 +145,14 @@ directory already exists."
        (ignore-errors
          (completion-file input (buffer-directory)))))))
 
-(defun auto-completion-fallback-provider (point)
-  "Use Cape's effective fallback order: dabbrev, then file."
-  (or (auto-completion-dabbrev-items point)
-      (auto-completion-file-items point)))
-
 (defun auto-completion-primary-spec (&optional (buffer (current-buffer)))
   (variable-value 'lem/language-mode:completion-spec :buffer buffer))
 
 (defun auto-completion-provider (&optional (point (current-point)))
   (or (auto-completion-primary-spec (point-buffer point))
-      #'auto-completion-fallback-provider))
+      (if (auto-completion-file-context-p point)
+          #'auto-completion-file-items
+          #'auto-completion-dabbrev-items)))
 
 (defun auto-completion-prefix-ready-p (point)
   (if (auto-completion-primary-spec (point-buffer point))
@@ -167,6 +164,19 @@ directory already exists."
 
 (defun auto-completion-prompt-active-p ()
   (not (null (lem/prompt-window:current-prompt-window))))
+
+(defun auto-completion-context-options (spec)
+  "Apply Orderless only to ordinary, non-file in-buffer completion."
+  (declare (ignore spec))
+  (unless (or (auto-completion-prompt-active-p)
+              (and (null (auto-completion-primary-spec))
+                   (auto-completion-file-context-p (current-point))))
+    (list :filter-function #'orderless-filter-completion-items
+          :separator #\Space)))
+
+(setf (variable-value
+       'lem/completion-mode:completion-context-options-function :global)
+      #'auto-completion-context-options)
 
 (defun auto-completion-insert-state-p (buffer)
   (or (not (mode-active-p buffer 'lem-vi-mode:vi-mode))
@@ -208,6 +218,8 @@ directory already exists."
   (and *auto-completion-context*
        (eq *auto-completion-context*
            lem/completion-mode::*completion-context*)
+       (lem/completion-mode::context-request-pending-p
+        *auto-completion-context*)
        (null (lem/completion-mode::context-popup-menu
               *auto-completion-context*))))
 
@@ -284,11 +296,18 @@ directory already exists."
 (defun auto-completion-post-command ()
   "Debounce completion after ordinary insertion and backward deletion."
   (auto-completion-cancel-timer)
-  (when (and (auto-completion-owned-context-p)
-             (or (auto-completion-context-pending-p)
-                 (not (auto-completion-continue-command-p
-                       (this-command)))))
-    (lem/completion-mode:completion-end))
+  (let ((command-name (command-name (this-command))))
+    (when (and
+           (auto-completion-owned-context-p)
+           (or (not (auto-completion-continue-command-p (this-command)))
+               (and
+                (auto-completion-context-pending-p)
+                (not (member
+                      command-name
+                      '(lem/completion-mode::completion-self-insert
+                        lem/completion-mode::completion-delete-previous-char
+                        lem/completion-mode::completion-backward-delete-word))))))
+      (lem/completion-mode:completion-end)))
   (auto-completion-prune-context)
   (when (and (null lem/completion-mode::*completion-context*)
              (auto-completion-trigger-command-p (this-command)))
@@ -296,3 +315,14 @@ directory already exists."
 
 (add-hook *post-command-hook* 'auto-completion-post-command -100)
 (add-hook *exit-editor-hook* 'auto-completion-cancel-timer)
+
+(define-command lem-yath-orderless-insert-separator () ()
+  "Insert Corfu's separator and switch the current batch to local filtering."
+  (if (lem/completion-mode:completion-start-local-filtering #\Space)
+      (progn
+        (insert-character (current-point) #\Space)
+        (lem/completion-mode:completion-refresh))
+      (lem-yath-completion-space)))
+
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "M-Space" 'lem-yath-orderless-insert-separator)

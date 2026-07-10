@@ -18,10 +18,10 @@
   (delete-between-points (buffer-start-point (current-buffer))
                          (buffer-end-point (current-buffer))))
 
-(defun completion-lifecycle-item (name label insert-text)
+(defun completion-lifecycle-item (name label insert-text &optional filter-text)
   (lem/completion-mode:make-completion-item
    :label label
-   :filter-text name
+   :filter-text (or filter-text name)
    :insert-text insert-text
    :focus-action (lambda (context)
                    (declare (ignore context))
@@ -66,7 +66,7 @@
     (completion-lifecycle-report "DELIVER fresh")
     (funcall callback
              (list (completion-lifecycle-item
-                    "fresh" "FRESH-ABC" "fresh_insert")))))
+                    "fresh" "FRESH-ABC" "fresh_insert" "abc")))))
 
 (define-command lem-yath-test-deliver-stale-completion () ()
   (alexandria:when-let ((callback
@@ -74,7 +74,7 @@
     (completion-lifecycle-report "DELIVER stale")
     (funcall callback
              (list (completion-lifecycle-item
-                    "stale" "STALE-AB" "stale_insert")))))
+                    "stale" "STALE-AB" "stale_insert" "ab")))))
 
 (define-key lem/completion-mode::*completion-mode-keymap*
   "F5" 'lem-yath-test-deliver-fresh-completion)

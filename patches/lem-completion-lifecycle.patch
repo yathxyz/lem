@@ -1,5 +1,5 @@
 diff --git a/extensions/lsp-mode/lsp-mode.lisp b/extensions/lsp-mode/lsp-mode.lisp
-index b50d1d4..d2f6987 100644
+index b50d1d4..c03eb1d 100644
 --- a/extensions/lsp-mode/lsp-mode.lisp
 +++ b/extensions/lsp-mode/lsp-mode.lisp
 @@ -101,14 +101,18 @@ Use this when lsp-mode has side effects that you want to avoid."
@@ -23,7 +23,19 @@ index b50d1d4..d2f6987 100644
 
  (defun display-message (text &key style source-window)
    (when text
-@@ -898,20 +902,44 @@ Use this when lsp-mode has side effects that you want to avoid."
+@@ -262,7 +266,10 @@ Use this when lsp-mode has side effects that you want to avoid."
+      :keymap *lsp-mode-keymap*
+      :enable-hook 'enable-hook)
+   (setf (variable-value 'language-mode:completion-spec)
+-        (lem/completion-mode:make-completion-spec 'text-document/completion :async t))
++        (lem/completion-mode:make-completion-spec
++         'text-document/completion
++         :async t
++         :filter-function #'filter-completion-items))
+   (setf (variable-value 'language-mode:find-definitions-function)
+         #'lsp-find-definitions)
+   (setf (variable-value 'language-mode:find-references-function)
+@@ -898,20 +905,44 @@ Use this when lsp-mode has side effects that you want to avoid."
        (move-to-lsp-position end range-end)
        (list start end))))
 
@@ -78,7 +90,7 @@ index b50d1d4..d2f6987 100644
                 (declare (ignore end))
                 (make-instance
                  'completion-item
-@@ -920,6 +948,8 @@ Use this when lsp-mode has side effects that you want to avoid."
+@@ -920,6 +951,8 @@ Use this when lsp-mode has side effects that you want to avoid."
                  ;; the `end` position becomes mis-aligned and can't be used.
                  ;; :end end
                  :label label
@@ -87,9 +99,16 @@ index b50d1d4..d2f6987 100644
                  :detail (handler-case (lsp:completion-item-detail item)
                            (unbound-slot () ""))
                  :sort-text (handler-case (lsp:completion-item-sort-text item)
-@@ -961,21 +991,27 @@ Use this when lsp-mode has side effects that you want to avoid."
+@@ -960,22 +993,27 @@ Use this when lsp-mode has side effects that you want to avoid."
+                  (workspace-server-capabilities workspace))
      (unbound-slot () nil)))
 
++(defun filter-completion-items (input items)
++  "Retain Lem's native LSP fuzzy filtering when no client overrides it."
++  (completion-strings input
++                      items
++                      :key #'completion:completion-item-filter-text))
++
  (defun text-document/completion (point then)
 -  (when-let ((workspace (get-workspace-from-point point)))
 -    (when (provide-completion-p workspace)
@@ -115,14 +134,7 @@ index b50d1d4..d2f6987 100644
 +                'lsp:completion-params
 +                (make-text-document-position-arguments point))
 +         :then (lambda (response)
-+                 (funcall then
-+                          (if-let ((symbol-at-point
-+                                    (symbol-string-at-point point)))
-+                            (completion-strings
-+                             symbol-at-point
-+                             (convert-completion-response point response)
-+                             :key #'completion:completion-item-filter-text)
-+                            (convert-completion-response point response))))
++                 (funcall then (convert-completion-response point response)))
 +         :error (lambda (message code)
 +                  (declare (ignore message code))
 +                  (funcall then nil)))
@@ -131,10 +143,10 @@ index b50d1d4..d2f6987 100644
  (defun completion-with-trigger-character (c)
    (declare (ignore c))
 diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
-index 1e90e52..e4977f1 100644
+index 1e90e52..2ce4583 100644
 --- a/src/ext/completion-mode.lisp
 +++ b/src/ext/completion-mode.lisp
-@@ -4,7 +4,10 @@
+@@ -4,7 +4,13 @@
             :make-completion-item
             :completion-item
             :completion-item-label
@@ -142,10 +154,26 @@ index 1e90e52..e4977f1 100644
 +           :completion-item-insert-text
             :completion-item-detail
 +           :completion-item-accept-action
++           :completion-context-options-function
++           :completion-local-filtering-p
++           :completion-start-local-filtering
             :run-completion
             :completion-end
             :completion-mode
-@@ -23,6 +26,31 @@
+@@ -18,11 +24,74 @@
+ (defvar *completion-context* nil)
+ (defvar *completion-reverse* nil)
+
++(define-editor-variable completion-context-options-function nil
++  "Function returning completion context options for the current buffer.
++
++The function receives the completion spec and returns a property list.  The
++supported keys are :FILTER-FUNCTION and :SEPARATOR.  A filter function receives
++the current completion input and the provider's raw items, and must return the
++original items it wants displayed.")
++
+ (defclass completion-context ()
+   ((spec
      :initarg :spec
      :reader context-spec
      :type completion-spec)
@@ -163,6 +191,36 @@ index 1e90e52..e4977f1 100644
 +    :initarg :automatic
 +    :initform nil
 +    :reader context-automatic-p)
++   (style
++    :initarg :style
++    :initform nil
++    :reader context-style)
++   (filter-function
++    :initarg :filter-function
++    :initform nil
++    :reader context-filter-function)
++   (separator
++    :initarg :separator
++    :initform nil
++    :reader context-separator)
++   (local-filtering
++    :initform nil
++    :accessor context-local-filtering-p)
++   (request-pending
++    :initform nil
++    :accessor context-request-pending-p)
++   (raw-items
++    :initform nil
++    :accessor context-raw-items)
++   (range-start
++    :initform nil
++    :accessor context-range-start)
++   (range-end
++    :initform nil
++    :accessor context-range-end)
++   (range-offsets
++    :initform (make-hash-table :test #'eq)
++    :reader context-range-offsets)
 +   (max-display-items
 +    :initarg :max-display-items
 +    :initform nil
@@ -177,7 +235,28 @@ index 1e90e52..e4977f1 100644
     (last-items
      :initform '()
      :accessor context-last-items)
-@@ -63,6 +91,16 @@
+@@ -37,10 +106,17 @@
+    (async
+     :initarg :async
+     :initform nil
+-    :reader spec-async-p)))
++    :reader spec-async-p)
++   (filter-function
++    :initarg :filter-function
++    :initform nil
++    :reader spec-filter-function)))
+
+-(defun make-completion-spec (function &key async)
+-  (make-instance 'completion-spec :function function :async async))
++(defun make-completion-spec (function &key async filter-function)
++  (make-instance 'completion-spec
++                 :function function
++                 :async async
++                 :filter-function filter-function))
+
+ (defun ensure-completion-spec (completion-spec)
+   (typecase completion-spec
+@@ -63,6 +139,16 @@
      :initform ""
      :reader completion-item-label
      :type string)
@@ -194,7 +273,7 @@ index 1e90e52..e4977f1 100644
     (chunks
      :initarg :chunks
      :initform nil
-@@ -87,15 +125,32 @@
+@@ -87,15 +173,32 @@
      :initarg :focus-action
      :initform nil
      :reader completion-item-focus-action
@@ -229,7 +308,7 @@ index 1e90e52..e4977f1 100644
    (apply #'make-instance 'completion-item initargs))
 
  (defvar *completion-mode-keymap* (make-keymap :description '*completion-mode-keymap*
-@@ -170,16 +225,30 @@
+@@ -170,16 +273,44 @@
                                              (lambda (point)
                                                (move-point point dest-point))))))))
 
@@ -237,6 +316,20 @@ index 1e90e52..e4977f1 100644
 +  (alexandria:when-let ((spinner (context-spinner context)))
 +    (lem/loading-spinner:stop-loading-spinner spinner)
 +    (setf (context-spinner context) nil)))
++
++(defun close-context-popup (context)
++  (alexandria:when-let ((popup (context-popup-menu context)))
++    (popup-menu-quit popup)
++    (setf (context-popup-menu context) nil)))
++
++(defun delete-context-range (context)
++  (dolist (point (list (context-range-start context)
++                       (context-range-end context)))
++    (when point
++      (ignore-errors (delete-point point))))
++  (setf (context-range-start context) nil
++        (context-range-end context) nil)
++  (clrhash (context-range-offsets context)))
 +
  (defun completion-end ()
    (when *completion-context*
@@ -247,14 +340,14 @@ index 1e90e52..e4977f1 100644
 +    (let* ((context *completion-context*)
 +           (buffer (context-buffer context)))
 +      (incf (context-generation context))
++      (setf (context-request-pending-p context) nil)
 +      (stop-context-spinner context)
 +      (when (or (buffer-temporary-p buffer)
 +                (member buffer (buffer-list)))
 +        (with-current-buffer buffer
 +          (completion-mode nil)))
-+      (alexandria:when-let ((popup-menu (context-popup-menu context)))
-+        (popup-menu-quit popup-menu))
-+      (setf (context-popup-menu context) nil))
++      (close-context-popup context)
++      (delete-context-range context))
      (setf *completion-context* nil)))
 
  (defun call-focus-action ()
@@ -265,7 +358,31 @@ index 1e90e52..e4977f1 100644
      (alexandria:when-let* ((menu (context-popup-menu *completion-context*))
                             (item (lem/popup-menu:get-focus-item menu))
                             (fn (completion-item-focus-action item)))
-@@ -205,16 +274,32 @@
+@@ -188,14 +319,20 @@
+ (define-command completion-self-insert () ()
+   (let ((c (insertion-key-p (last-read-key-sequence))))
+     (cond (c (insert-character (current-point) c)
+-             (continue-completion *completion-context*))
++             (completion-refresh))
+           (t (unread-key-sequence (last-read-key-sequence))
+              (completion-end)))))
+
+ (defun completion-refresh ()
+   "This will refresh the contents of the completion window using any changes made in the interim"
+-  (when *completion-context*
+-    (continue-completion *completion-context*)))
++  (alexandria:when-let ((context *completion-context*))
++    (if (context-local-filtering-p context)
++        (if (completion-context-separator-present-p context)
++            (completion-refilter context)
++            (progn
++              (setf (context-local-filtering-p context) nil)
++              (continue-completion context)))
++        (continue-completion context))))
+
+ (define-command completion-delete-previous-char (n) (:universal)
+   (delete-previous-char n)
+@@ -205,33 +342,55 @@
    (backward-delete-word n)
    (completion-refresh))
 
@@ -294,15 +411,63 @@ index 1e90e52..e4977f1 100644
    "Move selection to previous line in completion window"
 -  (popup-menu-up (context-popup-menu *completion-context*))
 -  (call-focus-action))
-+  (let ((popup (context-popup-menu *completion-context*)))
++  (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
 +    (when (or (context-cycle-p *completion-context*)
 +              (not (popup-focus-at-first-item-p popup)))
 +      (popup-menu-up popup)
 +      (call-focus-action))))
 
  (define-command completion-end-of-buffer () ()
-   (popup-menu-last (context-popup-menu *completion-context*))
-@@ -244,7 +329,15 @@
+-  (popup-menu-last (context-popup-menu *completion-context*))
+-  (call-focus-action))
++  (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
++    (popup-menu-last popup)
++    (call-focus-action)))
+
+ (define-command completion-beginning-of-buffer () ()
+-  (popup-menu-first (context-popup-menu *completion-context*))
+-  (call-focus-action))
++  (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
++    (popup-menu-first popup)
++    (call-focus-action)))
+
+ (define-command completion-select () ()
+-  (popup-menu-select (context-popup-menu *completion-context*)))
++  (alexandria:if-let ((popup (context-popup-menu *completion-context*)))
++    (popup-menu-select popup)
++    (progn
++      (unread-key-sequence (last-read-key-sequence))
++      (completion-end))))
+
+ (define-command completion-insert-space-and-cancel () ()
+   (insert-character (current-point) #\space)
+   (completion-end))
+
+-(defun completion-item-range (point item)
++(defun completion-item-provider-range (point item)
+   (let ((start (or (completion-item-start item)
+                    (with-point ((start point))
+                      (skip-chars-backward start #'syntax-symbol-char-p)
+@@ -240,11 +399,34 @@
+                  point)))
+     (values start end)))
+
++(defun completion-item-range (point item)
++  (let ((context *completion-context*))
++    (if (and context
++             (context-local-filtering-p context)
++             (context-range-start context)
++             (context-range-end context))
++        (destructuring-bind (start-offset . end-offset)
++            (gethash item (context-range-offsets context) '(0 . 0))
++          (let ((start (copy-point (context-range-start context) :temporary))
++                (end (copy-point (context-range-end context) :temporary)))
++            (character-offset start start-offset)
++            (character-offset end end-offset)
++            (values start (if (point> point end) point end))))
++        (completion-item-provider-range point item))))
++
+ (defun completion-insert (point item &optional begin)
    (when item
      (multiple-value-bind (start end) (completion-item-range point item)
        (delete-between-points start end)
@@ -319,7 +484,7 @@ index 1e90e52..e4977f1 100644
 
  (defun partial-match (strings)
    (when strings
-@@ -261,7 +354,8 @@
+@@ -261,19 +443,20 @@
 
  (defun narrowing-down (context last-items)
    (when last-items
@@ -329,7 +494,21 @@ index 1e90e52..e4977f1 100644
        (multiple-value-bind (start end)
            (completion-item-range (current-point) (first last-items))
          (cond ((and n (plusp n) (< (count-characters start end) n))
-@@ -294,79 +388,136 @@
+                (completion-insert (current-point)
+                                   (first last-items)
+                                   n)
+-               (continue-completion context)
++               (completion-refresh)
+                t)
+               ((alexandria:length= last-items 1)
+                (completion-insert (current-point)
+                                   (first last-items))
+-               (continue-completion context)
++               (completion-refresh)
+                t)
+               (t
+                nil))))))
+@@ -294,79 +477,257 @@
          result)))
 
  (defun compute-completion-items (context then)
@@ -347,14 +526,76 @@ index 1e90e52..e4977f1 100644
 -(defun start-completion (context items style)
 +  (let ((generation (incf (context-generation context))))
 +    (setf (context-last-items context) nil)
-+    (flet ((return-items (items)
-+             (funcall then (limitation-items items) generation)))
-+      (let ((spec (context-spec context)))
-+        (if (spec-async-p spec)
-+            (call-async-function spec (current-point) #'return-items)
-+            (return-items (call-sync-function spec (current-point))))))))
++    (if (context-local-filtering-p context)
++        (funcall then (context-raw-items context) generation nil)
++        (let ((spec (context-spec context)))
++          (setf (context-request-pending-p context) t)
++          (flet ((return-items (items)
++                   (funcall then items generation t)))
++            (if (spec-async-p spec)
++                (call-async-function spec (current-point) #'return-items)
++                (return-items (call-sync-function spec (current-point)))))))))
 +
-+(defun start-completion (context items style generation)
++(defun update-context-range (context items)
++  (when items
++    (multiple-value-bind (start end)
++        (completion-item-provider-range (current-point) (first items))
++      (delete-context-range context)
++      (setf (context-range-start context)
++            (copy-point start :right-inserting)
++            (context-range-end context)
++            (copy-point end :left-inserting))
++      (let ((base-start-position (position-at-point start))
++            (base-end-position (position-at-point end)))
++        (dolist (item items)
++          (multiple-value-bind (item-start item-end)
++              (completion-item-provider-range (current-point) item)
++            (when (and (eq (point-buffer item-start) (point-buffer start))
++                       (eq (point-buffer item-end) (point-buffer end)))
++              (setf (gethash item (context-range-offsets context))
++                    (cons (- (position-at-point item-start)
++                             base-start-position)
++                          (- (position-at-point item-end)
++                             base-end-position))))))))))
++
++(defun completion-context-input (context)
++  (alexandria:when-let ((start (context-range-start context)))
++    (when (and (eq (point-buffer start) (current-buffer))
++               (point<= start (current-point)))
++      (points-to-string start (current-point)))))
++
++(defun completion-context-separator-present-p (context)
++  (alexandria:when-let* ((separator (context-separator context))
++                         (input (completion-context-input context)))
++    (find separator input :test #'char=)))
++
++(defun filter-context-items (context items)
++  (alexandria:if-let ((filter (context-filter-function context)))
++    (funcall filter (or (completion-context-input context) "") items)
++    items))
++
++(defun prepare-context-items (context raw-items)
++  (limitation-items (filter-context-items context raw-items)))
++
++(defun completion-local-filtering-p ()
++  (and *completion-context*
++       (context-local-filtering-p *completion-context*)))
++
++(defun completion-start-local-filtering (&optional (separator #\Space))
++  "Freeze the current provider batch and filter it locally after SEPARATOR."
++  (let ((context *completion-context*))
++    (when (and context
++               (context-filter-function context)
++               (eql separator (context-separator context))
++               (context-raw-items context)
++               (context-range-start context))
++      (incf (context-generation context))
++      (setf (context-request-pending-p context) nil
++            (context-local-filtering-p context) t)
++      (stop-context-spinner context)
++      t)))
++
++(defun start-completion (context items generation)
    "Open popup menu for completions in the context provided"
    (when items
 +    (setf (context-presented-generation context) generation)
@@ -376,19 +617,54 @@ index 1e90e52..e4977f1 100644
 +                                        (context-generation context)))
 +                                (completion-accept (current-point) item)))
 +           :print-spec (make-print-spec items)
-+           (append (when style `(:style ,style))
++           (append (alexandria:when-let ((style (context-style context)))
++                     `(:style ,style))
 +                   (alexandria:when-let ((max-display-items
 +                                          (context-max-display-items context)))
 +                     `(:max-display-items ,max-display-items)))))
      (completion-mode t)
 -    (unless (spec-async-p (context-spec context))
 +    (unless (or (spec-async-p (context-spec context))
-+                (context-automatic-p context))
++                (context-automatic-p context)
++                (context-local-filtering-p context))
        (narrowing-down context items))
      (when *completion-reverse*
        (completion-end-of-buffer))
      (call-focus-action)))
 
++(defun present-context-items (context items generation)
++  (setf (context-last-items context) items)
++  (cond
++    ((null items)
++     (if (context-local-filtering-p context)
++         (progn
++           (setf (context-presented-generation context) generation)
++           (close-context-popup context)
++           (completion-mode t))
++         (completion-end)))
++    ((context-popup-menu context)
++     (setf (context-presented-generation context) generation)
++     (apply
++      #'popup-menu-update
++      (context-popup-menu context)
++      items
++      :print-spec (make-print-spec items)
++      (alexandria:when-let
++          ((max-display-items (context-max-display-items context)))
++        `(:max-display-items ,max-display-items)))
++     (call-focus-action))
++    (t
++     (start-completion context items generation))))
++
++(defun completion-refilter (context)
++  (let ((generation (incf (context-generation context))))
++    (setf (context-request-pending-p context) nil)
++    (stop-context-spinner context)
++    (present-context-items
++     context
++     (prepare-context-items context (context-raw-items context))
++     generation)))
++
  (defun continue-completion (context)
 -  (compute-completion-items
 -   context
@@ -406,7 +682,7 @@ index 1e90e52..e4977f1 100644
 +        (origin-position (position-at-point (current-point))))
 +    (compute-completion-items
 +     context
-+     (lambda (items generation)
++     (lambda (raw-items generation provider-result-p)
 +       (when (and (eq context *completion-context*)
 +                  (= generation (context-generation context)))
 +         (if (and (eq origin-buffer (current-buffer))
@@ -416,28 +692,24 @@ index 1e90e52..e4977f1 100644
 +                       (= origin-position
 +                          (position-at-point (current-point))))))
 +             (progn
-+               (setf (context-last-items context) items)
-+               (cond ((null items)
-+                      (completion-end))
-+                     ((context-popup-menu context)
-+                      (setf (context-presented-generation context) generation)
-+                      (apply
-+                       #'popup-menu-update
-+                       (context-popup-menu context)
-+                       items
-+                       :print-spec (make-print-spec items)
-+                       (alexandria:when-let
-+                           ((max-display-items
-+                              (context-max-display-items context)))
-+                         `(:max-display-items ,max-display-items)))
-+                      (call-focus-action))))
++               (setf (context-request-pending-p context) nil)
++               (when provider-result-p
++                 (setf (context-raw-items context) raw-items)
++                 (update-context-range context raw-items))
++               (present-context-items
++                context
++                (prepare-context-items context raw-items)
++                generation))
 +             (completion-end))))))
    (when *completion-reverse*
      (ignore-errors (completion-end-of-buffer))))
 
 -(defun run-completion (completion-spec &key style then)
-+(defun run-completion (completion-spec
-+                       &key style then automatic max-display-items (cycle t))
++(defun run-completion
++    (completion-spec
++     &key style then automatic max-display-items (cycle t)
++       (filter-function nil filter-function-supplied-p)
++       (separator nil separator-supplied-p))
    "Start a new completion using the completion-spec,
  creates a new completion-context and sets *completion-context*"
    (when *completion-context*
@@ -445,10 +717,28 @@ index 1e90e52..e4977f1 100644
    (let* ((spec (ensure-completion-spec completion-spec))
 -         (context (make-instance 'completion-context :spec spec)))
 +         (origin-buffer (current-buffer))
++         (options-function
++           (variable-value 'completion-context-options-function
++                           :default origin-buffer))
++         (options
++           (when options-function
++             (funcall (alexandria:ensure-function options-function) spec)))
++         (filter-function
++           (cond
++             (filter-function-supplied-p filter-function)
++             ((getf options :filter-function))
++             (t (spec-filter-function spec))))
++         (separator
++           (if separator-supplied-p
++               separator
++               (getf options :separator)))
 +         (context (make-instance 'completion-context
 +                                 :spec spec
 +                                 :buffer origin-buffer
 +                                 :automatic automatic
++                                 :style style
++                                 :filter-function filter-function
++                                 :separator separator
 +                                 :max-display-items max-display-items
 +                                 :cycle cycle))
 +         (origin-tick (buffer-modified-tick origin-buffer)))
@@ -468,7 +758,8 @@ index 1e90e52..e4977f1 100644
               context
 -             (lambda (items)
 -               (lem/loading-spinner:stop-loading-spinner spinner)
-+             (lambda (items generation)
++             (lambda (raw-items generation provider-result-p)
++               (declare (ignore provider-result-p))
 +               (stop-context-spinner context)
                 (when (and (eq context *completion-context*)
 +                          (= generation (context-generation context)))
@@ -490,30 +781,39 @@ index 1e90e52..e4977f1 100644
 -                  (when then
 -                    (funcall then)))))))))))
 +                     (progn
-+                       (setf (context-last-items context) items)
-+                       (if items
++                       (setf (context-request-pending-p context) nil
++                             (context-raw-items context) raw-items)
++                       (update-context-range context raw-items)
++                       (let ((items (prepare-context-items context raw-items)))
++                         (setf (context-last-items context) items)
++                         (if items
 +                           (progn
-+                             (start-completion context items style generation)
++                             (start-completion context items generation)
 +                             (when then
 +                               (funcall then)))
-+                           (completion-end)))
++                             (completion-end))))
 +                     (completion-end))))))
 +              (compute-completion-items
 +               context
-+               (lambda (items generation)
++               (lambda (raw-items generation provider-result-p)
++                 (declare (ignore provider-result-p))
 +                 (when (and (eq context *completion-context*)
 +                            (= generation (context-generation context)))
-+                   (setf (context-last-items context) items)
-+                   (cond
-+                     ((null items)
-+                      (completion-end))
-+                     ((and (alexandria:length= items 1)
-+                           (not automatic))
-+                      (completion-accept (current-point) (first items)))
-+                     (t
-+                      (start-completion context items style generation)
-+                      (when then
-+                        (funcall then)))))))))
++                   (setf (context-request-pending-p context) nil
++                         (context-raw-items context) raw-items)
++                   (update-context-range context raw-items)
++                   (let ((items (prepare-context-items context raw-items)))
++                     (setf (context-last-items context) items)
++                     (cond
++                       ((null items)
++                        (completion-end))
++                       ((and (alexandria:length= items 1)
++                             (not automatic))
++                        (completion-accept (current-point) (first items)))
++                       (t
++                        (start-completion context items generation)
++                        (when then
++                          (funcall then))))))))))
 +      (error (condition)
 +        (when (eq context *completion-context*)
 +          (completion-end))

@@ -310,9 +310,13 @@ all components must match.  Uppercase input makes matching case-sensitive."
   "Insert a space; in a prompt, keep filtering the completion popup."
   (insert-character (current-point) #\Space)
   (let ((prompt (lem/prompt-window:current-prompt-window)))
-    (if (and prompt (eq (current-buffer) (window-buffer prompt)))
-        (lem/completion-mode:completion-refresh)
-        (lem/completion-mode:completion-end))))
+    (cond
+      ((and prompt (eq (current-buffer) (window-buffer prompt)))
+       (lem/completion-mode:completion-refresh))
+      ((lem/completion-mode:completion-local-filtering-p)
+       (lem/completion-mode:completion-refresh))
+      (t
+       (lem/completion-mode:completion-end)))))
 
 (define-key lem/completion-mode::*completion-mode-keymap*
   "Space" 'lem-yath-completion-space)

@@ -280,8 +280,10 @@ revision. It separates display, filter, and insertion text, adds a final-accept
 callback, and rejects stale asynchronous generations before they can update the
 popup. Automatic contexts also keep a cancellable spinner, remember their origin
 buffer, display rather than insert synchronous singletons, and carry their own
-row-limit and cycling policy. Every asynchronous refresh revalidates its buffer,
-modification tick, and point before changing the menu.
+row-limit and cycling policy. Context filters retain the provider's unbounded raw
+batch and run before the display cap, so item metadata and callbacks survive
+local filtering. Every asynchronous refresh revalidates its buffer, modification
+tick, and point before changing the menu.
 Synchronous prompt providers may atomically normalize their input before
 returning candidates; `scripts/prompt-completion-test.sh` verifies that file
 refresh still retains path-aware candidates while asynchronous validation stays
@@ -302,18 +304,41 @@ prevents an obsolete request from opening a popup. Read-only buffers and keyboar
 macros are excluded.
 
 The buffer's mode-local completion spec remains authoritative, as Eglot's CAPF is
-in the live Emacs setup. Where there is no mode provider, the configured Cape
-fallback order is reproduced: prefix-matched dynamic abbreviations from buffers
-with the same major mode, followed by file-at-point completion. File completion
-requires either `file:` or a slash with an existing parent directory and may open
-before three identifier characters, matching Cape's explicit file trigger.
+in the live Emacs setup. Where there is no mode provider, same-major-mode
+dynamic abbreviations supply the ordinary-buffer candidate pool, while recognized
+path contexts use file-at-point completion. File completion requires either
+`file:` or a slash with an existing parent directory and may open before three
+identifier characters, matching Cape's explicit file trigger.
+
+`lem-yath/src/orderless.lisp` filters ordinary in-buffer candidates with the
+configured portable Orderless behavior: escaped-space components, whole-query
+smart case, any-order AND matching, overlapping and repeated components,
+literal-or-valid-regexp matching, and the default `~`, `=`, `^`, `!`, and `,`
+edge dispatchers. Filtering uses LSP `filterText` while acceptance retains the
+original item's display, insertion text, range, focus action, and final action.
+The `M-Space` command inserts Corfu's separator, invalidates any pending request,
+and freezes the last fully accepted provider batch. Further components are
+filtered locally, so a space-separated query is never sent to LSP. A zero-match
+view hides only the popup; Backspace can recover it, and deleting the final
+separator resumes provider queries. Plain Space before separator activation still
+ends ordinary completion. Prompt completion remains Vertico-Prescient, and file
+completion remains path-aware.
+
+This is deliberately an approximation rather than a full Orderless claim:
+CL-PPCRE and Emacs use different regexp dialects, and the pinned Orderless
+package's `%` character-fold and `&` annotation dispatchers are not implemented.
+Initialism parity is verified for deterministic ASCII word boundaries rather than
+every Emacs syntax table.
 
 `scripts/auto-completion-test.sh` drives all of this through the ncurses editor,
 including the delay boundary, 12-candidate scrolling through a 10-row window,
 both non-cycling edges, rapid-typing debounce, provider exclusivity, singleton
 acceptance, whole-token and file-prefix replacement, unrelated movement and
 buffer-switch cleanup, Escape cancellation, and out-of-order asynchronous delivery.
-Multi-component Orderless input and its `M-Space` separator remain a tracked gap.
+`scripts/orderless-completion-test.sh` separately exercises the matcher oracle,
+raw-before-cap filtering, manual and automatic completion, local separator request
+ownership, stale asynchronous delivery, zero-match recovery, tracked replacement
+ranges, and prompt/file isolation through the real ncurses editor.
 
 ### consult-like commands (verified)
 - `M-x`: `execute-command` (bound `M-x`); command completion via `completion-command`

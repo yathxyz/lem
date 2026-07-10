@@ -29,6 +29,11 @@
   (or (electric-opening-close character)
       (syntax-closed-paren-char-p character)))
 
+(defun electric-closing-character-p (character)
+  (or (syntax-closed-paren-char-p character)
+      (alexandria:when-let ((close (electric-opening-close character)))
+        (char= character close))))
+
 (defun electric-pair-whitespace-character-p (character)
   (find character '(#\Tab #\Space #\Newline) :test #'char=))
 
@@ -267,6 +272,12 @@ commands retain an outer selection and its original orientation."
     (#\] 'lem-paredit-mode:paredit-close-bracket)
     (#\} 'lem-paredit-mode:paredit-close-brace)))
 
+(defun electric-paredit-closing-command-p (command)
+  (member command
+          '(lem-paredit-mode:paredit-close-parenthesis
+            lem-paredit-mode:paredit-close-bracket
+            lem-paredit-mode:paredit-close-brace)))
+
 (defun electric-execute-paredit-command (command)
   (execute
    (lem-core::get-active-modes-class-instance (current-buffer))
@@ -278,9 +289,9 @@ commands retain an outer selection and its original orientation."
                          (lem/prompt-window:current-prompt-window)))
     (eq (current-buffer) (window-buffer prompt))))
 
-;; Completion's fallback command bypasses SELF-INSERT.  Delimiters should still
-;; pair and then close the popup, while ordinary completion input keeps using
-;; Lem's native refresh path.  In Lisp buffers, dispatch the same Paredit
+;; Completion's fallback command bypasses SELF-INSERT.  Delimiters still pair;
+;; ordinary completion then closes, while an Orderless separator context
+;; refilters its frozen batch.  In Lisp buffers, dispatch the same Paredit
 ;; command that its mode keymap owns so structural spacing remains intact.
 (defmethod execute :around
     (mode (command lem/completion-mode::completion-self-insert) argument)
@@ -304,6 +315,23 @@ commands retain an outer selection and its original orientation."
              (electric-self-insert character 1)
              (lem/completion-mode:completion-refresh))
            (call-next-method)))
+      ((and (lem/completion-mode:completion-local-filtering-p)
+            (electric-closing-character-p character)
+            (or (electric-paredit-closing-command-p paredit-command)
+                (electric-close-after-whitespace-p
+                 (current-point) character)))
+       (lem/completion-mode:completion-end)
+       (if paredit-command
+           (electric-execute-paredit-command paredit-command)
+           (electric-self-insert character 1)))
+      ((and (lem/completion-mode:completion-local-filtering-p)
+            (or paredit-command
+                (electric-active-selection-p)
+                (electric-special-character-p character)))
+       (if paredit-command
+           (electric-execute-paredit-command paredit-command)
+           (electric-self-insert character 1))
+       (lem/completion-mode:completion-refresh))
       ((or paredit-command
            (electric-active-selection-p)
            (electric-special-character-p character))

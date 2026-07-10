@@ -139,6 +139,7 @@
             completion-test = mkTestApp "lem-yath-completion-test" "completion-test.sh";
             completion-lifecycle-test = mkTestApp "lem-yath-completion-lifecycle-test" "completion-lifecycle-test.sh";
             auto-completion-test = mkTestApp "lem-yath-auto-completion-test" "auto-completion-test.sh";
+            orderless-completion-test = mkTestApp "lem-yath-orderless-completion-test" "orderless-completion-test.sh";
             interactive-test = mkTestApp "lem-yath-interactive-test" "interactive-test.sh";
             structural-test = mkTestApp "lem-yath-structural-test" "structural-test.sh";
             notes-test = mkTestApp "lem-yath-notes-test" "notes-test.sh";
@@ -155,6 +156,7 @@
             completion = mkCheck "completion" "completion-test.sh";
             completion-lifecycle = mkCheck "completion-lifecycle" "completion-lifecycle-test.sh";
             auto-completion = mkCheck "auto-completion" "auto-completion-test.sh";
+            orderless-completion = mkCheck "orderless-completion" "orderless-completion-test.sh";
             notes = mkCheck "notes" "notes-test.sh";
             editing = mkCheck "editing" "editing-test.sh";
             prompt-completion = mkCheck "prompt-completion" "prompt-completion-test.sh";
