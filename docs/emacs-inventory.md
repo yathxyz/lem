@@ -22,7 +22,7 @@ Key environment:
 - `evil-respect-visual-line-mode t`.
 - `evil-undo-system 'undo-redo` (uses built-in `undo-redo`, NOT undo-tree).
 - `evil-want-C-u-delete t` (C-u deletes to indent in insert state).
-- `evil-want-minibuffer t` (evil active in minibuffer too).
+- `evil-want-minibuffer nil` (Evil is not active in the minibuffer).
 - After `evil-maps` loads: `C-n` and `C-p` are **unbound** in `evil-motion-state-map`, `evil-insert-state-map`, `evil-emacs-state-map` (so they fall through to completion/global).
 - `evil-collection` installed and `(evil-collection-init)` called globally (all default integrations).
 - `evil-org` (with `evil-org-agenda-set-keys`) for org buffers.

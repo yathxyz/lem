@@ -222,11 +222,9 @@ revision, q quits."
             (tm-render buffer 0 :message t)
             (switch-to-buffer buffer)))))))
 
-;;; --- keymap & leader binding ----------------------------------------------
+;;; --- keymap ----------------------------------------------------------------
 
 (define-key *lem-yath-timemachine-keymap* "p" 'lem-yath-timemachine-older)
 (define-key *lem-yath-timemachine-keymap* "n" 'lem-yath-timemachine-newer)
 (define-key *lem-yath-timemachine-keymap* "g" 'lem-yath-timemachine-jump)
 (define-key *lem-yath-timemachine-keymap* "q" 'lem-yath-timemachine-quit)
-
-(define-key lem-vi-mode:*normal-keymap* "Leader g t" 'lem-yath-git-timemachine)

@@ -306,7 +306,3 @@ then `url' externally, then a note under $WORKDIR/roam/references/."
         (message "No bibliography entries (checked ~{~a~^, ~})" *citar-bib-files*)
         (alexandria:when-let ((entry (citar-prompt-entry "Insert key: " entries)))
           (insert-string (current-point) (format nil "@~a" (getf entry :key)))))))
-
-;;; --- keybindings -----------------------------------------------------------
-
-(define-key lem-vi-mode:*normal-keymap* "Leader y o" 'lem-yath-citar-open)

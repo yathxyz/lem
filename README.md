@@ -13,6 +13,7 @@ terminal (ncurses) frontend, multi-threaded SBCL image.
 | `docs/emacs-inventory.md` | Extracted feature inventory of the Emacs config |
 | `docs/lem-capabilities.md` | Survey of Lem's real APIs (grounded in source) |
 | `docs/port-map.md` | Emacs package → Lem equivalent mapping + gap report |
+| `docs/vi-parity.md` | Vim/Evil behavior matrix, evidence, and remaining gaps |
 | `docs/porting-conventions.md` | Hard rules every module follows |
 | `scripts/` | tmux-based TUI test harness |
 
@@ -41,11 +42,12 @@ of writing `.fasl` files into the source tree.
 
 ## What's in the port
 
-- vi-mode with a Space leader reproducing the full SPC chord map (files,
-  buffers, project, git, notes, LLM, help, navigation)
+- vi-mode with a Space leader reproducing every feasible SPC chord in normal
+  and visual states (files, buffers, project, git, notes, LLM, help, navigation)
 - surround / snipe / comment operator (`gc`) / paredit on lisp buffers
-- orderless (space-separated substring) filtering in every prompt, popup open
-  by default, multi-token input kept alive (Space re-filters in prompts)
+- orderless (space-separated substring) filtering in command and buffer
+  prompts, with multi-token input kept alive; file prompts retain Lem's stock
+  completion behavior
 - LSP specs: rust-analyzer, pyright, harper-ls, and flake-aware nixd
 - legit (magit) + jj dispatch on `SPC g g`, git-gutter, git-timemachine
 - roam-lite notes, dailies, journal, capture over `$WORKDIR`
@@ -70,3 +72,14 @@ nix run .#interactive-test
 
 The underlying scripts remain parallel-safe via `LEM_YATH_CHECK_ID` and accept
 `LEM_BIN`/`LEM_YATH_SOURCE` overrides for direct debugging.
+
+To keep builds and real TUI sessions off a weaker laptop, mirror the current
+worktree to the dedicated cache directory on `ex44` and run the full gate there:
+
+```sh
+./scripts/test-on-ex44.sh
+```
+
+Pass `check`, `compile`, `boot`, `orderless`, or `interactive` to run only that
+gate. `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and
+remote cache directory.

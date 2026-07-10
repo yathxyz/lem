@@ -226,7 +226,3 @@ thread, so the editor never blocks. Offline degrades to a message."
               (message "DevDocs: opened ~a" url))
           (error () (message "DevDocs: couldn't launch browser for ~a" url))))
       (message "DevDocs: no entry in this buffer"))))
-
-;;; --- keybinding (SPC h d) ---------------------------------------------------
-
-(define-key lem-vi-mode:*normal-keymap* "Leader h d" 'lem-yath-devdocs-lookup)

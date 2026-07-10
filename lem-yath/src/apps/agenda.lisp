@@ -263,7 +263,3 @@ Mirrors org-agenda + org-super-agenda. Scanning runs in the background."
 (define-key *lem-yath-agenda-mode-keymap* "Return" 'lem-yath-agenda-visit)
 (define-key *lem-yath-agenda-mode-keymap* "g" 'lem-yath-agenda-refresh)
 (define-key *lem-yath-agenda-mode-keymap* "q" 'quit-active-window)
-
-;;; --- leader binding ------------------------------------------------------
-
-(define-key lem-vi-mode:*normal-keymap* "Leader m a" 'lem-yath-agenda)

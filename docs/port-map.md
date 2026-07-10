@@ -11,11 +11,11 @@ Status legend:
 |---|---|---|
 | evil | lem-builtin | `lem-vi-mode`, enabled in `src/vi.lisp` |
 | evil-collection | lem-builtin | vi-mode's own mode integrations |
-| evil-surround | ported | visual `S`, `g s` motion, `d s`, `c s` (`src/vi.lisp`) |
-| evil-snipe | ported | `s`/`S` 2-char snipe (`src/vi.lisp`) |
+| evil-surround | ported/partial | standard `ys`/`ds`/`cs`, visual `S`, common delimiter padding; tag prompts and syntax-aware balancing remain gaps (`src/vi.lisp`) |
+| evil-snipe | ported/partial | visible-scope `s`/`S`, repeat, and operator `z/Z/x/X`; incremental highlighting remains a gap (`src/vi.lisp`) |
 | evil-nerd-commenter | ported | `g c` operator (`src/vi.lisp`) |
-| evil-org | n/a | no org buffers in Lem |
-| general (SPC leader) | ported | vi-mode leader = Space + full chord map (`src/keybindings.lisp`) |
+| evil-org | partial | no Org major mode; shared-file workflows and `SPC m I` heading IDs work in plain buffers |
+| general (SPC leader) | ported/partial | vi-mode leader = Space in normal+visual with exact boot-time verification; remaining capability gaps are listed in `docs/vi-parity.md` |
 | vertico | ported/lem-builtin | prompt completion list opens instantly (`src/completion.lisp`) |
 | orderless | ported | `orderless-filter` wired into command/buffer prompts; Space re-filters instead of closing the popup, so multi-token input works (`src/completion.lisp`) |
 | marginalia | lem-builtin | M-x candidates show keybindings (kept by the wrapper) |
@@ -78,7 +78,7 @@ Status legend:
 | which-key | lem-builtin | prefix/transient keymap UI (`lem/transient`) |
 | transient | lem-builtin | `lem/transient` |
 | multiple-cursors | lem-builtin | core multi-cursors (`M-C`, isearch add-cursor); Emacs config only used it internally |
-| expreg | gap | no expand-region; vi text objects cover most cases |
+| expreg | ported/partial | repeated `SPC v` expands word → delimiters → line → paragraph; no parser-backed syntax expansion |
 | vundo | gap | linear undo/redo only |
 | pulsar | n/a | jump recentering is default behavior |
 | indent-bars | gap | no indent guides in ncurses frontend |
@@ -95,8 +95,8 @@ Status legend:
 
 ## Behavioral divergences worth knowing
 
-- **Surround keys**: `ys` is `g s` (visual `S` unchanged) — `y`/`c`/`d` are real
-  vi operators in Lem and read a motion next.
+- **Surround grammar**: standard `ys`/`ds`/`cs` and visual `S` work, including
+  common padded delimiters, but tag prompts and syntax-aware balancing do not.
 - **ws-butler** trims the whole buffer, not only touched lines.
 - **Format-on-save** is manual (`SPC b f`), not automatic.
 - **org files** open as plain text; the workflows (capture/dailies/journal/agenda)

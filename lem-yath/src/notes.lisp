@@ -63,6 +63,70 @@ Org-style link in .org buffers, markdown-style otherwise."
                          (format nil "[[file:~a][~a]]" choice title)
                          (format nil "[~a](~a)" title choice))))))
 
+;;; --- Org heading IDs -------------------------------------------------------
+
+(defun uuid-v4 ()
+  (format nil "~8,'0x-~4,'0x-~4,'0x-~4,'0x-~12,'0x"
+          (random (ash 1 32))
+          (random (ash 1 16))
+          (logior #x4000 (random #x1000))
+          (logior #x8000 (random #x4000))
+          (random (ash 1 48))))
+
+(defun org-heading-point ()
+  "Return the current or nearest preceding Org heading."
+  (with-point ((point (current-point)))
+    (line-start point)
+    (loop
+      (when (cl-ppcre:scan "^\\*+\\s+" (line-string point))
+        (return (copy-point point :temporary)))
+      (unless (line-offset point -1)
+        (return nil)))))
+
+(defun org-property-id (drawer-start)
+  "Return the ID in the property drawer at DRAWER-START, if present."
+  (with-point ((point drawer-start))
+    (loop
+      (let ((line (line-string point)))
+        (when (alexandria:starts-with-subseq ":ID:" line)
+          (return (string-trim '(#\Space #\Tab) (subseq line 4))))
+        (when (string= line ":END:")
+          (return nil)))
+      (unless (line-offset point 1)
+        (return nil)))))
+
+(defun org-property-drawer-end (drawer-start)
+  (with-point ((point drawer-start))
+    (loop
+      (when (string= (line-string point) ":END:")
+        (return (copy-point point :temporary)))
+      (unless (line-offset point 1)
+        (return nil)))))
+
+(define-command lem-yath-org-id-get-create () ()
+  "Return or create an :ID: property on the current Org heading."
+  (alexandria:if-let ((heading (org-heading-point)))
+    (with-point ((drawer heading))
+      (unless (line-offset drawer 1)
+        (line-end drawer)
+        (insert-character drawer #\Newline))
+      (line-start drawer)
+      (cond
+        ((string= (line-string drawer) ":PROPERTIES:")
+         (alexandria:if-let ((existing (org-property-id drawer)))
+           (message "Org ID: ~a" existing)
+           (alexandria:if-let ((end (org-property-drawer-end drawer)))
+             (let ((id (uuid-v4)))
+               (insert-string end (format nil ":ID: ~a~%" id))
+               (message "Created Org ID: ~a" id))
+             (message "Malformed Org property drawer: missing :END:"))))
+        (t
+         (let ((id (uuid-v4)))
+           (insert-string drawer
+                          (format nil ":PROPERTIES:~%:ID: ~a~%:END:~%" id))
+           (message "Created Org ID: ~a" id)))))
+    (message "No Org heading at point")))
+
 ;;; --- dailies & journal ------------------------------------------------------
 
 (defun decoded-date-strings (&optional (time (get-universal-time)))

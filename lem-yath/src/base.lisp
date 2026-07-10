@@ -54,6 +54,33 @@ in any order, case-insensitively. Empty INPUT keeps everything."
              (every (lambda (tok) (search tok label :test #'char-equal)) tokens)))
          candidates))))
 
+;;; --- help ------------------------------------------------------------------
+
+(defun variable-candidates ()
+  "Names of bound Lisp variables in the running Lem image."
+  (let ((names '()))
+    (do-all-symbols (symbol)
+      (when (and (boundp symbol) (symbol-package symbol))
+        (pushnew (format nil "~a::~a"
+                         (package-name (symbol-package symbol))
+                         (symbol-name symbol))
+                 names
+                 :test #'string=)))
+    (sort names #'string-lessp)))
+
+(define-command lem-yath-describe-variable () ()
+  "Describe a bound Lisp variable, like helpful-variable."
+  (let* ((candidates (variable-candidates))
+         (choice (prompt-for-string
+                  "Variable: "
+                  :completion-function
+                  (lambda (input) (orderless-filter input candidates))
+                  :test-function
+                  (lambda (input) (member input candidates :test #'string=))))
+         (symbol (read-from-string choice)))
+    (with-pop-up-typeout-window (out (make-buffer "*Variable Help*") :erase t)
+      (describe symbol out))))
+
 ;;; --- async processes -> buffers -------------------------------------------
 
 (defun append-text (buffer string)
@@ -102,6 +129,9 @@ ON-EXIT, if given, is called on the editor thread with the exit code."
       (format s "boot-ok: ~a~%" (boot-ok-p))
       (format s "vi-mode: ~a~%" (typep (current-global-mode) 'lem-vi-mode:vi-mode))
       (format s "leader: ~a~%" (variable-value 'lem-vi-mode/leader:leader-key :global))
+      (format s "leader-bindings: ~a~%"
+              (and (fboundp 'evil-leader-bindings-ok-p)
+                   (evil-leader-bindings-ok-p)))
       (dolist (entry '(("rust-spec" lem-rust-mode:rust-mode)
                        ("nix-spec" lem-nix-mode:nix-mode)
                        ("python-spec" lem-python-mode:python-mode)

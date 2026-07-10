@@ -40,6 +40,7 @@ grep -q '^boot-error: none$' "$report" || { echo "FAIL: boot error"; fail=1; }
 grep -q '^boot-ok: T$' "$report" || { echo "FAIL: boot-ok not T"; fail=1; }
 grep -qi '^vi-mode: T$' "$report" || { echo "FAIL: vi-mode inactive"; fail=1; }
 grep -q '^leader: Space$' "$report" || { echo "FAIL: leader not Space"; fail=1; }
+grep -q '^leader-bindings: T$' "$report" || { echo "FAIL: leader binding parity"; fail=1; }
 grep -q 'rust-spec: (rust-analyzer)' "$report" || { echo "FAIL: rust spec"; fail=1; }
 grep -q 'commands: t t t t t t' "$report" || { echo "FAIL: missing commands"; fail=1; }
 
