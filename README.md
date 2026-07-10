@@ -53,13 +53,17 @@ of writing `.fasl` files into the source tree.
   ranking in command, buffer, and custom prompts; file prompts retain Lem's
   path-aware matching and gain the same ranking
 - completion candidates keep display, filtering, and insertion text separate;
-  acceptance callbacks are explicit and stale asynchronous results are rejected
+  final insertion and post-accept callbacks are explicit, tracked replacement
+  ranges survive filtering, and stale asynchronous results are rejected
 - exact expansion of the configured private Org `jjs` source-block snippet and
   a data-only Yasnippet session engine over the flake-pinned community corpus;
   numbered, anonymous, and nested fields, defaults, mirrors, escapes, safe
   indentation directives, forward/reverse field navigation, and a Prescient
   `M-x` insertion prompt are supported for 2,243 definitions; the 144 executable
   or conditional definitions remain unavailable, and embedded Elisp is never evaluated
+- LSP `insertTextFormat=Snippet` candidates enter the same field-session UI
+  after `insertText`, `TextEdit`, or `InsertReplaceEdit` acceptance; malformed
+  payloads fail closed and server-supplied backquoted Lisp remains inert
 - Emacs-like daily navigation/editing: region-or-line `M-j`, a persistent
   300-entry `M-g r` MRU, filterable `C-x C-b`, and asynchronous persistent
   `M-s f` name search with property-backed Return and persistent q/revisit behavior
@@ -82,7 +86,7 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 
 `nix flake check` runs the package, compile, boot, prompt and in-buffer
 completion, completion-lifecycle, automatic-completion, editing,
-Orderless completion, snippets, daily-workflows, electric-editing, notes, and
+Orderless completion, snippets, LSP snippets, daily-workflows, electric-editing, notes, and
 parity-ledger checks. The ledger
 can also be validated directly, and the interactive TUI checks are exposed as
 flake apps:
@@ -98,6 +102,7 @@ nix run .#completion-lifecycle-test
 nix run .#auto-completion-test
 nix run .#orderless-completion-test
 nix run .#snippet-test
+nix run .#lsp-snippet-test
 nix run .#editing-test
 nix run .#daily-workflows-test
 nix run .#electric-editing-test

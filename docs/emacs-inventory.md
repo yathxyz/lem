@@ -207,6 +207,17 @@ full Yasnippet compatibility.
 
 **LSP client = Eglot (built-in), boosted by `eglot-booster`** (`eglot-booster-mode 1`; requires `emacs-lsp-booster` binary on PATH).
 
+The pinned runtime advertises `completionItem.snippetSupport` because
+Yasnippet is active. On acceptance, Corfu closes first and Eglot passes format-2
+`insertText` or the winning `textEdit.newText` directly to
+`yas-expand-snippet`; there is no TextMate-to-Yas translation layer.
+Consequently numbered fields, mirrors, and `$0` work, while
+`${TM_FILENAME}` and `${1|one,two|}` become editable literal Yas fields and
+paired backquotes are executable in Emacs. Eglot resolves a data-bearing item
+synchronously when the server supports resolve, applies `additionalTextEdits`
+after the primary expansion, ignores the completion command, and does not
+advertise CompletionList item defaults or `insertTextMode`.
+
 Diagnostics policy (`yath/eglot-managed-diagnostics`): when an Eglot-managed buffer becomes active, **Flycheck is turned off and Flymake (Eglot's default) is used**; Flycheck is restored when Eglot detaches. So Flycheck is the linter for non-LSP prog buffers, Flymake for LSP buffers.
 
 `eglot-ensure` wrapper `yath/eglot-ensure` skips minibuffers and remote (TRAMP) dirs.

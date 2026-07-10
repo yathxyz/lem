@@ -20,6 +20,7 @@
                (:file "orderless")
                (:file "auto-completion")
                (:file "snippets")
+               (:file "lsp-snippets")
                (:file "ide")
                (:file "git")
                (:file "notes")

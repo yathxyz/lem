@@ -277,8 +277,11 @@ prompt behavior described in `src/completion.lisp`.
 
 Lem-yath carries `patches/lem-completion-lifecycle.patch` against the pinned Lem
 revision. It separates display, filter, and insertion text, adds a final-accept
-callback, and rejects stale asynchronous generations before they can update the
-popup. Automatic contexts also keep a cancellable spinner, remember their origin
+callback plus a distinct final-insertion callback, and rejects stale asynchronous
+generations before they can update the popup. A custom final inserter receives
+the accepted tracked range only after the completion UI closes; its post-accept
+callback runs exactly once only when insertion succeeds. Automatic contexts also
+keep a cancellable spinner, remember their origin
 buffer, display rather than insert synchronous singletons, and carry their own
 row-limit and cycling policy. Context filters retain the provider's unbounded raw
 batch and run before the display cap, so item metadata and callbacks survive
@@ -291,9 +294,11 @@ strict.
 The LSP adapter consequently honors plain `filterText`, `insertText`,
 `TextEdit`, and `InsertReplaceEdit` new-text precedence. Provider-relative
 replacement ranges are retained with tracked start/end points and per-item
-offsets while the user continues editing. LSP `insertTextFormat=Snippet`,
-completion resolve, additional edits, and completion commands remain separate
-gaps.
+offsets while the user continues editing. When lem-yath's data-only handler is
+installed, the client advertises snippet support and routes
+`insertTextFormat=Snippet` through that final-insertion seam. Completion resolve,
+additional edits, CompletionList item defaults, `insertTextMode`, and completion
+commands remain separate gaps.
 
 ### Automatic in-buffer completion — `lem-yath/src/auto-completion.lisp` (verified)
 
@@ -381,6 +386,37 @@ requiring a trigger. Its Prescient-filtered labels include the template name,
 trigger, and source table; choosing one inserts it at point and starts the same
 field session used by trigger expansion.
 
+### LSP completion snippets — `lem-yath/src/lsp-snippets.lisp` (verified subset)
+
+The configured Emacs 31/Eglot path advertises snippet support and passes an
+accepted LSP snippet directly to Yasnippet. Lem-yath mirrors that path safely:
+format 2 is detected independently of the candidate kind, `TextEdit.newText`
+or `InsertReplaceEdit.newText` retains precedence over `insertText`, the full
+replace range is tracked through popup filtering, and final acceptance installs
+the ordinary data-only field session only after the popup closes. Format 1 and
+omitted formats remain literal completion text. If the handler is unavailable,
+the capability is false and an unexpected snippet item is rejected rather than
+inserting raw `${...}` syntax.
+
+This covers the Eglot/Yasnippet behavior used in the profile: numbered fields,
+defaults, nesting, mirrors, `$0`, field navigation, automatic Yas-style
+indentation, and the existing completion/Vi/Paredit precedence. It also retains
+the profile's observable direct-Yas treatment of `${TM_FILENAME}` and
+`${1|one,two|}` as editable literal fields rather than pretending that they are
+TextMate variables or choices. The intentional security difference is that
+paired backquotes from a language server are inserted literally; they are never
+evaluated as Emacs Lisp.
+
+This is not full LSP TextMate grammar support. Standard variables, choices,
+variable transforms, strict LSP escaping, `insertTextMode`, resolved completion
+items, additional edits, and trusted completion commands remain explicit gaps.
+Malformed payloads are parsed before mutation and leave the completion prefix
+unchanged. `nix run .#lsp-snippet-test` verifies `insertText`, `TextEdit`, and
+the `InsertReplaceEdit.replace` path, literal plain-format markers, mirrors and
+field exit, Tab/Return acceptance, multiple-candidate non-insertion, malformed
+recovery, dynamic capability advertising, exact-once callbacks, and inert
+server-supplied backquotes through the real ncurses editor.
+
 Roots retain private-before-community precedence. Tables combine natural
 `prog-mode`, `text-mode`, and `fundamental-mode` ancestry with `.yas-parents`
 using deterministic Emacs-31-style ordering. The explicit mappings used where
@@ -416,7 +452,7 @@ This is not full Yasnippet parity. The 144 definitions requiring backquoted
 Elisp, field transforms, nontrivial conditions, command execution, or unsupported
 `expand-env` forms cannot expand. Active sessions do not stack, direct snippet
 key bindings are not installed, undo/redo does not revive a field session on
-redo, and LSP completion items are not ingested as snippets. The real TUI gate
+redo, and strict TextMate snippet grammar is not implemented. The file-snippet TUI gate
 is `nix run .#snippet-test`; it drives the private snippet, portable field
 grammar, the Prescient selector, navigation and editing keys,
 completion/Vi/Paredit precedence,

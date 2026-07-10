@@ -9,4 +9,5 @@
            #:snippet-active-session-p
            #:snippet-current-field-number
            #:snippet-reload
-           #:snippet-root-directories))
+           #:snippet-root-directories
+           #:expand-lsp-snippet))

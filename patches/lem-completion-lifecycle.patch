@@ -1,5 +1,5 @@
 diff --git a/extensions/lsp-mode/lsp-mode.lisp b/extensions/lsp-mode/lsp-mode.lisp
-index b50d1d4..c03eb1d 100644
+index b50d1d4..b46bb83 100644
 --- a/extensions/lsp-mode/lsp-mode.lisp
 +++ b/extensions/lsp-mode/lsp-mode.lisp
 @@ -101,14 +101,18 @@ Use this when lsp-mode has side effects that you want to avoid."
@@ -35,13 +35,59 @@ index b50d1d4..c03eb1d 100644
    (setf (variable-value 'language-mode:find-definitions-function)
          #'lsp-find-definitions)
    (setf (variable-value 'language-mode:find-references-function)
-@@ -898,20 +905,44 @@ Use this when lsp-mode has side effects that you want to avoid."
+@@ -538,10 +545,25 @@ Use this when lsp-mode has side effects that you want to avoid."
+     (asdf:system-relative-pathname :lem-lsp-mode
+                                    "client-capabilities.json"))))
+
++(defun completion-snippet-expansion-function ()
++  (variable-value
++   'completion:completion-snippet-expansion-function
++   :global))
++
+ (defun client-capabilities ()
+-  (convert-from-json
+-   (parse-json *client-capabilities-text*)
+-   'lsp:client-capabilities))
++  (let* ((capabilities
++           (convert-from-json
++            (parse-json *client-capabilities-text*)
++            'lsp:client-capabilities))
++         (text-document
++           (lsp:client-capabilities-text-document capabilities))
++         (completion
++           (lsp:text-document-client-capabilities-completion text-document))
++         (completion-item
++           (lsp:completion-client-capabilities-completion-item completion)))
++    (setf (gethash "snippetSupport" completion-item)
++          (not (null (completion-snippet-expansion-function))))
++    capabilities))
+
+ (defun initialize (workspace continuation)
+   (async-request
+@@ -898,28 +920,71 @@ Use this when lsp-mode has side effects that you want to avoid."
        (move-to-lsp-position end range-end)
        (list start end))))
 
 +(defun optional-completion-item-value (reader item)
 +  (handler-case (funcall reader item)
 +    (unbound-slot () nil)))
++
++(defun reject-completion-snippet (point start end)
++  (declare (ignore point start end))
++  (message "Cannot expand LSP snippet: no snippet expander is configured")
++  nil)
++
++(defun completion-snippet-final-insert-action (item text label)
++  (when (eql
++         (optional-completion-item-value
++          #'lsp:completion-item-insert-text-format item)
++         lsp:insert-text-format-snippet)
++    (alexandria:if-let ((function
++                         (completion-snippet-expansion-function)))
++      (lambda (point start end)
++        (declare (ignore point))
++        (funcall function text label start end))
++      #'reject-completion-snippet)))
 +
  (defun convert-completion-items (point items)
    (labels ((sort-items (items)
@@ -85,21 +131,26 @@ index b50d1d4..c03eb1d 100644
             (make-completion-item (item)
 -             (destructuring-bind (label start end)
 -                 (label-and-points item)
+-               (declare (ignore end))
 +             (destructuring-bind (label filter-text insert-text start end)
 +                 (label-filter-insert-and-points item)
-                (declare (ignore end))
                 (make-instance
                  'completion-item
-@@ -920,6 +951,8 @@ Use this when lsp-mode has side effects that you want to avoid."
-                 ;; the `end` position becomes mis-aligned and can't be used.
-                 ;; :end end
+                 :start start
+-                ;; After showing completion candidates, if you type characters and select a candidate,
+-                ;; the `end` position becomes mis-aligned and can't be used.
+-                ;; :end end
++                :end end
                  :label label
 +                :filter-text filter-text
 +                :insert-text insert-text
++                :final-insert-action
++                (completion-snippet-final-insert-action
++                 item insert-text label)
                  :detail (handler-case (lsp:completion-item-detail item)
                            (unbound-slot () ""))
                  :sort-text (handler-case (lsp:completion-item-sort-text item)
-@@ -960,22 +993,27 @@ Use this when lsp-mode has side effects that you want to avoid."
+@@ -960,22 +1025,27 @@ Use this when lsp-mode has side effects that you want to avoid."
                   (workspace-server-capabilities workspace))
      (unbound-slot () nil)))
 
@@ -143,24 +194,26 @@ index b50d1d4..c03eb1d 100644
  (defun completion-with-trigger-character (c)
    (declare (ignore c))
 diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
-index 1e90e52..2ce4583 100644
+index 1e90e52..64ac481 100644
 --- a/src/ext/completion-mode.lisp
 +++ b/src/ext/completion-mode.lisp
-@@ -4,7 +4,13 @@
+@@ -4,7 +4,15 @@
             :make-completion-item
             :completion-item
             :completion-item-label
 +           :completion-item-filter-text
 +           :completion-item-insert-text
++           :completion-item-final-insert-action
             :completion-item-detail
 +           :completion-item-accept-action
 +           :completion-context-options-function
++           :completion-snippet-expansion-function
 +           :completion-local-filtering-p
 +           :completion-start-local-filtering
             :run-completion
             :completion-end
             :completion-mode
-@@ -18,11 +24,74 @@
+@@ -18,11 +26,81 @@
  (defvar *completion-context* nil)
  (defvar *completion-reverse* nil)
 
@@ -171,6 +224,13 @@ index 1e90e52..2ce4583 100644
 +supported keys are :FILTER-FUNCTION and :SEPARATOR.  A filter function receives
 +the current completion input and the provider's raw items, and must return the
 +original items it wants displayed.")
++
++(define-editor-variable completion-snippet-expansion-function nil
++  "Function used by completion providers to install a snippet session.
++
++The function receives snippet text, its display label, and the start and end
++points of the accepted completion range.  It returns true only when expansion
++succeeds without exposing the snippet syntax as ordinary buffer text.")
 +
  (defclass completion-context ()
    ((spec
@@ -235,7 +295,7 @@ index 1e90e52..2ce4583 100644
     (last-items
      :initform '()
      :accessor context-last-items)
-@@ -37,10 +106,17 @@
+@@ -37,10 +115,17 @@
     (async
      :initarg :async
      :initform nil
@@ -256,7 +316,7 @@ index 1e90e52..2ce4583 100644
 
  (defun ensure-completion-spec (completion-spec)
    (typecase completion-spec
-@@ -63,6 +139,16 @@
+@@ -63,6 +148,16 @@
      :initform ""
      :reader completion-item-label
      :type string)
@@ -273,10 +333,15 @@ index 1e90e52..2ce4583 100644
     (chunks
      :initarg :chunks
      :initform nil
-@@ -87,15 +173,32 @@
+@@ -87,15 +182,38 @@
      :initarg :focus-action
      :initform nil
      :reader completion-item-focus-action
++    :type (or null function))
++   (final-insert-action
++    :initarg :final-insert-action
++    :initform nil
++    :reader completion-item-final-insert-action
 +    :type (or null function))
 +   (accept-action
 +    :initarg :accept-action
@@ -302,13 +367,14 @@ index 1e90e52..2ce4583 100644
 -                             &key label chunks detail start end focus-action)
 -  (declare (ignore label chunks detail start end focus-action))
 +                             &key label filter-text insert-text chunks detail
-+                               start end focus-action accept-action)
++                               start end focus-action final-insert-action
++                               accept-action)
 +  (declare (ignore label filter-text insert-text chunks detail
-+                   start end focus-action accept-action))
++                   start end focus-action final-insert-action accept-action))
    (apply #'make-instance 'completion-item initargs))
 
  (defvar *completion-mode-keymap* (make-keymap :description '*completion-mode-keymap*
-@@ -170,16 +273,44 @@
+@@ -170,16 +288,44 @@
                                              (lambda (point)
                                                (move-point point dest-point))))))))
 
@@ -358,7 +424,7 @@ index 1e90e52..2ce4583 100644
      (alexandria:when-let* ((menu (context-popup-menu *completion-context*))
                             (item (lem/popup-menu:get-focus-item menu))
                             (fn (completion-item-focus-action item)))
-@@ -188,14 +319,20 @@
+@@ -188,14 +334,20 @@
  (define-command completion-self-insert () ()
    (let ((c (insertion-key-p (last-read-key-sequence))))
      (cond (c (insert-character (current-point) c)
@@ -382,7 +448,7 @@ index 1e90e52..2ce4583 100644
 
  (define-command completion-delete-previous-char (n) (:universal)
    (delete-previous-char n)
-@@ -205,33 +342,55 @@
+@@ -205,33 +357,55 @@
    (backward-delete-word n)
    (completion-refresh))
 
@@ -448,14 +514,13 @@ index 1e90e52..2ce4583 100644
    (let ((start (or (completion-item-start item)
                     (with-point ((start point))
                       (skip-chars-backward start #'syntax-symbol-char-p)
-@@ -240,11 +399,34 @@
+@@ -240,11 +414,45 @@
                   point)))
      (values start end)))
 
 +(defun completion-item-range (point item)
 +  (let ((context *completion-context*))
 +    (if (and context
-+             (context-local-filtering-p context)
 +             (context-range-start context)
 +             (context-range-end context))
 +        (destructuring-bind (start-offset . end-offset)
@@ -475,40 +540,76 @@ index 1e90e52..2ce4583 100644
 +      (insert-string point (subseq (completion-item-insert-text item) 0 begin)))))
 +
 +(defun completion-accept (point item)
-+  "Insert ITEM as a final selection and run its acceptance action exactly once."
++  "Insert ITEM finally, then run its post-accept action exactly once."
 +  (when item
-+    (completion-insert point item)
-+    (completion-end)
-+    (alexandria:when-let ((action (completion-item-accept-action item)))
-+      (funcall action))))
++    (let ((final-action (completion-item-final-insert-action item))
++          (accept-action (completion-item-accept-action item)))
++      (if final-action
++          (multiple-value-bind (range-start range-end)
++              (completion-item-range point item)
++            (with-point ((start range-start :right-inserting)
++                         (end range-end :left-inserting))
++              (completion-end)
++              (when (funcall final-action point start end)
++                (when accept-action
++                  (funcall accept-action)))))
++          (progn
++            (completion-insert point item)
++            (completion-end)
++            (when accept-action
++              (funcall accept-action)))))))
 
  (defun partial-match (strings)
    (when strings
-@@ -261,19 +443,20 @@
+@@ -261,22 +469,31 @@
 
  (defun narrowing-down (context last-items)
    (when last-items
 -    (let ((n (partial-match (mapcar #'completion-item-label last-items))))
-+    (let ((n (partial-match
-+              (mapcar #'completion-item-insert-text last-items))))
-       (multiple-value-bind (start end)
-           (completion-item-range (current-point) (first last-items))
-         (cond ((and n (plusp n) (< (count-characters start end) n))
-                (completion-insert (current-point)
-                                   (first last-items)
-                                   n)
+-      (multiple-value-bind (start end)
+-          (completion-item-range (current-point) (first last-items))
+-        (cond ((and n (plusp n) (< (count-characters start end) n))
+-               (completion-insert (current-point)
+-                                  (first last-items)
+-                                  n)
 -               (continue-completion context)
-+               (completion-refresh)
-                t)
-               ((alexandria:length= last-items 1)
-                (completion-insert (current-point)
-                                   (first last-items))
+-               t)
+-              ((alexandria:length= last-items 1)
+-               (completion-insert (current-point)
+-                                  (first last-items))
 -               (continue-completion context)
-+               (completion-refresh)
-                t)
-               (t
-                nil))))))
-@@ -294,79 +477,257 @@
+-               t)
+-              (t
+-               nil))))))
++    (cond
++      ((and (alexandria:length= last-items 1)
++            (completion-item-final-insert-action (first last-items)))
++       (completion-accept (current-point) (first last-items))
++       t)
++      ((some #'completion-item-final-insert-action last-items)
++       nil)
++      (t
++       (let ((n (partial-match
++                 (mapcar #'completion-item-insert-text last-items))))
++         (multiple-value-bind (start end)
++             (completion-item-range (current-point) (first last-items))
++           (cond ((and n (plusp n) (< (count-characters start end) n))
++                  (completion-insert (current-point)
++                                     (first last-items)
++                                     n)
++                  (completion-refresh)
++                  t)
++                 ((alexandria:length= last-items 1)
++                  (completion-insert (current-point)
++                                     (first last-items))
++                  (completion-refresh)
++                  t)
++                 (t
++                  nil))))))))
+
+ (define-command completion-narrowing-down-or-next-line () ()
+   (or (narrowing-down *completion-context* (context-last-items *completion-context*))
+@@ -294,79 +511,257 @@
          result)))
 
  (defun compute-completion-items (context then)

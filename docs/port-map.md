@@ -25,13 +25,13 @@ Status legend:
 | marginalia | partial | M-x keybindings, buffer paths, and provider-specific LSP/Lisp details exist; no general category annotation layer |
 | consult | ported/partial | project buffers `SPC SPC`, project-grep, isearch; no preview-on-move |
 | consult-eglot | gap | `SPC p s` currently invokes document symbols, not the configured workspace-symbol search |
-| corfu (TTY via Emacs 31) | ported/partial | Lem has an ncurses popup, correct display/filter/insert metadata, acceptance callbacks, stale-result rejection, automatic identifier completion after the configured 3-character/0.2-second threshold, and local `M-Space` filtering with zero-match recovery; Corfu's wider command surface remains unported |
+| corfu (TTY via Emacs 31) | ported/partial | Lem has an ncurses popup, correct display/filter/insert metadata, distinct final-insert and post-accept callbacks, tracked ranges, stale-result rejection, automatic identifier completion after the configured 3-character/0.2-second threshold, and local `M-Space` filtering with zero-match recovery; Corfu's wider command surface remains unported |
 | cape | ported/partial | automatic same-major-mode dabbrev and path-aware file-at-point fallbacks are composed and TUI-tested; raw dabbrev candidates feed Orderless, while Cape's broader provider library is not ported |
-| yasnippet (+ snippets) | ported/partial | the configured private Org `jjs` source-block snippet is exact, and `src/snippets.lisp` uses the audited data-only subset of the 2,387 definitions at pinned `yasnippet-snippets` commit `606ee926df6839243098de6d71332a697518cb86`; numbered, anonymous, and nested fields, defaults, repeated placeholders, mirrors, escapes, `${0:...}`, `$0`, safe indentation directives, field navigation, and a Prescient `M-x lem-yath-insert-snippet` selector work, while 144 executable or conditional definitions are explicitly unavailable and never evaluated |
+| yasnippet (+ snippets) | ported/partial | the configured private Org `jjs` source-block snippet is exact, and `src/snippets.lisp` uses the audited data-only subset of the 2,387 definitions at pinned `yasnippet-snippets` commit `606ee926df6839243098de6d71332a697518cb86`; numbered, anonymous, and nested fields, defaults, repeated placeholders, mirrors, escapes, `${0:...}`, `$0`, safe indentation directives, field navigation, a Prescient `M-x lem-yath-insert-snippet` selector, and common Eglot LSP snippet sessions work, while executable definitions and strict TextMate choices/variables/transforms remain unavailable |
 | prescient (+vertico-) | ported/partial | prompt literal/regexp/initialism filtering and persistent recency/frequency ranking are implemented; interactive toggles and char folding remain gaps |
 | embark (+consult) | gap | Lem has context menus and LSP code-action menus, but no generic target classifier/action maps behind `SPC e a` |
 | wgrep | lem-builtin | grep results are editable & write back (better than default Emacs) |
-| eglot + eglot-booster | lem-builtin | `lem-lsp-mode`; booster n/a (native client) |
+| eglot + eglot-booster | lem-builtin+ported | `lem-lsp-mode`; booster n/a (native client); `insertTextFormat=Snippet` uses the data-only field engine with dynamic capability advertising, while resolve/additional edits remain gaps |
 | flycheck (+rust) | partial | LSP diagnostics overlays; no non-LSP linter framework |
 | apheleia | partial | `SPC b f` → LSP format (`src/ide.lisp`); configured format-on-save behavior is absent |
 | dape (DAP debugging) | gap | Lem has no DAP client |
@@ -126,8 +126,12 @@ Status legend:
 - **Snippet scope**: `Tab`, `Shift-Tab`, `C-g`, `C-d`, and `Backspace` provide
   the tested field-session workflow, with completion, Vi, and Paredit retaining
   their intended precedence. Root and table inheritance plus common filename
-  mappings expose the pinned community data without executing Emacs Lisp.
+  mappings expose the pinned community data without executing Emacs Lisp. LSP
+  format-2 candidates use the same safe session after tracked final acceptance;
+  plain format stays literal, malformed payloads preserve the prefix, and
+  backquoted server text is inert.
   Stacked active sessions, direct snippet bindings, redo-time session revival,
-  and LSP snippet ingestion remain gaps. BibTeX expansion deterministically
+  strict TextMate variables/choices/transforms, completion resolve, and
+  additional completion edits remain gaps. BibTeX expansion deterministically
   omits automatic indentation; this approximates the intended steady-state text
   rather than reproducing Emacs' transient indentation calls.
