@@ -40,6 +40,9 @@ case "$test_name" in
   orderless-completion)
     remote_command='nix run path:$PWD#orderless-completion-test'
     ;;
+  snippets)
+    remote_command='nix run path:$PWD#snippet-test'
+    ;;
   interactive)
     remote_command='nix run path:$PWD#interactive-test'
     ;;
@@ -62,7 +65,7 @@ case "$test_name" in
     remote_command='nix run path:$PWD#electric-editing-test'
     ;;
   *)
-    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|orderless-completion|prompt-completion|daily-workflows|electric-editing|interactive|structural|notes|editing]" >&2
+    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|orderless-completion|snippets|prompt-completion|daily-workflows|electric-editing|interactive|structural|notes|editing]" >&2
     exit 2
     ;;
 esac

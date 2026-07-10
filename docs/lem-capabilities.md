@@ -289,9 +289,11 @@ returning candidates; `scripts/prompt-completion-test.sh` verifies that file
 refresh still retains path-aware candidates while asynchronous validation stays
 strict.
 The LSP adapter consequently honors plain `filterText`, `insertText`,
-`TextEdit`, and `InsertReplaceEdit` new-text precedence. Tracked replacement
-ranges, snippet expansion, completion resolve, additional edits, and completion
-commands remain separate gaps.
+`TextEdit`, and `InsertReplaceEdit` new-text precedence. Provider-relative
+replacement ranges are retained with tracked start/end points and per-item
+offsets while the user continues editing. LSP `insertTextFormat=Snippet`,
+completion resolve, additional edits, and completion commands remain separate
+gaps.
 
 ### Automatic in-buffer completion — `lem-yath/src/auto-completion.lisp` (verified)
 
@@ -340,7 +342,89 @@ raw-before-cap filtering, manual and automatic completion, local separator reque
 ownership, stale asynchronous delivery, zero-match recovery, tracked replacement
 ranges, and prompt/file isolation through the real ncurses editor.
 
+### Yasnippet-compatible expansion — `lem-yath/src/snippets.lisp` (verified subset)
+
+The configured wrapper searches the repository's private snippets before the
+exact flake-pinned `yasnippet-snippets` commit
+`606ee926df6839243098de6d71332a697518cb86`. That collection contains 2,387
+definitions. Every snippet file is treated solely as data; the corpus audit
+classifies 2,243 definitions as portable and 144 that require executable or
+conditional behavior as explicitly unavailable, and no embedded Emacs Lisp is
+ever evaluated. The
+configured private corpus contains one snippet, `org-mode/srcblock.snpt`; its
+`jjs` trigger, `language` field, and final blank-line `$0` position are
+reproduced exactly. The `.org` filename mapping makes it available even though
+Lem currently opens Org files in Fundamental mode.
+
+The portable grammar covers simple and braced numbered fields (`$1`, `${1}`),
+numbered defaults, anonymous `${default}` fields, nested fields and defaults,
+repeated braced placeholders, simple mirrors, escaped syntax characters,
+`${0:default}`, the final `$0`, and `$>` indentation markers. Mirrors update
+while their owning field changes, including dependencies nested inside a
+containing field. Field order follows Yasnippet's numbered, anonymous, then-zero
+ordering, including its observed repeated-placeholder ownership rules.
+
+`Tab` expands a matching trigger or advances the active field; `Shift-Tab`
+moves backward. `C-g` ends the session without deleting its text. At the start
+of an untouched default, `C-d` clears it and advances, while `Backspace` clears
+it and remains in the field; away from that position the underlying commands
+retain their ordinary behavior. `${0:...}` permits one replacement edit before
+the session commits. Expansion cancels pending automatic completion. An
+ordinary completion popup owns `Tab` before expansion, whereas an already
+active snippet field takes precedence over an incidental popup. Leaving Vi
+insert state retains the session for later resumption, and edits inside fields
+continue through Paredit and electric-pair behavior. With no trigger or session,
+the original mode-specific `Tab` binding runs unchanged.
+
+`M-x lem-yath-insert-snippet` exposes the active portable templates without
+requiring a trigger. Its Prescient-filtered labels include the template name,
+trigger, and source table; choosing one inserts it at point and starts the same
+field session used by trigger expansion.
+
+Roots retain private-before-community precedence. Tables combine natural
+`prog-mode`, `text-mode`, and `fundamental-mode` ancestry with `.yas-parents`
+using deterministic Emacs-31-style ordering. The explicit mappings used where
+Lem's mode name alone cannot select the matching Yas table are:
+
+| Lem mode or filename | Yas table |
+|---|---|
+| `clojure-repl-mode` | `cider-repl-mode` (then `clojure-mode`) |
+| `elisp-mode` | `emacs-lisp-mode` |
+| `lisp-mode` | `lisp-mode` |
+| `legit-commit-mode` | `git-commit-mode` |
+| `xml-mode` | `nxml-mode` |
+| `posix-shell-mode` | `sh-mode` |
+| `.org` | `org-mode` |
+| `.md`, `.markdown` | `markdown-mode` |
+| `Makefile`, `GNUmakefile`, `.mk` | `makefile-gmake-mode` |
+| `.bib` | `bibtex-mode` |
+| `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx` | `c++-mode` |
+| `.cs` | `csharp-mode` |
+| `.gd` | `gdscript-mode` |
+| `.nasm` | `nasm-mode` |
+| `.tex` | `latex-mode` |
+
+The data-only indentation policy recognizes the safe directives present in the
+pinned corpus: fixed indentation, fixed indentation combined with disabled
+region wrapping, automatic indentation of the first line, and `$>` line
+markers. Other `expand-env` forms are unavailable rather than evaluated.
+BibTeX snippets deliberately skip automatic indentation: deterministic template
+text approximates Emacs' intended steady state, not its transient indentation
+calls.
+
+This is not full Yasnippet parity. The 144 definitions requiring backquoted
+Elisp, field transforms, nontrivial conditions, command execution, or unsupported
+`expand-env` forms cannot expand. Active sessions do not stack, direct snippet
+key bindings are not installed, undo/redo does not revive a field session on
+redo, and LSP completion items are not ingested as snippets. The real TUI gate
+is `nix run .#snippet-test`; it drives the private snippet, portable field
+grammar, the Prescient selector, navigation and editing keys,
+completion/Vi/Paredit precedence,
+indentation, lifecycle cleanup, undo, and a real pinned Python community snippet
+through the ncurses editor.
+
 ### consult-like commands (verified)
+
 - `M-x`: `execute-command` (bound `M-x`); command completion via `completion-command`
   (`prompt.lisp:151`).
 - Find file: `lem:find-file` (`C-x C-f`).
@@ -660,9 +744,10 @@ default.
   (`transient/transient.lisp`). Combined with the new prefix keymap system this is the
   which-key analog. (No separate "which-key auto-popup on every prefix" toggle, but the
   prefix/transient infra exists.)
-- **Snippets / templates**: **NONE.** No yasnippet/tempel equivalent. `src/ext/abbrev.lisp`
-  (`lem/abbrev`, `M-/`) is **dynamic abbrev** (word completion from buffers), not
-  templating.
+- **Snippets / templates (upstream)**: **NONE.** No yasnippet/tempel equivalent.
+  `src/ext/abbrev.lisp` (`lem/abbrev`, `M-/`) is **dynamic abbrev** (word
+  completion from buffers), not templating. Lem-yath adds the verified data-only
+  compatibility layer described in §4; that does not change upstream Lem.
 - **abbrev** (static expansion table like Emacs `abbrev-mode`): only the dynamic form
   above exists; no abbrev-table system.
 - **isearch / occur**: `src/ext/isearch.lisp` (`lem/isearch`): `isearch-forward`/
@@ -777,8 +862,9 @@ show-paren, highlight-line, frame-multiplexer tabs, dired-like filer, markdown p
 literate eval.
 
 **The big upstream gaps vs Emacs:** **no org-mode** (no agenda/babel/capture/export — markdown
-eval-blocks are the closest), **no snippet system** (no yasnippet/tempel; only dynamic
-abbrev `M-/`), **no static abbrev tables**, **completion has fuzzy primitives but
+eval-blocks are the closest), **no upstream snippet system** (no yasnippet/tempel;
+only dynamic abbrev `M-/`; lem-yath adds the bounded data-only subset in §4),
+**no static abbrev tables**, **completion has fuzzy primitives but
 no Orderless/Prescient framework**, **tree-sitter is a manual API** (no auto-enabled
 tree-sitter modes; you wire grammars+queries yourself, 10 grammars bundled), **vi-mode
 lacks surround/sneak/easymotion**, **legit lacks blame/bisect/cherry-pick/region-staging**,

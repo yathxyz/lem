@@ -170,8 +170,8 @@ Note: avy commands are bound but `avy` is **not** an explicitly declared/configu
 | **corfu** | active | global, automatic in-buffer popup; live defaults use a 3-character prefix, 0.2-second delay, 10 rows, and no cycling |
 | **TTY Corfu rendering** | active | Emacs 31 native `tty-child-frames`; no `corfu-terminal` package or mode is installed |
 | **cape** | deferred providers | prepends `cape-file` and `cape-dabbrev` to `completion-at-point-functions`; no Cape snippet provider |
-| **yasnippet** | active (`after-init`, `yas-global-mode`) | snippet dir = `user-emacs-directory/snippets/` |
-| **yasnippet-snippets** | active if installed | community snippets |
+| **yasnippet** | active (`after-init`, `yas-global-mode`) | snippet dir = `user-emacs-directory/snippets/`; it currently contains only the Org `jjs` source-block snippet described below |
+| **yasnippet-snippets** | active if installed | 2,387 community definitions at commit `606ee926df6839243098de6d71332a697518cb86` |
 | **prescient / vertico-prescient** | active | persistent usage data; Vertico locally uses Prescient literal/regexp/initialism filtering and learned sorting instead of the global Orderless style |
 | **consult** | deferred/autoloaded | `consult-project-buffer` (`SPC SPC`); `consult-outline` is bound by `.dir-locals.el` but has a cold-start autoload defect in Emacs that Lem should not reproduce |
 | **consult-eglot** | deferred/autoloaded | `consult-eglot-symbols` (`SPC p s`) performs workspace-symbol search |
@@ -184,6 +184,22 @@ Core completion settings (`init.el`): `completion-ignore-case t`,
 pipelines: Vertico + Marginalia + Prescient for minibuffers, and Corfu +
 Orderless + mode/Cape CAPFs in ordinary buffers. Yasnippet expands separately
 through `TAB`; it is not a Cape candidate source.
+
+The private corpus is exactly `org-mode/srcblock.snpt`. Its `jjs` trigger
+expands the following body, first visiting the `language` field and then the
+final position on the blank line:
+
+```text
+#+BEGIN_SRC ${1:language}
+$0
+#+END_SRC
+```
+
+The community collection is not purely declarative: alongside ordinary fields,
+defaults, nesting, and mirrors, some definitions use backquoted Emacs Lisp,
+field transforms, conditions, command snippets, or contextual expansion
+settings. Reproducing basic placeholder syntax alone therefore does not imply
+full Yasnippet compatibility.
 
 ---
 

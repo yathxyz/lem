@@ -5,4 +5,8 @@
 (defpackage :lem-yath
   (:use :cl :lem)
   (:export #:write-boot-report
-           #:boot-ok-p))
+           #:boot-ok-p
+           #:snippet-active-session-p
+           #:snippet-current-field-number
+           #:snippet-reload
+           #:snippet-root-directories))

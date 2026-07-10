@@ -4,6 +4,10 @@
   inputs = {
     lem.url = "github:lem-project/lem";
     nixpkgs.follows = "lem/nixpkgs";
+    yasnippet-snippets = {
+      url = "github:AndreaCrotti/yasnippet-snippets/606ee926df6839243098de6d71332a697518cb86";
+      flake = false;
+    };
   };
 
   outputs =
@@ -11,6 +15,7 @@
       self,
       nixpkgs,
       lem,
+      yasnippet-snippets,
     }:
     let
       inherit (nixpkgs) lib;
@@ -81,6 +86,7 @@
               mkdir -p "$asdf_cache"
 
               export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-yath:$asdf_cache:/nix/store:/nix/store''${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
+              export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
               exec ${lemNcurses}/bin/lem -q --eval '(load #P"${self}/lem-yath/init.lisp")' "$@"
             '';
           };
@@ -95,6 +101,7 @@
                   export TERM=''${TERM:-xterm-256color}
                   export LEM_BIN=${lemNcurses}/bin/lem
                   export LEM_YATH_SOURCE=${self}/lem-yath
+                  export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
                   exec bash ${self}/scripts/${script} "$@"
                 '';
               };
@@ -113,6 +120,7 @@
                 export XDG_CACHE_HOME=$TMPDIR/cache
                 export LEM_BIN=${lemNcurses}/bin/lem
                 export LEM_YATH_CHECK_ID=nix-${name}
+                export LEM_YATH_SNIPPET_DIRS="$PWD/source/lem-yath/snippets:${yasnippet-snippets}/snippets"
 
                 mkdir -p "$HOME" "$XDG_CACHE_HOME"
                 cp -R ${self} source
@@ -140,6 +148,7 @@
             completion-lifecycle-test = mkTestApp "lem-yath-completion-lifecycle-test" "completion-lifecycle-test.sh";
             auto-completion-test = mkTestApp "lem-yath-auto-completion-test" "auto-completion-test.sh";
             orderless-completion-test = mkTestApp "lem-yath-orderless-completion-test" "orderless-completion-test.sh";
+            snippet-test = mkTestApp "lem-yath-snippet-test" "snippet-test.sh";
             interactive-test = mkTestApp "lem-yath-interactive-test" "interactive-test.sh";
             structural-test = mkTestApp "lem-yath-structural-test" "structural-test.sh";
             notes-test = mkTestApp "lem-yath-notes-test" "notes-test.sh";
@@ -157,6 +166,7 @@
             completion-lifecycle = mkCheck "completion-lifecycle" "completion-lifecycle-test.sh";
             auto-completion = mkCheck "auto-completion" "auto-completion-test.sh";
             orderless-completion = mkCheck "orderless-completion" "orderless-completion-test.sh";
+            snippets = mkCheck "snippets" "snippet-test.sh";
             notes = mkCheck "notes" "notes-test.sh";
             editing = mkCheck "editing" "editing-test.sh";
             prompt-completion = mkCheck "prompt-completion" "prompt-completion-test.sh";
@@ -176,6 +186,7 @@
             shellHook = ''
               export LEM_BIN=${lemNcurses}/bin/lem
               export LEM_YATH_SOURCE=$PWD/lem-yath
+              export LEM_YATH_SNIPPET_DIRS="$PWD/lem-yath/snippets:${yasnippet-snippets}/snippets"
             '';
           };
 

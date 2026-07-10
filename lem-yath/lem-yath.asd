@@ -19,6 +19,7 @@
                (:file "completion")
                (:file "orderless")
                (:file "auto-completion")
+               (:file "snippets")
                (:file "ide")
                (:file "git")
                (:file "notes")
