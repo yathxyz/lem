@@ -26,7 +26,8 @@
     lem/completion-mode::completion-beginning-of-buffer
     lem/completion-mode::completion-narrowing-down-or-next-line
     lem-yath-completion-space
-    lem-yath-orderless-insert-separator))
+    lem-yath-orderless-insert-separator
+    lem-yath-act-completion))
 
 (defun auto-completion-symbol-bounds (point)
   (with-point ((start point)

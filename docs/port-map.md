@@ -29,7 +29,7 @@ Status legend:
 | cape | ported/partial | automatic same-major-mode dabbrev and path-aware file-at-point fallbacks are composed and TUI-tested; raw dabbrev candidates feed Orderless, while Cape's broader provider library is not ported |
 | yasnippet (+ snippets) | ported/partial | the configured private Org `jjs` source-block snippet is exact, and `src/snippets.lisp` uses the audited data-only subset of the 2,387 definitions at pinned `yasnippet-snippets` commit `606ee926df6839243098de6d71332a697518cb86`; numbered, anonymous, and nested fields, defaults, repeated placeholders, mirrors, escapes, `${0:...}`, `$0`, safe indentation directives, field navigation, a Prescient `M-x lem-yath-insert-snippet` selector, and common Eglot LSP snippet sessions work, while executable definitions and strict TextMate choices/variables/transforms remain unavailable |
 | prescient (+vertico-) | ported/partial | prompt literal/regexp/initialism filtering and persistent recency/frequency ranking are implemented; interactive toggles and char folding remain gaps |
-| embark (+consult) | gap | Lem has context menus and LSP code-action menus, but no generic target classifier/action maps behind `SPC e a` |
+| embark (+consult) | ported/partial | `SPC e a` opens a typed, extensible action dispatcher for contiguous regions, URLs, existing local files, identifiers, buffers, native mode menus, focused completion candidates, and search/location rows; completion-local `C-c a` can copy in place or accept once (`src/actions.lisp`). Target cycling, act-all, collect/export/live views, arbitrary Embark action-map composition, and richer embark-consult adapters remain gaps |
 | wgrep | lem-builtin | grep results are editable & write back (better than default Emacs) |
 | eglot + eglot-booster | lem-builtin+ported | `lem-lsp-mode`; booster n/a (native client); ordinary local-file workspaces are isolated by stable server identity + canonical root, pending starts deduplicate and time out, save-as/mode changes rebind explicit ownership, restart/shutdown is project-scoped and graceful, and server cwd/init options are frozen to the project; Lem's Lisp-v2 self/manual connections deliberately retain global connection switching; `insertTextFormat=Snippet` uses the data-only field engine with dynamic capability advertising, and accepted items support bounded lazy resolve plus direct/resolved `additionalTextEdits`; resolved documentation/detail and completion commands remain gaps |
 | flycheck (+rust) | partial | LSP diagnostics overlays; no non-LSP linter framework |
@@ -109,6 +109,10 @@ Status legend:
 - **org files** open as plain text; the workflows (capture/dailies/journal/agenda)
   operate on the same files but there is no org folding/links/tables UI.
 - **Completion previews**: no consult-style live preview while cycling candidates.
+- **Embark scope**: completion uses `C-c a` because the ncurses input path cannot
+  represent `C-.` distinctly. The typed dispatcher does not yet provide target
+  cycling, act-all, collect/export/live views, arbitrary Embark action-map
+  composition, or the wider embark-consult adapter set.
 - **Find-name results** persist after opening a match and are safe for spaces,
   control characters, and shell-looking patterns, but they are a path list rather
   than a full Dired buffer with marking and file operations.

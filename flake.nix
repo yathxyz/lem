@@ -211,6 +211,7 @@
             daily-workflows-test = mkTestApp "lem-yath-daily-workflows-test" "daily-workflows-test.sh";
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
             ui-parity-test = mkTestApp "lem-yath-ui-parity-test" "ui-parity-test.sh";
+            actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
           };
 
@@ -230,6 +231,7 @@
             daily-workflows = mkCheck "daily-workflows" "daily-workflows-test.sh";
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";
             ui-parity = mkCheck "ui-parity" "ui-parity-test.sh";
+            actions = mkCheck "actions" "actions-test.sh";
             lsp-project = mkCheckWithLem lemLspTest "lsp-project" "lsp-project-test.sh";
             parity-ledger =
               pkgs.runCommand "lem-yath-parity-ledger-check" { nativeBuildInputs = [ pkgs.python3 ]; }

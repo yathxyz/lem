@@ -19,6 +19,7 @@
                (:file "completion")
                (:file "orderless")
                (:file "auto-completion")
+               (:file "actions")
                (:file "snippets")
                (:file "lsp-snippets")
                (:file "ide")

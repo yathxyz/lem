@@ -325,6 +325,58 @@ Resolved documentation/detail, CompletionList item defaults, `insertTextMode`,
 completion commands, and rollback after an arbitrary throwing buffer hook remain
 separate gaps; Lem has no native change-group primitive for that last case.
 
+### Embark-style actions — `lem-yath/src/actions.lisp` (verified subset)
+
+Lem-yath adds typed target and action records plus ordered provider and action
+registries.  `register-action-target-provider` and `register-action` replace an
+entry by stable ID, so reloading built-ins remains idempotent without deleting
+unrelated third-party registrations.  `SPC e a` resolves the current context in
+this order: an active contiguous region, a property-backed `*Find*` path, a
+movable peek-source row, an HTTP(S) URL or existing local path at point, a syntax
+identifier, and finally the current buffer.  Providers are extensible, and a
+failing provider or action does not prevent later dispatches.  The dispatcher
+refuses ambiguous duplicate action keys rather than showing a menu whose result
+depends on registration order.
+
+The resolved target kind and only its applicable actions appear immediately in
+a terminal-safe, one-key transient:
+
+| Target | Actions |
+|---|---|
+| Region | `w` copy region |
+| URL | `Return` open URL; `w` copy URL |
+| Existing local file | `Return` visit in Lem; `w` copy path; `x` open externally |
+| Identifier | `d` definitions; `r` references; `w` copy identifier; `a` current-project LSP code actions when the target is still current and its workspace is ready |
+| Search/location row | `Return` visit location; `w` copy the displayed line |
+| Buffer | `s` save; `r` revert; `k` kill; `w` copy buffer name |
+| Focused completion | `Return` accept the captured item; `w` copy its insertion text |
+
+For ordinary targets, `m` delegates to the originating buffer's native mode
+context menu when one is available, and `q` cancels.  URL and external-file
+actions pass a direct argument vector to `xdg-open`; they do not construct a
+shell command.  Removed buffers, stale completion contexts, and stale
+identifier/LSP ownership fail closed.
+
+Completion popups use `C-c a`: ncurses cannot represent `C-.` as a distinct
+input chord.  The completion target snapshots the focused item and its context;
+copying closes only the action transient and leaves completion live, while
+accepting closes completion and runs its insertion/final actions exactly once.
+The registry and bindings can be reloaded without accumulating duplicate
+providers, actions, or keys.
+
+`scripts/actions-test.sh` exercises the normal/visual leader binding, forward
+and reverse regions, labeled transient dispatch and cancellation, URL copying,
+relative and property-backed file navigation, identifier definition/reference
+delegation, native-menu delegation, completion copy/accept lifecycle, Find and
+peek locations, stale-origin cleanup, and reload idempotence through the actual
+ncurses editor.  LSP code-action gating, external opening, and the buffer action
+variants are source-inspected but are not dynamically covered by that suite.
+
+This is intentionally partial Embark parity.  Visual-block selections are not
+region targets.  Target cycling, act-all, collect/export/live views, arbitrary
+Embark action-map composition, and the richer embark-consult adapter set are not
+implemented.
+
 ### Project-scoped LSP workspaces and symbols (verified)
 
 The pinned `patches/lem-project-lsp-workspaces.patch` replaces Lem's ordinary

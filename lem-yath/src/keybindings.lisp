@@ -21,6 +21,7 @@
     ("m" . "mode")
     ("m e" . "evaluation")
     ("c" . "compile")
+    ("e" . "actions")
     ("h" . "help")
     ("y" . "display"))
   "Descriptions shown for nested leader prefixes.")
@@ -149,6 +150,9 @@
   ("c c" 'lem-yath-compile "compile")                    ; SPC c c
   ("m e e" 'lem-lisp-mode:lisp-eval-last-expression
    "evaluate last expression")                            ; SPC m e e
+
+  ;; context-sensitive actions (Embark-style)
+  ("e a" 'lem-yath-act "act on target")                  ; SPC e a
 
   ;; help (helpful)
   ("h k" 'apropos-command "describe command")       ; SPC h k

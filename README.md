@@ -56,6 +56,10 @@ of writing `.fasl` files into the source tree.
 - completion candidates keep display, filtering, and insertion text separate;
   final insertion and post-accept callbacks are explicit, tracked replacement
   ranges survive filtering, and stale asynchronous results are rejected
+- an Embark-style, typed action dispatcher on `SPC e a` covers contiguous
+  regions, URLs, existing local files, identifiers, buffers, native mode menus,
+  completion candidates, and search locations; completion-local `C-c a` can
+  copy without closing the popup or accept the captured candidate exactly once
 - exact expansion of the configured private Org `jjs` source-block snippet and
   a data-only Yasnippet session engine over the flake-pinned community corpus;
   numbered, anonymous, and nested fields, defaults, mirrors, escapes, safe
@@ -96,11 +100,11 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 ## Testing
 
 `nix flake check` runs the package, compile, boot, prompt and in-buffer
-completion, completion-lifecycle, automatic-completion, editing,
-Orderless completion, snippets, LSP snippets, daily-workflows, electric-editing,
-UI parity, project-scoped LSP lifecycle, notes, and parity-ledger checks. The ledger
-can also be validated directly, and the interactive TUI checks are exposed as
-flake apps:
+completion, completion-lifecycle, automatic-completion, Embark-style actions,
+editing, Orderless completion, snippets, LSP snippets, daily-workflows,
+electric-editing, UI parity, project-scoped LSP lifecycle, notes, and
+parity-ledger checks. The ledger can also be validated directly, and the
+interactive TUI checks are exposed as flake apps:
 
 ```sh
 nix flake check
@@ -111,6 +115,7 @@ nix run .#completion-test
 nix run .#prompt-completion-test
 nix run .#completion-lifecycle-test
 nix run .#auto-completion-test
+nix run .#actions-test
 nix run .#orderless-completion-test
 nix run .#snippet-test
 nix run .#lsp-snippet-test
@@ -135,8 +140,9 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 ```
 
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
-`completion-lifecycle`, `auto-completion`, `editing`, `daily-workflows`,
-`orderless-completion`, `snippets`, `lsp-snippets`, `lsp-project`, `electric-editing`, `ui-parity`, `interactive`,
-`structural`, or `notes` to run only that gate.
+`completion-lifecycle`, `auto-completion`, `actions`, `editing`,
+`daily-workflows`, `orderless-completion`, `snippets`, `lsp-snippets`,
+`lsp-project`, `electric-editing`, `ui-parity`, `interactive`, `structural`, or
+`notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

@@ -176,8 +176,13 @@ Note: avy commands are bound but `avy` is **not** an explicitly declared/configu
 | **consult** | deferred/autoloaded | `consult-project-buffer` (`SPC SPC`); `consult-outline` is bound by `.dir-locals.el` but has a cold-start autoload defect in Emacs that Lem should not reproduce |
 | **consult-eglot** | deferred/autoloaded | `consult-eglot-symbols` (`SPC p s`) performs workspace-symbol search |
 | **embark** | deferred/autoloaded | only `embark-act` is exposed (`SPC e a` and `M-x`); no minibuffer binding or custom action maps |
-| **embark-consult** | installed only | no load/configuration path in the current config |
+| **embark-consult** | effective on demand | no user configuration; the pinned Embark package loads it automatically after Consult loads when the installed library is available |
 | **wgrep** | deferred; `wgrep-change-to-wgrep-mode` (editable grep buffers) |
+
+The `embark-consult` load path comes from the pinned package rather than this
+configuration: its `embark.el` registers a `with-eval-after-load` form for
+Consult and then requires the installed integration library.  It is therefore
+effective after both packages have loaded, not merely an unused declaration.
 
 Core completion settings (`init.el`): `completion-ignore-case t`,
 `completions-detailed t`, `tab-always-indent 'complete`. In effect there are two
@@ -448,7 +453,8 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 
 ## Packages declared in Nix but with NO explicit elisp config (defaults / vestigial)
 
-`embark-consult`, `multiple-cursors` (internal overlay use only), `nov`,
+`embark-consult` (effective through Embark's automatic Consult hook),
+`multiple-cursors` (internal overlay use only), `nov`,
 `pgmacs`/`pg`, `eldoc-box`, `org-ref`, `org-contrib`, `ob-async`, `yaml-mode`,
 `meson-mode`, `nginx-mode`, `just-mode`, `cider`, `clojure-ts-mode`, `go-mode`
 (hooked but no use-package), `typst-ts-mode`, `engrave-faces`,
