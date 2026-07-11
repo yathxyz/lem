@@ -142,7 +142,8 @@
             runtimeInputs = coreRuntimeInputs;
             text = ''
               cache_home="''${XDG_CACHE_HOME:-''${HOME:-/tmp}/.cache}"
-              asdf_cache="$cache_home/lem-yath/asdf"
+              source_key="$(printf '%s' '${self}/lem-yath' | sha256sum | cut -c1-16)"
+              asdf_cache="$cache_home/lem-yath/asdf/$source_key"
               mkdir -p "$asdf_cache"
 
               export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-yath:$asdf_cache:/nix/store:/nix/store''${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
