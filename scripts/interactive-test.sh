@@ -502,7 +502,7 @@ if boot_with_file "$S15R" "$SNIPEREPEATFIX" 'ab xx ab yy ab' "15-snipe-parity"; 
 fi
 if boot_with_file "$S15O" "$SNIPEFIX" 'alpha beta gamma' "15-snipe-parity"; then
   send_chord "$S15O" "d" "z" "b" "e"
-  lem_capture "$S15O" | grep -qE '^[[:space:][:digit:]]*eta gamma[[:space:]]*$' && snipe_operator_ok=1
+  lem_capture "$S15O" | grep -qE '^[[:space:][:digit:]]*ta gamma[[:space:]]*$' && snipe_operator_ok=1
 fi
 if [ "$snipe_repeat_ok" = 1 ] && [ "$snipe_operator_ok" = 1 ]; then
   pass "15-snipe-parity" "s repeat and inclusive operator z matched evil-snipe"

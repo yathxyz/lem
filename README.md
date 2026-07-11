@@ -50,7 +50,7 @@ of writing `.fasl` files into the source tree.
 - state-aware terminal cursors and a genuine buffer-local Evil-style Emacs
   state on `C-z`: red-box normal, green-bar insert, cyan-box Emacs, portable
   visual/replace shapes, Emacs mark semantics, and exact prior-state return
-- surround / snipe / comment operator (`gc`) plus Lispyville-compatible,
+- surround / exact configured evil-snipe 2.1.3 / comment operator (`gc`) plus Lispyville-compatible,
   delimiter-safe structural editing in Common Lisp, Clojure, Scheme/Racket,
   and Emacs Lisp buffers
 - Prescient-style literal/regexp/initialism filtering and persistent learned
@@ -129,7 +129,7 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 completion, completion-lifecycle, automatic-completion, Embark-style actions,
 editing, formatting, Orderless completion, snippets, LSP snippets, daily-workflows,
 electric-editing, UI parity, project navigation, persistence, retained undo/Vundo,
-project-scoped LSP lifecycle, LLM key dispatch, cursor/state parity, notes, and parity-ledger checks. The ledger can
+project-scoped LSP lifecycle, LLM key dispatch, cursor/state parity, evil-snipe parity, notes, and parity-ledger checks. The ledger can
 also be validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
@@ -145,6 +145,7 @@ nix run .#auto-completion-test
 nix run .#actions-test
 nix run .#llm-keybinding-test
 nix run .#cursor-state-test
+nix run .#snipe-test
 nix run .#orderless-completion-test
 nix run .#snippet-test
 nix run .#lsp-snippet-test
@@ -175,7 +176,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
 `daily-workflows`, `llm-keybinding`, `orderless-completion`, `snippets`, `lsp-snippets`,
-`lsp-project`, `project-navigation`, `persistence`, `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `interactive`, `structural`, or
+`lsp-project`, `project-navigation`, `persistence`, `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `interactive`, `structural`, or
 `notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

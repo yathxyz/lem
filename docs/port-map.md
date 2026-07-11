@@ -16,7 +16,7 @@ Status legend:
 | evil | lem-builtin+ported | `lem-vi-mode`, enabled in `src/vi.lisp`; `src/cursor-state.lisp` adds the configured normal/insert/Emacs colors, portable visual/replace shapes, and a buffer-local `C-z` Emacs state with ordinary Emacs region semantics |
 | evil-collection | lem-builtin | vi-mode's own mode integrations |
 | evil-surround | ported/partial | standard `ys`/`ds`/`cs`, visual `S`, common delimiter padding; tag prompts and syntax-aware balancing remain gaps (`src/vi.lisp`) |
-| evil-snipe | ported/partial | visible-scope `s`/`S`, repeat, and operator `z/Z/x/X`; incremental highlighting remains a gap (`src/vi.lisp`) |
+| evil-snipe | ported | configured 2.1.3 behavior: visible `s/S/f/F/t/T`, whole-visible `;`/`,` and transient pair repeats, exact inclusive/exclusive operators, counts/dot/jumplist behavior, leading-whitespace skipping, and incremental/final faces (`src/vi.lisp`, `scripts/snipe-test.sh`) |
 | evil-nerd-commenter | ported | `g c` operator (`src/vi.lisp`) |
 | evil-org | partial | no Org major mode; shared-file workflows and `SPC m I` heading IDs work in plain buffers |
 | general (SPC leader) | ported/partial | normal and visual states share one described Space-leader keymap with exact binding verification and delayed continuation help; remaining capability gaps are listed in `docs/vi-parity.md` |

@@ -14,7 +14,7 @@ configuration does not override it.
 | Native operators | `d/c/y`, doubled `dd/cc/yy`, visual operators, counts, text objects, and dot-repeat survive the surround dispatch layer | interactive checks 8, 9, and 12–14 |
 | Whole-line yank | `Y` yanks the current line, matching configured Evil and `yy` even when the cursor is mid-line | interactive check 22 |
 | evil-surround | `ys{motion}`, `ds{char}`, `cs{old}{new}`, visual `S`; padded `(`/`[`/`{` and compact closing-delimiter variants | interactive check 10 |
-| evil-snipe | `s/S`, immediate repeat, visible-window scope, operator `z/Z` inclusive and `x/X` exclusive, `;`/`,` repeat fallback | interactive checks 5 and 15 |
+| evil-snipe 2.1.3 | Case-sensitive `s/S/f/F/t/T`, counts, visible initial scope, whole-visible repeats, persistent `;`/`,`, lower/upper transient pairs, operator `z/Z/x/X`, leading-whitespace skipping, incremental/final highlighting, cancellation, dot-repeat, and jumplist semantics | `snipe-test.sh`; interactive checks 5 and 15 |
 | evil-nerd-commenter | `gc{motion}` and visual `gc` | interactive check 4 |
 | Insert controls | `C-u` deletes back to indentation, `M-Backspace` deletes a word, `C-n/C-p` retain ordinary line movement, `C-c i` sends text through point to the LLM; the same chord sends a Vi selection from VISUAL | interactive checks 16 and 20 plus `llm-keybinding-test.sh` |
 | Cursor and Emacs state | `NORMAL` is a red box, `INSERT` a green bar, visual a default-color box, and replace a default-color underline; `C-z` enters a cyan, buffer-local `EMACS` state with ordinary Emacs movement and mark/copy semantics, then returns to the prior state | `cursor-state-test.sh` |
@@ -42,7 +42,6 @@ These bindings are intentionally not mapped to unrelated commands:
 | Full Embark workflow | The dispatcher has typed, extensible providers and a focused action set, but visual-block selection is not a region target, and there is no target cycling, act-all, collect/export/live views, arbitrary Embark action-map composition, or richer embark-consult adapters. |
 | Avy leader jumps | `SPC l/a/s` use goto-line, snipe, and symbol search; they do not render Avy labels over every visible target. |
 | Full expreg syntax awareness | Incremental expansion is present, but it uses delimiters and text boundaries rather than a parser-backed syntax tree. |
-| evil-snipe highlighting | Motions, scope, repeat, and operator behavior are present; incremental candidate highlighting is not. |
 | Full evil-surround grammar | Common delimiters and padding are present; tag prompts and syntax-aware balanced matching are not. |
 | Workwin cursor geometry | The active terminal profile colors match, but ncurses cannot reproduce the optional graphical profile's two-pixel bar width or hollow visual cursor. |
 | evil-org / all evil-collection integrations | Lem has no Org major mode and does not contain integrations for every Emacs mode. Org file workflows and heading IDs still operate on the shared files. |
