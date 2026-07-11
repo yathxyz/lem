@@ -56,7 +56,10 @@
   "Region if a mark is active, else the buffer up to point (gptel's rule)."
   (let ((buffer (current-buffer)))
     (if (buffer-mark-p buffer)
-        (points-to-string (region-beginning buffer) (region-end buffer))
+        (let ((global-mode (current-global-mode)))
+          (points-to-string
+           (region-beginning-using-global-mode global-mode buffer)
+           (region-end-using-global-mode global-mode buffer)))
         (points-to-string (buffer-start-point buffer) (current-point)))))
 
 (defun llm-output-buffer ()
@@ -107,7 +110,8 @@
 (define-command lem-yath-llm-send () ()
   "Send region (or buffer up to point) to the LLM, streaming the reply
 (gptel-send)."
-  (let ((text (string-trim '(#\Space #\Tab #\Newline) (llm-source-text))))
+  (let ((text (string-trim '(#\Space #\Tab #\Newline #\Return)
+                           (llm-source-text))))
     (if (zerop (length text))
         (message "Nothing to send")
         (llm-backend-stream *llm-backend* text))))

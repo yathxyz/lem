@@ -51,6 +51,9 @@ case "$test_name" in
   actions)
     remote_command='nix run path:$PWD#actions-test'
     ;;
+  llm-keybinding)
+    remote_command='nix run path:$PWD#llm-keybinding-test'
+    ;;
   orderless-completion)
     remote_command='nix run path:$PWD#orderless-completion-test'
     ;;
@@ -94,7 +97,7 @@ case "$test_name" in
     remote_command='nix run path:$PWD#ui-parity-test'
     ;;
   *)
-    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|actions|orderless-completion|snippets|lsp-snippets|lsp-project|project-navigation|prompt-completion|daily-workflows|electric-editing|ui-parity|interactive|structural|notes|editing]" >&2
+    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|orderless-completion|snippets|lsp-snippets|lsp-project|project-navigation|prompt-completion|daily-workflows|electric-editing|ui-parity|interactive|structural|notes|editing]" >&2
     exit 2
     ;;
 esac

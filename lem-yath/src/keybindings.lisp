@@ -235,8 +235,10 @@
 
 ;;; --- non-leader bindings ----------------------------------------------------
 
-;; insert state: C-c i sends to the LLM (gptel-send from insert state)
+;; Lem enters VISUAL as soon as a Vi buffer gains an active mark, so keep the
+;; same chord available there for gptel-send's selected-region path.
 (define-key lem-vi-mode:*insert-keymap* "C-c i" 'lem-yath-llm-send)
+(define-key lem-vi-mode:*visual-keymap* "C-c i" 'lem-yath-llm-send)
 (define-key lem-vi-mode:*insert-keymap* "C-u" 'lem-yath-delete-back-to-indentation)
 (define-key lem-vi-mode:*insert-keymap* "M-Backspace"
   'lem-yath-structural-kill-last-word)

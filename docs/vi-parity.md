@@ -16,7 +16,7 @@ configuration does not override it.
 | evil-surround | `ys{motion}`, `ds{char}`, `cs{old}{new}`, visual `S`; padded `(`/`[`/`{` and compact closing-delimiter variants | interactive check 10 |
 | evil-snipe | `s/S`, immediate repeat, visible-window scope, operator `z/Z` inclusive and `x/X` exclusive, `;`/`,` repeat fallback | interactive checks 5 and 15 |
 | evil-nerd-commenter | `gc{motion}` and visual `gc` | interactive check 4 |
-| Insert controls | `C-u` deletes back to indentation, `M-Backspace` deletes a word, `C-n/C-p` retain ordinary line movement, `C-c i` sends to the LLM | interactive checks 16 and 20 plus boot/load checks |
+| Insert controls | `C-u` deletes back to indentation, `M-Backspace` deletes a word, `C-n/C-p` retain ordinary line movement, `C-c i` sends text through point to the LLM; the same chord sends a Vi selection from VISUAL | interactive checks 16 and 20 plus `llm-keybinding-test.sh` |
 | Editing leader commands | Org ID creation, auto fill, visual-line wrapping, paragraph filling, variable help | interactive checks 17–19 plus exact leader-map check |
 | Region expansion | Repeated `SPC v` expands through word, nearest delimiter, line, and paragraph | interactive check 21 |
 | Lispy/Lispyville structural editing | Paredit smart insertion plus safe Vim operators, `W/E/B` atom motions, `>/<` slurp/barf, all configured additional and additional-insert transforms, comments/strings, and Lisp-family delimiters | `structural-test.sh` |
