@@ -13,6 +13,7 @@
                (:file "base")
                (:file "workspace")
                (:file "editing")
+               (:file "cursor-state")
                (:file "vi")
                (:file "structural")
                (:file "electric-pair")

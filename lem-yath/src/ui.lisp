@@ -62,7 +62,12 @@
 ;; tab-bar-mode equivalent (tmux-like frame tabs). Enabling is idempotent on
 ;; reload and runs immediately for the flake's post-init --eval load path.
 (defun enable-lem-yath-frame-multiplexer ()
-  (ignore-errors
+  (let* ((package (find-package :lem/frame-multiplexer))
+         (keymap-symbol (and package (find-symbol "*KEYMAP*" package))))
+    (unless (and keymap-symbol (boundp keymap-symbol))
+      (error "The pinned frame-multiplexer keymap is unavailable"))
+    ;; C-z is Evil's state toggle.  C-x t is Emacs' native tab-bar prefix.
+    (define-key *global-keymap* "C-x t" (symbol-value keymap-symbol))
     (uiop:symbol-call :lem/frame-multiplexer :enable-frame-multiplexer)))
 
 (initialize-editor-feature 'enable-lem-yath-frame-multiplexer)

@@ -96,8 +96,11 @@ case "$test_name" in
   ui-parity)
     remote_command='nix run path:$PWD#ui-parity-test'
     ;;
+  cursor-state)
+    remote_command='nix run path:$PWD#cursor-state-test'
+    ;;
   *)
-    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|orderless-completion|snippets|lsp-snippets|lsp-project|project-navigation|prompt-completion|daily-workflows|electric-editing|ui-parity|interactive|structural|notes|editing]" >&2
+    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|orderless-completion|snippets|lsp-snippets|lsp-project|project-navigation|prompt-completion|daily-workflows|electric-editing|ui-parity|cursor-state|interactive|structural|notes|editing]" >&2
     exit 2
     ;;
 esac

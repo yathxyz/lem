@@ -202,7 +202,11 @@ alias** that warns and points to `*normal-keymap*` (`states.lisp:55-58`).
 
 States (`define-state`, `core.lisp:119`): `normal`, `insert`, `replace-state`,
 `operator`, `replace-char-state`, `vi-modeline` (the `:` COMMAND state), `visual`.
-Each carries cursor type + modeline color.
+Each carries cursor type, optional cursor color, and modeline color. The ncurses
+frontend turns `:box`, `:bar`, and `:underline` into DECSCUSR terminal controls.
+Changing the shared cursor attribute alone does not invalidate a stationary
+cursor cell's drawing cache, so lem-yath marks the focused window dirty on an
+ordinary Vi state change before the normal post-command redraw.
 
 ### Defining bindings per state — README + `states.lisp`
 ```lisp
@@ -1092,7 +1096,9 @@ default.
 - **Frame multiplexer = tab bar** (`src/ext/frame-multiplexer.lisp`,
   `lem/frame-multiplexer`): `frame-multiplexer-mode` toggles a tmux-like tabbed frame;
   `frame-multiplexer-next/prev/switch-0..9/create`. Lem-yath enables it idempotently for
-  both ordinary init and post-init `--eval` loading. There is also `src/tabbar-config.lisp`.
+  both ordinary init and post-init `--eval` loading. Upstream's global `C-z` prefix stays
+  installed, while state-local Evil-compatible `C-z` takes precedence in Vi buffers;
+  `C-x t` is the reachable tab/frame prefix. There is also `src/tabbar-config.lisp`.
 - Window splits/commands: `split-active-window-vertically`/`-horizontally`,
   `delete-other-windows` (`C-x 1`), `other-window`/`next-window` (`C-x o`),
   `delete-active-window` (`C-x 0`) — `src/commands/window.lisp`. Floating windows

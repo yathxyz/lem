@@ -231,6 +231,7 @@
             vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
+            cursor-state-test = mkTestApp "lem-yath-cursor-state-test" "cursor-state-test.sh";
             lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
           };
 
@@ -256,6 +257,7 @@
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";
+            cursor-state = mkCheck "cursor-state" "cursor-state-test.sh";
             lsp-project = mkCheckWithLem lemLspTest "lsp-project" "lsp-project-test.sh";
             parity-ledger =
               pkgs.runCommand "lem-yath-parity-ledger-check" { nativeBuildInputs = [ pkgs.python3 ]; }

@@ -17,6 +17,7 @@ configuration does not override it.
 | evil-snipe | `s/S`, immediate repeat, visible-window scope, operator `z/Z` inclusive and `x/X` exclusive, `;`/`,` repeat fallback | interactive checks 5 and 15 |
 | evil-nerd-commenter | `gc{motion}` and visual `gc` | interactive check 4 |
 | Insert controls | `C-u` deletes back to indentation, `M-Backspace` deletes a word, `C-n/C-p` retain ordinary line movement, `C-c i` sends text through point to the LLM; the same chord sends a Vi selection from VISUAL | interactive checks 16 and 20 plus `llm-keybinding-test.sh` |
+| Cursor and Emacs state | `NORMAL` is a red box, `INSERT` a green bar, visual a default-color box, and replace a default-color underline; `C-z` enters a cyan, buffer-local `EMACS` state with ordinary Emacs movement and mark/copy semantics, then returns to the prior state | `cursor-state-test.sh` |
 | Editing leader commands | Org ID creation, auto fill, visual-line wrapping, paragraph filling, variable help | interactive checks 17–19 plus exact leader-map check |
 | Region expansion | Repeated `SPC v` expands through word, nearest delimiter, line, and paragraph | interactive check 21 |
 | Lispy/Lispyville structural editing | Paredit smart insertion plus safe Vim operators, `W/E/B` atom motions, `>/<` slurp/barf, all configured additional and additional-insert transforms, comments/strings, and Lisp-family delimiters | `structural-test.sh` |
@@ -43,6 +44,7 @@ These bindings are intentionally not mapped to unrelated commands:
 | Full expreg syntax awareness | Incremental expansion is present, but it uses delimiters and text boundaries rather than a parser-backed syntax tree. |
 | evil-snipe highlighting | Motions, scope, repeat, and operator behavior are present; incremental candidate highlighting is not. |
 | Full evil-surround grammar | Common delimiters and padding are present; tag prompts and syntax-aware balanced matching are not. |
+| Workwin cursor geometry | The active terminal profile colors match, but ncurses cannot reproduce the optional graphical profile's two-pixel bar width or hollow visual cursor. |
 | evil-org / all evil-collection integrations | Lem has no Org major mode and does not contain integrations for every Emacs mode. Org file workflows and heading IDs still operate on the shared files. |
 
 These are implementation gaps, not untested claims. Closing one requires adding
