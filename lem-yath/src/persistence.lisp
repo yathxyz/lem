@@ -1248,13 +1248,28 @@
         (progn
           (set-buffer-file-state buffer path signature)
           (record-buffer-place buffer))
-        (progn
-          (setf (buffer-value buffer 'lem-yath-file-state-signature)
-                (list :unknown))
-          (report-buffer-file-conflict
-           buffer (list :post-save-mismatch)
-           "~a changed while being saved; keeping the buffer modified")
-          (editor-error "Saved file no longer matches the live buffer")))))
+        (let ((disk-signature
+                (and path
+                     (file-state-signature
+                      path :digest t :full-digest t))))
+          (if (and (buffer-modified-p buffer)
+                   disk-signature
+                   (eq (first disk-signature) :present))
+              ;; An after-save hook may legitimately create a new dirty
+              ;; descendant after the exact saved node.  Track the stable
+              ;; bytes on disk without pretending the live descendant was
+              ;; saved or flagging it as an external race.
+              (progn
+                (set-buffer-file-state buffer path disk-signature)
+                (record-buffer-place buffer))
+              (progn
+                (setf (buffer-value buffer 'lem-yath-file-state-signature)
+                      (list :unknown))
+                (report-buffer-file-conflict
+                 buffer (list :post-save-mismatch)
+                 "~a changed while being saved; keeping the buffer modified")
+                (editor-error
+                 "Saved file no longer matches the live buffer")))))))
 
 (defun persistence-after-sync-hook (buffer)
   "Refresh tracking after any core/LSP caller synchronizes from disk."

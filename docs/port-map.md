@@ -84,7 +84,7 @@ Status legend:
 | transient | lem-builtin | `lem/transient` |
 | multiple-cursors | lem-builtin | core multi-cursors (`M-C`, isearch add-cursor); Emacs config only used it internally |
 | expreg | ported/partial | repeated `SPC v` expands word → delimiters → line → paragraph; no parser-backed syntax expansion |
-| vundo | gap | `SPC u` is unbound and Lem discards redo branches on the first post-undo edit; a retained core undo tree must precede a truthful Unicode vundo UI |
+| vundo | ported/partial | `SPC u` opens a three-row Unicode retained tree with live preview, branch/stem/saved-node navigation, mark/diff, save, rollback, and accept (`src/vundo.lisp`, `patches/lem-undo-tree.patch`, `scripts/vundo-test.sh`); numeric prefixes and debug keys `i`/`D` are absent |
 | pulsar | n/a | jump recentering is default behavior |
 | indent-bars | gap | no indent guides in ncurses frontend |
 | rainbow-delimiters | partial | paren coloring in lisp-mode; show-paren elsewhere |
@@ -123,6 +123,13 @@ Status legend:
 - **org files** open as plain text; the workflows (capture/dailies/journal/agenda)
   operate on the same files but there is no org folding/links/tables UI.
 - **Completion previews**: no consult-style live preview while cycling candidates.
+- **Undo accounting**: the configured 2,080,000 / 3,120,000 / 48,000,000
+  Vundo budgets are applied to copied UTF-8 edit payload, not Emacs heap usage.
+  Lem additionally caps retained history at 65,536 nodes, 262,144 edits, and
+  128 MiB of UTF-8 route-validation work. Retained nodes do not store
+  historical point values, so preview point is replay-derived. Vundo movement has no numeric-prefix
+  variants or `i`/`D` debug commands, and speculative rectangle/Copilot-style
+  transactions are retained because Lem has no discard-transaction API.
 - **Embark scope**: completion uses `C-c a` because the ncurses input path cannot
   represent `C-.` distinctly. The typed dispatcher does not yet provide target
   cycling, act-all, collect/export/live views, arbitrary Embark action-map

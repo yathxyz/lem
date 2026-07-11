@@ -704,9 +704,15 @@ lem_stop "$quit_guard_session"
 large_file="$LEM_YATH_PERSISTENCE_TEST_ROOT/large-stale.txt"
 large_expected="$root/large-stale.expected"
 large_stamp="$root/large-stale.timestamp"
-large_size=$((17 * 1024 * 1024))
-LC_ALL=C head -c "$large_size" /dev/zero | tr '\0' A >"$large_file"
-LC_ALL=C head -c "$large_size" /dev/zero | tr '\0' B >"$large_expected"
+large_payload_size=$((17 * 1024 * 1024))
+# The safety contract depends on total bytes, not one pathological 17 MiB
+# logical line.  Short lines keep ncurses prompt redraws out of this digest
+# regression while retaining an ASCII file comfortably above the 16 MiB cap.
+LC_ALL=C head -c "$large_payload_size" /dev/zero | tr '\0' A | \
+  fold -w 4095 >"$large_file"
+LC_ALL=C head -c "$large_payload_size" /dev/zero | tr '\0' B | \
+  fold -w 4095 >"$large_expected"
+large_size=$(wc -c <"$large_file")
 touch -r "$large_file" "$large_stamp"
 large_session="lem-yath-persistence-large-$id"
 if start_phase "$large_session" large "$large_file" &&

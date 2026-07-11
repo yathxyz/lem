@@ -43,4 +43,5 @@
                              (:file "timemachine")
                              (:file "llm-cli")))
                (:file "persistence")
+               (:file "vundo")
                (:file "keybindings")))

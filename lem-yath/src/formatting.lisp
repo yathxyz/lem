@@ -595,6 +595,10 @@ text and buffer and returns formatted text."
                (editorconfig-normalize-buffer buffer)
                (lem/buffer/file:write-to-file-without-write-hook
                 buffer (buffer-filename buffer))
+               ;; This second write is the exact formatted state on disk.
+               ;; Core marks the initial pre-hook write before after-save
+               ;; hooks, so establish the formatter-produced saved node here.
+               (buffer-mark-saved buffer)
                (lem/buffer/file:update-changed-disk-date buffer))
            (error (condition)
              (message "Format-on-save failed: ~a" condition)))

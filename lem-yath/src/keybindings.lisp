@@ -116,6 +116,7 @@
   ("b f" 'lem-yath-format-buffer "format buffer")         ; SPC b f
   ("b m" 'lem-bookmark::bookmark-set "set bookmark")      ; SPC b m
   ("Return" 'lem-bookmark::bookmark-jump "jump bookmark") ; SPC RET
+  ("u" 'lem-yath-vundo "visual undo tree")                 ; SPC u
 
   ;; project (project.el / consult)
   ("p f" 'lem-yath-project-find-file "find project file") ; SPC p f

@@ -662,6 +662,53 @@ notifications, directory-buffer save-place, and registered adapters for Lem's
 non-file list buffers remain gaps; the module exposes a buffer-local stale/revert
 adapter contract for later use.
 
+### Retained undo tree and Vundo — `patches/lem-undo-tree.patch`, `lem-yath/src/vundo.lisp` (verified approximation)
+
+The pinned-core patch replaces destructive linear redo history with a retained
+branching tree. Ordinary `u` and `C-r` still work, but a new edit after undo now
+creates another branch and records the branch most recently traversed as the
+preferred redo path. The public snapshot and movement API uses generation-tagged
+opaque node references, validates the complete route before replay, preserves
+read-only state, and fails closed to a truthful dirty root if a mutating hook
+invalidates the replay. Reload deliberately reroots history. Save identity,
+generic clean state, and the monotonic mutation tick are tracked separately so
+no-op edits, external reloads, saved-node navigation, and stale references do
+not silently corrupt the graph.
+
+The configured Emacs limits of 2,080,000 / 3,120,000 / 48,000,000 are retained,
+but measure copied UTF-8 edit payload rather than Emacs heap allocation. Lem also
+bounds history at 65,536 nodes and 262,144 edits and caps one validated movement
+route at 128 MiB of UTF-8 work. Every ordinary undo/redo and Vundo preview
+preflights its required return route before changing the live buffer. Pruning
+keeps the current and newly protected command reachable while removing old
+leaves; a pruned clean or saved node is cleared, and the latest surviving actual
+save is recomputed.
+
+Normal- and visual-state `SPC u` open a three-row Unicode tree in a bottom pane.
+The source buffer previews the selected node live; `f`/Right and `b`/Left move
+to a child and parent, `n`/Down and `p`/Up move among siblings, `a`/`w`/`e`
+traverse stems, and `l`/`r` follow Vundo's saved-node chronology across branches.
+`m`/`u`/`d`, `C-x C-s`, `q`/`C-g`, and Return cover marking/diffing, saving,
+rollback, and acceptance. A displaced bottom pane survives both delayed leader
+help and Vundo with its geometry, point, view, cursor, and horizontal scroll.
+Diff inputs are exclusively created mode-0600 files, invoked through an argv
+list under a timeout, size-capped, and removed on every exit path.
+
+Unlike Emacs' undo entries, retained Lem nodes do not store a historical point
+for each node. Preview point is therefore derived from replayed edit positions;
+`q` restores the exact entry point and view, while Return deliberately keeps the
+preview-derived location.
+
+`scripts/vundo-test.sh` exercises the real ncurses editor, including branch
+retention and preferred redo, all public movement families, Unicode rendering,
+distant point/view restoration, clean versus saved nodes, diff cleanup, save,
+reload, killed windows and buffers, wide-tree pruning, mutating hooks,
+stale-reference rejection, asymmetric route refusal, after-save descendants,
+direct and re-entrant teardown, prior bottom panes, and read-only failures.
+Vundo numeric prefixes and debug keys `i`/`D` are not implemented.
+Rectangle/Copilot-style speculative transactions remain in history because Lem
+has no discard-transaction API.
+
 - Find by name: `M-s f` (`lem-yath/src/find-name.lisp`) prompts for a root and
   wildcard, runs GNU find asynchronously with a NUL-delimited argv-safe protocol,
   and fills a persistent read-only `*Find*` buffer. Exact path properties make

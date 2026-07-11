@@ -82,6 +82,10 @@ of writing `.fasl` files into the source tree.
   for dirty buffers, and private cross-process persistence for file positions,
   reviewed non-secret prompt histories, Vi-aware kills, and separate literal and
   regexp search rings
+- retained branching undo with the configured raised payload budgets and a
+  three-row Unicode Vundo UI on `SPC u`; live previews support branch, stem,
+  saved-node, mark/diff, save, rollback, and accept workflows while ordinary
+  `u`/`C-r` continue along the selected branch
 - global syntax-aware delimiter/quote pairing and self-insert selection
   replacement, including region wrapping without taking keys away from Paredit or Vi
 - official-CLI EditorConfig resolution for steady-state local file buffers,
@@ -121,8 +125,9 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 `nix flake check` runs the package, compile, boot, prompt and in-buffer
 completion, completion-lifecycle, automatic-completion, Embark-style actions,
 editing, formatting, Orderless completion, snippets, LSP snippets, daily-workflows,
-electric-editing, UI parity, project navigation, persistence, project-scoped LSP lifecycle, notes, and
-parity-ledger checks. The ledger can also be validated directly, and the
+electric-editing, UI parity, project navigation, persistence, retained undo/Vundo,
+project-scoped LSP lifecycle, notes, and parity-ledger checks. The ledger can
+also be validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
 ```sh
@@ -141,6 +146,7 @@ nix run .#lsp-snippet-test
 nix run .#lsp-project-test
 nix run .#project-navigation-test
 nix run .#persistence-test
+nix run .#vundo-test
 nix run .#editing-test
 nix run .#formatting-test
 nix run .#daily-workflows-test
@@ -164,7 +170,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
 `daily-workflows`, `orderless-completion`, `snippets`, `lsp-snippets`,
-`lsp-project`, `project-navigation`, `persistence`, `electric-editing`, `ui-parity`, `interactive`, `structural`, or
+`lsp-project`, `project-navigation`, `persistence`, `vundo`, `electric-editing`, `ui-parity`, `interactive`, `structural`, or
 `notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

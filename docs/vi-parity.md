@@ -20,6 +20,7 @@ configuration does not override it.
 | Editing leader commands | Org ID creation, auto fill, visual-line wrapping, paragraph filling, variable help | interactive checks 17–19 plus exact leader-map check |
 | Region expansion | Repeated `SPC v` expands through word, nearest delimiter, line, and paragraph | interactive check 21 |
 | Lispy/Lispyville structural editing | Paredit smart insertion plus safe Vim operators, `W/E/B` atom motions, `>/<` slurp/barf, all configured additional and additional-insert transforms, comments/strings, and Lisp-family delimiters | `structural-test.sh` |
+| Retained undo / Vundo | Ordinary `u`/`C-r` retain abandoned branches; normal and visual `SPC u` open a Unicode three-row tree with live preview, arrows and `f/b/n/p`, `a/w/e`, cross-branch `l/r`, `m/u/d`, `C-x C-s`, rollback, and accept | `vundo-test.sh` |
 | Embark-style actions | `SPC e a` in normal and visual states opens the same one-key action dispatcher; an active forward or reverse visual region takes precedence over point targets, and copying it leaves the buffer unchanged | `actions-test.sh` |
 
 Run the complete gate away from the laptop with:
@@ -38,7 +39,6 @@ These bindings are intentionally not mapped to unrelated commands:
 | `evil-respect-visual-line-mode` | `SPC y v` toggles wrapping, but `j/k` retain Vim logical-line movement instead of changing to display-line movement while wrapping is active. |
 | Completion-local `C-.` | The ncurses input path cannot represent this key distinctly, so the completion popup uses `C-c a` for its action menu. |
 | Full Embark workflow | The dispatcher has typed, extensible providers and a focused action set, but visual-block selection is not a region target, and there is no target cycling, act-all, collect/export/live views, arbitrary Embark action-map composition, or richer embark-consult adapters. |
-| `SPC u` (`vundo`) | Lem provides linear undo/redo, not an undo tree or visualizer. |
 | Avy leader jumps | `SPC l/a/s` use goto-line, snipe, and symbol search; they do not render Avy labels over every visible target. |
 | Full expreg syntax awareness | Incremental expansion is present, but it uses delimiters and text boundaries rather than a parser-backed syntax tree. |
 | evil-snipe highlighting | Motions, scope, repeat, and operator behavior are present; incremental candidate highlighting is not. |

@@ -31,9 +31,11 @@
             patches = [
               ./patches/lem-completion-lifecycle.patch
               ./patches/lem-transient-delay-race.patch
+              ./patches/lem-transient-bottom-restore.patch
               ./patches/lem-project-lsp-workspaces.patch
               ./patches/lem-safe-revert.patch
               ./patches/lem-prompt-history-limit.patch
+              ./patches/lem-undo-tree.patch
             ];
           };
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (
@@ -225,6 +227,7 @@
             persistence-test = mkTestApp "lem-yath-persistence-test" "persistence-test.sh";
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
             ui-parity-test = mkTestApp "lem-yath-ui-parity-test" "ui-parity-test.sh";
+            vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
           };
@@ -248,6 +251,7 @@
             persistence = mkCheck "persistence" "persistence-test.sh";
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";
             ui-parity = mkCheck "ui-parity" "ui-parity-test.sh";
+            vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
             lsp-project = mkCheckWithLem lemLspTest "lsp-project" "lsp-project-test.sh";
             parity-ledger =
