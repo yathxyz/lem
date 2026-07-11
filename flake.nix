@@ -85,14 +85,21 @@
           coreRuntimeInputs =
             with pkgs;
             [
+              black
+              clang-tools
               coreutils
               curl
+              diffutils
+              editorconfig-core-c
               fd
               findutils
               gitMinimal
+              go
               gnugrep
               gnused
+              nixfmt-rfc-style
               ripgrep
+              rustfmt
               which
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [ xdg-utils ];
@@ -207,6 +214,7 @@
             structural-test = mkTestApp "lem-yath-structural-test" "structural-test.sh";
             notes-test = mkTestApp "lem-yath-notes-test" "notes-test.sh";
             editing-test = mkTestApp "lem-yath-editing-test" "editing-test.sh";
+            formatting-test = mkTestApp "lem-yath-formatting-test" "formatting-test.sh";
             prompt-completion-test = mkTestApp "lem-yath-prompt-completion-test" "prompt-completion-test.sh";
             daily-workflows-test = mkTestApp "lem-yath-daily-workflows-test" "daily-workflows-test.sh";
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
@@ -227,6 +235,7 @@
             lsp-snippets = mkCheck "lsp-snippets" "lsp-snippet-test.sh";
             notes = mkCheck "notes" "notes-test.sh";
             editing = mkCheck "editing" "editing-test.sh";
+            formatting = mkCheck "formatting" "formatting-test.sh";
             prompt-completion = mkCheck "prompt-completion" "prompt-completion-test.sh";
             daily-workflows = mkCheck "daily-workflows" "daily-workflows-test.sh";
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";

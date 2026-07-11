@@ -33,7 +33,7 @@ Status legend:
 | wgrep | lem-builtin | grep results are editable & write back (better than default Emacs) |
 | eglot + eglot-booster | lem-builtin+ported | `lem-lsp-mode`; booster n/a (native client); ordinary local-file workspaces are isolated by stable server identity + canonical root, pending starts deduplicate and time out, save-as/mode changes rebind explicit ownership, restart/shutdown is project-scoped and graceful, and server cwd/init options are frozen to the project; Lem's Lisp-v2 self/manual connections deliberately retain global connection switching; `insertTextFormat=Snippet` uses the data-only field engine with dynamic capability advertising, and accepted items support bounded lazy resolve plus direct/resolved `additionalTextEdits`; resolved documentation/detail and completion commands remain gaps |
 | flycheck (+rust) | partial | LSP diagnostics overlays; no non-LSP linter framework |
-| apheleia | partial | `SPC b f` → LSP format (`src/ide.lisp`); configured format-on-save behavior is absent |
+| apheleia | ported/partial | `SPC b f` formats unsaved buffer text through a mapped CLI/in-process backend, with ready LSP fallback only when manual formatting has no usable mapped backend; mapped programming modes with an available, successful backend also format synchronously after the first save and are silently rewritten before LSP `didSave` (`src/formatting.lisp`, `scripts/formatting-test.sh`). The registry is broad but finite, and async formatting, formatter prompts, and Apheleia-style per-project backend overrides are absent |
 | dape (DAP debugging) | gap | Lem has no DAP client |
 | treesit-auto / tree-sitter-langs / tsc / grammars | partial | `lem-tree-sitter` + 10 grammars baked in; modes default to TextMate highlighting (manual opt-in API) |
 | nix-mode | lem-builtin+ported | `lem-nix-mode` + **nixd** spec incl. flake options/formatter (`src/ide.lisp`) |
@@ -92,11 +92,12 @@ Status legend:
 | dirvish | lem-builtin | `directory-mode` + filer |
 | find-name-dired (built-in) | ported/partial | `M-s f` asynchronously fills a persistent, read-only `*Find*` buffer with safely escaped rows backed by exact paths (`src/find-name.lisp`); Dired marking, long columns, file operations, and process cancellation remain gaps |
 | electric-pair-mode / delete-selection-mode (built-ins) | ported/partial | syntax-table delimiter/quote pairing, local balance reuse/skip, numeric prefixes, ordinary region replacement, and Emacs-style opener/quote region wrapping; an unmatched embedded quote is escaped to keep the Lisp string valid instead of reproducing Lispy's raw interior quote, while full forward balance scanning, global paired Backspace, and zero-result prompt recovery remain gaps (`src/electric-pair.lisp`, `scripts/electric-editing-test.sh`) |
-| ws-butler | ported | track changed programming-buffer lines and trim only those lines on save (`src/editing.lisp`) |
+| ws-butler | ported | track changed programming-buffer lines and trim only those lines on save (`src/editing.lisp`); EditorConfig `trim_trailing_whitespace=true` additionally normalizes the whole buffer, while false/absent retains touched-line cleanup |
 | ibuffer | lem-builtin/partial | `list-buffers` (`C-x C-b`) provides Buffer/File columns, fuzzy narrowing, and Return-to-open; the configured org/tramp/emacs/ediff/dired/terminal/help saved groups are absent |
 | bookmarks (built-in) | lem-builtin | `lem-bookmark`, `SPC b m` / `SPC RET` |
 | avy | partial | `SPC l` goto-line, `SPC a` snipe, `SPC s` isearch-symbol |
-| gcmh / no-littering / use-package / direnv / sops / editorconfig | n/a or gap | SBCL image needs no GC hacks; no-littering n/a; **direnv/sops/editorconfig: gap** |
+| gcmh / no-littering / use-package / direnv / sops | n/a or gap | SBCL image needs no GC hacks; no-littering/use-package n/a; **direnv/sops: gap** |
+| editorconfig | ported/partial | the official CLI resolves hierarchy/inheritance for every steady-state local file buffer; Lem maps indentation, line endings, write charset, fill column, trailing whitespace, and final-newline policy (`src/editorconfig.lisp`, `scripts/formatting-test.sh`). Charset is applied only to subsequent writes, not initial decoding |
 | auto-revert / savehist / save-place / recentf (built-ins) | partial | recentf is ported as a persistent, deduplicated 300-file MRU on `M-g r`; global auto-revert, save-place, and the expanded savehist variables remain gaps |
 | doom-themes | n/a | Emacs config loaded no theme; Lem default kept (185 base16 themes available) |
 | notmuch-outlook / business-visual profile / nodes-org-sync | gap | host-gated bespoke integrations, out of scope |
@@ -105,7 +106,20 @@ Status legend:
 
 - **Surround grammar**: standard `ys`/`ds`/`cs` and visual `S` work, including
   common padded delimiters, but tag prompts and syntax-aware balancing do not.
-- **Format-on-save** is manual (`SPC b f`), not automatic.
+- **Formatting lifecycle**: mapped programming modes with an available,
+  successful backend format synchronously after the ordinary save, then receive
+  a silent second write before LSP `didSave`.
+  External commands use stdin and direct argument vectors under a timeout. CLI
+  launch, timeout, nonzero-exit, and output-limit failures occur before buffer
+  mutation, leave the first save intact, and do not fall back to LSP; diff
+  application itself has no transactional rollback. LSP fallback is manual-only
+  when no mapped backend is usable. There is no async worker, formatter prompt,
+  or Apheleia-style per-project backend table.
+- **EditorConfig scope**: matching is delegated to the official CLI, but Lem
+  maps only the documented core properties. A charset rule cannot re-decode an
+  already opened file and affects later writes only; UTF-16BE/LE writes do not
+  add a BOM. `trim_trailing_whitespace=false` does not disable ws-butler's
+  touched-line policy. Direnv remains a separate, unimplemented integration.
 - **org files** open as plain text; the workflows (capture/dailies/journal/agenda)
   operate on the same files but there is no org folding/links/tables UI.
 - **Completion previews**: no consult-style live preview while cycling candidates.

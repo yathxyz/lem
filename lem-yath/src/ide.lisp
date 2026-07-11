@@ -86,13 +86,6 @@
                      (list "options" (apply #'lem-lsp-base/type:make-lsp-map
                                             options)))))))
 
-;;; --- format buffer (apheleia's SPC b f) ------------------------------------
-
-(define-command lem-yath-format-buffer () ()
-  "Format the current buffer via its LSP server (apheleia equivalent)."
-  (handler-case (uiop:symbol-call :lem-lsp-mode :lsp-document-format)
-    (error (e) (message "Format failed: ~a" e))))
-
 ;;; --- workspace symbols (consult-eglot-symbols / SPC p s) ------------------
 
 (defparameter *workspace-symbol-timeout* 10

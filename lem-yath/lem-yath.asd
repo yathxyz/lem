@@ -23,6 +23,8 @@
                (:file "snippets")
                (:file "lsp-snippets")
                (:file "ide")
+               (:file "editorconfig")
+               (:file "formatting")
                (:file "git")
                (:file "notes")
                (:file "find-name")

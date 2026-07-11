@@ -76,6 +76,17 @@ of writing `.fasl` files into the source tree.
   `M-s f` name search with property-backed Return and persistent q/revisit behavior
 - global syntax-aware delimiter/quote pairing and self-insert selection
   replacement, including region wrapping without taking keys away from Paredit or Vi
+- official-CLI EditorConfig resolution for steady-state local file buffers,
+  including indentation, line endings, write charset, fill column, whitespace,
+  and final-newline policy; charset changes affect subsequent writes, and
+  `trim_trailing_whitespace=false` or an absent property leaves ws-butler's
+  touched-line cleanup in place
+- synchronous, CLI-first Apheleia-style formatting for a finite set of
+  programming modes: `SPC b f` formats without saving, while normal saves run a
+  mapped formatter, when available and successful, before LSP observes the
+  final buffer; commands use direct argument vectors with a timeout, and only
+  manual formatting can fall back to a ready LSP formatter when no mapped
+  backend is available
 - relative line numbers in programming buffers only, matching the Emacs
   `prog-mode` scope while leaving prose and utility buffers clean
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
@@ -101,7 +112,7 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 
 `nix flake check` runs the package, compile, boot, prompt and in-buffer
 completion, completion-lifecycle, automatic-completion, Embark-style actions,
-editing, Orderless completion, snippets, LSP snippets, daily-workflows,
+editing, formatting, Orderless completion, snippets, LSP snippets, daily-workflows,
 electric-editing, UI parity, project-scoped LSP lifecycle, notes, and
 parity-ledger checks. The ledger can also be validated directly, and the
 interactive TUI checks are exposed as flake apps:
@@ -121,6 +132,7 @@ nix run .#snippet-test
 nix run .#lsp-snippet-test
 nix run .#lsp-project-test
 nix run .#editing-test
+nix run .#formatting-test
 nix run .#daily-workflows-test
 nix run .#electric-editing-test
 nix run .#ui-parity-test

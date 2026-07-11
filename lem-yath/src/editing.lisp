@@ -3,7 +3,8 @@
 
 (in-package :lem-yath)
 
-(setf (variable-value 'tab-width :global) 4)
+(setf (variable-value 'tab-width :global) 4
+      (variable-value 'indent-tabs-mode :global) nil)
 
 ;;; ws-butler parity: remember changed lines and trim only those lines when a
 ;;; programming buffer is saved. Existing whitespace elsewhere is preserved.
@@ -11,6 +12,10 @@
 (defvar *trim-trailing-whitespace* t)
 (defvar *trimming-touched-lines* nil)
 (defparameter *fill-column* 80)
+
+(defun lem-yath-buffer-fill-column (&optional (buffer (current-buffer)))
+  (or (buffer-value buffer 'lem-yath-fill-column)
+      *fill-column*))
 
 (defparameter *non-programming-language-mode-classes*
   '(("LEM-MARKDOWN-MODE" . "MARKDOWN-MODE")
@@ -165,9 +170,10 @@
          (trimmed (string-left-trim '(#\Space #\Tab) line)))
     (subseq line 0 (- (length line) (length trimmed)))))
 
-(defun lem-yath-wrap-paragraph-text (text indentation)
+(defun lem-yath-wrap-paragraph-text
+    (text indentation &optional (fill-column (lem-yath-buffer-fill-column)))
   (let* ((words (remove "" (cl-ppcre:split "\\s+" text) :test #'string=))
-         (width (max 10 (- *fill-column* (length indentation))))
+         (width (max 10 (- fill-column (length indentation))))
          (lines '())
          (current ""))
     (dolist (word words)
@@ -210,7 +216,8 @@
 (defun auto-fill-after-command ()
   (when (and (buffer-value (current-buffer) 'lem-yath-auto-fill)
              (typep (lem-vi-mode/core:current-state) 'lem-vi-mode:insert)
-             (> (point-column (current-point)) *fill-column*)
+             (> (point-column (current-point))
+                (lem-yath-buffer-fill-column))
              (member (character-at (current-point) -1) '(#\Space #\Tab)))
     (lem-yath-fill-paragraph)))
 

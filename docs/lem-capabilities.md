@@ -675,6 +675,77 @@ recovered without reopening it. For a selected Lisp form containing an unmatched
 embedded quote, Lem escapes the quote to keep the new string valid; configured Lispy
 leaves that interior quote raw, so this is an intentional semantic improvement.
 
+### EditorConfig policy and Apheleia-style formatting — `lem-yath/src/editorconfig.lisp`, `lem-yath/src/formatting.lisp` (verified subset)
+
+Lem-yath delegates EditorConfig matching, `root` handling, hierarchy, and
+`unset` resolution to the official `editorconfig` CLI instead of implementing a
+second parser. The CLI is invoked with a direct argument vector under a
+five-second GNU `timeout`. At steady state, every absolute local file buffer is
+resolved after find-file, re-resolved after filename or major-mode changes, and
+queried again before save; buffer switches perform a cheap stale-state check.
+This scope is deliberately broader than programming buffers. An error retains
+the last successfully applied state rather than partially reverting it.
+
+The mapped properties are `indent_style`, `indent_size`, `tab_width`,
+`end_of_line` (`lf`, `cr`, or `crlf`), `charset` (`utf-8`, `utf-8-bom`,
+`latin1`, `utf-16be`, or `utf-16le`), positive or `off` `max_line_length`,
+`trim_trailing_whitespace`, and `insert_final_newline`. Indentation, encoding,
+and fill-column baselines are restored before newly resolved properties are
+applied, so a closer file can remove an inherited setting without leaving stale
+buffer-local state. Charset runs after Lem has decoded an opened file and
+therefore controls subsequent writes only; UTF-16BE/LE output intentionally has
+no BOM. `insert_final_newline=true` adds a newline to a nonempty buffer, while
+false or absent never removes one. `trim_trailing_whitespace=true` cleans every
+line; false or absent leaves the existing ws-butler hook active, so only touched
+lines in programming buffers are cleaned.
+
+The formatter registry currently has these finite built-in mappings:
+
+| Lem mode family | Backend selection |
+|---|---|
+| Python | `black --quiet --stdin-filename FILE -` |
+| Rust | `rustfmt --quiet --emit stdout` |
+| Go | `gofmt` |
+| Nix | first available of `nixfmt-rfc-style`, `nixfmt`, or `alejandra` |
+| C | `clang-format -assume-filename FILE` |
+| TypeScript, JSON, JavaScript | project-local `node_modules/.bin/prettier`, then `prettier` on `PATH`, with the buffer's tab policy |
+| Java | `google-java-format -` |
+| Clojure | `cljfmt fix -` |
+| Terraform | first available of `tofu` or `terraform`, then `fmt -` |
+| Zig | `zig fmt --stdin` |
+| Lua | `stylua -` |
+| Common Lisp | in-process `indent-buffer` in a temporary buffer |
+
+The packaged core runtime supplies Black, rustfmt, gofmt, nixfmt-rfc-style, and
+clang-format; the remaining external mappings activate when their executable is
+available. External backends receive the unsaved buffer through stdin, run in
+the buffer directory with direct argv boundaries and a ten-second timeout, and
+reject stdout beyond the configured result limit. Changes are applied as diff
+hunks while keeping point, mark, and visible window points stable.
+
+`SPC b f` invokes the mapped CLI or in-process backend without saving. If no
+mapped backend is usable, manual formatting may use a ready, current LSP
+workspace that advertises document formatting. A CLI which starts and then
+fails does not fall back to LSP. For a mapped programming file, the normal save
+hook instead formats synchronously after the first write when its backend is
+available. A successful result is normalized through EditorConfig and silently
+written before LSP `didSave`. Automatic formatting never falls back to LSP, and
+a CLI launch, timeout, output-limit, or nonzero-exit failure leaves the original
+save clean and unchanged in the buffer. Applying a successful diff is not
+transactional, so an error during patch application has no rollback guarantee.
+Unmapped programming modes, unavailable backends, and prose do not format
+automatically.
+
+This is not the asynchronous Apheleia execution model. There is no formatter
+prompt, Apheleia-compatible per-project backend override table, or direnv
+integration; project-local Prettier discovery is the one executable-selection
+special case. `scripts/formatting-test.sh` drives the real ncurses editor and
+checks official-CLI parent/nearer/root/unset behavior, global no-tabs and local
+indentation, true/false/absent whitespace policy, LF/CR/CRLF and final-newline
+normalization, subsequent-write Latin-1 bytes, manual point/mark/undo and argv
+stability, save ordering and rewrite count, CLI failure without LSP fallback,
+prose exclusion, and reload idempotence.
+
 ---
 
 ## 5. LSP  (`extensions/lsp-mode/`, package `lem-lsp-mode`)
