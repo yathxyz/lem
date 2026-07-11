@@ -217,6 +217,7 @@
             formatting-test = mkTestApp "lem-yath-formatting-test" "formatting-test.sh";
             prompt-completion-test = mkTestApp "lem-yath-prompt-completion-test" "prompt-completion-test.sh";
             daily-workflows-test = mkTestApp "lem-yath-daily-workflows-test" "daily-workflows-test.sh";
+            project-navigation-test = mkTestApp "lem-yath-project-navigation-test" "project-navigation-test.sh";
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
             ui-parity-test = mkTestApp "lem-yath-ui-parity-test" "ui-parity-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
@@ -238,6 +239,7 @@
             formatting = mkCheck "formatting" "formatting-test.sh";
             prompt-completion = mkCheck "prompt-completion" "prompt-completion-test.sh";
             daily-workflows = mkCheck "daily-workflows" "daily-workflows-test.sh";
+            project-navigation = mkCheck "project-navigation" "project-navigation-test.sh";
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";
             ui-parity = mkCheck "ui-parity" "ui-parity-test.sh";
             actions = mkCheck "actions" "actions-test.sh";

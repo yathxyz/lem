@@ -23,7 +23,7 @@ Status legend:
 | vertico | ported/lem-builtin | prompt list opens immediately, shows up to 20 rows, and cycles; focused TUI coverage in `scripts/completion-test.sh` |
 | orderless | ported/partial | ordinary-buffer completion has escaped-space components, whole-query smart case, any-order literal/regexp filtering, and `~ = ^ ! ,` affix dispatch through `M-Space`; CL-PPCRE differs from Emacs regexp syntax, and `%` char-fold plus `&` annotation dispatch remain gaps (`src/orderless.lisp`) |
 | marginalia | partial | M-x keybindings, buffer paths, and provider-specific LSP/Lisp details exist; no general category annotation layer |
-| consult | ported/partial | project buffers `SPC SPC`, project-grep, isearch; no preview-on-move |
+| consult | ported/partial | `src/project.lisp` supplies persistent project MRU, tracked+untracked file selection, project-buffer membership by directory, bounded asynchronous regexp search, and Emacs-style switch dispatch on `SPC p f/g/p` and `SPC SPC`; prompt preview-on-move and Consult metadata remain gaps |
 | consult-eglot | ported/partial | `SPC p s` sends `workspace/symbol` to the current project, then opens an annotated Prescient picker; incremental server queries and preview-on-move remain gaps |
 | corfu (TTY via Emacs 31) | ported/partial | Lem has an ncurses popup, correct display/filter/insert metadata, distinct final-insert and post-accept callbacks, tracked ranges, stale-result rejection, automatic identifier completion after the configured 3-character/0.2-second threshold, and local `M-Space` filtering with zero-match recovery; Corfu's wider command surface remains unported |
 | cape | ported/partial | automatic same-major-mode dabbrev and path-aware file-at-point fallbacks are composed and TUI-tested; raw dabbrev candidates feed Orderless, while Cape's broader provider library is not ported |
@@ -84,7 +84,7 @@ Status legend:
 | transient | lem-builtin | `lem/transient` |
 | multiple-cursors | lem-builtin | core multi-cursors (`M-C`, isearch add-cursor); Emacs config only used it internally |
 | expreg | ported/partial | repeated `SPC v` expands word → delimiters → line → paragraph; no parser-backed syntax expansion |
-| vundo | gap | linear undo/redo only |
+| vundo | gap | `SPC u` is unbound and Lem discards redo branches on the first post-undo edit; a retained core undo tree must precede a truthful Unicode vundo UI |
 | pulsar | n/a | jump recentering is default behavior |
 | indent-bars | gap | no indent guides in ncurses frontend |
 | rainbow-delimiters | partial | paren coloring in lisp-mode; show-paren elsewhere |

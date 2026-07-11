@@ -74,6 +74,10 @@ of writing `.fasl` files into the source tree.
 - Emacs-like daily navigation/editing: region-or-line `M-j`, a persistent
   300-entry `M-g r` MRU, filterable `C-x C-b`, and asynchronous persistent
   `M-s f` name search with property-backed Return and persistent q/revisit behavior
+- project.el-style navigation: persistent automatic project MRU, Git-aware
+  tracked/untracked file finding, cancellable bounded asynchronous regexp search, exact
+  directory-based project buffers, and arbitrary-directory command dispatch on
+  `SPC p f/g/p` and `SPC SPC`
 - global syntax-aware delimiter/quote pairing and self-insert selection
   replacement, including region wrapping without taking keys away from Paredit or Vi
 - official-CLI EditorConfig resolution for steady-state local file buffers,
@@ -113,7 +117,7 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 `nix flake check` runs the package, compile, boot, prompt and in-buffer
 completion, completion-lifecycle, automatic-completion, Embark-style actions,
 editing, formatting, Orderless completion, snippets, LSP snippets, daily-workflows,
-electric-editing, UI parity, project-scoped LSP lifecycle, notes, and
+electric-editing, UI parity, project navigation, project-scoped LSP lifecycle, notes, and
 parity-ledger checks. The ledger can also be validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
@@ -131,6 +135,7 @@ nix run .#orderless-completion-test
 nix run .#snippet-test
 nix run .#lsp-snippet-test
 nix run .#lsp-project-test
+nix run .#project-navigation-test
 nix run .#editing-test
 nix run .#formatting-test
 nix run .#daily-workflows-test
@@ -154,7 +159,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
 `daily-workflows`, `orderless-completion`, `snippets`, `lsp-snippets`,
-`lsp-project`, `electric-editing`, `ui-parity`, `interactive`, `structural`, or
+`lsp-project`, `project-navigation`, `electric-editing`, `ui-parity`, `interactive`, `structural`, or
 `notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

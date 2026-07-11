@@ -632,6 +632,21 @@ through the ncurses editor.
 `.project .projectile Makefile configure.ac TAGS …` (`project.lisp:31-53`). `find-root`
 walks up to the project root. Saved projects persisted to `(lem-home)/history/projects`.
 
+The configured editor replaces the high-frequency upstream commands in
+`lem-yath/src/project.lisp`. Git roots (including initialized submodules) are
+canonicalized and automatically recorded in the same persistent history.
+`SPC p f` uses NUL-safe `git ls-files` data for tracked and untracked files;
+`SPC p g` converts Emacs regexp syntax and runs bounded ripgrep batches over
+that exact file set on a request-owned, cancellable worker thread. Canonical
+containment and visited-root tracking bound malformed or cyclic submodules.
+`SPC p p` also offers an arbitrary
+directory and the default find-file/find-regexp/find-directory/VCS/shell/other
+dispatch. `SPC SPC` uses each buffer's directory, so compilation, terminal,
+and REPL-style buffers participate without sibling-prefix leakage. The
+two-process ncurses gate is `scripts/project-navigation-test.sh`; it also forces
+overlapping cancellation and hostile submodule fixtures. Consult's
+prompt preview and rich candidate metadata remain unavailable.
+
 ### Completion UI config
 `*prompt-buffer-completion-function*`, `*prompt-file-completion-function*`,
 `*prompt-command-completion-function*` (`prompt.lisp:9-11`) can be overridden.

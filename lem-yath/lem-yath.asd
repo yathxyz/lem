@@ -26,6 +26,7 @@
                (:file "editorconfig")
                (:file "formatting")
                (:file "git")
+               (:file "project")
                (:file "notes")
                (:file "find-name")
                (:file "tools")

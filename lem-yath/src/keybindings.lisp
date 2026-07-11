@@ -118,9 +118,9 @@
   ("Return" 'lem-bookmark::bookmark-jump "jump bookmark") ; SPC RET
 
   ;; project (project.el / consult)
-  ("p f" 'project-find-file "find project file")         ; SPC p f
-  ("p g" 'lem/grep:project-grep "grep project")           ; SPC p g
-  ("p p" 'project-switch "switch project")               ; SPC p p
+  ("p f" 'lem-yath-project-find-file "find project file") ; SPC p f
+  ("p g" 'lem-yath-project-grep "grep project")           ; SPC p g
+  ("p p" 'lem-yath-project-switch "switch project")       ; SPC p p
   ("p s" 'lem-yath-workspace-symbol "workspace symbols")       ; SPC p s
 
   ;; git (magit / majutsu dispatch)
