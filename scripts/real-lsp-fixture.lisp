@@ -162,6 +162,24 @@
 (defun real-lsp-test-case-file (case)
   (merge-pathnames (getf case :file) (real-lsp-test-case-root case)))
 
+(defun real-lsp-test-command-line-file-p ()
+  (let* ((case (aref *real-lsp-test-cases* 0))
+         (buffer (current-buffer)))
+    (and (buffer-filename buffer)
+         (uiop:pathname-equal (real-lsp-test-case-file case)
+                              (buffer-filename buffer))
+         (eq (getf case :mode) (buffer-major-mode buffer)))))
+
+(defun real-lsp-test-command-line-workspace-p ()
+  (and (real-lsp-test-command-line-file-p)
+       (buffer-value (current-buffer) 'lem-lsp-mode::lsp-workspace)))
+
+(defun real-lsp-test-lem-home-restored-p ()
+  (let ((expected (uiop:getenv "LEM_YATH_REAL_LSP_EXPECTED_LEM_HOME")))
+    (and expected
+         (uiop:pathname-equal (uiop:ensure-directory-pathname expected)
+                              (uiop:ensure-directory-pathname (lem-home))))))
+
 (defun real-lsp-test-client-pid (client)
   (etypecase client
     (lem-lsp-mode/client:stdio-client
@@ -525,6 +543,11 @@
 
 (real-lsp-test-report-prerequisites)
 (real-lsp-test-report
- "FIXTURE ready=yes boot=~a cases=~d"
+ "FIXTURE ready=yes boot=~a cases=~d command-line-file=~a command-line-workspace=~a lem-home=~a caller-evals=~a"
  (real-lsp-test-yes-no (boot-ok-p))
- (length *real-lsp-test-cases*))
+ (length *real-lsp-test-cases*)
+ (real-lsp-test-yes-no (real-lsp-test-command-line-file-p))
+ (real-lsp-test-yes-no (real-lsp-test-command-line-workspace-p))
+ (real-lsp-test-yes-no (real-lsp-test-lem-home-restored-p))
+ (real-lsp-test-yes-no
+  (string= "yes" (or (uiop:getenv "LEM_YATH_REAL_LSP_EVAL_ONE") ""))))

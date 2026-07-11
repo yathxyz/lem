@@ -38,6 +38,8 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 export HOME="$root/home"
+export LEM_HOME="$root/lem-home/"
+export LEM_YATH_REAL_LSP_EXPECTED_LEM_HOME="$LEM_HOME"
 export XDG_CACHE_HOME="$root/cache"
 export WORKDIR="$root/work"
 export LEM_YATH_REAL_LSP_FIXTURES="$root/fixtures/"
@@ -51,7 +53,7 @@ if [ -z "${LEM_YATH_REAL_LSP_NIXPKGS_SOURCE:-}" ] ||
   exit 1
 fi
 
-mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR" \
+mkdir -p "$HOME" "$LEM_HOME" "$XDG_CACHE_HOME" "$WORKDIR" \
   "$HOME/proj/nix" \
   "$LEM_YATH_REAL_LSP_FIXTURES/rust/src" \
   "$LEM_YATH_REAL_LSP_FIXTURES/python" \
@@ -213,21 +215,22 @@ invoke_mx() {
 }
 
 fixture="$(lem-yath_lisp_string "$here/scripts/real-lsp-fixture.lisp")"
-scratch="$root/scratch.txt"
-: >"$scratch"
+startup_file="$LEM_YATH_REAL_LSP_FIXTURES/rust/src/main.rs"
+expected_fixture_state='FIXTURE ready=yes boot=yes cases=6 command-line-file=yes command-line-workspace=yes lem-home=yes caller-evals=yes'
 
 # LEM_BIN must be the installed lem-yath wrapper.  It loads its own immutable
 # configuration before this test fixture; loading the repository init here
 # would accidentally test a second, local configuration instead.
 lem_start "$session" \
   --log-filename "$LEM_YATH_REAL_LSP_LOG" \
+  --eval '(setf (uiop:getenv "LEM_YATH_REAL_LSP_EVAL_ONE") "yes")' \
   --eval "(load #P$fixture)" \
-  "$scratch"
+  "$startup_file"
 
 if lem_wait_for "$session" 'NORMAL' 60 >/dev/null &&
    fixture_state=$(wait_report '^FIXTURE ' 60) &&
-   [[ "$fixture_state" == 'FIXTURE ready=yes boot=yes cases=6' ]]; then
-  pass boot 'installed wrapper loaded the fixture and configuration'
+   [[ "$fixture_state" == "$expected_fixture_state" ]]; then
+  pass boot 'configuration preceded the command-line file and caller eval'
 else
   fail boot 'installed wrapper or fixture did not become ready'
   aborted=1

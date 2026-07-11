@@ -152,6 +152,18 @@
             meta.description = description;
           };
 
+          lemInit = pkgs.writeTextDir "init.lisp" ''
+            (require :sb-posix)
+            (let ((restore (uiop:getenv "LEM_YATH_WRAPPER_LEM_HOME_SET"))
+                  (original (uiop:getenv "LEM_YATH_WRAPPER_LEM_HOME_VALUE")))
+              (if restore
+                  (setf (uiop:getenv "LEM_HOME") original)
+                  (uiop:symbol-call :sb-posix :unsetenv "LEM_HOME"))
+              (uiop:symbol-call :sb-posix :unsetenv "LEM_YATH_WRAPPER_LEM_HOME_SET")
+              (uiop:symbol-call :sb-posix :unsetenv "LEM_YATH_WRAPPER_LEM_HOME_VALUE"))
+            (load #P"${self}/lem-yath/init.lisp")
+          '';
+
           lemYath = pkgs.writeShellApplication {
             name = "lem";
             runtimeInputs = defaultRuntimeInputs;
@@ -164,10 +176,23 @@
               export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-yath:$asdf_cache:/nix/store:/nix/store''${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
               export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
 
+              # Lem loads its init file before command-line filenames, but
+              # evaluates --eval after them.  Use a temporary init root for
+              # configuration while restoring the caller's normal LEM_HOME
+              # before the configuration itself is loaded.
+              if [[ -v LEM_HOME ]]; then
+                export LEM_YATH_WRAPPER_LEM_HOME_SET=1
+                export LEM_YATH_WRAPPER_LEM_HOME_VALUE="$LEM_HOME"
+              else
+                unset LEM_YATH_WRAPPER_LEM_HOME_SET
+                unset LEM_YATH_WRAPPER_LEM_HOME_VALUE
+              fi
+              export LEM_HOME=${lemInit}/
+
               # Lem stores only the final --eval argument.  Fold caller forms
-              # into our startup form so an extra --eval cannot skip the
-              # configured editor, and preserve their command-line order.
-              startup_form='(load #P"${self}/lem-yath/init.lisp")'
+              # in command-line order without changing their normal timing.
+              caller_form=
+              have_eval=0
               lem_args=()
               while (( "$#" )); do
                 case "$1" in
@@ -176,8 +201,18 @@
                       echo "lem: $1 requires a Common Lisp form" >&2
                       exit 2
                     fi
-                    startup_form="(progn $startup_form $2)"
+                    if (( have_eval )); then
+                      caller_form="(progn $caller_form $2)"
+                    else
+                      caller_form=$2
+                      have_eval=1
+                    fi
                     shift 2
+                    ;;
+                  -q|--without-init-file)
+                    # This is the configured wrapper, so its immutable init
+                    # file is mandatory even if callers pass upstream's -q.
+                    shift
                     ;;
                   *)
                     lem_args+=("$1")
@@ -186,7 +221,11 @@
                 esac
               done
 
-              exec ${lemNcurses}/bin/lem -q --eval "$startup_form" "''${lem_args[@]}"
+              if (( have_eval )); then
+                lem_args+=(--eval "$caller_form")
+              fi
+
+              exec ${lemNcurses}/bin/lem "''${lem_args[@]}"
             '';
           };
 
