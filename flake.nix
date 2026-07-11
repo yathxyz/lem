@@ -28,7 +28,10 @@
           lemPatchedSrc = pkgs.applyPatches {
             name = "lem-yath-lem-source";
             src = lem.outPath;
-            patches = [ ./patches/lem-completion-lifecycle.patch ];
+            patches = [
+              ./patches/lem-completion-lifecycle.patch
+              ./patches/lem-transient-delay-race.patch
+            ];
           };
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (
             old:
@@ -175,6 +178,7 @@
             prompt-completion-test = mkTestApp "lem-yath-prompt-completion-test" "prompt-completion-test.sh";
             daily-workflows-test = mkTestApp "lem-yath-daily-workflows-test" "daily-workflows-test.sh";
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
+            ui-parity-test = mkTestApp "lem-yath-ui-parity-test" "ui-parity-test.sh";
           };
 
           checks = {
@@ -192,6 +196,7 @@
             prompt-completion = mkCheck "prompt-completion" "prompt-completion-test.sh";
             daily-workflows = mkCheck "daily-workflows" "daily-workflows-test.sh";
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";
+            ui-parity = mkCheck "ui-parity" "ui-parity-test.sh";
             parity-ledger =
               pkgs.runCommand "lem-yath-parity-ledger-check" { nativeBuildInputs = [ pkgs.python3 ]; }
                 ''

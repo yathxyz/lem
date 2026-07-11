@@ -2,6 +2,12 @@
 
 (in-package :lem-yath)
 
+(defun initialize-editor-feature (function)
+  "Run FUNCTION once a frame exists, including when config loads via --eval."
+  (if lem-core::*in-the-editor*
+      (funcall function)
+      (add-hook *after-init-hook* function)))
+
 (defparameter *boot-ok* nil)
 
 (defun boot-ok-p () *boot-ok*)

@@ -44,8 +44,10 @@ and loads into the nix-built `lem-ncurses` image.
 ## Commands & keybindings
 
 - Commands: `(define-command lem-yath-<area>-<verb> () () "docstring" ...)`.
-- Leader bindings go at the END of your file, e.g.
-  `(define-key lem-vi-mode:*normal-keymap* "Leader y o" 'lem-yath-citar-open)`.
+- Leader commands may be implemented anywhere, but their bindings belong in
+  the shared `define-evil-leader-keys` table in `src/keybindings.lisp`. App-local
+  `Leader` definitions are replaced when that table is rebuilt and cannot
+  represent the normal-and-visual map used by the Emacs configuration.
   The leader is SPC. Don't touch keys outside your assignment.
 - For list UIs: create a buffer, `(setf (buffer-read-only-p buffer) t)` after
   filling, and define a dedicated major mode with a keymap binding `Return`,

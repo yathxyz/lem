@@ -403,7 +403,3 @@ fetches unread items on a background thread; returns immediately."
         (setf (buffer-read-only-p buffer) t)
         (pop-to-buffer buffer)
         (elfeed-load-async api-key buffer)))))
-
-;;; --- leader binding ---------------------------------------------------------
-
-(define-key lem-vi-mode:*normal-keymap* "Leader a r" 'lem-yath-elfeed)

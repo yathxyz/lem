@@ -121,5 +121,3 @@ Prescient-style; sets *llm-backend* and confirms."
           (setf *llm-backend* backend)
           (message "LLM backend: ~(~a~)" backend))
         (message "Unknown or unavailable backend: ~a" choice))))
-
-(define-key lem-vi-mode:*normal-keymap* "Leader g b" 'lem-yath-llm-set-backend)

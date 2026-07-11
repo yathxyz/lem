@@ -44,8 +44,9 @@ of writing `.fasl` files into the source tree.
 
 ## What's in the port
 
-- vi-mode with a Space leader reproducing every feasible SPC chord in normal
-  and visual states (files, buffers, project, git, notes, LLM, help, navigation)
+- vi-mode with one shared Space leader in normal and visual states; every
+  feasible chord is preserved and a described which-key-style continuation
+  menu appears after the configured one-second pause
 - surround / snipe / comment operator (`gc`) plus Lispyville-compatible,
   delimiter-safe structural editing in Common Lisp, Clojure, Scheme/Racket,
   and Emacs Lisp buffers
@@ -71,6 +72,8 @@ of writing `.fasl` files into the source tree.
   `M-s f` name search with property-backed Return and persistent q/revisit behavior
 - global syntax-aware delimiter/quote pairing and self-insert selection
   replacement, including region wrapping without taking keys away from Paredit or Vi
+- relative line numbers in programming buffers only, matching the Emacs
+  `prog-mode` scope while leaving prose and utility buffers clean
 - LSP specs: rust-analyzer, pyright, harper-ls, and flake-aware nixd
 - legit (magit) + jj dispatch on `SPC g g`, git-gutter, git-timemachine
 - roam-lite notes, root-level roam dailies, journal, and i/t/r capture over
@@ -88,8 +91,8 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 
 `nix flake check` runs the package, compile, boot, prompt and in-buffer
 completion, completion-lifecycle, automatic-completion, editing,
-Orderless completion, snippets, LSP snippets, daily-workflows, electric-editing, notes, and
-parity-ledger checks. The ledger
+Orderless completion, snippets, LSP snippets, daily-workflows, electric-editing,
+UI parity, notes, and parity-ledger checks. The ledger
 can also be validated directly, and the interactive TUI checks are exposed as
 flake apps:
 
@@ -108,6 +111,7 @@ nix run .#lsp-snippet-test
 nix run .#editing-test
 nix run .#daily-workflows-test
 nix run .#electric-editing-test
+nix run .#ui-parity-test
 nix run .#notes-test
 nix run .#interactive-test
 nix run .#structural-test
@@ -125,7 +129,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `editing`, `daily-workflows`,
-`orderless-completion`, `snippets`, `lsp-snippets`, `electric-editing`, `interactive`,
+`orderless-completion`, `snippets`, `lsp-snippets`, `electric-editing`, `ui-parity`, `interactive`,
 `structural`, or `notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

@@ -10,7 +10,7 @@ configuration does not override it.
 | Area | Lem behavior | Evidence |
 |---|---|---|
 | Vim states and core editing | Upstream normal, insert, visual, operator, replace, registers, text objects, counts, dot-repeat, macros, jumplist, windows, search, and Ex commands | Pinned `lem-vi-mode`; lem-yath regression coverage protects overridden operators |
-| Leader | `SPC` in normal and visual; every implemented entry is checked against the expected command in both keymaps | `leader-bindings: T` in `boot-test.sh` |
+| Leader | `SPC` in normal and visual shares one described, reload-safe keymap; every entry is checked against its command, and pausing for one second opens nested continuation help without changing other transient menus | `leader-bindings: T` in `boot-test.sh`; `ui-parity-test.sh` |
 | Native operators | `d/c/y`, doubled `dd/cc/yy`, visual operators, counts, text objects, and dot-repeat survive the surround dispatch layer | interactive checks 8, 9, and 12–14 |
 | Whole-line yank | `Y` yanks the current line, matching configured Evil and `yy` even when the cursor is mid-line | interactive check 22 |
 | evil-surround | `ys{motion}`, `ds{char}`, `cs{old}{new}`, visual `S`; padded `(`/`[`/`{` and compact closing-delimiter variants | interactive check 10 |

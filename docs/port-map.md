@@ -19,7 +19,7 @@ Status legend:
 | evil-snipe | ported/partial | visible-scope `s`/`S`, repeat, and operator `z/Z/x/X`; incremental highlighting remains a gap (`src/vi.lisp`) |
 | evil-nerd-commenter | ported | `g c` operator (`src/vi.lisp`) |
 | evil-org | partial | no Org major mode; shared-file workflows and `SPC m I` heading IDs work in plain buffers |
-| general (SPC leader) | ported/partial | vi-mode leader = Space in normal+visual with exact boot-time verification; remaining capability gaps are listed in `docs/vi-parity.md` |
+| general (SPC leader) | ported/partial | normal and visual states share one described Space-leader keymap with exact binding verification and delayed continuation help; remaining capability gaps are listed in `docs/vi-parity.md` |
 | vertico | ported/lem-builtin | prompt list opens immediately, shows up to 20 rows, and cycles; focused TUI coverage in `scripts/completion-test.sh` |
 | orderless | ported/partial | ordinary-buffer completion has escaped-space components, whole-query smart case, any-order literal/regexp filtering, and `~ = ^ ! ,` affix dispatch through `M-Space`; CL-PPCRE differs from Emacs regexp syntax, and `%` char-fold plus `&` annotation dispatch remain gaps (`src/orderless.lisp`) |
 | marginalia | partial | M-x keybindings, buffer paths, and provider-specific LSP/Lisp details exist; no general category annotation layer |
@@ -80,7 +80,7 @@ Status legend:
 | pgmacs / pg | ported | psql-backed query/table viewer (`src/apps/pg.lisp`) |
 | salta.el | partial | six primary Supabase/PostgREST workflows exist; the notmuch payment-email bridge and some UI semantics remain open |
 | helpful | lem-builtin | describe-key / describe-bindings / apropos-command (`SPC h *`) |
-| which-key | gap | `lem/transient` exists, but the configured Space leader currently waits silently and has no which-key-style popup |
+| which-key | ported/partial | the shared Space-leader tree opens a described `lem/transient` menu after one second, refreshes nested prefixes immediately, and cancels cleanly on fast dispatch, reload, or Escape without changing unrelated transient timing; arbitrary non-leader prefixes remain silent (`scripts/ui-parity-test.sh`) |
 | transient | lem-builtin | `lem/transient` |
 | multiple-cursors | lem-builtin | core multi-cursors (`M-C`, isearch add-cursor); Emacs config only used it internally |
 | expreg | ported/partial | repeated `SPC v` expands word → delimiters → line → paragraph; no parser-backed syntax expansion |
@@ -88,6 +88,7 @@ Status legend:
 | pulsar | n/a | jump recentering is default behavior |
 | indent-bars | gap | no indent guides in ncurses frontend |
 | rainbow-delimiters | partial | paren coloring in lisp-mode; show-paren elsewhere |
+| display-line-numbers (built-in) | ported | relative numbers render in saved and unsaved programming buffers, compose with other gutters, and stay out of prose and utility buffers (`src/ui.lisp`, `scripts/ui-parity-test.sh`) |
 | dirvish | lem-builtin | `directory-mode` + filer |
 | find-name-dired (built-in) | ported/partial | `M-s f` asynchronously fills a persistent, read-only `*Find*` buffer with safely escaped rows backed by exact paths (`src/find-name.lisp`); Dired marking, long columns, file operations, and process cancellation remain gaps |
 | electric-pair-mode / delete-selection-mode (built-ins) | ported/partial | syntax-table delimiter/quote pairing, local balance reuse/skip, numeric prefixes, ordinary region replacement, and Emacs-style opener/quote region wrapping; an unmatched embedded quote is escaped to keep the Lisp string valid instead of reproducing Lispy's raw interior quote, while full forward balance scanning, global paired Backspace, and zero-result prompt recovery remain gaps (`src/electric-pair.lisp`, `scripts/electric-editing-test.sh`) |

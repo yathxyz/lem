@@ -30,9 +30,11 @@
       (lem-yath-legit-status)))
 
 ;; Gutter diff indicators (git-gutter-mode on prog buffers in Emacs;
-;; Lem's implementation is a global mode). Enabled after init: its
-;; enable-hook walks existing buffers/windows.
-(add-hook *after-init-hook*
-          (lambda ()
-            (ignore-errors
-              (uiop:symbol-call :lem-git-gutter :git-gutter-mode t))))
+;; Lem's implementation is a global mode). The flake loads this config via
+;; --eval after *after-init-hook* has run, so initialize immediately when the
+;; editor frame already exists.
+(defun enable-lem-yath-git-gutter ()
+  (ignore-errors
+    (uiop:symbol-call :lem-git-gutter :git-gutter-mode t)))
+
+(initialize-editor-feature 'enable-lem-yath-git-gutter)

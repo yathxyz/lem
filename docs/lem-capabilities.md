@@ -174,8 +174,12 @@ Two systems:
 3. Persistent plist config: `(setf (lem:config :key) v)` (`src/config.lisp`).
 
 ### Run code after startup
-Best: `(add-hook lem:*after-init-hook* (lambda () …))`. For deferred/async, use a timer
-(§11) or `(lem:start-timer (lem:make-idle-timer #'fn) …)`.
+For a normal init file, use `(add-hook lem:*after-init-hook* (lambda () …))`.
+The lem-yath wrapper deliberately starts Lem with `-q --eval`, and CLI eval forms run
+after that hook has already fired. Its `initialize-editor-feature` helper therefore
+runs frame-dependent setup immediately when `*in-the-editor*` is true and registers a
+hook only for pre-launch loads. For deferred/async work, use a timer (§11) or
+`(lem:start-timer (lem:make-idle-timer #'fn) …)`.
 
 ---
 
@@ -704,7 +708,9 @@ UI, no log graph filtering. Customize via `lem/porcelain:*git-base-arglist*`,
 `lem/legit:*vcs-existence-order*`.
 
 ### Also: git-gutter — `extensions/git-gutter/` (`lem-git-gutter`), in the image. Shows
-add/modify/delete marks in the gutter.
+add/modify/delete marks in the gutter. Lem-yath enables it through the post-init-safe
+initializer in `src/git.lisp`; the UI gate checks that the mode starts under the flake
+wrapper and composes its column with relative line numbers.
 
 ---
 
@@ -783,6 +789,15 @@ variables: `line-numbers` (line 37), `line-number-format` (21), `custom-current-
 `(setf (variable-value 'lem/line-numbers:line-numbers :global) t)` then
 `(lem/line-numbers:line-numbers-mode)` — or set via vi `:set number`.
 
+Lem-yath keeps the global minor mode available but contributes numbers only
+when the same programming-buffer predicate used by touched-line whitespace
+cleanup succeeds. Its display method composes the number column after an
+existing provider instead of masking Git markers, prompts, or app gutters.
+Relative numbers therefore render in saved and unsaved `prog-mode`-equivalent
+buffers and not in Markdown, AsciiDoc, XML/HTML, patch, fundamental, or utility
+buffers. `nix run .#ui-parity-test` checks the actual synthesized mode class,
+relative distance, unsaved-buffer behavior, and another provider's survival.
+
 ### Show-paren — `src/ext/showparen.lisp`. `M-x toggle-show-paren` (line 69); enabled by
 default via `lem/show-paren:enable`. Highlights matching paren.
 
@@ -793,7 +808,8 @@ default.
 ### Tabs / window management
 - **Frame multiplexer = tab bar** (`src/ext/frame-multiplexer.lisp`,
   `lem/frame-multiplexer`): `frame-multiplexer-mode` toggles a tmux-like tabbed frame;
-  `frame-multiplexer-next/prev/switch-0..9/create`. There is also `src/tabbar-config.lisp`.
+  `frame-multiplexer-next/prev/switch-0..9/create`. Lem-yath enables it idempotently for
+  both ordinary init and post-init `--eval` loading. There is also `src/tabbar-config.lisp`.
 - Window splits/commands: `split-active-window-vertically`/`-horizontally`,
   `delete-other-windows` (`C-x 1`), `other-window`/`next-window` (`C-x o`),
   `delete-active-window` (`C-x 0`) — `src/commands/window.lisp`. Floating windows
@@ -814,9 +830,15 @@ default.
   (`:detect-encoding` default).
 - **which-key / transient menus**: `extensions/transient/` (`lem/transient`,
   `define-transient`) — magit-style popup menus with columns/descriptions
-  (`transient/transient.lisp`). Combined with the new prefix keymap system this is the
-  which-key analog. (No separate "which-key auto-popup on every prefix" toggle, but the
-  prefix/transient infra exists.)
+  (`transient/transient.lisp`). Lem-yath builds one described leader keymap shared by
+  normal and visual states, marks only that complete prefix tree for transient display,
+  and gives that tree the Emacs-configured one-second delay while retaining Lem's 500ms
+  default for unrelated transient menus. Fast chords cancel the pending timer; pausing
+  opens the root menu, nested prefixes replace it immediately, and command or Escape
+  completion closes it. A small pinned-Lem patch prevents an already queued canceled
+  timer from reopening obsolete help. The real TUI gate verifies both timings, nested
+  descriptions, reload cleanup, stale-callback rejection, fast dispatch, and
+  visual-state reuse.
 - **Snippets / templates (upstream)**: **NONE.** No yasnippet/tempel equivalent.
   `src/ext/abbrev.lisp` (`lem/abbrev`, `M-/`) is **dynamic abbrev** (word
   completion from buffers), not templating. Lem-yath adds the verified data-only

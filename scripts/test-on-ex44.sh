@@ -67,8 +67,11 @@ case "$test_name" in
   electric-editing)
     remote_command='nix run path:$PWD#electric-editing-test'
     ;;
+  ui-parity)
+    remote_command='nix run path:$PWD#ui-parity-test'
+    ;;
   *)
-    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|orderless-completion|snippets|lsp-snippets|prompt-completion|daily-workflows|electric-editing|interactive|structural|notes|editing]" >&2
+    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|orderless-completion|snippets|lsp-snippets|prompt-completion|daily-workflows|electric-editing|ui-parity|interactive|structural|notes|editing]" >&2
     exit 2
     ;;
 esac
