@@ -40,7 +40,8 @@
 
 (defun completion-lifecycle-malformed-lsp-result
     (response &key simulate-conversion-error)
-  (let ((success-callback nil)
+  (let ((workspace (make-instance 'lem-lsp-mode::workspace :state :ready))
+        (success-callback nil)
         (provider-results '())
         (context nil)
         (pending-before nil)
@@ -53,7 +54,11 @@
        (list 'lem-lsp-mode::buffer-workspace
              (lambda (buffer &optional errorp)
                (declare (ignore buffer errorp))
-               :completion-lifecycle-workspace))
+               workspace))
+       (list 'lem-lsp-mode::workspace-response-current-p
+             (lambda (candidate buffer)
+               (declare (ignore candidate buffer))
+               t))
        (list 'lem-lsp-mode::provide-completion-p
              (lambda (workspace)
                (declare (ignore workspace))

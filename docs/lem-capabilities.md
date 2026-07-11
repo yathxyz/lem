@@ -325,6 +325,53 @@ Resolved documentation/detail, CompletionList item defaults, `insertTextMode`,
 completion commands, and rollback after an arbitrary throwing buffer hook remain
 separate gaps; Lem has no native change-group primitive for that last case.
 
+### Project-scoped LSP workspaces and symbols (verified)
+
+The pinned `patches/lem-project-lsp-workspaces.patch` replaces Lem's ordinary
+language-global routing with stable server-class and canonical-root keys plus an
+explicit workspace pointer on every managed buffer. A starting workspace is registered
+before connection, so two files opened while initialization is pending share one
+process. Different roots using the same language remain isolated. Lem's Lisp-v2
+self/manual connections are the intentional exception: they retain global connection
+selection, and newly opened or restarted Lisp buffers follow the selected connection.
+
+Servers start in the project directory, and initialization options are frozen under the
+originating buffer. Initialization has a 30-second bound; detaching the final pending
+buffer cancels its spinner, retry loop, timer, registry entry, and process. Dead cached
+child processes are replaced as one project unit. File URIs percent-encode reserved and
+Unicode path characters, preserve literal `+`, and reject non-file or remote-authority
+URIs rather than treating them as local paths.
+
+Disabling LSP or killing a buffer removes its request hooks, restores the prior
+completion/xref/revert handlers, clears diagnostics and their timer, and sends one
+`didClose` for the URI that was actually opened. Save-as, root changes, and language-mode
+changes close the old document and rebind eligible buffers before further requests. An
+empty ready workspace remains cached, matching Eglot's default
+`eglot-autoshutdown=nil` policy. `lsp-restart-server` snapshots and reopens every live
+buffer owned by only the current project; `lsp-shutdown-server` can also release an idle
+project explicitly. Both paths remove registry state first, use a bounded `shutdown`
+request, send `exit`, disconnect JSON-RPC, and unconditionally dispose the process.
+Late initialization, diagnostics, completion, signature, xref, and highlight callbacks
+must still match the ready workspace and originating buffer ownership before affecting
+the editor.
+
+`SPC p s` now sends `workspace/symbol` to that captured project. The first prompt is
+the server query; the second applies the configured Prescient matching to name, kind,
+container, and root-relative file annotations, opening only the selected file. This is
+a bounded two-stage approximation of Consult: it lacks per-keystroke server queries,
+cancellation, and preview-on-move.
+
+`scripts/lsp-project-test.sh` exercises the actual ncurses editor against a deterministic
+Python stdio language server. It verifies pending-start deduplication and timeout,
+cross-root isolation, save-as migration and mode-change detachment, notification
+ownership, handler and diagnostic cleanup, stale diagnostic ownership, symbol error
+recovery and navigation, project-only restart, idle retention/reuse/explicit stop,
+bounded shutdown with forced disposal, graceful exit on responsive paths,
+old-process death, and editor-exit cleanup. Static contracts
+cover exact and glob root markers, `.git/` directory fallback, filesystem-root
+termination, safe URI conversion, spec-instance-stable keys, fileless guards, global Lisp-v2
+connection selection/restart, and both leader states.
+
 ### Automatic in-buffer completion — `lem-yath/src/auto-completion.lisp` (verified)
 
 Lem-yath mirrors the active Corfu defaults with a 200 ms wall timer after

@@ -120,7 +120,7 @@
   ("p f" 'project-find-file "find project file")         ; SPC p f
   ("p g" 'lem/grep:project-grep "grep project")           ; SPC p g
   ("p p" 'project-switch "switch project")               ; SPC p p
-  ("p s" 'lem-lsp-mode::lsp-document-symbol "document symbols") ; SPC p s
+  ("p s" 'lem-yath-workspace-symbol "workspace symbols")       ; SPC p s
 
   ;; git (magit / majutsu dispatch)
   ("g g" 'lem-yath-vcs-status "VCS status")       ; SPC g g

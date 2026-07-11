@@ -177,7 +177,7 @@ lem_keys "$session" p
 sleep 0.2
 if lem_capture "$session" | grep -q '\[Leader p: project\]' &&
    lem_capture "$session" | grep -q 'find project file' &&
-   lem_capture "$session" | grep -q 'document symbols'; then
+   lem_capture "$session" | grep -q 'workspace symbols'; then
   pass nested-leader "project continuations replaced the root menu immediately"
 else
   fail nested-leader "project continuation menu was missing or undescribed"

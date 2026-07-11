@@ -31,6 +31,7 @@
             patches = [
               ./patches/lem-completion-lifecycle.patch
               ./patches/lem-transient-delay-race.patch
+              ./patches/lem-project-lsp-workspaces.patch
             ];
           };
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (
@@ -52,6 +53,32 @@
               lispLibs = map (
                 dependency: if (dependency.pname or null) == "jsonrpc" then patchedJsonrpc else dependency
               ) old.lispLibs;
+            }
+          );
+          lemLspTest = lemNcurses.overrideLispAttrs (
+            old:
+            let
+              script = builtins.readFile old.buildScript;
+              marker = ";; Dump Image";
+            in
+            {
+              systems = old.systems ++ [ "lem-lisp-mode/v2" ];
+              buildScript =
+                assert lib.assertMsg (lib.hasInfix marker script)
+                  "Lem build script no longer contains its dump marker";
+                pkgs.writeText "build-lem-lsp-test.lisp" (
+                  builtins.replaceStrings
+                    [ marker ]
+                    [
+                      ''
+                        (map nil #'asdf:register-immutable-system
+                             (asdf:already-loaded-systems))
+
+                        ;; Dump Image
+                      ''
+                    ]
+                    script
+                );
             }
           );
 
@@ -88,6 +115,7 @@
             with pkgs;
             [
               bash
+              python3
               tmux
             ]
             ++ coreRuntimeInputs;
@@ -112,15 +140,15 @@
             '';
           };
 
-          mkTestApp =
-            name: script:
+          mkTestAppWithLem =
+            lemPackage: name: script:
             let
               runner = pkgs.writeShellApplication {
                 inherit name;
-                runtimeInputs = [ lemNcurses ] ++ testInputs;
+                runtimeInputs = [ lemPackage ] ++ testInputs;
                 text = ''
                   export TERM=''${TERM:-xterm-256color}
-                  export LEM_BIN=${lemNcurses}/bin/lem
+                  export LEM_BIN=${lemPackage}/bin/lem
                   export LEM_YATH_SOURCE=${self}/lem-yath
                   export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
                   exec bash ${self}/scripts/${script} "$@"
@@ -129,17 +157,19 @@
             in
             mkApp "${runner}/bin/${name}" "Run ${script} with flake-pinned Lem";
 
-          mkCheck =
-            name: script:
+          mkTestApp = mkTestAppWithLem lemNcurses;
+
+          mkCheckWithLem =
+            lemPackage: name: script:
             pkgs.runCommand "lem-yath-${name}-check"
               {
-                nativeBuildInputs = [ lemNcurses ] ++ testInputs;
+                nativeBuildInputs = [ lemPackage ] ++ testInputs;
               }
               ''
                 export TERM=xterm-256color
                 export HOME=$TMPDIR/home
                 export XDG_CACHE_HOME=$TMPDIR/cache
-                export LEM_BIN=${lemNcurses}/bin/lem
+                export LEM_BIN=${lemPackage}/bin/lem
                 export LEM_YATH_CHECK_ID=nix-${name}
                 export LEM_YATH_SNIPPET_DIRS="$PWD/source/lem-yath/snippets:${yasnippet-snippets}/snippets"
 
@@ -151,6 +181,8 @@
                 bash ./scripts/${script}
                 touch "$out"
               '';
+
+          mkCheck = mkCheckWithLem lemNcurses;
         in
         rec {
           packages = {
@@ -179,6 +211,7 @@
             daily-workflows-test = mkTestApp "lem-yath-daily-workflows-test" "daily-workflows-test.sh";
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
             ui-parity-test = mkTestApp "lem-yath-ui-parity-test" "ui-parity-test.sh";
+            lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
           };
 
           checks = {
@@ -197,6 +230,7 @@
             daily-workflows = mkCheck "daily-workflows" "daily-workflows-test.sh";
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";
             ui-parity = mkCheck "ui-parity" "ui-parity-test.sh";
+            lsp-project = mkCheckWithLem lemLspTest "lsp-project" "lsp-project-test.sh";
             parity-ledger =
               pkgs.runCommand "lem-yath-parity-ledger-check" { nativeBuildInputs = [ pkgs.python3 ]; }
                 ''
