@@ -1103,7 +1103,27 @@ Ordered and structurally tabbed list transforms, point-only indentation of a
 continuation-bearing item, formula-table structure edits, CLOCK-line dragging,
 and every visual Meta operation fail byte-identically. Type-matched source
 blocks, including mismatched nested end markers, are excluded from heading,
-list, and table dispatch; literal `M-K/J` line dragging remains available. The exact
+list, and table dispatch; literal `M-K/J` line dragging remains available.
+
+A separate on-demand boundary model and Vi adapter implement all eight bindings
+in the active Evil-Org text-object theme: `ae/ie`, `aE/iE`, `ar/ir`, and
+`aR/iR` in operator-pending and Visual states. The bounded model covers inline
+markup, bracket/plain links, timestamps, table cells, paragraphs and rows,
+flat matched blocks, point-sensitive simple unordered items/lists, tables with
+associated formulas, headline elements, sections, and heading ancestry. It
+preserves Evil-Org's characterwise versus linewise
+register/Visual shapes, original-point count anchoring, ancestry climbing,
+owned post-blank, and reverse or repeated Visual expansion without taking
+ownership of normal `a/i`, stock `aw/iw`, surround, or operator Snipe. Ordered,
+tab-structured, or continuation-list contexts fail object, element, and
+greater-element requests closed. Recognized drawers, orphan-property lines,
+and nested or unclosed block roots fail all four families closed; recognized
+unsupported or ambiguous inline/cell syntax fails object requests closed; and empty
+leaf-item or inner-subtree ranges abort. These aborts occur before mutation and
+preserve text, registers, and an existing Visual selection. Type-mismatched
+inner end markers remain literal inside an otherwise matched flat block.
+
+The exact
 `TODO → NEXT → WAITING → HOLD → SOMEDAY | DONE → CANCELLED`
 sequence with immediate saving, checklist continuation/toggling, bracket-link
 insertion plus file/URL/mailto/ID opening, and basic table alignment, cell
@@ -1128,9 +1148,24 @@ dragging, and degenerate tables. Mouse hit-testing,
 overlapping nested folds, non-file link variants, and several broader commands
 above remain outside this focused gate.
 
-This is intentionally narrower than GNU Org and Evil-Org. Heading/element text
-objects; Org-aware endpoints, insert/append commands, and structural operators;
-true `<`/`>` Org ranges, region-aware Meta operations, generic Org-element
+`scripts/org-operator-test.sh` independently drives the installed-wrapper TUI.
+It dynamically exercises all eight bindings with delete/yank operators over
+opaque/nested markup, bracket/plain links, timestamps, table cells/rules and
+formula ownership, paragraphs, headlines, flat leaf and recursive blocks,
+point-sensitive and empty lists, owned post-blank, and subtrees. It verifies
+object/element count anchors and unsupported-syntax barriers, subtree
+ancestry count, character/line registers, representative one-step undo,
+normal-state aborts (including nested and opaque unsupported syntax), and exact
+Visual-abort preservation. It statically
+resolves all eight Visual routes and dynamically covers characterwise,
+linewise, reverse, and repeated selection through `ae`, `ar`, and `aR`. It
+also verifies normal `a/i`, `daw`, `ys`/`ds`/`cs`, and operator-Snipe `x/X`
+routing.
+
+This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
+footnote, nested-special, and malformed text-object contexts; Org-aware
+endpoints, insert/append commands, and structural operators; true `<`/`>` Org
+ranges, region-aware Meta operations, generic Org-element
 movement, shift-control commands, and richer list/table semantics; timestamp,
 scheduling, and deadline
 workflows; source-block editing or execution; Babel, LaTeX preview, export and

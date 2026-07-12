@@ -237,7 +237,9 @@
           (dolist (relative '("src/org/parser.lisp"
                               "src/org/folding.lisp"
                               "src/org/mode.lisp"
-                              "src/org/commands.lisp"))
+                              "src/org/commands.lisp"
+                              "src/org/structure.lisp"
+                              "src/org/text-objects.lisp"))
             (load (merge-pathnames relative source))))
         (org-test-log
          (concatenate

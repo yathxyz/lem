@@ -1312,16 +1312,6 @@ The second value is the length of SECOND in its new leading position."
 (define-key *org-vi-insert-keymap* "C-t" 'lem-yath-org-metaright)
 (define-key *org-vi-insert-keymap* "C-d" 'lem-yath-org-metaleft)
 
-(defmethod lem-vi-mode/core:mode-specific-keymaps ((mode org-mode))
-  (declare (ignore mode))
-  (let ((state (lem-vi-mode/core:current-state)))
-    (cond
-      ((typep state 'lem-vi-mode/visual:visual)
-       (list *org-vi-visual-keymap*))
-      ((typep state 'lem-vi-mode/states:insert)
-       (list *org-vi-insert-keymap*))
-      (t (list *org-vi-normal-keymap*)))))
-
 ;;; Stock Org chords that do not conflict with the active Evil state maps.
 (define-key *org-mode-keymap* "Tab" 'lem-yath-org-cycle)
 (define-key *org-mode-keymap* "Shift-Tab" 'lem-yath-org-shift-tab)
