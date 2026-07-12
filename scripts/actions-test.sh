@@ -307,14 +307,9 @@ lem_keys "$session" F10
 if ! wait_screen 'Action completion:'; then
   die completion-boot 'fixture prompt did not open'
 fi
-lem_keys "$session" Tab
 if ! wait_screen 'ACTION-CANDIDATE'; then
   die completion-popup 'prompt completion did not focus the fixture candidate'
 fi
-# Prompt completion may retain its most recently focused row.  Move to the
-# first row explicitly; Up is non-cycling at the boundary.
-lem_keys "$session" Up
-sleep 0.2
 before=$(report_count '^PROMPT ')
 lem_keys "$session" F9
 if ! wait_report_count '^PROMPT ' "$((before + 1))" ||

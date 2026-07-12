@@ -283,22 +283,28 @@ whether the list opens instantly or on TAB. Core has fuzzy primitives, but no
 Orderless component dispatch or persistent Prescient ranking; lem-yath adds the
 prompt behavior described in `src/completion.lisp`.
 
+Lem-yath gives prompt contexts Vertico-style display-only startup: presenting
+candidates neither inserts a shared prefix nor automatically accepts a
+synchronous singleton. `Tab` inserts the focused candidate and refreshes
+completion without closing the prompt; one `Return` accepts it and submits the
+prompt. `M-p` and `M-n` traverse prompt history and reopen completion.
+
 Lem-yath carries `patches/lem-completion-lifecycle.patch` against the pinned Lem
 revision. It separates display, filter, and insertion text, adds a final-accept
 callback plus a distinct final-insertion callback, and rejects stale asynchronous
 generations before they can update the popup. A custom final inserter receives
 the accepted tracked range only after the completion UI closes; its post-accept
-callback runs exactly once only when insertion succeeds. Automatic contexts also
-keep a cancellable spinner, remember their origin
+callback runs exactly once only when insertion succeeds. Ordinary automatic
+in-buffer contexts also keep a cancellable spinner, remember their origin
 buffer, display rather than insert synchronous singletons, and carry their own
 row-limit and cycling policy. Context filters retain the provider's unbounded raw
 batch and run before the display cap, so item metadata and callbacks survive
 local filtering. Every asynchronous refresh revalidates its buffer, modification
 tick, and point before changing the menu.
-Synchronous prompt providers may atomically normalize their input before
-returning candidates; `scripts/prompt-completion-test.sh` verifies that file
-refresh still retains path-aware candidates while asynchronous validation stays
-strict.
+Synchronous file-prompt providers may atomically normalize path input during a
+refresh; this is distinct from completion-engine common-prefix insertion, which
+prompt contexts disable. `scripts/prompt-completion-test.sh` verifies that file
+refresh retains path-aware candidates while asynchronous validation stays strict.
 The LSP adapter consequently honors plain `filterText`, `insertText`,
 `TextEdit`, and `InsertReplaceEdit` new-text precedence. Provider-relative
 replacement ranges are retained with tracked start/end points and per-item

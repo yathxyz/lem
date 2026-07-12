@@ -68,8 +68,6 @@ run_mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.5
   lem_keys "$session" Enter
-  sleep 0.25
-  lem_keys "$session" Enter
   sleep 0.4
 }
 
@@ -136,9 +134,25 @@ if run_mx lem-yath-test-auto-dabbrev-setup &&
   lem_keys "$session" F5
   wait_report_count '^FOCUS ' $((before + 1)) 5 || true
   first=$(grep '^FOCUS ' "$LEM_YATH_AUTO_COMPLETION_REPORT" | tail -n 1 | cut -d' ' -f2-)
-  lem_keys "$session" C-p
+
+  lem_keys "$session" M-n
   lem_keys "$session" F5
   wait_report_count '^FOCUS ' $((before + 2)) 5 || true
+  meta_next=$(grep '^FOCUS ' "$LEM_YATH_AUTO_COMPLETION_REPORT" | tail -n 1 | cut -d' ' -f2-)
+  lem_keys "$session" M-p
+  lem_keys "$session" F5
+  wait_report_count '^FOCUS ' $((before + 3)) 5 || true
+  meta_back=$(grep '^FOCUS ' "$LEM_YATH_AUTO_COMPLETION_REPORT" | tail -n 1 | cut -d' ' -f2-)
+  if [ -n "$first" ] && [ "$meta_next" != "$first" ] &&
+     [ "$meta_back" = "$first" ]; then
+    pass meta-navigation "M-n/M-p still moved ordinary popup candidates"
+  else
+    fail meta-navigation "ordinary popup focus changed $first -> $meta_next -> $meta_back"
+  fi
+
+  lem_keys "$session" C-p
+  lem_keys "$session" F5
+  wait_report_count '^FOCUS ' $((before + 4)) 5 || true
   first_again=$(grep '^FOCUS ' "$LEM_YATH_AUTO_COMPLETION_REPORT" | tail -n 1 | cut -d' ' -f2-)
   if [ -n "$first" ] && [ "$first" = "$first_again" ]; then
     pass no-cycle-first "C-p stayed on the first candidate"
@@ -150,11 +164,11 @@ if run_mx lem-yath-test-auto-dabbrev-setup &&
     lem_keys "$session" C-n
   done
   lem_keys "$session" F5
-  wait_report_count '^FOCUS ' $((before + 3)) 5 || true
+  wait_report_count '^FOCUS ' $((before + 5)) 5 || true
   last=$(grep '^FOCUS ' "$LEM_YATH_AUTO_COMPLETION_REPORT" | tail -n 1 | cut -d' ' -f2-)
   lem_keys "$session" C-n
   lem_keys "$session" F5
-  wait_report_count '^FOCUS ' $((before + 4)) 5 || true
+  wait_report_count '^FOCUS ' $((before + 6)) 5 || true
   last_again=$(grep '^FOCUS ' "$LEM_YATH_AUTO_COMPLETION_REPORT" | tail -n 1 | cut -d' ' -f2-)
   if [ -n "$last" ] && [ "$last" != "$first" ] && [ "$last" = "$last_again" ]; then
     pass no-cycle-last "C-n stayed on the last of all twelve candidates"

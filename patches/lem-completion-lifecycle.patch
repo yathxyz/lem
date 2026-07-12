@@ -1448,7 +1448,7 @@ index 1e90e52..561ab4a 100644
             :run-completion
             :completion-end
             :completion-mode
-@@ -18,11 +26,83 @@
+@@ -18,11 +26,89 @@
  (defvar *completion-context* nil)
  (defvar *completion-reverse* nil)
 
@@ -1456,9 +1456,11 @@ index 1e90e52..561ab4a 100644
 +  "Function returning completion context options for the current buffer.
 +
 +The function receives the completion spec and returns a property list.  The
-+supported keys are :FILTER-FUNCTION and :SEPARATOR.  A filter function receives
-+the current completion input and the provider's raw items, and must return the
-+original items it wants displayed.")
++supported keys are :FILTER-FUNCTION, :SEPARATOR, and :NARROWING.  A filter
++function receives the current completion input and the provider's raw items,
++and must return the original items it wants displayed.  When :NARROWING is
++false, displaying synchronous candidates neither inserts their common prefix
++nor accepts a singleton automatically.")
 +
 +(define-editor-variable completion-snippet-preparation-function nil
 +  "Function used by completion providers to prepare a snippet session.
@@ -1488,6 +1490,10 @@ index 1e90e52..561ab4a 100644
 +    :initarg :automatic
 +    :initform nil
 +    :reader context-automatic-p)
++   (narrowing
++    :initarg :narrowing
++    :initform t
++    :reader context-narrowing-p)
 +   (style
 +    :initarg :style
 +    :initform nil
@@ -1532,7 +1538,7 @@ index 1e90e52..561ab4a 100644
     (last-items
      :initform '()
      :accessor context-last-items)
-@@ -37,10 +117,17 @@
+@@ -37,10 +123,17 @@
     (async
      :initarg :async
      :initform nil
@@ -1553,7 +1559,7 @@ index 1e90e52..561ab4a 100644
 
  (defun ensure-completion-spec (completion-spec)
    (typecase completion-spec
-@@ -63,6 +150,16 @@
+@@ -63,6 +156,16 @@
      :initform ""
      :reader completion-item-label
      :type string)
@@ -1570,7 +1576,7 @@ index 1e90e52..561ab4a 100644
     (chunks
      :initarg :chunks
      :initform nil
-@@ -87,15 +184,38 @@
+@@ -87,15 +190,38 @@
      :initarg :focus-action
      :initform nil
      :reader completion-item-focus-action
@@ -1611,7 +1617,7 @@ index 1e90e52..561ab4a 100644
    (apply #'make-instance 'completion-item initargs))
 
  (defvar *completion-mode-keymap* (make-keymap :description '*completion-mode-keymap*
-@@ -170,16 +290,44 @@
+@@ -170,16 +296,44 @@
                                              (lambda (point)
                                                (move-point point dest-point))))))))
 
@@ -1661,7 +1667,7 @@ index 1e90e52..561ab4a 100644
      (alexandria:when-let* ((menu (context-popup-menu *completion-context*))
                             (item (lem/popup-menu:get-focus-item menu))
                             (fn (completion-item-focus-action item)))
-@@ -188,14 +336,20 @@
+@@ -188,14 +342,20 @@
  (define-command completion-self-insert () ()
    (let ((c (insertion-key-p (last-read-key-sequence))))
      (cond (c (insert-character (current-point) c)
@@ -1685,7 +1691,7 @@ index 1e90e52..561ab4a 100644
 
  (define-command completion-delete-previous-char (n) (:universal)
    (delete-previous-char n)
-@@ -205,33 +359,55 @@
+@@ -205,33 +365,55 @@
    (backward-delete-word n)
    (completion-refresh))
 
@@ -1751,7 +1757,7 @@ index 1e90e52..561ab4a 100644
    (let ((start (or (completion-item-start item)
                     (with-point ((start point))
                       (skip-chars-backward start #'syntax-symbol-char-p)
-@@ -240,11 +416,54 @@
+@@ -240,11 +422,54 @@
                   point)))
      (values start end)))
 
@@ -1807,7 +1813,7 @@ index 1e90e52..561ab4a 100644
 
  (defun partial-match (strings)
    (when strings
-@@ -261,22 +480,31 @@
+@@ -261,22 +486,31 @@
 
  (defun narrowing-down (context last-items)
    (when last-items
@@ -1855,7 +1861,7 @@ index 1e90e52..561ab4a 100644
 
  (define-command completion-narrowing-down-or-next-line () ()
    (or (narrowing-down *completion-context* (context-last-items *completion-context*))
-@@ -294,79 +522,265 @@
+@@ -294,79 +528,275 @@
          result)))
 
  (defun compute-completion-items (context then)
@@ -1979,7 +1985,8 @@ index 1e90e52..561ab4a 100644
 +                     `(:max-display-items ,max-display-items)))))
      (completion-mode t)
 -    (unless (spec-async-p (context-spec context))
-+    (unless (or (spec-async-p (context-spec context))
++    (unless (or (not (context-narrowing-p context))
++                (spec-async-p (context-spec context))
 +                (context-automatic-p context)
 +                (context-local-filtering-p context))
        (narrowing-down context items))
@@ -2063,6 +2070,7 @@ index 1e90e52..561ab4a 100644
 +(defun run-completion
 +    (completion-spec
 +     &key style then automatic max-display-items (cycle t)
++       (narrowing nil narrowing-supplied-p)
 +       (filter-function nil filter-function-supplied-p)
 +       (separator nil separator-supplied-p))
    "Start a new completion using the completion-spec,
@@ -2087,10 +2095,17 @@ index 1e90e52..561ab4a 100644
 +           (if separator-supplied-p
 +               separator
 +               (getf options :separator)))
++         (narrowing-option (getf options :narrowing :unspecified))
++         (narrowing
++           (cond
++             (narrowing-supplied-p narrowing)
++             ((eq narrowing-option :unspecified) t)
++             (t narrowing-option)))
 +         (context (make-instance 'completion-context
 +                                 :spec spec
 +                                 :buffer origin-buffer
 +                                 :automatic automatic
++                                 :narrowing narrowing
 +                                 :style style
 +                                 :filter-function filter-function
 +                                 :separator separator
@@ -2162,7 +2177,8 @@ index 1e90e52..561ab4a 100644
 +                     (cond
 +                       ((null items)
 +                        (completion-end))
-+                       ((and (alexandria:length= items 1)
++                       ((and (context-narrowing-p context)
++                             (alexandria:length= items 1)
 +                             (not automatic))
 +                        (completion-accept (current-point) (first items)))
 +                       (t

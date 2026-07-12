@@ -115,7 +115,7 @@ invoke_mx() {
   send_keys "$session" Escape Escape M-x
   lem_wait_for "$session" 'Command:' "$WAIT_TIMEOUT" >/dev/null || return 1
   send_literal "$session" "$command"
-  send_keys "$session" Enter Enter
+  send_keys "$session" Enter
   wait_report_count "$report_pattern" "$((before + 1))" "$WAIT_TIMEOUT"
 }
 
@@ -124,7 +124,7 @@ open_mx_prompt() {
   send_keys "$session" Escape Escape M-x
   lem_wait_for "$session" 'Command:' "$WAIT_TIMEOUT" >/dev/null || return 1
   send_literal "$session" "$command"
-  send_keys "$session" Enter Enter
+  send_keys "$session" Enter
   lem_wait_for "$session" "$prompt" "$WAIT_TIMEOUT" >/dev/null
 }
 
@@ -378,7 +378,7 @@ then
   send_keys "$auto_session" Escape Escape M-x
   if lem_wait_for "$auto_session" 'Command:' "$WAIT_TIMEOUT" >/dev/null; then
     send_literal "$auto_session" revert-buffer
-    send_keys "$auto_session" Enter Enter
+    send_keys "$auto_session" Enter
     if lem_wait_for "$auto_session" 'Discard unsaved changes' "$WAIT_TIMEOUT" \
          >/dev/null; then
       send_keys "$auto_session" n

@@ -210,8 +210,6 @@ invoke_mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.4
   lem_keys "$session" Enter
-  sleep 0.2
-  lem_keys "$session" Enter
 }
 
 fixture="$(lem-yath_lisp_string "$here/scripts/real-lsp-fixture.lisp")"

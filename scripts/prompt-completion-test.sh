@@ -60,8 +60,6 @@ invoke_prompt_command() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.6
   lem_keys "$session" Enter
-  sleep 0.3
-  lem_keys "$session" Enter
   lem_wait_for "$session" "$prompt" 10 >/dev/null
 }
 
@@ -111,8 +109,6 @@ if invoke_prompt_command lem-yath-test-buffer-prompt 'Fixture buffer:'; then
   lem_keys "$session" C-n
   sleep 0.2
   lem_keys "$session" Enter
-  sleep 0.2
-  lem_keys "$session" Enter
   if wait_report_count '^BUFFER-SELECT ' 1; then
     selected_buffer_path=$(grep '^BUFFER-SELECT ' "$LEM_YATH_PROMPT_COMPLETION_REPORT" |
       tail -1 | sed 's/^.* path=//')
@@ -152,8 +148,8 @@ if [ -n "$selected_buffer_path" ] &&
   lem_keys "$session" Escape
 fi
 
-# File prompt: narrow the first path component, select a slash-terminated
-# directory, then explicitly reopen completion for the nested component.
+# File prompt: narrow the first path component, use Vertico-style Tab to insert
+# a slash-terminated directory without exiting, then narrow the nested files.
 selected_file_name=""
 if invoke_prompt_command lem-yath-test-file-prompt 'Fixture file:' &&
    lem_wait_for "$session" 'nested/' 10 >/dev/null; then
@@ -161,7 +157,7 @@ if invoke_prompt_command lem-yath-test-file-prompt 'Fixture file:' &&
   sleep 0.5
   if lem_wait_for "$session" 'nested/' 5 >/dev/null; then
     pass file-refresh "typing retained path-aware candidates in the automatic popup"
-    lem_keys "$session" Enter
+    lem_keys "$session" Tab
     sleep 0.5
     screen=$(lem_capture "$session")
     if grep -q 'nested/' <<<"$screen" &&
@@ -172,7 +168,6 @@ if invoke_prompt_command lem-yath-test-file-prompt 'Fixture file:' &&
     fi
 
     tmux_cmd send-keys -t "$session" -l al-r
-    lem_keys "$session" Tab
     if lem_wait_for "$session" 'alpha-report.txt' 10 >/dev/null &&
        lem_wait_for "$session" 'alpine-report.txt' 10 >/dev/null; then
       pass partial-components "al-r matched both nested hyphen components"
@@ -181,8 +176,6 @@ if invoke_prompt_command lem-yath-test-file-prompt 'Fixture file:' &&
     fi
 
     lem_keys "$session" C-n
-    sleep 0.2
-    lem_keys "$session" Enter
     sleep 0.2
     lem_keys "$session" Enter
     if wait_report_count '^FILE-SELECT ' 1; then
@@ -211,11 +204,10 @@ if [ -n "$selected_file_name" ] &&
   tmux_cmd send-keys -t "$session" -l neste
   sleep 0.5
   if lem_wait_for "$session" 'nested/' 10 >/dev/null; then
-    lem_keys "$session" Enter
+    lem_keys "$session" Tab
     sleep 0.3
   fi
   tmux_cmd send-keys -t "$session" -l al-r
-  lem_keys "$session" Tab
   sleep 0.7
   screen=$(lem_capture "$session")
   case "$selected_file_name" in

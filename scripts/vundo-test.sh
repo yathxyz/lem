@@ -126,7 +126,7 @@ invoke_mx() {
   send_keys Escape Escape M-x
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
   send_literal "$command"
-  send_keys Enter Enter
+  send_keys Enter
   wait_report_count "$pattern" "$((before + 1))" "$timeout"
 }
 
@@ -135,7 +135,7 @@ invoke_mx_no_report() {
   send_keys Escape Escape M-x
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
   send_literal "$command"
-  send_keys Enter Enter
+  send_keys Enter
   sleep 0.5
 }
 

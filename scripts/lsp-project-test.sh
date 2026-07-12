@@ -165,8 +165,6 @@ invoke_mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.4
   lem_keys "$session" Enter
-  sleep 0.2
-  lem_keys "$session" Enter
   if [ -n "$prompt" ]; then
     lem_wait_for "$session" "$prompt" 10 >/dev/null
   fi
@@ -322,8 +320,7 @@ if invoke_mx lem-yath-workspace-symbol 'Workspace symbol query:'; then
   if wait_event_count WORKSPACE_SYMBOL 'query=alpha' 1 &&
      lem_wait_for "$session" 'Workspace symbol:' 10 >/dev/null; then
     # Fresh test state preserves server order, so AlphaSymbol is the focused
-    # first row.  Avoid typing over the prompt's automatically inserted common
-    # prefix; Return exercises the completion item's custom accept action.
+    # first row.  The empty prompt remains unchanged until Return accepts it.
     if lem_wait_for "$session" 'AlphaSymbol' 10 >/dev/null &&
        lem_wait_for "$session" 'symbols.fixture' 10 >/dev/null; then
       screen=$(lem_capture "$session")

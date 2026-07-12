@@ -153,8 +153,6 @@ run_mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.5
   lem_keys "$session" Enter
-  sleep 0.25
-  lem_keys "$session" Enter
   sleep 0.4
 }
 
@@ -268,8 +266,6 @@ if run_mx lem-yath-test-snippet-selector-setup &&
    lem_wait_for "$session" 'Snippet:' "$WAIT_TIMEOUT" >/dev/null; then
   send_literal 'manual picker'
   if lem_wait_for "$session" 'manual picker' "$WAIT_TIMEOUT" >/dev/null; then
-    lem_keys "$session" Enter
-    sleep 0.25
     lem_keys "$session" Enter
     sleep 0.4
     enter_insert

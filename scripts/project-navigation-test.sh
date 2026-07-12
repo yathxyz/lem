@@ -227,8 +227,6 @@ invoke_mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.5
   lem_keys "$session" Enter
-  sleep 0.2
-  lem_keys "$session" Enter
   wait_report_count "$report_pattern" "$((before + 1))"
 }
 
@@ -243,7 +241,7 @@ submit_completion_prompt() {
     sleep 0.1
     index=$((index + 1))
   done
-  lem_keys "$session" Enter
+  return 1
 }
 
 register_session="lem-yath-project-register-$id"
@@ -537,11 +535,7 @@ if lem_wait_for "$verify_session" 'Project( \(current\))?:' "$WAIT_TIMEOUT" >/de
         lem_keys "$verify_session" f
         if lem_wait_for "$verify_session" 'Project file( \(current\))?:' "$WAIT_TIMEOUT" \
              >/dev/null; then
-          gamma_prompt_line=$(lem_capture "$verify_session" |
-            grep -m1 'Project file' || true)
-          if ! grep -Fq 'gamma-target.txt' <<<"$gamma_prompt_line"; then
-            tmux_cmd send-keys -t "$verify_session" -l 'gamma-target'
-          fi
+          tmux_cmd send-keys -t "$verify_session" -l 'gamma-target'
           sleep 0.3
           submit_completion_prompt "$verify_session" 'Project file( \(current\))?:'
           if lem_wait_for "$verify_session" 'GAMMA TARGET PROJECT' \

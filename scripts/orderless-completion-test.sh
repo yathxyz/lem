@@ -75,8 +75,6 @@ run_mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.5
   lem_keys "$session" Enter
-  sleep 0.25
-  lem_keys "$session" Enter
   sleep 0.4
 }
 
@@ -89,8 +87,6 @@ invoke_prompt() {
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
   tmux_cmd send-keys -t "$session" -l lem-yath-test-orderless-prompt
   sleep 0.5
-  lem_keys "$session" Enter
-  sleep 0.25
   lem_keys "$session" Enter
   lem_wait_for "$session" 'Orderless prompt:' 10 >/dev/null
 }

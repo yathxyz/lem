@@ -172,8 +172,6 @@ mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.5
   tmux_cmd send-keys -t "$session" Enter
-  sleep 0.25
-  tmux_cmd send-keys -t "$session" Enter
   sleep 0.5
 }
 

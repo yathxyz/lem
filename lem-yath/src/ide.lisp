@@ -178,10 +178,7 @@
      :end end
      :accept-action
      (lambda ()
-       (setf (car selected-cell) candidate)
-       (completion-record-candidate
-        (workspace-symbol-candidate-label candidate))
-       (lem/prompt-window::prompt-execute)))))
+       (setf (car selected-cell) candidate)))))
 
 (defun prompt-for-workspace-symbol (candidates)
   (let ((selected-cell (list nil)))

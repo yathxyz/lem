@@ -197,6 +197,12 @@ pipelines: Vertico + Marginalia + Prescient for minibuffers, and Corfu +
 Orderless + mode/Cape CAPFs in ordinary buffers. Yasnippet expands separately
 through `TAB`; it is not a Cape candidate source.
 
+An isolated live-Vertico probe confirmed that opening candidates does not insert
+a common prefix or accept a singleton. `TAB` inserts the focused candidate while
+retaining the minibuffer, `RET` accepts and submits once, and `M-p`/`M-n` traverse
+history. `C-g` aborts; one physical `Escape` starts a Meta sequence rather than
+aborting.
+
 The private corpus is exactly `org-mode/srcblock.snpt`. Its `jjs` trigger
 expands the following body, first visiting the `language` field and then the
 final position on the blank line:

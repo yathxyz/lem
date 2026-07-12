@@ -67,8 +67,6 @@ run_mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.6
   lem_keys "$session" Enter
-  sleep 0.3
-  lem_keys "$session" Enter
   sleep 0.5
 }
 

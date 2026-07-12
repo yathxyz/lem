@@ -555,15 +555,9 @@ fi
 
 send_keys "$git_session" C-j g t t
 if lem_wait_for "$git_session" 'Commit message:' "$WAIT_TIMEOUT" >/dev/null; then
-  # Lem may insert the candidates' common prefix when completion opens.  Set
-  # the exact subject instead of appending to whatever the prompt inferred.
-  send_keys "$git_session" C-a C-k
   tmux_cmd send-keys -t "$git_session" -l -- vcs-old
   sleep 0.5
   send_keys "$git_session" Enter
-  if lem_capture "$git_session" | grep -q 'Commit message:'; then
-    send_keys "$git_session" Enter
-  fi
   active_before=$(report_count '^TIMEMACHINE active=yes ')
   lem_keys "$git_session" F5
   if wait_report_count '^TIMEMACHINE active=yes ' "$((active_before + 1))" &&

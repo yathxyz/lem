@@ -134,8 +134,6 @@ invoke_setup() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.4
   lem_keys "$session" Enter
-  sleep 0.2
-  lem_keys "$session" Enter
   wait_report_count "^SETUP label=$label$" "$((before + 1))"
 }
 

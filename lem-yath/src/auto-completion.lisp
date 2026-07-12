@@ -25,6 +25,9 @@
     lem/completion-mode::completion-end-of-buffer
     lem/completion-mode::completion-beginning-of-buffer
     lem/completion-mode::completion-narrowing-down-or-next-line
+    lem-yath-completion-tab
+    lem-yath-completion-previous-history
+    lem-yath-completion-next-history
     lem-yath-completion-space
     lem-yath-orderless-insert-separator
     lem-yath-act-completion))
@@ -169,11 +172,17 @@ directory already exists."
 (defun auto-completion-context-options (spec)
   "Apply Orderless only to ordinary, non-file in-buffer completion."
   (declare (ignore spec))
-  (unless (or (auto-completion-prompt-active-p)
-              (and (null (auto-completion-primary-spec))
-                   (auto-completion-file-context-p (current-point))))
-    (list :filter-function #'orderless-filter-completion-items
-          :separator #\Space)))
+  (cond
+    ;; Vertico only displays and filters prompt candidates.  Merely opening a
+    ;; synchronous list must not insert its common prefix or accept a singleton.
+    ((auto-completion-prompt-active-p)
+     (list :narrowing nil))
+    ((and (null (auto-completion-primary-spec))
+          (auto-completion-file-context-p (current-point)))
+     nil)
+    (t
+     (list :filter-function #'orderless-filter-completion-items
+           :separator #\Space))))
 
 (setf (variable-value
        'lem/completion-mode:completion-context-options-function :global)

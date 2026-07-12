@@ -1365,6 +1365,13 @@ Tab reports the failure without also invoking its fallback indentation."
       (snippet-move-field 1)
       (call-next-method)))
 
+(defmethod execute :around
+    (mode (command lem-yath-completion-tab) argument)
+  (declare (ignore mode command argument))
+  (if (snippet-active-session-p)
+      (snippet-move-field 1)
+      (call-next-method)))
+
 (defun snippet-shift-tab-command-p ()
   (some (lambda (key)
           (match-key key :shift t :sym "Tab"))

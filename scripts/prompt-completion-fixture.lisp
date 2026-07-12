@@ -46,14 +46,6 @@
      "files/nested/alpha-report.txt" (format nil "alpha~%"))
     (prompt-completion-fixture-write
      "files/nested/alpine-report.txt" (format nil "alpine~%"))
-    ;; Keep two `nest...' directory candidates until the final query
-    ;; character, preventing singleton auto-insertion from hiding the slash.
-    (ensure-directories-exist
-     (prompt-completion-fixture-path "files/nestling/.keep"))
-    ;; Prevent the initial empty-query popup from inserting `nest' as a
-    ;; common prefix before the TUI driver types its directory component.
-    (ensure-directories-exist
-     (prompt-completion-fixture-path "files/other/.keep"))
     (dolist (buffer (list first-buffer second-buffer paren-buffer))
       (prompt-completion-fixture-log
        "BUFFER name=~a path=~a"

@@ -91,8 +91,6 @@ invoke_test_command() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.5
   lem_keys "$session" Enter
-  sleep 0.2
-  lem_keys "$session" Enter
   wait_report_count "$report_pattern" "$((count_before + 1))" "$WAIT_TIMEOUT"
 }
 
@@ -378,8 +376,6 @@ if start_fixture_session "$recent_session" verify &&
   if lem_wait_for "$recent_session" 'File:' "$WAIT_TIMEOUT" >/dev/null &&
      lem_wait_for "$recent_session" 'recent-042\.txt' "$WAIT_TIMEOUT" >/dev/null; then
     pass recent-binding "M-g r opened the recent-file completion prompt"
-    lem_keys "$recent_session" Enter
-    sleep 0.3
     lem_keys "$recent_session" Enter
     if lem_wait_for "$recent_session" 'RECENT TARGET 042' "$WAIT_TIMEOUT" >/dev/null; then
       current_before=$(report_count '^CURRENT ')

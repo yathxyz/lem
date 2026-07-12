@@ -292,6 +292,91 @@ all components must match.  Uppercase input makes matching case-sensitive."
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "Return" 'lem-yath-prompt-execute)
 
+(defun completion-prompt-active-p ()
+  (alexandria:when-let ((prompt
+                         (lem/prompt-window:current-prompt-window)))
+    (eq (current-buffer) (window-buffer prompt))))
+
+(defun completion-prompt-context ()
+  "Return the current, fully presented prompt completion context."
+  (alexandria:when-let* ((prompt
+                          (lem/prompt-window:current-prompt-window))
+                         (context
+                          lem/completion-mode::*completion-context*)
+                         (popup
+                          (lem/completion-mode::context-popup-menu context)))
+    (when (and (eq (current-buffer) (window-buffer prompt))
+               (eq (lem/completion-mode::context-buffer context)
+                   (current-buffer))
+               (= (lem/completion-mode::context-presented-generation context)
+                  (lem/completion-mode::context-generation context)))
+      context)))
+
+(defun completion-focused-item ()
+  (alexandria:when-let* ((context (completion-prompt-context))
+                         (popup
+                          (lem/completion-mode::context-popup-menu context)))
+    (lem/popup-menu:get-focus-item popup)))
+
+(define-command lem-yath-completion-return () ()
+  "Accept the focused prompt candidate and submit it with one Return."
+  (if (completion-prompt-active-p)
+      (alexandria:when-let* ((prompt
+                              (lem/prompt-window:current-prompt-window))
+                             (context (completion-prompt-context))
+                             (popup
+                              (lem/completion-mode::context-popup-menu
+                               context)))
+        (lem:popup-menu-select popup)
+        ;; Acceptance normally closes CONTEXT.  Do not submit stale input if a
+        ;; callback refused the selection or deliberately opened a replacement.
+        (when (and (eq prompt
+                       (lem/prompt-window:current-prompt-window))
+                   (null lem/completion-mode::*completion-context*))
+          (lem-yath-prompt-execute)))
+      (lem/completion-mode::completion-select)))
+
+(define-command lem-yath-completion-tab () ()
+  "Insert the focused prompt candidate without closing the prompt."
+  (if (completion-prompt-active-p)
+      (alexandria:when-let ((item (completion-focused-item)))
+        (lem/completion-mode::completion-insert (current-point) item)
+        (lem/completion-mode:completion-refresh))
+      (lem/completion-mode::completion-narrowing-down-or-next-line)))
+
+(defun completion-prompt-history (command)
+  "Run prompt history COMMAND and reopen automatic completion."
+  (lem/completion-mode:completion-end)
+  (funcall command)
+  (lem/prompt-window::open-prompt-completion))
+
+(define-command lem-yath-completion-previous-history () ()
+  "Use M-p for prompt history and retain candidate movement elsewhere."
+  (if (completion-prompt-active-p)
+      (completion-prompt-history
+       #'lem/prompt-window::prompt-previous-history)
+      (lem/completion-mode::completion-previous-line)))
+
+(define-command lem-yath-completion-next-history () ()
+  "Use M-n for prompt history and retain candidate movement elsewhere."
+  (if (completion-prompt-active-p)
+      (completion-prompt-history
+       #'lem/prompt-window::prompt-next-history)
+      (lem/completion-mode::completion-next-line)))
+
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "Return" 'lem-yath-completion-return)
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "Tab" 'lem-yath-completion-tab)
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "M-p" 'lem-yath-completion-previous-history)
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "M-n" 'lem-yath-completion-next-history)
+(define-key lem/prompt-window::*prompt-mode-keymap*
+  "M-p" 'lem-yath-completion-previous-history)
+(define-key lem/prompt-window::*prompt-mode-keymap*
+  "M-n" 'lem-yath-completion-next-history)
+
 (defun completion-reset-current-category ()
   (setf *completion-current-category* nil))
 
