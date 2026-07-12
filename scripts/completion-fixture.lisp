@@ -9,12 +9,16 @@
                             :direction :output
                             :if-exists :append
                             :if-does-not-exist :create)
-      (format stream "FOCUS ~a INPUT ~s~%"
-              (lem/completion-mode:completion-item-label item)
-              (lem/prompt-window::get-input-string)))))
+      (let ((input (lem/prompt-window::get-input-string)))
+        (format stream "FOCUS=~a INPUT-LENGTH=~d INPUT=~a~%"
+                (lem/completion-mode:completion-item-label item)
+                (length input)
+                input)))))
 
 (define-key lem/completion-mode::*completion-mode-keymap*
   "F5" 'lem-yath-test-report-prompt-focus)
+(pushnew 'lem-yath-test-report-prompt-focus
+         *auto-completion-continue-commands*)
 
 (define-command lem-yath-test-vertico-shared-prefix-prompt () ()
   "Open a prompt whose initial candidates share a nonempty prefix."

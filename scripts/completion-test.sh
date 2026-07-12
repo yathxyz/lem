@@ -66,6 +66,23 @@ close_prompt() {
   sleep 0.3
 }
 
+capture_prompt_state() {
+  local session=$1 before count
+  before=$(grep -c '^FOCUS=' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+  before=${before:-0}
+  lem_keys "$session" F5
+  for _ in $(seq 1 40); do
+    count=$(grep -c '^FOCUS=' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+    count=${count:-0}
+    if [ "$count" -gt "$before" ]; then
+      grep '^FOCUS=' "$LEM_YATH_COMPLETION_REPORT" | tail -n 1
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 s1="lem-yath-completion-a-$id"
 if start_session "$s1"; then
   if open_query "$s1" lem-yath-test-vertico-shared-prefix-prompt; then
@@ -73,8 +90,8 @@ if start_session "$s1"; then
     if lem_wait_for "$s1" 'Shared prefix:' 10 >/dev/null &&
        lem_wait_for "$s1" 'common-alpha' 10 >/dev/null &&
        lem_wait_for "$s1" 'common-beta' 10 >/dev/null; then
-      screen=$(lem_capture "$s1")
-      if grep -Eq 'Shared prefix:[[:space:]]*│$' <<<"$screen"; then
+      state=$(capture_prompt_state "$s1" || true)
+      if grep -q 'INPUT-LENGTH=0 ' <<<"$state"; then
         pass no-eager-prefix "initial candidates did not rewrite empty input"
       else
         fail no-eager-prefix "initial candidates inserted their common prefix" "$s1"
@@ -91,8 +108,8 @@ if start_session "$s1"; then
     lem_keys "$s1" Enter
     if lem_wait_for "$s1" 'Singleton:' 10 >/dev/null &&
        lem_wait_for "$s1" 'singleton-value' 10 >/dev/null; then
-      screen=$(lem_capture "$s1")
-      if grep -Eq 'Singleton:[[:space:]]*│$' <<<"$screen"; then
+      state=$(capture_prompt_state "$s1" || true)
+      if grep -q 'INPUT-LENGTH=0 ' <<<"$state"; then
         pass singleton-display "the initial singleton left input untouched"
       else
         fail singleton-display "the initial singleton was inserted eagerly" "$s1"
@@ -152,14 +169,12 @@ if start_session "$s1"; then
 
   if open_query "$s1" 'lem-yath-roam-' &&
      lem_wait_for "$s1" 'lem-yath-roam-find' 10 >/dev/null; then
-    lem_keys "$s1" F5
-    sleep 0.2
-    initial_focus=$(grep '^FOCUS ' "$LEM_YATH_COMPLETION_REPORT" | tail -n 1 | cut -d' ' -f2)
+    state=$(capture_prompt_state "$s1" || true)
+    initial_focus=$(sed -n 's/^FOCUS=\([^ ]*\).*/\1/p' <<<"$state")
     lem_keys "$s1" C-p
     sleep 0.3
-    lem_keys "$s1" F5
-    sleep 0.2
-    wrapped_focus=$(grep '^FOCUS ' "$LEM_YATH_COMPLETION_REPORT" | tail -n 1 | cut -d' ' -f2)
+    state=$(capture_prompt_state "$s1" || true)
+    wrapped_focus=$(sed -n 's/^FOCUS=\([^ ]*\).*/\1/p' <<<"$state")
     lem_keys "$s1" Tab
     if [ "$wrapped_focus" = 'lem-yath-roam-random' ] &&
        lem_wait_for "$s1" 'Command: lem-yath-roam-random' 10 >/dev/null; then
@@ -195,9 +210,8 @@ if start_session "$s1"; then
         fail prompt-history-previous "M-p moved candidates instead of history" "$s1"
       fi
       lem_keys "$s1" M-n
-      sleep 0.4
-      screen=$(lem_capture "$s1")
-      if grep -Eq 'Command:[[:space:]]*│$' <<<"$screen"; then
+      state=$(capture_prompt_state "$s1" || true)
+      if grep -q 'INPUT-LENGTH=0 ' <<<"$state"; then
         pass prompt-history-next "M-n restored the original empty prompt"
       else
         fail prompt-history-next "M-n did not restore the prompt edit" "$s1"
