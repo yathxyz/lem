@@ -1063,6 +1063,15 @@ Real structural editing: `paredit-slurp`, `paredit-barf`, `paredit-splice`(+fwd/
   `extensions/lem-base16-themes/src/themes.lisp`). All available by name to `load-theme`.
 - Hook after theme load: `*after-load-theme-hook*`.
 
+Lem-yath defines and loads a native `"modus-vivendi-tinted"` theme in
+`src/theme.lisp`, rather than relying on a similarly named Base16 theme. It
+copies the current Emacs theme's foreground/background and the semantic palette
+available through Lem's face model, then reapplies the profile after Lem's
+persisted-theme startup hook. The resolved attributes retain the source hex
+values, although the ncurses frontend ultimately renders them through the
+terminal's available color model. `scripts/ui-parity-test.sh` verifies the
+resolved palette, reload behavior, and multiple distinct rendered color classes.
+
 ### Modeline — `src/modeline.lisp`
 `(lem:modeline-add-status-list item &optional buffer)` /
 `modeline-remove-status-list` (`modeline.lisp:55,61`); items are functions returning
@@ -1085,20 +1094,42 @@ buffers and not in Markdown, AsciiDoc, XML/HTML, patch, fundamental, or utility
 buffers. `nix run .#ui-parity-test` checks the actual synthesized mode class,
 relative distance, unsaved-buffer behavior, and another provider's survival.
 
+### Long-line display — `src/window/window.lisp`, `src/commands/window.lisp`
+The `line-wrap` editor variable defaults to true upstream, and
+`M-x toggle-line-wrap` changes it for the current buffer. Lem-yath changes the
+global default to false so long lines truncate like the current Emacs config;
+`SPC y v` still toggles wrapping buffer-locally. Evil's complete
+`evil-respect-visual-line-mode` remapping and screen-line selection semantics
+remain a separate gap.
+
 ### Show-paren — `src/ext/showparen.lisp`. `M-x toggle-show-paren` (line 69); enabled by
 default via `lem/show-paren:enable`. Highlights matching paren.
 
+### Nested delimiter colors — `extensions/lisp-mode/ext/paren-coloring.lisp`
+Upstream exposes six cycling parenthesis attributes and applies them only when
+the buffer's major mode is Common Lisp `lisp-mode`. Lem-yath enables that hook
+globally and maps the six attributes to the first six delimiter depths of the
+active Emacs Modus palette. Clojure has a separate, disabled upstream coloring
+implementation; Scheme/Racket, Emacs Lisp, and non-Lisp programming modes do
+not receive the configured rainbow treatment. Show-paren remains available in
+those modes. The UI gate checks six actual syntax properties, their resolved
+colors, and a live matching-pair overlay.
+
 ### Highlight current line — `src/highlight-line.lisp`. Editor variable
-`highlight-line` (default **t**, line 3) and `highlight-line-color` (line 4). On by
-default.
+`highlight-line` (default **t**, line 3) and `highlight-line-color` (line 4).
+Lem-yath overrides the global default to false because the current Emacs config
+does not enable `hl-line-mode` or `global-hl-line-mode`.
 
 ### Tabs / window management
 - **Frame multiplexer = tab bar** (`src/ext/frame-multiplexer.lisp`,
   `lem/frame-multiplexer`): `frame-multiplexer-mode` toggles a tmux-like tabbed frame;
-  `frame-multiplexer-next/prev/switch-0..9/create`. Lem-yath enables it idempotently for
-  both ordinary init and post-init `--eval` loading. Upstream's global `C-z` prefix stays
-  installed, while state-local Evil-compatible `C-z` takes precedence in Vi buffers;
-  `C-x t` is the reachable tab/frame prefix. There is also `src/tabbar-config.lisp`.
+  `frame-multiplexer-next/prev/switch-0..9/create`. Upstream enables it from an
+  after-init hook. Lem-yath removes that hook so startup has no tab/header row,
+  retains `C-x t` as the reachable tab/frame prefix, and makes `C-x t 2` (also
+  `C-x t c`) enable the multiplexer and create a tab on demand. Upstream's global
+  `C-z` prefix remains installed, while state-local Evil-compatible `C-z` takes
+  precedence in Vi buffers. There is no winner-style window-layout undo/redo
+  history. There is also `src/tabbar-config.lisp`.
 - Window splits/commands: `split-active-window-vertically`/`-horizontally`,
   `delete-other-windows` (`C-x 1`), `other-window`/`next-window` (`C-x o`),
   `delete-active-window` (`C-x 0`) — `src/commands/window.lisp`. Floating windows

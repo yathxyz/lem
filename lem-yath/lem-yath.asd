@@ -32,6 +32,7 @@
                (:file "find-name")
                (:file "tools")
                (:file "llm")
+               (:file "theme")
                (:file "ui")
                (:module "apps"
                 :components ((:file "agenda")

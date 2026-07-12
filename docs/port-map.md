@@ -13,7 +13,7 @@ Status legend:
 
 | Emacs package | Status | Lem equivalent / location |
 |---|---|---|
-| evil | lem-builtin+ported | `lem-vi-mode`, enabled in `src/vi.lisp`; `src/cursor-state.lisp` adds the configured normal/insert/Emacs colors, portable visual/replace shapes, and a buffer-local `C-z` Emacs state with ordinary Emacs region semantics |
+| evil | lem-builtin+ported/partial | `lem-vi-mode`, enabled in `src/vi.lisp`; `src/cursor-state.lisp` adds the configured normal/insert/Emacs colors, portable visual/replace shapes, and a buffer-local `C-z` Emacs state with ordinary Emacs region semantics. `SPC y v` toggles wrapping, but the active-visual-line remaps and screen-line `V` selection controlled by `evil-respect-visual-line-mode` remain a gap. |
 | evil-collection | lem-builtin | vi-mode's own mode integrations |
 | evil-surround | ported/partial | standard `ys`/`ds`/`cs`, visual `S`, common delimiter padding; tag prompts and syntax-aware balancing remain gaps (`src/vi.lisp`) |
 | evil-snipe | ported | configured 2.1.3 behavior: visible `s/S/f/F/t/T`, whole-visible `;`/`,` and transient pair repeats, exact inclusive/exclusive operators, counts/dot/jumplist behavior, leading-whitespace skipping, and incremental/final faces (`src/vi.lisp`, `scripts/snipe-test.sh`) |
@@ -87,8 +87,10 @@ Status legend:
 | vundo | ported/partial | `SPC u` opens a three-row Unicode retained tree with live preview, branch/stem/saved-node navigation, mark/diff, save, rollback, and accept (`src/vundo.lisp`, `patches/lem-undo-tree.patch`, `scripts/vundo-test.sh`); numeric prefixes and debug keys `i`/`D` are absent |
 | pulsar | n/a | jump recentering is default behavior |
 | indent-bars | gap | no indent guides in ncurses frontend |
-| rainbow-delimiters | partial | paren coloring in lisp-mode; show-paren elsewhere |
+| rainbow-delimiters | ported/partial | `src/ui.lisp` enables upstream coloring in Common Lisp buffers, and `src/theme.lisp` maps its six cycling depths to the first six Modus delimiter colors; Emacs applies rainbow-delimiters throughout `prog-mode` and exposes additional depths. Show-paren remains available elsewhere (`scripts/ui-parity-test.sh`). |
 | display-line-numbers (built-in) | ported | relative numbers render in saved and unsaved programming buffers, compose with other gutters, and stay out of prose and utility buffers (`src/ui.lisp`, `scripts/ui-parity-test.sh`) |
+| truncate-lines / hl-line-mode (built-ins) | ported | `src/ui.lisp` starts with long lines truncated and disables Lem's upstream current-line highlight, matching the active Emacs baseline; `SPC y v` retains buffer-local wrap toggling (`scripts/ui-parity-test.sh`) |
+| tab-bar / winner-mode (built-ins) | partial | no tab header is shown at startup; `C-x t 2` lazily enables Lem's frame multiplexer and creates a tab. Winner-style window-layout undo/redo is absent (`src/ui.lisp`, `scripts/ui-parity-test.sh`). |
 | dirvish | lem-builtin | `directory-mode` + filer |
 | find-name-dired (built-in) | ported/partial | `M-s f` asynchronously fills a persistent, read-only `*Find*` buffer with safely escaped rows backed by exact paths (`src/find-name.lisp`); Dired marking, long columns, file operations, and process cancellation remain gaps |
 | electric-pair-mode / delete-selection-mode (built-ins) | ported/partial | syntax-table delimiter/quote pairing, local balance reuse/skip, numeric prefixes, ordinary region replacement, and Emacs-style opener/quote region wrapping; an unmatched embedded quote is escaped to keep the Lisp string valid instead of reproducing Lispy's raw interior quote, while full forward balance scanning, global paired Backspace, and zero-result prompt recovery remain gaps (`src/electric-pair.lisp`, `scripts/electric-editing-test.sh`) |
@@ -99,11 +101,24 @@ Status legend:
 | gcmh / no-littering / use-package / direnv / sops | n/a or gap | SBCL image needs no GC hacks; no-littering/use-package n/a; **direnv/sops: gap** |
 | editorconfig | ported/partial | the official CLI resolves hierarchy/inheritance for every steady-state local file buffer; Lem maps indentation, line endings, write charset, fill column, trailing whitespace, and final-newline policy (`src/editorconfig.lisp`, `scripts/formatting-test.sh`). Charset is applied only to subsequent writes, not initial decoding |
 | auto-revert / savehist / save-place / recentf (built-ins) | ported/partial | `src/persistence.lisp` safely polls every file buffer before commands, transactionally reloads only clean readable files up to a 64 MiB safety cap, protects stale saves, restores up to 600 local-file positions, and atomically persists allowlisted non-secret prompt histories, a 120-entry live/40-entry saved Vi-aware kill ring, and separate 16-entry literal/regexp search rings; recentf remains a 300-file MRU on `M-g r`. Idle-time/filesystem notifications, larger automatic reloads, directory-buffer positions, and broad non-file stale adapters remain gaps |
-| doom-themes | n/a | Emacs config loaded no theme; Lem default kept (185 base16 themes available) |
+| modus-vivendi-tinted (built-in) / doom-themes | ported/partial | the active Emacs startup theme is recreated natively in `src/theme.lisp`; resolved semantic colors are tested, while ncurses rendering is limited by the terminal color model and Lem has fewer face roles. `doom-themes` remains declared but inactive. |
 | notmuch-outlook / business-visual profile / nodes-org-sync | gap | host-gated bespoke integrations, out of scope |
 
 ## Behavioral divergences worth knowing
 
+- **Visual-line Evil behavior**: `SPC y v` changes the wrapping display, but it
+  does not yet install Emacs Evil's conditional `j/k`, `gj/gk`, `0/g0`, `$/g$`,
+  and screen-line `V` semantics. The attempted partial motion-only version was
+  deliberately excluded because selection and operator behavior must remain
+  coherent.
+- **Display palette and delimiters**: Lem retains the configured Modus hex
+  values for its available semantic attributes, but ncurses maps them through
+  the terminal's color capabilities. Nested colors cover six cycling depths in
+  Common Lisp only; other modes retain matching-pair highlighting rather than
+  Emacs's all-`prog-mode` rainbow coverage.
+- **Tabs and layout history**: startup correctly has no tab row and `C-x t 2`
+  creates one on demand, but Lem's frame multiplexer is not a complete Emacs tab
+  implementation and there is no winner-mode layout history.
 - **Surround grammar**: standard `ys`/`ds`/`cs` and visual `S` work, including
   common padded delimiters, but tag prompts and syntax-aware balancing do not.
 - **Formatting lifecycle**: mapped programming modes with an available,

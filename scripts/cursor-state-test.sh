@@ -354,7 +354,7 @@ reload_before=$(report_count '^RELOAD ')
 reload_offset=$(settled_raw_size) || die reload-idempotence 'raw terminal stream did not settle'
 send_key F10
 if ! wait_report_count \
-     '^RELOAD state-same=yes emacs-same=yes activate=1 deactivate=1 exit=1 switch=1$' \
+     '^RELOAD state-same=yes emacs-same=yes activate=1 deactivate=1 exit=1 theme=1 switch=1$' \
      "$((reload_before + 1))" ||
    ! wait_shape_after "$reload_offset" 5 || ! assert_cursor_background 42,102; then
   die reload-idempotence 'double source reload changed state, hooks, or profile'
@@ -364,6 +364,24 @@ if ! wait_report_count '^SUMMARY STATIC PASS failures=0$' 2; then
   die reload-idempotence 'post-reload static contracts failed'
 fi
 pass reload-idempotence 'double reload retained instances, hooks, bindings, and INSERT'
+
+theme_before=$(report_count '^THEME ')
+theme_offset=$(settled_raw_size) || die theme-roundtrip 'raw terminal stream did not settle'
+send_key F6
+if ! wait_report_count \
+     '^THEME other=lem-default configured=modus-vivendi-tinted buffer-same=yes active-same=yes state=INSERT type=bar configured-color=green hook=1$' \
+     "$((theme_before + 1))" ||
+   ! wait_screen 'INSERT.*cursor-source\.txt' ||
+   ! wait_shape_after "$theme_offset" 5 || ! assert_cursor_background 42,102 ||
+   ! record_state ||
+   ! assert_last_state \
+     '^STATE buffer=cursor-source\.txt state=INSERT type=bar configured=green .* global=vi visual=none mark=no point=1 return=none ';
+then
+  die theme-roundtrip \
+    'theme changes did not preserve the INSERT logical state and terminal profile'
+fi
+pass theme-roundtrip \
+  'different/configured themes retained one hook and the green bar INSERT profile'
 
 exit_offset=$(settled_raw_size) || die exit-restore 'raw terminal stream did not settle'
 send_key C-x

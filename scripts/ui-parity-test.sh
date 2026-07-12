@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Real-ncurses coverage for delayed leader help and programming-only numbers.
+# Real-ncurses coverage for the display baseline, delayed leader help, and
+# programming-only numbers.
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,9 +13,16 @@ export WORKDIR="$root/work"
 export LEM_YATH_UI_PARITY_REPORT="$root/report"
 export LEM_YATH_UI_CODE_FILE="$root/code.lisp"
 export LEM_YATH_UI_PROSE_FILE="$root/notes.md"
+export LEM_YATH_UI_WRAP_FILE="$root/wrap.txt"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR"
-printf '(defun answer ()\n  42)\n' >"$LEM_YATH_UI_CODE_FILE"
+printf '((((((rainbow))))))\n(defun answer (value)\n  (list :answer value "string")) ; comment\n' >"$LEM_YATH_UI_CODE_FILE"
 printf '# Notes\n\nplain prose\n' >"$LEM_YATH_UI_PROSE_FILE"
+{
+  printf 'WRAP-BEGIN-'
+  head -c 600 /dev/zero | tr '\0' x
+  printf '%s\n' '-TAIL-SENTINEL'
+  printf '%s\n' 'SECOND-LINE'
+} >"$LEM_YATH_UI_WRAP_FILE"
 : >"$LEM_YATH_UI_PARITY_REPORT"
 
 source "$here/scripts/tui-driver.sh"
@@ -67,10 +75,11 @@ screen_has_leader() {
 }
 
 fixture="$(lem-yath_lisp_string "$here/scripts/ui-parity-fixture.lisp")"
-lem_start_lem-yath_eval "$session" "(load #P$fixture)" "$LEM_YATH_UI_CODE_FILE"
+lem_start "$session" "$LEM_YATH_UI_CODE_FILE" --eval "(load #P$fixture)"
 
 if lem_wait_for "$session" 'NORMAL' 60 >/dev/null &&
    wait_report '^READY$' 60; then
+  tmux_cmd resize-window -t "$session" -x 100 -y 30
   pass boot "configured Lem loaded the UI fixture"
 else
   fail boot "fixture did not become ready"
@@ -78,9 +87,65 @@ fi
 
 if run_mx lem-yath-test-ui-static-checks &&
    wait_report '^SUMMARY STATIC PASS failures=0$'; then
-  pass static-contracts "leader maps, scoped delay, and expected bindings are configured"
+  pass static-contracts "display defaults, tab lifecycle, and leader behavior are configured"
 else
-  fail static-contracts "leader help static contracts failed"
+  fail static-contracts "display or leader static contracts failed"
+fi
+
+if run_mx lem-yath-test-ui-theme-state &&
+   wait_report '^THEME name=modus-vivendi-tinted foreground=#ffffff background=#0d0e1c region=#ffffff/#555a66 modeline=#ffffff/#484d67 inactive=#969696/#292d48 warning=#d0bc00/none string=#2fafff/none comment=#ef8386/none keyword=#79a8ff/none constant=#b6a0ff/none function=#f78fe7/none variable=#4ae2f0/none type=#11c777/none builtin=#feacd0/none line=#989898/#1d2235 active-line=#ffffff/#4a4f69 paren=#ffffff/#4f7f9f$' &&
+   wait_report '^RAINBOW attributes=PAREN-COLOR-1,PAREN-COLOR-2,PAREN-COLOR-3,PAREN-COLOR-4,PAREN-COLOR-5,PAREN-COLOR-6 colors=#ffffff/none,#ff66ff/none,#00eff0/none,#ff6b55/none,#efef00/none,#b6a0ff/none$' &&
+   wait_report '^SHOW-PAREN enabled=yes timer=yes overlays=2 colors=#ffffff/#4f7f9f,#ffffff/#4f7f9f$'; then
+  pass theme "Modus semantic faces, six Common Lisp depths, and pair highlighting are active"
+else
+  fail theme "theme attributes or rainbow delimiter properties differed"
+fi
+
+escape=$(printf '\033')
+rendered_colors=$(
+  tmux_cmd capture-pane -t "$session" -p -e 2>/dev/null |
+    LC_ALL=C grep -aoE "${escape}\\[(3[0-7]|9[0-7]|38[:;]5[:;][0-9]+)m" |
+    sort -u | wc -l | tr -d ' '
+)
+if ((rendered_colors >= 5)); then
+  pass theme-render "ncurses emitted $rendered_colors distinct foreground classes"
+else
+  fail theme-render "ncurses exposed only $rendered_colors foreground classes"
+fi
+
+if run_mx lem-yath-test-ui-reload-display &&
+   wait_report '^DISPLAY-RELOAD theme=modus-vivendi-tinted wrap=no highlight=no frame=no rainbow-hooks=1$'; then
+  pass display-reload "theme and UI reload preserve one idempotent baseline"
+else
+  fail display-reload "display reload changed state or duplicated hooks"
+fi
+
+lem_keys "$session" C-x t 2
+sleep 0.5
+if run_mx lem-yath-test-ui-frame-state &&
+   wait_report '^FRAME enabled=yes count=2$' &&
+   lem_capture "$session" | sed -n '1p' | grep -q '0:' &&
+   lem_capture "$session" | sed -n '1p' | grep -q '1:'; then
+  pass on-demand-tab "C-x t 2 enabled tabs and created a second frame"
+else
+  fail on-demand-tab "C-x t 2 did not lazily enable the tab UI"
+fi
+
+if run_mx lem-yath-test-ui-reload-active-tabs &&
+   wait_report '^TAB-RELOAD enabled=yes count=2$'; then
+  pass tab-reload "configuration reload preserved user-created tabs"
+else
+  fail tab-reload "configuration reload destroyed active tabs"
+fi
+
+run_mx toggle-frame-multiplexer || true
+sleep 0.3
+if run_mx lem-yath-test-ui-frame-state &&
+   wait_report '^FRAME enabled=no count=0$' &&
+   ! lem_capture "$session" | sed -n '1p' | grep -qE '0:|1:'; then
+  pass hide-tabs "disabling tabs restored the header-free baseline"
+else
+  fail hide-tabs "frame multiplexer did not return to its startup state"
 fi
 
 if run_mx lem-yath-test-ui-rebuild-leader &&
@@ -123,6 +188,40 @@ if run_mx lem-yath-test-ui-unsaved-code-state &&
   pass unsaved-line-numbers "unsaved programming buffers also receive relative numbers"
 else
   fail unsaved-line-numbers "fileless programming buffer lacked relative numbers"
+fi
+
+# A fresh ordinary buffer inherits the truncated startup default.  The existing
+# SPC y v command toggles rendering, while full Evil screen-line operators are
+# tracked separately rather than being approximated here.
+run_mx lem-yath-test-ui-wrap-state || true
+sleep 0.3
+if wait_report '^WRAP label=state enabled=no line=1 column=0 ' &&
+   ! lem_capture "$session" | grep -q 'TAIL-SENTINEL' &&
+   lem_capture "$session" | sed -n '1p' | grep -q 'WRAP-BEGIN' &&
+   ! lem_capture "$session" | sed -n '1p' | grep -qE '0: .*wrap'; then
+  pass truncated-startup "long lines clip to one row with no tab header"
+else
+  fail truncated-startup "startup wrapped, exposed the tail, or retained a tab header"
+fi
+
+run_mx toggle-line-wrap || true
+run_mx lem-yath-test-ui-wrap-state || true
+sleep 0.3
+if [[ $(grep '^WRAP label=state ' "$LEM_YATH_UI_PARITY_REPORT" | tail -1) == *'enabled=yes'* ]] &&
+   lem_capture "$session" | grep -q 'TAIL-SENTINEL'; then
+  pass wrapped-display "the existing wrap toggle rendered the long-line tail"
+else
+  fail wrapped-display "the wrap toggle did not expose the long-line tail"
+fi
+
+run_mx toggle-line-wrap || true
+run_mx lem-yath-test-ui-wrap-state || true
+sleep 0.3
+if [[ $(grep '^WRAP label=state ' "$LEM_YATH_UI_PARITY_REPORT" | tail -1) == *'enabled=no'* ]] &&
+   ! lem_capture "$session" | grep -q 'TAIL-SENTINEL'; then
+  pass truncated-restore "toggling wrapping off restored clipped rendering"
+else
+  fail truncated-restore "toggle-off did not restore truncated rendering"
 fi
 
 run_mx lem-yath-test-ui-code-state || true

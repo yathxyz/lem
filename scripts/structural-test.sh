@@ -27,7 +27,9 @@ fail() {
 start() { # start <label> <file> <wait-pattern>
   local label="$1" file="$2" pattern="$3" s="lem-struct-$1-$id"
   SESSIONS+=("$s")
-  lem_start_lem-yath "$s" "$file"
+  # LEM_BIN is the configured wrapper: it loads lem-yath as the init file
+  # before command-line files, matching the installed editor lifecycle.
+  lem_start "$s" "$file"
   if ! lem_wait_for "$s" "$pattern" 40 >/dev/null; then
     fail "$label" "file did not open" "$s"
     return 1
@@ -54,7 +56,10 @@ for ext in lisp clj cljs cljc edn scm rkt el; do
   file="/tmp/lem-yath-struct-mode.$ext"
   printf '%s\n' '(foo bar)' > "$file"
   if start "01-mode-$ext" "$file" 'foo bar'; then
-    screen_has "$STRUCT_SESSION" 'paredit' || mode_ok=0
+    if ! lem_wait_for "$STRUCT_SESSION" 'paredit' 10 >/dev/null; then
+      printf 'Paredit did not activate for .%s\n' "$ext" >&2
+      mode_ok=0
+    fi
   else
     mode_ok=0
   fi

@@ -37,7 +37,7 @@ These bindings are intentionally not mapped to unrelated commands:
 | Emacs binding / feature | Gap in Lem |
 |---|---|
 | `SPC y c` (`yath/centered-view-mode`) | The ncurses frontend has no equivalent balanced window-margin facility. |
-| `evil-respect-visual-line-mode` | `SPC y v` toggles wrapping, but `j/k` retain Vim logical-line movement instead of changing to display-line movement while wrapping is active. |
+| `evil-respect-visual-line-mode` | `SPC y v` toggles wrapping, but Lem retains its ordinary logical/display motion mappings. The configured Emacs remaps `j/k`, `gj/gk`, `0/g0`, `$/g$`, and `V` while visual-line mode is active; that complete, selection-aware behavior is not yet implemented safely. |
 | Completion-local `C-.` | The ncurses input path cannot represent this key distinctly, so the completion popup uses `C-c a` for its action menu. |
 | Full Embark workflow | The dispatcher has typed, extensible providers and a focused action set, but visual-block selection is not a region target, and there is no target cycling, act-all, collect/export/live views, arbitrary Embark action-map composition, or richer embark-consult adapters. |
 | Avy leader jumps | `SPC l/a/s` use goto-line, snipe, and symbol search; they do not render Avy labels over every visible target. |

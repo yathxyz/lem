@@ -170,6 +170,10 @@
                    'restore-terminal-cursor-profile))
              "one-exit-cursor-restore")
       (check (= 1 (cursor-state-hook-count
+                   *after-load-theme-hook*
+                   'configure-lem-yath-cursor-states))
+             "one-theme-cursor-reconfigure")
+      (check (= 1 (cursor-state-hook-count
                    *switch-to-buffer-hook*
                    'lem-yath-sync-vi-state-before-buffer-switch))
              "one-buffer-state-sync")
@@ -206,7 +210,7 @@
      (concatenate
       'string
       "RELOAD state-same=~a emacs-same=~a activate=~d deactivate=~d "
-      "exit=~d switch=~d")
+      "exit=~d theme=~d switch=~d")
      (if (eq state (lem-vi-mode/core:buffer-state)) "yes" "no")
      (if (eq emacs-state *lem-yath-emacs-state*) "yes" "no")
      (cursor-state-hook-count *buffer-mark-activate-hook*
@@ -215,9 +219,34 @@
                               'lem-yath-emacs-mark-deactivate)
      (cursor-state-hook-count *exit-editor-hook*
                               'restore-terminal-cursor-profile)
+     (cursor-state-hook-count *after-load-theme-hook*
+                              'configure-lem-yath-cursor-states)
      (cursor-state-hook-count
       *switch-to-buffer-hook*
       'lem-yath-sync-vi-state-before-buffer-switch))))
+
+(define-command lem-yath-test-cursor-theme-roundtrip () ()
+  (let ((buffer-state (lem-vi-mode/core:buffer-state))
+        (active-state (lem-vi-mode/core:current-state)))
+    (load-theme "lem-default" nil)
+    (let ((other-theme (current-theme)))
+      (load-lem-yath-color-theme)
+      (let ((state (cursor-state-effective-state (current-buffer))))
+        (cursor-state-log
+         (concatenate
+          'string
+          "THEME other=~a configured=~a buffer-same=~a active-same=~a "
+          "state=~a type=~a configured-color=~a hook=~d")
+         other-theme
+         (current-theme)
+         (if (eq buffer-state (lem-vi-mode/core:buffer-state)) "yes" "no")
+         (if (eq active-state (lem-vi-mode/core:current-state)) "yes" "no")
+         (or (cursor-state-name state) "none")
+         (or (cursor-state-type-name state) "none")
+         (or (cursor-state-configured-color state) "default")
+         (cursor-state-hook-count
+          *after-load-theme-hook*
+          'configure-lem-yath-cursor-states))))))
 
 (define-command lem-yath-test-cursor-prompt () ()
   (handler-case
@@ -237,6 +266,7 @@
                       lem-vi-mode:*visual-keymap*
                       *lem-yath-emacs-state-keymap*))
   (define-key keymap "F7" 'lem-yath-test-cursor-static)
+  (define-key keymap "F6" 'lem-yath-test-cursor-theme-roundtrip)
   (define-key keymap "F8" 'lem-yath-test-cursor-source)
   (define-key keymap "F9" 'lem-yath-test-cursor-other)
   (define-key keymap "F10" 'lem-yath-test-cursor-reload)

@@ -152,7 +152,7 @@ Note: avy commands are bound but `avy` is **not** an explicitly declared/configu
 - **ws-butler**: `ws-butler-mode` on `prog-mode` (trims trailing whitespace only on touched lines).
 - **Electric pairs**: `electric-pair-mode t` (global auto-pairing).
 - **delete-selection-mode 1**: typing replaces active region.
-- **Scrolling**: `scroll-conservatively`/`scroll-margin` are present but **commented out** (defaults in effect). `truncate-lines t` default (long lines truncate, arrow glyph `→`). Vertical border glyph `│`.
+- **Scrolling**: `scroll-conservatively`/`scroll-margin` are present but **commented out** (defaults in effect). `truncate-lines t` is the default (long lines truncate, arrow glyph `→`); `SPC y v` toggles buffer-local visual-line wrapping. Vertical border glyph `│`.
 - **Undo**: `evil-undo-system 'undo-redo` (built-in). `vundo` for a visual undo tree (`SPC u`), `vundo-glyph-alist = vundo-unicode-symbols`. Undo limits raised: `undo-limit` 13*160000, `undo-strong-limit` 13*240000, `undo-outer-limit` 2*24000000.
 - **multiple-cursors**: declared in nix; **no keybindings or config**. Only used *internally* by `init-ai.el` to draw a fake cursor overlay during gptel streaming (`mc/make-cursor-overlay-at-point`). Not an interactive editing feature here.
 - **expreg**: region expansion (see §1.5).
@@ -282,13 +282,14 @@ Helpers: `lem-yath/nixpkgs-build-outpath` (build a nixpkgs attr, return store pa
 
 ## 6. UI
 
-- **Theme**: `doom-themes` declared (deferred), but **no `load-theme` is called at startup** in the elisp — the default Emacs theme is used unless the optional business profile is on. `custom-safe-themes` lists 9 hashes (doom variants) marked safe. So: *no active doom theme by default* — flag this; the only theme actually loaded by code is in the business-visual profile (`modus-operandi`, fallback `leuven`). **`doom-modeline` is referenced in `custom.el` (`doom-modeline-check-simple-format t`) but `doom-modeline` is NOT in the nix package list and never required** — likely vestigial. No modeline package is active; default Emacs modeline (mode-line disabled during early-init then restored).
+- **Theme**: startup explicitly disables any active themes and loads the built-in `modus-vivendi-tinted` theme. The optional business profile can replace it on configured hosts with `modus-operandi` (fallback `leuven`). `doom-themes` is still declared but is not the active startup theme; the 9 Doom hashes in `custom-safe-themes` only mark themes safe. **`doom-modeline` is referenced in `custom.el` (`doom-modeline-check-simple-format t`) but is not in the Nix package list and is never required** — likely vestigial. No modeline package is active; the default Emacs modeline is disabled during early init and then restored.
 - **Line numbers**: `display-line-numbers-type 'relative`; `display-line-numbers-mode` on `prog-mode` only.
+- **Current line**: neither `hl-line-mode` nor `global-hl-line-mode` is enabled. The host-gated business profile customizes the `hl-line` face but does not enable the mode.
 - **pulsar**: deferred; `pulsar-delay 0.03`, `pulsar-iterations 4`, all auto-pulse functions disabled (`pulsar-pulse-functions nil`, region nil, on-window-change nil). Hooked into `consult-after-jump-hook` (recenter + reveal) and `imenu-after-jump-hook` (recenter). Effectively: recenter on jump, minimal flashing.
 - **indent-bars**: `indent-bars-mode` on `prog-mode`; `indent-bars-treesit-support nil`.
-- **rainbow-delimiters**: `rainbow-delimiters-mode` on `prog-mode`.
+- **rainbow-delimiters**: `rainbow-delimiters-mode` on every `prog-mode` buffer; the Emacs configuration does not impose a six-depth or Common-Lisp-only restriction.
 - **Fonts**: JetBrainsMono Nerd Font family chain (`JetBrainsMono Nerd Font Mono` -> `JetBrainsMono Nerd Font` -> `JetBrainsMono`), default height `120`. Applied to `default` + `fixed-pitch` via hooks (`after-init`, `window-setup`, `after-make-frame-functions`). `font-use-system-font nil`.
-- **Tabs / windows**: `tab-bar` hints on, no close/new buttons. `winner-mode` (window layout undo). `split-width-threshold 170`, `split-height-threshold nil`. `switch-to-buffer-obey-display-actions t`. `org-roam` buffer shows in a right side-window (width 0.4).
+- **Tabs / windows**: tab hints are enabled and close/new buttons are hidden, but `tab-bar-mode` itself is **not** enabled, so startup has no tab bar. Emacs retains the built-in `C-x t` prefix (`C-x t 2` creates a tab on demand). `winner-mode` is enabled after init for window-layout undo/redo. `split-width-threshold 170`, `split-height-threshold nil`. `switch-to-buffer-obey-display-actions t`. `org-roam` buffers show in a right side window (width 0.4).
 - **dirvish**: `dirvish-override-dired-mode` on `after-init` (dirvish replaces dired everywhere).
 - **Custom view modes**:
   - `yath/centered-view-mode` (`SPC y c`): balanced window margins to center text at `yath/centered-view-width` (default 100).

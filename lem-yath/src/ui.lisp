@@ -1,11 +1,17 @@
-;;;; UI: relative line numbers (display-line-numbers-type 'relative),
-;;;; tab bar (tab-bar-mode), show-paren/highlight-line are Lem defaults.
-;;;; The Emacs config loads no color theme by default, so neither do we.
+;;;; UI baseline: relative programming line numbers, truncated long lines,
+;;;; no implicit tab/header row, no global current-line highlight, and the
+;;;; Common Lisp parentheses subset of rainbow-delimiters.  The palette lives
+;;;; in theme.lisp.
 
 (in-package :lem-yath)
 
+(setf (variable-value 'line-wrap :global) nil)
+(setf (variable-value 'highlight-line :global) nil)
+
 (setf lem/line-numbers:*relative-line* t)
 (setf (variable-value 'lem/line-numbers:line-numbers :global) t)
+
+(setf (variable-value 'lem-lisp-mode/paren-coloring:paren-coloring :global) t)
 
 (defun programming-line-number-content (buffer point)
   (multiple-value-bind (computed-line active-line-p)
@@ -59,15 +65,49 @@
          (programming-line-number-content buffer point))
         other-content)))
 
-;; tab-bar-mode equivalent (tmux-like frame tabs). Enabling is idempotent on
-;; reload and runs immediately for the flake's post-init --eval load path.
-(defun enable-lem-yath-frame-multiplexer ()
+;; Emacs retains its built-in C-x t prefix but does not enable tab-bar-mode at
+;; startup.  Lem's extension registers an unconditional after-init enable hook,
+;; so remove it and turn off any live header when this config is reloaded.
+(defun enable-lem-yath-frame-multiplexer-on-demand ()
+  (unless (variable-value 'lem/frame-multiplexer::frame-multiplexer :global)
+    (uiop:symbol-call :lem/frame-multiplexer :enable-frame-multiplexer)))
+
+(define-command lem-yath-frame-create () ()
+  "Enable frame tabs and create a new tab with a fresh buffer list."
+  (enable-lem-yath-frame-multiplexer-on-demand)
+  (call-command
+   'lem/frame-multiplexer:frame-multiplexer-create-with-new-buffer-list nil))
+
+(define-command lem-yath-frame-create-with-previous-buffer () ()
+  "Enable frame tabs and create a new tab showing the current buffer."
+  (enable-lem-yath-frame-multiplexer-on-demand)
+  (call-command
+   'lem/frame-multiplexer::frame-multiplexer-create-with-previous-buffer nil))
+
+(defun configure-lem-yath-frame-multiplexer ()
   (let* ((package (find-package :lem/frame-multiplexer))
-         (keymap-symbol (and package (find-symbol "*KEYMAP*" package))))
+         (keymap-symbol (and package (find-symbol "*KEYMAP*" package)))
+         (enable-symbol (and package
+                             (find-symbol "ENABLE-FRAME-MULTIPLEXER" package)))
+         (upstream-autostart-p
+           (and enable-symbol
+                (find enable-symbol *after-init-hook* :key #'car))))
     (unless (and keymap-symbol (boundp keymap-symbol))
       (error "The pinned frame-multiplexer keymap is unavailable"))
     ;; C-z is Evil's state toggle.  C-x t is Emacs' native tab-bar prefix.
     (define-key *global-keymap* "C-x t" (symbol-value keymap-symbol))
-    (uiop:symbol-call :lem/frame-multiplexer :enable-frame-multiplexer)))
+    (define-key (symbol-value keymap-symbol) "2" 'lem-yath-frame-create)
+    (define-key (symbol-value keymap-symbol) "c" 'lem-yath-frame-create)
+    (define-key (symbol-value keymap-symbol) "C"
+      'lem-yath-frame-create-with-previous-buffer)
+    (remove-hook *after-init-hook* enable-symbol)
+    ;; When this configuration is first loaded after upstream's init hook has
+    ;; already run, undo that automatic tab row.  On later reloads the hook is
+    ;; gone, so preserve tabs the user explicitly enabled with C-x t 2.
+    (when (and upstream-autostart-p
+               (variable-value
+                'lem/frame-multiplexer::frame-multiplexer :global))
+      (uiop:symbol-call :lem/frame-multiplexer
+                        :disable-frame-multiplexer))))
 
-(initialize-editor-feature 'enable-lem-yath-frame-multiplexer)
+(configure-lem-yath-frame-multiplexer)

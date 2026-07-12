@@ -354,7 +354,7 @@
             snippet-test = mkTestApp "lem-yath-snippet-test" "snippet-test.sh";
             lsp-snippet-test = mkTestApp "lem-yath-lsp-snippet-test" "lsp-snippet-test.sh";
             interactive-test = mkTestApp "lem-yath-interactive-test" "interactive-test.sh";
-            structural-test = mkTestApp "lem-yath-structural-test" "structural-test.sh";
+            structural-test = mkTestAppWithLem lemYath "lem-yath-structural-test" "structural-test.sh";
             notes-test = mkTestApp "lem-yath-notes-test" "notes-test.sh";
             editing-test = mkTestApp "lem-yath-editing-test" "editing-test.sh";
             formatting-test = mkTestApp "lem-yath-formatting-test" "formatting-test.sh";
@@ -363,7 +363,7 @@
             project-navigation-test = mkTestApp "lem-yath-project-navigation-test" "project-navigation-test.sh";
             persistence-test = mkTestApp "lem-yath-persistence-test" "persistence-test.sh";
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
-            ui-parity-test = mkTestApp "lem-yath-ui-parity-test" "ui-parity-test.sh";
+            ui-parity-test = mkTestAppWithLem lemYath "lem-yath-ui-parity-test" "ui-parity-test.sh";
             vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
@@ -383,6 +383,7 @@
             orderless-completion = mkCheck "orderless-completion" "orderless-completion-test.sh";
             snippets = mkCheck "snippets" "snippet-test.sh";
             lsp-snippets = mkCheck "lsp-snippets" "lsp-snippet-test.sh";
+            structural = mkCheckWithLem lemYath "structural" "structural-test.sh";
             notes = mkCheck "notes" "notes-test.sh";
             editing = mkCheck "editing" "editing-test.sh";
             formatting = mkCheck "formatting" "formatting-test.sh";
@@ -391,7 +392,7 @@
             project-navigation = mkCheck "project-navigation" "project-navigation-test.sh";
             persistence = mkCheck "persistence" "persistence-test.sh";
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";
-            ui-parity = mkCheck "ui-parity" "ui-parity-test.sh";
+            ui-parity = mkCheckWithLem lemYath "ui-parity" "ui-parity-test.sh";
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";

@@ -104,6 +104,9 @@ of writing `.fasl` files into the source tree.
   backend is available
 - relative line numbers in programming buffers only, matching the Emacs
   `prog-mode` scope while leaving prose and utility buffers clean
+- the current Modus Vivendi Tinted palette, truncated long lines, no global
+  current-line highlight or startup tab header, `C-x t 2` tabs on demand, and
+  six Modus-matched delimiter depths in Common Lisp buffers
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
   deduplication and timeout, explicit buffer ownership with save-as migration,
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,

@@ -67,6 +67,96 @@
    buffer
    point))
 
+(defun ui-parity-attribute-colors (name)
+  (let ((attribute (ensure-attribute name)))
+    (format nil "~a/~a"
+            (or (attribute-foreground attribute) "none")
+            (or (attribute-background attribute) "none"))))
+
+(defun ui-parity-hook-count (hook function)
+  (count function hook :key #'car))
+
+(defun ui-parity-key-command (keymap keys)
+  (alexandria:when-let
+      ((prefix (lem-core::keymap-find keymap
+                                      (lem-core::parse-keyspec keys))))
+    (lem-core::prefix-suffix prefix)))
+
+(defun ui-parity-record-theme ()
+  (ui-parity-log
+   "THEME name=~a foreground=~a background=~a region=~a modeline=~a inactive=~a warning=~a string=~a comment=~a keyword=~a constant=~a function=~a variable=~a type=~a builtin=~a line=~a active-line=~a paren=~a"
+   (current-theme)
+   (foreground-color)
+   (background-color)
+   (ui-parity-attribute-colors 'region)
+   (ui-parity-attribute-colors 'modeline)
+   (ui-parity-attribute-colors 'modeline-inactive)
+   (ui-parity-attribute-colors 'syntax-warning-attribute)
+   (ui-parity-attribute-colors 'syntax-string-attribute)
+   (ui-parity-attribute-colors 'syntax-comment-attribute)
+   (ui-parity-attribute-colors 'syntax-keyword-attribute)
+   (ui-parity-attribute-colors 'syntax-constant-attribute)
+   (ui-parity-attribute-colors 'syntax-function-name-attribute)
+   (ui-parity-attribute-colors 'syntax-variable-attribute)
+   (ui-parity-attribute-colors 'syntax-type-attribute)
+   (ui-parity-attribute-colors 'syntax-builtin-attribute)
+   (ui-parity-attribute-colors 'lem/line-numbers:line-numbers-attribute)
+   (ui-parity-attribute-colors 'lem/line-numbers:active-line-number-attribute)
+   (ui-parity-attribute-colors 'lem/show-paren:showparen-attribute)))
+
+(defun ui-parity-open-paren-attributes (buffer)
+  (with-point ((point (buffer-start-point buffer))
+               (end (buffer-end-point buffer)))
+    (loop :while (and (point< point end)
+                      (not (end-line-p point)))
+          :for character := (character-at point)
+          :when (eql character #\()
+            :collect (text-property-at point :attribute)
+          :do (character-offset point 1))))
+
+(define-command lem-yath-test-ui-theme-state () ()
+  (alexandria:when-let ((path (uiop:getenv "LEM_YATH_UI_CODE_FILE")))
+    (switch-to-buffer (find-file-buffer path)))
+  (ui-parity-record-theme)
+  (let ((attributes (ui-parity-open-paren-attributes (current-buffer))))
+    (ui-parity-log "RAINBOW attributes=~{~a~^,~} colors=~{~a~^,~}"
+                   attributes
+                   (mapcar #'ui-parity-attribute-colors attributes)))
+  (buffer-start (current-point))
+  (lem/show-paren::update-show-paren)
+  (ui-parity-log
+   "SHOW-PAREN enabled=~a timer=~a overlays=~d colors=~{~a~^,~}"
+   (if (variable-value 'lem/show-paren:enable) "yes" "no")
+   (if lem/show-paren::*show-paren-timer* "yes" "no")
+   (length lem/show-paren::*brackets-overlays*)
+   (mapcar (lambda (overlay)
+             (ui-parity-attribute-colors (overlay-attribute overlay)))
+           lem/show-paren::*brackets-overlays*)))
+
+(defun ui-parity-wrap-buffer ()
+  (alexandria:when-let ((path (uiop:getenv "LEM_YATH_UI_WRAP_FILE")))
+    (let ((buffer (find-file-buffer path)))
+      (switch-to-buffer buffer)
+      buffer)))
+
+(defun ui-parity-record-wrap (label)
+  (let* ((point (current-point))
+         (window (current-window)))
+    (ui-parity-log
+     "WRAP label=~a enabled=~a line=~d column=~d body-width=~d cursor-y=~d"
+     label
+     (if (variable-value 'line-wrap :default (current-buffer)) "yes" "no")
+     (line-number-at-point point)
+     (point-charpos point)
+     (lem-core::window-body-width window)
+     (lem-core::window-cursor-y window))))
+
+(define-command lem-yath-test-ui-wrap-state () ()
+  (when (ui-parity-wrap-buffer)
+    (buffer-start (current-point))
+    (redraw-display)
+    (ui-parity-record-wrap "state")))
+
 (defun ui-parity-record (label)
   (let ((buffer (current-buffer)))
     (buffer-start (buffer-point buffer))
@@ -136,9 +226,36 @@
       (check (lem-core::mode-active-p
               (current-buffer) 'lem-git-gutter::git-gutter-mode)
              "post-init-eval-git-gutter-started")
+      (check (not (variable-value
+                   'lem/frame-multiplexer::frame-multiplexer :global))
+             "frame-multiplexer-not-started")
+      (check (zerop (ui-parity-hook-count
+                     *after-init-hook*
+                     'lem/frame-multiplexer::enable-frame-multiplexer))
+             "frame-multiplexer-autostart-removed")
+      (check (let ((keymap lem/frame-multiplexer:*keymap*))
+               (and (eq 'lem-yath-frame-create
+                        (ui-parity-key-command keymap "2"))
+                    (eq 'lem-yath-frame-create
+                        (ui-parity-key-command keymap "c"))
+                    (eq 'lem-yath-frame-create-with-previous-buffer
+                        (ui-parity-key-command keymap "C"))))
+             "frame-multiplexer-on-demand-bindings")
+      (check (not (variable-value 'line-wrap :global))
+             "long-lines-truncated-by-default")
+      (check (not (variable-value 'highlight-line :global))
+             "current-line-highlight-disabled")
       (check (variable-value
-              'lem/frame-multiplexer::frame-multiplexer :global)
-             "post-init-eval-frame-multiplexer-started")
+              'lem-lisp-mode/paren-coloring:paren-coloring :global)
+             "rainbow-delimiters-enabled")
+      (check (= 1 (ui-parity-hook-count
+                   (variable-value 'after-syntax-scan-hook :global)
+                   'lem-lisp-mode/paren-coloring:paren-coloring))
+             "one-rainbow-delimiter-hook")
+      (check (and (string= "modus-vivendi-tinted" (current-theme))
+                  (string= "#ffffff" (foreground-color))
+                  (string= "#0d0e1c" (background-color)))
+             "current-emacs-theme-loaded")
       (check (and (eq 'lem-yath-llm-set-backend
                       (leader-binding-command
                        lem-vi-mode:*normal-keymap* "g b"))
@@ -154,6 +271,43 @@
       (ui-parity-log "SUMMARY STATIC ~a failures=~d"
                      (if (zerop failures) "PASS" "FAIL")
                      failures))))
+
+(define-command lem-yath-test-ui-reload-display () ()
+  (let ((root (asdf:system-source-directory "lem-yath")))
+    (load (merge-pathnames "src/theme.lisp" root))
+    (load (merge-pathnames "src/ui.lisp" root)))
+  (ui-parity-log
+   "DISPLAY-RELOAD theme=~a wrap=~a highlight=~a frame=~a rainbow-hooks=~d"
+   (current-theme)
+   (if (variable-value 'line-wrap :global) "yes" "no")
+   (if (variable-value 'highlight-line :global) "yes" "no")
+   (if (variable-value 'lem/frame-multiplexer::frame-multiplexer :global)
+       "yes" "no")
+   (ui-parity-hook-count
+    (variable-value 'after-syntax-scan-hook :global)
+    'lem-lisp-mode/paren-coloring:paren-coloring)))
+
+(define-command lem-yath-test-ui-frame-state () ()
+  (ui-parity-log
+   "FRAME enabled=~a count=~d"
+   (if (variable-value 'lem/frame-multiplexer::frame-multiplexer :global)
+       "yes"
+       "no")
+   (loop :for virtual-frame :being :the :hash-values
+           :of lem/frame-multiplexer::*virtual-frame-map*
+         :sum (lem/frame-multiplexer::num-frames virtual-frame))))
+
+(define-command lem-yath-test-ui-reload-active-tabs () ()
+  (load (merge-pathnames "src/ui.lisp"
+                         (asdf:system-source-directory "lem-yath")))
+  (ui-parity-log
+   "TAB-RELOAD enabled=~a count=~d"
+   (if (variable-value 'lem/frame-multiplexer::frame-multiplexer :global)
+       "yes"
+       "no")
+   (loop :for virtual-frame :being :the :hash-values
+           :of lem/frame-multiplexer::*virtual-frame-map*
+         :sum (lem/frame-multiplexer::num-frames virtual-frame))))
 
 (define-command lem-yath-test-ui-code-state () ()
   (alexandria:when-let ((path (uiop:getenv "LEM_YATH_UI_CODE_FILE")))

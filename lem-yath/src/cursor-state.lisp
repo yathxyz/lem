@@ -205,4 +205,7 @@
 ;; the invoking shell.
 (add-hook *exit-editor-hook* 'restore-terminal-cursor-profile -100)
 
+(remove-hook *after-load-theme-hook* 'configure-lem-yath-cursor-states)
+(add-hook *after-load-theme-hook* 'configure-lem-yath-cursor-states -100)
+
 (configure-lem-yath-cursor-states)
