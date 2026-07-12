@@ -541,8 +541,7 @@ if press_report F8 '^BOTTOM installed=yes$'; then
     # The initial Unicode-pane case already proves glyph rendering.  Under a
     # loaded Nix builder, capture-pane can transiently escape those glyphs;
     # verify this delayed dispatch through the authoritative live session.
-    if lem_wait_for "$session" '\*vundo\*' 15 >/dev/null &&
-       press_report F2 '^ORIGIN ' &&
+    if press_report F2 '^ORIGIN ' &&
        [[ "$(last_report '^ORIGIN ')" == \
           *'session=open tree=live diff=none bottom=live '*focus=vundo ]]; then
       send_keys n q

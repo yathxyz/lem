@@ -169,8 +169,14 @@ assert_state() {
 }
 
 body_attributes() {
-  tmux_cmd capture-pane -t "$1" -p -e | sed -n '2,12p'
+  tmux_cmd capture-pane -t "$1" -p -e | sed -n '1,12p'
 }
+
+# ncurses' xterm-256color projection of the configured Modus faces.  Keep the
+# two backgrounds separate: the test below verifies that the selected target
+# remains visually distinct from the other matches.
+snipe_selected_background='44|104|48;5;39'
+snipe_match_background='47|107|48;5;251'
 
 attribute_count() {
   local colors=$1
@@ -197,7 +203,8 @@ wait_attribute_count() {
 wait_no_snipe_attributes() {
   local session=$1 timeout=${2:-$WAIT_TIMEOUT} index=0 count
   while ((index < timeout * 10)); do
-    count=$(attribute_count '46|106|47|107|48;5;110|48;5;251' \
+    count=$(attribute_count \
+      "$snipe_selected_background|$snipe_match_background" \
       <<<"$(body_attributes "$session")")
     if ((count == 0)); then
       return 0
@@ -613,7 +620,7 @@ if start_session "$highlight_session" "$highlight_file" 'ax ay ax az'; then
   send_keys "$highlight_session" s a
   if lem_wait_for "$highlight_session" '1>' "$WAIT_TIMEOUT" >/dev/null &&
      staged_matches=$(wait_attribute_count "$highlight_session" \
-       '47|107|48;5;251' 4); then
+       "$snipe_match_background" 4); then
     pass incremental-highlight "first character exposed $staged_matches visible candidates"
   else
     fail incremental-highlight "prefix candidates were not rendered before read-key" \
@@ -634,9 +641,9 @@ if start_session "$highlight_session" "$highlight_file" 'ax ay ax az'; then
   selected_count=0
   secondary_count=0
   if selected_count=$(wait_attribute_count "$highlight_session" \
-       '46|106|48;5;110' 1) &&
+       "$snipe_selected_background" 1) &&
      secondary_count=$(wait_attribute_count "$highlight_session" \
-       '47|107|48;5;251' 2); then
+       "$snipe_match_background" 2); then
     pass final-highlight "selected and later matches use distinct visible faces"
   else
     fail final-highlight \
@@ -648,9 +655,9 @@ if start_session "$highlight_session" "$highlight_file" 'ax ay ax az'; then
   repeat_selected=0
   repeat_secondary=0
   if repeat_selected=$(wait_attribute_count "$highlight_session" \
-       '46|106|48;5;110' 1) &&
+       "$snipe_selected_background" 1) &&
      repeat_secondary=$(wait_attribute_count "$highlight_session" \
-       '47|107|48;5;251' 3); then
+       "$snipe_match_background" 3); then
     pass whole-visible-repeat "repeat highlighted matches on both sides of point"
   else
     fail whole-visible-repeat \

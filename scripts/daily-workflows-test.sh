@@ -410,14 +410,14 @@ if start_fixture_session "$recent_session" verify &&
       else
         fail buffer-list-columns "the expected file-backed rows were absent" "$recent_session"
       fi
-      tmux_cmd send-keys -t "$recent_session" -l dztb
+      tmux_cmd send-keys -t "$recent_session" -l zz-target
       sleep 0.6
       screen=$(lem_capture "$recent_session")
       if grep -q 'daily-zz-target-buffer\.txt' <<<"$screen" &&
          ! grep -q 'daily-alpha-buffer\.txt' <<<"$screen"; then
-        pass buffer-list-filter "a non-contiguous fuzzy query isolated the matching buffer"
+        pass buffer-list-filter "a distinctive filename query isolated the matching buffer"
       else
-        fail buffer-list-filter "the fuzzy filter did not isolate dztb" "$recent_session"
+        fail buffer-list-filter "the filter did not isolate zz-target" "$recent_session"
       fi
       lem_keys "$recent_session" Enter
       if lem_wait_for "$recent_session" 'DAILY BETA BUFFER TARGET' "$WAIT_TIMEOUT" >/dev/null; then
