@@ -24,7 +24,9 @@ Key environment:
 
 `init-evil.el`:
 - `evil-mode 1`, with `evil-want-integration t`, `evil-want-keybinding nil` (defers to evil-collection).
-- `evil-respect-visual-line-mode t`.
+- `evil-respect-visual-line-mode t`: while `visual-line-mode` is active,
+  `j/k`, `0/$`, `I/A`, `D/C`, doubled line operators, `Y`, and `V` follow
+  screen rows, while `gj/gk` and `g0/g$` retain logical-line access.
 - `evil-undo-system 'undo-redo` (uses built-in `undo-redo`, NOT undo-tree).
 - `evil-want-C-u-delete t` (C-u deletes to indent in insert state).
 - `evil-want-minibuffer nil` (Evil is not active in the minibuffer).
@@ -152,7 +154,7 @@ Note: avy commands are bound but `avy` is **not** an explicitly declared/configu
 - **ws-butler**: `ws-butler-mode` on `prog-mode` (trims trailing whitespace only on touched lines).
 - **Electric pairs**: `electric-pair-mode t` (global auto-pairing).
 - **delete-selection-mode 1**: typing replaces active region.
-- **Scrolling**: `scroll-conservatively`/`scroll-margin` are present but **commented out** (defaults in effect). `truncate-lines t` is the default (long lines truncate, arrow glyph `→`); `SPC y v` toggles buffer-local visual-line wrapping. Vertical border glyph `│`.
+- **Scrolling**: `scroll-conservatively`/`scroll-margin` are present but **commented out** (defaults in effect). `truncate-lines t` is the default (long lines truncate, arrow glyph `→`); `SPC y v` toggles buffer-local, word-wrapped visual-line mode. Vertical border glyph `│`.
 - **Undo**: `evil-undo-system 'undo-redo` (built-in). `vundo` for a visual undo tree (`SPC u`), `vundo-glyph-alist = vundo-unicode-symbols`. Undo limits raised: `undo-limit` 13*160000, `undo-strong-limit` 13*240000, `undo-outer-limit` 2*24000000.
 - **multiple-cursors**: declared in nix; **no keybindings or config**. Only used *internally* by `init-ai.el` to draw a fake cursor overlay during gptel streaming (`mc/make-cursor-overlay-at-point`). Not an interactive editing feature here.
 - **expreg**: region expansion (see §1.5).

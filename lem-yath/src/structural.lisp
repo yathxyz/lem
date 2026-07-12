@@ -170,16 +170,37 @@ Each unmatched delimiter becomes a one-character hole between regions."
 
 (lem-vi-mode:define-operator lem-yath-structural-change-lines (start end type) ("<R>")
     (:motion lem-yath-line-motion :move-point nil)
-  (structural-safe-manipulate start end type :delete t)
-  (move-point (current-point) start)
-  ;; Lispyville keeps unmatched opening delimiters, enters after them, and
-  ;; preserves a line boundary instead of joining the following form.
-  (loop while (syntax-open-paren-char-p (character-at (current-point)))
-        do (character-offset (current-point) 1))
-  (unless (eql (character-at (current-point)) #\Newline)
-    (insert-character (current-point) #\Newline)
-    (character-offset (current-point) -1))
-  (setf (lem-vi-mode/core:buffer-state) 'lem-vi-mode/states::insert))
+  (if (eq type :screen-line)
+      ;; Lispyville does not classify Evil's newer screen-line range as a
+      ;; linewise register and changes it like a character region.
+      (lem-yath-structural-change start end type)
+      (progn
+        (structural-safe-manipulate start end type :delete t)
+        (move-point (current-point) start)
+        ;; Lispyville keeps unmatched opening delimiters, enters after them,
+        ;; and preserves a line boundary instead of joining the following form.
+        (loop while (syntax-open-paren-char-p (character-at (current-point)))
+              do (character-offset (current-point) 1))
+        (unless (eql (character-at (current-point)) #\Newline)
+          (insert-character (current-point) #\Newline)
+          (character-offset (current-point) -1))
+        (setf (lem-vi-mode/core:buffer-state)
+              'lem-vi-mode/states::insert))))
+
+(lem-vi-mode:define-operator lem-yath-structural-yank-to-zero
+    (start end type) ("<R>")
+  (:motion lem-yath-zero-motion :move-point nil)
+  (lem-yath-structural-yank start end type))
+
+(lem-vi-mode:define-operator lem-yath-structural-delete-to-zero
+    (start end type) ("<R>")
+  (:motion lem-yath-zero-motion :move-point nil)
+  (lem-yath-structural-delete start end type))
+
+(lem-vi-mode:define-operator lem-yath-structural-change-to-zero
+    (start end type) ("<R>")
+  (:motion lem-yath-zero-motion :move-point nil)
+  (lem-yath-structural-change start end type))
 
 (lem-vi-mode:define-motion lem-yath-to-line-end () ()
   (:type :inclusive)
@@ -682,13 +703,13 @@ Each unmatched delimiter becomes a one-character hole between regions."
 (define-command lem-yath-structural-delete-line-dispatch (argument) (:universal-nil)
   (call-command (if (structural-editing-p)
                     'lem-yath-structural-delete-to-line-end
-                    'lem-vi-mode/commands:vi-delete-line)
+                    'lem-yath-delete-to-line-end)
                 argument))
 
 (define-command lem-yath-structural-change-line-dispatch (argument) (:universal-nil)
   (call-command (if (structural-editing-p)
                     'lem-yath-structural-change-to-line-end
-                    'lem-vi-mode/commands:vi-change-line)
+                    'lem-yath-change-to-line-end)
                 argument))
 
 (defun structural-line-comment-index (line-start line-end)

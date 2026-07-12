@@ -32,6 +32,7 @@
   (configure-vi-cursor-state 'lem-vi-mode/states:replace-state nil :underline)
   (dolist (state '(lem-vi-mode/visual::visual-char
                    lem-vi-mode/visual::visual-line
+                   lem-vi-mode/visual::visual-screen-line
                    lem-vi-mode/visual::visual-block))
     (configure-vi-cursor-state state nil :box))
   (reinitialize-instance

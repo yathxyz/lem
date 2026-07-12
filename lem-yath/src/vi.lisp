@@ -7,6 +7,13 @@
 
 (lem-vi-mode:vi-mode)
 
+;; Match Evil's `evil-respect-visual-line-mode': the buffer-local wrapping
+;; switch changes Vi's screen/logical line policy instead of only changing
+;; rendering.
+(setf (variable-value
+       'lem-vi-mode/visual:respect-visual-line-mode :global)
+      t)
+
 ;; SPC is the leader, exactly like the Emacs general.el setup. vi-mode
 ;; rewrites a leader-key press into the symbolic "Leader" key for vi keymaps,
 ;; so "Leader x y" chords below behave like SPC-x-y.
@@ -199,12 +206,213 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
   (unread-key key)
   (call-command command argument))
 
+(defun lem-yath-screen-line-policy-p ()
+  (lem-vi-mode/visual:respect-visual-line-mode-p))
+
+(defun lem-yath-before-indentation-p (point)
+  "Whether POINT is no later than its logical line's first nonblank."
+  (with-point ((indentation point))
+    (back-to-indentation indentation)
+    (point<= point indentation)))
+
+(defun lem-yath-screen-motion-range (origin destination)
+  "Return Evil's normalized exclusive screen motion range."
+  (with-point ((start origin)
+               (end destination))
+    (when (point< end start)
+      (rotatef start end))
+    (cond
+      ((and (point/= start end)
+            (start-line-p end))
+       ;; Evil normalizes an exclusive motion landing at logical BOL.  From
+       ;; indentation it becomes the preceding logical line; otherwise it is
+       ;; inclusive through that line's terminator.
+       (character-offset end -1)
+       (lem-vi-mode/core:make-range
+        (copy-point start :temporary)
+        (copy-point end :temporary)
+        (if (lem-yath-before-indentation-p start) :line :inclusive)))
+      (t
+       (lem-vi-mode/core:make-range
+        (copy-point start :temporary)
+        (copy-point end :temporary)
+        :exclusive)))))
+
+(defun lem-yath-vertical-motion-range (count direction screen-first-p)
+  "Move COUNT rows in DIRECTION and return the effective Vi motion range.
+SCREEN-FIRST-P means use displayed rows while the configured wrapping policy
+is active; false implements the inverse g-j/g-k mapping."
+  (let ((screen-p (if screen-first-p
+                      (lem-yath-screen-line-policy-p)
+                      (not (lem-yath-screen-line-policy-p)))))
+    (with-point ((origin (current-point)))
+      (alexandria:ignore-some-conditions (beginning-of-buffer end-of-buffer)
+        (ecase direction
+          (:forward
+           (if screen-p (next-line count) (next-logical-line count)))
+          (:backward
+           (if screen-p (previous-line count) (previous-logical-line count)))))
+      (if screen-p
+          (lem-yath-screen-motion-range origin (current-point))
+          (lem-vi-mode/core:make-range
+           (copy-point origin :temporary)
+           (copy-point (current-point) :temporary)
+           :line)))))
+
+(lem-vi-mode:define-motion lem-yath-next-line (&optional (n 1)) (:universal)
+  ()
+  (lem-yath-vertical-motion-range n :forward t))
+
+(lem-vi-mode:define-motion lem-yath-previous-line (&optional (n 1)) (:universal)
+  ()
+  (lem-yath-vertical-motion-range n :backward t))
+
+(lem-vi-mode:define-motion lem-yath-next-g-line (&optional (n 1)) (:universal)
+  ()
+  (lem-yath-vertical-motion-range n :forward nil))
+
+(lem-vi-mode:define-motion lem-yath-previous-g-line (&optional (n 1)) (:universal)
+  ()
+  (lem-yath-vertical-motion-range n :backward nil))
+
+(defun lem-yath-zero-target (point)
+  (if (lem-yath-screen-line-policy-p)
+      (lem-vi-mode/visual:screen-line-start point)
+      (line-start (copy-point point :temporary))))
+
+(define-command lem-yath-zero () ()
+  "Move to strict screen or logical column zero, respecting wrapping."
+  (if (mode-active-p (current-buffer) 'lem/universal-argument:universal-argument)
+      (lem/universal-argument:universal-argument-0)
+      (move-point (current-point) (lem-yath-zero-target (current-point)))))
+
+(lem-vi-mode:define-motion lem-yath-zero-motion () ()
+  (:type :exclusive)
+  (with-point ((origin (current-point)))
+    (move-point (current-point) (lem-yath-zero-target (current-point)))
+    (lem-vi-mode/core:make-range
+     (copy-point origin :temporary)
+     (copy-point (current-point) :temporary)
+     :exclusive)))
+
+(define-command lem-yath-g-zero () ()
+  "Move to the inverse strict logical or screen column zero."
+  (move-point
+   (current-point)
+   (if (lem-yath-screen-line-policy-p)
+       (line-start (copy-point (current-point) :temporary))
+       (lem-vi-mode/visual:screen-line-start (current-point)))))
+
+(defun lem-yath-move-to-screen-line-end (count)
+  (when (> count 1)
+    (unless (move-to-next-virtual-line
+             (current-point) (1- count) (current-window))
+      (buffer-end (current-point))))
+  (move-to-end-of-line))
+
+(defun lem-yath-move-to-logical-line-end (count)
+  (when (> count 1)
+    (alexandria:ignore-some-conditions (end-of-buffer)
+      (next-logical-line (1- count))))
+  (line-end (current-point)))
+
+(defun lem-yath-end-motion-range (count screen-first-p)
+  (let ((screen-p (if screen-first-p
+                      (lem-yath-screen-line-policy-p)
+                      (not (lem-yath-screen-line-policy-p)))))
+    (with-point ((origin (current-point)))
+      (if screen-p
+          (lem-yath-move-to-screen-line-end count)
+          (lem-yath-move-to-logical-line-end count))
+      (lem-vi-mode/core:make-range
+       (copy-point origin :temporary)
+       (copy-point (current-point) :temporary)
+       (if screen-p :inclusive :exclusive)))))
+
+(lem-vi-mode:define-motion lem-yath-end-of-line (&optional (n 1)) (:universal)
+  ()
+  (lem-yath-end-motion-range n t))
+
+(lem-vi-mode:define-motion lem-yath-g-end-of-line (&optional (n 1)) (:universal)
+  ()
+  (lem-yath-end-motion-range n nil))
+
+(define-command lem-yath-visual-line () ()
+  (call-command
+   (if (lem-yath-screen-line-policy-p)
+       'lem-vi-mode/visual:vi-visual-screen-line
+       'lem-vi-mode/visual:vi-visual-line)
+   nil))
+
+(define-command lem-yath-insert-line () ()
+  "Enter insert at indentation or the active displayed-row start."
+  (if (not (lem-yath-screen-line-policy-p))
+      (lem-vi-mode/commands:vi-insert-line)
+      (with-point ((indentation (current-point))
+                   (screen-start (current-point)))
+        (back-to-indentation indentation)
+        (move-point screen-start
+                    (lem-vi-mode/visual:screen-line-start screen-start))
+        (move-point (current-point)
+                    (if (point< indentation screen-start)
+                        screen-start
+                        indentation))
+        (setf (lem-vi-mode/core:buffer-state)
+              'lem-vi-mode/states::insert))))
+
+(define-command lem-yath-append-line () ()
+  "Enter insert at the active displayed-row or logical line end."
+  (if (lem-yath-screen-line-policy-p)
+      (with-point ((logical-end (current-point)))
+        (line-end logical-end)
+        (let ((screen-end
+                (lem-vi-mode/visual:screen-line-end (current-point))))
+          ;; The exclusive end of a logical line's final displayed row is the
+          ;; next line's BOL.  A inserts before that newline, not after it.
+          (move-point (current-point)
+                      (if (point< logical-end screen-end)
+                          logical-end
+                          screen-end))))
+      (line-end (current-point)))
+  (setf (lem-vi-mode/core:buffer-state) 'lem-vi-mode/states::insert))
+
 (lem-vi-mode:define-motion lem-yath-line-motion (&optional (n 1)) (:universal)
   (:type :line)
-  (line-offset (current-point) (1- n)))
+  (with-point ((origin (current-point)))
+    (if (lem-yath-screen-line-policy-p)
+        (when (> n 1)
+          (alexandria:ignore-some-conditions (end-of-buffer)
+            (next-line (1- n))))
+        (alexandria:ignore-some-conditions (end-of-buffer)
+          (next-logical-line (1- n))))
+    (lem-vi-mode/core:make-range
+     (copy-point origin :temporary)
+     (copy-point (current-point) :temporary)
+     (if (lem-yath-screen-line-policy-p) :screen-line :line))))
+
+(defun lem-yath-expand-line-based-visual-range (start end type)
+  "Expand a character Visual range for D, C, or Y like Evil."
+  (if (or (not (lem-vi-mode/visual:visual-p))
+          (member type '(:line :screen-line :block)))
+      (values start end type)
+      (with-point ((last end))
+        (when (point< start last)
+          (character-offset last -1))
+        (if (lem-yath-screen-line-policy-p)
+            (destructuring-bind (screen-start screen-end)
+                (lem-vi-mode/visual:screen-line-range start last)
+              (values screen-start screen-end :screen-line))
+            (with-point ((line-start start)
+                         (line-end last))
+              (line-start line-start)
+              (or (line-offset line-end 1 0)
+                  (line-end line-end))
+              (values line-start line-end :line))))))
 
 (lem-vi-mode:define-operator lem-yath-yank-lines (start end type) ("<R>")
   (:motion lem-yath-line-motion :move-point nil)
+  (multiple-value-setq (start end type)
+    (lem-yath-expand-line-based-visual-range start end type))
   (lem-vi-mode/commands:vi-yank start end type))
 
 (lem-vi-mode:define-operator lem-yath-delete-lines (start end type) ("<R>")
@@ -217,6 +425,59 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
   (:motion lem-yath-line-motion :move-point nil)
   (lem-vi-mode/commands:vi-change start end type))
 
+(lem-vi-mode:define-operator lem-yath-delete-to-line-end
+    (start end type) ("<R>")
+  (:motion lem-yath-end-of-line :move-point nil)
+  (multiple-value-setq (start end type)
+    (lem-yath-expand-line-based-visual-range start end type))
+  (let ((lem-core::*this-command*
+          (get-command 'lem-vi-mode/commands:vi-delete)))
+    (lem-vi-mode/commands:vi-delete start end type)))
+
+(lem-vi-mode:define-operator lem-yath-change-to-line-end
+    (start end type) ("<R>")
+  (:motion lem-yath-end-of-line :move-point nil)
+  (multiple-value-setq (start end type)
+    (lem-yath-expand-line-based-visual-range start end type))
+  (lem-vi-mode/commands:vi-change start end type))
+
+(lem-vi-mode:define-operator lem-yath-yank-to-zero (start end type) ("<R>")
+  (:motion lem-yath-zero-motion :move-point nil)
+  (lem-vi-mode/commands:vi-yank start end type))
+
+(lem-vi-mode:define-operator lem-yath-delete-to-zero (start end type) ("<R>")
+  (:motion lem-yath-zero-motion :move-point nil)
+  (let ((lem-core::*this-command*
+          (get-command 'lem-vi-mode/commands:vi-delete)))
+    (lem-vi-mode/commands:vi-delete start end type)))
+
+(lem-vi-mode:define-operator lem-yath-change-to-zero (start end type) ("<R>")
+  (:motion lem-yath-zero-motion :move-point nil)
+  (lem-vi-mode/commands:vi-change start end type))
+
+(defun lem-yath-read-operator-key (argument)
+  "Read an optional motion count and return its key and combined count."
+  (let* ((key (read-key))
+         (character (key-to-char key))
+         (first-digit (and character (digit-char-p character))))
+    ;; A leading zero is the `0' motion.  Counts start at 1..9, though later
+    ;; digits may contain zero (for example, d10j).
+    (if (and first-digit (plusp first-digit))
+        (loop :with motion-count := first-digit
+              :for next-key := (read-key)
+              :for next-character := (key-to-char next-key)
+              :for next-digit := (and next-character
+                                      (digit-char-p next-character))
+              :while next-digit
+              :do (setf motion-count
+                        (+ (* motion-count 10) next-digit))
+              :finally
+                 (return
+                   (values next-key
+                           (* (or argument 1) motion-count)
+                           t)))
+        (values key argument nil))))
+
 (define-command lem-yath-yank-or-surround (argument) (:universal-nil)
   "Run native `y`, or evil-surround `ys` when followed by s."
   (if (lem-vi-mode/visual:visual-p)
@@ -224,20 +485,32 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
                         'lem-yath-structural-yank
                         'lem-vi-mode/commands:vi-yank)
                     argument)
-      (let ((key (read-key)))
+      (multiple-value-bind (key combined-argument counted-p)
+          (lem-yath-read-operator-key argument)
         (case (key-to-char key)
           (#\s
-           (call-command 'lem-yath-surround-operator argument))
+           (if counted-p
+               (call-vi-operator
+                (if (structural-editing-p)
+                    'lem-yath-structural-yank
+                    'lem-vi-mode/commands:vi-yank)
+                combined-argument key)
+               (call-command 'lem-yath-surround-operator argument)))
           (#\y
            (call-command (if (structural-editing-p)
                              'lem-yath-structural-yank-lines
                              'lem-yath-yank-lines)
-                         argument))
+                         combined-argument))
+          (#\0
+           (call-command (if (structural-editing-p)
+                             'lem-yath-structural-yank-to-zero
+                             'lem-yath-yank-to-zero)
+                         combined-argument))
           (otherwise
            (call-vi-operator (if (structural-editing-p)
                                  'lem-yath-structural-yank
                                  'lem-vi-mode/commands:vi-yank)
-                             argument key))))))
+                             combined-argument key))))))
 
 (define-command lem-yath-delete-or-surround (argument) (:universal-nil)
   "Run native `d`, or evil-surround `ds` when followed by s."
@@ -246,20 +519,32 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
                         'lem-yath-structural-delete
                         'lem-vi-mode/commands:vi-delete)
                     argument)
-      (let ((key (read-key)))
+      (multiple-value-bind (key combined-argument counted-p)
+          (lem-yath-read-operator-key argument)
         (case (key-to-char key)
           (#\s
-           (lem-yath-surround-delete))
+           (if counted-p
+               (call-vi-operator
+                (if (structural-editing-p)
+                    'lem-yath-structural-delete
+                    'lem-vi-mode/commands:vi-delete)
+                combined-argument key)
+               (lem-yath-surround-delete)))
           (#\d
            (call-command (if (structural-editing-p)
                              'lem-yath-structural-delete-lines
                              'lem-yath-delete-lines)
-                         argument))
+                         combined-argument))
+          (#\0
+           (call-command (if (structural-editing-p)
+                             'lem-yath-structural-delete-to-zero
+                             'lem-yath-delete-to-zero)
+                         combined-argument))
           (otherwise
            (call-vi-operator (if (structural-editing-p)
                                  'lem-yath-structural-delete
                                  'lem-vi-mode/commands:vi-delete)
-                             argument key))))))
+                             combined-argument key))))))
 
 (define-command lem-yath-change-or-surround (argument) (:universal-nil)
   "Run native `c`, or evil-surround `cs` when followed by s."
@@ -268,20 +553,32 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
                         'lem-yath-structural-change
                         'lem-vi-mode/commands:vi-change)
                     argument)
-      (let ((key (read-key)))
+      (multiple-value-bind (key combined-argument counted-p)
+          (lem-yath-read-operator-key argument)
         (case (key-to-char key)
           (#\s
-           (lem-yath-surround-change))
+           (if counted-p
+               (call-vi-operator
+                (if (structural-editing-p)
+                    'lem-yath-structural-change
+                    'lem-vi-mode/commands:vi-change)
+                combined-argument key)
+               (lem-yath-surround-change)))
           (#\c
            (call-command (if (structural-editing-p)
                              'lem-yath-structural-change-lines
                              'lem-yath-change-lines)
-                         argument))
+                         combined-argument))
+          (#\0
+           (call-command (if (structural-editing-p)
+                             'lem-yath-structural-change-to-zero
+                             'lem-yath-change-to-zero)
+                         combined-argument))
           (otherwise
            (call-vi-operator (if (structural-editing-p)
                                  'lem-yath-structural-change
                                  'lem-vi-mode/commands:vi-change)
-                             argument key))))))
+                             combined-argument key))))))
 
 (define-command lem-yath-yank-line-dispatch (argument) (:universal-nil)
   "Use Lispyville's safe y$ in structural buffers and Vim's whole-line Y elsewhere."
@@ -291,10 +588,23 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
                 argument))
 
 (define-key lem-vi-mode:*visual-keymap* "S" 'lem-yath-surround-operator)
+(define-key lem-vi-mode:*motion-keymap* "j" 'lem-yath-next-line)
+(define-key lem-vi-mode:*motion-keymap* "k" 'lem-yath-previous-line)
+(define-key lem-vi-mode:*motion-keymap* "g j" 'lem-yath-next-g-line)
+(define-key lem-vi-mode:*motion-keymap* "g k" 'lem-yath-previous-g-line)
+(define-key lem-vi-mode:*motion-keymap* "0" 'lem-yath-zero)
+(define-key lem-vi-mode:*motion-keymap* "g 0" 'lem-yath-g-zero)
+(define-key lem-vi-mode:*motion-keymap* "$" 'lem-yath-end-of-line)
+(define-key lem-vi-mode:*motion-keymap* "g $" 'lem-yath-g-end-of-line)
+(define-key lem-vi-mode:*motion-keymap* "V" 'lem-yath-visual-line)
 (define-key lem-vi-mode:*normal-keymap* "y" 'lem-yath-yank-or-surround)
 (define-key lem-vi-mode:*normal-keymap* "Y" 'lem-yath-yank-line-dispatch)
 (define-key lem-vi-mode:*normal-keymap* "d" 'lem-yath-delete-or-surround)
 (define-key lem-vi-mode:*normal-keymap* "c" 'lem-yath-change-or-surround)
+(define-key lem-vi-mode:*normal-keymap* "D" 'lem-yath-delete-to-line-end)
+(define-key lem-vi-mode:*normal-keymap* "C" 'lem-yath-change-to-line-end)
+(define-key lem-vi-mode:*normal-keymap* "I" 'lem-yath-insert-line)
+(define-key lem-vi-mode:*normal-keymap* "A" 'lem-yath-append-line)
 
 ;;; --- snipe (evil-snipe 2.1.3) ---------------------------------------------
 

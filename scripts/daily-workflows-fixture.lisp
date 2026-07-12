@@ -57,6 +57,7 @@
          label
          (cond
            ((lem-vi-mode/visual:visual-line-p) "line")
+           ((lem-vi-mode/visual:visual-screen-line-p) "screen-line")
            ((lem-vi-mode/visual:visual-block-p) "block")
            (t "char"))
          (position-at-point (current-point))

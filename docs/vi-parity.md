@@ -11,8 +11,9 @@ configuration does not override it.
 |---|---|---|
 | Vim states and core editing | Upstream normal, insert, visual, operator, replace, registers, text objects, counts, dot-repeat, macros, jumplist, windows, search, and Ex commands | Pinned `lem-vi-mode`; lem-yath regression coverage protects overridden operators |
 | Leader | `SPC` in normal and visual shares one described, reload-safe keymap; every entry is checked against its command, and pausing for one second opens nested continuation help without changing other transient menus | `leader-bindings: T` in `boot-test.sh`; `ui-parity-test.sh` |
-| Native operators | `d/c/y`, doubled `dd/cc/yy`, visual operators, counts, text objects, and dot-repeat survive the surround dispatch layer | interactive checks 8, 9, and 12–14 |
-| Whole-line yank | `Y` yanks the current line, matching configured Evil and `yy` even when the cursor is mid-line | interactive check 22 |
+| Native operators | `d/c/y`, doubled `dd/cc/yy`, visual operators, counts, text objects, and dot-repeat survive the surround dispatch layer; while wrapping is active, doubled operators use complete displayed rows and native line-register normalization | interactive checks 8, 9, and 12–14; `screen-line-test.sh` |
+| Whole-line yank | `Y` and `yy` use a logical line normally and a complete displayed row while wrapping is active | interactive check 22; `screen-line-test.sh` |
+| Evil visual-line policy | `SPC y v` reversibly swaps `j/k` with `gj/gk` and `0/$` with `g0/g$`; while wrapping is active, `I/A`, `D/C`, doubled line operators, `Y`, native registers/paste, and `V` follow displayed rows. Counts, goal families, boundary clamping, exclusive-motion BOL promotion, empty ranges, wide cells, undo/redo, and Lispyville delimiter safety are covered. | 26-case 40-column ncurses `screen-line-test.sh` |
 | evil-surround | `ys{motion}`, `ds{char}`, `cs{old}{new}`, visual `S`; padded `(`/`[`/`{` and compact closing-delimiter variants | interactive check 10 |
 | evil-snipe 2.1.3 | Case-sensitive `s/S/f/F/t/T`, counts, visible initial scope, whole-visible repeats, persistent `;`/`,`, lower/upper transient pairs, operator `z/Z/x/X`, leading-whitespace skipping, incremental/final highlighting, cancellation, dot-repeat, and jumplist semantics | `snipe-test.sh`; interactive checks 5 and 15 |
 | evil-nerd-commenter | `gc{motion}` and visual `gc` | interactive check 4 |
@@ -23,6 +24,11 @@ configuration does not override it.
 | Lispy/Lispyville structural editing | Paredit smart insertion plus safe Vim operators, `W/E/B` atom motions, `>/<` slurp/barf, all configured additional and additional-insert transforms, comments/strings, and Lisp-family delimiters | `structural-test.sh` |
 | Retained undo / Vundo | Ordinary `u`/`C-r` retain abandoned branches; normal and visual `SPC u` open a Unicode three-row tree with live preview, arrows and `f/b/n/p`, `a/w/e`, cross-branch `l/r`, `m/u/d`, `C-x C-s`, rollback, and accept | `vundo-test.sh` |
 | Embark-style actions | `SPC e a` in normal and visual states opens the same one-key action dispatcher; an active forward or reverse visual region takes precedence over point targets, and copying it leaves the buffer unchanged | `actions-test.sh` |
+
+The modal behavior matches the configured Emacs TTY oracle over Lem's
+displayed rows. It remains an approximation of Emacs `visual-line-mode`
+because Emacs prefers word-boundary wrapping while Lem breaks rows at display
+width.
 
 Run the complete gate away from the laptop with:
 
@@ -37,7 +43,6 @@ These bindings are intentionally not mapped to unrelated commands:
 | Emacs binding / feature | Gap in Lem |
 |---|---|
 | `SPC y c` (`yath/centered-view-mode`) | The ncurses frontend has no equivalent balanced window-margin facility. |
-| `evil-respect-visual-line-mode` | `SPC y v` toggles wrapping, but Lem retains its ordinary logical/display motion mappings. The configured Emacs remaps `j/k`, `gj/gk`, `0/g0`, `$/g$`, and `V` while visual-line mode is active; that complete, selection-aware behavior is not yet implemented safely. |
 | Completion-local `C-.` | The ncurses input path cannot represent this key distinctly, so the completion popup uses `C-c a` for its action menu. |
 | Full Embark workflow | The dispatcher has typed, extensible providers and a focused action set, but visual-block selection is not a region target, and there is no target cycling, act-all, collect/export/live views, arbitrary Embark action-map composition, or richer embark-consult adapters. |
 | Avy leader jumps | `SPC l/a/s` use goto-line, snipe, and symbol search; they do not render Avy labels over every visible target. |

@@ -37,6 +37,7 @@
               ./patches/lem-safe-revert.patch
               ./patches/lem-prompt-history-limit.patch
               ./patches/lem-undo-tree.patch
+              ./patches/lem-vi-screen-line.patch
             ];
           };
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (
@@ -355,6 +356,7 @@
             lsp-snippet-test = mkTestApp "lem-yath-lsp-snippet-test" "lsp-snippet-test.sh";
             interactive-test = mkTestApp "lem-yath-interactive-test" "interactive-test.sh";
             structural-test = mkTestAppWithLem lemYath "lem-yath-structural-test" "structural-test.sh";
+            screen-line-test = mkTestAppWithLem lemYath "lem-yath-screen-line-test" "screen-line-test.sh";
             notes-test = mkTestApp "lem-yath-notes-test" "notes-test.sh";
             editing-test = mkTestApp "lem-yath-editing-test" "editing-test.sh";
             formatting-test = mkTestApp "lem-yath-formatting-test" "formatting-test.sh";
@@ -384,6 +386,7 @@
             snippets = mkCheck "snippets" "snippet-test.sh";
             lsp-snippets = mkCheck "lsp-snippets" "lsp-snippet-test.sh";
             structural = mkCheckWithLem lemYath "structural" "structural-test.sh";
+            screen-line = mkCheckWithLem lemYath "screen-line" "screen-line-test.sh";
             notes = mkCheck "notes" "notes-test.sh";
             editing = mkCheck "editing" "editing-test.sh";
             formatting = mkCheck "formatting" "formatting-test.sh";

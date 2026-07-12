@@ -55,9 +55,9 @@ lem_start() { # lem_start <session> [lem-args...]
     return 127
   fi
   tmux_cmd kill-session -t "$s" 2>/dev/null
-  local command
+  local command width="${LEM_TUI_WIDTH:-200}" height="${LEM_TUI_HEIGHT:-50}"
   printf -v command "%q " "$LEM_BIN" "$@"
-  tmux_cmd new-session -d -s "$s" -x 200 -y 50 "$command"
+  tmux_cmd new-session -d -s "$s" -x "$width" -y "$height" "$command"
 }
 
 lem_start_lem-yath() { # lem_start_lem-yath <session> [lem-args...]

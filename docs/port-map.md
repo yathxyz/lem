@@ -13,7 +13,7 @@ Status legend:
 
 | Emacs package | Status | Lem equivalent / location |
 |---|---|---|
-| evil | lem-builtin+ported/partial | `lem-vi-mode`, enabled in `src/vi.lisp`; `src/cursor-state.lisp` adds the configured normal/insert/Emacs colors, portable visual/replace shapes, and a buffer-local `C-z` Emacs state with ordinary Emacs region semantics. `SPC y v` toggles wrapping, but the active-visual-line remaps and screen-line `V` selection controlled by `evil-respect-visual-line-mode` remain a gap. |
+| evil | lem-builtin+ported/partial | `lem-vi-mode`, enabled in `src/vi.lisp`; `src/cursor-state.lisp` supplies the configured cursors and buffer-local Emacs state. `SPC y v` activates the patched conditional screen/logical policy for `j/k`, `gj/gk`, `0/g0`, `$/g$`, `I/A`, `D/C`, line operators/registers, paste, and `V`, restoring ordinary logical-line behavior when disabled (`patches/lem-vi-screen-line.patch`, `scripts/screen-line-test.sh`). Lem's display-width row breaking remains an approximation of Emacs word wrapping. |
 | evil-collection | lem-builtin | vi-mode's own mode integrations |
 | evil-surround | ported/partial | standard `ys`/`ds`/`cs`, visual `S`, common delimiter padding; tag prompts and syntax-aware balancing remain gaps (`src/vi.lisp`) |
 | evil-snipe | ported | configured 2.1.3 behavior: visible `s/S/f/F/t/T`, whole-visible `;`/`,` and transient pair repeats, exact inclusive/exclusive operators, counts/dot/jumplist behavior, leading-whitespace skipping, and incremental/final faces (`src/vi.lisp`, `scripts/snipe-test.sh`) |
@@ -49,7 +49,7 @@ Status legend:
 | just-mode / meson-mode / nginx-mode / nushell-ts-mode / typst-ts-mode | gap | open as fundamental (no Lem modes) |
 | yaml-mode | lem-builtin | `lem-yaml-mode` |
 | sqlite3 | n/a | elisp FFI library |
-| lispy / lispyville | ported | Paredit in Common Lisp, Clojure, Scheme/Racket, and Elisp; delimiter-safe Vim operators, atom motions, slurp/barf, drag, splice, split, raise, transpose, convolute, and list insertion/opening (`src/structural.lisp`, `scripts/structural-test.sh`); plus full SLIME via micros |
+| lispy / lispyville | ported | Paredit in Common Lisp, Clojure, Scheme/Racket, and Elisp; delimiter-safe Vim operators, atom motions, slurp/barf, drag, splice, split, raise, transpose, convolute, and list insertion/opening (`src/structural.lisp`, `scripts/structural-test.sh`); wrapped-row delimiter safety and Lispyville's screen-row character-register quirk are covered by `scripts/screen-line-test.sh`; plus full SLIME via micros |
 | magit | lem-builtin | `lem/legit` (status/stage/commit/branch/push/pull/stash/rebase); `SPC g G` |
 | magit-todos | gap | no TODO section in legit |
 | forge | gap | no GitHub/GitLab integration |
@@ -89,7 +89,7 @@ Status legend:
 | indent-bars | gap | no indent guides in ncurses frontend |
 | rainbow-delimiters | ported/partial | `src/ui.lisp` enables upstream coloring in Common Lisp buffers, and `src/theme.lisp` maps its six cycling depths to the first six Modus delimiter colors; Emacs applies rainbow-delimiters throughout `prog-mode` and exposes additional depths. Show-paren remains available elsewhere (`scripts/ui-parity-test.sh`). |
 | display-line-numbers (built-in) | ported | relative numbers render in saved and unsaved programming buffers, compose with other gutters, and stay out of prose and utility buffers (`src/ui.lisp`, `scripts/ui-parity-test.sh`) |
-| truncate-lines / hl-line-mode (built-ins) | ported | `src/ui.lisp` starts with long lines truncated and disables Lem's upstream current-line highlight, matching the active Emacs baseline; `SPC y v` retains buffer-local wrap toggling (`scripts/ui-parity-test.sh`) |
+| truncate-lines / visual-line-mode / hl-line-mode (built-ins) | ported/partial | `src/ui.lisp` starts with long lines truncated and disables Lem's upstream current-line highlight, matching the active Emacs baseline; `SPC y v` retains buffer-local wrap toggling and activates the configured modal row policy (`scripts/ui-parity-test.sh`, `scripts/screen-line-test.sh`). Emacs word-wrap and Lem display-width wrapping can choose different row boundaries. |
 | tab-bar / winner-mode (built-ins) | partial | no tab header is shown at startup; `C-x t 2` lazily enables Lem's frame multiplexer and creates a tab. Winner-style window-layout undo/redo is absent (`src/ui.lisp`, `scripts/ui-parity-test.sh`). |
 | dirvish | lem-builtin | `directory-mode` + filer |
 | find-name-dired (built-in) | ported/partial | `M-s f` asynchronously fills a persistent, read-only `*Find*` buffer with safely escaped rows backed by exact paths (`src/find-name.lisp`); Dired marking, long columns, file operations, and process cancellation remain gaps |
@@ -106,11 +106,10 @@ Status legend:
 
 ## Behavioral divergences worth knowing
 
-- **Visual-line Evil behavior**: `SPC y v` changes the wrapping display, but it
-  does not yet install Emacs Evil's conditional `j/k`, `gj/gk`, `0/g0`, `$/g$`,
-  and screen-line `V` semantics. The attempted partial motion-only version was
-  deliberately excluded because selection and operator behavior must remain
-  coherent.
+- **Visual-line row geometry**: the configured Evil screen/logical-line policy
+  is ported and TUI-tested. Emacs `visual-line-mode` wraps preferentially at
+  word boundaries, whereas Lem wraps at display width, so commands can
+  encounter different displayed-row boundaries.
 - **Display palette and delimiters**: Lem retains the configured Modus hex
   values for its available semantic attributes, but ncurses maps them through
   the terminal's color capabilities. Nested colors cover six cycling depths in

@@ -87,7 +87,8 @@ Runs from the project root; the worker runs on a background thread."
              (lem-vi-mode/core:buffer-state buffer)))
          (unterminated-linewise-eof-p
            (and visual-state
-                (lem-vi-mode/visual:visual-line-p buffer)
+                (or (lem-vi-mode/visual:visual-line-p buffer)
+                    (lem-vi-mode/visual:visual-screen-line-p buffer))
                 (end-buffer-p end)
                 (or (zerop (length text))
                     (char/= (char text (1- (length text))) #\Newline))))

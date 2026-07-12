@@ -1098,9 +1098,14 @@ relative distance, unsaved-buffer behavior, and another provider's survival.
 The `line-wrap` editor variable defaults to true upstream, and
 `M-x toggle-line-wrap` changes it for the current buffer. Lem-yath changes the
 global default to false so long lines truncate like the current Emacs config;
-`SPC y v` still toggles wrapping buffer-locally. Evil's complete
-`evil-respect-visual-line-mode` remapping and screen-line selection semantics
-remain a separate gap.
+`SPC y v` still toggles wrapping buffer-locally.
+`patches/lem-vi-screen-line.patch` adds Vi `:screen-line` ranges, a screen-line
+Visual state, displayed-row motions, native line-register normalization,
+separate logical/display goal columns, and tab/CJK-aware virtual-column
+movement. `lem-yath/src/vi.lisp` applies the configured conditional motions
+and operators, and `scripts/screen-line-test.sh` verifies them in a 40-column
+ncurses session. Lem still breaks wrapped rows at display width rather than
+Emacs's word boundaries, so row geometry remains approximate.
 
 ### Show-paren — `src/ext/showparen.lisp`. `M-x toggle-show-paren` (line 69); enabled by
 default via `lem/show-paren:enable`. Highlights matching paren.

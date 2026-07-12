@@ -190,9 +190,8 @@ else
   fail unsaved-line-numbers "fileless programming buffer lacked relative numbers"
 fi
 
-# A fresh ordinary buffer inherits the truncated startup default.  The existing
-# SPC y v command toggles rendering, while full Evil screen-line operators are
-# tracked separately rather than being approximated here.
+# A fresh ordinary buffer inherits the truncated startup default.  This suite
+# checks rendering only; screen-line modal semantics live in screen-line-test.sh.
 run_mx lem-yath-test-ui-wrap-state || true
 sleep 0.3
 if wait_report '^WRAP label=state enabled=no line=1 column=0 ' &&

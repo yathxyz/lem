@@ -165,7 +165,8 @@
   ;; citations / display
   ("y o" 'lem-yath-citar-open "open citation")       ; SPC y o
   ("y a" 'lem-yath-toggle-auto-fill "toggle auto-fill") ; SPC y a
-  ("y v" 'toggle-line-wrap "toggle visual lines")    ; SPC y v
+  ("y v" 'lem-core/commands/window::toggle-line-wrap
+   "toggle visual lines")                              ; SPC y v
   ("y w" 'lem-yath-fill-paragraph "fill paragraph")  ; SPC y w
 
   ;; navigation (avy / isearch)

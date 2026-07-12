@@ -44,6 +44,7 @@
   (cond
     ((lem-vi-mode/visual:visual-char-p) "char")
     ((lem-vi-mode/visual:visual-line-p) "line")
+    ((lem-vi-mode/visual:visual-screen-line-p) "screen-line")
     ((lem-vi-mode/visual:visual-block-p) "block")
     (t "none")))
 
@@ -113,6 +114,7 @@
              "replace-default-underline")
       (dolist (state '(lem-vi-mode/visual::visual-char
                        lem-vi-mode/visual::visual-line
+                       lem-vi-mode/visual::visual-screen-line
                        lem-vi-mode/visual::visual-block))
         (check (cursor-state-spec-p state nil :box)
                (format nil "~(~a~)-default-box" state)))
