@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Real-ncurses coverage for the display baseline, delayed leader help, and
-# programming-only numbers.
+# Real-ncurses coverage for the display baseline, global delayed prefix help,
+# and programming-only numbers.
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -69,7 +69,15 @@ run_mx() {
 }
 
 screen_has_leader() {
-  lem_capture "$session" | grep -qE '\[Leader([^]]*)?\]'
+  lem_capture "$session" | grep -q 'lem-yath-snipe-forward'
+}
+
+screen_has_dynamic_prefix() {
+  lem_capture "$session" | grep -q 'ui-prefix-local'
+}
+
+screen_has_c_x_prefix() {
+  lem_capture "$session" | grep -q 'C-f find-file'
 }
 
 fixture="$(lem-yath_lisp_string "$here/scripts/ui-parity-fixture.lisp")"
@@ -148,9 +156,16 @@ fi
 
 if run_mx lem-yath-test-ui-rebuild-leader &&
    wait_report '^REBUILD changed=yes timer-before=yes timer-after=no stale-callback-safe=yes window-before=yes window-after=no shown-replaced=yes normal-prefixes=1 visual-prefixes=1 cache-normal=yes cache-visual=yes bindings=yes help=yes$'; then
-  pass leader-rebuild "reload replaces one shared tree and clears stale UI/cache state"
+  pass leader-rebuild "reload replaces one shared raw tree and clears stale UI/cache state"
 else
   fail leader-rebuild "leader rebuild lifecycle contracts failed"
+fi
+
+if run_mx lem-yath-test-ui-reload-prefix-help &&
+   wait_report '^PREFIX-RELOAD pending-clean=yes stale-safe=yes visible-clean=yes mode=yes delay=321 limit=19$'; then
+  pass prefix-help-reload "direct reload cancels pending/visible help and preserves preferences"
+else
+  fail prefix-help-reload "prefix-help reload lifecycle contracts failed"
 fi
 
 if run_mx lem-yath-test-ui-code-state &&
@@ -244,8 +259,159 @@ else
     fail unrelated-transient "unrelated transient did not appear on its own schedule"
   fi
 fi
+
+lem_keys "$session" p
+sleep 0.2
+if lem_capture "$session" | grep -q '\[Fixture unrelated nested\]' &&
+   lem_capture "$session" | grep -q 'nested leaf'; then
+  pass unrelated-nested "native transient nesting still refreshes immediately"
+else
+  fail unrelated-nested "global Which-Key delay leaked into a native transient"
+fi
 lem_keys "$session" Escape
 sleep 0.4
+
+# A dynamically created local/global shared prefix must merge both maps, keep
+# one shadow winner, sort by key, and use the ordinary one-second idle delay.
+lem_keys "$session" Escape
+sleep 0.3
+lem_keys "$session" F9
+sleep 0.7
+if screen_has_dynamic_prefix; then
+  fail dynamic-prefix-delay "dynamic prefix help appeared before one second"
+else
+  dynamic_shown=0
+  for _ in {1..8}; do
+    sleep 0.1
+    if screen_has_dynamic_prefix; then
+      dynamic_shown=1
+      break
+    fi
+  done
+  dynamic_screen=$(lem_capture "$session")
+  local_line=$(printf '%s\n' "$dynamic_screen" | grep -n 'ui-prefix-local' | head -1 | cut -d: -f1)
+  global_line=$(printf '%s\n' "$dynamic_screen" | grep -n 'ui-prefix-global' | head -1 | cut -d: -f1)
+  shadow_line=$(printf '%s\n' "$dynamic_screen" | grep -n 'ui-prefix-shadow-local' | head -1 | cut -d: -f1)
+  if ((dynamic_shown)) &&
+     [[ -n "$local_line" && -n "$global_line" && -n "$shadow_line" ]] &&
+     ((local_line < global_line && global_line < shadow_line)) &&
+     ! printf '%s\n' "$dynamic_screen" | grep -q 'ui-prefix-shadow-global'; then
+    pass dynamic-prefix-merge "late mode/global maps merged, sorted, and honored local shadowing"
+  else
+    fail dynamic-prefix-merge "dynamic shared prefix contents or precedence were wrong"
+  fi
+fi
+
+lem_keys "$session" Escape
+sleep 0.3
+lem_keys "$session" F9
+sleep 0.08
+lem_keys "$session" a
+if wait_report '^PREFIX-DISPATCH local count=1 popup=no$' 10; then
+  sleep 1.2
+  if screen_has_dynamic_prefix; then
+    fail dynamic-fast-dispatch "completed dynamic prefix resurrected delayed help"
+  else
+    pass dynamic-fast-dispatch "displayed continuation dispatched and canceled its timer"
+  fi
+else
+  fail dynamic-fast-dispatch "displayed local continuation did not dispatch"
+fi
+
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" F9
+sleep 0.08
+lem_keys "$session" b
+if wait_report '^PREFIX-DISPATCH global$' 10; then
+  pass dynamic-global-dispatch "merged global continuation dispatched through the live keymaps"
+else
+  fail dynamic-global-dispatch "merged global continuation did not dispatch"
+fi
+
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" F9
+sleep 0.08
+lem_keys "$session" d
+if wait_report '^PREFIX-DISPATCH shadow-local$' 10 &&
+   ! grep -q '^PREFIX-DISPATCH shadow-global$' "$LEM_YATH_UI_PARITY_REPORT"; then
+  pass dynamic-shadow-dispatch "the displayed local shadow winner was the dispatched command"
+else
+  fail dynamic-shadow-dispatch "displayed shadowing and actual dispatch diverged"
+fi
+
+# Built-in global and Vi-state prefixes must participate too.
+lem_keys "$session" Escape
+sleep 0.3
+lem_keys "$session" C-x
+sleep 0.7
+if screen_has_c_x_prefix; then
+  fail global-prefix-delay "C-x help appeared before one second"
+else
+  if lem_wait_for "$session" 'C-f find-file' 2 >/dev/null; then
+    pass global-prefix "the built-in C-x map received delayed raw-command guidance"
+  else
+    fail global-prefix "the built-in C-x map remained silent"
+  fi
+fi
+
+lem_keys "$session" t
+sleep 0.7
+if screen_has_c_x_prefix ||
+   lem_capture "$session" | grep -q 'lem-yath-frame-create'; then
+  fail nested-global-delay "nested C-x t reused or replaced the popup too early"
+else
+  if lem_wait_for "$session" 'lem-yath-frame-create' 2 >/dev/null; then
+    pass nested-global-delay "nested C-x t hid the old page and waited a fresh second"
+  else
+    fail nested-global-delay "nested C-x t guidance missed its second idle window"
+  fi
+fi
+lem_keys "$session" Escape
+sleep 1.2
+if screen_has_c_x_prefix ||
+   lem_capture "$session" | grep -q 'lem-yath-frame-create'; then
+  fail global-prefix-cancel "Escape left or resurrected global prefix help"
+else
+  pass global-prefix-cancel "Escape canceled global prefix help without resurrection"
+fi
+
+lem_keys "$session" Escape
+sleep 0.3
+lem_keys "$session" g
+if lem_wait_for "$session" 'lem-yath-next-g-line' 2 >/dev/null; then
+  pass vi-prefix "the active normal-state g map received delayed guidance"
+else
+  fail vi-prefix "the active Vi-state prefix remained silent"
+fi
+lem_keys "$session" Escape
+sleep 0.4
+
+# Insert-state C-c shares a prefix across the Vi state and Lisp mode.  Both
+# valid layers must be described, with the state-local i binding winning.
+tmux_cmd resize-window -t "$session" -x 180 -y 30
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" i
+sleep 0.2
+lem_keys "$session" C-c
+sleep 0.7
+if lem_capture "$session" | grep -q 'lem-yath-llm-send'; then
+  fail insert-shared-prefix "insert C-c help appeared before one second"
+else
+  if lem_wait_for "$session" 'lem-yath-llm-send' 2 >/dev/null &&
+     lem_capture "$session" | grep -q 'lisp-eval-at-point'; then
+    pass insert-shared-prefix "insert C-c merged the state-local and Lisp-mode continuations"
+  else
+    fail insert-shared-prefix "insert C-c omitted an active keymap layer"
+  fi
+fi
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" Escape
+sleep 0.3
+tmux_cmd resize-window -t "$session" -x 100 -y 30
 
 lem_keys "$session" Escape
 sleep 0.3
@@ -257,7 +423,7 @@ else
   leader_shown=0
   for _ in {1..8}; do
     sleep 0.1
-    if lem_capture "$session" | grep -q '\[Leader\]'; then
+    if screen_has_leader; then
       leader_shown=1
       break
     fi
@@ -270,13 +436,17 @@ else
 fi
 
 lem_keys "$session" p
-sleep 0.2
-if lem_capture "$session" | grep -q '\[Leader p: project\]' &&
-   lem_capture "$session" | grep -q 'find project file' &&
-   lem_capture "$session" | grep -q 'workspace symbols'; then
-  pass nested-leader "project continuations replaced the root menu immediately"
+sleep 0.7
+if screen_has_leader ||
+   lem_capture "$session" | grep -q 'lem-yath-project-find-file'; then
+  fail nested-leader "nested leader help appeared before its fresh idle delay"
 else
-  fail nested-leader "project continuation menu was missing or undescribed"
+  if lem_wait_for "$session" 'lem-yath-project-find-file' 2 >/dev/null &&
+     lem_capture "$session" | grep -q 'lem-yath-workspace-symbol'; then
+    pass nested-leader "leader nesting uses raw commands after a fresh one-second wait"
+  else
+    fail nested-leader "project continuation help was missing or mislabeled"
+  fi
 fi
 
 lem_keys "$session" Escape
@@ -308,7 +478,7 @@ sleep 0.3
 lem_keys "$session" v
 if lem_wait_for "$session" 'VISUAL' 3 >/dev/null; then
   lem_keys "$session" Space
-  if lem_wait_for "$session" '\[Leader\]' 2 >/dev/null; then
+  if lem_wait_for "$session" 'lem-yath-snipe-forward' 2 >/dev/null; then
     pass visual-leader "the shared leader popup also appears in visual state"
   else
     fail visual-leader "visual-state leader did not show continuations"

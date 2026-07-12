@@ -80,8 +80,8 @@ Status legend:
 | pgmacs / pg | ported | psql-backed query/table viewer (`src/apps/pg.lisp`) |
 | salta.el | partial | six primary Supabase/PostgREST workflows exist; the notmuch payment-email bridge and some UI semantics remain open |
 | helpful | lem-builtin | describe-key / describe-bindings / apropos-command (`SPC h *`) |
-| which-key | ported/partial | the shared Space-leader tree opens a described `lem/transient` menu after one second, refreshes nested prefixes immediately, and cancels cleanly on fast dispatch, reload, or Escape without changing unrelated transient timing; arbitrary non-leader prefixes remain silent (`scripts/ui-parity-test.sh`) |
-| transient | lem-builtin | `lem/transient` |
+| which-key | ported/partial | global guidance snapshots every active ordinary keymap-backed prefix across global, dynamic mode, and Vi-state maps, using live dispatcher lookup to preserve shadowing. Initial and nested pages each wait a fresh second, then render sorted raw command/`+prefix` labels in multi-column snapshots capped at 25% of frame height; fast dispatch, Escape, reload, stale timers, and cyclic maps are covered in `scripts/ui-parity-test.sh`. Exact Emacs `C-h` paging, page/column layout, separators/default replacements, and echo-area presentation remain absent. |
+| transient | lem-builtin | `lem/transient`; native transient menus remain isolated from global prefix guidance, opening after the upstream 500ms delay and refreshing nested menus immediately (`scripts/ui-parity-test.sh`) |
 | multiple-cursors | lem-builtin | core multi-cursors (`M-C`, isearch add-cursor); Emacs config only used it internally |
 | expreg | ported/partial | repeated `SPC v` expands word → delimiters → line → paragraph; no parser-backed syntax expansion |
 | vundo | ported/partial | `SPC u` opens a three-row Unicode retained tree with live preview, branch/stem/saved-node navigation, mark/diff, save, rollback, and accept (`src/vundo.lisp`, `patches/lem-undo-tree.patch`, `scripts/vundo-test.sh`); numeric prefixes and debug keys `i`/`D` are absent |

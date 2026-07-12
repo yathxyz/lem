@@ -37,6 +37,8 @@
 
 (define-key *ui-parity-unrelated-keymap* "x"
   'lem-yath-test-ui-unrelated-leaf)
+(define-key *ui-parity-unrelated-keymap* "p y"
+  'lem-yath-test-ui-unrelated-leaf)
 (setf (lem-core::prefix-description
        (lem-core::keymap-find
         *ui-parity-unrelated-keymap*
@@ -44,8 +46,58 @@
       "fixture leaf"
       (lem/transient::keymap-show-p *ui-parity-unrelated-keymap*)
       t)
+(let* ((prefix
+         (lem-core::keymap-find
+          *ui-parity-unrelated-keymap*
+          (lem-core::parse-keyspec "p")))
+       (child (lem-core::prefix-suffix prefix)))
+  (setf (lem-core::prefix-description prefix) "native nested"
+        (lem-core::keymap-description child) "Fixture unrelated nested"
+        (lem/transient::keymap-show-p child) t
+        (lem-core::prefix-description
+         (lem-core::keymap-find child (lem-core::parse-keyspec "y")))
+        "nested leaf"))
 (define-key lem-vi-mode:*normal-keymap* "F12"
   *ui-parity-unrelated-keymap*)
+
+;;; A prefix assembled after startup and shared by a buffer-local mode and the
+;;; global map.  Which-Key must merge both maps while honoring local shadowing.
+(defvar *ui-parity-prefix-mode-keymap* (lem-core::make-keymap))
+(defvar *ui-parity-prefix-dispatch-count* 0)
+
+(define-command ui-prefix-local () ()
+  (incf *ui-parity-prefix-dispatch-count*)
+  (ui-parity-log "PREFIX-DISPATCH local count=~d popup=~a"
+                 *ui-parity-prefix-dispatch-count*
+                 (if (lem/transient::transient-window-alive-p) "yes" "no")))
+
+(define-command ui-prefix-global () ()
+  (ui-parity-log "PREFIX-DISPATCH global"))
+
+(define-command ui-prefix-shadow-local () ()
+  (ui-parity-log "PREFIX-DISPATCH shadow-local"))
+
+(define-command ui-prefix-shadow-global () ()
+  (ui-parity-log "PREFIX-DISPATCH shadow-global"))
+
+(define-key *ui-parity-prefix-mode-keymap* "F9 a" 'ui-prefix-local)
+(define-key *ui-parity-prefix-mode-keymap* "F9 d" 'ui-prefix-shadow-local)
+(define-key *global-keymap* "F9 b" 'ui-prefix-global)
+(define-key *global-keymap* "F9 d" 'ui-prefix-shadow-global)
+
+(define-minor-mode lem-yath-test-prefix-mode
+    (:name "UI parity dynamic prefix"
+     :keymap *ui-parity-prefix-mode-keymap*))
+
+(lem-yath-test-prefix-mode t)
+
+(defvar *ui-parity-cyclic-keymap* (lem-core::make-keymap))
+(unless (lem-core::keymap-prefixes *ui-parity-cyclic-keymap*)
+  (lem-core::keymap-add-prefix
+   *ui-parity-cyclic-keymap*
+   (lem-core::make-prefix
+    :key (first (lem-core::parse-keyspec "F7"))
+    :suffix *ui-parity-cyclic-keymap*)))
 
 (defun ui-parity-content-string (content)
   (and content (lem/buffer/line:content-string content)))
@@ -81,6 +133,14 @@
       ((prefix (lem-core::keymap-find keymap
                                       (lem-core::parse-keyspec keys))))
     (lem-core::prefix-suffix prefix)))
+
+(defun ui-parity-which-key-description (prefix-keys key)
+  (third
+   (find key
+         (which-key-continuations
+          (lem-core::parse-keyspec prefix-keys))
+         :key #'second
+         :test #'string=)))
 
 (defun ui-parity-record-theme ()
   (ui-parity-log
@@ -214,15 +274,67 @@
       (check (evil-leader-bindings-ok-p)
              "leader-bindings-preserved")
       (check (evil-leader-help-ok-p)
-             "shared-described-transient-tree")
-      (check (= 1000 *leader-help-delay*)
+             "shared-raw-leader-under-global-help")
+      (check (= 1000 *which-key-idle-delay*)
              "one-second-configured-delay")
+      (check (= 27 *which-key-description-limit*)
+             "default-description-limit")
+      (check (string= "abcdefghijklmnopqrstuvwxy.."
+                      (which-key-truncate-description
+                       "abcdefghijklmnopqrstuvwxyz-long"))
+             "default-ascii-ellipsis")
+      (check (let ((*which-key-description-limit* 1))
+               (string= "." (which-key-truncate-description "long")))
+             "small-description-limit-bounded")
+      (check (lem-core::mode-active-p (current-buffer) 'which-key-mode)
+             "global-which-key-mode-enabled")
+      (check (which-key-command-executing-p)
+             "command-local-key-reads-inhibited")
       (check (= 500 lem/transient:*transient-popup-delay*)
              "upstream-transient-delay-preserved")
-      (check (not (leader-help-keymap-p *ui-parity-unrelated-keymap*))
-             "unrelated-keymap-not-marked-as-leader")
+      (check (not (which-key-display-map-p *ui-parity-unrelated-keymap*))
+             "native-transient-not-an-auto-snapshot")
       (check (not lem/transient:*transient-always-show*)
              "unrelated-keymaps-not-perpetual")
+      (check (and
+              (string= "ui-prefix-local"
+                       (ui-parity-which-key-description "F9" "a"))
+              (string= "ui-prefix-global"
+                       (ui-parity-which-key-description "F9" "b"))
+              (string= "ui-prefix-shadow-local"
+                       (ui-parity-which-key-description "F9" "d"))
+              (not (find "ui-prefix-shadow-global"
+                         (which-key-continuations
+                          (lem-core::parse-keyspec "F9"))
+                         :key #'third
+                         :test #'string=)))
+             "dynamic-shared-prefix-composition")
+      (check
+       (let* ((display-map
+                (which-key-make-display-map
+                 (lem-core::parse-keyspec "C-x")))
+              (columns (lem-core::keymap-children display-map))
+              (column-size (which-key-column-size)))
+         (and (which-key-display-map-p display-map)
+              (eq :row
+                  (lem/transient::keymap-display-style display-map))
+              (= column-size (max 1 (floor (display-height) 4)))
+              (> (length columns) 1)
+              (every (lambda (column)
+                       (<= (length (lem-core::keymap-prefixes column))
+                           column-size))
+                     columns)
+              (some (lambda (column)
+                      (some (lambda (prefix)
+                              (string= "+prefix"
+                                       (lem-core::prefix-description prefix)))
+                            (lem-core::keymap-prefixes column)))
+                    columns)))
+       "quarter-height-multicolumn-prefix-marker")
+      (check (= 1 (length
+                   (which-key-active-candidate-keys
+                    *ui-parity-cyclic-keymap*)))
+             "cyclic-prefix-graph-bounded")
       (check (lem-core::mode-active-p
               (current-buffer) 'lem-yath-git-gutter-mode)
              "programming-buffer-git-gutter-started")
@@ -266,11 +378,15 @@
                       (leader-binding-command
                        lem-vi-mode:*visual-keymap* "g b")))
              "LLM-backend-binding-preserved")
-      (check (string= "Leader p: project"
-                      (lem-core::keymap-description
-                       (lem-core::prefix-suffix
-                        (leader-prefix *evil-leader-keymap* "p"))))
-             "project-prefix-description")
+      (check (and
+              (null (lem-core::keymap-description *evil-leader-keymap*))
+              (null (lem-core::prefix-description
+                     (leader-prefix *evil-leader-keymap* "p f")))
+              (string= "lem-yath-project-find-file"
+                       (which-key-description
+                        (lem-core::prefix-suffix
+                         (leader-prefix *evil-leader-keymap* "p f")))))
+             "raw-project-command-description")
       (ui-parity-log "SUMMARY STATIC ~a failures=~d"
                      (if (zerop failures) "PASS" "FAIL")
                      failures))))
@@ -310,7 +426,39 @@
        "no")
    (loop :for virtual-frame :being :the :hash-values
            :of lem/frame-multiplexer::*virtual-frame-map*
-         :sum (lem/frame-multiplexer::num-frames virtual-frame))))
+           :sum (lem/frame-multiplexer::num-frames virtual-frame))))
+
+(define-command lem-yath-test-ui-reload-prefix-help () ()
+  (let* ((*which-key-idle-delay* 321)
+         (*which-key-description-limit* 19)
+         (root (asdf:system-source-directory "lem-yath"))
+         (source (merge-pathnames "src/prefix-help.lisp" root))
+         (display-map
+           (which-key-make-display-map
+            (lem-core::parse-keyspec "F9"))))
+    (let ((lem/transient:*transient-popup-delay* 5000))
+      (lem/transient::show-transient-with-delay display-map))
+    (let ((old-timer lem/transient::*transient-delay-timer*))
+      (load source)
+      (let ((pending-clean
+              (and (null lem/transient::*transient-delay-timer*)
+                   (not (lem/transient::transient-window-alive-p)))))
+        (when old-timer
+          (funcall (lem/common/timer::timer-function old-timer)))
+        (let ((stale-safe
+                (not (lem/transient::transient-window-alive-p))))
+          (lem/transient::show-transient display-map)
+          (load source)
+          (ui-parity-log
+           "PREFIX-RELOAD pending-clean=~a stale-safe=~a visible-clean=~a mode=~a delay=~d limit=~d"
+           (if pending-clean "yes" "no")
+           (if stale-safe "yes" "no")
+           (if (not (lem/transient::transient-window-alive-p)) "yes" "no")
+           (if (lem-core::mode-active-p (current-buffer) 'which-key-mode)
+               "yes"
+               "no")
+           *which-key-idle-delay*
+           *which-key-description-limit*))))))
 
 (define-command lem-yath-test-ui-code-state () ()
   (alexandria:when-let ((path (uiop:getenv "LEM_YATH_UI_CODE_FILE")))
@@ -361,10 +509,7 @@
                      "no")))
 
 (defun ui-parity-install-fast-command ()
-  (define-key *evil-leader-keymap* "z" 'lem-yath-test-ui-fast-command)
-  (setf (lem-core::prefix-description
-         (leader-prefix *evil-leader-keymap* "z"))
-        "fixture fast command"))
+  (define-key *evil-leader-keymap* "z" 'lem-yath-test-ui-fast-command))
 
 (defun ui-parity-direct-leader-prefix-count (keymap)
   (length
@@ -375,7 +520,11 @@
 
 (define-command lem-yath-test-ui-rebuild-leader () ()
   (let* ((old-keymap *evil-leader-keymap*)
-         (_ (keymap-activate old-keymap))
+         (display-map
+           (which-key-make-display-map
+            (lem-core::parse-keyspec "Space")))
+         (_ (let ((lem/transient:*transient-popup-delay* 5000))
+              (lem/transient::show-transient-with-delay display-map)))
          (old-timer lem/transient::*transient-delay-timer*)
          (timer-before (not (null old-timer))))
     (declare (ignore _))

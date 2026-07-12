@@ -313,7 +313,10 @@ blame, and `q` to quit.
 - **Custom view modes**:
   - `yath/centered-view-mode` (`SPC y c`): balanced window margins to center text at `yath/centered-view-width` (default 100).
   - `yath/business-document-mode` & `yath/business-visual-mode`: an entire alternate "office document" presentation profile (proportional fonts: Aptos/Segoe UI/etc.; modus-operandi theme; calm faces; simplified modeline; variable-pitch; centered docs). **Auto-enabled only on hosts in `yath/business-visual-hosts` (default `("workwin")`).** Applies to org/markdown/text/message/notmuch/elfeed/nov/eww/helpful/Info modes. Large amount of code; T2/T3 for porting.
-- Other UI: `which-key` (deferred 1s, `which-key-mode`), `helpful` (better help buffers), `transient` (`transient-default-level 7`, `q` quits), ANSI color in compilation output.
+- Other UI:
+  - Emacs loads Which-Key after one idle second and enables `which-key-mode`. Independently, the untouched Which-Key defaults wait one second before an initial popup and, because the secondary delay is `nil`, wait the full delay again after a nested prefix; paging, page/column layout, separators, replacements, and echo-area presentation also remain at their defaults.
+  - The Lem port globally composes live global, mode, and Vi-state maps with dispatcher-accurate shadowing. Ordinary initial and nested prefixes each wait a fresh second before showing a 25%-height, multi-column snapshot labeled with raw commands or `+prefix`; native transients retain Lem's 500ms opening delay and immediate nesting. The real TUI covers dynamic maps, fast dispatch, Escape, reload, timer races, and cyclic maps. Exact Emacs `C-h` paging and presentation remain a parity gap.
+  - `helpful` supplies richer help buffers; `transient` uses `transient-default-level 7` and `q` to quit; compilation output receives ANSI color.
 
 ---
 
@@ -427,7 +430,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **wgrep**: editable grep buffers (deferred).
 - **helpful**: better help buffers (`SPC h k/v/K`, `helpful-at-point`).
 - **editorconfig**: `editorconfig-mode` on `prog-mode`.
-- **which-key**: deferred 1s.
+- **which-key**: enabled globally after a one-second deferred package load; its independent one-second popup delay and the paging, column, separator, replacement, and echo-area settings retain their defaults.
 - **Startup**: early-init disables tool/scroll/menu/blink-cursor bars, silences startup messages, sets `gc-cons-threshold` huge + `file-name-handler-alist nil` for fast init (restored on `emacs-startup-hook`). Native-comp warnings silenced. `inhibit-startup-message`, empty scratch message.
 - **Server/daemon**: `lem-yath/server-start-maybe` starts server on init; `recentf-auto-cleanup` differs under daemon; editor env vars point to `emacsclient`.
 - **xref/grep**: `xref-search-program 'ripgrep`; `grep-command "rg -nS --no-heading "`; extra ignored dirs (node_modules, build, dist, VCS).

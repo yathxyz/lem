@@ -1404,16 +1404,34 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   gb2312, iso-8859-1, 8bit. `prompt-for-encodings`, `*default-external-format*`
   (`:detect-encoding` default).
 - **which-key / transient menus**: `extensions/transient/` (`lem/transient`,
-  `define-transient`) — magit-style popup menus with columns/descriptions
-  (`transient/transient.lisp`). Lem-yath builds one described leader keymap shared by
-  normal and visual states, marks only that complete prefix tree for transient display,
-  and gives that tree the Emacs-configured one-second delay while retaining Lem's 500ms
-  default for unrelated transient menus. Fast chords cancel the pending timer; pausing
-  opens the root menu, nested prefixes replace it immediately, and command or Escape
-  completion closes it. A small pinned-Lem patch prevents an already queued canceled
-  timer from reopening obsolete help. The real TUI gate verifies both timings, nested
-  descriptions, reload cleanup, stale-callback rejection, fast dispatch, and
-  visual-state reuse.
+  `define-transient`) provides magit-style popup menus with columns and descriptions
+  (`transient/transient.lisp`). Lem-yath's global `which-key-mode`
+  (`src/prefix-help.lisp`) intercepts every ordinary keymap-backed incomplete
+  prefix without rewriting the live maps. Each display snapshot walks the active
+  global, mode, and Vi-state graph cycle-safely, then asks `lookup-keybind` for each
+  candidate so late mode maps participate and the command dispatcher chooses the same
+  shadow winner for display and execution.
+
+  Entries are sorted by key and labeled from the raw lower-case command name, or
+  `+prefix` for a further prefix; `SPC`, `RET`, and `DEL` use the configured compact
+  spelling. The display is a fresh, display-only multi-column snapshot with at most
+  `floor(display-height / 4)` entries per column. Both the primary prefix and every
+  nested ordinary keymap-backed prefix wait a fresh one-second idle period. Fast
+  commands, Escape, command completion, source reload, and leader-map rebuild remove
+  pending or visible help; the pinned transient timer patch rejects a canceled callback
+  that was already queued. Keymap activation inside an already executing command is
+  deliberately ignored, matching Which-Key's inhibition during command-local reads such
+  as help prompts.
+
+  Explicit native transient menus bypass this automatic path, retaining Lem's 500ms
+  opening delay and immediate nested refresh. `scripts/ui-parity-test.sh` exercises
+  built-in `C-x`, normal-state `g`, insert-state `C-c`, the normal/visual Space leader,
+  dynamically added global and mode maps, local shadowing, both delay policies, fast
+  dispatch, Escape, preference-preserving reload, timer cancellation and stale callback
+  rejection, and bounded traversal of a cyclic prefix graph through the real ncurses
+  editor. This remains an approximation of Emacs Which-Key: `C-h` paging, its precise
+  page/column layout, separators and default replacements, and exact echo-area
+  presentation are not reproduced.
 - **Snippets / templates (upstream)**: **NONE.** No yasnippet/tempel equivalent.
   `src/ext/abbrev.lisp` (`lem/abbrev`, `M-/`) is **dynamic abbrev** (word
   completion from buffers), not templating. Lem-yath adds the verified data-only

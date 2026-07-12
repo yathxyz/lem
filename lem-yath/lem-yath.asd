@@ -55,4 +55,5 @@
                              (:file "llm-cli")))
                (:file "persistence")
                (:file "vundo")
+               (:file "prefix-help")
                (:file "keybindings")))

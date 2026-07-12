@@ -45,8 +45,12 @@ of writing `.fasl` files into the source tree.
 ## What's in the port
 
 - vi-mode with one shared Space leader in normal and visual states; every
-  feasible chord is preserved and a described which-key-style continuation
-  menu appears after the configured one-second pause
+  feasible chord is preserved. Globally enabled Which-Key-style guidance
+  composes the live global, mode, and Vi-state maps for every ordinary
+  keymap-backed prefix, honors dispatcher shadowing, and shows sorted raw command or `+prefix`
+  labels in multi-column snapshots capped at one quarter of the frame height.
+  Both the initial page and each nested page wait a fresh idle second, while
+  native Lem transients keep their 500ms opening delay and immediate nesting
 - state-aware terminal cursors and a genuine buffer-local Evil-style Emacs
   state on `C-z`: red-box normal, green-bar insert, cyan-box Emacs, portable
   visual/replace shapes, Emacs mark semantics, and exact prior-state return
