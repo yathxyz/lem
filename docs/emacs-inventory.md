@@ -313,7 +313,11 @@ blame, and `q` to quit.
 
 ## 7. Org & notes
 
-**Org root** = `$WORKDIR` (default `~/work`). `org-agenda-files` = `$WORKDIR`. `initial-major-mode org-mode`. `org-ellipsis " [...]"`.
+**Org root** = `$WORKDIR` (default `~/work`). `org-agenda-files` contains the
+existing canonical directories, in order, from `$WORKDIR`, `$PUBLIC_ORG_DIR`
+(default `~/public-org`), and `$PUBLIC_ORG_DIR/mcp`; Org expands each directory
+to its top-level, non-hidden `.org` files. `initial-major-mode org-mode`.
+`org-ellipsis " [...]"`.
 
 ### Capture (`org-capture-templates`)
 - `i` Inbox -> `inbox.org` ("Inbox" headline), with CREATED prop.
@@ -334,6 +338,7 @@ blame, and `q` to quit.
 
 ### Agenda
 - `org-agenda` on `SPC m a`.
+- Agenda sources are the top-level `.org` files in the three existing roots above; roam, journal, and other nested trees are not included by those directory entries.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
 
@@ -446,19 +451,19 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **tree-sitter** highlighting (`treesit-auto`) — Lem has its own highlighting; map grammar coverage.
 - **Git**: magit (`SPC g g/G`) + git-gutter + git-timemachine; smart jj/git dispatch; majutsu (jj) if a Lem jj porcelain exists (likely a gap).
 - **dape** debugging (Python/Go/Rust/C) — likely partial/gap in Lem.
-- **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — large workflow; Lem has no org — major gap, document the capture/roam/journal data model and key paths (`$WORKDIR`, `roam/`, `roam/journal/`, `references/`, `media/`).
+- **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — Lem now has bounded native Org editing, capture, roam-file, daily, journal, and agenda implementations. Org-roam database/backlink semantics and the full capture/journal interfaces remain gaps.
 - **vundo, pulsar (recenter-on-jump), indent-bars, dirvish** UI niceties.
-- **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`) — Lem has no gptel; document as a port/gap (could wire an LLM client).
+- **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`) — Lem has OpenRouter streaming and CLI backend ports, while gptel presets, handoff/tool loops, OAuth backends, tracing, and generic MCP-client semantics remain gaps.
 
 ### Tier 3 — apps / bespoke integrations with likely no Lem equivalent (document as gaps)
-- **notmuch mail** (+ Proton Bridge/mbsync pipeline, PDF preview) — no Lem mail client; gap.
-- **elfeed RSS** (Miniflux/fever) — gap.
+- **notmuch mail** (+ Proton Bridge/mbsync pipeline, PDF preview) — a CLI-backed Lem reader covers search/read/refresh; composition, sending, and attachment/PDF workflows remain gaps.
+- **elfeed RSS** (Miniflux/fever) — the Fever listing/reading/archive path is ported; full Elfeed filtering and local-database behavior remain gaps.
 - **pdf-tools, nov (EPUB)** — gap.
-- **citar/ebib/reftex/org-ref bibliography**, **org publishing**, **org-modern/super-agenda** — org-ecosystem, gap.
+- **citar/ebib/reftex/org-ref bibliography**, **org publishing**, **org-modern/super-agenda** — Citar-like lookup and a bounded grouped agenda are ported; the wider bibliography, publishing, org-modern, and arbitrary agenda interfaces remain gaps.
 - **salta.el** (Supabase/PostgREST property/contractor/payments client; tabulated-list UIs; `C-c s` prefix; notmuch payment-email bridge) — bespoke business tool; would need a full reimplementation in CL (REST client + list UI) if desired. Document its commands (§ below).
 - **business-visual / business-document modes** (office presentation profile, host-gated to `workwin`) — niche; gap/optional.
-- **nodes-org-sync** (PostgreSQL graph sync of org headings, host-gated to `nova`), **pgmacs** (Postgres UI) — bespoke/external; gap.
-- The many **gptel CLI backends** (Codex, Grok Build x2, ChatGPT Codex OAuth) — deeply Emacs/process-specific; gap unless a generic LLM client is built.
+- **nodes-org-sync** (PostgreSQL graph sync of org headings, host-gated to `nova`) remains external; a narrower psql-backed table/query viewer now covers the pgmacs entry workflow.
+- The **gptel CLI backends** have bounded Claude/Codex/Grok process adapters; rich agent-event rendering, backend-specific conversation semantics, and ChatGPT Codex OAuth remain gaps.
 
 ### salta.el commands (reference for any port)
 - `salta-find-property` (fuzzy property search -> tabulated list), `salta-property-detail`, `salta-property-reckoner` (revenue/cost/profit + totals/margin), `salta-contractor-rates`, `salta-contractor-financials`, `salta-payments`, plus list/detail navigation (`RET` open, `w` copy, `r` reckoner, `g` refresh; detail: `c` claims, `p` payments) and `salta-open-payment-email-from-notmuch`. Talks to a Supabase PostgREST API (`/rest/v1/...`, RPCs `fuzzy_search_properties`, `get_reckoner_data`); creds via `salta-base-url`/`salta-api-key`/env/`~/.config/salta/credentials.json`.

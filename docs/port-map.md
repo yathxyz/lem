@@ -61,7 +61,7 @@ Status legend:
 | md-roam | partial | .md notes are discoverable, but YAML IDs/titles/tags and graph semantics are not indexed |
 | org-roam-dailies | ported | `SPC n r d t` / `SPC n r d d` (`src/notes.lisp`) |
 | org-journal | ported | `SPC n j j`, same file layout + timestamp headings |
-| org-agenda / org-super-agenda | ported/partial | scanning agenda: overdue/today/upcoming/todos (`src/apps/agenda.lisp`) |
+| org-agenda / org-super-agenda | ported/partial | `SPC m a` scans the same existing `$WORKDIR`, `$PUBLIC_ORG_DIR`, and public `mcp/` roots as Emacs, using only top-level non-hidden `.org` files; it groups overdue/today/upcoming/unscheduled TODO entries and provides exact Return/g/q navigation with coalesced asynchronous refreshes (`src/apps/agenda.lisp`, `scripts/agenda-test.sh`). Active-timestamp events, COMMENT/archive filtering, arbitrary agenda dispatch, item editing/bulk actions, clocks, and the wider Org agenda UI remain gaps. |
 | org-modern / org-download / org-ref / org-contrib / ob-async / ob-dsq / engrave-faces / cdlatex | gap | the native Org subset applies terminal semantic faces, but has no org-modern glyph composition, image/download workflow, bibliography integration, Babel/source execution, LaTeX preview, or publishing/export engine |
 | citar / ebib / reftex | ported (citar) | bib parse + open file/url/note, `SPC y o` (`src/apps/citar.lisp`); ebib/reftex gap |
 | gptel | partial | OpenRouter streaming exists, but presets, model discovery, conversation/tool semantics, handoff, transforms, and tracing remain open |

@@ -1121,6 +1121,31 @@ publishing; org-modern glyph composition in the terminal; and an initial Org
 scratch buffer remain explicit gaps. Agenda scanning and capture/roam workflows
 are separate bounded implementations rather than services of this major mode.
 
+### Native agenda summary — `lem-yath/src/apps/agenda.lisp`
+
+`SPC m a` opens and focuses a read-only grouped agenda over the current Emacs
+configuration's existing canonical roots: `$WORKDIR`, `$PUBLIC_ORG_DIR`, and
+`$PUBLIC_ORG_DIR/mcp`. Each directory contributes only its top-level,
+non-hidden lowercase `.org` files. The parser recognizes the configured TODO
+sequence plus immediate Org planning lines, preserves separate SCHEDULED and
+DEADLINE rows, and groups entries into overdue, today, seven-day upcoming, and
+unscheduled TODO sections.
+
+Scanning runs away from the editor thread. Refresh requests coalesce behind one
+worker per buffer, generations reject stale results, source failures are shown
+instead of becoming a false empty agenda, and killed buffers reject late
+delivery. Entry lines retain exact source pathname and line properties. In Vi
+state, `Return` visits that source, `g` refreshes, and `q` closes the explicit
+popup split. `scripts/agenda-test.sh` drives all four production entry keys in
+the installed ncurses wrapper and also verifies source scope, grouping,
+duplicate basenames, refresh races, unmodified/undo-free generated buffers, and
+cleanup.
+
+This is a task summary, not a replacement for GNU Org's arbitrary agenda
+dispatcher. Ordinary active-timestamp events, COMMENT/archive filtering,
+agenda editing, bulk actions, clocks, repeating timestamps, custom commands,
+and the wider org-super-agenda presentation remain explicit gaps.
+
 ---
 
 ## 9. UI

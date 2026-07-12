@@ -367,6 +367,7 @@
             screen-line-test = mkTestAppWithLem lemYath "lem-yath-screen-line-test" "screen-line-test.sh";
             notes-test = mkTestApp "lem-yath-notes-test" "notes-test.sh";
             org-test = mkTestAppWithLem lemYath "lem-yath-org-test" "org-test.sh";
+            agenda-test = mkTestAppWithLem lemYath "lem-yath-agenda-test" "agenda-test.sh";
             editing-test = mkTestApp "lem-yath-editing-test" "editing-test.sh";
             formatting-test = mkTestApp "lem-yath-formatting-test" "formatting-test.sh";
             prompt-completion-test = mkTestApp "lem-yath-prompt-completion-test" "prompt-completion-test.sh";
@@ -399,6 +400,7 @@
             screen-line = mkCheckWithLem lemYath "screen-line" "screen-line-test.sh";
             notes = mkCheck "notes" "notes-test.sh";
             org = mkCheckWithLem lemYath "org" "org-test.sh";
+            agenda = mkCheckWithLem lemYath "agenda" "agenda-test.sh";
             editing = mkCheck "editing" "editing-test.sh";
             formatting = mkCheck "formatting" "formatting-test.sh";
             prompt-completion = mkCheck "prompt-completion" "prompt-completion-test.sh";

@@ -87,6 +87,9 @@ case "$test_name" in
   org)
     remote_command='nix run path:$PWD#org-test'
     ;;
+  agenda)
+    remote_command='nix run path:$PWD#agenda-test'
+    ;;
   editing)
     remote_command='nix run path:$PWD#editing-test'
     ;;
@@ -109,7 +112,7 @@ case "$test_name" in
     remote_command='nix run path:$PWD#snipe-test'
     ;;
   *)
-    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|project-navigation|prompt-completion|daily-workflows|electric-editing|ui-parity|cursor-state|snipe|interactive|structural|notes|org|editing]" >&2
+    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|project-navigation|prompt-completion|daily-workflows|electric-editing|ui-parity|cursor-state|snipe|interactive|structural|notes|org|agenda|editing]" >&2
     exit 2
     ;;
 esac

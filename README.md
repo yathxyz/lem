@@ -128,6 +128,8 @@ of writing `.fasl` files into the source tree.
   revision-navigation workflow
 - roam-lite notes, root-level roam dailies, journal, and i/t/r capture over
   `$WORKDIR`, plus public TODO capture over `$PUBLIC_ORG_DIR`
+- a grouped Org agenda over the exact existing work/public/public-MCP roots,
+  with top-level file scope and modal Return/g/q navigation
 - streaming OpenRouter LLM client + claude/codex/grok CLI backends
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
   (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli
@@ -145,7 +147,7 @@ editing, formatting, Orderless completion, snippets, LSP snippets, real installe
 language-server handshakes, daily-workflows,
 electric-editing, UI parity, project navigation, VCS, persistence, retained undo/Vundo,
 project-scoped LSP lifecycle, LLM key dispatch, cursor/state parity, evil-snipe
-parity, screen-line/Evil parity, notes, and parity-ledger checks. The ledger can
+parity, screen-line/Evil parity, notes, native Org, agenda, and parity-ledger checks. The ledger can
 also be validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
@@ -178,6 +180,8 @@ nix run .#electric-editing-test
 nix run .#ui-parity-test
 nix run .#vcs-test
 nix run .#notes-test
+nix run .#org-test
+nix run .#agenda-test
 nix run .#interactive-test
 nix run .#structural-test
 ```
