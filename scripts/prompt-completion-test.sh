@@ -84,6 +84,16 @@ if invoke_prompt_command lem-yath-test-buffer-prompt 'Fixture buffer:'; then
   else
     fail delimiter-query "delimiter input closed or bypassed prompt completion" "$session"
   fi
+  lem_keys "$session" BSpace
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -q 'Fixture buffer:' <<<"$screen" &&
+     ! grep -Fq 'Fixture buffer: ()' <<<"$screen" &&
+     grep -q 'buffers/one/shared.txt' <<<"$screen"; then
+    pass delimiter-backspace "paired Backspace cleared the query and restored prompt candidates"
+  else
+    fail delimiter-backspace "paired Backspace closed or failed to refresh the prompt" "$session"
+  fi
   lem_keys "$session" Escape
   sleep 0.2
   lem_keys "$session" Escape

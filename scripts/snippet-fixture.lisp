@@ -238,6 +238,9 @@
 (define-command lem-yath-test-snippet-middle-backspace-setup () ()
   (snippet-test-reset-fundamental "middle-backspace"))
 
+(define-command lem-yath-test-snippet-pair-backspace-setup () ()
+  (snippet-test-reset-fundamental "pair-backspace"))
+
 (define-command lem-yath-test-snippet-mode-change-setup () ()
   (snippet-test-reset-fundamental "mode-change"))
 

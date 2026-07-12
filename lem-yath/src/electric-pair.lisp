@@ -8,6 +8,11 @@
 
 (in-package :lem-yath)
 
+(defparameter *electric-text-pairs*
+  (list (cons (code-char #x2018) (code-char #x2019))
+        (cons (code-char #x201c) (code-char #x201d)))
+  "Electric Pair's language-independent asymmetric quote pairs.")
+
 (defun electric-active-selection-p (&optional (point (current-point)))
   "Whether POINT owns a nonempty, self-insertable selection."
   (let ((mark (cursor-mark point)))
@@ -23,16 +28,22 @@
   (or (alexandria:when-let ((pair (syntax-open-paren-char-p character)))
         (cdr pair))
       (when (syntax-string-quote-char-p character)
-        character)))
+        character)
+      (cdr (assoc character *electric-text-pairs* :test #'char=))))
 
-(defun electric-special-character-p (character)
-  (or (electric-opening-close character)
-      (syntax-closed-paren-char-p character)))
+(defun electric-text-closing-character-p (character)
+  (and character
+       (rassoc character *electric-text-pairs* :test #'char=)))
 
 (defun electric-closing-character-p (character)
   (or (syntax-closed-paren-char-p character)
+      (electric-text-closing-character-p character)
       (alexandria:when-let ((close (electric-opening-close character)))
         (char= character close))))
+
+(defun electric-special-character-p (character)
+  (or (electric-opening-close character)
+      (electric-closing-character-p character)))
 
 (defun electric-pair-whitespace-character-p (character)
   (find character '(#\Tab #\Space #\Newline) :test #'char=))
@@ -208,7 +219,7 @@ commands retain an outer selection and its original orientation."
        (insert-character point character)
        (insert-character point close)
        (character-offset point -1))
-      ((and (syntax-closed-paren-char-p character)
+      ((and (electric-closing-character-p character)
             (electric-skip-close-after-whitespace point character)))
       (t
        (insert-character point character)))))
@@ -278,6 +289,71 @@ commands retain an outer selection and its original orientation."
             lem-paredit-mode:paredit-close-bracket
             lem-paredit-mode:paredit-close-brace)))
 
+(defun electric-backspace-key-p ()
+  "Whether the current command came from one physical Backspace key."
+  (let ((keys (last-read-key-sequence)))
+    (and (listp keys)
+         (null (cdr keys))
+         (match-key (car keys) :sym "Backspace"))))
+
+(defun electric-vi-replace-state-p ()
+  (and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
+       (typep (lem-vi-mode/core:current-state)
+              'lem-vi-mode/states:replace-state)))
+
+(defun electric-paredit-printable-command-p (command)
+  "Whether COMMAND is a printable character command owned by Paredit."
+  (or (typep command 'lem-paredit-mode:paredit-insert-paren)
+      (typep command 'lem-paredit-mode:paredit-insert-bracket)
+      (typep command 'lem-paredit-mode:paredit-insert-brace)
+      (typep command 'lem-paredit-mode:paredit-insert-doublequote)
+      (typep command 'lem-paredit-mode:paredit-insert-vertical-line)
+      (typep command 'lem-paredit-mode:paredit-close-parenthesis)
+      (typep command 'lem-paredit-mode:paredit-close-bracket)
+      (typep command 'lem-paredit-mode:paredit-close-brace)))
+
+(defun electric-paredit-printable-character (command)
+  "Return the physical character whose Paredit binding resolved to COMMAND."
+  (let ((character (insertion-key-p (last-read-key-sequence))))
+    (and (mode-active-p (current-buffer) 'lem-paredit-mode:paredit-mode)
+         character
+         (electric-paredit-printable-command-p command)
+         (eq (command-name command) (electric-paredit-command character))
+         character)))
+
+(defun electric-paredit-backspace-command-p (command)
+  (and (mode-active-p (current-buffer) 'lem-paredit-mode:paredit-mode)
+       (electric-backspace-key-p)
+       (typep command 'lem-paredit-mode:paredit-backward-delete)))
+
+(defun electric-execute-vi-replace-character (character argument)
+  "Insert CHARACTER literally after Vi's replace pre-command bookkeeping."
+  ;; Configured Evil treats even an unmatched Lisp closer as raw replacement.
+  ;; Lem's SELF-INSERT execute advice would reject that closer after Vi had
+  ;; already removed the overwritten character.  Use the insertion primitive:
+  ;; its core before/after hooks still run, while structural policy stays out.
+  (lem-core/commands/edit:process-input-character character (or argument 1)))
+
+;; Paredit's local printable bindings otherwise hide SELF-INSERT from Vi's
+;; replace pre-command hook.  Present those bindings as SELF-INSERT while that
+;; hook records/removes the overwritten character; the matching execute advice
+;; below then performs ordinary one-character insertion instead of pairing.
+(defmethod lem-vi-mode/core:pre-command-hook :around
+    ((state lem-vi-mode/states:replace-state))
+  (cond
+    ((electric-paredit-printable-character (this-command))
+     (let ((lem-core::*this-command*
+             (lem/common/command:ensure-command
+              'lem-core/commands/edit:self-insert)))
+       (call-next-method)))
+    ((electric-paredit-backspace-command-p (this-command))
+     (let ((lem-core::*this-command*
+             (lem/common/command:ensure-command
+              'lem-core/commands/edit:delete-previous-char)))
+       (call-next-method)))
+    (t
+     (call-next-method))))
+
 (defun electric-execute-paredit-command (command)
   (execute
    (lem-core::get-active-modes-class-instance (current-buffer))
@@ -288,6 +364,145 @@ commands retain an outer selection and its original orientation."
   (alexandria:when-let ((prompt
                          (lem/prompt-window:current-prompt-window)))
     (eq (current-buffer) (window-buffer prompt))))
+
+(defun electric-pair-deletion-context-p ()
+  "Whether electric Backspace is active in the current editing state."
+  (or (electric-prompt-completion-p)
+      (not (typep (current-global-mode) 'lem-vi-mode:vi-mode))
+      (let ((state (lem-vi-mode/core:current-state)))
+        (and (typep state 'lem-vi-mode/states:insert)
+             (not (typep state 'lem-vi-mode/states:replace-state))))))
+
+(defun electric-adjacent-pair-p (&optional (point (current-point)))
+  "Whether POINT is immediately between a recognized electric pair."
+  (let ((open (character-at point -1))
+        (close (character-at point)))
+    (and open
+         close
+         (alexandria:when-let ((expected (electric-opening-close open)))
+           (char= expected close)))))
+
+(defun electric-pair-selection-p
+    (&optional (point (current-point)))
+  "Whether POINT's mark is within one character of its adjacent pair."
+  (let ((mark (cursor-mark point)))
+    (and (mark-active-p mark)
+         (mark-point mark)
+         (electric-adjacent-pair-p point)
+         (<= (count-characters (cursor-region-beginning point)
+                               (cursor-region-end point))
+             1))))
+
+(defun electric-delete-adjacent-pair (point count argument)
+  "Delete COUNT characters on each side of POINT as one safe command.
+
+The immediate characters must form an electric pair.  Preflight the complete
+range so bounds and read-only properties cannot fail after half the pair has
+changed.  Record closer and opener separately so undo restores point between
+them, as in Emacs."
+  (let* ((mark (cursor-mark point))
+         (restore-mark-p (mark-active-p mark)))
+    ;; Buffer modification normally consumes an active Lem mark.  Electric
+    ;; Pair instead leaves a selected delimiter as a zero-width active mark.
+    (when restore-mark-p
+      (setf (mark-active-p mark) nil))
+    (unwind-protect
+         (with-point ((start point)
+                      (end point))
+           (unless (and (character-offset start (- count))
+                        (character-offset end count))
+             (editor-error "Not enough characters around electric pair"))
+           (unless lem/buffer/internal:*inhibit-read-only*
+             (lem/buffer/internal::check-read-only-buffer
+              (point-buffer point))
+             (lem/buffer/internal::check-read-only-at-point
+              start (* 2 count)))
+           ;; Emacs removes the closer first.  Both edits share this command's
+           ;; undo boundary, while their order restores the between-pair point.
+           (delete-character point count)
+           (lem-core/commands/edit::delete-previous-char-1 argument))
+      (when restore-mark-p
+        (setf (mark-active-p mark) t)))))
+
+(defun electric-delete-previous-at-point (argument)
+  "Run Backspace at the current cursor with electric and Paredit precedence."
+  (let* ((point (current-point))
+         (mark (cursor-mark point))
+         (count (or argument 1)))
+    (cond
+      ;; Preserve ordinary delete-selection behavior, except for the useful
+      ;; Emacs cases where the mark is between or selects one side of the pair.
+      ((and (mark-active-p mark)
+            (not (electric-pair-selection-p point)))
+       (lem-core/commands/edit::delete-cursor-region point))
+      ((and (plusp count)
+            (electric-adjacent-pair-p point))
+       (electric-delete-adjacent-pair point count argument))
+      ;; Lem's Paredit is the Lispy/Lispyville substitute.  It remains
+      ;; authoritative whenever the global adjacent-pair rule did not match.
+      ((and (plusp count) (structural-editing-p))
+       (lem-paredit-mode:paredit-backward-delete count))
+      (t
+       (lem-core/commands/edit::delete-previous-char-1 argument)))))
+
+(defun electric-delete-previous-cursors (argument)
+  "Apply electric Backspace to every cursor and retain live completion."
+  (let ((completion-context lem/completion-mode::*completion-context*))
+    (do-each-cursors ()
+      (electric-delete-previous-at-point argument))
+    ;; Paredit's symbolic Backspace remap can leave the stock command in
+    ;; charge even while completion-mode is active.  Refresh that path too.
+    (when (and completion-context
+               (eq completion-context
+                   lem/completion-mode::*completion-context*))
+      (lem/completion-mode:completion-refresh))))
+
+;; Keep the stock command identity: Vi replace history, snippets, completion,
+;; and automatic-completion lifecycle tracking all depend on it.  The mode
+;; specializer makes this method more specific than Lem's core (MODE T) method.
+(defmethod execute :around
+    ((mode lem-core::global-mode)
+     (command lem-core/commands/edit:delete-previous-char)
+     argument)
+  (declare (ignore mode command))
+  (if (and (electric-backspace-key-p)
+           (electric-pair-deletion-context-p))
+      (electric-delete-previous-cursors argument)
+      (call-next-method)))
+
+;; Depending on the active keymap composition, physical Backspace can resolve
+;; directly to Paredit instead of the stock command.  The global adjacent-pair
+;; rule still wins; all nonmatching structural deletion remains upstream.
+(defmethod execute :around
+    ((mode lem-core::global-mode)
+     (command lem-paredit-mode:paredit-backward-delete)
+     argument)
+  (cond
+    ((and (electric-vi-replace-state-p)
+          (electric-paredit-backspace-command-p command))
+     (execute mode
+              (lem/common/command:ensure-command
+               'lem-core/commands/edit:delete-previous-char)
+              argument))
+    ((and (electric-paredit-backspace-command-p command)
+          (electric-pair-deletion-context-p))
+     (electric-delete-previous-cursors argument))
+    (t
+     (call-next-method))))
+
+;; Completion invokes DELETE-PREVIOUS-CHAR as a function, bypassing the core
+;; command method above.  Apply the same behavior, then refresh exactly once.
+(defmethod execute :around
+    ((mode lem-core::global-mode)
+     (command lem/completion-mode::completion-delete-previous-char)
+     argument)
+  (declare (ignore mode command))
+  (if (and (electric-backspace-key-p)
+           (electric-pair-deletion-context-p))
+      (progn
+        (electric-delete-previous-at-point argument)
+        (lem/completion-mode:completion-refresh))
+      (call-next-method)))
 
 ;; Completion's fallback command bypasses SELF-INSERT.  Delimiters still pair;
 ;; ordinary completion then closes, while an Orderless separator context
@@ -342,16 +557,23 @@ commands retain an outer selection and its original orientation."
       (t
        (call-next-method)))))
 
-;; Paredit's insertion commands intentionally outrank the global self-insert
-;; layer.  Add only the missing active-region wrapping case, then delegate every
-;; ordinary Lisp insertion to upstream Paredit unchanged.
+;; Paredit's printable commands intentionally outrank the global self-insert
+;; layer.  Openers add the missing active-region wrapping case; outside Vi
+;; Replace, every ordinary Lisp insertion still delegates upstream unchanged.
 (defmacro define-electric-paredit-region-wrapper (command open close)
   `(defmethod execute :around
        (mode (command ,command) argument)
-     (declare (ignore mode command argument))
-     (if (electric-active-selection-p)
-         (electric-paredit-wrap-selection (current-point) ,open ,close)
-         (call-next-method))))
+     (declare (ignore mode))
+     (let ((replace-character
+             (and (electric-vi-replace-state-p)
+                  (electric-paredit-printable-character command))))
+       (cond
+         (replace-character
+          (electric-execute-vi-replace-character replace-character argument))
+         ((electric-active-selection-p)
+          (electric-paredit-wrap-selection (current-point) ,open ,close))
+         (t
+          (call-next-method))))))
 
 (define-electric-paredit-region-wrapper
   lem-paredit-mode:paredit-insert-paren #\( #\))
@@ -361,3 +583,23 @@ commands retain an outer selection and its original orientation."
   lem-paredit-mode:paredit-insert-brace #\{ #\})
 (define-electric-paredit-region-wrapper
   lem-paredit-mode:paredit-insert-doublequote #\" #\")
+
+(defmacro define-electric-paredit-replace-literal (command)
+  `(defmethod execute :around
+       (mode (command ,command) argument)
+     (declare (ignore mode))
+     (let ((replace-character
+             (and (electric-vi-replace-state-p)
+                  (electric-paredit-printable-character command))))
+       (if replace-character
+           (electric-execute-vi-replace-character replace-character argument)
+           (call-next-method)))))
+
+(define-electric-paredit-replace-literal
+  lem-paredit-mode:paredit-insert-vertical-line)
+(define-electric-paredit-replace-literal
+  lem-paredit-mode:paredit-close-parenthesis)
+(define-electric-paredit-replace-literal
+  lem-paredit-mode:paredit-close-bracket)
+(define-electric-paredit-replace-literal
+  lem-paredit-mode:paredit-close-brace)

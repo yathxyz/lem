@@ -788,22 +788,44 @@ while quote wrapping retains the original outer selection orientation.
 Selected quotes and backslashes are escaped so the wrapped Lisp string retains
 the selected text's value.
 
-Pair discovery uses each buffer's syntax table. Openers insert their matching
-closer, escaped quotes remain literal, an immediate matching closer is reused,
-and typing that closer advances over it. Numeric prefixes, odd/even escapes,
+Pair discovery uses each buffer's syntax table, supplemented by Emacs's Unicode
+single- and double-smart-quote pairs. Openers insert their matching closer,
+escaped quotes remain literal, an immediate matching closer is reused, and
+typing that closer advances over it. Numeric prefixes, odd/even escapes,
 balanced adjacent pairs, syntax-safe whitespace/newline skipping, prompt
 queries, and Lisp completion/Paredit dispatch are covered as well. Special
 delimiter input closes an ordinary in-buffer completion popup without stale
-state, while prompt completion refreshes in place. The real ncurses suite also
-covers Fundamental, Python, Lisp/Paredit, read-only buffers, one-step undo, and
-both region orientations.
+state, while prompt completion refreshes in place.
+
+Physical Backspace immediately between a recognized pair preflights the complete
+range and removes both sides within one editor command, regardless of whether
+they were auto-inserted or escaped. A positive prefix removes that many
+characters on each side after checking both bounds, and its backward half enters
+the kill ring like Emacs.
+The syntax table keeps Python `''` paired while Fundamental mode treats it as
+ordinary text. The behavior is active in Emacs editing and Vi insert state,
+including completion prompts and active snippet fields with mirror updates.
+Forward Delete and Vi normal, visual, and replace states retain their own
+commands. A zero-width active mark or one-delimiter selection removes its full
+pair, broader selections keep ordinary delete-selection behavior, and one undo
+restores the deletion.
+The real ncurses suites cover completion refresh, prompt refresh after paired
+deletion, one-sided read-only preflight, Paredit protection for nonempty forms,
+and snippet mirrors as well as Fundamental, Python, and Lisp buffers.
 
 This remains an approximation of the complete Emacs mode: preserve-balance does
-not yet scan across intervening non-whitespace forms, adjacent-pair Backspace is
-not global outside Paredit, and a zero-result prompt completion cannot yet be
-recovered without reopening it. For a selected Lisp form containing an unmatched
-embedded quote, Lem escapes the quote to keep the new string valid; configured Lispy
-leaves that interior quote raw, so this is an intentional semantic improvement.
+not yet scan across intervening non-whitespace forms, a negative prefix delegates
+to ordinary Backspace instead of symmetrically deleting around a pair, and a
+zero-result prompt completion cannot yet be recovered without reopening it.
+For an active selection wider than one delimiter, Lem deletes exactly the
+selection; Emacs can also consume an unselected adjacent delimiter depending on
+orientation, a destructive quirk Lem deliberately does not reproduce.
+Pair deletion deliberately preflights the complete range instead of reproducing
+Emacs's partial mutation when a bound or one character's read-only property
+fails. The two removals remain separately visible to change hooks. For a
+selected Lisp form containing an unmatched embedded quote, Lem
+escapes the quote to keep the new string valid; configured Lispy leaves that
+interior quote raw, so this is an intentional semantic improvement.
 
 ### EditorConfig policy and Apheleia-style formatting — `lem-yath/src/editorconfig.lisp`, `lem-yath/src/formatting.lisp` (verified subset)
 

@@ -126,6 +126,16 @@ assert_text_result() {
   fi
 }
 
+assert_hex_result() {
+  local name=$1 label=$2 expected=$3 session=$4 line
+  line=$(last_result "$label")
+  if [[ "$line" == *"text-hex=$expected "* ]]; then
+    pass "$name" "$label produced the expected character sequence"
+  else
+    fail "$name" "unexpected result: $line" "$session"
+  fi
+}
+
 invoke_setup() {
   local session=$1 command=$2 label=$3 before
   before=$(report_count "^SETUP label=$label$")
@@ -199,6 +209,15 @@ if start_session "$plain_session" "$plain_file"; then
   else
     fail pair-insert-undo "undo result probe did not run" "$plain_session"
   fi
+  lem_keys "$plain_session" i
+  send_literal "$plain_session" '('
+  lem_keys "$plain_session" BSpace
+  leave_insert "$plain_session"
+  if record_result "$plain_session" plain.txt; then
+    assert_result pair-insert-backspace plain.txt '' 1 no "$plain_session"
+  else
+    fail pair-insert-backspace "insert-state Backspace probe did not run" "$plain_session"
+  fi
 else
   fail plain-boot "plain buffer did not initialize" "$plain_session"
 fi
@@ -247,6 +266,16 @@ if start_session "$python_session" "$python_file"; then
     assert_result python-syntax-pairs pairs.py "([{\"''\"}])x" 11 no "$python_session"
   else
     fail python-syntax-pairs "Python result probe did not run" "$python_session"
+  fi
+  if invoke_setup "$python_session" lem-yath-test-electric-delete-single-quote delete-single-quote; then
+    lem_keys "$python_session" BSpace
+    if record_result "$python_session" delete-single-quote; then
+      assert_result python-single-quote-backspace delete-single-quote '' 1 no "$python_session"
+    else
+      fail python-single-quote-backspace "Python single-quote Backspace probe did not run" "$python_session"
+    fi
+  else
+    fail python-single-quote-backspace "Python single-quote setup failed" "$python_session"
   fi
 else
   fail python-boot "Python buffer did not initialize" "$python_session"
@@ -310,6 +339,127 @@ if invoke_setup "$lisp_session" lem-yath-test-electric-lisp-completion-setup lis
   fi
 else
   fail paredit-completion-fence "Lisp completion setup failed" "$lisp_session"
+fi
+
+if invoke_setup "$lisp_session" lem-yath-test-electric-lisp-completion-setup lisp-completion; then
+  ensure_insert "$lisp_session"
+  send_literal "$lisp_session" alp
+  if lem_wait_for "$lisp_session" 'alpha-char-p' "$WAIT_TIMEOUT" >/dev/null; then
+    send_literal "$lisp_session" '|'
+    lem_keys "$lisp_session" BSpace
+    if lem_wait_for "$lisp_session" 'alpha-char-p' "$WAIT_TIMEOUT" >/dev/null &&
+       record_result "$lisp_session" lisp-completion; then
+      assert_result paredit-completion-backspace lisp-completion 'alp' 4 no "$lisp_session"
+    else
+      fail paredit-completion-backspace "paired Backspace closed or failed to refresh completion" "$lisp_session"
+    fi
+  else
+    fail paredit-completion-backspace "Lisp completion popup did not open" "$lisp_session"
+  fi
+else
+  fail paredit-completion-backspace "Lisp completion setup failed" "$lisp_session"
+fi
+
+if invoke_setup "$lisp_session" lem-yath-test-electric-lisp-delete-pair lisp-delete-pair; then
+  lem_keys "$lisp_session" BSpace
+  if record_result "$lisp_session" lisp-delete-pair; then
+    assert_result paredit-adjacent-backspace lisp-delete-pair '' 1 no "$lisp_session"
+  else
+    fail paredit-adjacent-backspace "Lisp paired Backspace probe did not run" "$lisp_session"
+  fi
+else
+  fail paredit-adjacent-backspace "Lisp paired Backspace setup failed" "$lisp_session"
+fi
+
+if invoke_setup "$lisp_session" lem-yath-test-electric-lisp-delete-smart-quote lisp-delete-smart-quote; then
+  lem_keys "$lisp_session" BSpace
+  if record_result "$lisp_session" lisp-delete-smart-quote; then
+    assert_result paredit-smart-quote-precedence lisp-delete-smart-quote '' 1 no "$lisp_session"
+  else
+    fail paredit-smart-quote-precedence "Lisp smart-quote Backspace probe did not run" "$lisp_session"
+  fi
+else
+  fail paredit-smart-quote-precedence "Lisp smart-quote setup failed" "$lisp_session"
+fi
+
+if invoke_setup "$lisp_session" lem-yath-test-electric-lisp-delete-protected lisp-delete-protected; then
+  lem_keys "$lisp_session" BSpace
+  if record_result "$lisp_session" lisp-delete-protected; then
+    assert_result paredit-nonempty-protection lisp-delete-protected '(x)' 1 no "$lisp_session"
+  else
+    fail paredit-nonempty-protection "Lisp nonempty-pair probe did not run" "$lisp_session"
+  fi
+else
+  fail paredit-nonempty-protection "Lisp nonempty-pair setup failed" "$lisp_session"
+fi
+
+if invoke_setup "$lisp_session" lem-yath-test-electric-vi-replace-backspace-setup replace-backspace; then
+  lem_keys "$lisp_session" R
+  send_literal "$lisp_session" '('
+  if lem_wait_for "$lisp_session" '[(]bcdef' "$WAIT_TIMEOUT" >/dev/null &&
+     lem_wait_for "$lisp_session" 'REPLACE' "$WAIT_TIMEOUT" >/dev/null; then
+    pass paredit-replace-overwrite "Lisp opener overwrote one character in Vi Replace"
+  else
+    fail paredit-replace-overwrite "Lisp opener did not produce the intermediate Replace state" "$lisp_session"
+  fi
+  lem_keys "$lisp_session" BSpace
+  if record_result "$lisp_session" replace-backspace; then
+    assert_result paredit-replace-backspace replace-backspace 'abcdef' 1 no "$lisp_session"
+    line=$(last_result replace-backspace)
+    if [[ "$line" == *'global=vi paredit=yes' ]]; then
+      pass paredit-replace-state "Lisp replace Backspace remained owned by Vi"
+    else
+      fail paredit-replace-state "unexpected Lisp replace state: $line" "$lisp_session"
+    fi
+  else
+    fail paredit-replace-backspace "Lisp replace Backspace probe did not run" "$lisp_session"
+  fi
+else
+  fail paredit-replace-backspace "Lisp replace Backspace setup failed" "$lisp_session"
+fi
+
+if invoke_setup "$lisp_session" lem-yath-test-electric-vi-replace-close-setup replace-close-backspace; then
+  lem_keys "$lisp_session" R
+  send_literal "$lisp_session" ')'
+  if lem_wait_for "$lisp_session" '[(][)]bcdef[)]' "$WAIT_TIMEOUT" >/dev/null &&
+     lem_wait_for "$lisp_session" 'REPLACE' "$WAIT_TIMEOUT" >/dev/null; then
+    pass paredit-replace-closer-overwrite "Lisp closer overwrote one character in Vi Replace"
+  else
+    fail paredit-replace-closer-overwrite "Lisp closer remained structural in Replace" "$lisp_session"
+  fi
+  lem_keys "$lisp_session" BSpace
+  if record_result "$lisp_session" replace-close-backspace; then
+    assert_result paredit-replace-closer-backspace replace-close-backspace '(abcdef)' 2 no "$lisp_session"
+  else
+    fail paredit-replace-closer-backspace "Lisp closer restoration probe did not run" "$lisp_session"
+  fi
+else
+  fail paredit-replace-closer-backspace "Lisp closer Replace setup failed" "$lisp_session"
+fi
+
+if invoke_setup "$lisp_session" lem-yath-test-electric-vi-replace-direct-backspace-setup replace-direct-backspace; then
+  lem_keys "$lisp_session" R
+  before=$(report_count '^DIRECT-BACKSPACE ')
+  lem_keys "$lisp_session" F8
+  if wait_report_count '^DIRECT-BACKSPACE ' "$((before + 1))"; then
+    line=$(grep '^DIRECT-BACKSPACE ' "$LEM_YATH_ELECTRIC_EDITING_REPORT" | tail -1)
+    if [[ "$line" == *'PAREDIT-BACKWARD-DELETE' ]]; then
+      pass paredit-direct-backspace-binding "forced Backspace resolved to Paredit in Replace"
+    else
+      fail paredit-direct-backspace-binding "unexpected forced Backspace binding: $line" "$lisp_session"
+    fi
+  else
+    fail paredit-direct-backspace-binding "forced Backspace binding probe did not run" "$lisp_session"
+  fi
+  send_literal "$lisp_session" '('
+  lem_keys "$lisp_session" BSpace
+  if record_result "$lisp_session" replace-direct-backspace; then
+    assert_result paredit-direct-replace-backspace replace-direct-backspace 'abcdef' 1 no "$lisp_session"
+  else
+    fail paredit-direct-replace-backspace "direct Paredit Backspace restoration probe did not run" "$lisp_session"
+  fi
+else
+  fail paredit-direct-replace-backspace "direct Paredit Backspace setup failed" "$lisp_session"
 fi
 fi
 stop_session "$lisp_session"
@@ -386,6 +536,258 @@ if start_session "$count_session" "$count_file"; then
     fi
   else
     fail counted-even-escape "counted even-escape setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-paren delete-paren; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-paren; then
+      assert_result adjacent-paren-backspace delete-paren '' 1 no "$count_session"
+    else
+      fail adjacent-paren-backspace "parenthesis Backspace probe did not run" "$count_session"
+    fi
+  else
+    fail adjacent-paren-backspace "parenthesis Backspace setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-quote delete-quote; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-quote; then
+      assert_result adjacent-quote-backspace delete-quote '' 1 no "$count_session"
+    else
+      fail adjacent-quote-backspace "quote Backspace probe did not run" "$count_session"
+    fi
+  else
+    fail adjacent-quote-backspace "quote Backspace setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-single-quote delete-single-quote; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-single-quote; then
+      assert_result fundamental-single-quote-fallback delete-single-quote "'" 1 no "$count_session"
+    else
+      fail fundamental-single-quote-fallback "Fundamental single-quote probe did not run" "$count_session"
+    fi
+  else
+    fail fundamental-single-quote-fallback "Fundamental single-quote setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-empty-emacs empty-emacs; then
+    send_literal "$count_session" '‘'
+    if record_result "$count_session" empty-emacs; then
+      assert_hex_result smart-quote-pair empty-emacs 20182019 "$count_session"
+    else
+      fail smart-quote-pair "smart-quote insertion probe did not run" "$count_session"
+    fi
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" empty-emacs; then
+      assert_result smart-quote-backspace empty-emacs '' 1 no "$count_session"
+    else
+      fail smart-quote-backspace "smart-quote Backspace probe did not run" "$count_session"
+    fi
+  else
+    fail smart-quote-pair "smart-quote setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-empty-emacs empty-emacs; then
+    send_literal "$count_session" '“'
+    if record_result "$count_session" empty-emacs; then
+      assert_hex_result smart-double-quote-pair empty-emacs 201C201D "$count_session"
+    else
+      fail smart-double-quote-pair "smart double-quote insertion probe did not run" "$count_session"
+    fi
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" empty-emacs; then
+      assert_result smart-double-quote-backspace empty-emacs '' 1 no "$count_session"
+    else
+      fail smart-double-quote-backspace "smart double-quote Backspace probe did not run" "$count_session"
+    fi
+  else
+    fail smart-double-quote-pair "smart double-quote setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-nonempty delete-nonempty; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-nonempty; then
+      assert_result nonempty-backspace-fallback delete-nonempty 'x)' 1 no "$count_session"
+    else
+      fail nonempty-backspace-fallback "nonempty-pair probe did not run" "$count_session"
+    fi
+  else
+    fail nonempty-backspace-fallback "nonempty-pair setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-spaced delete-spaced; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-spaced; then
+      assert_result spaced-backspace-fallback delete-spaced ' )' 1 no "$count_session"
+    else
+      fail spaced-backspace-fallback "spaced-pair probe did not run" "$count_session"
+    fi
+  else
+    fail spaced-backspace-fallback "spaced-pair setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-mismatch delete-mismatch; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-mismatch; then
+      assert_result mismatched-backspace-fallback delete-mismatch '[' 1 no "$count_session"
+    else
+      fail mismatched-backspace-fallback "mismatched-pair probe did not run" "$count_session"
+    fi
+  else
+    fail mismatched-backspace-fallback "mismatched-pair setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-escaped delete-escaped; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-escaped; then
+      assert_result escaped-adjacent-backspace delete-escaped '\' 2 no "$count_session"
+    else
+      fail escaped-adjacent-backspace "escaped-pair probe did not run" "$count_session"
+    fi
+  else
+    fail escaped-adjacent-backspace "escaped-pair setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-count delete-count; then
+    lem_keys "$count_session" M-2 BSpace
+    if record_result "$count_session" delete-count; then
+      assert_result counted-adjacent-backspace delete-count 'XW' 2 no "$count_session"
+    else
+      fail counted-adjacent-backspace "counted Backspace probe did not run" "$count_session"
+    fi
+    before=$(report_count '^KILL ')
+    lem_keys "$count_session" F9
+    if wait_report_count '^KILL ' "$((before + 1))"; then
+      line=$(grep '^KILL ' "$LEM_YATH_ELECTRIC_EDITING_REPORT" | tail -1)
+      if [ "$line" = 'KILL text-hex=5928' ]; then
+        pass counted-backspace-killring "explicit prefix killed only the backward half"
+      else
+        fail counted-backspace-killring "unexpected kill-ring result: $line" "$count_session"
+      fi
+    else
+      fail counted-backspace-killring "kill-ring probe did not run" "$count_session"
+    fi
+  else
+    fail counted-adjacent-backspace "counted Backspace setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-selected-opener delete-selected-opener; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-selected-opener; then
+      assert_result selected-opener-backspace delete-selected-opener '' 1 yes "$count_session"
+      line=$(last_result delete-selected-opener)
+      if [[ "$line" == *'mark-point=1 '* ]]; then
+        pass selected-opener-mark "pair deletion retained a zero-width active mark"
+      else
+        fail selected-opener-mark "unexpected selected-opener mark: $line" "$count_session"
+      fi
+    else
+      fail selected-opener-backspace "selected-opener Backspace probe did not run" "$count_session"
+    fi
+  else
+    fail selected-opener-backspace "selected-opener setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-selected-closer delete-selected-closer; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-selected-closer; then
+      assert_result selected-closer-backspace delete-selected-closer '' 1 yes "$count_session"
+      line=$(last_result delete-selected-closer)
+      if [[ "$line" == *'mark-point=1 '* ]]; then
+        pass selected-closer-mark "reverse pair selection retained a zero-width active mark"
+      else
+        fail selected-closer-mark "unexpected selected-closer mark: $line" "$count_session"
+      fi
+    else
+      fail selected-closer-backspace "selected-closer Backspace probe did not run" "$count_session"
+    fi
+  else
+    fail selected-closer-backspace "selected-closer setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-zero-mark delete-zero-mark; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-zero-mark; then
+      assert_result zero-mark-pair-backspace delete-zero-mark '' 1 yes "$count_session"
+      line=$(last_result delete-zero-mark)
+      if [[ "$line" == *'mark-point=1 '* ]]; then
+        pass zero-mark-pair-retention "zero-width active mark followed the deleted pair"
+      else
+        fail zero-mark-pair-retention "unexpected zero-mark result: $line" "$count_session"
+      fi
+    else
+      fail zero-mark-pair-backspace "zero-mark paired Backspace probe did not run" "$count_session"
+    fi
+  else
+    fail zero-mark-pair-backspace "zero-mark paired Backspace setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-wide-left delete-wide-left; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-wide-left; then
+      assert_result wide-left-selection-backspace delete-wide-left ')b' 1 no "$count_session"
+    else
+      fail wide-left-selection-backspace "wide left-selection probe did not run" "$count_session"
+    fi
+  else
+    fail wide-left-selection-backspace "wide left-selection setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-wide-right delete-wide-right; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-wide-right; then
+      assert_result wide-right-selection-backspace delete-wide-right 'a(' 3 no "$count_session"
+    else
+      fail wide-right-selection-backspace "wide right-selection probe did not run" "$count_session"
+    fi
+  else
+    fail wide-right-selection-backspace "wide right-selection setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-read-only delete-read-only; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-read-only; then
+      assert_result read-only-pair-backspace delete-read-only '()' 2 no "$count_session"
+      line=$(last_result delete-read-only)
+      if [[ "$line" == *'readonly=yes '* ]]; then
+        pass read-only-pair-state "failed pair deletion retained read-only state"
+      else
+        fail read-only-pair-state "unexpected read-only result: $line" "$count_session"
+      fi
+    else
+      fail read-only-pair-backspace "read-only Backspace probe did not run" "$count_session"
+    fi
+  else
+    fail read-only-pair-backspace "read-only Backspace setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-protected-opener delete-protected-opener; then
+    lem_keys "$count_session" BSpace
+    if record_result "$count_session" delete-protected-opener; then
+      assert_result protected-opener-preflight delete-protected-opener '()' 2 no "$count_session"
+      line=$(last_result delete-protected-opener)
+      if [[ "$line" == *'readonly=no '* ]]; then
+        pass protected-opener-scope "one protected character refused the whole pair deletion"
+      else
+        fail protected-opener-scope "fixture unexpectedly made the whole buffer read-only: $line" "$count_session"
+      fi
+    else
+      fail protected-opener-preflight "protected-opener Backspace probe did not run" "$count_session"
+    fi
+  else
+    fail protected-opener-preflight "protected-opener setup failed" "$count_session"
+  fi
+
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-undo delete-undo; then
+    lem_keys "$count_session" BSpace "C-\\"
+    if record_result "$count_session" delete-undo; then
+      assert_result pair-backspace-one-undo delete-undo '()' 2 no "$count_session"
+    else
+      fail pair-backspace-one-undo "pair deletion undo probe did not run" "$count_session"
+    fi
+  else
+    fail pair-backspace-one-undo "pair deletion undo setup failed" "$count_session"
   fi
 else
   fail counted-insert-boot "counted insertion buffer did not initialize" "$count_session"
@@ -548,6 +950,19 @@ if start_session "$replace_session" "$replace_file"; then
     assert_result vi-replace-isolation replace.txt '(bcdef' 2 no "$replace_session"
   else
     fail vi-replace-isolation "Vi replace probe did not run" "$replace_session"
+  fi
+  leave_insert "$replace_session"
+  if invoke_setup "$replace_session" lem-yath-test-electric-vi-replace-backspace-setup replace-backspace; then
+    lem_keys "$replace_session" R
+    send_literal "$replace_session" '('
+    lem_keys "$replace_session" BSpace
+  else
+    fail vi-replace-backspace "Vi replace Backspace setup failed" "$replace_session"
+  fi
+  if record_result "$replace_session" replace-backspace; then
+    assert_result vi-replace-backspace replace-backspace 'abcdef' 1 no "$replace_session"
+  else
+    fail vi-replace-backspace "Vi replace Backspace probe did not run" "$replace_session"
   fi
 else
   fail vi-replace-isolation-boot "Vi replace buffer did not initialize" "$replace_session"

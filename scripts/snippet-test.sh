@@ -67,6 +67,8 @@ write_snippet "$fixture_snippet_root/fundamental-mode/middle-insert" \
   'middle default insertion' 'midins' '${1:value}-$0'
 write_snippet "$fixture_snippet_root/fundamental-mode/middle-backspace" \
   'middle default backspace' 'midbs' '${1:value}-$0'
+write_snippet "$fixture_snippet_root/fundamental-mode/pair-backspace" \
+  'paired backspace mirror' 'pairbs' '${1:()}:$1-$0'
 write_snippet "$fixture_snippet_root/fundamental-mode/mode-change" \
   'mode change cleanup' 'mchg' '${1:value}-$0'
 write_snippet "$fixture_snippet_root/fundamental-mode/manual-picker" \
@@ -456,6 +458,23 @@ if run_mx lem-yath-test-snippet-middle-backspace-setup && enter_insert; then
   fi
 else
   fail middle-backspace-setup "could not prepare middle-default Backspace"
+fi
+
+# Backspace between adjacent delimiters flows through the snippet wrapper and
+# updates every mirror from the one preflighted pair-deletion command.
+if run_mx lem-yath-test-snippet-pair-backspace-setup && enter_insert; then
+  send_literal pairbs
+  lem_keys "$session" Tab
+  lem_keys "$session" Right
+  lem_keys "$session" BSpace
+  if record_state pair-backspace; then
+    assert_state paired-backspace-mirror pair-backspace $':-\n' \
+      'active=yes' 'field=1' 'completion=no'
+  else
+    fail paired-backspace-mirror "paired snippet Backspace probe did not run"
+  fi
+else
+  fail pair-backspace-setup "could not prepare paired snippet Backspace"
 fi
 
 # A major-mode transition invalidates the old field overlays and buffer-local

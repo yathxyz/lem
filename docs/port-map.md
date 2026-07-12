@@ -93,7 +93,7 @@ Status legend:
 | tab-bar / winner-mode (built-ins) | partial | no tab header is shown at startup; `C-x t 2` lazily enables Lem's frame multiplexer and creates a tab. Winner-style window-layout undo/redo is absent (`src/ui.lisp`, `scripts/ui-parity-test.sh`). |
 | dirvish | lem-builtin | `directory-mode` + filer |
 | find-name-dired (built-in) | ported/partial | `M-s f` asynchronously fills a persistent, read-only `*Find*` buffer with safely escaped rows backed by exact paths (`src/find-name.lisp`); Dired marking, long columns, file operations, and process cancellation remain gaps |
-| electric-pair-mode / delete-selection-mode (built-ins) | ported/partial | syntax-table delimiter/quote pairing, local balance reuse/skip, numeric prefixes, ordinary region replacement, and Emacs-style opener/quote region wrapping; an unmatched embedded quote is escaped to keep the Lisp string valid instead of reproducing Lispy's raw interior quote, while full forward balance scanning, global paired Backspace, and zero-result prompt recovery remain gaps (`src/electric-pair.lisp`, `scripts/electric-editing-test.sh`) |
+| electric-pair-mode / delete-selection-mode (built-ins) | ported/partial | syntax-table delimiter/quote pairing plus Unicode smart quotes, local balance reuse/skip, numeric prefixes, ordinary region replacement, Emacs-style opener/quote region wrapping, and preflighted adjacent-pair Backspace in Emacs or Vi insert editing; pair deletion preserves completion, prompt, snippet, Paredit, read-only, kill-ring, undo, and Vi-state lifecycles. An unmatched embedded quote is escaped to keep the Lisp string valid instead of reproducing Lispy's raw interior quote, while full forward balance scanning, negative-prefix paired Backspace, Emacs's destructive wide-selection quirk, and zero-result prompt recovery remain gaps (`src/electric-pair.lisp`, `scripts/electric-editing-test.sh`) |
 | ws-butler | ported | track changed programming-buffer lines and trim only those lines on save (`src/editing.lisp`); EditorConfig `trim_trailing_whitespace=true` additionally normalizes the whole buffer, while false/absent retains touched-line cleanup |
 | ibuffer | lem-builtin/partial | `list-buffers` (`C-x C-b`) provides Buffer/File columns, fuzzy narrowing, and Return-to-open; the configured org/tramp/emacs/ediff/dired/terminal/help saved groups are absent |
 | bookmarks (built-in) | lem-builtin/partial | `lem-bookmark`, `SPC b m` / `SPC RET`; unlike the configured Emacs, modified bookmarks are not automatically saved at exit |
@@ -173,10 +173,12 @@ Status legend:
   preserves additions, while a stale process can resurrect a history clear.
 - **Rectangle duplication**: `M-j` matches line and contiguous-region behavior,
   including Vi character/line selections, but V-BLOCK remains unsupported.
-- **Electric-pair scope**: syntax-table pairs, quotes, numeric prefixes,
-  escapes, and local syntax-safe closer reuse/skip are covered. Full forward
-  balance scanning across forms, global adjacent-pair Backspace, and recovery
-  after a zero-result prompt query remain open.
+- **Electric-pair scope**: syntax-table pairs, Unicode smart quotes, numeric
+  prefixes, escapes, local syntax-safe closer reuse/skip, and preflighted
+  adjacent-pair Backspace are covered. Full forward balance scanning across
+  forms, negative-prefix paired Backspace, Emacs's orientation-dependent
+  destructive behavior for selections wider than one delimiter, and recovery after a zero-
+  result prompt query remain open.
 - **In-buffer Orderless scope**: automatic mode/Cape completion supports
   multi-component matching and Corfu's `M-Space` separator. CL-PPCRE differs
   from Emacs regexp syntax, `%` character folding and `&` annotation dispatch

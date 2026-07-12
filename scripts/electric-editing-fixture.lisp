@@ -181,17 +181,26 @@
     (setf (buffer-value buffer :electric-editing-label) "count-existing")
     (electric-editing-log "SETUP label=count-existing")))
 
-(defun electric-editing-setup-count-seed (label text offset)
+(defun electric-editing-setup-count-seed
+    (label text offset &key read-only mark-offset)
   (lem-core::emacs-mode)
   (let ((buffer (current-buffer)))
     (setf (buffer-read-only-p buffer) nil)
     (buffer-mark-cancel buffer)
-    (erase-buffer buffer)
-    (insert-string (buffer-point buffer) text)
+    ;; Test scenarios can leave a character-level read-only property behind.
+    ;; Fixture reset is authoritative and must clear that protected text.
+    (let ((*inhibit-read-only* t))
+      (erase-buffer buffer)
+      (insert-string (buffer-point buffer) text))
     (buffer-start (buffer-point buffer))
     (character-offset (buffer-point buffer) offset)
+    (when mark-offset
+      (with-point ((mark (buffer-start-point buffer)))
+        (character-offset mark mark-offset)
+        (setf (buffer-mark buffer) mark)))
     (clear-buffer-edit-history buffer)
-    (setf (buffer-value buffer :electric-editing-label) label)
+    (setf (buffer-value buffer :electric-editing-label) label
+          (buffer-read-only-p buffer) (not (null read-only)))
     (electric-editing-log "SETUP label=~a" label)))
 
 (define-command lem-yath-test-electric-count-quote-existing () ()
@@ -202,6 +211,103 @@
 
 (define-command lem-yath-test-electric-count-even-escape () ()
   (electric-editing-setup-count-seed "count-even-escape" "\\\\z" 2))
+
+(define-command lem-yath-test-electric-delete-paren () ()
+  (electric-editing-setup-count-seed "delete-paren" "()" 1))
+
+(define-command lem-yath-test-electric-delete-quote () ()
+  (electric-editing-setup-count-seed "delete-quote" "\"\"" 1))
+
+(define-command lem-yath-test-electric-delete-single-quote () ()
+  (electric-editing-setup-count-seed "delete-single-quote" "''" 1))
+
+(define-command lem-yath-test-electric-delete-nonempty () ()
+  (electric-editing-setup-count-seed "delete-nonempty" "(x)" 1))
+
+(define-command lem-yath-test-electric-delete-spaced () ()
+  (electric-editing-setup-count-seed "delete-spaced" "( )" 1))
+
+(define-command lem-yath-test-electric-delete-mismatch () ()
+  (electric-editing-setup-count-seed "delete-mismatch" "([" 1))
+
+(define-command lem-yath-test-electric-delete-escaped () ()
+  (electric-editing-setup-count-seed "delete-escaped" "\\()" 2))
+
+(define-command lem-yath-test-electric-delete-count () ()
+  (electric-editing-setup-count-seed "delete-count" "XY()ZW" 3)
+  (setf lem-core::*killring* (lem/common/killring:make-killring 120)))
+
+(define-command lem-yath-test-electric-delete-read-only () ()
+  (electric-editing-setup-count-seed
+   "delete-read-only" "()" 1 :read-only t))
+
+(define-command lem-yath-test-electric-delete-protected-opener () ()
+  (electric-editing-setup-count-seed "delete-protected-opener" "()" 1)
+  (with-point ((start (buffer-start-point (current-buffer)))
+               (end (buffer-start-point (current-buffer))))
+    (character-offset end 1)
+    (put-text-property start end :read-only t)))
+
+(define-command lem-yath-test-electric-delete-undo () ()
+  (electric-editing-setup-count-seed "delete-undo" "()" 1))
+
+(define-command lem-yath-test-electric-delete-selected-opener () ()
+  (electric-editing-setup-count-seed
+   "delete-selected-opener" "()" 1 :mark-offset 0))
+
+(define-command lem-yath-test-electric-delete-selected-closer () ()
+  (electric-editing-setup-count-seed
+   "delete-selected-closer" "()" 1 :mark-offset 2))
+
+(define-command lem-yath-test-electric-delete-zero-mark () ()
+  (electric-editing-setup-count-seed
+   "delete-zero-mark" "()" 1 :mark-offset 1))
+
+(define-command lem-yath-test-electric-delete-wide-left () ()
+  (electric-editing-setup-count-seed
+   "delete-wide-left" "a()b" 2 :mark-offset 0))
+
+(define-command lem-yath-test-electric-delete-wide-right () ()
+  (electric-editing-setup-count-seed
+   "delete-wide-right" "a()b" 2 :mark-offset 4))
+
+(define-command lem-yath-test-electric-lisp-delete-pair () ()
+  (electric-editing-setup-count-seed "lisp-delete-pair" "()" 1))
+
+(define-command lem-yath-test-electric-lisp-delete-protected () ()
+  (electric-editing-setup-count-seed "lisp-delete-protected" "(x)" 1))
+
+(define-command lem-yath-test-electric-lisp-delete-smart-quote () ()
+  (electric-editing-setup-count-seed "lisp-delete-smart-quote" "“”" 1))
+
+(defun electric-editing-setup-vi-replace
+    (label text offset &key direct-paredit-backspace)
+  (lem-vi-mode:vi-mode)
+  (let ((buffer (current-buffer)))
+    (setf (lem-vi-mode/core:buffer-state buffer) 'lem-vi-mode:normal)
+    (setf (buffer-read-only-p buffer) nil)
+    (buffer-mark-cancel buffer)
+    (erase-buffer buffer)
+    (insert-string (buffer-point buffer) text)
+    (buffer-start (buffer-point buffer))
+    (character-offset (buffer-point buffer) offset)
+    (clear-buffer-edit-history buffer)
+    (setf (buffer-value buffer :electric-editing-label) label)
+    (when direct-paredit-backspace
+      (define-key lem-paredit-mode:*paredit-mode-keymap*
+        "Backspace" 'lem-paredit-mode:paredit-backward-delete))
+    (electric-editing-log "SETUP label=~a" label)))
+
+(define-command lem-yath-test-electric-vi-replace-backspace-setup () ()
+  (electric-editing-setup-vi-replace "replace-backspace" "abcdef" 0))
+
+(define-command lem-yath-test-electric-vi-replace-close-setup () ()
+  (electric-editing-setup-vi-replace
+   "replace-close-backspace" "(abcdef)" 1))
+
+(define-command lem-yath-test-electric-vi-replace-direct-backspace-setup () ()
+  (electric-editing-setup-vi-replace
+   "replace-direct-backspace" "abcdef" 0 :direct-paredit-backspace t))
 
 (define-command lem-yath-test-electric-lisp-completion-setup () ()
   (lem/completion-mode:completion-end)
@@ -234,11 +340,26 @@
    *electric-editing-after-count*
    (electric-editing-hex (electric-editing-buffer-text))))
 
+(define-command lem-yath-test-electric-killring-record () ()
+  (multiple-value-bind (text options)
+      (lem/common/killring:peek-killring-item (current-killring) 0)
+    (declare (ignore options))
+    (electric-editing-log "KILL text-hex=~a"
+                          (if text (electric-editing-hex text) "none"))))
+
+(define-command lem-yath-test-electric-backspace-binding-record () ()
+  (let* ((prefix (lem-core::lookup-keybind
+                  (lem-core::parse-keyspec "Backspace")))
+         (command (and prefix (lem-core::prefix-suffix prefix))))
+    (electric-editing-log "DIRECT-BACKSPACE command=~s" command)))
+
 (dolist (keymap (list *global-keymap*
                       lem-vi-mode:*normal-keymap*
                       lem-vi-mode:*insert-keymap*
                       lem-vi-mode:*visual-keymap*))
   (define-key keymap "F12" 'lem-yath-test-electric-record)
+  (define-key keymap "F8" 'lem-yath-test-electric-backspace-binding-record)
+  (define-key keymap "F9" 'lem-yath-test-electric-killring-record)
   (define-key keymap "F10" 'lem-yath-test-electric-hook-record))
 
 (electric-editing-log "READY")

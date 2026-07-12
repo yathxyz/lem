@@ -17,7 +17,8 @@
 (defvar *auto-completion-context* nil)
 
 (defparameter *auto-completion-continue-commands*
-  '(lem/completion-mode::completion-self-insert
+  '(lem-core/commands/edit:delete-previous-char
+    lem/completion-mode::completion-self-insert
     lem/completion-mode::completion-delete-previous-char
     lem/completion-mode::completion-backward-delete-word
     lem/completion-mode::completion-next-line
