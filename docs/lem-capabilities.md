@@ -310,10 +310,13 @@ synchronous singleton. `Tab` inserts the focused candidate and refreshes
 completion without closing the prompt; one `Return` accepts it and submits the
 prompt. `M-p` and `M-n` traverse prompt history and reopen completion.
 
-Lem-yath carries `patches/lem-completion-lifecycle.patch` against the pinned Lem
-revision. It separates display, filter, and insertion text, adds a final-accept
-callback plus a distinct final-insertion callback, and rejects stale asynchronous
-generations before they can update the popup. A custom final inserter receives
+Lem-yath carries `patches/lem-completion-lifecycle.patch` and
+`patches/lem-completion-observer-change-group.patch` plus
+`patches/lem-completion-presentation-focus.patch` against the pinned Lem
+revision. They separate display, filter, and insertion text, add a final-accept
+callback plus a distinct final-insertion callback, expose scoped presentation,
+focus, and teardown observation, make an inactive row non-actionable, and reject
+stale asynchronous generations before they can update the popup. A custom final inserter receives
 the accepted tracked range only after the completion UI closes; its post-accept
 callback runs exactly once only when insertion succeeds. Ordinary automatic
 in-buffer contexts also keep a cancellable spinner, remember their origin
@@ -353,8 +356,9 @@ split a surrogate pair, and retains tested UTF-8/UTF-32 conversion helpers.
 Generic edit batches are validated before mutation and applied in descending
 order, so adjacent simultaneous edits cannot consume one another.
 Resolved documentation/detail, CompletionList item defaults, `insertTextMode`,
-completion commands, and rollback after an arbitrary throwing buffer hook remain
-separate gaps; Lem has no native change-group primitive for that last case.
+completion commands, and rollback of the LSP acceptance path after an arbitrary
+throwing buffer hook remain separate gaps.  The retained-undo change group used
+for Corfu-style input reset is deliberately narrower than that LSP transaction.
 
 ### Embark-style actions — `lem-yath/src/actions.lisp` (verified subset)
 
@@ -486,6 +490,39 @@ separator resumes provider queries. Plain Space before separator activation stil
 ends ordinary completion. Prompt completion remains Vertico-Prescient, and file
 completion remains path-aware.
 
+Automatic contexts also reproduce Corfu's selected-candidate interaction.  An
+ordinary initial preselection is accepted by `Tab` or `Return`; exact input that
+matches a non-first candidate starts on a real prompt row, where neither key can
+accept a hidden item. `C-n`/`C-p`, arrow keys, beginning/end commands, and
+`M-n`/`M-p` navigate without cycling. Moving off the preselection draws a
+source-aligned, display-only preview: source text, point, modified tick, dirty
+state, and retained undo history remain unchanged.
+Typing, deletion, movement, ordinary Space, and electric/Paredit commands commit
+that semantic selection before the command runs.  `M-Space` instead clears the
+selection, inserts one separator, and refilters without accepting it.
+
+`Escape` first returns a navigated selection to the preselection, next cancels
+only edits made since the popup opened, and finally closes unchanged input.
+`C-g` closes in one stage while retaining real typed input and never applies a
+display-only preview.  The reset uses a pinned, undo-honest retained-history
+change group; accepting completion still leaves one Vi insertion as one undo.
+Public undo, redo, and tree movement refuse while that group owns the buffer;
+replay bookkeeping is buffer-scoped, and a teardown that cannot close safely
+preserves live text while resetting the compromised history fail-closed.
+Teardown is exercised for async nil, movement, buffer switches, and source-window
+deletion without deleting unrelated floating windows; resize instead
+recomputes the owned preview. Buffer deletion and editor exit converge on the
+same cleanup path.
+
+Lem has no inline display overlay equivalent to Corfu's child-frame overlay.
+The ncurses implementation therefore uses a borderless one-row floating window
+and suppresses preview when a multiline or wrapped replacement cannot be shown
+exactly.  Corfu's `test-completion` predicate is not available through Lem's
+provider API; prompt-row validity is conservatively inferred from exact
+candidate insertion text and can differ for provider-specific predicates. Float
+ownership is verified in the target single-frame ncurses frontend; multi-frame
+GUI ownership remains unverified.
+
 This is deliberately an approximation rather than a full Orderless claim:
 CL-PPCRE and Emacs use different regexp dialects, and the pinned Orderless
 package's `%` character-fold and `&` annotation dispatchers are not implemented.
@@ -495,8 +532,12 @@ every Emacs syntax table.
 `scripts/auto-completion-test.sh` drives all of this through the ncurses editor,
 including the delay boundary, 12-candidate scrolling through a 10-row window,
 both non-cycling edges, rapid-typing debounce, provider exclusivity, singleton
-acceptance, whole-token and file-prefix replacement, unrelated movement and
-buffer-switch cleanup, Escape cancellation, and out-of-order asynchronous delivery.
+acceptance, whole-token and file-prefix replacement, non-mutating preview and
+commit-before-command behavior (including movement and Paredit), exact-valid and
+zero-match prompt rows, staged Escape and one-stage `C-g`, a real normal-state
+Vi undo, preview geometry/layering, preview resize plus async cleanup, source-window
+deletion, unrelated floating-window ownership, buffer-switch cleanup, and
+out-of-order asynchronous delivery.
 `scripts/orderless-completion-test.sh` separately exercises the matcher oracle,
 raw-before-cap filtering, manual and automatic completion, local separator request
 ownership, stale asynchronous delivery, zero-match recovery, tracked replacement
@@ -738,8 +779,9 @@ reload, killed windows and buffers, wide-tree pruning, mutating hooks,
 stale-reference rejection, asymmetric route refusal, after-save descendants,
 direct and re-entrant teardown, prior bottom panes, and read-only failures.
 Vundo numeric prefixes and debug keys `i`/`D` are not implemented.
-Rectangle/Copilot-style speculative transactions remain in history because Lem
-has no discard-transaction API.
+Rectangle/Copilot-style speculative paths do not yet use the constrained
+retained-undo change-group API, so their intermediate transactions remain in
+history.
 
 - Find by name: `M-s f` (`lem-yath/src/find-name.lisp`) prompts for a root and
   wildcard, runs GNU find asynchronously with a NUL-delimited argv-safe protocol,

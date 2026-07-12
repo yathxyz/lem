@@ -460,7 +460,7 @@
                ;; Apply only the inverse character as a test replay, then put
                ;; the authoritative pointer back at the root.  The final
                ;; public snapshot validates the constructed graph in full.
-               (let ((lem/buffer/internal::*undo-tree-replaying-p* t))
+               (let ((lem/buffer/internal::*undo-tree-replaying-p* buffer))
                  (delete-character (buffer-start-point buffer) 1))
                (setf (lem/buffer/internal::buffer-%undo-tree-current buffer)
                      root

@@ -202,6 +202,15 @@ pipelines: Vertico + Marginalia + Prescient for minibuffers, and Corfu +
 Orderless + mode/Cape CAPFs in ordinary buffers. Yasnippet expands separately
 through `TAB`; it is not a Cape candidate source.
 
+The pinned Corfu source supplies the active defaults `corfu-preselect 'valid`
+and `corfu-preview-current 'insert`.  Thus a valid input distinct from the
+first candidate starts on Corfu's prompt row; otherwise the first candidate is
+preselected without being previewed.  Moving to another candidate displays a
+non-mutating preview which is committed before subsequent ordinary input.
+`TAB` completes, `RET` inserts the selection, `Escape` resets selection/input in
+stages, `C-g` quits while retaining typed input, and `M-Space` inserts the
+Orderless separator without accepting a preview.
+
 An isolated live-Vertico probe confirmed that opening candidates does not insert
 a common prefix or accept a singleton. `TAB` inserts the focused candidate while
 retaining the minibuffer, `RET` accepts and submits once, and `M-p`/`M-n` traverse

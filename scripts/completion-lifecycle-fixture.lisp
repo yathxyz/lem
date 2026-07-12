@@ -256,6 +256,11 @@
                  (incf failures)))
              (buffer-is (expected)
                (string= expected (completion-lifecycle-buffer-text)))
+             (cleanup-completion ()
+               (loop repeat 4
+                     while lem/completion-mode::*completion-context*
+                     do (ignore-errors
+                          (lem/completion-mode:completion-end))))
              (converted (item)
                (first (lem-lsp-mode::convert-completion-items
                        (current-point)
@@ -279,6 +284,630 @@
                               (lem/completion-mode:completion-item-insert-text
                                fallback))
                      "label-is-insert-fallback"))
+
+            (completion-lifecycle-clear-buffer)
+            (let* ((events '())
+                   (first
+                     (lem/completion-mode:make-completion-item
+                      :label "OBSERVER-FIRST"))
+                   (second
+                     (lem/completion-mode:make-completion-item
+                      :label "OBSERVER-SECOND"))
+                   (context
+                     (lem/completion-mode:run-completion
+                      (lambda (point)
+                        (declare (ignore point))
+                        (list first second))
+                      :automatic t
+                      :observer-function
+                      (lambda (observed event item)
+                        (push
+                         (list event
+                               (and item
+                                    (lem/completion-mode:completion-item-label
+                                     item))
+                               (eq observed
+                                   lem/completion-mode::*completion-context*))
+                         events)))))
+              (declare (ignore context))
+              (lem/completion-mode:completion-end)
+              (lem/completion-mode:completion-end)
+              (check
+               (equal (reverse events)
+                      '((:present "OBSERVER-FIRST" t)
+                        (:focus "OBSERVER-FIRST" t)
+                        (:end nil nil)))
+               "context-observer-present-focus-then-reentrant-safe-end"))
+
+            (let ((events '())
+                  (navigated-p nil)
+                  (first-focus-count 0)
+                  (second-focus-count 0))
+              (unwind-protect
+                   (progn
+                     (lem/completion-mode:run-completion
+                      (lambda (point)
+                        (declare (ignore point))
+                        (list
+                         (lem/completion-mode:make-completion-item
+                          :label "PRESENT-NAV-FIRST"
+                          :focus-action
+                          (lambda (context)
+                            (declare (ignore context))
+                            (incf first-focus-count)))
+                         (lem/completion-mode:make-completion-item
+                          :label "PRESENT-NAV-SECOND"
+                          :focus-action
+                          (lambda (context)
+                            (declare (ignore context))
+                            (incf second-focus-count)))))
+                      :automatic t
+                      :observer-function
+                      (lambda (observed event item)
+                        (declare (ignore observed))
+                        (push
+                         (list event
+                               (and item
+                                    (lem/completion-mode:completion-item-label
+                                     item)))
+                         events)
+                        (when (and (eq event :present)
+                                   (not navigated-p))
+                          (setf navigated-p t)
+                          (lem/completion-mode::completion-next-line))))
+                     (check
+                      (and navigated-p
+                           (zerop first-focus-count)
+                           (= second-focus-count 1)
+                           (equal (reverse events)
+                                  '((:present "PRESENT-NAV-FIRST")
+                                    (:focus "PRESENT-NAV-SECOND"))))
+                      "present-observer-navigation-suppresses-outer-focus"))
+                (cleanup-completion)))
+
+            (let ((events '())
+                  (provider-count 0)
+                  (focus-count 0)
+                  (refreshed-p nil))
+              (unwind-protect
+                   (progn
+                     (lem/completion-mode:run-completion
+                      (lambda (point)
+                        (declare (ignore point))
+                        (incf provider-count)
+                        (let ((prefix (format nil "PRESENT-REFRESH-~d"
+                                              provider-count)))
+                          (list
+                           (lem/completion-mode:make-completion-item
+                            :label (format nil "~a-FIRST" prefix)
+                            :focus-action
+                            (lambda (context)
+                              (declare (ignore context))
+                              (incf focus-count)))
+                           (lem/completion-mode:make-completion-item
+                            :label (format nil "~a-SECOND" prefix)))))
+                      :automatic t
+                      :observer-function
+                      (lambda (observed event item)
+                        (declare (ignore observed))
+                        (push
+                         (list event
+                               (and item
+                                    (lem/completion-mode:completion-item-label
+                                     item)))
+                         events)
+                        (when (and (eq event :present)
+                                   (not refreshed-p))
+                          (setf refreshed-p t)
+                          (lem/completion-mode:completion-refresh))))
+                     (check
+                      (and refreshed-p
+                           (= provider-count 2)
+                           (= focus-count 1)
+                           (equal
+                            (reverse events)
+                            '((:present "PRESENT-REFRESH-1-FIRST")
+                              (:present "PRESENT-REFRESH-2-FIRST")
+                              (:focus "PRESENT-REFRESH-2-FIRST"))))
+                      "present-observer-refresh-suppresses-old-generation-focus"))
+                (cleanup-completion)))
+
+            (let ((events '())
+                  (nested-focus-p nil)
+                  (focus-count 0))
+              (unwind-protect
+                   (progn
+                     (lem/completion-mode:run-completion
+                      (lambda (point)
+                        (declare (ignore point))
+                        (list
+                         (lem/completion-mode:make-completion-item
+                          :label "PRESENT-SAME-ROW"
+                          :focus-action
+                          (lambda (context)
+                            (declare (ignore context))
+                            (incf focus-count)))
+                         (lem/completion-mode:make-completion-item
+                          :label "PRESENT-SAME-ROW-SECOND")))
+                      :automatic t
+                      :observer-function
+                      (lambda (observed event item)
+                        (declare (ignore observed))
+                        (push
+                         (list event
+                               (and item
+                                    (lem/completion-mode:completion-item-label
+                                     item)))
+                         events)
+                        (when (and (eq event :present)
+                                   (not nested-focus-p))
+                          (setf nested-focus-p t)
+                          (lem/completion-mode::completion-beginning-of-buffer))))
+                     (check
+                      (and nested-focus-p
+                           (= focus-count 1)
+                           (equal (reverse events)
+                                  '((:present "PRESENT-SAME-ROW")
+                                    (:focus "PRESENT-SAME-ROW"))))
+                      "present-observer-same-row-focus-runs-once"))
+                (cleanup-completion)))
+
+            (let ((events '())
+                  (focus-count 0)
+                  (focus-context-current-p nil)
+                  (old-context nil))
+              (unwind-protect
+                   (progn
+                     (lem/completion-mode:run-completion
+                      (lambda (point)
+                        (declare (ignore point))
+                        (list
+                         (lem/completion-mode:make-completion-item
+                          :label "ENDS-ON-FOCUS"
+                          :focus-action
+                          (lambda (context)
+                            (incf focus-count)
+                            (setf focus-context-current-p
+                                  (eq context
+                                      lem/completion-mode::*completion-context*))
+                            (lem/completion-mode:completion-end)))
+                         (lem/completion-mode:make-completion-item
+                          :label "ENDS-ON-FOCUS-SECOND")))
+                      :automatic t
+                      :observer-function
+                      (lambda (observed event item)
+                        (when (eq event :present)
+                          (setf old-context observed))
+                        (push
+                         (list event
+                               (and item
+                                    (lem/completion-mode:completion-item-label
+                                     item))
+                               (eq observed
+                                   lem/completion-mode::*completion-context*))
+                         events)))
+                     (check
+                      (and (= focus-count 1)
+                           focus-context-current-p
+                           (null lem/completion-mode::*completion-context*)
+                           old-context
+                           (null
+                            (lem/completion-mode::context-popup-menu
+                             old-context))
+                           (equal (reverse events)
+                                  '((:present "ENDS-ON-FOCUS" t)
+                                    (:end nil nil))))
+                      "focus-action-end-suppresses-stale-focus"))
+                (cleanup-completion)))
+
+            (let ((events '())
+                  (old-context nil)
+                  (replacement-context nil)
+                  (old-focus-count 0)
+                  (replacement-focus-count 0))
+              (unwind-protect
+                   (progn
+                     (lem/completion-mode:run-completion
+                      (lambda (point)
+                        (declare (ignore point))
+                        (list
+                         (lem/completion-mode:make-completion-item
+                          :label "OLD-REPLACE"
+                          :focus-action
+                          (lambda (context)
+                            (declare (ignore context))
+                            (incf old-focus-count)
+                            (setf replacement-context
+                                  (lem/completion-mode:run-completion
+                                   (lambda (replacement-point)
+                                     (declare (ignore replacement-point))
+                                     (list
+                                      (lem/completion-mode:make-completion-item
+                                       :label "FOCUS-REPLACEMENT"
+                                       :focus-action
+                                       (lambda (replacement)
+                                         (declare (ignore replacement))
+                                         (incf replacement-focus-count)))
+                                      (lem/completion-mode:make-completion-item
+                                       :label "FOCUS-REPLACEMENT-SECOND")))
+                                   :automatic t
+                                   :observer-function
+                                   (lambda (observed event item)
+                                     (push
+                                      (list :replacement
+                                            event
+                                            (and item
+                                                 (lem/completion-mode:completion-item-label
+                                                  item))
+                                            (eq observed
+                                                lem/completion-mode::*completion-context*))
+                                      events))))))
+                         (lem/completion-mode:make-completion-item
+                          :label "OLD-REPLACE-SECOND")))
+                      :automatic t
+                      :observer-function
+                      (lambda (observed event item)
+                        (when (eq event :present)
+                          (setf old-context observed))
+                        (push
+                         (list :old
+                               event
+                               (and item
+                                    (lem/completion-mode:completion-item-label
+                                     item))
+                               (eq observed
+                                   lem/completion-mode::*completion-context*))
+                         events)))
+                     (check
+                      (and (= old-focus-count 1)
+                           (= replacement-focus-count 1)
+                           old-context
+                           replacement-context
+                           (eq replacement-context
+                               lem/completion-mode::*completion-context*)
+                           (lem/completion-mode::context-popup-menu
+                            replacement-context)
+                           (null
+                            (lem/completion-mode::context-popup-menu
+                             old-context))
+                           (null
+                            (lem/completion-mode::context-range-start
+                             old-context))
+                           (null
+                            (lem/completion-mode::context-range-end
+                             old-context))
+                           (equal
+                            (reverse events)
+                            '((:old :present "OLD-REPLACE" t)
+                              (:old :end nil nil)
+                              (:replacement :present
+                               "FOCUS-REPLACEMENT" t)
+                              (:replacement :focus
+                               "FOCUS-REPLACEMENT" t))))
+                      "focus-action-replacement-survives-without-old-focus"))
+                (cleanup-completion)))
+
+            (let ((events '())
+                  (old-context nil)
+                  (replacement-context nil))
+              (unwind-protect
+                   (progn
+                     (setf old-context
+                           (lem/completion-mode:run-completion
+                            (lambda (point)
+                              (declare (ignore point))
+                              (list
+                               (lem/completion-mode:make-completion-item
+                                :label "END-OBSERVER-OLD")
+                               (lem/completion-mode:make-completion-item
+                                :label "END-OBSERVER-OLD-SECOND")))
+                            :automatic t
+                            :observer-function
+                            (lambda (observed event item)
+                              (push
+                               (list :old
+                                     event
+                                     (and item
+                                          (lem/completion-mode:completion-item-label
+                                           item))
+                                     (eq observed
+                                         lem/completion-mode::*completion-context*))
+                               events)
+                              (when (eq event :end)
+                                (setf replacement-context
+                                      (lem/completion-mode:run-completion
+                                       (lambda (replacement-point)
+                                         (declare (ignore replacement-point))
+                                         (list
+                                          (lem/completion-mode:make-completion-item
+                                           :label "END-OBSERVER-NEW")
+                                          (lem/completion-mode:make-completion-item
+                                           :label
+                                           "END-OBSERVER-NEW-SECOND")))
+                                       :automatic t
+                                       :observer-function
+                                       (lambda (replacement event item)
+                                         (push
+                                          (list
+                                           :replacement
+                                           event
+                                           (and item
+                                                (lem/completion-mode:completion-item-label
+                                                 item))
+                                           (eq replacement
+                                               lem/completion-mode::*completion-context*))
+                                          events))))))))
+                     (lem/completion-mode:completion-end)
+                     (check
+                      (and replacement-context
+                           (eq replacement-context
+                               lem/completion-mode::*completion-context*)
+                           (eq (lem/completion-mode::context-buffer
+                                replacement-context)
+                               (current-buffer))
+                           (lem/completion-mode::context-popup-menu
+                            replacement-context)
+                           (null
+                            (lem/completion-mode::context-popup-menu
+                             old-context))
+                           (null
+                            (lem/completion-mode::context-range-start
+                             old-context))
+                           (null
+                            (lem/completion-mode::context-range-end
+                             old-context))
+                           (equal
+                            (reverse events)
+                            '((:old :present "END-OBSERVER-OLD" t)
+                              (:old :focus "END-OBSERVER-OLD" t)
+                              (:old :end nil nil)
+                              (:replacement :present
+                               "END-OBSERVER-NEW" t)
+                              (:replacement :focus
+                               "END-OBSERVER-NEW" t))))
+                      "end-observer-same-buffer-replacement-survives-cleanup"))
+                (cleanup-completion)))
+
+            (let ((replacement-context nil)
+                  (returned-context nil)
+                  (contender-provider-count 0))
+              (unwind-protect
+                   (progn
+                     (lem/completion-mode:run-completion
+                      (lambda (point)
+                        (declare (ignore point))
+                        (list
+                         (lem/completion-mode:make-completion-item
+                          :label "OUTER-OLD")
+                         (lem/completion-mode:make-completion-item
+                          :label "OUTER-OLD-SECOND")))
+                      :automatic t
+                      :observer-function
+                      (lambda (observed event item)
+                        (declare (ignore observed item))
+                        (when (eq event :end)
+                          (setf replacement-context
+                                (lem/completion-mode:run-completion
+                                 (lambda (replacement-point)
+                                   (declare (ignore replacement-point))
+                                   (list
+                                    (lem/completion-mode:make-completion-item
+                                     :label "OUTER-REPLACEMENT")
+                                    (lem/completion-mode:make-completion-item
+                                     :label "OUTER-REPLACEMENT-SECOND")))
+                                 :automatic t
+                                 :observer-function nil)))))
+                     (setf returned-context
+                           (lem/completion-mode:run-completion
+                            (lambda (point)
+                              (declare (ignore point))
+                              (incf contender-provider-count)
+                              (list
+                               (lem/completion-mode:make-completion-item
+                                :label "OUTER-CONTENDER")
+                               (lem/completion-mode:make-completion-item
+                                :label "OUTER-CONTENDER-SECOND")))
+                            :automatic t))
+                     (check
+                      (and replacement-context
+                           (zerop contender-provider-count)
+                           (eq returned-context replacement-context)
+                           (eq replacement-context
+                               lem/completion-mode::*completion-context*)
+                           (lem/completion-mode::context-popup-menu
+                            replacement-context))
+                      "outer-run-preserves-end-observer-replacement"))
+                (cleanup-completion)))
+
+            (let ((old-hover nil)
+                  (replacement-context nil)
+                  (replacement-focus-count 0)
+                  (callback-safe-p nil))
+              (unwind-protect
+                   (progn
+                     (let* ((old-context
+                              (lem/completion-mode:run-completion
+                               (lambda (point)
+                                 (declare (ignore point))
+                                 (list
+                                  (lem/completion-mode:make-completion-item
+                                   :label "STALE-HOVER-OLD")
+                                  (lem/completion-mode:make-completion-item
+                                   :label "STALE-HOVER-OLD-SECOND")))
+                               :automatic t
+                               :observer-function nil))
+                            (popup
+                              (lem/completion-mode::context-popup-menu
+                               old-context)))
+                       (setf old-hover
+                             (text-property-at
+                              (buffer-start-point
+                               (lem/popup-menu::popup-menu-buffer popup))
+                              :hover-callback)))
+                     (lem/completion-mode:completion-end)
+                     (setf replacement-context
+                           (lem/completion-mode:run-completion
+                            (lambda (point)
+                              (declare (ignore point))
+                              (list
+                               (lem/completion-mode:make-completion-item
+                                :label "STALE-HOVER-NEW"
+                                :focus-action
+                                (lambda (context)
+                                  (declare (ignore context))
+                                  (incf replacement-focus-count)))
+                               (lem/completion-mode:make-completion-item
+                                :label "STALE-HOVER-NEW-SECOND")))
+                            :automatic t
+                            :observer-function nil))
+                     (setf callback-safe-p
+                           (handler-case
+                               (progn (funcall old-hover nil nil) t)
+                             (error () nil)))
+                     (check
+                      (and old-hover
+                           callback-safe-p
+                           (= replacement-focus-count 1)
+                           (eq replacement-context
+                               lem/completion-mode::*completion-context*)
+                           (string=
+                            "STALE-HOVER-NEW"
+                            (lem/completion-mode:completion-item-label
+                             (lem/popup-menu:get-focus-item
+                              (lem/completion-mode::context-popup-menu
+                               replacement-context)))))
+                      "stale-hover-cannot-mutate-replacement-context"))
+                (cleanup-completion)))
+
+            (let ((context nil)
+                  (popup nil)
+                  (old-hover nil)
+                  (provider-count 0)
+                  (focus-count 0)
+                  (callback-safe-p nil))
+              (unwind-protect
+                   (progn
+                     (setf context
+                           (lem/completion-mode:run-completion
+                            (lambda (point)
+                              (declare (ignore point))
+                              (incf provider-count)
+                              (let ((prefix
+                                      (format nil "HOVER-GENERATION-~d"
+                                              provider-count)))
+                                (list
+                                 (lem/completion-mode:make-completion-item
+                                  :label (format nil "~a-FIRST" prefix)
+                                  :focus-action
+                                  (lambda (observed)
+                                    (declare (ignore observed))
+                                    (incf focus-count)))
+                                 (lem/completion-mode:make-completion-item
+                                  :label (format nil "~a-SECOND" prefix)
+                                  :focus-action
+                                  (lambda (observed)
+                                    (declare (ignore observed))
+                                    (incf focus-count))))))
+                            :automatic t
+                            :observer-function nil)
+                           popup
+                           (lem/completion-mode::context-popup-menu context)
+                           old-hover
+                           (text-property-at
+                            (buffer-start-point
+                             (lem/popup-menu::popup-menu-buffer popup))
+                            :hover-callback))
+                     (lem/completion-mode:completion-refresh)
+                     (with-point
+                         ((destination
+                            (buffer-start-point
+                             (lem/popup-menu::popup-menu-buffer popup))))
+                       (line-offset destination 1)
+                       (setf callback-safe-p
+                             (handler-case
+                                 (progn
+                                   (funcall
+                                    old-hover
+                                    (lem/popup-menu::popup-menu-window popup)
+                                    destination)
+                                   t)
+                               (error () nil))))
+                     (check
+                      (and old-hover
+                           callback-safe-p
+                           (= provider-count 2)
+                           (= focus-count 2)
+                           (eq popup
+                               (lem/completion-mode::context-popup-menu
+                                context))
+                           (string=
+                            "HOVER-GENERATION-2-FIRST"
+                            (lem/completion-mode:completion-item-label
+                             (lem/popup-menu:get-focus-item popup))))
+                      "stale-hover-generation-cannot-move-current-popup"))
+                (cleanup-completion)))
+
+            (let ((events '())
+                  (context nil)
+                  (focus-count 0)
+                  (accept-count 0))
+              (unwind-protect
+                   (progn
+                     (completion-lifecycle-clear-buffer)
+                     (setf context
+                           (lem/completion-mode:run-completion
+                            (lambda (point)
+                              (declare (ignore point))
+                              (list
+                               (lem/completion-mode:make-completion-item
+                                :label "HIDDEN-FIRST"
+                                :insert-text "must-not-insert"
+                                :focus-action
+                                (lambda (observed)
+                                  (declare (ignore observed))
+                                  (incf focus-count))
+                                :accept-action
+                                (lambda () (incf accept-count)))
+                               (lem/completion-mode:make-completion-item
+                                :label "OTHER-HIDDEN")))
+                            :automatic t
+                            :observer-function
+                            (lambda (observed event item)
+                              (push
+                               (list event
+                                     (and item
+                                          (lem/completion-mode:completion-item-label
+                                           item))
+                                     (eq observed
+                                         lem/completion-mode::*completion-context*))
+                               events)
+                              (when (eq event :present)
+                                (lem/popup-menu:popup-menu-clear-focus
+                                 (lem/completion-mode::context-popup-menu
+                                  observed))))))
+                     (let ((popup
+                             (lem/completion-mode::context-popup-menu
+                              context)))
+                       (check
+                        (and popup
+                             (not
+                              (lem/popup-menu:popup-menu-focus-active-p
+                               popup))
+                             (null (lem/popup-menu:get-focus-item popup))
+                             (zerop focus-count)
+                             (equal
+                              (reverse events)
+                              '((:present "HIDDEN-FIRST" t))))
+                        "inactive-popup-does-not-expose-hidden-item")
+                       (lem:popup-menu-select popup)
+                       (check
+                        (and (zerop accept-count)
+                             (buffer-is "")
+                             (eq context
+                                 lem/completion-mode::*completion-context*))
+                        "inactive-popup-cannot-select-hidden-item")))
+                (cleanup-completion)
+                (completion-lifecycle-clear-buffer)))
 
             (let ((item (lem/completion-mode:make-completion-item
                          :label "DISPLAY"

@@ -66,10 +66,14 @@ wait_report_count() {
 
 run_mx() {
   local command=$1
-  lem_keys "$session" Escape
+  # Corfu Escape is deliberately staged (selection, input, then popup), so a
+  # fixed number of Escapes cannot guarantee that Vi has left Insert state.
+  # C-g closes completion in one stage; the following Escape is then Vi's.
+  lem_keys "$session" C-g
   sleep 0.15
   lem_keys "$session" Escape
   sleep 0.15
+  lem_wait_for "$session" 'NORMAL' 5 >/dev/null || return 1
   lem_keys "$session" M-x
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
   tmux_cmd send-keys -t "$session" -l "$command"

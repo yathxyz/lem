@@ -320,29 +320,39 @@ all components must match.  Uppercase input makes matching case-sensitive."
 
 (define-command lem-yath-completion-return () ()
   "Accept the focused prompt candidate and submit it with one Return."
-  (if (completion-prompt-active-p)
-      (alexandria:when-let* ((prompt
-                              (lem/prompt-window:current-prompt-window))
-                             (context (completion-prompt-context))
-                             (popup
-                              (lem/completion-mode::context-popup-menu
-                               context)))
-        (lem:popup-menu-select popup)
-        ;; Acceptance normally closes CONTEXT.  Do not submit stale input if a
-        ;; callback refused the selection or deliberately opened a replacement.
-        (when (and (eq prompt
-                       (lem/prompt-window:current-prompt-window))
-                   (null lem/completion-mode::*completion-context*))
-          (lem-yath-prompt-execute)))
-      (lem/completion-mode::completion-select)))
+  (cond
+    ((completion-prompt-active-p)
+     (alexandria:when-let* ((prompt
+                             (lem/prompt-window:current-prompt-window))
+                            (context (completion-prompt-context))
+                            (popup
+                             (lem/completion-mode::context-popup-menu
+                              context)))
+       (lem:popup-menu-select popup)
+       ;; Acceptance normally closes CONTEXT.  Do not submit stale input if a
+       ;; callback refused the selection or deliberately opened a replacement.
+       (when (and (eq prompt
+                      (lem/prompt-window:current-prompt-window))
+                  (null lem/completion-mode::*completion-context*))
+         (lem-yath-prompt-execute))))
+    ((and (fboundp 'auto-completion-session-owned-p)
+          (funcall 'auto-completion-session-owned-p))
+     (funcall 'auto-completion-return))
+    (t
+     (lem/completion-mode::completion-select))))
 
 (define-command lem-yath-completion-tab () ()
   "Insert the focused prompt candidate without closing the prompt."
-  (if (completion-prompt-active-p)
-      (alexandria:when-let ((item (completion-focused-item)))
-        (lem/completion-mode::completion-insert (current-point) item)
-        (lem/completion-mode:completion-refresh))
-      (lem/completion-mode::completion-narrowing-down-or-next-line)))
+  (cond
+    ((completion-prompt-active-p)
+     (alexandria:when-let ((item (completion-focused-item)))
+       (lem/completion-mode::completion-insert (current-point) item)
+       (lem/completion-mode:completion-refresh)))
+    ((and (fboundp 'auto-completion-session-owned-p)
+          (funcall 'auto-completion-session-owned-p))
+     (funcall 'auto-completion-tab))
+    (t
+     (lem/completion-mode::completion-narrowing-down-or-next-line))))
 
 (defun completion-prompt-history (command)
   "Run prompt history COMMAND and reopen automatic completion."

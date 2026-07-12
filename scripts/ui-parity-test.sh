@@ -57,13 +57,19 @@ wait_report() {
 }
 
 run_mx() {
-  local command=$1
+  local command=$1 first index
   lem_keys "$session" Escape
   sleep 0.3
   lem_keys "$session" M-x
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
-  tmux_cmd send-keys -t "$session" -l "$command"
-  sleep 0.4
+  first=${command:0:1}
+  tmux_cmd send-keys -t "$session" -l "$first"
+  lem_wait_for "$session" "Command: ${first}" 5 >/dev/null || return 1
+  for ((index = 1; index < ${#command}; index++)); do
+    tmux_cmd send-keys -t "$session" -l "${command:index:1}"
+    sleep 0.05
+  done
+  sleep 0.2
   lem_keys "$session" Enter
   sleep 0.4
 }

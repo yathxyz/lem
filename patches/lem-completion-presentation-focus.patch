@@ -1,0 +1,413 @@
+diff --git a/src/ext/popup-menu.lisp b/src/ext/popup-menu.lisp
+--- a/src/ext/popup-menu.lisp
++++ b/src/ext/popup-menu.lisp
+@@ -2,7 +2,10 @@
+   (:use :cl :lem)
+   (:export :write-header
+            :get-focus-item
+-           :apply-print-spec)
++           :apply-print-spec
++           :popup-menu-focus-active-p
++           :popup-menu-clear-focus
++           :popup-menu-activate-focus)
+   #+sbcl
+   (:lock t))
+ (in-package :lem/popup-menu)
+@@ -22,7 +25,10 @@
+     :accessor popup-menu-action-callback)
+    (focus-attribute
+     :initarg :focus-attribute
+-    :accessor popup-menu-focus-attribute)))
++    :accessor popup-menu-focus-attribute)
++   (focus-active
++    :initform t
++    :accessor popup-menu-focus-active-p)))
+ 
+ (define-attribute popup-menu-attribute
+   (t :foreground "white" :background "RoyalBlue"))
+@@ -41,10 +47,24 @@
+   (alexandria:when-let ((focus-overlay (popup-menu-focus-overlay popup-menu)))
+     (delete-overlay focus-overlay))
+   (clear-overlays (popup-menu-buffer popup-menu))
+-  (unless (header-point-p point)
++  (setf (popup-menu-focus-overlay popup-menu) nil)
++  (when (and (popup-menu-focus-active-p popup-menu)
++             (not (header-point-p point)))
+     (setf (popup-menu-focus-overlay popup-menu)
+           (make-focus-overlay point (popup-menu-focus-attribute popup-menu)))))
+ 
++(defun popup-menu-clear-focus (popup-menu)
++  "Make POPUP-MENU's prompt row authoritative, not merely unhighlighted."
++  (setf (slot-value popup-menu 'focus-active) nil)
++  (update-focus-overlay popup-menu (focus-point popup-menu))
++  nil)
++
++(defun popup-menu-activate-focus (popup-menu)
++  "Activate POPUP-MENU's current physical row."
++  (setf (slot-value popup-menu 'focus-active) t)
++  (update-focus-overlay popup-menu (focus-point popup-menu))
++  t)
++
+ (defgeneric write-header (print-spec point)
+   (:method (print-spec point)))
+ 
+@@ -67,7 +87,8 @@
+     (buffer-start point)))
+ 
+ (defun get-focus-item (popup-menu)
+-  (alexandria:when-let (p (focus-point popup-menu))
++  (alexandria:when-let (p (and (popup-menu-focus-active-p popup-menu)
++                               (focus-point popup-menu)))
+     (text-property-at (line-start p) :item)))
+ 
+ (defun make-menu-buffer ()
+@@ -141,6 +162,8 @@
+ 
+ (defmethod lem-if:popup-menu-update (implementation popup-menu items &key print-spec (max-display-items 20) keep-focus)
+   (when popup-menu
++    (unless keep-focus
++      (setf (slot-value popup-menu 'focus-active) t))
+     (let ((last-line (line-number-at-point (buffer-point (popup-menu-buffer popup-menu)))))
+       (multiple-value-bind (menu-width focus-overlay height)
+           (setup-menu-buffer (popup-menu-buffer popup-menu)
+@@ -175,6 +198,7 @@
+ 
+ (defun move-focus (popup-menu function)
+   (alexandria:when-let (point (focus-point popup-menu))
++    (setf (slot-value popup-menu 'focus-active) t)
+     (funcall function point)
+     (line-start point)
+     (window-see (popup-menu-window popup-menu))
+@@ -184,28 +208,34 @@
+     (update-focus-overlay popup-menu point)))
+ 
+ (defmethod lem-if:popup-menu-down (implementation popup-menu)
+-  (move-focus
+-   popup-menu
+-   (lambda (point)
+-     (unless (line-offset point 1)
+-       (buffer-start point)))))
++  (if (popup-menu-focus-active-p popup-menu)
++      (move-focus
++       popup-menu
++       (lambda (point)
++         (unless (line-offset point 1)
++           (buffer-start point))))
++      (popup-menu-activate-focus popup-menu)))
+ 
+ (defmethod lem-if:popup-menu-up (implementation popup-menu)
+-  (move-focus
+-   popup-menu
+-   (lambda (point)
+-     (unless (line-offset point -1)
+-       (buffer-end point))
+-     (when (header-point-p point)
+-       (buffer-end point)))))
++  (if (popup-menu-focus-active-p popup-menu)
++      (move-focus
++       popup-menu
++       (lambda (point)
++         (unless (line-offset point -1)
++           (buffer-end point))
++         (when (header-point-p point)
++           (buffer-end point))))
++      (popup-menu-activate-focus popup-menu)))
+ 
+ (defmethod lem-if:popup-menu-first (implementation popup-menu)
++  (setf (slot-value popup-menu 'focus-active) t)
+   (move-focus
+    popup-menu
+    (lambda (point)
+      (buffer-start point))))
+ 
+ (defmethod lem-if:popup-menu-last (implementation popup-menu)
++  (setf (slot-value popup-menu 'focus-active) t)
+   (move-focus
+    popup-menu
+    (lambda (point)
+diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
+--- a/src/ext/completion-mode.lisp
++++ b/src/ext/completion-mode.lisp
+@@ -17,6 +17,7 @@
+            :run-completion
+            :completion-end
+            :completion-mode
++           :completion-clear-focus
+            :completion-refresh)
+   #+sbcl
+   (:lock t))
+@@ -93,6 +94,15 @@
+     :initarg :observer-function
+     :initform nil
+     :reader context-observer-function)
++   (focus-message-window
++    :initform nil
++    :accessor context-focus-message-window)
++   (focus-message-frame
++    :initform nil
++    :accessor context-focus-message-frame)
++   (focus-serial
++    :initform 0
++    :accessor context-focus-serial)
+    (local-filtering
+     :initform nil
+     :accessor context-local-filtering-p)
+@@ -299,15 +309,40 @@
+                        :click-callback (lambda (window dest-point)
+                                          (declare (ignore window dest-point))
+                                          (completion-select)))
+-    (let ((context *completion-context*))
++    (let ((context *completion-context*)
++          (generation
++            (context-presented-generation *completion-context*)))
+       (put-text-property start
+                          point
+-                         :hover-callback (lambda (window dest-point)
+-                                           (declare (ignore window))
+-                                           (lem/popup-menu::move-focus
+-                                            (context-popup-menu context)
+-                                            (lambda (point)
+-                                              (move-point point dest-point))))))))
++                         :hover-callback
++                         (lambda (window dest-point)
++                           (when (eq context *completion-context*)
++                             (let ((popup (context-popup-menu context)))
++                               (when (and
++                                      popup
++                                      (eq window
++                                          (lem/popup-menu::popup-menu-window
++                                           popup))
++                                      (context-presentation-current-p
++                                       context generation popup))
++                                 (clear-context-focus-message context)
++                                 (when (and
++                                        (eq window
++                                            (lem/popup-menu::popup-menu-window
++                                             popup))
++                                        (context-presentation-current-p
++                                         context generation popup))
++                                   (lem/popup-menu::move-focus
++                                    popup
++                                    (lambda (point)
++                                      (move-point point dest-point)))
++                                   (when (and
++                                          (eq window
++                                              (lem/popup-menu::popup-menu-window
++                                               popup))
++                                          (context-presentation-current-p
++                                           context generation popup))
++                                     (call-focus-action)))))))))))
+ 
+ (defun stop-context-spinner (context)
+   (alexandria:when-let ((spinner (context-spinner context)))
+@@ -328,6 +363,39 @@
+         (context-range-end context) nil)
+   (clrhash (context-range-offsets context)))
+ 
++(defun clear-context-focus-message (context)
++  "Delete only the message window returned by CONTEXT's last focus action."
++  (let ((window (context-focus-message-window context))
++        (frame (context-focus-message-frame context)))
++    (setf (context-focus-message-window context) nil
++          (context-focus-message-frame context) nil)
++    (when (and window frame
++               (eq window (frame-message-window frame)))
++      (unless (deleted-window-p window)
++        (delete-window window))
++      (setf (frame-message-window frame) nil))))
++
++(defun completion-clear-focus ()
++  "Deactivate the current completion row and its owned documentation."
++  (alexandria:when-let* ((context *completion-context*)
++                         (popup (context-popup-menu context)))
++    (clear-context-focus-message context)
++    (lem/popup-menu:popup-menu-clear-focus popup)))
++
++(defun context-presentation-current-p (context generation popup)
++  (and (eq context *completion-context*)
++       (= generation (context-generation context))
++       (= generation (context-presented-generation context))
++       (eq popup (context-popup-menu context))))
++
++(defun notify-context-presentation (context item)
++  (alexandria:when-let ((observer (context-observer-function context)))
++    (funcall observer context :present item)))
++
++(defun notify-context-focus (context item)
++  (alexandria:when-let ((observer (context-observer-function context)))
++    (funcall observer context :focus item)))
++
+ (defun completion-end ()
+   (when *completion-context*
+     (let* ((context *completion-context*)
+@@ -335,32 +403,66 @@
+       (incf (context-generation context))
+       (setf (context-request-pending-p context) nil)
+       (setf *completion-context* nil)
++      (stop-context-spinner context)
++      (when (or (buffer-temporary-p buffer)
++                (member buffer (buffer-list)))
++        (with-current-buffer buffer
++          (completion-mode nil)))
+       (unwind-protect
+-           (alexandria:when-let ((observer
+-                                  (context-observer-function context)))
+-             (funcall observer context :end nil))
+-        (stop-context-spinner context)
+-        (when (or (buffer-temporary-p buffer)
+-                  (member buffer (buffer-list)))
+-          (with-current-buffer buffer
+-            (completion-mode nil)))
++           (progn
++             (handler-case (clear-context-focus-message context)
++               (error (condition)
++                 (message "Could not clear completion documentation: ~A"
++                          condition)))
++             (alexandria:when-let ((observer
++                                    (context-observer-function context)))
++               (funcall observer context :end nil)))
+         (close-context-popup context)
+         (delete-context-range context)))))
+ 
+-(defun notify-context-focus (context item)
+-  (alexandria:when-let ((observer (context-observer-function context)))
+-    (funcall observer context :focus item)))
+-
+ (defun call-focus-action ()
+-  (when (and *completion-context*
+-             (= (context-presented-generation *completion-context*)
+-                (context-generation *completion-context*)))
+-    (alexandria:when-let* ((context *completion-context*)
+-                           (menu (context-popup-menu context))
+-                           (item (lem/popup-menu:get-focus-item menu)))
+-      (alexandria:when-let ((fn (completion-item-focus-action item)))
+-        (funcall fn context))
+-      (notify-context-focus context item))))
++  (alexandria:when-let ((context *completion-context*))
++    (let ((generation (context-generation context))
++          (frame (current-frame)))
++      (alexandria:when-let* ((popup (context-popup-menu context))
++                             (item
++                               (and
++                                (context-presentation-current-p
++                                 context generation popup)
++                                (lem/popup-menu:get-focus-item popup))))
++        (let ((serial (incf (context-focus-serial context))))
++          (alexandria:when-let ((fn (completion-item-focus-action item)))
++            (let ((result (funcall fn context)))
++              (when (and result (eq result (frame-message-window frame)))
++                (if (and (= serial (context-focus-serial context))
++                         (context-presentation-current-p
++                          context generation popup))
++                    (setf (context-focus-message-window context) result
++                          (context-focus-message-frame context) frame)
++                    (progn
++                      (unless (deleted-window-p result)
++                        (delete-window result))
++                      (when (eq result (frame-message-window frame))
++                        (setf (frame-message-window frame) nil)))))))
++          (when (and (= serial (context-focus-serial context))
++                     (context-presentation-current-p
++                      context generation popup)
++                     (eq item (lem/popup-menu:get-focus-item popup)))
++            (notify-context-focus context item)))))))
++
++(defun notify-context-presentation-and-focus (context)
++  "Notify presentation, then focus only if its exact row is still current."
++  (when (eq context *completion-context*)
++    (let* ((generation (context-generation context))
++           (popup (context-popup-menu context))
++           (serial (context-focus-serial context))
++           (item (and popup (lem/popup-menu:get-focus-item popup))))
++      (notify-context-presentation context item)
++      (when (and popup
++                 (= serial (context-focus-serial context))
++                 (context-presentation-current-p context generation popup)
++                 (eq item (lem/popup-menu:get-focus-item popup)))
++        (call-focus-action)))))
+ 
+ (define-command completion-self-insert () ()
+   (let ((c (insertion-key-p (last-read-key-sequence))))
+@@ -402,8 +504,10 @@
+ (define-command completion-next-line () ()
+   "Move selection to next line in completion window"
+   (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
+-    (when (or (context-cycle-p *completion-context*)
++    (when (or (not (lem/popup-menu:popup-menu-focus-active-p popup))
++              (context-cycle-p *completion-context*)
+               (not (popup-focus-at-last-item-p popup)))
++      (clear-context-focus-message *completion-context*)
+       (popup-menu-down popup)
+       (call-focus-action))))
+ 
+@@ -412,16 +516,19 @@
+   (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
+     (when (or (context-cycle-p *completion-context*)
+               (not (popup-focus-at-first-item-p popup)))
++      (clear-context-focus-message *completion-context*)
+       (popup-menu-up popup)
+       (call-focus-action))))
+ 
+ (define-command completion-end-of-buffer () ()
+   (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
++    (clear-context-focus-message *completion-context*)
+     (popup-menu-last popup)
+     (call-focus-action)))
+ 
+ (define-command completion-beginning-of-buffer () ()
+   (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
++    (clear-context-focus-message *completion-context*)
+     (popup-menu-first popup)
+     (call-focus-action)))
+ 
+@@ -656,9 +763,11 @@
+                 (context-automatic-p context)
+                 (context-local-filtering-p context))
+       (narrowing-down context items))
+-    (when *completion-reverse*
+-      (completion-end-of-buffer))
+-    (call-focus-action)))
++    (when (and (eq context *completion-context*)
++               *completion-reverse*)
++      (popup-menu-last (context-popup-menu context)))
++    (when (eq context *completion-context*)
++      (notify-context-presentation-and-focus context))))
+ 
+ (defun present-context-items (context items generation)
+   (setf (context-last-items context) items)
+@@ -667,11 +776,14 @@
+      (if (context-local-filtering-p context)
+          (progn
+            (setf (context-presented-generation context) generation)
++           (clear-context-focus-message context)
+            (close-context-popup context)
+-           (completion-mode t))
++           (completion-mode t)
++           (notify-context-presentation context nil))
+          (completion-end)))
+     ((context-popup-menu context)
+      (setf (context-presented-generation context) generation)
++     (clear-context-focus-message context)
+      (apply
+       #'popup-menu-update
+       (context-popup-menu context)
+@@ -680,7 +792,7 @@
+       (alexandria:when-let
+           ((max-display-items (context-max-display-items context)))
+         `(:max-display-items ,max-display-items)))
+-     (call-focus-action))
++     (notify-context-presentation-and-focus context))
+     (t
+      (start-completion context items generation))))
+ 
+@@ -731,7 +843,9 @@
+   "Start a new completion using the completion-spec,
+ creates a new completion-context and sets *completion-context*"
+   (when *completion-context*
+-    (completion-end))
++    (completion-end)
++    (alexandria:when-let ((replacement *completion-context*))
++      (return-from run-completion replacement)))
+   (let* ((spec (ensure-completion-spec completion-spec))
+          (origin-buffer (current-buffer))
+          (options-function
