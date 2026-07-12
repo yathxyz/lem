@@ -61,6 +61,11 @@ of writing `.fasl` files into the source tree.
 - surround / exact configured evil-snipe 2.1.3 / comment operator (`gc`) plus Lispyville-compatible,
   delimiter-safe structural editing in Common Lisp, Clojure, Scheme/Racket,
   and Emacs Lisp buffers
+- configured Avy jumps on `SPC l/a/s` use balanced `a/s/d/f/g/h/j/k/l`
+  floating labels over visible line, character, and symbol targets. Normal state
+  searches every ordinary or side text window, Visual stays in the current
+  window, wrapped and hidden rows are respected, and the display never mutates
+  source buffers
 - Prescient-style literal/regexp/initialism filtering and persistent learned
   ranking in command, buffer, and custom prompts; file prompts retain Lem's
   path-aware matching and gain the same ranking
@@ -161,7 +166,7 @@ editing, formatting, Orderless completion, snippets, LSP snippets, real installe
 language-server handshakes, daily-workflows, Direnv environment switching,
 electric-editing, UI parity, project navigation, VCS, persistence, retained undo/Vundo,
 project-scoped LSP lifecycle, LLM key dispatch, cursor/state parity, evil-snipe
-parity, screen-line/Evil parity, notes, native Org, agenda, and parity-ledger checks. The ledger can
+and Avy parity, screen-line/Evil parity, notes, native Org, agenda, and parity-ledger checks. The ledger can
 also be validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
@@ -178,6 +183,7 @@ nix run .#actions-test
 nix run .#llm-keybinding-test
 nix run .#cursor-state-test
 nix run .#snipe-test
+nix run .#avy-test
 nix run .#screen-line-test
 nix run .#orderless-completion-test
 nix run .#snippet-test
@@ -214,7 +220,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
 `daily-workflows`, `direnv`, `llm-keybinding`, `orderless-completion`, `snippets`, `lsp-snippets`,
-`lsp-project`, `real-lsp`, `project-navigation`, `persistence`, `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `interactive`, `structural`, or
+`lsp-project`, `real-lsp`, `project-navigation`, `persistence`, `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`, `interactive`, `structural`, or
 `notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

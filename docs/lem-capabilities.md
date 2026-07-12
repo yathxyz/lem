@@ -256,6 +256,27 @@ and quote/paren text objects but no `ys`/`cs`/`ds` surround commands and no `s`/
 2-char sneak motion. There IS a **jumplist** (`jumplist.lisp`, `:jumps` ex command,
 `C-o`/`C-i`-style) and registers (`registers.lisp`).
 
+Lem-yath supplies the configured Evil/Avy navigation separately in
+`src/avy.lisp`. `SPC l/a/s` select visible line, character, and symbol-start
+targets through Avy's balanced `a/s/d/f/g/h/j/k/l` tree. Borderless floating
+windows place labels over target cells without changing source text, text
+properties, modified state, or undo/redo history. Normal state considers every
+visible ordinary or dedicated side text window unless a prefix narrows it to
+the current one; transient floating popups are excluded. Visual and operator
+states remain current-window-only. Character candidates are case-folded and
+closest-first, while symbol selection uses syntax-table starts and treats
+printable punctuation as a direct target.
+
+Line selection follows displayed rows, including wrapped rows, and excludes
+hidden lines. A raw digit during line selection opens the absolute-line
+fallback, zero and singleton candidate sets retain Avy's behavior, and Escape
+or `C-g` removes every label. A size change invalidates the cached screen
+coordinates and aborts on the next Avy input. `scripts/avy-test.sh` verifies
+these paths, jumplist integration, reload cleanup, and source non-mutation in
+the real ncurses frontend. Avy's default `x/X/t/m/n/y/Y/i/z` dispatch actions
+and `?` help are not implemented; exotic display/syntax geometry and exact
+Emacs minibuffer presentation also remain approximate.
+
 ### Options — `extensions/vi-mode/options.lisp`, README §Options
 Vim-like global options via `(setf (lem-vi-mode:option-value "name") val)` or `:set`.
 Shipped options: `autochdir`/`acd`, `number`/`nu`. (Small set — far fewer than Vim.)

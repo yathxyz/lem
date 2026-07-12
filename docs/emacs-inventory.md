@@ -91,7 +91,12 @@ Explicit initial states: `gptel-context-buffer-mode` -> `emacs`.
 | `SPC s` | `evil-avy-goto-symbol-1` | Avy: jump to symbol |
 | `SPC v` | `expreg-expand` | Expand region (expreg) |
 
-Note: avy commands are bound but `avy` is **not** an explicitly declared/configured package in nix or elisp — assume it ships with evil-collection / is a transitive dep, OR is a porting gap to flag.
+The audited Nix-built Emacs profile contains Avy `20241101.1357`. The user
+configuration has no Avy-specific variable or face overrides, so these commands
+use the package defaults: balanced labels over `a/s/d/f/g/h/j/k/l`, `at-full`
+placement, case-folded matching, immediate single-candidate jumps, every window
+in the current frame from normal state (a prefix narrows to the current window),
+and the current window from Visual or operator state with or without a prefix.
 
 #### Insert-state `C-c` prefix (keymap override)
 

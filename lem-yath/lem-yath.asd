@@ -16,6 +16,7 @@
                (:file "editing")
                (:file "cursor-state")
                (:file "vi")
+               (:file "avy")
                (:file "structural")
                (:file "electric-pair")
                (:file "completion")

@@ -69,7 +69,7 @@ run_mx() {
 }
 
 screen_has_leader() {
-  lem_capture "$session" | grep -q 'lem-yath-snipe-forward'
+  lem_capture "$session" | grep -q 'lem-yath-avy-goto-char'
 }
 
 screen_has_dynamic_prefix() {
@@ -478,7 +478,7 @@ sleep 0.3
 lem_keys "$session" v
 if lem_wait_for "$session" 'VISUAL' 3 >/dev/null; then
   lem_keys "$session" Space
-  if lem_wait_for "$session" 'lem-yath-snipe-forward' 2 >/dev/null; then
+  if lem_wait_for "$session" 'lem-yath-avy-goto-char' 2 >/dev/null; then
     pass visual-leader "the shared leader popup also appears in visual state"
   else
     fail visual-leader "visual-state leader did not show continuations"

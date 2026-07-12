@@ -111,10 +111,10 @@
   ("y v" 'lem-core/commands/window::toggle-line-wrap) ; SPC y v
   ("y w" 'lem-yath-fill-paragraph)                   ; SPC y w
 
-  ;; navigation (avy / isearch)
-  ("l" 'goto-line)                              ; SPC l
-  ("a" 'lem-yath-snipe-forward)                ; SPC a
-  ("s" 'lem/isearch:isearch-forward-symbol)     ; SPC s
+  ;; navigation (Avy)
+  ("l" 'lem-yath-avy-goto-line)                 ; SPC l
+  ("a" 'lem-yath-avy-goto-char)                 ; SPC a
+  ("s" 'lem-yath-avy-goto-symbol-1)             ; SPC s
   ("v" 'lem-yath-expand-region))                ; SPC v
 
 (defun leader-binding-command (keymap keys)

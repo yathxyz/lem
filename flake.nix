@@ -385,6 +385,7 @@
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
             cursor-state-test = mkTestApp "lem-yath-cursor-state-test" "cursor-state-test.sh";
             snipe-test = mkTestApp "lem-yath-snipe-test" "snipe-test.sh";
+            avy-test = mkTestApp "lem-yath-avy-test" "avy-test.sh";
             lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
             real-lsp-test = mkRealLspTestApp "lem-yath-real-lsp-test" "real-lsp-test.sh";
           };
@@ -420,6 +421,7 @@
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";
             cursor-state = mkCheck "cursor-state" "cursor-state-test.sh";
             snipe = mkCheck "snipe" "snipe-test.sh";
+            avy = mkCheck "avy" "avy-test.sh";
             lsp-project = mkCheckWithLem lemLspTest "lsp-project" "lsp-project-test.sh";
             real-lsp = mkRealLspCheck "real-lsp" "real-lsp-test.sh";
             parity-ledger =

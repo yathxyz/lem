@@ -28,10 +28,10 @@ esac
 
 case "$test_name" in
   all)
-    remote_command='nix flake check path:$PWD && nix run path:$PWD#interactive-test && nix run path:$PWD#structural-test'
+    remote_command='nix flake check path:$PWD --option max-jobs 2 && nix run path:$PWD#interactive-test --option max-jobs 2 && nix run path:$PWD#structural-test --option max-jobs 2'
     ;;
   check)
-    remote_command='nix flake check path:$PWD'
+    remote_command='nix flake check path:$PWD --option max-jobs 2'
     ;;
   compile)
     remote_command='nix run path:$PWD#compile-check'
@@ -114,8 +114,11 @@ case "$test_name" in
   snipe)
     remote_command='nix run path:$PWD#snipe-test'
     ;;
+  avy)
+    remote_command='nix run path:$PWD#avy-test --option max-jobs 2'
+    ;;
   *)
-    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|project-navigation|prompt-completion|daily-workflows|direnv|electric-editing|ui-parity|cursor-state|snipe|interactive|structural|notes|org|agenda|editing]" >&2
+    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|project-navigation|prompt-completion|daily-workflows|direnv|electric-editing|ui-parity|cursor-state|snipe|avy|interactive|structural|notes|org|agenda|editing]" >&2
     exit 2
     ;;
 esac
