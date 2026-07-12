@@ -163,10 +163,10 @@ else
 fi
 
 if run_mx lem-yath-test-ui-production-gutters &&
-   wait_report '^STATE label=production-gutters file=code\.lisp programming=yes line-mode=yes fixture-mode=no git-mode=yes line-numbers=yes relative=2 number-width=3 gutter=2 gutter-width=4 '; then
-  pass production-gutters "real Git and relative-number columns compose"
+   wait_report '^STATE label=production-gutters file=code\.lisp programming=yes line-mode=yes fixture-mode=no git-mode=yes line-numbers=yes relative=2 number-width=3 gutter=2 gutter-width=3 '; then
+  pass production-gutters "an unchanged code buffer renders only its relative-number column"
 else
-  fail production-gutters "production Git gutter was absent or swallowed"
+  fail production-gutters "an empty Git gutter added width or swallowed relative numbers"
 fi
 
 if run_mx lem-yath-test-ui-reordered-code-state &&
@@ -177,10 +177,10 @@ else
 fi
 
 if run_mx lem-yath-test-ui-prose-state &&
-   wait_report '^STATE label=prose file=notes\.md programming=no line-mode=yes fixture-mode=yes git-mode=yes line-numbers=no relative=none number-width=0 gutter=fixture-gutter gutter-width=14 '; then
-  pass prose-line-numbers "Markdown omits numbers without swallowing another gutter"
+   wait_report '^STATE label=prose file=notes\.md programming=no line-mode=yes fixture-mode=yes git-mode=no line-numbers=no relative=none number-width=0 gutter=fixture-gutter gutter-width=14 '; then
+  pass prose-line-numbers "Markdown omits code-only gutters without swallowing another gutter"
 else
-  fail prose-line-numbers "prose numbering or composite-gutter isolation failed"
+  fail prose-line-numbers "prose gutter scope or composite-gutter isolation failed"
 fi
 
 if run_mx lem-yath-test-ui-unsaved-code-state &&

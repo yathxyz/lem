@@ -735,15 +735,21 @@ has no discard-transaction API.
 walks up to the project root. Saved projects persisted to `(lem-home)/history/projects`.
 
 The configured editor replaces the high-frequency upstream commands in
-`lem-yath/src/project.lisp`. Git roots (including initialized submodules) are
+`lem-yath/src/project.lisp`. Git roots (including initialized submodules and
+linked worktrees whose `.git` marker is a file) are
 canonicalized and automatically recorded in the same persistent history.
 `SPC p f` uses NUL-safe `git ls-files` data for tracked and untracked files;
 `SPC p g` converts Emacs regexp syntax and runs bounded ripgrep batches over
 that exact file set on a request-owned, cancellable worker thread. Canonical
 containment and visited-root tracking bound malformed or cyclic submodules.
-`SPC p p` also offers an arbitrary
-directory and the default find-file/find-regexp/find-directory/VCS/shell/other
-dispatch. `SPC SPC` uses each buffer's directory, so compilation, terminal,
+`SPC p p` also offers an arbitrary directory and the audited `f/g/d/v/e/o`
+project dispatch. `f`, `g`, and `d` find a file, regexp, or directory; `v`
+opens Git status through Legit at the selected root even in a colocated jj
+workspace. `e` creates a Lem terminal at that root and `o` invokes Lem's
+M-x-style command prompt with that root as the buffer directory. Those last two
+preserve the useful dispatch and working-directory behavior but remain
+approximations of Emacs `project-eshell` and `project-any-command`. `SPC SPC`
+uses each buffer's directory, so compilation, terminal,
 and REPL-style buffers participate without sibling-prefix leakage. The
 two-process ncurses gate is `scripts/project-navigation-test.sh`; it also forces
 overlapping cancellation and hostile submodule fixtures. Consult's
@@ -994,10 +1000,35 @@ UI, no log graph filtering. Customize via `lem/porcelain:*git-base-arglist*`,
 `*commits-log-page-size*`, `*nb-latest-commits*`, `*branch-sort-by*`,
 `lem/legit:*vcs-existence-order*`.
 
+### Configured VCS dispatch and time travel — `lem-yath/src/git.lisp`, `src/apps/timemachine.lisp`
+
+The flake wrapper packages both Git and `jj`. `SPC g g` derives the root from
+the visited filename and prefers Jujutsu in a colocated workspace; otherwise it
+opens Legit at the Git root. `SPC g G` forces Git and `SPC g J` forces
+Jujutsu. `.git` files are accepted throughout the patched root detection, so
+Legit, project dispatch, the gutter, and time travel work from linked
+worktrees. The Jujutsu UI is deliberately a repository-specific, read-only
+`jj status` plus bounded `jj log` view, refreshed with `g r` and closed with
+`q`; it is not a Majutsu-style staging or history-mutation porcelain.
+
+`SPC g t` opens a read-only history buffer at the source point. `C-k` selects
+the older revision, `C-j` the newer revision, `g t g` an oldest-numbered
+revision, `g t t` a revision by commit subject, and `q` returns to the exact
+live source buffer and point while removing the history view. History follows
+renames, translates the anchor across changed line counts, and rejects a
+currently untracked path even when that path has older Git history; ordinary
+Evil `p`, `n`, and `t` remain unshadowed. This tested target matches the configured
+git-timemachine navigation, but the optional Evil-collection `g t y`/`g t Y`
+hash-copy and `g t b` blame commands are absent.
+
 ### Also: git-gutter — `extensions/git-gutter/` (`lem-git-gutter`), in the image. Shows
-add/modify/delete marks in the gutter. Lem-yath enables it through the post-init-safe
-initializer in `src/git.lisp`; the UI gate checks that the mode starts under the flake
-wrapper and composes its column with relative line numbers.
+add/modify/delete marks in the gutter. Lem-yath replaces the upstream global mode
+with a buffer-local lifecycle matching Emacs `prog-mode`: programming files update
+after edits and saves, while prose and utility buffers have neither marker state nor
+a reserved gutter column. The installed-wrapper `scripts/vcs-test.sh` gate uses a
+real linked worktree to render `+`, `~`, and `_`, checks clean-line composition with
+another left-gutter provider, mode transitions, a real idle debounce refresh and
+undo, cleanup, and reload safety.
 
 ---
 

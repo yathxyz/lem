@@ -184,7 +184,7 @@
                 "yes"
                 "no")
             (if (lem-core::mode-active-p
-                 buffer 'lem-git-gutter::git-gutter-mode)
+                 buffer 'lem-yath-git-gutter-mode)
                 "yes"
                 "no")
             (if line-number "yes" "no")
@@ -224,8 +224,11 @@
       (check (not lem/transient:*transient-always-show*)
              "unrelated-keymaps-not-perpetual")
       (check (lem-core::mode-active-p
-              (current-buffer) 'lem-git-gutter::git-gutter-mode)
-             "post-init-eval-git-gutter-started")
+              (current-buffer) 'lem-yath-git-gutter-mode)
+             "programming-buffer-git-gutter-started")
+      (check (not (member 'lem-git-gutter::git-gutter-mode
+                          (lem-core::active-global-minor-modes)))
+             "upstream-global-git-gutter-disabled")
       (check (not (variable-value
                    'lem/frame-multiplexer::frame-multiplexer :global))
              "frame-multiplexer-not-started")
@@ -315,8 +318,8 @@
   (ui-parity-record "code"))
 
 (define-command lem-yath-test-ui-reordered-code-state () ()
-  ;; Re-enabling pushes line-numbers ahead of git-gutter in the active global
-  ;; mode list.  Both columns must still compose in this reverse order.
+  ;; Re-enabling pushes line-numbers to the end of the active global mode list.
+  ;; Its global column must still compose with the buffer-local Git column.
   (lem/line-numbers:toggle-line-numbers)
   (lem/line-numbers:toggle-line-numbers)
   (ui-parity-record "code-reordered"))
@@ -343,6 +346,7 @@
                      (format nil
                              "(defun unsaved-one ())~%(defun unsaved-two ())~%(defun unsaved-three ())~%")))
     (buffer-unmark buffer)
+    (lem-yath-git-gutter-sync-buffer buffer)
     (switch-to-buffer buffer))
   (ui-parity-record "unsaved-code"))
 

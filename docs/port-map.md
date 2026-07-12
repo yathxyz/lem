@@ -23,7 +23,7 @@ Status legend:
 | vertico | ported/lem-builtin | prompt list opens immediately, shows up to 20 rows, and cycles; focused TUI coverage in `scripts/completion-test.sh` |
 | orderless | ported/partial | ordinary-buffer completion has escaped-space components, whole-query smart case, any-order literal/regexp filtering, and `~ = ^ ! ,` affix dispatch through `M-Space`; CL-PPCRE differs from Emacs regexp syntax, and `%` char-fold plus `&` annotation dispatch remain gaps (`src/orderless.lisp`) |
 | marginalia | partial | M-x keybindings, buffer paths, and provider-specific LSP/Lisp details exist; no general category annotation layer |
-| consult | ported/partial | `src/project.lisp` supplies persistent project MRU, tracked+untracked file selection, project-buffer membership by directory, bounded asynchronous regexp search, and Emacs-style switch dispatch on `SPC p f/g/p` and `SPC SPC`; prompt preview-on-move and Consult metadata remain gaps |
+| consult | ported/partial | `src/project.lisp` supplies persistent project MRU, tracked+untracked file selection, project-buffer membership by directory, bounded asynchronous regexp search, and Emacs-style switch dispatch on `SPC p f/g/p` and `SPC SPC`. The switch menu preserves `f/g/d/v/e/o`: `v` opens Git through Legit at the selected root, while `e` uses Lem's rooted terminal and `o` uses rooted M-x-style command execution, approximations of `project-eshell` and `project-any-command`. Prompt preview-on-move and Consult metadata remain gaps. |
 | consult-eglot | ported/partial | `SPC p s` sends `workspace/symbol` to the current project, then opens an annotated Prescient picker; incremental server queries and preview-on-move remain gaps |
 | corfu (TTY via Emacs 31) | ported/partial | Lem has an ncurses popup, correct display/filter/insert metadata, distinct final-insert and post-accept callbacks, tracked ranges, stale-result rejection, automatic identifier completion after the configured 3-character/0.2-second threshold, and local `M-Space` filtering with zero-match recovery; Corfu's wider command surface remains unported |
 | cape | ported/partial | automatic same-major-mode dabbrev and path-aware file-at-point fallbacks are composed and TUI-tested; raw dabbrev candidates feed Orderless, while Cape's broader provider library is not ported |
@@ -53,9 +53,9 @@ Status legend:
 | magit | lem-builtin | `lem/legit` (status/stage/commit/branch/push/pull/stash/rebase); `SPC g G` |
 | magit-todos | gap | no TODO section in legit |
 | forge | gap | no GitHub/GitLab integration |
-| git-gutter | lem-builtin | `lem-git-gutter`, enabled globally (`src/git.lisp`) |
-| git-timemachine | ported | `SPC g t` (`src/apps/timemachine.lisp`) |
-| majutsu (jj) | ported/partial | smart dispatch `SPC g g` + jj status/log view (`src/git.lisp`); no staging UI |
+| git-gutter | lem-builtin+ported | `src/git.lisp` wraps `lem-git-gutter` in a buffer-local programming-mode lifecycle. The installed-wrapper VCS gate proves real add/modify/delete markers in a linked worktree, exclusion from prose/utility buffers, composition with other gutters, and no reserved blank column for a clean line. |
+| git-timemachine | ported/partial | `SPC g t` opens rename-aware history at the translated source point; `C-k`/`C-j`, `g t g`, `g t t`, and `q` match the audited older/newer/numeric/fuzzy/return workflow under `scripts/vcs-test.sh`. The Evil-collection hash-copy and blame commands are not implemented. |
+| majutsu (jj) | ported/partial | packaged `jj` powers smart `SPC g g` dispatch and forced `SPC g J`, but only in a repository-specific, read-only status/log view (`src/git.lisp`); this is not a Majutsu porcelain and has no mutation UI. |
 | org (capture) | ported | `SPC o` → inbox/todo/readlist with CREATED property (`src/notes.lisp`) |
 | org-roam | ported/partial | find/insert/random over $WORKDIR/roam incl. .md (`src/notes.lisp`); no backlinks/db |
 | md-roam | partial | .md notes are discoverable, but YAML IDs/titles/tags and graph semantics are not indexed |

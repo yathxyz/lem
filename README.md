@@ -84,7 +84,9 @@ of writing `.fasl` files into the source tree.
 - project.el-style navigation: persistent automatic project MRU, Git-aware
   tracked/untracked file finding, cancellable bounded asynchronous regexp search, exact
   directory-based project buffers, and arbitrary-directory command dispatch on
-  `SPC p f/g/p` and `SPC SPC`
+  `SPC p f/g/p` and `SPC SPC`; the project switch menu preserves `f/g/d/v/e/o`,
+  with root-correct Git status and close terminal/M-x approximations for Emacs's
+  Eshell and arbitrary-command entries
 - safe global refresh of externally changed clean files, stale-save protection
   for dirty buffers, and private cross-process persistence for file positions,
   reviewed non-secret prompt histories, Vi-aware kills, and separate literal and
@@ -120,7 +122,10 @@ of writing `.fasl` files into the source tree.
 - installed LSP stack for Rust, Python, Markdown, Nix, Go, and Terraform:
   rust-analyzer, pyright, harper-ls, flake-aware nixd, gopls, and terraform-ls,
   plus the Rust toolchain required by rust-analyzer
-- legit (magit) + jj dispatch on `SPC g g`, git-gutter, git-timemachine
+- Legit (Magit approximation) plus packaged `jj` smart dispatch on `SPC g g`;
+  the Jujutsu side is a read-only status/log view, while programming buffers get
+  buffer-local Git markers and `SPC g t` supplies the audited git-timemachine
+  revision-navigation workflow
 - roam-lite notes, root-level roam dailies, journal, and i/t/r capture over
   `$WORKDIR`, plus public TODO capture over `$PUBLIC_ORG_DIR`
 - streaming OpenRouter LLM client + claude/codex/grok CLI backends
@@ -138,7 +143,7 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 completion, completion-lifecycle, automatic-completion, Embark-style actions,
 editing, formatting, Orderless completion, snippets, LSP snippets, real installed
 language-server handshakes, daily-workflows,
-electric-editing, UI parity, project navigation, persistence, retained undo/Vundo,
+electric-editing, UI parity, project navigation, VCS, persistence, retained undo/Vundo,
 project-scoped LSP lifecycle, LLM key dispatch, cursor/state parity, evil-snipe
 parity, screen-line/Evil parity, notes, and parity-ledger checks. The ledger can
 also be validated directly, and the
@@ -171,6 +176,7 @@ nix run .#formatting-test
 nix run .#daily-workflows-test
 nix run .#electric-editing-test
 nix run .#ui-parity-test
+nix run .#vcs-test
 nix run .#notes-test
 nix run .#interactive-test
 nix run .#structural-test

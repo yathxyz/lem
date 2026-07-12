@@ -315,12 +315,12 @@ fi
 
 if invoke_mx "$verify_session" \
      lem-yath-test-project-navigation-static-checks '^STATIC ' &&
-   grep -q '^STATIC normal=yes visual=yes pf=yes pg=yes pp=yes space=yes leader-tree=yes$' \
+   grep -q '^STATIC normal=yes visual=yes pf=yes pg=yes pp=yes space=yes leader-tree=yes emacs-dispatch=yes$' \
      "$LEM_YATH_PROJECT_NAVIGATION_REPORT" &&
    grep -q '^REGEXP escaped-alternation=yes raw-alternation=yes leading-close-class=yes escaped-close-class=yes negated-close-class=yes$' \
      "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
   pass project-leader-bindings \
-    'leader maps and Emacs-to-extended regexp conversion are exact'
+    'leader maps and project-dispatch keys match Emacs; regexp conversion is exact'
 else
   fail project-leader-bindings 'project leader bindings diverged' \
     "$verify_session"

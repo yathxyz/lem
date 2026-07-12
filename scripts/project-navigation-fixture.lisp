@@ -120,8 +120,12 @@
 (defun project-navigation-test-leader-binding-p (keymap keys command)
   (eq command (leader-binding-command keymap keys)))
 
+(defun project-navigation-test-key-bound-p (keymap keys)
+  (not (null (lem-core::keymap-find keymap
+                                    (lem-core::parse-keyspec keys)))))
+
 (define-command lem-yath-test-project-navigation-static-checks () ()
-  (let ((normal
+  (let* ((normal
           (and
            (project-navigation-test-leader-binding-p
             lem-vi-mode:*normal-keymap* "p f" 'lem-yath-project-find-file)
@@ -140,9 +144,22 @@
            (project-navigation-test-leader-binding-p
             lem-vi-mode:*visual-keymap* "p p" 'lem-yath-project-switch)
            (project-navigation-test-leader-binding-p
-            lem-vi-mode:*visual-keymap* "Space" 'lem-yath-project-buffers))))
+            lem-vi-mode:*visual-keymap* "Space" 'lem-yath-project-buffers)))
+         (project-dispatch (project-switch-keymap))
+         (emacs-dispatch
+           (and (every (lambda (key)
+                         (project-navigation-test-key-bound-p
+                          project-dispatch key))
+                       '("f" "g" "d" "v" "e" "o"))
+                (notany (lambda (key)
+                          (project-navigation-test-key-bound-p
+                           project-dispatch key))
+                        '("s" "x")))))
     (project-navigation-test-log
-     "STATIC normal=~a visual=~a pf=~a pg=~a pp=~a space=~a leader-tree=~a"
+     (concatenate
+      'string
+      "STATIC normal=~a visual=~a pf=~a pg=~a pp=~a space=~a "
+      "leader-tree=~a emacs-dispatch=~a")
      (project-navigation-test-yes-no normal)
      (project-navigation-test-yes-no visual)
      (project-navigation-test-yes-no
@@ -157,7 +174,8 @@
      (project-navigation-test-yes-no
       (project-navigation-test-leader-binding-p
        lem-vi-mode:*normal-keymap* "Space" 'lem-yath-project-buffers))
-     (project-navigation-test-yes-no (evil-leader-bindings-ok-p)))
+     (project-navigation-test-yes-no (evil-leader-bindings-ok-p))
+     (project-navigation-test-yes-no emacs-dispatch))
     (project-navigation-test-log
      (concatenate
       'string

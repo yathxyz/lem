@@ -38,6 +38,7 @@
               ./patches/lem-prompt-history-limit.patch
               ./patches/lem-undo-tree.patch
               ./patches/lem-vi-screen-line.patch
+              ./patches/lem-git-worktree.patch
             ];
           };
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (
@@ -126,14 +127,16 @@
             rustc
           ];
 
-          defaultRuntimeInputs = coreRuntimeInputs ++ lspRuntimeInputs ++ rustRuntimeInputs;
+          vcsRuntimeInputs = with pkgs; [ jujutsu ];
+
+          defaultRuntimeInputs =
+            coreRuntimeInputs ++ lspRuntimeInputs ++ rustRuntimeInputs ++ vcsRuntimeInputs;
 
           extendedRuntimeInputs =
             with pkgs;
             defaultRuntimeInputs
             ++ [
               isync
-              jujutsu
               notmuch
               postgresql
             ];
@@ -244,12 +247,12 @@
             export NIX_PATH=nixpkgs=${nixpkgs}
           '';
 
-          mkTestAppWithLem =
-            lemPackage: name: script:
+          mkTestAppWithLemAndInputs =
+            lemPackage: extraInputs: name: script:
             let
               runner = pkgs.writeShellApplication {
                 inherit name;
-                runtimeInputs = [ lemPackage ] ++ testInputs;
+                runtimeInputs = [ lemPackage ] ++ testInputs ++ extraInputs;
                 text = ''
                   export TERM=''${TERM:-xterm-256color}
                   export LEM_BIN=${lemPackage}/bin/lem
@@ -261,6 +264,8 @@
               };
             in
             mkApp "${runner}/bin/${name}" "Run ${script} with flake-pinned Lem";
+
+          mkTestAppWithLem = lemPackage: mkTestAppWithLemAndInputs lemPackage [ ];
 
           mkTestApp = mkTestAppWithLem lemNcurses;
 
@@ -283,11 +288,11 @@
             in
             mkApp "${runner}/bin/${name}" "Run ${script} against the installed Lem package";
 
-          mkCheckWithLem =
-            lemPackage: name: script:
+          mkCheckWithLemAndInputs =
+            lemPackage: extraInputs: name: script:
             pkgs.runCommand "lem-yath-${name}-check"
               {
-                nativeBuildInputs = [ lemPackage ] ++ testInputs;
+                nativeBuildInputs = [ lemPackage ] ++ testInputs ++ extraInputs;
               }
               ''
                 export TERM=xterm-256color
@@ -306,6 +311,8 @@
                 bash ./scripts/${script}
                 touch "$out"
               '';
+
+          mkCheckWithLem = lemPackage: mkCheckWithLemAndInputs lemPackage [ ];
 
           mkCheck = mkCheckWithLem lemNcurses;
 
@@ -366,6 +373,7 @@
             persistence-test = mkTestApp "lem-yath-persistence-test" "persistence-test.sh";
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
             ui-parity-test = mkTestAppWithLem lemYath "lem-yath-ui-parity-test" "ui-parity-test.sh";
+            vcs-test = mkTestAppWithLemAndInputs lemYath vcsRuntimeInputs "lem-yath-vcs-test" "vcs-test.sh";
             vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
@@ -396,6 +404,7 @@
             persistence = mkCheck "persistence" "persistence-test.sh";
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";
             ui-parity = mkCheckWithLem lemYath "ui-parity" "ui-parity-test.sh";
+            vcs = mkCheckWithLemAndInputs lemYath vcsRuntimeInputs "vcs" "vcs-test.sh";
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";

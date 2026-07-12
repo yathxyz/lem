@@ -5,9 +5,9 @@ Authoritative inventory for porting this Emacs config (config name: **lem-yath**
 Source root: `/home/yanni/proj/nix/computer/home/config/emacs/`
 Packages provided by Nix/Home-Manager (`package-enable-at-startup nil`); `use-package-always-ensure nil`.
 
-Completion behavior was refreshed against computer commit
-`883f9737f82359e2f634973e10dbab761e2b5138` and the running Emacs 31 daemon on
-2026-07-10. Other sections still require row-by-row refresh through
+Completion and VCS behavior were refreshed against computer commit
+`6bb888bba6d2547409b5c05c9740f0392fa96e30` and the running Emacs 31 daemon on
+2026-07-12. Other sections still require row-by-row refresh through
 `docs/parity-ledger.tsv` rather than being assumed current.
 
 Key environment:
@@ -186,6 +186,11 @@ configuration: its `embark.el` registers a `with-eval-after-load` form for
 Consult and then requires the installed integration library.  It is therefore
 effective after both packages have loaded, not merely an unused declaration.
 
+The audited Emacs 31 `project-switch-project` menu uses `f` find file, `g` find
+regexp, `d` directory, `v` `project-vc-dir`, `e` `project-eshell`, and `o`
+`project-any-command`. These are the interaction targets for Lem's project
+switch transient, independently of the leader bindings that enter it.
+
 Core completion settings (`init.el`): `completion-ignore-case t`,
 `completions-detailed t`, `tab-always-indent 'complete`. In effect there are two
 pipelines: Vertico + Marginalia + Prescient for minibuffers, and Corfu +
@@ -277,6 +282,12 @@ Helpers: `lem-yath/nixpkgs-build-outpath` (build a nixpkgs attr, return store pa
 - `lem-yath-magit-status` (`SPC g G`): force magit at git root.
 - `lem-yath-majutsu-status` (`SPC g J`): force majutsu at jj root.
 - Helper roots: `lem-yath-vcs--jj-root` (dominating `.jj`), `lem-yath-vcs--git-root` (dominating `.git`).
+
+Inside git-timemachine, the audited Evil collection keeps ordinary normal-state
+`p`/`n` behavior and binds `C-k` to the previous (older) revision, `C-j` to the
+next (newer) revision, `g t g` to numeric revision selection, `g t t` to fuzzy
+revision selection, `g t y`/`g t Y` to short/full hash copying, `g t b` to
+blame, and `q` to quit.
 
 `vc-handled-backends '(Git)` only. `magit`/`magit-todos`/`forge`/`git-gutter`/`git-timemachine` all loaded via `init-evil`.
 

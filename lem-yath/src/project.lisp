@@ -1049,28 +1049,26 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
 (defun call-in-project-buffer-directory (root function)
   "Call FUNCTION with the current Lem buffer directory temporarily at ROOT."
   (let* ((buffer (current-buffer))
-         (old-directory (buffer-directory buffer))
+         (old-directory (lem/buffer/internal::buffer-%directory buffer))
          (root (canonical-project-directory root)))
     (unwind-protect
          (progn
            (setf (buffer-directory buffer) root)
            (funcall function))
-      (when (member buffer (buffer-list) :test #'eq)
-        (if (uiop:directory-exists-p old-directory)
-            (setf (buffer-directory buffer) old-directory)
-            ;; Preserve Lem's prior buffer-local value even if the command
-            ;; removed that directory while it was running.
-            (setf (lem/buffer/internal::buffer-%directory buffer)
-                  old-directory))))))
+      (unless (deleted-buffer-p buffer)
+        ;; Preserve the exact prior local value, including NIL or a path that
+        ;; the invoked command removed while it was running.
+        (setf (lem/buffer/internal::buffer-%directory buffer)
+              old-directory)))))
 
 (defun project-open-root (root)
   "Open ROOT in Lem's directory editor."
   (find-file (remember-project-root root)))
 
 (defun project-open-vcs (root)
-  "Open the configured jj/Git status UI for ROOT."
+  "Open Git status for ROOT, the Lem counterpart to Emacs `project-vc-dir'."
   (remember-project-root root)
-  (call-in-project-buffer-directory root #'lem-yath-vcs-status))
+  (lem-yath-legit-status-at root))
 
 (defun project-open-shell (root)
   "Create a terminal rooted at ROOT."
@@ -1101,9 +1099,9 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
     (dolist (entry '(("f" "find file")
                      ("g" "find regexp")
                      ("d" "find directory")
-                     ("v" "VCS status")
-                     ("s" "shell")
-                     ("x" "other command")
+                     ("v" "Git VC directory")
+                     ("e" "shell")
+                     ("o" "other command")
                      ("q" "cancel")))
       (destructuring-bind (key description) entry
         (define-key keymap key 'nop-command)
@@ -1125,8 +1123,8 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
      t)
     ((string= key "d") (project-find-directory-at-root root) t)
     ((string= key "v") (project-open-vcs root) t)
-    ((string= key "s") (project-open-shell root) t)
-    ((string= key "x") (project-execute-command root) t)
+    ((string= key "e") (project-open-shell root) t)
+    ((string= key "o") (project-execute-command root) t)
     ((or (string= key "q") (string= key "Escape")) t)
     (t nil)))
 
