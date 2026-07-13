@@ -823,9 +823,14 @@ history.
   operations, long columns, and process cancellation remain absent.
 - Grep: `lem/grep:grep` and `lem/grep:project-grep` (`src/ext/grep.lisp`, bound
   `C-x p g`). Default command **`git grep -nHI`** (`grep.lisp:14-18`); change with
-  `(setf lem/grep:*grep-command* "rg")` or `lem/grep:change-grep-command`. **Results are
-  editable** (wgrep-like): editing the results buffer writes through to files
-  (`change-grep-buffer`, `grep.lisp:93-136`). Uses the split "peek-source" UI.
+  `(setf lem/grep:*grep-command* "rg")` or `lem/grep:change-grep-command`. Results are
+  line-editable: each edit writes through immediately to the source buffer, while
+  disk remains unchanged until that source buffer is saved. Lem-yath's
+  `patches/lem-grep-writeback.patch` preserves points by replacing only the changed
+  span, and `patches/lem-peek-source-timer.patch` owns and invalidates one preview
+  timer while keeping background previews from changing Vi state. The real ncurses
+  project-navigation gate verifies edit, preview, save, and Insert-to-Normal Escape
+  behavior. This is wgrep-like, but has no explicit staged finish/abort transaction.
 - ripgrep: not the default, but trivially `(setf lem/grep:*grep-command* "rg"
   lem/grep:*grep-args* "-nH")`.
 
@@ -1576,8 +1581,9 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
 - **isearch / occur**: `src/ext/isearch.lisp` (`lem/isearch`): `isearch-forward`/
   `-backward`/`-regexp`/`-symbol`, `query-replace`, `query-replace-regexp`,
   `query-replace-symbol`, isearch→multiple-cursors (`isearch-add-cursor-to-next-match`).
-  **No dedicated `occur` command**; the grep/peek-source UI (§4) covers "list matches",
-  and it is **editable like wgrep**.
+  **No dedicated `occur` command**; the grep/peek-source UI (§4) covers "list matches"
+  with immediate source-buffer write-through rather than wgrep's staged finish/abort
+  workflow.
 - **Multiple cursors**: core support. `src/cursors.lisp` + `src/commands/multiple-cursors.lisp`
   (`add-cursors-to-next-line`, bound `M-C`); isearch can add cursors at matches.
 - **Markdown preview**: yes, `preview` generic in markdown-mode (§8), plus literate
@@ -1677,7 +1683,8 @@ terraform, perl, vue, lisp) with hover/goto/refs/rename/code-action/format/diagn
 but **Rust, Nix, SQL, Dart have no active spec** and need a one-line
 `define-language-spec` in `init.lisp`. **legit** is a credible magit-lite: status, hunk
 staging, commit, branch, push/pull, log, **stash**, and **interactive rebase** (reword/
-edit excepted). LSP/grep results are even **wgrep-editable**. Common Lisp gets a full
+edit excepted). Grep result rows are editable with immediate source-buffer
+write-through. Common Lisp gets a full
 SLIME (micros): REPL, SLDB, inspector, macroexpand, autodoc. Extras shipped in-tree:
 libvterm **terminal**, **Copilot**, **Claude Code**, MCP server, transient (which-key-ish)
 menus, multiple-cursors, isearch/query-replace, 185 base16 themes, line-numbers,

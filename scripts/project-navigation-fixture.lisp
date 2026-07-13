@@ -1023,6 +1023,8 @@
         :count t
         :do (setf start (+ position (length needle)))))
 
+(defvar *project-navigation-test-grep-writeback-focus-pending* t)
+
 (define-command lem-yath-test-project-navigation-record-grep () ()
   (let* ((current (current-buffer))
          (buffer (if (alexandria:starts-with-subseq
@@ -1044,7 +1046,79 @@
      (project-navigation-test-yes-no ignored)
      (if text
          (project-navigation-test-count-substring "SHARED_GREP" text)
-         0))))
+         0))
+    (when *project-navigation-test-grep-writeback-focus-pending*
+      (setf *project-navigation-test-grep-writeback-focus-pending* nil)
+      (project-navigation-test-focus-grep-writeback))
+    (lem-yath-test-project-navigation-record-grep-writeback)))
+
+(defun project-navigation-test-grep-buffer ()
+  (let ((current (current-buffer)))
+    (if (alexandria:starts-with-subseq
+         "*peek-source*" (buffer-name current))
+        current
+        (get-buffer "*peek-source*"))))
+
+(defun project-navigation-test-focus-grep-writeback ()
+  (let ((buffer (project-navigation-test-grep-buffer)))
+    (unless buffer
+      (editor-error "No project grep result buffer"))
+    (unless (eq buffer (current-buffer))
+      (switch-to-buffer buffer))
+    (let ((point (current-point)))
+      (buffer-start point)
+      (let ((match (search-forward point "SHARED_GREP ALPHA")))
+        (unless match
+          (editor-error "No editable Alpha grep result")))
+      (character-offset point -4)
+      (window-see (current-window)))
+    (project-navigation-test-log
+     "GREP-WRITEBACK focus=yes column=~d readonly=~s previous-readonly=~s"
+     (point-charpos (current-point))
+     (text-property-at (current-point) :read-only)
+     (text-property-at (current-point) :read-only -1))))
+
+(define-command lem-yath-test-project-navigation-record-grep-writeback () ()
+  (let* ((path (project-navigation-test-path
+                *project-navigation-test-alpha* "src/tracked-target.txt"))
+         (source (find-file-buffer path))
+         (grep-buffer (project-navigation-test-grep-buffer))
+         (source-text
+           (points-to-string (buffer-start-point source)
+                             (buffer-end-point source)))
+         (grep-text
+           (and grep-buffer
+                (points-to-string (buffer-start-point grep-buffer)
+                                  (buffer-end-point grep-buffer))))
+         (disk-text (uiop:read-file-string path)))
+    (project-navigation-test-log
+     "GREP-WRITEBACK result=~a source=~a modified=~a disk=~a"
+     (project-navigation-test-yes-no
+      (and grep-text (search "SHARED_GREP AWRITEBACK_LPHA" grep-text)))
+     (project-navigation-test-yes-no
+      (search "SHARED_GREP AWRITEBACK_LPHA" source-text))
+     (project-navigation-test-yes-no (buffer-modified-p source))
+     (project-navigation-test-yes-no
+      (search "SHARED_GREP AWRITEBACK_LPHA" disk-text)))))
+
+(define-command lem-yath-test-project-navigation-record-grep-escape () ()
+  (let* ((state (lem-vi-mode/core:current-state))
+         (grep-buffer (project-navigation-test-grep-buffer))
+         (grep-text
+           (and grep-buffer
+                (points-to-string (buffer-start-point grep-buffer)
+                                  (buffer-end-point grep-buffer)))))
+    (project-navigation-test-log
+     "GREP-ESCAPE normal=~a result=~a"
+     (project-navigation-test-yes-no
+      (and state
+           (lem-vi-mode/core:state=
+            state
+            (lem-vi-mode/core:ensure-state
+             'lem-vi-mode/states:normal))))
+     (project-navigation-test-yes-no
+      (and grep-text
+           (search "SHARED_GREP AWRITEBACK_LPHA" grep-text))))))
 
 (define-command lem-yath-test-project-navigation-submit-gamma () ()
   (lem/prompt-window::replace-prompt-input
@@ -1081,6 +1155,8 @@
 
 (define-key lem/peek-source:*peek-source-keymap*
   "F8" 'lem-yath-test-project-navigation-record-grep)
+(define-key lem/peek-source:*peek-source-keymap*
+  "F12" 'lem-yath-test-project-navigation-record-grep-escape)
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F4" 'lem-yath-test-project-navigation-submit-gamma)
 

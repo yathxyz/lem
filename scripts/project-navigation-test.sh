@@ -534,6 +534,55 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
       fail spc-p-g-buffer 'the project grep result buffer diverged' \
         "$verify_session"
     fi
+
+    send_chord "$verify_session" i
+    tmux_cmd send-keys -t "$verify_session" -l 'WRITEBACK_'
+    sleep 0.4
+    before=$(report_count '^GREP-WRITEBACK result=')
+    lem_keys "$verify_session" F8
+    if wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" &&
+       grep -q '^GREP-WRITEBACK result=yes source=yes modified=yes disk=no$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-writeback \
+        'editing a grep result immediately changed the source buffer only'
+    else
+      fail spc-p-g-writeback \
+        'grep-result editing did not update the source buffer transactionally' \
+        "$verify_session"
+    fi
+
+    lem_keys "$verify_session" C-x o
+    sleep 0.3
+    lem_keys "$verify_session" C-x C-s
+    lem_keys "$verify_session" C-x o
+    sleep 0.2
+    before=$(report_count '^GREP-WRITEBACK result=')
+    lem_keys "$verify_session" F8
+    if wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" &&
+       grep -q '^GREP-WRITEBACK result=yes source=yes modified=no disk=yes$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-writeback-save \
+        'saving the source window persisted the grep edit to disk'
+    else
+      fail spc-p-g-writeback-save \
+        'the source save did not persist the grep edit cleanly' \
+        "$verify_session"
+    fi
+
+    lem_keys "$verify_session" Escape
+    sleep 0.2
+    before=$(report_count '^GREP-ESCAPE ')
+    lem_keys "$verify_session" F12
+    if wait_report_count '^GREP-ESCAPE ' "$((before + 1))" &&
+       grep -q '^GREP-ESCAPE normal=yes result=yes$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-escape \
+        'Escape left Vi Insert state without dismissing the grep results'
+    else
+      fail spc-p-g-escape \
+        'Escape did not preserve the grep UI in Vi Normal state' \
+        "$verify_session"
+    fi
   else
     fail spc-p-g-results 'SPC p g produced no Alpha match' "$verify_session"
   fi

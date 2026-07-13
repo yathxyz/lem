@@ -942,6 +942,21 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
       :buffer (lem/peek-source:collector-buffer collector))
      'lem/grep::change-grep-buffer)))
 
+(define-command lem-yath-peek-source-escape () ()
+  "Leave a non-Normal Vi state before dismissing a peek-source UI."
+  (let ((state (lem-vi-mode/core:current-state)))
+    (cond
+      ((lem-vi-mode/visual:visual-p)
+       (lem-vi-mode/visual:vi-visual-end))
+      ((and state
+            (not (lem-vi-mode/core:state=
+                  state
+                  (lem-vi-mode/core:ensure-state
+                   'lem-vi-mode/states:normal))))
+       (lem-vi-mode/commands:vi-normal))
+      (t
+       (lem/peek-source::peek-source-quit)))))
+
 (defun deliver-project-grep-results (root results request)
   "Display RESULTS when REQUEST still belongs to its live origin."
   (when (current-project-request-p :grep request)
@@ -1122,6 +1137,8 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
 (define-key *global-keymap* "C-x p g" 'lem-yath-project-grep)
 (define-key *global-keymap* "C-x p p" 'lem-yath-project-switch)
 (define-key *global-keymap* "C-x p d" 'lem-yath-project-root-directory)
+(define-key lem/peek-source:*peek-source-keymap*
+  "Escape" 'lem-yath-peek-source-escape)
 
 ;; Hot reloads must not multiply registration work.
 (remove-hook *find-file-hook* 'register-buffer-project)
