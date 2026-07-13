@@ -398,6 +398,7 @@
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
             ui-parity-test = mkTestAppWithLem lemYath "lem-yath-ui-parity-test" "ui-parity-test.sh";
             centered-view-test = mkTestAppWithLem lemYath "lem-yath-centered-view-test" "centered-view-test.sh";
+            help-test = mkTestApp "lem-yath-help-test" "help-test.sh";
             vcs-test = mkTestAppWithLemAndInputs lemYath vcsRuntimeInputs "lem-yath-vcs-test" "vcs-test.sh";
             vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
@@ -440,6 +441,7 @@
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";
             ui-parity = mkCheckWithLem lemYath "ui-parity" "ui-parity-test.sh";
             centered-view = mkCheckWithLem lemYath "centered-view" "centered-view-test.sh";
+            help = mkCheck "help" "help-test.sh";
             vcs = mkCheckWithLemAndInputs lemYath vcsRuntimeInputs "vcs" "vcs-test.sh";
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";

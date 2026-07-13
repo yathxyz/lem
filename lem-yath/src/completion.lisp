@@ -192,6 +192,13 @@
                   label)))
     (error () nil)))
 
+(defun prescient-regexp-scanner (component case-sensitive-p)
+  "Compile COMPONENT once for a candidate batch, or return NIL if invalid."
+  (handler-case
+      (ppcre:create-scanner
+       component :case-insensitive-mode (not case-sensitive-p))
+    (error () nil)))
+
 (defun prescient-initials (label)
   (coerce
    (loop :for index :from 0 :below (length label)
@@ -206,9 +213,13 @@
   (search component (prescient-initials label)
           :test (if case-sensitive-p #'char= #'char-equal)))
 
-(defun prescient-component-match-p (component label case-sensitive-p)
+(defun prescient-component-match-p
+    (component label case-sensitive-p
+     &optional (regexp-scanner nil regexp-scanner-supplied-p))
   (or (prescient-literal-match-p component label case-sensitive-p)
-      (prescient-regexp-match-p component label case-sensitive-p)
+      (if regexp-scanner-supplied-p
+          (and regexp-scanner (ppcre:scan regexp-scanner label))
+          (prescient-regexp-match-p component label case-sensitive-p))
       (prescient-initialism-match-p component label case-sensitive-p)))
 
 (defun prescient-filter (input candidates
@@ -222,16 +233,23 @@ When RANK-P is false, preserve the provider's source-defined order."
   (setf *completion-current-category* category)
   (let* ((components (prescient-split-query input))
          (case-sensitive-p (prescient-case-sensitive-p (or input "")))
+         (matchers
+           (mapcar (lambda (component)
+                     (cons component
+                           (prescient-regexp-scanner
+                            component case-sensitive-p)))
+                   components))
          (filtered
-           (if (null components)
+           (if (null matchers)
                candidates
                (remove-if-not
                 (lambda (candidate)
                   (let ((label (funcall key candidate)))
-                    (every (lambda (component)
+                    (every (lambda (matcher)
                              (prescient-component-match-p
-                              component label case-sensitive-p))
-                           components)))
+                              (car matcher) label case-sensitive-p
+                              (cdr matcher)))
+                           matchers)))
                 candidates))))
     (if rank-p
         (completion-sort-candidates filtered :key key)

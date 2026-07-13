@@ -327,6 +327,19 @@ special file modes, conditional foreign ownership, and metadata-failure fallback
 remain source-inspected. Marginalia's less common category annotators, dynamic
 alignment, and remote-file fields remain outside this approximation.
 
+The active Helpful leader workflows are no longer routed through generic
+apropos. `SPC h k` indexes every currently fbound, package-qualified Lisp symbol
+and shows its callable type, introspected lambda list, and first documentation
+line; `SPC h v` indexes bound variables and shows type, a bounded printed value,
+and documentation. Variable names matching Marginalia's credential patterns are
+censored in both the candidate row and final help buffer. Selection preserves
+package identity without reading prompt text as Lisp, while Prescient compiles
+each regexp component once per candidate batch so the larger symbol tables remain
+responsive. `scripts/help-test.sh` drives both leader chords through ncurses and
+verifies non-command callables, exact same-name package selection, display-only
+metadata, secret censoring, and reload. Helpful source links, references, callers,
+and richer cross-reference navigation remain gaps.
+
 Lem-yath carries `patches/lem-completion-lifecycle.patch`,
 `patches/lem-completion-detail-accessor.patch`, and
 `patches/lem-completion-observer-change-group.patch` plus

@@ -21,6 +21,7 @@
                (:file "electric-pair")
                (:file "completion")
                (:file "annotations")
+               (:file "help")
                (:file "orderless")
                (:file "auto-completion")
                (:file "actions")

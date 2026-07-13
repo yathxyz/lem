@@ -39,37 +39,6 @@ Returns the containing directory pathname, or NIL."
                              (merge-pathnames name (uiop:ensure-directory-pathname dir))))))
                 (when path (return path)))))
 
-;; Defined in completion.lisp, which follows this foundational module in the
-;; serial ASDF system.  Declaring it keeps compilation of prompt helpers clean.
-(declaim (ftype function prescient-filter))
-
-;;; --- help ------------------------------------------------------------------
-
-(defun variable-candidates ()
-  "Names of bound Lisp variables in the running Lem image."
-  (let ((names '()))
-    (do-all-symbols (symbol)
-      (when (and (boundp symbol) (symbol-package symbol))
-        (pushnew (format nil "~a::~a"
-                         (package-name (symbol-package symbol))
-                         (symbol-name symbol))
-                 names
-                 :test #'string=)))
-    (sort names #'string-lessp)))
-
-(define-command lem-yath-describe-variable () ()
-  "Describe a bound Lisp variable, like helpful-variable."
-  (let* ((candidates (variable-candidates))
-         (choice (prompt-for-string
-                  "Variable: "
-                  :completion-function
-                  (lambda (input) (prescient-filter input candidates))
-                  :test-function
-                  (lambda (input) (member input candidates :test #'string=))))
-         (symbol (read-from-string choice)))
-    (with-pop-up-typeout-window (out (make-buffer "*Variable Help*") :erase t)
-      (describe symbol out))))
-
 ;;; --- async processes -> buffers -------------------------------------------
 
 (defun append-text (buffer string)
