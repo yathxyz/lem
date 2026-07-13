@@ -1316,11 +1316,299 @@ keymaps and therefore execute the non-jumping repeat motions directly."
 ;;; --- incremental region expansion (expreg) ---------------------------------
 
 (defparameter *expand-region-pairs*
-  '(("(" ")") ("[" "]") ("{" "}") ("<" ">")
+  '(("(" ")") ("[" "]") ("{" "}")
     ("\"" "\"") ("'" "'") ("`" "`")))
 
+(defparameter *expand-region-tree-sitter-modes*
+  '((("LEM-PYTHON-MODE" . "PYTHON-MODE") "python")
+    (("LEM-JSON-MODE" . "JSON-MODE") "json"))
+  "Exact file modes with parser-backed Expreg coverage.")
+
+(defstruct expand-region-parser-cache
+  tick
+  language
+  seed-start
+  seed-end
+  ranges
+  inner-range)
+
+(defun expand-region-exact-major-mode-p (buffer mode-class)
+  (destructuring-bind (package-name . symbol-name) mode-class
+    (alexandria:when-let* ((package (find-package package-name))
+                           (symbol (find-symbol symbol-name package)))
+      (eq symbol (buffer-major-mode buffer)))))
+
+(defun expand-region-tree-sitter-language (&optional (buffer (current-buffer)))
+  (loop :for (mode-class language) :in *expand-region-tree-sitter-modes*
+        :when (expand-region-exact-major-mode-p buffer mode-class)
+          :return language))
+
+(defun expand-region-basic-word-character-p (character)
+  (and character (alphanumericp character)))
+
+(defun expand-region-symbol-character-p (character)
+  (and character
+       (or (expand-region-basic-word-character-p character)
+           (member character '(#\_ #\- #\. #\')))))
+
+(defun expand-region-character-range-at-point (point predicate)
+  (with-point ((start point)
+               (end point))
+    (cond
+      ((funcall predicate (character-at start)))
+      ((funcall predicate (character-at start -1))
+       (character-offset start -1))
+      (t
+       (return-from expand-region-character-range-at-point nil)))
+    (loop :while (funcall predicate (character-at start -1))
+          :do (character-offset start -1))
+    (loop :while (funcall predicate (character-at end))
+          :do (character-offset end 1))
+    (when (point< start end)
+      (list (copy-point start :temporary)
+            (copy-point end :temporary)))))
+
+(defun expand-region-initial-word-range (point)
+  (expand-region-character-range-at-point
+   point #'expand-region-basic-word-character-p))
+
+(defun expand-region-symbol-candidate (start end)
+  (with-point ((candidate-start start)
+               (candidate-end end))
+    (loop :while (expand-region-symbol-character-p
+                  (character-at candidate-start -1))
+          :do (character-offset candidate-start -1))
+    (loop :while (expand-region-symbol-character-p
+                  (character-at candidate-end))
+          :do (character-offset candidate-end 1))
+    (let ((candidate
+            (list (copy-point candidate-start :temporary)
+                  (copy-point candidate-end :temporary))))
+      (if (expand-region-strictly-contains-p candidate start end)
+          candidate
+          (progn
+            (expand-region-delete-point-range candidate)
+            nil)))))
+
+(defun expand-region-delete-point-range (range)
+  (when range
+    (dolist (point range)
+      (when (alive-point-p point)
+        (delete-point point)))))
+
+(defun expand-region-point<= (left right)
+  (or (point= left right) (point< left right)))
+
+(defun expand-region-strictly-contains-p (range start end)
+  (and (expand-region-point<= (first range) start)
+       (expand-region-point<= end (second range))
+       (or (point< (first range) start)
+           (point< end (second range)))))
+
+(defun expand-region-range-size (range)
+  (- (position-at-point (second range))
+     (position-at-point (first range))))
+
+(defun expand-region-byte-to-point (buffer byte-offset)
+  (with-point ((point (buffer-start-point buffer)))
+    ;; tree-sitter offsets are zero-based; move-to-bytes uses Lem's one-based
+    ;; point convention.
+    (move-to-bytes point (1+ byte-offset))
+    (unless (= byte-offset (point-bytes point))
+      (error "tree-sitter byte offset ~d does not map to a Lem point"
+             byte-offset))
+    (copy-point point :temporary)))
+
+(defun expand-region-byte-range-to-points (buffer range)
+  (let ((points nil)
+        (complete-p nil))
+    (unwind-protect
+         (progn
+           (push (expand-region-byte-to-point buffer (car range)) points)
+           (push (expand-region-byte-to-point buffer (cdr range)) points)
+           (setf complete-p t)
+           (nreverse points))
+      (unless complete-p
+        (expand-region-delete-point-range points)))))
+
+(defun expand-region-paired-inner-range (range)
+  "Return the inside of a bracketed RANGE, or NIL."
+  (with-point ((start (first range))
+               (end (second range)))
+    (when (point< start end)
+      (let ((open (character-at start)))
+        (character-offset end -1)
+        (let* ((close (character-at end))
+               (pair (assoc (and open (string open))
+                            *expand-region-pairs*
+                            :test #'string=)))
+          (when (and (member open '(#\( #\[ #\{))
+                     pair close
+                     (string= (second pair) (string close)))
+            (character-offset start 1)
+            (when (expand-region-point<= start end)
+              (list (copy-point start :temporary)
+                    (copy-point end :temporary)))))))))
+
+(defun expand-region-ts-node-ranges
+    (node selection-start selection-end &optional root-p)
+  "Collect useful named NODE ranges which contain the selected byte range."
+  (unwind-protect
+       (let ((start (tree-sitter:node-start-byte node))
+             (end (tree-sitter:node-end-byte node))
+             (ranges nil))
+         (when (and (<= start selection-start)
+                    (<= selection-end end))
+           (when (and (not root-p)
+                      (tree-sitter:node-named-p node)
+                      (not (tree-sitter:node-missing-p node))
+                      (or (< start selection-start)
+                          (< selection-end end)))
+             (push (cons start end) ranges))
+           ;; Named children contain every useful grammar node while avoiding
+           ;; one-character punctuation leaves which Expreg also filters.
+           (dotimes (index (tree-sitter:node-named-child-count node))
+             (alexandria:when-let
+                 ((child (tree-sitter:node-named-child node index)))
+               (setf ranges
+                     (nconc (expand-region-ts-node-ranges
+                             child selection-start selection-end)
+                            ranges)))))
+         ranges)
+    ;; tree-sitter-cl allocates node structs outside the Lisp heap.
+    (cffi:foreign-free (tree-sitter/types:ts-node-buffer node))))
+
+(defun expand-region-delete-tree (tree)
+  (trivial-garbage:cancel-finalization tree)
+  (tree-sitter/ffi:ts-tree-delete
+   (tree-sitter/types:ts-tree-ptr tree)))
+
+(defun expand-region-tree-sitter-byte-ranges
+    (buffer language selection-start selection-end)
+  "Return containing syntax ranges and whether LANGUAGE parsed successfully."
+  (handler-case
+      (progn
+        (unless (tree-sitter:tree-sitter-available-p)
+          (return-from expand-region-tree-sitter-byte-ranges
+            (values nil nil)))
+        (let ((grammar (or (tree-sitter:get-language language)
+                           (tree-sitter:load-language-from-system language))))
+          (tree-sitter:with-parser (parser grammar)
+            (let ((tree (tree-sitter:parser-parse-string
+                         parser (buffer-text buffer))))
+              (unless tree
+                (return-from expand-region-tree-sitter-byte-ranges
+                  (values nil nil)))
+              (unwind-protect
+                   (let ((root (tree-sitter:tree-root-node tree)))
+                     (values
+                      (expand-region-ts-node-ranges
+                       root selection-start selection-end
+                       (not (string= language "json")))
+                      t))
+                (expand-region-delete-tree tree))))))
+    (error () (values nil nil))))
+
+(defun expand-region-byte-range-contains-p
+    (range selection-start selection-end)
+  (and (<= (car range) selection-start)
+       (<= selection-end (cdr range))))
+
+(defun expand-region-parser-cache-valid-p
+    (cache buffer language selection-start selection-end)
+  (and cache
+       (= (expand-region-parser-cache-tick cache)
+          (buffer-modified-tick buffer))
+       (string= language (expand-region-parser-cache-language cache))
+       (<= selection-start
+           (expand-region-parser-cache-seed-start cache))
+       (<= (expand-region-parser-cache-seed-end cache)
+           selection-end)
+       (some (lambda (range)
+               (expand-region-byte-range-contains-p
+                range selection-start selection-end))
+             (expand-region-parser-cache-ranges cache))))
+
+(defun expand-region-smallest-inner-byte-range
+    (buffer byte-ranges start end)
+  "Return the innermost bracketed node containing the initial selection."
+  (let ((best nil)
+        (best-size nil))
+    (dolist (byte-range byte-ranges)
+      (let* ((outside (expand-region-byte-range-to-points buffer byte-range))
+             (inside (expand-region-paired-inner-range outside)))
+        (when (and inside
+                   (expand-region-strictly-contains-p inside start end))
+          (let ((size (expand-region-range-size inside)))
+            (when (or (null best-size) (< size best-size))
+              (setf best byte-range
+                    best-size size))))
+        (expand-region-delete-point-range outside)
+        (expand-region-delete-point-range inside)))
+    best))
+
+(defun expand-region-tree-sitter-candidate (start end)
+  "Return the smallest parser-backed range containing START..END.
+
+The second value is true when a grammar parsed the buffer, even when no larger
+useful node exists. This distinction prevents delimiter fallback from scanning
+through strings or malformed syntax in a parsed buffer."
+  (let* ((buffer (point-buffer start))
+         (language (expand-region-tree-sitter-language buffer))
+         (selection-start (point-bytes start))
+         (selection-end (point-bytes end)))
+    (unless language
+      (return-from expand-region-tree-sitter-candidate (values nil nil)))
+    (let ((cache (buffer-value buffer 'lem-yath-expand-region-parser-cache)))
+      (unless (expand-region-parser-cache-valid-p
+               cache buffer language selection-start selection-end)
+        (multiple-value-bind (byte-ranges parsed-p)
+            (expand-region-tree-sitter-byte-ranges
+             buffer language selection-start selection-end)
+          (setf cache
+                (when parsed-p
+                  (make-expand-region-parser-cache
+                   :tick (buffer-modified-tick buffer)
+                   :language language
+                   :seed-start selection-start
+                   :seed-end selection-end
+                   :ranges byte-ranges
+                   :inner-range
+                   (expand-region-smallest-inner-byte-range
+                    buffer byte-ranges start end)))
+                (buffer-value buffer 'lem-yath-expand-region-parser-cache)
+                cache)))
+      (unless cache
+        (return-from expand-region-tree-sitter-candidate (values nil nil)))
+      (let ((byte-ranges (expand-region-parser-cache-ranges cache))
+            (inner-range (expand-region-parser-cache-inner-range cache))
+            (parsed-p t))
+      (let ((best nil))
+        (labels ((consider (candidate)
+                   (cond
+                     ((not (expand-region-strictly-contains-p
+                            candidate start end))
+                      (expand-region-delete-point-range candidate))
+                     ((or (null best)
+                          (< (expand-region-range-size candidate)
+                             (expand-region-range-size best)))
+                      (expand-region-delete-point-range best)
+                      (setf best candidate))
+                     (t
+                      (expand-region-delete-point-range candidate)))))
+          (dolist (byte-range byte-ranges)
+            (let* ((outside
+                     (expand-region-byte-range-to-points buffer byte-range))
+                   (inside
+                     (when (equal byte-range inner-range)
+                       (expand-region-paired-inner-range outside))))
+              (consider outside)
+              (when inside
+                (consider inside)))))
+        (values best parsed-p))))))
+
 (defun enclosing-region-candidate (start end)
-  "Return the smallest delimiter pair strictly containing START..END."
+  "Return the smallest delimiter interior or pair containing START..END."
   (let ((best nil)
         (best-size nil))
     (dolist (pair *expand-region-pairs*)
@@ -1334,33 +1622,93 @@ keymaps and therefore execute the non-jumping repeat motions directly."
             (let ((size (- (position-at-point forward)
                            (position-at-point back))))
               (when (or (null best-size) (< size best-size))
+                (expand-region-delete-point-range best)
                 (setf best-size size
                       best (list (copy-point back :temporary)
                                  (copy-point forward :temporary)))))))))
-    best))
+    (when best
+      (let ((inside (expand-region-paired-inner-range best)))
+        (if (and inside
+                 (expand-region-strictly-contains-p inside start end)
+                 (< (expand-region-range-size inside)
+                    (expand-region-range-size best)))
+            (progn
+              (expand-region-delete-point-range best)
+              inside)
+            (progn
+              (expand-region-delete-point-range inside)
+              best))))))
 
-(defun expand-region-to-lines (start end)
-  (with-point ((line-start start)
-               (line-end end))
-    (line-start line-start)
-    (when (and (zerop (point-charpos line-end))
-               (point< start line-end))
-      (line-offset line-end -1))
-    (line-end line-end)
-    (if (and (point= start line-start) (point= end line-end))
-        nil
-        (list (copy-point line-start :temporary)
-              (copy-point line-end :temporary)))))
+(defun expand-region-paragraph-candidate (start end)
+  "Return the nonblank paragraph around START when it contains START..END.
+
+The range ends at the start of the following blank line, retaining the final
+newline in the same way as Expreg's paragraph tier."
+  (when (lem-yath-blank-line-p start)
+    (return-from expand-region-paragraph-candidate nil))
+  (with-point ((paragraph-start start)
+               (paragraph-end start))
+    (line-start paragraph-start)
+    (loop
+      (with-point ((previous paragraph-start))
+        (unless (and (line-offset previous -1)
+                     (not (lem-yath-blank-line-p previous)))
+          (return))
+        (line-start previous)
+        (move-point paragraph-start previous)))
+    (line-start paragraph-end)
+    (loop :while (not (lem-yath-blank-line-p paragraph-end))
+          :do (with-point ((next paragraph-end))
+                (if (line-offset next 1)
+                    (progn
+                      (line-start next)
+                      (move-point paragraph-end next))
+                    (progn
+                      (line-end paragraph-end)
+                      (return)))))
+    (let ((candidate
+            (list (copy-point paragraph-start :temporary)
+                  (copy-point paragraph-end :temporary))))
+      (if (expand-region-strictly-contains-p candidate start end)
+          candidate
+          (progn
+            (expand-region-delete-point-range candidate)
+            nil)))))
 
 (define-command lem-yath-expand-region () ()
-  "Expand the visual region through word, delimiters, line, and paragraph."
+  "Expand the visual region through syntax nodes, delimiters, and text units."
   (if (not (lem-vi-mode/visual:visual-p))
-      (progn
+      (let ((word-range (expand-region-initial-word-range (current-point))))
+        (setf (buffer-value
+               (current-buffer) 'lem-yath-expand-region-parser-cache)
+              nil)
         (lem-vi-mode/visual:vi-visual-char)
-        (call-command 'lem-vi-mode/commands:vi-inner-word 1))
+        (if word-range
+            (setf (lem-vi-mode/visual:visual-range) word-range)
+            (call-command 'lem-vi-mode/commands:vi-inner-word 1)))
       (destructuring-bind (start end) (lem-vi-mode/visual:visual-range)
-        (alexandria:if-let ((range (enclosing-region-candidate start end)))
-          (setf (lem-vi-mode/visual:visual-range) range)
-          (alexandria:if-let ((range (expand-region-to-lines start end)))
-            (setf (lem-vi-mode/visual:visual-range) range)
-            (call-command 'lem-vi-mode/commands:vi-a-paragraph 1))))))
+        (alexandria:if-let
+            ((symbol-range (expand-region-symbol-candidate start end)))
+          (setf (lem-vi-mode/visual:visual-range) symbol-range)
+          (multiple-value-bind (syntax-range parsed-p)
+              (expand-region-tree-sitter-candidate start end)
+            (let ((delimiter-range
+                    (unless parsed-p
+                      (enclosing-region-candidate start end))))
+              (cond
+                (syntax-range
+                 (setf (lem-vi-mode/visual:visual-range) syntax-range))
+                (parsed-p
+                 ;; The syntax root is deliberately not a candidate, matching
+                 ;; Expreg's exhaustion behavior in Python. JSON's document
+                 ;; root is retained above because it supplies Expreg's final
+                 ;; whole-buffer-with-newline tier.
+                 nil)
+                (delimiter-range
+                 (setf (lem-vi-mode/visual:visual-range) delimiter-range))
+                (t
+                 (alexandria:when-let
+                     ((paragraph-range
+                        (expand-region-paragraph-candidate start end)))
+                   (setf (lem-vi-mode/visual:visual-range)
+                         paragraph-range))))))))))

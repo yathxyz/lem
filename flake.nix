@@ -367,6 +367,7 @@
             snippet-test = mkTestApp "lem-yath-snippet-test" "snippet-test.sh";
             lsp-snippet-test = mkTestApp "lem-yath-lsp-snippet-test" "lsp-snippet-test.sh";
             interactive-test = mkTestApp "lem-yath-interactive-test" "interactive-test.sh";
+            expreg-test = mkTestApp "lem-yath-expreg-test" "expreg-test.sh";
             surround-test = mkTestApp "lem-yath-surround-test" "surround-test.sh";
             structural-test = mkTestAppWithLem lemYath "lem-yath-structural-test" "structural-test.sh";
             screen-line-test = mkTestAppWithLem lemYath "lem-yath-screen-line-test" "screen-line-test.sh";
@@ -404,6 +405,7 @@
             orderless-completion = mkCheck "orderless-completion" "orderless-completion-test.sh";
             snippets = mkCheck "snippets" "snippet-test.sh";
             lsp-snippets = mkCheck "lsp-snippets" "lsp-snippet-test.sh";
+            expreg = mkCheck "expreg" "expreg-test.sh";
             surround = mkCheck "surround" "surround-test.sh";
             structural = mkCheckWithLem lemYath "structural" "structural-test.sh";
             screen-line = mkCheckWithLem lemYath "screen-line" "screen-line-test.sh";

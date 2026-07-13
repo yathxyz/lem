@@ -622,12 +622,13 @@ if boot_with_file "$S20" "$SCRATCH" 'first known line' "20-control-line-motion";
 fi
 
 # ===========================================================================
-# Check 21: Repeated SPC v expands from the word at point to its nearest
-#   enclosing delimiter. Visual S then exposes the exact selected range.
+# Check 21: Repeated SPC v expands through word, delimiter interior, and the
+#   enclosing pair. Visual S then exposes the exact selected range.
 # ===========================================================================
 S21="lem-yath-it21-$id"
 if boot_with_file "$S21" "$EXPANDFIX" 'one two.*alpha beta.*three' "21-expand-region"; then
   send_chord "$S21" "s" "a" "l"
+  send_chord "$S21" "Space" "v"
   send_chord "$S21" "Space" "v"
   send_chord "$S21" "Space" "v"
   send_chord "$S21" "S" "]"
