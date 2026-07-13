@@ -23,6 +23,9 @@ export GIT_PAGER=cat
 export JJ_CONFIG="$root/jj-config.toml"
 export JJ_PAGER=cat
 export NO_COLOR=1
+# The wrapper-path assertion starts Lem from an intentionally empty PATH.
+# Host direnv bookkeeping would otherwise restore an unrelated parent PATH.
+unset DIRENV_DIFF DIRENV_DIR DIRENV_FILE DIRENV_WATCHES
 export LEM_YATH_VCS_REPORT="$root/report"
 export LEM_YATH_VCS_COLOCATED_ROOT="$root/repos/colocated repo;safe/"
 export LEM_YATH_VCS_GIT_MAIN="$root/repos/git main;safe/"
@@ -110,9 +113,13 @@ printf '(defparameter vcs-retired :historical)\n' \
   >"$LEM_YATH_VCS_GIT_MAIN/nested/deeper/retired.lisp"
 printf '# VCS notes\n\nold prose\n' \
   >"$LEM_YATH_VCS_GIT_MAIN/nested/docs/notes.md"
+printf 'TODO tracked implementation task\nordinary line\n' \
+  >"$LEM_YATH_VCS_GIT_MAIN/nested/deeper/todos.txt"
+printf 'FIXME tracked documentation task\n' \
+  >"$LEM_YATH_VCS_GIT_MAIN/nested/docs/fixmes.txt"
 "$git_bin" -C "$LEM_YATH_VCS_GIT_MAIN" add -- \
   nested/deeper/history-old.lisp nested/deeper/retired.lisp \
-  nested/docs/notes.md
+  nested/deeper/todos.txt nested/docs/fixmes.txt nested/docs/notes.md
 if ! git_commit "$LEM_YATH_VCS_GIT_MAIN" vcs-old \
   '2001-01-02T00:00:00+0000'; then
   echo "Could not create the older history fixture" >&2
@@ -410,7 +417,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -439,6 +446,24 @@ if wait_legit "$git_session" git; then
   pass smart-git-dispatch 'SPC g g selected Legit in a Git-only repository'
 else
   fail smart-git-dispatch 'smart dispatch did not open Legit for Git-only' \
+    "$git_session"
+fi
+legit_state=$(latest_report '^LEGIT phase=git ')
+if [[ "$legit_state" == *'todos=yes todo-count=yes todo-properties=yes todo-hook=1 '* ]]; then
+  pass legit-todo-section 'Legit rendered two tracked TODO/FIXME rows with actions'
+else
+  fail legit-todo-section "unexpected Legit TODO state: $legit_state" \
+    "$git_session"
+fi
+
+todo_preview_before=$(report_count '^TODO-PREVIEW ')
+send_keys "$git_session" C-c t
+if wait_report_count '^TODO-PREVIEW ' "$((todo_preview_before + 1))" &&
+   [[ $(latest_report '^TODO-PREVIEW ') == \
+      'TODO-PREVIEW row=yes move=yes visit=yes file=todos.txt line=1 text=yes' ]]; then
+  pass legit-todo-preview 'a TODO row resolves to its exact tracked source line'
+else
+  fail legit-todo-preview 'TODO row preview metadata did not resolve exactly' \
     "$git_session"
 fi
 send_keys "$git_session" q F6

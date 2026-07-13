@@ -171,6 +171,10 @@
 (defun direnv-parse-export (output)
   "Parse and validate a complete `direnv export json' result.
 Return a sorted alist whose NIL values mean that a variable must be unset."
+  (when (every (lambda (character)
+                 (member character '(#\Space #\Tab #\Newline #\Return)))
+               output)
+    (return-from direnv-parse-export '()))
   (let ((start (direnv-json-start output)))
     (unless start
       (error "direnv did not return a JSON object"))

@@ -440,20 +440,69 @@
      (vcs-test-encode (buffer-name buffer)))))
 
 (define-command lem-yath-test-vcs-legit-state () ()
-  (let ((active (and (fboundp 'lem/legit::legit-status-active-p)
-                     (lem/legit::legit-status-active-p))))
+  (let* ((active (and (fboundp 'lem/legit::legit-status-active-p)
+                      (lem/legit::legit-status-active-p)))
+         (buffer (and active
+                      (window-buffer lem/legit::*peek-window*)))
+         (text (and buffer (buffer-text buffer)))
+         (todo-point (and buffer (buffer-start-point buffer))))
+    (when todo-point
+      (unless (search-forward todo-point "nested/deeper/todos.txt:1:")
+        (setf todo-point nil))
+      (when todo-point (line-start todo-point)))
     (vcs-test-log
      (concatenate
       'string
       "LEGIT phase=~a active=~a source-live=~a raw-exact=~a "
-      "raw-sentinel=~a current=~a")
+      "raw-sentinel=~a todos=~a todo-count=~a todo-properties=~a "
+      "todo-hook=~d current=~a")
      *vcs-test-phase*
      (vcs-test-yes-no active)
      (vcs-test-yes-no (and *vcs-test-source-buffer*
                            (not (deleted-buffer-p *vcs-test-source-buffer*))))
      (vcs-test-yes-no (vcs-test-source-raw-exact-p))
      (vcs-test-yes-no (vcs-test-source-raw-sentinel-p))
+     (vcs-test-yes-no (and text (search "TODO/FIXME (2):" text)))
+     (vcs-test-yes-no
+      (and text
+           (search "nested/deeper/todos.txt:1:" text)
+           (search "nested/docs/fixmes.txt:1:" text)))
+     (vcs-test-yes-no
+      (and todo-point
+           (lem/legit::get-move-function todo-point)
+           (lem/legit::get-visit-file-function todo-point)))
+     (count 'insert-legit-todo-section
+            lem/legit::*status-section-functions*
+            :key #'car :test #'eq)
      (vcs-test-encode (buffer-name (current-buffer))))))
+
+(define-command lem-yath-test-vcs-todo-preview () ()
+  (let* ((buffer (and (lem/legit::legit-status-active-p)
+                      (window-buffer lem/legit::*peek-window*)))
+         (row (and buffer (buffer-start-point buffer))))
+    (when row
+      (unless (search-forward row "nested/deeper/todos.txt:1:")
+        (setf row nil))
+      (when row (line-start row)))
+    (let* ((move (and row (lem/legit::get-move-function row)))
+           (visit (and row (lem/legit::get-visit-file-function row)))
+           (source (and move (funcall move)))
+           (source-buffer (and source (point-buffer source))))
+      (vcs-test-log
+       "TODO-PREVIEW row=~a move=~a visit=~a file=~a line=~a text=~a"
+       (vcs-test-yes-no row)
+       (vcs-test-yes-no source)
+       (vcs-test-yes-no
+        (and visit
+             (string= (funcall visit) "nested/deeper/todos.txt")))
+       (if (and source-buffer (buffer-filename source-buffer))
+           (file-namestring (buffer-filename source-buffer))
+           "none")
+       (if source (line-number-at-point source) "none")
+       (vcs-test-yes-no
+        (and source-buffer
+             (search "TODO tracked implementation task"
+                     (buffer-text source-buffer))))))))
 
 (defun vcs-test-restore-source-point ()
   (let ((point (buffer-point *vcs-test-source-buffer*)))
@@ -614,6 +663,9 @@
                      lem/directory-mode::*file-entry-inserters*)
    :root-marker (count ".git" lem-core/commands/project:*root-files*
                        :test #'string=)
+   :todo-hook (count 'insert-legit-todo-section
+                     lem/legit::*status-section-functions*
+                     :key #'car :test #'eq)
    :smart (leader-binding-command lem-vi-mode:*normal-keymap* "g g")
    :git (leader-binding-command lem-vi-mode:*normal-keymap* "g G")
    :jj (leader-binding-command lem-vi-mode:*normal-keymap* "g J")
@@ -642,7 +694,7 @@
            (concatenate
             'string
             "RELOAD same=~a find=~d post=~d save=~d change=~d kill=~d "
-            "global=~d source=~d directory=~d root-marker=~d "
+            "global=~d source=~d directory=~d root-marker=~d todo-hook=~d "
             "smart=~a git=~a jj=~a time=~a jj-refresh=~a jj-quit=~a "
             "older=~a newer=~a nth=~a "
             "fuzzy=~a p=~a n=~a t=~a quit=~a")
@@ -656,6 +708,7 @@
            (getf after :source-mode)
            (getf after :directory)
            (getf after :root-marker)
+           (getf after :todo-hook)
            (vcs-test-yes-no (eq (getf after :smart) 'lem-yath-vcs-status))
            (vcs-test-yes-no (eq (getf after :git) 'lem-yath-legit-status))
            (vcs-test-yes-no (eq (getf after :jj) 'lem-yath-jj-log))
@@ -693,6 +746,9 @@
 (define-key *global-keymap* "F11" 'lem-yath-test-vcs-detour-timemachine)
 (define-key *global-keymap* "F12" 'lem-yath-test-vcs-debounce-state)
 (define-key *global-keymap* "C-c u" 'lem-yath-test-vcs-untracked-state)
+(define-key *global-keymap* "C-c t" 'lem-yath-test-vcs-todo-preview)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c t" 'lem-yath-test-vcs-todo-preview)
 
 (vcs-test-log "READY phase=~a file=~a"
               *vcs-test-phase*

@@ -47,6 +47,7 @@
               ./patches/lem-completion-groups.patch
               ./patches/lem-vi-screen-line.patch
               ./patches/lem-git-worktree.patch
+              ./patches/lem-legit-status-sections.patch
               ./patches/lem-hidden-lines.patch
             ];
           };

@@ -51,7 +51,7 @@ Status legend:
 | sqlite3 | n/a | elisp FFI library |
 | lispy / lispyville | ported | Paredit in Common Lisp, Clojure, Scheme/Racket, and Elisp; delimiter-safe Vim operators, atom motions, slurp/barf, drag, splice, split, raise, transpose, convolute, and list insertion/opening (`src/structural.lisp`, `scripts/structural-test.sh`); wrapped-row delimiter safety and Lispyville's screen-row character-register quirk are covered by `scripts/screen-line-test.sh`; plus full SLIME via micros |
 | magit | lem-builtin | `lem/legit` (status/stage/commit/branch/push/pull/stash/rebase); `SPC g G` |
-| magit-todos | gap | no TODO section in legit |
+| magit-todos | ported/partial | `src/git.lisp` adds a navigable TODO/FIXME section to Legit Git status through a small pinned-upstream status hook. The synchronous `git grep` scan is deliberately limited to tracked nonbinary files, 200 results, 1 MiB, and five seconds; it does not reproduce magit-todos keyword customization or grouping (`scripts/vcs-test.sh`). |
 | forge | gap | no GitHub/GitLab integration |
 | git-gutter | lem-builtin+ported | `src/git.lisp` wraps `lem-git-gutter` in a buffer-local programming-mode lifecycle. The installed-wrapper VCS gate proves real add/modify/delete markers in a linked worktree, exclusion from prose/utility buffers, composition with other gutters, and no reserved blank column for a clean line. |
 | git-timemachine | ported/partial | `SPC g t` opens rename-aware history at the translated source point; `C-k`/`C-j`, `g t g`, `g t t`, and `q` match the audited older/newer/numeric/fuzzy/return workflow under `scripts/vcs-test.sh`. The Evil-collection hash-copy and blame commands are not implemented. |

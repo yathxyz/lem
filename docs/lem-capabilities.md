@@ -1086,7 +1086,9 @@ if a mutation fails, the saved prior values are restored sequentially before
 the error is reported. This is rollback, not an atomic transaction. A nonzero
 export carrying a valid unload diff is applied before the safe status
 diagnostic, matching `emacs-direnv`; missing programs and timeouts retain the
-prior environment. Stderr is drained for safety but neither its contents nor
+prior environment. Successful whitespace-only output is treated as an empty
+change set, matching Direnv outside an active environment. Stderr is drained
+for safety but neither its contents nor
 environment values are retained in module state or displayed; summaries and
 diagnostics expose variable names and status only.
 
@@ -1106,6 +1108,7 @@ direct argv safety, exact-directory caching and reload idempotence, nested
 directory/listener buffers and ineligible scratch retention, post-command
 directory changes, denied files without auto-allow, explicit allow and manual
 refresh, hard timeout retention, malformed-output prevalidation, and recovery.
+The static production probe also covers successful empty export output.
 
 ---
 
@@ -1248,6 +1251,13 @@ Legit, project dispatch, the gutter, and time travel work from linked
 worktrees. The Jujutsu UI is deliberately a repository-specific, read-only
 `jj status` plus bounded `jj log` view, refreshed with `g r` and closed with
 `q`; it is not a Majutsu-style staging or history-mutation porcelain.
+
+Git status also appends navigable TODO/FIXME rows from tracked, nonbinary
+files. Moving onto a row previews the exact source line and visiting it opens
+that file. This is a bounded magit-todos approximation: the synchronous
+`git grep` scan stops at 200 rendered results, 1 MiB of output, or five seconds,
+and does not implement configurable keywords or magit-todos grouping. A small
+pinned-upstream patch exposes the status-section hook used by this integration.
 
 `SPC g t` opens a read-only history buffer at the source point. `C-k` selects
 the older revision, `C-j` the newer revision, `g t g` an oldest-numbered

@@ -193,7 +193,7 @@
    (concatenate
     'string
     "STATIC update-command=~a allow-command=~a relevant=~a maybe=~a "
-    "update-directory=~a active-var=~a program=~a timeout=~a mode-hooks=~d")
+    "update-directory=~a active-var=~a program=~a timeout=~a empty-export=~a mode-hooks=~d")
    (if (fboundp 'direnv-update-environment) "yes" "no")
    (if (fboundp 'direnv-allow) "yes" "no")
    (if (fboundp 'direnv-relevant-directory) "yes" "no")
@@ -202,6 +202,9 @@
    (if (boundp '*direnv-active-directory*) "yes" "no")
    (if (and (boundp '*direnv-program*) *direnv-program*) "yes" "no")
    (if (and (boundp '*direnv-timeout-program*) *direnv-timeout-program*)
+       "yes"
+       "no")
+   (if (null (direnv-parse-export (format nil " ~%~c" #\Tab)))
        "yes"
        "no")
    *direnv-test-mode-hook-count*)

@@ -145,7 +145,8 @@ of writing `.fasl` files into the source tree.
   rust-analyzer
 - Legit (Magit approximation) plus packaged `jj` smart dispatch on `SPC g g`;
   the Jujutsu side is a read-only status/log view, while programming buffers get
-  buffer-local Git markers and `SPC g t` supplies the audited git-timemachine
+  buffer-local Git markers, Git status includes navigable tracked-file
+  TODO/FIXME rows, and `SPC g t` supplies the audited git-timemachine
   revision-navigation workflow
 - metadata-aware Org file/heading and pinned md-roam node completion with
   find/insert/random workflows. A typed missing title opens the configured

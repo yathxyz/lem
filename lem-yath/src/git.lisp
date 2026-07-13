@@ -10,6 +10,115 @@
 ;; Defined later in the serial system, in ui.lisp.  Git state can be prepared
 ;; before the UI module loads, but rendering only happens after startup.
 (declaim (ftype function join-left-display-content))
+(declaim (ftype function run-project-program))
+(declaim (special *project-process-timeout*))
+
+(defparameter *legit-todo-result-limit* 200)
+(defparameter *legit-todo-output-limit* (* 1024 1024))
+(defparameter *legit-todo-timeout* 5)
+
+(defstruct legit-todo
+  path
+  line
+  text)
+
+(defun parse-legit-todos (output)
+  "Parse Git grep's NUL-delimited path, line, and text records."
+  (let ((start 0)
+        (length (length output))
+        (results '()))
+    (loop :while (and (< start length)
+                      (< (length results) *legit-todo-result-limit*))
+          :for path-end := (position #\Null output :start start)
+          :for line-end := (and path-end
+                                (position #\Null output
+                                          :start (1+ path-end)))
+          :for text-end := (and line-end
+                                (or (position #\Newline output
+                                              :start (1+ line-end))
+                                    length))
+          :while (and path-end line-end text-end)
+          :for path := (subseq output start path-end)
+          :for line := (parse-integer output
+                                      :start (1+ path-end)
+                                      :end line-end
+                                      :junk-allowed t)
+          :for text := (subseq output (1+ line-end) text-end)
+          :when (and line (plusp line) (plusp (length path)))
+            :do (push (make-legit-todo :path path :line line :text text)
+                      results)
+          :do (setf start (min length (1+ text-end))))
+    (nreverse results)))
+
+(defun collect-legit-todos (root)
+  "Return bounded TODO/FIXME matches from tracked Git files below ROOT."
+  (let ((git (or (executable-find "git")
+                 (error "Git is unavailable"))))
+    (let ((*project-process-timeout* *legit-todo-timeout*))
+      (multiple-value-bind (output error-output status)
+          (run-project-program
+           (list (uiop:native-namestring git)
+                 "grep" "-n" "-I" "-z" "-E" "(TODO|FIXME)" "--")
+           :directory root
+           :output-limit *legit-todo-output-limit*)
+        (cond
+          ((eql status 0) (parse-legit-todos output))
+          ((eql status 1) '())
+          (t
+           (error "git grep failed (~a): ~a"
+                  status
+                  (completion-bounded-annotation error-output))))))))
+
+(defun make-legit-todo-move-function (root todo)
+  (let ((pathname (merge-pathnames (legit-todo-path todo) root))
+        (line (legit-todo-line todo)))
+    (lambda ()
+      (let* ((buffer (find-file-buffer pathname))
+             (point (buffer-point buffer)))
+        (move-to-line point line)
+        (line-start point)
+        point))))
+
+(defun insert-legit-todo-section (vcs collector)
+  "Append a navigable tracked-file TODO/FIXME section to Legit status."
+  (declare (ignore collector))
+  (unless (string-equal "git" (lem/porcelain::vcs-name vcs))
+    (return-from insert-legit-todo-section))
+  (let ((root (uiop:ensure-directory-pathname (truename (uiop:getcwd)))))
+    (handler-case
+        (let ((todos (collect-legit-todos root)))
+          (lem/legit::collector-insert "")
+          (lem/legit::collector-insert
+           (format nil "TODO/FIXME (~d):" (length todos)) :header t)
+          (if todos
+              (dolist (todo todos)
+                (lem/legit::with-appending-source
+                    (point
+                     :move-function
+                     (make-legit-todo-move-function root todo)
+                     :visit-file-function
+                     (let ((path (legit-todo-path todo)))
+                       (lambda () path)))
+                  (insert-string
+                   point
+                   (format nil "~a:~d: ~a"
+                           (legit-todo-path todo)
+                           (legit-todo-line todo)
+                           (completion-bounded-annotation
+                            (legit-todo-text todo)))
+                   :attribute 'lem/legit::filename-attribute
+                   :read-only t)))
+              (lem/legit::collector-insert "<none>")))
+      (error (condition)
+        (lem/legit::collector-insert "")
+        (lem/legit::collector-insert "TODO/FIXME (unavailable):" :header t)
+        (lem/legit::collector-insert
+         (completion-bounded-annotation (princ-to-string condition)))))))
+
+(remove-hook lem/legit::*status-section-functions*
+             'insert-legit-todo-section)
+(add-hook lem/legit::*status-section-functions*
+          'insert-legit-todo-section)
 
 (defun vcs-directory (&optional (buffer (current-buffer)))
   "Return BUFFER's file directory, local directory, or Lem process directory."

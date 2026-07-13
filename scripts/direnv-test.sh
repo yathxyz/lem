@@ -380,7 +380,7 @@ assert_state pre-mode-direnv mode-initial \
 if run_and_wait lem-yath-test-direnv-static '^STATIC '; then
   static=$(grep '^STATIC ' "$LEM_YATH_DIRENV_REPORT" | tail -1)
   hooks=$(grep '^HOOKS label=initial ' "$LEM_YATH_DIRENV_REPORT" | tail -1)
-  if [[ "$static" == *'update-command=yes allow-command=yes relevant=yes maybe=yes update-directory=yes active-var=yes program=yes timeout=yes mode-hooks=1'* ]] &&
+  if [[ "$static" == *'update-command=yes allow-command=yes relevant=yes maybe=yes update-directory=yes active-var=yes program=yes timeout=yes empty-export=yes mode-hooks=1'* ]] &&
      [[ "$hooks" == 'HOOKS label=initial find=0 switch=1 post=1' ]]; then
     pass api-and-hooks 'the around method owns file opens and selected-buffer hooks are unique'
   else

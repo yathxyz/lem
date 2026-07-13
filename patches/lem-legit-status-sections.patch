@@ -1,0 +1,11 @@
+diff --git a/extensions/legit/legit.lisp b/extensions/legit/legit.lisp
+index 8aa1c4d..8c51f4a 100644
+--- a/extensions/legit/legit.lisp
++++ b/extensions/legit/legit.lisp
+@@ -50,0 +51,3 @@ Currently Git-only. Concretely, this calls Git with the -w option.")
++(defvar *status-section-functions* '()
++  "Hook functions called with the VCS and collector while rendering status.")
++
+@@ -611,0 +615,2 @@ Ongoing:
++        (run-hooks *status-section-functions* vcs collector)
++
