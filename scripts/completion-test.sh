@@ -173,6 +173,52 @@ if start_session "$s1"; then
   fi
   close_prompt "$s1"
 
+  if open_query "$s1" lem-yath-test-vertico-grouped-prompt; then
+    lem_keys "$s1" Enter
+    if lem_wait_for "$s1" 'Grouped:' 10 >/dev/null &&
+       lem_wait_for "$s1" 'First Group' 10 >/dev/null &&
+       lem_wait_for "$s1" 'Second Group' 10 >/dev/null &&
+       lem_wait_for "$s1" 'group-delta' 10 >/dev/null; then
+      state=$(capture_prompt_state "$s1" || true)
+      initial_focus=$(sed -n 's/^FOCUS=\([^ ]*\).*/\1/p' <<<"$state")
+      lem_keys "$s1" C-p
+      sleep 0.2
+      state=$(capture_prompt_state "$s1" || true)
+      previous_wrap_focus=$(sed -n 's/^FOCUS=\([^ ]*\).*/\1/p' <<<"$state")
+      lem_keys "$s1" C-n
+      sleep 0.2
+      state=$(capture_prompt_state "$s1" || true)
+      next_wrap_focus=$(sed -n 's/^FOCUS=\([^ ]*\).*/\1/p' <<<"$state")
+      lem_keys "$s1" C-n
+      sleep 0.2
+      lem_keys "$s1" C-n
+      sleep 0.2
+      state=$(capture_prompt_state "$s1" || true)
+      next_group_focus=$(sed -n 's/^FOCUS=\([^ ]*\).*/\1/p' <<<"$state")
+      lem_keys "$s1" C-p
+      sleep 0.2
+      state=$(capture_prompt_state "$s1" || true)
+      previous_group_focus=$(sed -n 's/^FOCUS=\([^ ]*\).*/\1/p' <<<"$state")
+      if [ "$initial_focus" = group-alpha ] &&
+         [ "$previous_wrap_focus" = group-delta ] &&
+         [ "$next_wrap_focus" = group-alpha ] &&
+         [ "$next_group_focus" = group-gamma ] &&
+         [ "$previous_group_focus" = group-beta ]; then
+        pass grouped-candidates \
+          'headings render at full height while C-n/C-p skip and wrap past them'
+      else
+        fail grouped-candidates \
+          "focus sequence was $initial_focus / $previous_wrap_focus / $next_wrap_focus / $next_group_focus / $previous_group_focus" \
+          "$s1"
+      fi
+    else
+      fail grouped-candidates 'the grouped completion rows did not render' "$s1"
+    fi
+  else
+    fail grouped-candidates 'could not invoke the grouped completion prompt' "$s1"
+  fi
+  close_prompt "$s1"
+
   if open_query "$s1" 'roam fi' &&
      lem_wait_for "$s1" 'lem-yath-roam-find' 10 >/dev/null; then
     pass literal-components "space-separated components keep the popup open"

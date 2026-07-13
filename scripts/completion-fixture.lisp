@@ -43,3 +43,27 @@
    (lambda (input)
      (declare (ignore input))
      '("singleton-value"))))
+
+(defun lem-yath-test-grouped-prompt-item (label group)
+  "Return a grouped completion item spanning the live prompt input."
+  (with-point ((start (lem/prompt-window::current-prompt-start-point))
+               (end (lem/prompt-window::current-prompt-start-point)))
+    (lem/completion-mode:make-completion-item
+     :label label
+     :insert-text label
+     :group group
+     :start start
+     :end (line-end end))))
+
+(define-command lem-yath-test-vertico-grouped-prompt () ()
+  "Open a prompt with two non-selectable completion group headings."
+  (prompt-for-string
+   "Grouped: "
+   :completion-function
+   (lambda (input)
+     (declare (ignore input))
+     (list
+      (lem-yath-test-grouped-prompt-item "group-alpha" "First Group")
+      (lem-yath-test-grouped-prompt-item "group-beta" "First Group")
+      (lem-yath-test-grouped-prompt-item "group-gamma" "Second Group")
+      (lem-yath-test-grouped-prompt-item "group-delta" "Second Group")))))

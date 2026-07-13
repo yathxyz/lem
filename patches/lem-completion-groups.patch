@@ -1,0 +1,259 @@
+diff --git a/src/ext/popup-menu.lisp b/src/ext/popup-menu.lisp
+--- a/src/ext/popup-menu.lisp
++++ b/src/ext/popup-menu.lisp
+@@ -3,6 +3,7 @@
+   (:export :write-header
+            :get-focus-item
+            :apply-print-spec
++           :item-group
+            :popup-menu-focus-active-p
+            :popup-menu-clear-focus
+            :popup-menu-activate-focus)
+@@ -34,12 +35,19 @@
+   (t :foreground "white" :background "RoyalBlue"))
+ (define-attribute non-focus-popup-menu-attribute)
+ 
++(define-attribute popup-menu-group-attribute
++  (t :foreground :base0D :bold t))
++
+ (defun focus-point (popup-menu)
+   (buffer-point (popup-menu-buffer popup-menu)))
+ 
+ (defun make-focus-overlay (point focus-attribute)
+   (make-line-overlay point focus-attribute))
+ 
++(defun selectable-point-p (point)
++  "Return true when POINT is on a row backed by a popup item."
++  (not (null (text-property-at (line-start point) :item))))
++
+ (defun update-focus-overlay (popup-menu point)
+   "Refresh the focus highlight so it tracks POINT in POPUP-MENU.
+ Deletes any previous overlay, clears stray overlays, and creates a new
+@@ -49,7 +57,7 @@
+   (clear-overlays (popup-menu-buffer popup-menu))
+   (setf (popup-menu-focus-overlay popup-menu) nil)
+   (when (and (popup-menu-focus-active-p popup-menu)
+-             (not (header-point-p point)))
++             (selectable-point-p point))
+     (setf (popup-menu-focus-overlay popup-menu)
+           (make-focus-overlay point (popup-menu-focus-attribute popup-menu)))))
+ 
+@@ -68,6 +76,12 @@
+ (defgeneric write-header (print-spec point)
+   (:method (print-spec point)))
+ 
++(defgeneric item-group (print-spec item)
++  (:documentation "Return ITEM's optional non-selectable group heading.")
++  (:method (print-spec item)
++    (declare (ignore print-spec item))
++    nil))
++
+ (defgeneric apply-print-spec (print-spec point item)
+   (:documentation "Applies the function `print-spec` to an `item` at `point`.  Typically this
+ will get the string representation of `item` and insert it at `point` (the default method implemented below)")
+@@ -76,15 +90,38 @@
+       (insert-string point string))))
+ 
+ (defun insert-items (point items print-spec)
+-  (with-point ((start point :right-inserting))
+-    (loop :for (item . continue-p) :on items
+-          :do (move-point start point)
+-              (apply-print-spec print-spec point item)
+-              (line-end point)
+-              (put-text-property start point :item item)
+-              (when continue-p
+-                (insert-character point #\newline)))
+-    (buffer-start point)))
++  "Insert ITEMS and return the number of candidate and group rows."
++  (let ((previous-group (gensym "NO-GROUP"))
++        (first-row-p t)
++        (row-count 0))
++    (labels ((begin-row ()
++               (unless first-row-p
++                 (insert-character point #\newline))
++               (setf first-row-p nil)
++               (incf row-count)))
++      (dolist (item items)
++        (let ((group (item-group print-spec item)))
++          (unless (equal group previous-group)
++            (setf previous-group group)
++            (when group
++              (begin-row)
++              (insert-string point group
++                             :attribute 'popup-menu-group-attribute))))
++        (begin-row)
++        (with-point ((start point :right-inserting))
++          (apply-print-spec print-spec point item)
++          (line-end point)
++          (put-text-property start point :item item))))
++    (buffer-start point)
++    row-count))
++
++(defun seek-selectable-point (point direction)
++  "Move POINT in DIRECTION until it reaches a selectable row."
++  (loop
++    (when (selectable-point-p point)
++      (return t))
++    (unless (line-offset point direction)
++      (return nil))))
+ 
+ (defun get-focus-item (popup-menu)
+   (alexandria:when-let (p (and (popup-menu-focus-active-p popup-menu)
+@@ -114,17 +151,17 @@
+                  (< 0 (length items)))
+         (insert-character point #\newline))
+       (setf (buffer-start-line buffer) start-line)
+-      (insert-items point items print-spec)
+-      (buffer-start point)
+-      (when header-exists
+-        (move-to-line point start-line))
+-      (when last-line (move-to-line point last-line))
+-      (let ((focus-overlay (make-focus-overlay point focus-attribute))
+-            (width (lem/popup-window::compute-buffer-width buffer)))
+-        (values width
+-                focus-overlay
+-                (+ (1- start-line)
+-                   (length items)))))))
++      (let ((row-count (insert-items point items print-spec)))
++        (buffer-start point)
++        (when header-exists
++          (move-to-line point start-line))
++        (when last-line (move-to-line point last-line))
++        (seek-selectable-point point 1)
++        (let ((focus-overlay (make-focus-overlay point focus-attribute))
++              (width (lem/popup-window::compute-buffer-width buffer)))
++          (values width
++                  focus-overlay
++                  (+ (1- start-line) row-count)))))))
+ 
+ (defparameter *style* '(:use-border t :offset-y 0))
+ 
+@@ -193,18 +230,19 @@
+   (delete-buffer (popup-menu-buffer popup-menu)))
+ 
+ (defun header-point-p (point)
+-  (< (line-number-at-point point)
+-     (buffer-start-line (point-buffer point))))
++  (not (selectable-point-p point)))
+ 
+-(defun move-focus (popup-menu function)
++(defun move-focus (popup-menu function &optional direction)
+   (alexandria:when-let (point (focus-point popup-menu))
+     (setf (slot-value popup-menu 'focus-active) t)
+     (funcall function point)
++    (when (and direction (not (seek-selectable-point point direction)))
++      (if (plusp direction)
++          (buffer-start point)
++          (buffer-end point))
++      (seek-selectable-point point (- direction)))
+     (line-start point)
+     (window-see (popup-menu-window popup-menu))
+-    (let ((buffer (point-buffer point)))
+-      (when (header-point-p point)
+-        (move-to-line point (buffer-start-line buffer))))
+     (update-focus-overlay popup-menu point)))
+ 
+ (defmethod lem-if:popup-menu-down (implementation popup-menu)
+@@ -213,7 +251,8 @@
+        popup-menu
+        (lambda (point)
+          (unless (line-offset point 1)
+-           (buffer-start point))))
++           (buffer-start point)))
++       1)
+       (popup-menu-activate-focus popup-menu)))
+ 
+ (defmethod lem-if:popup-menu-up (implementation popup-menu)
+@@ -222,9 +261,8 @@
+        popup-menu
+        (lambda (point)
+          (unless (line-offset point -1)
+-           (buffer-end point))
+-         (when (header-point-p point)
+-           (buffer-end point))))
++           (buffer-end point)))
++       -1)
+       (popup-menu-activate-focus popup-menu)))
+ 
+ (defmethod lem-if:popup-menu-first (implementation popup-menu)
+@@ -232,14 +270,16 @@
+   (move-focus
+    popup-menu
+    (lambda (point)
+-     (buffer-start point))))
++     (buffer-start point))
++   1))
+ 
+ (defmethod lem-if:popup-menu-last (implementation popup-menu)
+   (setf (slot-value popup-menu 'focus-active) t)
+   (move-focus
+    popup-menu
+    (lambda (point)
+-     (buffer-end point))))
++     (buffer-end point))
++   -1))
+ 
+ (defmethod lem-if:popup-menu-select (implementation popup-menu)
+   (alexandria:when-let ((f (popup-menu-action-callback popup-menu))
+diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
+--- a/src/ext/completion-mode.lisp
++++ b/src/ext/completion-mode.lisp
+@@ -8,6 +8,7 @@
+            :completion-item-insert-text
+            :completion-item-final-insert-action
+            :completion-item-detail
++           :completion-item-group
+            :completion-item-accept-action
+            :completion-context-options-function
+            :completion-context-observer-function
+@@ -199,6 +200,11 @@
+     :initform ""
+     :accessor completion-item-detail
+     :type string)
++   (group
++    :initarg :group
++    :initform nil
++    :reader completion-item-group
++    :type (or null string))
+    (start
+     :initarg :start
+     :initform nil
+@@ -240,10 +246,10 @@
+     (format stream "label: ~a" (completion-item-label obj))))
+ 
+ (defun make-completion-item (&rest initargs
+-                             &key label filter-text insert-text chunks detail
++                             &key label filter-text insert-text chunks detail group
+                                start end focus-action final-insert-action
+                                accept-action)
+-  (declare (ignore label filter-text insert-text chunks detail
++  (declare (ignore label filter-text insert-text chunks detail group
+                    start end focus-action final-insert-action accept-action))
+   (apply #'make-instance 'completion-item initargs))
+ 
+@@ -288,6 +294,10 @@
+                  :label-width
+                  (compute-label-width items)))
+ 
++(defmethod lem/popup-menu:item-group
++    ((print-spec print-spec) (item completion-item))
++  (completion-item-group item))
++
+ (defmethod lem/popup-menu:apply-print-spec ((print-spec print-spec) point item)
+   (with-point ((start point))
+     (insert-string point " ")
+@@ -497,9 +507,11 @@
+     (same-line-p focus end)))
+ 
+ (defun popup-focus-at-first-item-p (popup)
+-  (= (line-number-at-point (lem/popup-menu::focus-point popup))
+-     (lem/popup-menu::buffer-start-line
+-      (lem/popup-menu::popup-menu-buffer popup))))
++  (with-point ((focus (lem/popup-menu::focus-point popup))
++               (first (buffer-start-point
++                       (lem/popup-menu::popup-menu-buffer popup))))
++    (lem/popup-menu::seek-selectable-point first 1)
++    (same-line-p focus first)))
+ 
+ (define-command completion-next-line () ()
+   "Move selection to next line in completion window"
