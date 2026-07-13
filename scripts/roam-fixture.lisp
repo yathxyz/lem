@@ -63,6 +63,53 @@
       (when renamed-p
         (ignore-errors (sb-posix:rename saved-name parent-name))))))
 
+(defun roam-test-capture-template (key)
+  (find key *roam-capture-templates*
+        :test #'string= :key #'roam-capture-template-key))
+
+(defun roam-test-capture-rendering-p (key)
+  (let* ((time (encode-universal-time 6 5 4 3 2 2026 0))
+         (id "capture-test-id")
+         (title "My Title")
+         (timestamp "[2026-02-03 Tue 04:05]")
+         (org-prefix
+           (format nil
+                   ":PROPERTIES:~%:ID: ~a~%:END:~%#+title: ~a~%#+created: ~a"
+                   id title timestamp))
+         (expectation
+           (assoc key
+                  (list
+            (list "n" (format nil "~a~%~%" org-prefix))
+            (list "c" (format nil
+                              "~a~%#+filetags: :concept:~%~%* Claim~%~%~%* Context~%~%* Links~%"
+                              org-prefix))
+            (list "p" (format nil
+                              "~a~%#+filetags: :project:~%~%* Outcome~%~%~%* Notes~%~%* Links~%"
+                              org-prefix))
+            (list "s" (format nil
+                              "~a~%#+filetags: :source:~%~%* Summary~%~%~%* Notes~%~%* Links~%"
+                              org-prefix))
+            (list "m" (format nil
+                              "---~%id: ~a~%title: ~a~%created: \"2026-02-03T04:05:06+0000\"~%tags: []~%---~%~%"
+                              id title)))
+                  :test #'string=))
+         (template (roam-test-capture-template key)))
+    (multiple-value-bind (text cursor)
+        (roam-capture-render template title id time)
+      (let ((expected-cursor
+              (if (roam-capture-template-first-heading template)
+                  (let ((line
+                          (format nil "* ~a~%"
+                                  (roam-capture-template-first-heading
+                                   template))))
+                    (+ (search line text) (length line)))
+                  (length text))))
+        (unless (string= text (second expectation))
+          (roam-test-report "RENDER-MISMATCH key=~a actual=~s expected=~s"
+                            key text (second expectation)))
+        (and (string= text (second expectation))
+             (= cursor expected-cursor))))))
+
 (defun roam-test-run-static ()
   (let* ((buffers-before (length (buffer-list)))
          (nodes (note-nodes))
@@ -179,6 +226,34 @@
              "node-count-limit")
       (check (eq :outside (roam-test-containment-race-status))
              "descriptor-containment-race")
+      (let ((time (encode-universal-time 6 5 4 3 2 2026 0)))
+        (check (string= "creme_brulee_plan"
+                        (roam-capture-slug "Crème brûlée / Plan"))
+               "capture-org-roam-slug")
+        (check (equal
+                '("20260203040506-my_title.org"
+                  "20260203040506-my_title.org"
+                  "20260203040506-project-my_title.org"
+                  "references/20260203040506-my_title.org"
+                  "20260203040506-my_title.md")
+                (mapcar
+                 (lambda (template)
+                   (roam-capture-relative-path template "My Title" time))
+                 *roam-capture-templates*))
+               "capture-template-paths"))
+      (dolist (key '("n" "c" "p" "s" "m"))
+        (check (roam-test-capture-rendering-p key)
+               (format nil "capture-template-render-~a" key)))
+      (check (and (roam-new-title-input-p "Brand New Node" nodes)
+                  (roam-new-title-input-p "First Node" nil)
+                  (not (roam-new-title-input-p "Heading" nodes)))
+             "capture-only-zero-match-title")
+      (check (and (roam-test-editor-error-p
+                   (lambda () (roam-capture-safe-title "   ")))
+                  (roam-test-editor-error-p
+                   (lambda ()
+                     (roam-capture-safe-title (format nil "bad~%name")))))
+             "capture-title-validation")
       (roam-test-report "STATIC ~a failures=~d"
                         (if (zerop failures) "PASS" "FAIL") failures))))
 
@@ -236,7 +311,7 @@
   (let ((target (merge-pathnames "file-node.org" (roam-directory))))
     (find-file target)
     (buffer-start (current-point))
-    (insert-string (current-point) "UNSAVED\n")
+    (insert-string (current-point) (format nil "UNSAVED~%"))
     (let ((target-buffer (current-buffer)))
       (find-file *roam-test-origin*)
       (buffer-end (current-point))
@@ -251,6 +326,61 @@
   (roam-test-report "TEXT-RESET line=~d"
                     (line-number-at-point (current-point))))
 
+(defvar *roam-test-capture-id-counter* 0)
+
+(defun roam-test-capture-time ()
+  (encode-universal-time 6 5 4 3 2 2026 0))
+
+(defun roam-test-capture-id ()
+  (format nil "capture-~3,'0d" (incf *roam-test-capture-id-counter*)))
+
+(define-command lem-yath-test-roam-capture-state () ()
+  (let ((session *roam-capture-session*))
+    (if session
+        (roam-test-report
+         "CAPTURE active=yes path=~a id=~a title=~s saved=~a"
+         (enough-namestring (roam-capture-session-pathname session)
+                            (roam-directory))
+         (roam-capture-session-id session)
+         (roam-capture-session-title session)
+         (roam-test-yes-no (roam-capture-session-saved-p session)))
+        (roam-test-report "CAPTURE active=no"))))
+
+(define-command lem-yath-test-roam-capture-request-state () ()
+  (let ((request *roam-capture-request*))
+    (if request
+        (roam-test-report
+         "REQUEST active=yes title=~s insert=~a"
+         (roam-capture-request-title request)
+         (roam-test-yes-no (roam-capture-request-insert-p request)))
+        (roam-test-report "REQUEST active=no"))))
+
+(define-command lem-yath-test-roam-created-org-link () ()
+  (let ((buffer (find-file-buffer *roam-test-origin*)))
+    (with-current-buffer buffer
+      (let* ((text (points-to-string (buffer-start-point buffer)
+                                     (buffer-end-point buffer)))
+             (link "[[id:capture-003][Fresh Project]]"))
+        (roam-test-report "CREATED-ORG link=~a count=~d modified=~a"
+                          (roam-test-yes-no (search link text))
+                          (roam-test-count-substring link text)
+                          (roam-test-yes-no (buffer-modified-p buffer)))))))
+
+(define-command lem-yath-test-roam-created-markdown-link () ()
+  (let ((buffer (find-file-buffer *roam-test-markdown-origin*)))
+    (with-current-buffer buffer
+      (let* ((text (points-to-string (buffer-start-point buffer)
+                                     (buffer-end-point buffer)))
+             (link "[[Fresh Markdown]]"))
+        (roam-test-report "CREATED-MD link=~a count=~d modified=~a"
+                          (roam-test-yes-no (search link text))
+                          (roam-test-count-substring link text)
+                          (roam-test-yes-no (buffer-modified-p buffer)))))))
+
+(define-key *global-keymap* "F1" 'lem-yath-test-roam-capture-state)
+(define-key *global-keymap* "F2" 'lem-yath-test-roam-created-org-link)
+(define-key *global-keymap* "F3" 'lem-yath-test-roam-created-markdown-link)
+(define-key *global-keymap* "F4" 'lem-yath-test-roam-capture-request-state)
 (define-key *global-keymap* "F5" 'lem-yath-test-roam-reset-origin)
 (define-key *global-keymap* "F6" 'lem-yath-test-roam-current)
 (define-key *global-keymap* "F7" 'lem-yath-test-roam-origin-state)
@@ -264,4 +394,6 @@
                         :if-exists :supersede
                         :if-does-not-exist :create))
 (roam-test-run-static)
+(setf *roam-capture-time-function* #'roam-test-capture-time
+      *roam-capture-id-function* #'roam-test-capture-id)
 (roam-test-report "READY boot=~a" (roam-test-yes-no (boot-ok-p)))

@@ -147,8 +147,11 @@ of writing `.fasl` files into the source tree.
   buffer-local Git markers and `SPC g t` supplies the audited git-timemachine
   revision-navigation workflow
 - metadata-aware Org file/heading and pinned md-roam node completion with
-  find/insert/random workflows, plus root-level roam dailies, journal, and i/t/r
-  capture over `$WORKDIR` and public TODO capture over `$PUBLIC_ORG_DIR`
+  find/insert/random workflows. A typed missing title opens the configured
+  one-key `n/c/p/s/m` roam capture templates; `C-c C-c` finalizes the new Org
+  or Markdown note and any deferred link, while `C-c C-k` aborts without a
+  file. Root-level roam dailies, journal, and i/t/r capture operate over
+  `$WORKDIR`, with public TODO capture over `$PUBLIC_ORG_DIR`
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope and modal Return/g/q navigation
 - streaming OpenRouter LLM client + claude/codex/grok CLI backends
@@ -168,7 +171,7 @@ editing, formatting, Orderless completion, snippets, LSP snippets, real installe
 language-server handshakes, daily-workflows, Direnv environment switching,
 electric-editing, UI parity, project navigation, VCS, persistence, retained undo/Vundo,
 project-scoped LSP lifecycle, LLM key dispatch, cursor/state parity, evil-snipe
-and Avy parity, screen-line/Evil parity, notes, native Org, agenda, and parity-ledger checks. The ledger can
+and Avy parity, screen-line/Evil parity, notes, roam, native Org, agenda, and parity-ledger checks. The ledger can
 also be validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
@@ -203,6 +206,7 @@ nix run .#electric-editing-test
 nix run .#ui-parity-test
 nix run .#vcs-test
 nix run .#notes-test
+nix run .#roam-test
 nix run .#org-test
 nix run .#agenda-test
 nix run .#interactive-test
@@ -222,7 +226,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
 `daily-workflows`, `direnv`, `llm-keybinding`, `orderless-completion`, `snippets`, `lsp-snippets`,
-`lsp-project`, `real-lsp`, `project-navigation`, `persistence`, `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`, `interactive`, `structural`, or
+`lsp-project`, `real-lsp`, `project-navigation`, `persistence`, `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`, `interactive`, `structural`, `roam`, or
 `notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

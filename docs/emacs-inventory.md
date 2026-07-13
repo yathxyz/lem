@@ -474,7 +474,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **tree-sitter** highlighting (`treesit-auto`) — Lem has its own highlighting; map grammar coverage.
 - **Git**: magit (`SPC g g/G`) + git-gutter + git-timemachine; smart jj/git dispatch; majutsu (jj) if a Lem jj porcelain exists (likely a gap).
 - **dape** debugging (Python/Go/Rust/C) — likely partial/gap in Lem.
-- **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — Lem now has bounded native Org editing, capture, metadata-aware Org/Markdown roam-node selection, daily, journal, and agenda implementations. Org-roam database/backlink semantics and the full capture/journal interfaces remain gaps.
+- **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — Lem now has bounded native Org editing, metadata-aware Org/Markdown roam-node selection, the configured five roam capture templates with finalize/abort and deferred insertion, daily, journal, general Org capture, and agenda implementations. Org-roam database/backlink/autosync semantics and the full general capture/journal interfaces remain gaps.
 - **vundo, pulsar (recenter-on-jump), indent-bars, dirvish** UI niceties.
 - **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`) — Lem has OpenRouter streaming and CLI backend ports, while gptel presets, handoff/tool loops, OAuth backends, tracing, and generic MCP-client semantics remain gaps.
 

@@ -901,32 +901,38 @@ Returns one unique ID, aliases, the next line index, and validity."
           (return-from roam-unique-node-for-prompt-text nil))
         (setf match node)))))
 
+(defun roam-new-title-input-p (input nodes)
+  "Whether INPUT is a bounded nonblank title with no matching existing node."
+  (and (stringp input)
+       (plusp (length (string-trim '(#\Space #\Tab) input)))
+       (<= (length input) *roam-metadata-value-limit*)
+       (null (prescient-filter input nodes
+                               :key #'roam-node-search-text
+                               :category :roam
+                               :rank-p nil))))
+
 (defun prompt-for-note (prompt)
   (let ((nodes (note-nodes)))
-    (unless nodes
-      (message "No notes found under ~a" (roam-directory))
-      (return-from prompt-for-note nil))
     (let ((selected-cell (list nil)))
-      (prompt-for-string
-       prompt
-       :completion-function
-       (lambda (input)
-         (roam-completion-items nodes input selected-cell))
-       :test-function
-       (lambda (input)
-         (or (and (car selected-cell)
-                  (string= input (roam-node-prompt-text (car selected-cell))))
-             (setf (car selected-cell)
-                   (roam-unique-node-for-prompt-text input nodes))))
-       :edit-callback
-       (lambda (input)
-         (unless (and (car selected-cell)
-                      (string= input
-                               (roam-node-prompt-text (car selected-cell))))
-           (setf (car selected-cell) nil)))
-       :history-symbol 'lem-yath-roam
-       :special-keymap *roam-prompt-keymap*)
-      (values (car selected-cell) nodes))))
+      (let ((input
+              (prompt-for-string
+               prompt
+               :completion-function
+               (lambda (input)
+                 (roam-completion-items nodes input selected-cell))
+               :test-function
+               (lambda (input)
+                 (or (and (car selected-cell)
+                          (string= input
+                                   (roam-node-prompt-text
+                                    (car selected-cell))))
+                     (setf (car selected-cell)
+                           (roam-unique-node-for-prompt-text input nodes))
+                     (roam-new-title-input-p input nodes)))
+               :history-symbol 'lem-yath-roam
+               :special-keymap *roam-prompt-keymap*)))
+        (values (car selected-cell) nodes
+                (and (null (car selected-cell)) input))))))
 
 (defun roam-ensure-target-buffer-current (node)
   (alexandria:when-let
@@ -975,41 +981,9 @@ Returns one unique ID, aliases, the next line index, and validity."
             :do (write-char #\\ output)
           :do (write-char character output))))
 
-(define-command lem-yath-roam-find () ()
-  "Find/open a roam note (org-roam-node-find)."
-  (alexandria:when-let ((node (prompt-for-note "Roam node: ")))
-    (roam-visit-node node)))
-
 (define-command lem-yath-roam-random () ()
   "Open a random roam note (org-roam-node-random)."
   (let ((nodes (note-nodes)))
     (if nodes
         (roam-visit-node (elt nodes (random (length nodes))))
         (message "No notes found under ~a" (roam-directory)))))
-
-(define-command lem-yath-roam-insert () ()
-  "Insert an Org ID link or md-roam's configured title wiki link."
-  (alexandria:when-let ((selected (prompt-for-note "Insert link to: ")))
-    (let* ((file (ignore-errors (buffer-filename (current-buffer))))
-           (type (and file (pathname-type (pathname file))))
-           (org-p (and type (string-equal "org" type)))
-           (markdown-p (and type (string-equal "md" type))))
-      (unless (or org-p markdown-p)
-        (editor-error "Roam links can only be inserted in Org or Markdown files."))
-      (let* ((node (roam-resolve-node selected))
-             (title (roam-node-title node)))
-        (if org-p
-            (progn
-              (when (> (count (roam-node-id node) (note-nodes)
-                              :test #'string= :key #'roam-node-id)
-                       1)
-                (editor-error "The selected roam node ID is globally ambiguous."))
-              (insert-string
-               (current-point)
-               (format nil "[[id:~a][~a]]"
-                       (roam-node-id node)
-                       (roam-escape-link-text title '(#\\ #\])))))
-            (insert-string
-             (current-point)
-             (format nil "[[~a]]"
-                     (roam-escape-link-text title '(#\\ #\])))))))))

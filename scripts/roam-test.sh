@@ -19,6 +19,7 @@ export HOME="$root/home"
 export XDG_CACHE_HOME="$root/cache"
 export LEM_HOME="$root/lem-home/"
 export WORKDIR="$root/work"
+export TZ=UTC
 export LEM_YATH_COMPLETION_STATE_FILE="$root/completion-ranking.sexp"
 export LEM_YATH_ROAM_REPORT="$root/report"
 export LEM_YATH_ROAM_ORIGIN="$WORKDIR/origin.org"
@@ -226,6 +227,21 @@ open_roam_prompt() {
   else
     lem_wait_for "$session" 'Insert link to:' "$WAIT_TIMEOUT" >/dev/null
   fi
+}
+
+start_roam_capture() {
+  local action=$1 title=$2 template=$3
+  open_roam_prompt "$action" || return 1
+  tmux_cmd send-keys -t "$session" -l "$title"
+  lem_wait_for "$session" "${title}" "$WAIT_TIMEOUT" >/dev/null || return 1
+  lem_keys "$session" Enter
+  lem_wait_for "$session" 'Roam template:' "$WAIT_TIMEOUT" >/dev/null || return 1
+  lem_keys "$session" "$template"
+  lem_wait_for "$session" 'C-c C-c finalizes' "$WAIT_TIMEOUT" >/dev/null
+}
+
+invoke_save_buffer() {
+  tmux_cmd send-keys -t "$session" C-x C-s
 }
 
 fixture="$(lem-yath_lisp_string "$here/scripts/roam-fixture.lisp")"
@@ -513,6 +529,198 @@ if record_key F10 '^DIRTY ' &&
   fi
 else
   fail dirty-target-setup 'could not create the unsaved target-buffer state'
+fi
+
+reset_origin || fail capture-template-abort-origin 'could not restore template-menu origin'
+if open_roam_prompt f; then
+  tmux_cmd send-keys -t "$session" -l 'Pending Capture'
+  if lem_wait_for "$session" 'Pending Capture' "$WAIT_TIMEOUT" >/dev/null; then
+    lem_keys "$session" Enter
+  fi
+  if lem_wait_for "$session" 'Roam template:' "$WAIT_TIMEOUT" >/dev/null &&
+     record_key F4 '^REQUEST ' &&
+     report_is '^REQUEST ' \
+       'REQUEST active=yes title="Pending Capture" insert=no'; then
+    lem_keys "$session" C-g
+    if lem_wait_for "$session" 'Roam capture cancelled' "$WAIT_TIMEOUT" >/dev/null &&
+       record_key F4 '^REQUEST ' &&
+       report_is '^REQUEST ' 'REQUEST active=no' &&
+       record_key F6 '^CURRENT ' &&
+       report_is '^CURRENT ' 'CURRENT file=outside line=3'; then
+      pass capture-template-abort 'C-g cancelled the template menu at the exact origin'
+    else
+      fail capture-template-abort 'template-menu abort retained state or moved the origin'
+    fi
+  else
+    fail capture-template-abort 'missing title did not create a pending request'
+  fi
+else
+  fail capture-template-abort 'could not open a missing-title picker'
+fi
+
+abort_path="$roam/20260203040506-abort_concept.org"
+reset_origin || fail capture-abort-origin 'could not restore capture origin'
+if start_roam_capture f 'Abort Concept' c; then
+  if record_key F1 '^CAPTURE ' &&
+     report_is '^CAPTURE ' \
+       'CAPTURE active=yes path=20260203040506-abort_concept.org id=capture-001 title="Abort Concept" saved=no'; then
+    sleep 0.4
+    screen=$(lem_capture "$session")
+  else
+    screen=''
+  fi
+  if grep -Fq '#+filetags: :concept:' <<<"$screen" &&
+     grep -Fq '* Claim' <<<"$screen" &&
+     grep -Fq '* Context' <<<"$screen" &&
+     grep -Fq '* Links' <<<"$screen"; then
+    pass capture-template-ui 'missing title opened the selected concept template at %?'
+  else
+    fail capture-template-ui 'concept capture layout or session identity was wrong'
+  fi
+  invoke_save_buffer || true
+  if lem_wait_for "$session" 'Use C-c C-c to finalize' "$WAIT_TIMEOUT" >/dev/null &&
+     [ ! -e "$abort_path" ]; then
+    pass capture-save-guard 'ordinary save was refused before capture finalization'
+  else
+    fail capture-save-guard 'ordinary save bypassed capture finalization'
+  fi
+  send_chord C-c C-k
+  sleep 0.4
+  if [ ! -e "$abort_path" ] &&
+     record_key F1 '^CAPTURE ' && report_is '^CAPTURE ' 'CAPTURE active=no' &&
+     record_key F6 '^CURRENT ' &&
+     report_is '^CURRENT ' 'CURRENT file=outside line=3'; then
+    pass capture-abort 'C-c C-k removed the unsaved capture and restored origin'
+  else
+    fail capture-abort 'abort left a file, session, or changed origin'
+  fi
+else
+  fail capture-template-ui 'missing-title find did not enter capture'
+fi
+
+concept_path="$roam/20260203040506-fresh_concept.org"
+reset_origin || fail capture-find-origin 'could not restore find-capture origin'
+if start_roam_capture f 'Fresh Concept' c; then
+  tmux_cmd send-keys -t "$session" -l 'Captured claim'
+  if lem_wait_for "$session" 'Captured claim' "$WAIT_TIMEOUT" >/dev/null; then
+    send_chord C-c C-c
+  fi
+  if lem_wait_for "$session" 'Captured roam node:' "$WAIT_TIMEOUT" >/dev/null &&
+     [ -f "$concept_path" ] &&
+     grep -qF ':ID: capture-002' "$concept_path" &&
+     grep -qF '#+title: Fresh Concept' "$concept_path" &&
+     grep -qF '#+created: [2026-02-03 Tue 04:05]' "$concept_path" &&
+     grep -qF '#+filetags: :concept:' "$concept_path" &&
+     grep -qF 'Captured claim' "$concept_path" &&
+     record_key F6 '^CURRENT ' &&
+     report_is '^CURRENT ' \
+       'CURRENT file=20260203040506-fresh_concept.org line=9' &&
+     record_key F1 '^CAPTURE ' && report_is '^CAPTURE ' 'CAPTURE active=no'; then
+    pass capture-find-finalize 'find capture saved exact metadata/body and stayed on the node'
+  else
+    fail capture-find-finalize 'find capture did not finalize as the configured node'
+  fi
+else
+  fail capture-find-finalize 'concept capture could not be started'
+fi
+
+project_path="$roam/20260203040506-project-fresh_project.org"
+reset_origin || fail capture-insert-origin 'could not restore insert-capture origin'
+if start_roam_capture i 'Fresh Project' p; then
+  tmux_cmd send-keys -t "$session" -l 'Ship outcome'
+  if lem_wait_for "$session" 'Ship outcome' "$WAIT_TIMEOUT" >/dev/null; then
+    send_chord C-c C-c
+  fi
+  if lem_wait_for "$session" '\[\[id:capture-003\]\[Fresh Project\]\]' \
+       "$WAIT_TIMEOUT" >/dev/null &&
+     [ -f "$project_path" ] &&
+     grep -qF ':ID: capture-003' "$project_path" &&
+     grep -qF '#+filetags: :project:' "$project_path" &&
+     grep -qF '* Outcome' "$project_path" &&
+     grep -qF 'Ship outcome' "$project_path" &&
+     record_key F2 '^CREATED-ORG ' &&
+     report_is '^CREATED-ORG ' 'CREATED-ORG link=yes count=1 modified=yes'; then
+    pass capture-org-insert 'finalize returned to origin and inserted one ID link'
+  else
+    fail capture-org-insert 'deferred Org link or project file was incorrect'
+  fi
+  lem_keys "$session" u
+  sleep 0.3
+  if record_key F2 '^CREATED-ORG ' &&
+     report_is '^CREATED-ORG ' 'CREATED-ORG link=no count=0 modified=no' &&
+     [ -f "$project_path" ]; then
+    pass capture-org-insert-undo 'one undo removed only the link and kept the note'
+  else
+    fail capture-org-insert-undo 'capture insertion was not one origin undo step'
+  fi
+else
+  fail capture-org-insert 'project capture could not be started'
+fi
+
+markdown_capture_path="$roam/20260203040506-fresh_markdown.md"
+reset_markdown_origin ||
+  fail capture-markdown-origin 'could not restore Markdown capture origin'
+if start_roam_capture i 'Fresh Markdown' m; then
+  tmux_cmd send-keys -t "$session" -l 'Markdown capture body'
+  if lem_wait_for "$session" 'Markdown capture body' "$WAIT_TIMEOUT" >/dev/null; then
+    send_chord C-c C-c
+  fi
+  if lem_wait_for "$session" '\[\[Fresh Markdown\]\]' "$WAIT_TIMEOUT" >/dev/null &&
+     [ -f "$markdown_capture_path" ] &&
+     grep -qF 'id: capture-004' "$markdown_capture_path" &&
+     grep -qF 'title: Fresh Markdown' "$markdown_capture_path" &&
+     grep -qF 'created: "2026-02-03T04:05:06+0000"' \
+       "$markdown_capture_path" &&
+     grep -qF 'tags: []' "$markdown_capture_path" &&
+     grep -qF 'Markdown capture body' "$markdown_capture_path" &&
+     record_key F3 '^CREATED-MD ' &&
+     report_is '^CREATED-MD ' 'CREATED-MD link=yes count=1 modified=yes'; then
+    pass capture-markdown-insert 'Markdown template finalized with one title wiki link'
+  else
+    fail capture-markdown-insert 'Markdown capture file or deferred link was incorrect'
+  fi
+  lem_keys "$session" u
+  sleep 0.3
+  if record_key F3 '^CREATED-MD ' &&
+     report_is '^CREATED-MD ' 'CREATED-MD link=no count=0 modified=no' &&
+     [ -f "$markdown_capture_path" ]; then
+    pass capture-markdown-undo 'one undo removed the wiki link and kept the note'
+  else
+    fail capture-markdown-undo 'Markdown capture insertion was not one undo step'
+  fi
+else
+  fail capture-markdown-insert 'Markdown capture could not be started'
+fi
+
+collision_path="$roam/20260203040506-collision_node.org"
+reset_origin || fail capture-collision-origin 'could not restore collision origin'
+if start_roam_capture f 'Collision Node' n; then
+  printf '%s\n' 'EXTERNAL COLLISION CONTENT' >"$collision_path"
+  send_chord C-c C-c
+  collision_refused=no
+  if lem_wait_for "$session" 'target appeared on disk' "$WAIT_TIMEOUT" >/dev/null; then
+    if record_key F1 '^CAPTURE ' &&
+       report_is '^CAPTURE ' \
+         'CAPTURE active=yes path=20260203040506-collision_node.org id=capture-005 title="Collision Node" saved=no' &&
+       [ "$(cat "$collision_path")" = 'EXTERNAL COLLISION CONTENT' ]; then
+      collision_refused=yes
+    fi
+  fi
+  if [ "$collision_refused" = yes ]; then
+    pass capture-collision-refusal 'finalize refused a newly appeared target without overwrite'
+  else
+    fail capture-collision-refusal 'capture overwrote or lost a colliding target'
+  fi
+  send_chord C-c C-k
+  sleep 0.3
+  if record_key F1 '^CAPTURE ' && report_is '^CAPTURE ' 'CAPTURE active=no' &&
+     [ "$(cat "$collision_path")" = 'EXTERNAL COLLISION CONTENT' ]; then
+    pass capture-collision-abort 'abort kept the external collision and cleared session state'
+  else
+    fail capture-collision-abort 'collision cleanup changed external data or retained a session'
+  fi
+else
+  fail capture-collision-refusal 'collision capture could not be started'
 fi
 
 if grep -q '^STATIC PASS failures=0$' "$LEM_YATH_ROAM_REPORT" &&

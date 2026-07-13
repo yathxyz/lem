@@ -42,6 +42,7 @@
                              (:file "text-objects")))
                (:file "roam")
                (:file "notes")
+               (:file "roam-capture")
                (:file "find-name")
                (:file "tools")
                (:file "llm")
