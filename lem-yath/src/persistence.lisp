@@ -192,6 +192,7 @@
 
 (defun empty-persistence-state ()
   (list :version *persistence-format-version*
+        :bookmarks '()
         :places '()
         :kill-ring '()
         :literal-searches '()
@@ -204,6 +205,8 @@
                (evenp (length state))
                (eql (getf state :version) *persistence-format-version*))
           (list :version *persistence-format-version*
+                :bookmarks
+                (normalize-bookmark-state (getf state :bookmarks))
                 :places (normalize-places (getf state :places))
                 :kill-ring
                 (normalize-kill-entries (getf state :kill-ring))
@@ -244,7 +247,7 @@
         (error "Safe persistence requires the supported SBCL runtime")))))
 
 (defparameter *persistence-reader-atoms*
-  '("NIL" ":VERSION" ":PLACES" ":KILL-RING" ":LITERAL-SEARCHES"
+  '("NIL" ":VERSION" ":BOOKMARKS" ":PLACES" ":KILL-RING" ":LITERAL-SEARCHES"
     ":REGEXP-SEARCHES" ":PROMPT-HISTORIES" ":VI-LINE" ":VI-BLOCK"))
 
 (defun validate-persistence-reader-text (text)
@@ -760,6 +763,10 @@
                             :test #'string= :key #'first
                             :limit *save-place-limit*))))
     (list :version *persistence-format-version*
+          :bookmarks
+          (merge-bookmark-persistence-state
+           (getf newer :bookmarks)
+           (getf older :bookmarks))
           :places places
           :kill-ring
           (merge-kill-ring-state (getf newer :kill-ring)
@@ -778,6 +785,7 @@
 
 (defun collect-persistence-state ()
   (list :version *persistence-format-version*
+        :bookmarks (bookmark-persistence-snapshot)
         :places (copy-tree *saved-places*)
         :kill-ring
         (persistence-kill-ring-snapshot
@@ -786,22 +794,26 @@
         :regexp-searches (copy-list *regexp-search-history*)
         :prompt-histories (persistence-prompt-history-snapshot)))
 
-(defun apply-persistence-state (state &key restore-live-kill-ring)
+(defun apply-persistence-state
+    (state &key restore-live-kill-ring restore-bookmarks)
   (let ((state (normalize-persistence-state state)))
     (setf *saved-places* (copy-tree (getf state :places))
           *literal-search-history* (copy-list (getf state :literal-searches))
           *regexp-search-history* (copy-list (getf state :regexp-searches)))
     (when restore-live-kill-ring
       (restore-kill-ring (getf state :kill-ring)))
+    (when restore-bookmarks
+      (load-bookmark-persistence-state (getf state :bookmarks)))
     (restore-prompt-histories (getf state :prompt-histories))
     state))
 
 (defun load-persistence-state ()
-  "Safely load places, rings, and named prompt histories from disk."
+  "Safely load bookmarks, places, rings, and prompt histories from disk."
   (call-with-persistence-lock
    (lambda ()
      (apply-persistence-state (read-persistence-state-file)
-                              :restore-live-kill-ring t)))
+                              :restore-live-kill-ring t
+                              :restore-bookmarks t)))
   (setf *persistence-loaded-p* t
         *last-persistence-save-time* (get-internal-real-time))
   t)
@@ -817,9 +829,11 @@
               (collect-persistence-state)
               (read-persistence-state-file))))
        (write-persistence-state-file merged)
-       ;; Pull merged place/search/prompt state into this process.  Rebuilding
-       ;; the live kill ring here would disturb yank-pop rotation mid-session.
-       (apply-persistence-state merged :restore-live-kill-ring nil))))
+       ;; Pull merged bookmark/place/search/prompt state into this process.
+       ;; Rebuilding the kill ring would disturb yank-pop rotation mid-session.
+       (apply-persistence-state merged
+                                :restore-live-kill-ring nil
+                                :restore-bookmarks t))))
   (setf *forgotten-place-paths* '()
         *last-persistence-save-time* (get-internal-real-time))
   t)

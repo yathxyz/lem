@@ -58,6 +58,7 @@
                              (:file "salta")
                              (:file "timemachine")
                              (:file "llm-cli")))
+               (:file "bookmarks")
                (:file "persistence")
                (:file "vundo")
                (:file "prefix-help")

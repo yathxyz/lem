@@ -109,8 +109,8 @@ of writing `.fasl` files into the source tree.
   `src/workspace.lisp` (`scripts/direnv-test.sh`).
 - safe global refresh of externally changed clean files, stale-save protection
   for dirty buffers, and private cross-process persistence for file positions,
-  reviewed non-secret prompt histories, Vi-aware kills, and separate literal and
-  regexp search rings
+  bookmarks, reviewed non-secret prompt histories, Vi-aware kills, and separate
+  literal and regexp search rings
 - retained branching undo with the configured raised payload budgets and a
   three-row Unicode Vundo UI on `SPC u`; live previews support branch, stem,
   saved-node, mark/diff, save, rollback, and accept workflows while ordinary
@@ -170,10 +170,11 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 completion, completion-lifecycle, automatic-completion, Embark-style actions,
 editing, formatting, Orderless completion, snippets, LSP snippets, real installed
 language-server handshakes, daily-workflows, Direnv environment switching,
-electric-editing, UI parity, project navigation, VCS, persistence, retained undo/Vundo,
-project-scoped LSP lifecycle, LLM key dispatch, cursor/state parity, evil-snipe
-and Avy parity, screen-line/Evil parity, notes, roam, native Org, agenda, and parity-ledger checks. The ledger can
-also be validated directly, and the
+electric-editing, UI parity, project navigation, VCS, persistence, bookmarks,
+retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
+cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
+roam, native Org, agenda, and parity-ledger checks. The ledger can also be
+validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
 ```sh
@@ -198,6 +199,7 @@ nix run .#lsp-project-test
 nix run .#real-lsp-test
 nix run .#project-navigation-test
 nix run .#persistence-test
+nix run .#bookmark-test
 nix run .#vundo-test
 nix run .#editing-test
 nix run .#formatting-test
@@ -227,7 +229,9 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
 `daily-workflows`, `direnv`, `llm-keybinding`, `orderless-completion`, `snippets`, `lsp-snippets`,
-`lsp-project`, `real-lsp`, `project-navigation`, `persistence`, `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`, `interactive`, `structural`, `roam`, or
+`lsp-project`, `real-lsp`, `project-navigation`, `persistence`, `bookmarks`,
+`vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`,
+`interactive`, `structural`, `roam`, or
 `notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

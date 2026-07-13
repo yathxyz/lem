@@ -392,6 +392,7 @@
             direnv-test = mkTestApp "lem-yath-direnv-test" "direnv-test.sh";
             project-navigation-test = mkTestApp "lem-yath-project-navigation-test" "project-navigation-test.sh";
             persistence-test = mkTestApp "lem-yath-persistence-test" "persistence-test.sh";
+            bookmark-test = mkTestApp "lem-yath-bookmark-test" "bookmark-test.sh";
             electric-editing-test = mkTestApp "lem-yath-electric-editing-test" "electric-editing-test.sh";
             ui-parity-test = mkTestAppWithLem lemYath "lem-yath-ui-parity-test" "ui-parity-test.sh";
             vcs-test = mkTestAppWithLemAndInputs lemYath vcsRuntimeInputs "lem-yath-vcs-test" "vcs-test.sh";
@@ -431,6 +432,7 @@
             direnv = mkCheck "direnv" "direnv-test.sh";
             project-navigation = mkCheck "project-navigation" "project-navigation-test.sh";
             persistence = mkCheck "persistence" "persistence-test.sh";
+            bookmarks = mkCheck "bookmarks" "bookmark-test.sh";
             electric-editing = mkCheck "electric-editing" "electric-editing-test.sh";
             ui-parity = mkCheckWithLem lemYath "ui-parity" "ui-parity-test.sh";
             vcs = mkCheckWithLemAndInputs lemYath vcsRuntimeInputs "vcs" "vcs-test.sh";

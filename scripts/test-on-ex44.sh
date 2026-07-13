@@ -75,6 +75,9 @@ case "$test_name" in
   persistence)
     remote_command='nix run path:$PWD#persistence-test'
     ;;
+  bookmarks)
+    remote_command='nix run path:$PWD#bookmark-test'
+    ;;
   interactive)
     remote_command='nix run path:$PWD#interactive-test'
     ;;
