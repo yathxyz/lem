@@ -101,6 +101,21 @@ if start_session "$s1"; then
   fi
   close_prompt "$s1"
 
+  if open_query "$s1" find-file; then
+    screen=$(lem_capture "$s1")
+    if grep -Eq 'find-file[[:space:]]+\(SPC f f\).*Open the file\.' \
+         <<<"$screen"; then
+      pass leader-command-annotation \
+        'M-x preferred the configured SPC f f binding and command doc line'
+    else
+      fail leader-command-annotation \
+        'M-x omitted the configured leader binding for find-file' "$s1"
+    fi
+  else
+    fail leader-command-annotation 'could not query find-file in M-x' "$s1"
+  fi
+  close_prompt "$s1"
+
   if open_query "$s1" zyzzyva-annotation-only-token; then
     screen=$(lem_capture "$s1")
     if ! grep -Fq 'lem-yath-test-marginalia-command' <<<"$screen"; then

@@ -124,16 +124,28 @@
          (documentation symbol 'function)))
     (error () nil)))
 
+(defun completion-command-leader-binding (label)
+  "Return the first configured SPC binding for command LABEL, when available."
+  (when (and (boundp '*evil-leader-bindings*)
+             *evil-leader-bindings*)
+    (handler-case
+        (loop :for (keys command) :in *evil-leader-bindings*
+              :when (string-equal label (string command))
+                :return (format nil "SPC ~a" keys))
+      (error () nil))))
+
 (defun completion-annotate-command-item (item)
   (let* ((label (completion-label item))
          (binding (lem/completion-mode:completion-item-detail item))
+         (leader-binding (completion-command-leader-binding label))
          (documentation (completion-command-documentation label)))
     (completion-set-detail
      item
      (completion-join-annotation-fields
-      (and (stringp binding)
-           (plusp (length binding))
-           (format nil "(~a)" binding))
+      (cond
+        (leader-binding (format nil "(~a)" leader-binding))
+        ((and (stringp binding) (plusp (length binding)))
+         (format nil "(~a)" binding)))
       documentation))))
 
 ;;; Buffers ------------------------------------------------------------------
