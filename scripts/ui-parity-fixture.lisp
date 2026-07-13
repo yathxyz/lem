@@ -215,6 +215,21 @@
    (if (programming-buffer-p (current-buffer)) "yes" "no")
    (ui-parity-delimiter-attributes (current-buffer))))
 
+(define-command lem-yath-test-ui-rainbow-errors () ()
+  (alexandria:when-let ((path
+                         (uiop:getenv "LEM_YATH_UI_RAINBOW_ERROR_FILE")))
+    (switch-to-buffer (find-file-buffer path)))
+  (lem-core::syntax-scan-buffer (current-buffer))
+  (let ((attributes (ui-parity-delimiter-attributes (current-buffer))))
+    (ui-parity-log
+     "RAINBOW-ERRORS attributes=~{~a~^,~} colors=~{~a~^,~}"
+     attributes
+     (mapcar (lambda (attribute)
+               (if attribute
+                   (ui-parity-attribute-colors attribute)
+                   "none/none"))
+             attributes))))
+
 (defun ui-parity-wrap-buffer ()
   (alexandria:when-let ((path (uiop:getenv "LEM_YATH_UI_WRAP_FILE")))
     (let ((buffer (find-file-buffer path)))

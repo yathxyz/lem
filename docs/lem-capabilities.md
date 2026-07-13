@@ -1621,9 +1621,10 @@ leaving strings and comments to syntax highlighting. The theme supplies all
 nine default `rainbow-delimiters` depths with the exact colors resolved from the
 active Emacs Modus Vivendi Tinted theme, and show-paren remains active. The real
 TUI gate checks nine Lisp syntax properties and colors, mixed `()[]{}` nesting
-in Python, string/comment exclusion, reload idempotence, and a live matching-pair
-overlay. Unlike Emacs, unmatched or mismatched closers do not receive a
-dedicated rainbow error face, and Lem and Emacs syntax tables can differ.
+in Python, string/comment/escape exclusion, distinct mismatched and unmatched
+Modus faces (including negative parser depth), reload idempotence, and a live
+matching-pair overlay. Lem and Emacs syntax tables can still classify individual
+language constructs differently.
 
 ### Highlight current line — `src/highlight-line.lisp`. Editor variable
 `highlight-line` (default **t**, line 3) and `highlight-line-color` (line 4).

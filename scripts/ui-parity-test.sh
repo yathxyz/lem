@@ -13,12 +13,15 @@ export WORKDIR="$root/work"
 export LEM_YATH_UI_PARITY_REPORT="$root/report"
 export LEM_YATH_UI_CODE_FILE="$root/code.lisp"
 export LEM_YATH_UI_PROGRAMMING_FILE="$root/rainbow.py"
+export LEM_YATH_UI_RAINBOW_ERROR_FILE="$root/rainbow-errors.py"
 export LEM_YATH_UI_PROSE_FILE="$root/notes.md"
 export LEM_YATH_UI_WRAP_FILE="$root/wrap.txt"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR"
 printf '(((((((((rainbow)))))))))\n(defun answer (value)\n  (list :answer value "string")) ; comment\n' >"$LEM_YATH_UI_CODE_FILE"
 printf '%s\n' 'value = ({["ignored ( [ { } ] )"]})  # ignored ({[]})' \
   >"$LEM_YATH_UI_PROGRAMMING_FILE"
+printf '%s\n' 'mismatch = ([)]' 'unmatched = )(' 'escaped = \(' \
+  >"$LEM_YATH_UI_RAINBOW_ERROR_FILE"
 printf '# Notes\n\nplain prose\n' >"$LEM_YATH_UI_PROSE_FILE"
 {
   printf 'WRAP-BEGIN-'
@@ -133,6 +136,13 @@ if run_mx lem-yath-test-ui-programming-rainbow &&
   pass programming-rainbow "mixed delimiters use syntax depth while strings and comments remain untouched"
 else
   fail programming-rainbow "non-Lisp delimiter colors or syntax exclusions differed"
+fi
+
+if run_mx lem-yath-test-ui-rainbow-errors &&
+   wait_report '^RAINBOW-ERRORS attributes=PAREN-COLOR-1,PAREN-COLOR-2,RAINBOW-DELIMITER-MISMATCHED-ATTRIBUTE,PAREN-COLOR-1,RAINBOW-DELIMITER-UNMATCHED-ATTRIBUTE,RAINBOW-DELIMITER-UNMATCHED-ATTRIBUTE,NIL colors=#ffffff/none,#ff66ff/none,#ffffff/#7a6100,#ffffff/none,#ffffff/#9d1f1f,#ffffff/#9d1f1f,none/none$'; then
+  pass rainbow-errors "mismatched, unmatched, negative-depth, and escaped delimiters match Emacs"
+else
+  fail rainbow-errors "error delimiter classification or Modus colors differed"
 fi
 
 if run_mx lem-yath-test-ui-reload-display &&

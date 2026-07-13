@@ -9,6 +9,8 @@
 (define-attribute rainbow-delimiter-color-7)
 (define-attribute rainbow-delimiter-color-8)
 (define-attribute rainbow-delimiter-color-9)
+(define-attribute rainbow-delimiter-mismatched-attribute)
+(define-attribute rainbow-delimiter-unmatched-attribute)
 
 (lem-core:define-color-theme "modus-vivendi-tinted" ()
   (:display-background-mode :dark)
@@ -94,6 +96,10 @@
   (rainbow-delimiter-color-7 :foreground "#44df44")
   (rainbow-delimiter-color-8 :foreground "#79a8ff")
   (rainbow-delimiter-color-9 :foreground "#f78fe7")
+  (rainbow-delimiter-mismatched-attribute
+   :foreground "#ffffff" :background "#7a6100")
+  (rainbow-delimiter-unmatched-attribute
+   :foreground "#ffffff" :background "#9d1f1f")
 
   (lem-core:document-header1-attribute :foreground "#ffffff" :bold t)
   (lem-core:document-header2-attribute :foreground "#d2b580" :bold t)

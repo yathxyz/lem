@@ -29,6 +29,22 @@
 (defun rainbow-delimiter-code-p (point)
   (not (in-string-or-comment-p point)))
 
+(defun rainbow-delimiter-escaped-p (point syntax-table)
+  (with-point ((scan point))
+    (loop :with count := 0
+          :while (and (character-offset scan -1)
+                      (member
+                       (character-at scan)
+                       (lem/buffer/syntax-table:syntax-table-escape-chars
+                        syntax-table)))
+          :do (incf count)
+          :finally (return (oddp count)))))
+
+(defun rainbow-delimiter-put-attribute (point property-end attribute)
+  (move-point property-end point)
+  (character-offset property-end 1)
+  (put-text-property point property-end :attribute attribute))
+
 (defun rainbow-delimiter-coloring (start end)
   "Color syntax-table delimiters by nesting depth in programming buffers."
   (let* ((buffer (point-buffer start))
@@ -42,28 +58,42 @@
                    (property-end start))
         (line-start point)
         (line-end limit)
-        (let ((depth
-                (lem/buffer/internal::pps-state-paren-depth
-                 (syntax-ppss point))))
+        (let* ((state (syntax-ppss point))
+               (depth
+                 (lem/buffer/internal::pps-state-paren-depth state))
+               (stack
+                 (copy-list
+                  (lem/buffer/internal::pps-state-paren-stack state))))
           (loop :while (point< point limit)
                 :for character := (character-at point)
                 :for opening := (assoc character pairs)
                 :for closing := (rassoc character pairs)
-                :do (cond
-                      ((and opening (rainbow-delimiter-code-p point))
-                       (move-point property-end point)
-                       (character-offset property-end 1)
-                       (put-text-property
-                        point property-end :attribute
-                        (rainbow-delimiter-attribute depth))
-                       (incf depth))
-                      ((and closing (rainbow-delimiter-code-p point))
-                       (setf depth (max 0 (1- depth)))
-                       (move-point property-end point)
-                       (character-offset property-end 1)
-                       (put-text-property
-                        point property-end :attribute
-                        (rainbow-delimiter-attribute depth))))
+                :do (when (and (or opening closing)
+                               (rainbow-delimiter-code-p point)
+                               (not (rainbow-delimiter-escaped-p
+                                     point syntax-table)))
+                      (cond
+                        (opening
+                         (rainbow-delimiter-put-attribute
+                          point property-end
+                          (if (minusp depth)
+                              'rainbow-delimiter-unmatched-attribute
+                              (rainbow-delimiter-attribute depth)))
+                         (push character stack)
+                         (incf depth))
+                        (closing
+                         (rainbow-delimiter-put-attribute
+                          point property-end
+                          (cond
+                            ((not (plusp depth))
+                             'rainbow-delimiter-unmatched-attribute)
+                            ((eql (car stack) (car closing))
+                             (rainbow-delimiter-attribute (1- depth)))
+                            (t
+                             'rainbow-delimiter-mismatched-attribute)))
+                         (decf depth)
+                         (when (eql (car stack) (car closing))
+                           (pop stack)))))
                     (character-offset point 1)))))))
 
 ;; Upstream's hook is hard-coded to Common Lisp and round parentheses.  Own
