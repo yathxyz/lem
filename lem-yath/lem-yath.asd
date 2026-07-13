@@ -40,6 +40,7 @@
                              (:file "commands")
                              (:file "structure")
                              (:file "text-objects")))
+               (:file "roam")
                (:file "notes")
                (:file "find-name")
                (:file "tools")

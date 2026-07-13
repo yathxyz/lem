@@ -374,6 +374,7 @@
             structural-test = mkTestAppWithLem lemYath "lem-yath-structural-test" "structural-test.sh";
             screen-line-test = mkTestAppWithLem lemYath "lem-yath-screen-line-test" "screen-line-test.sh";
             notes-test = mkTestApp "lem-yath-notes-test" "notes-test.sh";
+            roam-test = mkTestApp "lem-yath-roam-test" "roam-test.sh";
             org-test = mkTestAppWithLem lemYath "lem-yath-org-test" "org-test.sh";
             org-operator-test = mkTestAppWithLem lemYath "lem-yath-org-operator-test" "org-operator-test.sh";
             agenda-test = mkTestAppWithLem lemYath "lem-yath-agenda-test" "agenda-test.sh";
@@ -412,6 +413,7 @@
             structural = mkCheckWithLem lemYath "structural" "structural-test.sh";
             screen-line = mkCheckWithLem lemYath "screen-line" "screen-line-test.sh";
             notes = mkCheck "notes" "notes-test.sh";
+            roam = mkCheck "roam" "roam-test.sh";
             org = mkCheckWithLem lemYath "org" "org-test.sh";
             org-operator = mkCheckWithLem lemYath "org-operator" "org-operator-test.sh";
             agenda = mkCheckWithLem lemYath "agenda" "agenda-test.sh";

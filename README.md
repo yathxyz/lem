@@ -146,8 +146,9 @@ of writing `.fasl` files into the source tree.
   the Jujutsu side is a read-only status/log view, while programming buffers get
   buffer-local Git markers and `SPC g t` supplies the audited git-timemachine
   revision-navigation workflow
-- roam-lite notes, root-level roam dailies, journal, and i/t/r capture over
-  `$WORKDIR`, plus public TODO capture over `$PUBLIC_ORG_DIR`
+- metadata-aware Org file/heading and pinned md-roam node completion with
+  find/insert/random workflows, plus root-level roam dailies, journal, and i/t/r
+  capture over `$WORKDIR` and public TODO capture over `$PUBLIC_ORG_DIR`
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope and modal Return/g/q navigation
 - streaming OpenRouter LLM client + claude/codex/grok CLI backends

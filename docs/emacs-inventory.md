@@ -352,7 +352,7 @@ to its top-level, non-hidden `.org` files. `initial-major-mode org-mode`.
 - Display template: `${file:30} :: ${title} ${tags:10}`.
 - `org-roam-completion-everywhere t`. `org-roam-file-extensions '("org" "md")`. `org-roam-list-files-commands '(fd fdfind rg find)`.
 - `org-roam-db-autosync-mode 1`. Excludes Syncthing `*.sync-conflict-*.org` files from indexing.
-- **md-roam** (`nobiot/md-roam`, custom build): `md-roam-mode 1`, `md-roam-file-extension "md"` — markdown notes participate in roam graph (YAML front-matter id/title/created/tags).
+- **md-roam** (`nobiot/md-roam` at `1113a568`, custom build): `md-roam-mode 1`, `md-roam-file-extension "md"` — Markdown notes participate through front-matter `id:`/`title:`, flow `ROAM_ALIASES`, and Zettlr `#tag`/`@tag` tokens. The configured default insertion form is `[[Title]]`.
 - Roam capture templates: `n` note, `c` concept (`:concept:`), `p` project (`:project:`), `s` source (under `references/`, `:source:`), `m` markdown note (`.md` with YAML front-matter).
 - **org-roam-dailies**: template `d` daily -> `%Y-%m-%d.org`. Bound via `SPC n r d t` / `SPC n r d d`.
 
@@ -474,7 +474,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **tree-sitter** highlighting (`treesit-auto`) — Lem has its own highlighting; map grammar coverage.
 - **Git**: magit (`SPC g g/G`) + git-gutter + git-timemachine; smart jj/git dispatch; majutsu (jj) if a Lem jj porcelain exists (likely a gap).
 - **dape** debugging (Python/Go/Rust/C) — likely partial/gap in Lem.
-- **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — Lem now has bounded native Org editing, capture, roam-file, daily, journal, and agenda implementations. Org-roam database/backlink semantics and the full capture/journal interfaces remain gaps.
+- **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — Lem now has bounded native Org editing, capture, metadata-aware Org/Markdown roam-node selection, daily, journal, and agenda implementations. Org-roam database/backlink semantics and the full capture/journal interfaces remain gaps.
 - **vundo, pulsar (recenter-on-jump), indent-bars, dirvish** UI niceties.
 - **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`) — Lem has OpenRouter streaming and CLI backend ports, while gptel presets, handoff/tool loops, OAuth backends, tracing, and generic MCP-client semantics remain gaps.
 

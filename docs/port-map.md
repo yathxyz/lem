@@ -57,8 +57,8 @@ Status legend:
 | git-timemachine | ported/partial | `SPC g t` opens rename-aware history at the translated source point; `C-k`/`C-j`, `g t g`, `g t t`, and `q` match the audited older/newer/numeric/fuzzy/return workflow under `scripts/vcs-test.sh`. The Evil-collection hash-copy and blame commands are not implemented. |
 | majutsu (jj) | ported/partial | packaged `jj` powers smart `SPC g g` dispatch and forced `SPC g J`, but only in a repository-specific, read-only status/log view (`src/git.lisp`); this is not a Majutsu porcelain and has no mutation UI. |
 | org (capture) | ported | `SPC o` → inbox/todo/readlist with CREATED property (`src/notes.lisp`) |
-| org-roam | ported/partial | find/insert/random over $WORKDIR/roam incl. .md (`src/notes.lisp`); no backlinks/db |
-| md-roam | partial | .md notes are discoverable, but YAML IDs/titles/tags and graph semantics are not indexed |
+| org-roam | ported/partial | bounded fresh file+heading node index with ID/title/alias/inherited-tag completion, exact find/random visits, and Org ID insertion (`src/roam.lisp`, `scripts/roam-test.sh`); no persistent DB, backlinks, autosync, or roam capture UI |
+| md-roam | partial | pinned front-matter ID/title/`ROAM_ALIASES`/Zettlr-tag indexing and `[[Title]]` insertion share the roam picker; no mixed-format graph DB, backlink/wiki-link UI, or duplicate-title disambiguation beyond pinned md-roam behavior |
 | org-roam-dailies | ported | `SPC n r d t` / `SPC n r d d` (`src/notes.lisp`) |
 | org-journal | ported | `SPC n j j`, same file layout + timestamp headings |
 | org-agenda / org-super-agenda | ported/partial | `SPC m a` scans the same existing `$WORKDIR`, `$PUBLIC_ORG_DIR`, and public `mcp/` roots as Emacs, using only top-level non-hidden `.org` files; it groups overdue/today/upcoming/unscheduled TODO entries and provides exact Return/g/q navigation with coalesced asynchronous refreshes (`src/apps/agenda.lisp`, `scripts/agenda-test.sh`). Active-timestamp events, COMMENT/archive filtering, arbitrary agenda dispatch, item editing/bulk actions, clocks, and the wider Org agenda UI remain gaps. |

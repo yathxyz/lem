@@ -1,15 +1,12 @@
-;;;; Notes layer: org-roam / org-roam-dailies / org-journal / org-capture,
-;;;; reduced to their actually-used workflows over the same on-disk layout:
-;;;;   $WORKDIR/roam/          org+md notes (roam, incl. md-roam)
+;;;; Notes layer: org-roam-dailies / org-journal / org-capture, reduced to
+;;;; their actually-used workflows over the same on-disk layout.  Roam note
+;;;; discovery and selection live separately in roam.lisp.
 ;;;;   $WORKDIR/roam/          dailies (%Y-%m-%d.org, no daily/ subdirectory)
 ;;;;   $WORKDIR/roam/journal/  org-journal (%Y%m%d.org)
 ;;;;   $WORKDIR/{inbox,todo,readlist}.org   capture targets
 ;;;;   $PUBLIC_ORG_DIR/inbox.org            public TODO capture target
 
 (in-package :lem-yath)
-
-(defun roam-directory ()
-  (uiop:ensure-directory-pathname (merge-pathnames "roam/" (workdir))))
 
 (defun public-org-directory ()
   "The public notes root, mirroring $PUBLIC_ORG_DIR (default ~/public-org)."
@@ -18,59 +15,6 @@
      (if (and configured (plusp (length configured)))
          configured
          (merge-pathnames "public-org/" (user-homedir-pathname))))))
-
-(defun note-files ()
-  "Relative paths of all org/md notes under the roam directory.
-Uses fd when available (as org-roam did), else find."
-  (let* ((root (roam-directory))
-         (command (if (executable-find "fd")
-                      (list "fd" "--type" "f" "--extension" "org" "--extension" "md"
-                            "." (namestring root))
-                      (list "find" (namestring root)
-                            "-name" "*.org" "-o" "-name" "*.md")))
-         (output (ignore-errors
-                   (uiop:run-program command :output :string
-                                             :ignore-error-status t))))
-    (loop :for line :in (uiop:split-string (or output "") :separator (string #\Newline))
-          :for trimmed := (string-trim " " line)
-          :unless (or (zerop (length trimmed))
-                      (search ".sync-conflict-" trimmed))
-            :collect (enough-namestring trimmed root))))
-
-(defun prompt-for-note (prompt)
-  (let ((files (note-files)))
-    (unless files
-      (message "No notes found under ~a" (roam-directory))
-      (return-from prompt-for-note nil))
-    (prompt-for-string prompt
-                       :completion-function (lambda (s) (prescient-filter s files))
-                       :test-function (lambda (s) (plusp (length s)))
-                       :history-symbol 'lem-yath-roam)))
-
-(define-command lem-yath-roam-find () ()
-  "Find/open a roam note (org-roam-node-find)."
-  (alexandria:when-let ((choice (prompt-for-note "Roam node: ")))
-    (find-file (merge-pathnames choice (roam-directory)))))
-
-(define-command lem-yath-roam-random () ()
-  "Open a random roam note (org-roam-node-random)."
-  (let ((files (note-files)))
-    (if files
-        (find-file (merge-pathnames (elt files (random (length files)))
-                                    (roam-directory)))
-        (message "No notes found under ~a" (roam-directory)))))
-
-(define-command lem-yath-roam-insert () ()
-  "Insert a link to a roam note (org-roam-node-insert).
-Org-style link in .org buffers, markdown-style otherwise."
-  (alexandria:when-let ((choice (prompt-for-note "Insert link to: ")))
-    (let* ((title (pathname-name (pathname choice)))
-           (file (ignore-errors (buffer-filename (current-buffer))))
-           (org-p (and file (string-equal "org" (pathname-type (pathname file))))))
-      (insert-string (current-point)
-                     (if org-p
-                         (format nil "[[file:~a][~a]]" choice title)
-                         (format nil "[~a](~a)" title choice))))))
 
 ;;; --- Org heading IDs -------------------------------------------------------
 
