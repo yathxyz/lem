@@ -397,7 +397,24 @@ done
 if [[ $(tmux_cmd display-message -p -t "$session" '#{pane_dead}' 2>/dev/null) != 1 ]]; then
   die exit-restore 'Lem did not exit cleanly'
 fi
-exit_status=$(tmux_cmd display-message -p -t "$session" '#{pane_dead_status}')
+exit_status=""
+exit_signal=""
+i=0
+while ((i < WAIT_TIMEOUT * 4)); do
+  exit_status=$(tmux_cmd display-message -p -t "$session" '#{pane_dead_status}')
+  exit_signal=$(tmux_cmd display-message -p -t "$session" '#{pane_dead_signal}')
+  if [[ -n $exit_status || -n $exit_signal ]]; then
+    break
+  fi
+  sleep 0.25
+  i=$((i + 1))
+done
+if [[ -n $exit_signal ]]; then
+  die exit-restore "Lem exited from signal $exit_signal"
+fi
+if [[ -z $exit_status ]]; then
+  die exit-restore 'tmux did not publish Lem exit metadata'
+fi
 if [[ $exit_status != 0 ]]; then
   die exit-restore "Lem exited with status $exit_status"
 fi
