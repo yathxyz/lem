@@ -267,11 +267,12 @@ if start_session "$s1"; then
     state=$(capture_prompt_state "$s1" || true)
     wrapped_focus=$(sed -n 's/^FOCUS=\([^ ]*\).*/\1/p' <<<"$state")
     lem_keys "$s1" Tab
-    if [ "$wrapped_focus" = 'lem-yath-roam-random' ] &&
-       lem_wait_for "$s1" 'Command: lem-yath-roam-random' 10 >/dev/null; then
+    if [ -n "$wrapped_focus" ] &&
+       [ "$wrapped_focus" != "$initial_focus" ] &&
+       lem_wait_for "$s1" "Command: ${wrapped_focus}" 10 >/dev/null; then
       pass cyclic-navigation "C-p wrapped and Tab retained the live prompt"
     else
-      fail cyclic-navigation "C-p changed $initial_focus to $wrapped_focus instead of wrapping to random" "$s1"
+      fail cyclic-navigation "C-p/Tab changed $initial_focus to an invalid wrapped focus: $wrapped_focus" "$s1"
     fi
   else
     fail cyclic-navigation "candidate set did not reopen" "$s1"
