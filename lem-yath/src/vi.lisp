@@ -137,41 +137,268 @@
       (insert-string e close)
       (insert-string s open))))
 
+(defun surround-quoted-state-p (state)
+  (member (pps-state-type state) '(:string :block-string :fence)))
+
+(defun surround-syntax-domain (point)
+  "Return POINT's syntax container, or :CODE outside quoted/comment domains."
+  (let* ((state (syntax-ppss point))
+         (start (pps-state-token-start-point state)))
+    (cond
+      ((and start (pps-state-string-p state))
+       (list :string (position-at-point start)))
+      ((and start (pps-state-comment-p state))
+       (list :comment (position-at-point start)))
+      ((and start (eq :fence (pps-state-type state)))
+       (list :fence (position-at-point start)))
+      (t
+       :code))))
+
+(defun surround-relevant-domain-p (domain target-domain)
+  "Whether DOMAIN can contain a target in TARGET-DOMAIN.
+
+Code delimiters can surround text inside a quoted or comment domain, while
+delimiters inside an unrelated syntax container must not impersonate code
+structure."
+  (or (eq domain :code)
+      (equal domain target-domain)))
+
+(defun surround-candidate-encloses-p (start end position)
+  (and (<= start position)
+       (< position end)))
+
+(defun surround-unescaped-character-p (point character)
+  (and (eql (character-at point) character)
+       (not (syntax-escape-point-p point 0))))
+
+(defun surround-string-state (point quote)
+  "Return POINT's syntax string state when its opener is QUOTE."
+  (labels ((matching-start (state)
+             (alexandria:when-let ((start
+                                    (and (surround-quoted-state-p state)
+                                         (pps-state-token-start-point state))))
+               (when (eql (character-at start) quote)
+                 state))))
+    (or (matching-start (syntax-ppss point))
+        (when (eql (character-at point) quote)
+          (with-point ((after point))
+            (when (character-offset after 1)
+              (alexandria:when-let ((state
+                                     (matching-start (syntax-ppss after))))
+                (when (point= (pps-state-token-start-point state) point)
+                  state))))))))
+
+(defun surround-string-start (point quote)
+  "Return the syntax string opener around POINT when it is QUOTE."
+  (alexandria:when-let ((state (surround-string-state point quote)))
+    (position-at-point (pps-state-token-start-point state))))
+
+(defun surround-syntax-string-candidate (point quote)
+  "Return the syntax string delimited by QUOTE around POINT as positions."
+  (alexandria:when-let ((start-position (surround-string-start point quote)))
+    (let ((buffer (point-buffer point))
+          (target-position (position-at-point point)))
+      (with-point ((start (buffer-start-point buffer))
+                   (scan (buffer-start-point buffer))
+                   (limit (buffer-end-point buffer)))
+        (move-to-position start start-position)
+        (move-point scan start)
+        (character-offset scan 1)
+        (loop :while (point< scan limit)
+              :when (and (surround-unescaped-character-p scan quote)
+                         (let* ((state (syntax-ppss scan))
+                                (token-start
+                                  (and (surround-quoted-state-p state)
+                                       (pps-state-token-start-point state))))
+                           (and token-start (point= token-start start))))
+                :do (let ((candidate
+                            (list start-position
+                                  (1+ (position-at-point scan)))))
+                      (return
+                        (when (surround-candidate-encloses-p
+                               (first candidate) (second candidate)
+                               target-position)
+                          candidate)))
+              :do (character-offset scan 1))))))
+
+(defun surround-syntax-string-boundary-p (point quote)
+  "Whether QUOTE at POINT opens or closes a syntax-table string."
+  (or (let* ((state (syntax-ppss point))
+             (start (and (surround-quoted-state-p state)
+                         (pps-state-token-start-point state))))
+        (and start (eql (character-at start) quote)))
+      (with-point ((after point))
+        (and (character-offset after 1)
+             (let* ((state (syntax-ppss after))
+                    (start (and (surround-quoted-state-p state)
+                                (pps-state-token-start-point state))))
+               (and start
+                    (point= start point)
+                    (eql (character-at start) quote)))))))
+
+(defun surround-asymmetric-candidate (point open close)
+  "Return the narrowest balanced OPEN/CLOSE pair enclosing POINT."
+  (let* ((buffer (point-buffer point))
+         (target-position (position-at-point point))
+         (target-domain (surround-syntax-domain point))
+         (stacks (make-hash-table :test 'equal)))
+    (with-point ((scan (buffer-start-point buffer))
+                 (limit (buffer-end-point buffer)))
+      (loop :while (point< scan limit)
+            :for opener-p := (surround-unescaped-character-p scan open)
+            :for closer-p := (surround-unescaped-character-p scan close)
+            :when (or opener-p closer-p)
+              :do (let ((domain (surround-syntax-domain scan)))
+                    (when (surround-relevant-domain-p domain target-domain)
+                      (cond
+                        (opener-p
+                         (push (position-at-point scan)
+                               (gethash domain stacks)))
+                        (closer-p
+                         (alexandria:when-let
+                             ((start (pop (gethash domain stacks))))
+                           (let ((candidate
+                                   (list start
+                                         (1+ (position-at-point scan)))))
+                             (when (surround-candidate-encloses-p
+                                    (first candidate) (second candidate)
+                                    target-position)
+                               (return candidate))))))))
+            :do (character-offset scan 1)))))
+
+(defun surround-symmetric-candidate (point quote)
+  "Return the narrowest unescaped QUOTE pair enclosing POINT."
+  ;; A one-character surround command cannot safely replace only the outer
+  ;; characters of a multi-character syntax delimiter such as Python's
+  ;; triple quote.  Leave it untouched until the surround grammar can carry
+  ;; complete delimiter strings.
+  (when (eq :block-string
+            (alexandria:when-let ((state
+                                   (surround-string-state point quote)))
+              (pps-state-type state)))
+    (return-from surround-symmetric-candidate nil))
+  (alexandria:when-let ((candidate
+                         (surround-syntax-string-candidate point quote)))
+    (return-from surround-symmetric-candidate candidate))
+  (let* ((buffer (point-buffer point))
+         (target-position (position-at-point point))
+         (target-domain (surround-syntax-domain point))
+         (opens (make-hash-table :test 'equal)))
+    (with-point ((scan (buffer-start-point buffer))
+                 (limit (buffer-end-point buffer)))
+      (loop :while (point< scan limit)
+            :when (surround-unescaped-character-p scan quote)
+              :do (let ((domain (surround-syntax-domain scan)))
+                    (when (and (surround-relevant-domain-p
+                                domain target-domain)
+                               (not (surround-syntax-string-boundary-p
+                                     scan quote)))
+                      (multiple-value-bind (start present-p)
+                          (gethash domain opens)
+                        (if present-p
+                            (let ((candidate
+                                    (list start
+                                          (1+ (position-at-point scan)))))
+                              (remhash domain opens)
+                              (when (surround-candidate-encloses-p
+                                     (first candidate) (second candidate)
+                                     target-position)
+                                (return candidate)))
+                            (setf (gethash domain opens)
+                                  (position-at-point scan))))))
+            :do (character-offset scan 1)))))
+
+(defun surround-candidate-points (buffer candidate)
+  (when candidate
+    (with-point ((start (buffer-start-point buffer))
+                 (end (buffer-start-point buffer)))
+      (when (and (move-to-position start (first candidate))
+                 (move-to-position end (second candidate)))
+        (values (copy-point start :temporary)
+                (copy-point end :temporary))))))
+
 (defun find-surrounding (open close)
-  "Nearest OPEN before point and CLOSE after point. Returns two points or NIL.
-Deliberately naive (no balancing) -- covers the common interactive cases."
-  (let ((here (current-point)))
-    (with-point ((back here)
-                 (fwd here))
-      (when (and (search-backward back open)
-                 (search-forward fwd close))
-        (values (copy-point back :temporary)
-                (copy-point fwd :temporary))))))
+  "Return the narrowest balanced OPEN/CLOSE pair enclosing point.
+
+Escaped delimiters are ignored.  Delimiters in unrelated strings, comments, or
+fences cannot pair with code delimiters, but code delimiters may still surround
+a target inside one of those syntax domains."
+  (unless (and (= 1 (length open)) (= 1 (length close)))
+    (editor-error "Only character surround pairs are supported"))
+  (let* ((point (current-point))
+         (open-character (char open 0))
+         (close-character (char close 0))
+         (candidate
+           (if (char= open-character close-character)
+               (surround-symmetric-candidate point open-character)
+               (surround-asymmetric-candidate
+                point open-character close-character))))
+    (surround-candidate-points (point-buffer point) candidate)))
+
+(defun surrounding-edit-ranges (start end open close trim-padding)
+  "Return the disjoint opener and closer ranges that should be replaced."
+  (with-point ((open-end start)
+               (close-start end)
+               (padded-open-end start))
+    (unless (and (character-offset open-end (length open))
+                 (character-offset close-start (- (length close)))
+                 (string= open (points-to-string start open-end))
+                 (string= close (points-to-string close-start end)))
+      (editor-error "Surrounding delimiters changed before editing"))
+    (when (and trim-padding
+               (eql (character-at close-start -1) #\Space))
+      (character-offset close-start -1))
+    (when (and trim-padding
+               (eql (character-at open-end) #\Space))
+      (move-point padded-open-end open-end)
+      (character-offset padded-open-end 1)
+      (when (point<= padded-open-end close-start)
+        (move-point open-end padded-open-end)))
+    (unless (point<= open-end close-start)
+      (editor-error "Surrounding delimiter ranges overlap"))
+    (values (copy-point start :temporary)
+            (copy-point open-end :temporary)
+            (copy-point close-start :temporary)
+            (copy-point end :temporary))))
+
+(defun ensure-surround-ranges-writable
+    (open-start open-end close-start close-end &key replacement)
+  "Preflight both disjoint surround mutations before changing either one."
+  (unless lem/buffer/internal:*inhibit-read-only*
+    (lem/buffer/internal::check-read-only-buffer
+     (point-buffer open-start))
+    (lem/buffer/internal::check-read-only-at-point
+     open-start (count-characters open-start open-end))
+    (lem/buffer/internal::check-read-only-at-point
+     close-start (count-characters close-start close-end))
+    ;; Replacement inserts where the ranges end up after deletion.  Adjacent
+    ;; read-only text can shift onto those points, so preflight that future
+    ;; state before changing the closer.
+    (when replacement
+      (lem/buffer/internal::check-read-only-at-point open-end 0)
+      (lem/buffer/internal::check-read-only-at-point close-end 0))))
 
 (defun remove-surrounding (start end open close trim-padding)
   "Remove OPEN and CLOSE at START and END, optionally removing inner spaces."
-  (character-offset end (- (length close)))
-  (delete-character end (length close))
-  (when (and trim-padding (eql (character-at end -1) #\Space))
-    (character-offset end -1)
-    (delete-character end 1))
-  (delete-character start (length open))
-  (when (and trim-padding (eql (character-at start) #\Space))
-    (delete-character start 1)))
+  (multiple-value-bind (open-start open-end close-start close-end)
+      (surrounding-edit-ranges start end open close trim-padding)
+    (ensure-surround-ranges-writable
+     open-start open-end close-start close-end)
+    (delete-between-points close-start close-end)
+    (delete-between-points open-start open-end)))
 
 (defun change-surrounding-pair (start end old-open old-close
                                 new-open new-close trim-padding)
   "Replace a surrounding pair without relying on points shifted by edits."
-  (character-offset end (- (length old-close)))
-  (delete-character end (length old-close))
-  (when (and trim-padding (eql (character-at end -1) #\Space))
-    (character-offset end -1)
-    (delete-character end 1))
-  (insert-string end new-close)
-  (delete-character start (length old-open))
-  (when (and trim-padding (eql (character-at start) #\Space))
-    (delete-character start 1))
-  (insert-string start new-open))
+  (multiple-value-bind (open-start open-end close-start close-end)
+      (surrounding-edit-ranges
+       start end old-open old-close trim-padding)
+    (ensure-surround-ranges-writable
+     open-start open-end close-start close-end :replacement t)
+    (delete-between-points close-start close-end)
+    (insert-string close-start new-close)
+    (delete-between-points open-start open-end)
+    (insert-string open-start new-open)))
 
 (define-command lem-yath-surround-delete () ()
   "Delete the nearest surrounding pair (ds in evil-surround)."
@@ -188,18 +415,17 @@ Deliberately naive (no balancing) -- covers the common interactive cases."
   "Change the nearest surrounding pair (cs in evil-surround)."
   (let ((old-char (read-vi-character "Change surround: ")))
     (multiple-value-bind (old-open old-close) (surround-delimiters old-char)
-      (multiple-value-bind (new-open new-close)
-          (surround-insertion-pair
-           (read-vi-character (format nil "Replace ~a...~a with: "
-                                      old-open old-close)))
       (multiple-value-bind (s e) (find-surrounding old-open old-close)
-        (cond ((and s e)
-               (change-surrounding-pair
-                s e old-open old-close new-open new-close
-                (spaced-surround-character-p old-char)))
-              (t
-               (message "No surrounding ~a...~a found"
-                        old-open old-close))))))))
+        (if (and s e)
+            (multiple-value-bind (new-open new-close)
+                (surround-insertion-pair
+                 (read-vi-character (format nil "Replace ~a...~a with: "
+                                            old-open old-close)))
+              (change-surrounding-pair
+               s e old-open old-close new-open new-close
+               (spaced-surround-character-p old-char)))
+            (message "No surrounding ~a...~a found"
+                     old-open old-close))))))
 
 (defun call-vi-operator (command argument key)
   "Run native vi operator COMMAND with ARGUMENT after restoring KEY."
