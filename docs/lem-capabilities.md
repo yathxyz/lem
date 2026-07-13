@@ -1614,13 +1614,16 @@ default via `lem/show-paren:enable`. Highlights matching paren.
 
 ### Nested delimiter colors — `extensions/lisp-mode/ext/paren-coloring.lisp`
 Upstream exposes six cycling parenthesis attributes and applies them only when
-the buffer's major mode is Common Lisp `lisp-mode`. Lem-yath enables that hook
-globally and maps the six attributes to the first six delimiter depths of the
-active Emacs Modus palette. Clojure has a separate, disabled upstream coloring
-implementation; Scheme/Racket, Emacs Lisp, and non-Lisp programming modes do
-not receive the configured rainbow treatment. Show-paren remains available in
-those modes. The UI gate checks six actual syntax properties, their resolved
-colors, and a live matching-pair overlay.
+the buffer's major mode is Common Lisp `lisp-mode`. Lem-yath disables that
+special-case hook and installs one syntax-table-driven hook for all programming
+buffers. It colors every mode-declared delimiter pair by nesting depth while
+leaving strings and comments to syntax highlighting. The theme supplies all
+nine default `rainbow-delimiters` depths with the exact colors resolved from the
+active Emacs Modus Vivendi Tinted theme, and show-paren remains active. The real
+TUI gate checks nine Lisp syntax properties and colors, mixed `()[]{}` nesting
+in Python, string/comment exclusion, reload idempotence, and a live matching-pair
+overlay. Unlike Emacs, unmatched or mismatched closers do not receive a
+dedicated rainbow error face, and Lem and Emacs syntax tables can differ.
 
 ### Highlight current line — `src/highlight-line.lisp`. Editor variable
 `highlight-line` (default **t**, line 3) and `highlight-line-color` (line 4).

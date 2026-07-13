@@ -6,6 +6,10 @@
 
 (defparameter *lem-yath-color-theme* "modus-vivendi-tinted")
 
+(define-attribute rainbow-delimiter-color-7)
+(define-attribute rainbow-delimiter-color-8)
+(define-attribute rainbow-delimiter-color-9)
+
 (lem-core:define-color-theme "modus-vivendi-tinted" ()
   (:display-background-mode :dark)
   (:foreground "#ffffff")
@@ -80,15 +84,16 @@
   (lem/prompt-window:prompt-attribute :foreground "#4ae2f0" :bold t)
   (lem/link::link-attribute :foreground "#79a8ff" :underline t)
 
-  ;; rainbow-delimiters' first six Modus depths.  Lem's Lisp renderer exposes
-  ;; six attributes and cycles after them; the remaining Emacs depths stay a
-  ;; documented limitation rather than receiving invented colors.
+  ;; rainbow-delimiters' nine default depths in Modus Vivendi Tinted.
   (lem-lisp-mode/paren-coloring:paren-color-1 :foreground "#ffffff")
   (lem-lisp-mode/paren-coloring:paren-color-2 :foreground "#ff66ff")
   (lem-lisp-mode/paren-coloring:paren-color-3 :foreground "#00eff0")
   (lem-lisp-mode/paren-coloring:paren-color-4 :foreground "#ff6b55")
   (lem-lisp-mode/paren-coloring:paren-color-5 :foreground "#efef00")
   (lem-lisp-mode/paren-coloring:paren-color-6 :foreground "#b6a0ff")
+  (rainbow-delimiter-color-7 :foreground "#44df44")
+  (rainbow-delimiter-color-8 :foreground "#79a8ff")
+  (rainbow-delimiter-color-9 :foreground "#f78fe7")
 
   (lem-core:document-header1-attribute :foreground "#ffffff" :bold t)
   (lem-core:document-header2-attribute :foreground "#d2b580" :bold t)

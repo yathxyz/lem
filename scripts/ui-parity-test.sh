@@ -12,10 +12,13 @@ export XDG_CACHE_HOME="$root/cache"
 export WORKDIR="$root/work"
 export LEM_YATH_UI_PARITY_REPORT="$root/report"
 export LEM_YATH_UI_CODE_FILE="$root/code.lisp"
+export LEM_YATH_UI_PROGRAMMING_FILE="$root/rainbow.py"
 export LEM_YATH_UI_PROSE_FILE="$root/notes.md"
 export LEM_YATH_UI_WRAP_FILE="$root/wrap.txt"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR"
-printf '((((((rainbow))))))\n(defun answer (value)\n  (list :answer value "string")) ; comment\n' >"$LEM_YATH_UI_CODE_FILE"
+printf '(((((((((rainbow)))))))))\n(defun answer (value)\n  (list :answer value "string")) ; comment\n' >"$LEM_YATH_UI_CODE_FILE"
+printf '%s\n' 'value = ({["ignored ( [ { } ] )"]})  # ignored ({[]})' \
+  >"$LEM_YATH_UI_PROGRAMMING_FILE"
 printf '# Notes\n\nplain prose\n' >"$LEM_YATH_UI_PROSE_FILE"
 {
   printf 'WRAP-BEGIN-'
@@ -106,9 +109,9 @@ fi
 
 if run_mx lem-yath-test-ui-theme-state &&
    wait_report '^THEME name=modus-vivendi-tinted foreground=#ffffff background=#0d0e1c region=#ffffff/#555a66 modeline=#ffffff/#484d67 inactive=#969696/#292d48 warning=#d0bc00/none string=#2fafff/none comment=#ef8386/none keyword=#79a8ff/none constant=#b6a0ff/none function=#f78fe7/none variable=#4ae2f0/none type=#11c777/none builtin=#feacd0/none line=#989898/#1d2235 active-line=#ffffff/#4a4f69 paren=#ffffff/#4f7f9f$' &&
-   wait_report '^RAINBOW attributes=PAREN-COLOR-1,PAREN-COLOR-2,PAREN-COLOR-3,PAREN-COLOR-4,PAREN-COLOR-5,PAREN-COLOR-6 colors=#ffffff/none,#ff66ff/none,#00eff0/none,#ff6b55/none,#efef00/none,#b6a0ff/none$' &&
+   wait_report '^RAINBOW attributes=PAREN-COLOR-1,PAREN-COLOR-2,PAREN-COLOR-3,PAREN-COLOR-4,PAREN-COLOR-5,PAREN-COLOR-6,RAINBOW-DELIMITER-COLOR-7,RAINBOW-DELIMITER-COLOR-8,RAINBOW-DELIMITER-COLOR-9 colors=#ffffff/none,#ff66ff/none,#00eff0/none,#ff6b55/none,#efef00/none,#b6a0ff/none,#44df44/none,#79a8ff/none,#f78fe7/none$' &&
    wait_report '^SHOW-PAREN enabled=yes timer=yes overlays=2 colors=#ffffff/#4f7f9f,#ffffff/#4f7f9f$'; then
-  pass theme "Modus semantic faces, six Common Lisp depths, and pair highlighting are active"
+  pass theme "Modus semantic faces, nine delimiter depths, and pair highlighting are active"
 else
   fail theme "theme attributes or rainbow delimiter properties differed"
 fi
@@ -125,8 +128,15 @@ else
   fail theme-render "ncurses exposed only $rendered_colors foreground classes"
 fi
 
+if run_mx lem-yath-test-ui-programming-rainbow &&
+   wait_report '^PROGRAM-RAINBOW mode=PYTHON-MODE programming=yes attributes=PAREN-COLOR-1,PAREN-COLOR-2,PAREN-COLOR-3,SYNTAX-STRING-ATTRIBUTE,SYNTAX-STRING-ATTRIBUTE,SYNTAX-STRING-ATTRIBUTE,SYNTAX-STRING-ATTRIBUTE,SYNTAX-STRING-ATTRIBUTE,SYNTAX-STRING-ATTRIBUTE,PAREN-COLOR-3,PAREN-COLOR-2,PAREN-COLOR-1,SYNTAX-COMMENT-ATTRIBUTE,SYNTAX-COMMENT-ATTRIBUTE,SYNTAX-COMMENT-ATTRIBUTE,SYNTAX-COMMENT-ATTRIBUTE,SYNTAX-COMMENT-ATTRIBUTE,SYNTAX-COMMENT-ATTRIBUTE$'; then
+  pass programming-rainbow "mixed delimiters use syntax depth while strings and comments remain untouched"
+else
+  fail programming-rainbow "non-Lisp delimiter colors or syntax exclusions differed"
+fi
+
 if run_mx lem-yath-test-ui-reload-display &&
-   wait_report '^DISPLAY-RELOAD theme=modus-vivendi-tinted wrap=no highlight=no frame=no rainbow-hooks=1$'; then
+   wait_report '^DISPLAY-RELOAD theme=modus-vivendi-tinted wrap=no highlight=no frame=no rainbow-hooks=1 upstream-hooks=0$'; then
   pass display-reload "theme and UI reload preserve one idempotent baseline"
 else
   fail display-reload "display reload changed state or duplicated hooks"

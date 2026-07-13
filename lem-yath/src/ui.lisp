@@ -1,7 +1,7 @@
 ;;;; UI baseline: relative programming line numbers, truncated long lines,
-;;;; no implicit tab/header row, no global current-line highlight, and the
-;;;; Common Lisp parentheses subset of rainbow-delimiters.  The palette lives
-;;;; in theme.lisp.
+;;;; no implicit tab/header row, no global current-line highlight, and
+;;;; syntax-aware rainbow delimiters in programming buffers.  The palette
+;;;; lives in theme.lisp.
 
 (in-package :lem-yath)
 
@@ -11,7 +11,69 @@
 (setf lem/line-numbers:*relative-line* t)
 (setf (variable-value 'lem/line-numbers:line-numbers :global) t)
 
-(setf (variable-value 'lem-lisp-mode/paren-coloring:paren-coloring :global) t)
+(defparameter *rainbow-delimiter-attributes*
+  #(lem-lisp-mode/paren-coloring:paren-color-1
+    lem-lisp-mode/paren-coloring:paren-color-2
+    lem-lisp-mode/paren-coloring:paren-color-3
+    lem-lisp-mode/paren-coloring:paren-color-4
+    lem-lisp-mode/paren-coloring:paren-color-5
+    lem-lisp-mode/paren-coloring:paren-color-6
+    rainbow-delimiter-color-7
+    rainbow-delimiter-color-8
+    rainbow-delimiter-color-9))
+
+(defun rainbow-delimiter-attribute (depth)
+  (aref *rainbow-delimiter-attributes*
+        (mod (max 0 depth) (length *rainbow-delimiter-attributes*))))
+
+(defun rainbow-delimiter-code-p (point)
+  (not (in-string-or-comment-p point)))
+
+(defun rainbow-delimiter-coloring (start end)
+  "Color syntax-table delimiters by nesting depth in programming buffers."
+  (let* ((buffer (point-buffer start))
+         (syntax-table (buffer-syntax-table buffer))
+         (pairs (and syntax-table
+                     (lem/buffer/syntax-table:syntax-table-paren-pairs
+                      syntax-table))))
+    (when (and pairs (programming-buffer-p buffer))
+      (with-point ((point start)
+                   (limit end)
+                   (property-end start))
+        (line-start point)
+        (line-end limit)
+        (let ((depth
+                (lem/buffer/internal::pps-state-paren-depth
+                 (syntax-ppss point))))
+          (loop :while (point< point limit)
+                :for character := (character-at point)
+                :for opening := (assoc character pairs)
+                :for closing := (rassoc character pairs)
+                :do (cond
+                      ((and opening (rainbow-delimiter-code-p point))
+                       (move-point property-end point)
+                       (character-offset property-end 1)
+                       (put-text-property
+                        point property-end :attribute
+                        (rainbow-delimiter-attribute depth))
+                       (incf depth))
+                      ((and closing (rainbow-delimiter-code-p point))
+                       (setf depth (max 0 (1- depth)))
+                       (move-point property-end point)
+                       (character-offset property-end 1)
+                       (put-text-property
+                        point property-end :attribute
+                        (rainbow-delimiter-attribute depth))))
+                    (character-offset point 1)))))))
+
+;; Upstream's hook is hard-coded to Common Lisp and round parentheses.  Own
+;; one generic hook instead, including after a live configuration reload.
+(setf (variable-value
+       'lem-lisp-mode/paren-coloring:paren-coloring :global) nil)
+(remove-hook (variable-value 'after-syntax-scan-hook :global)
+             'lem-lisp-mode/paren-coloring:paren-coloring)
+(add-hook (variable-value 'after-syntax-scan-hook :global)
+          'rainbow-delimiter-coloring)
 
 (defun programming-line-number-content (buffer point)
   (multiple-value-bind (computed-line active-line-p)

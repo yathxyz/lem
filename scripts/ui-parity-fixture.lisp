@@ -174,6 +174,18 @@
             :collect (text-property-at point :attribute)
           :do (character-offset point 1))))
 
+(defun ui-parity-delimiter-attributes (buffer)
+  (let ((pairs
+          (lem/buffer/syntax-table:syntax-table-paren-pairs
+           (buffer-syntax-table buffer))))
+    (with-point ((point (buffer-start-point buffer))
+                 (end (buffer-end-point buffer)))
+      (loop :while (point< point end)
+            :for character := (character-at point)
+            :when (or (assoc character pairs) (rassoc character pairs))
+              :collect (text-property-at point :attribute)
+            :do (character-offset point 1)))))
+
 (define-command lem-yath-test-ui-theme-state () ()
   (alexandria:when-let ((path (uiop:getenv "LEM_YATH_UI_CODE_FILE")))
     (switch-to-buffer (find-file-buffer path)))
@@ -192,6 +204,16 @@
    (mapcar (lambda (overlay)
              (ui-parity-attribute-colors (overlay-attribute overlay)))
            lem/show-paren::*brackets-overlays*)))
+
+(define-command lem-yath-test-ui-programming-rainbow () ()
+  (alexandria:when-let ((path (uiop:getenv "LEM_YATH_UI_PROGRAMMING_FILE")))
+    (switch-to-buffer (find-file-buffer path)))
+  (lem-core::syntax-scan-buffer (current-buffer))
+  (ui-parity-log
+   "PROGRAM-RAINBOW mode=~a programming=~a attributes=~{~a~^,~}"
+   (buffer-major-mode (current-buffer))
+   (if (programming-buffer-p (current-buffer)) "yes" "no")
+   (ui-parity-delimiter-attributes (current-buffer))))
 
 (defun ui-parity-wrap-buffer ()
   (alexandria:when-let ((path (uiop:getenv "LEM_YATH_UI_WRAP_FILE")))
@@ -360,13 +382,17 @@
              "long-lines-truncated-by-default")
       (check (not (variable-value 'highlight-line :global))
              "current-line-highlight-disabled")
-      (check (variable-value
-              'lem-lisp-mode/paren-coloring:paren-coloring :global)
-             "rainbow-delimiters-enabled")
+      (check (not (variable-value
+                   'lem-lisp-mode/paren-coloring:paren-coloring :global))
+             "lisp-only-rainbow-delimiters-disabled")
       (check (= 1 (ui-parity-hook-count
                    (variable-value 'after-syntax-scan-hook :global)
-                   'lem-lisp-mode/paren-coloring:paren-coloring))
+                   'rainbow-delimiter-coloring))
              "one-rainbow-delimiter-hook")
+      (check (zerop (ui-parity-hook-count
+                     (variable-value 'after-syntax-scan-hook :global)
+                     'lem-lisp-mode/paren-coloring:paren-coloring))
+             "no-lisp-only-rainbow-delimiter-hook")
       (check (and (string= "modus-vivendi-tinted" (current-theme))
                   (string= "#ffffff" (foreground-color))
                   (string= "#0d0e1c" (background-color)))
@@ -396,12 +422,15 @@
     (load (merge-pathnames "src/theme.lisp" root))
     (load (merge-pathnames "src/ui.lisp" root)))
   (ui-parity-log
-   "DISPLAY-RELOAD theme=~a wrap=~a highlight=~a frame=~a rainbow-hooks=~d"
+   "DISPLAY-RELOAD theme=~a wrap=~a highlight=~a frame=~a rainbow-hooks=~d upstream-hooks=~d"
    (current-theme)
    (if (variable-value 'line-wrap :global) "yes" "no")
    (if (variable-value 'highlight-line :global) "yes" "no")
    (if (variable-value 'lem/frame-multiplexer::frame-multiplexer :global)
        "yes" "no")
+   (ui-parity-hook-count
+    (variable-value 'after-syntax-scan-hook :global)
+    'rainbow-delimiter-coloring)
    (ui-parity-hook-count
     (variable-value 'after-syntax-scan-hook :global)
     'lem-lisp-mode/paren-coloring:paren-coloring)))
