@@ -137,6 +137,9 @@ of writing `.fasl` files into the source tree.
 - the current Modus Vivendi Tinted palette, truncated long lines, no global
   current-line highlight or startup tab header, `C-x t 2` tabs on demand, and
   six Modus-matched delimiter depths in Common Lisp buffers
+- `C-x C-b` grouped like the effective Ibuffer setup: ordered, first-match
+  org/tramp/emacs/ediff/dired/terminal/help groups, hidden empty groups, and a
+  Default tail, while retaining fuzzy filtering, marks, save/kill, and Return
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
   deduplication and timeout, explicit buffer ownership with save-as migration,
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,
@@ -175,7 +178,8 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 completion, completion-lifecycle, automatic-completion, Embark-style actions,
 editing, formatting, Orderless completion, snippets, LSP snippets, real installed
 language-server handshakes, daily-workflows, Direnv environment switching,
-electric-editing, UI parity, project navigation, VCS, persistence, bookmarks,
+electric-editing, grouped-buffer-list, UI parity, project navigation, VCS,
+persistence, bookmarks,
 retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
 roam, native Org, agenda, and parity-ledger checks. The ledger can also be

@@ -728,9 +728,16 @@ through the ncurses editor.
 - `M-x`: `execute-command` (bound `M-x`); command completion via `completion-command`
   (`prompt.lisp:151`).
 - Find file: `lem:find-file` (`C-x C-f`).
-- Buffer switch: `select-buffer` (`C-x b`), `list-buffers` (`C-x C-b`,
-  `src/ext/list-buffers.lisp`). The configured TUI verifies Buffer/File columns,
-  fuzzy narrowing, and Return-to-open; Emacs' saved Ibuffer groups remain absent.
+- Buffer switch: `select-buffer` (`C-x b`), while `C-x C-b` invokes
+  `lem-yath-list-buffers` (`src/buffer-list.lisp`). It partitions the native
+  marked multi-column chooser in the configured exclusive first-match
+  org/tramp/emacs/ediff/dired/terminal/help order, hides empty groups, preserves
+  recency within each group, and appends unmatched buffers as `Default`.
+  Fuzzy narrowing repeats group identity on each result; Return, mark/save/kill,
+  and control-character-safe display remain available. The real TUI verifies
+  classification, ordering, empty-group omission, filtering, selection, and
+  reload. Ibuffer's collapsible heading rows and wider sort/filter/format
+  commands are not reproduced.
 - Recent files: `M-g r` opens an annotated Lem persistent-MRU prompt after
   lem-yath sets the loaded
   history's 300-entry limit and normalizes oversized persisted histories to their

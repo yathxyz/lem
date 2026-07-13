@@ -46,6 +46,7 @@
                (:file "notes")
                (:file "roam-capture")
                (:file "find-name")
+               (:file "buffer-list")
                (:file "tools")
                (:file "llm")
                (:file "indent-guides")

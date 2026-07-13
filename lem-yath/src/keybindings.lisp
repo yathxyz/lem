@@ -194,6 +194,7 @@
   'lem-yath-find-recent-file)                           ; recentf + Marginalia
 (define-key *global-keymap* "M-s f" 'lem-yath-find-name) ; find-name-dired
 (define-key *global-keymap* "M-s g" 'lem/grep:grep)    ; M-s g grep
+(define-key *global-keymap* "C-x C-b" 'lem-yath-list-buffers) ; grouped ibuffer
 
 ;; keybindings.lisp is the system's last component; reaching here means the
 ;; whole port loaded.
