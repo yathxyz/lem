@@ -99,7 +99,7 @@ Status legend:
 | ibuffer | lem-builtin/partial | `list-buffers` (`C-x C-b`) provides Buffer/File columns, fuzzy narrowing, and Return-to-open; the configured org/tramp/emacs/ediff/dired/terminal/help saved groups are absent |
 | bookmarks (built-in) | ported | `lem-bookmark` retains `SPC b m` / `SPC RET`; `src/bookmarks.lisp` restores bookmarks at startup and saves them through the private atomic persistence transaction at clean exit. A three-way merge preserves independent additions and respects local updates/deletions across stale editor processes (`scripts/bookmark-test.sh`). |
 | avy | ported/partial | `SPC l/a/s` provide visible line, character, and symbol-start selection with balanced `a/s/d/f/g/h/j/k/l` floating labels, normal all-window and Visual current-window scope, closest case-folded character ordering, punctuation-aware symbols, wrapped/hidden-row handling, resize invalidation, raw-digit line fallback, cancellation, jumplist integration, and source non-mutation (`src/avy.lisp`, `scripts/avy-test.sh`). Default `x/X/t/m/n/y/Y/i/z/?` dispatch/help, exotic display and syntax geometry, and exact Emacs minibuffer presentation remain gaps. |
-| gcmh / no-littering / use-package / direnv / sops | n/a, ported/partial, or gap | SBCL needs no Emacs GC hack and no-littering/use-package do not map directly. Direnv is isolated in `src/direnv.lisp`: the current eligible buffer selects Lem's global process environment, explicit `direnv-allow` is available without auto-authorization, and `PATH` affects future subprocesses (`scripts/direnv-test.sh`). SOPS remains a gap. |
+| gcmh / no-littering / use-package / direnv / sops | n/a or ported/partial | SBCL needs no Emacs GC hack and no-littering/use-package do not map directly. Direnv is isolated in `src/direnv.lisp`: the current eligible buffer selects Lem's global process environment, explicit `direnv-allow` is available without auto-authorization, and `PATH` affects future subprocesses (`scripts/direnv-test.sh`). `src/sops.lisp` transparently decrypts existing local SOPS text files, installs an encrypting save writer, inhibits format-on-save, and fails closed on decryption errors (`scripts/sops-test.sh`); guided new-file creation and input-type overrides remain absent. |
 | editorconfig | ported/partial | the official CLI resolves hierarchy/inheritance for every steady-state local file buffer; Lem maps indentation, line endings, write charset, fill column, trailing whitespace, and final-newline policy (`src/editorconfig.lisp`, `scripts/formatting-test.sh`). Charset is applied only to subsequent writes, not initial decoding |
 | auto-revert / savehist / save-place / recentf (built-ins) | ported/partial | `src/persistence.lisp` safely polls every file buffer before commands, transactionally reloads only clean readable files up to a 64 MiB safety cap, protects stale saves, restores up to 600 local-file positions, and atomically persists bookmarks, allowlisted non-secret prompt histories, a 120-entry live/40-entry saved Vi-aware kill ring, and separate 16-entry literal/regexp search rings; recentf remains a 300-file MRU on `M-g r`. Idle-time/filesystem notifications, larger automatic reloads, directory-buffer positions, and broad non-file stale adapters remain gaps |
 | modus-vivendi-tinted (built-in) / doom-themes | ported/partial | the active Emacs startup theme is recreated natively in `src/theme.lisp`; resolved semantic colors are tested, while ncurses rendering is limited by the terminal color model and Lem has fewer face roles. `doom-themes` remains declared but inactive. |
@@ -162,6 +162,14 @@ Status legend:
   their launch environment, and worker threads may observe an intermediate
   multi-variable state or whichever buffer environment is active when they
   launch. `scripts/direnv-test.sh` supplies the focused ncurses evidence.
+- **SOPS file scope**: `src/sops.lisp` recognizes existing local YAML, JSON,
+  dotenv, INI, and text files through `sops filestatus`. Successful opens keep
+  plaintext only in the live buffer; the patched buffer-local writer sends it
+  to `sops encrypt --filename-override` and writes only returned ciphertext.
+  Failed decrypts remain read-only and retry through revert; failed encryption
+  leaves both the prior disk ciphertext and modified plaintext buffer intact.
+  The integration is synchronous, has no guided creation command or custom
+  input-type map, and uses persistence polling rather than file notifications.
 - **Org editing scope**: `.org` files use the native lem-yath Org mode. Its
   TUI-tested boundary covers semantic faces, non-destructive local/global
   folding, atomic hidden-line motion and reveal, safe heading insertion, the

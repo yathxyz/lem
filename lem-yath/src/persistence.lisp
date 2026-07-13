@@ -1050,7 +1050,10 @@
   (error "Safe persistence requires the supported SBCL runtime"))
 
 (defun stable-buffer-file-signature (buffer pathname)
-  "Return a full signature only when BUFFER matches a stable decoded file."
+  "Return BUFFER's stable on-disk identity.
+Ordinary buffers must encode to the file's bytes.  Active SOPS buffers instead
+track stable ciphertext because their deliberately decrypted text cannot match
+the visited file byte-for-byte."
   (handler-case
       (let ((before (file-state-signature pathname :digest t :full-digest t)))
         (case (first before)
@@ -1064,6 +1067,8 @@
           (:present)
           (otherwise
            (return-from stable-buffer-file-signature (list :unknown))))
+        (when (sops-buffer-active-p buffer)
+          (return-from stable-buffer-file-signature before))
         (multiple-value-bind (size digest)
             (buffer-output-fingerprint buffer)
           (let ((after

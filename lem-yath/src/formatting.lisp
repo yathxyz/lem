@@ -749,6 +749,7 @@ text and buffer and returns formatted text."
   ;; This hook owns every text-normalization mutation before the sole write.
   (formatting-configure-buffer buffer)
   (when (and (buffer-filename buffer)
+             (not (sops-buffer-active-p buffer))
              (not (buffer-value buffer 'lem-yath-format-before-save-active)))
     (setf (buffer-value buffer 'lem-yath-format-before-save-active) t
           (buffer-value buffer 'lem-yath-save-normalization-complete) nil)

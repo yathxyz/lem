@@ -13,6 +13,7 @@
                (:file "base")
                (:file "workspace")
                (:file "direnv")
+               (:file "sops")
                (:file "editing")
                (:file "cursor-state")
                (:file "vi")

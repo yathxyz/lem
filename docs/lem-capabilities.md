@@ -1123,6 +1123,27 @@ directory changes, denied files without auto-allow, explicit allow and manual
 refresh, hard timeout retention, malformed-output prevalidation, and recovery.
 The static production probe also covers successful empty export output.
 
+### Transparent SOPS editing — `lem-yath/src/sops.lisp` (verified approximation)
+
+Existing local `.yaml`, `.yml`, `.json`, `.env`, `.ini`, and `.txt` files pass
+through `sops filestatus` during file activation. Encrypted files are decrypted
+into the live buffer, while a small patched-core buffer writer replaces the
+ordinary save path and sends plaintext on stdin to `sops encrypt
+--filename-override`; only successful, nonempty ciphertext is written. The
+normal formatter is inhibited for these buffers. Persistence tracks the stable
+on-disk ciphertext identity, so external changes still trigger the SOPS-aware
+revert path rather than a false stale-save prompt.
+
+Decrypt failure leaves the original ciphertext read-only and installs revert as
+a retry. Encrypt failure aborts before disk writing, retaining both the old
+ciphertext and the modified plaintext buffer. SOPS stderr is drained but never
+shown because it may contain secret material. Calls use direct argv boundaries,
+a 300-second GNU timeout, and a 64 MiB accepted-output limit. The ncurses gate
+in `scripts/sops-test.sh` exercises successful open/save, plaintext fall-through,
+format inhibition, both failure/retry paths, external revert, and reload. Guided
+encrypted-file creation, custom input-type maps, remote files, and filesystem
+notifications remain outside this implementation.
+
 ---
 
 ## 5. LSP  (`extensions/lsp-mode/`, package `lem-lsp-mode`)
