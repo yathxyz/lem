@@ -16,6 +16,20 @@
 (defvar *avy-case-fold-search* t)
 (defvar *avy-single-candidate-jump* t)
 
+;; Keep this in the same order as the pinned Avy 20241101.1357 default.
+(defvar *avy-dispatch-alist*
+  '((#\x . :kill-move)
+    (#\X . :kill-stay)
+    (#\t . :teleport)
+    (#\m . :mark)
+    (#\n . :copy)
+    (#\y . :yank)
+    (#\Y . :yank-line)
+    (#\i . :ispell)
+    (#\z . :zap-to-char)))
+
+(defvar *avy-action* :goto)
+
 (defvar *avy-label-windows* nil)
 (defvar *avy-label-buffers* nil)
 (defvar *avy-session-active* nil)
@@ -414,6 +428,25 @@
              (or character key))
      :timeout nil)))
 
+(defun avy-action-name (action)
+  (ecase action
+    (:kill-move "kill-move")
+    (:kill-stay "kill-stay")
+    (:teleport "teleport")
+    (:mark "mark")
+    (:copy "copy")
+    (:yank "yank")
+    (:yank-line "yank-line")
+    (:ispell "ispell")
+    (:zap-to-char "zap-to-char")))
+
+(defun avy-show-dispatch-help ()
+  (show-message
+   (format nil "~{~c: ~a~^ ~}"
+           (loop :for (key . action) :in *avy-dispatch-alist*
+                 :append (list key (avy-action-name action))))
+   :timeout nil))
+
 (defun read-avy-line-number (initial-digit)
   "Read an absolute line without entering Lem's nested prompt Vi state."
   (loop :with digits := (princ-to-string initial-digit)
@@ -444,12 +477,22 @@
           (null (rest candidates)))
      (values (first candidates) :candidate))
     (t
-     (loop :with tree := (avy-balanced-tree candidates)
-           :do (avy-show-tree tree)
-               (let* ((key (read-avy-key))
+     (loop :with root-tree := (avy-balanced-tree candidates)
+           :with tree := root-tree
+           :with pending-key := nil
+           :do (unless pending-key
+                 (avy-show-tree tree))
+               (let* ((key (if pending-key
+                               (prog1 pending-key
+                                 (setf pending-key nil)
+                                 (clear-message))
+                               (read-avy-key)))
                       (character (key-to-char key))
                       (branch (and character
-                                   (assoc character tree :test #'char=))))
+                                   (assoc character tree :test #'char=)))
+                      (dispatch (and character
+                                     (assoc character *avy-dispatch-alist*
+                                            :test #'char=))))
                  (clear-avy-labels :redraw nil)
                  (cond
                    ((avy-abort-key-p key)
@@ -467,6 +510,14 @@
                        (read-avy-line-number
                         (digit-char-p character))
                        :goto-line)))
+                   (dispatch
+                    (setf *avy-action* (cdr dispatch)
+                          tree root-tree))
+                   ((and character (char= character #\?))
+                    (avy-show-dispatch-help)
+                    (redraw-display)
+                    (setf tree root-tree
+                          pending-key (read-avy-key)))
                    (t
                     (avy-invalid-key-message key))))))))
 
@@ -477,11 +528,85 @@
     (window-see window)
     candidate))
 
+(defun avy-item-end (candidate kind)
+  "Return the exclusive end of Avy's item at CANDIDATE for KIND."
+  (with-point ((end (avy-candidate-point candidate)))
+    (if (eq kind :line)
+        (line-end end)
+        (or (form-offset end 1)
+            (editor-error "No expression at the selected Avy target")))
+    (copy-point end :temporary)))
+
+(defun avy-item-text (candidate kind)
+  (points-to-string (avy-candidate-point candidate)
+                    (avy-item-end candidate kind)))
+
+(defun avy-return-to-origin (window point)
+  (switch-to-window window)
+  (move-point (current-point) point)
+  (window-see window))
+
+(defun avy-kill-item (candidate kind &key stay)
+  (let* ((start (avy-candidate-point candidate))
+         (end (avy-item-end candidate kind))
+         (text (points-to-string start end)))
+    (avy-jump-to-candidate candidate)
+    (kill-region (current-point) end)
+    (when stay
+      (just-one-space))
+    (message "Killed: ~a" text)
+    text))
+
+(defun perform-avy-action (action candidate kind origin-window origin-point)
+  "Apply ACTION to CANDIDATE, preserving Avy's origin semantics."
+  (ecase action
+    (:goto
+     (avy-jump-to-candidate candidate))
+    (:mark
+     (avy-jump-to-candidate candidate)
+     (set-cursor-mark (current-point) (current-point))
+     (move-point (current-point) (avy-item-end candidate kind)))
+    (:copy
+     (let ((text (avy-item-text candidate kind)))
+       (copy-to-clipboard-with-killring text)
+       (avy-return-to-origin origin-window origin-point)
+       (message "Copied: ~a" text)))
+    (:yank
+     (let ((text (avy-item-text candidate kind)))
+       (copy-to-clipboard-with-killring text)
+       (avy-return-to-origin origin-window origin-point)
+       (lem-core/commands/edit::yank-string (current-point) text)))
+    (:yank-line
+     (let ((text (avy-item-text candidate :line)))
+       (copy-to-clipboard-with-killring text)
+       (avy-return-to-origin origin-window origin-point)
+       (lem-core/commands/edit::yank-string (current-point) text)))
+    (:kill-move
+     (avy-kill-item candidate kind))
+    (:kill-stay
+     (avy-kill-item candidate kind :stay t)
+     (avy-return-to-origin origin-window origin-point))
+    (:teleport
+     (let ((text (avy-kill-item candidate kind :stay t)))
+       (avy-return-to-origin origin-window origin-point)
+       (save-excursion
+         (lem-core/commands/edit::yank-string (current-point) text))))
+    (:zap-to-char
+     (unless (eq (point-buffer origin-point)
+                 (point-buffer (avy-candidate-point candidate)))
+       (editor-error "Avy zap target must be in the current buffer"))
+     (avy-jump-to-candidate candidate)
+     (kill-region origin-point (current-point)))
+    (:ispell
+     (editor-error
+      "Avy spell correction is unavailable: no spell checker is configured"))))
+
 (defun perform-avy-jump (kind &key flip-scope)
   "Run the configured Avy selector KIND and move to its chosen target."
   (lem/transient::hide-transient)
   (clear-avy-labels :redraw nil)
   (let ((*avy-session-active* t)
+        (*avy-action* :goto)
         (*avy-window-size-changed* nil)
         (*window-size-change-functions*
           (copy-list *window-size-change-functions*)))
@@ -492,6 +617,7 @@
         (let* ((windows (avy-source-windows :flip-scope flip-scope))
                (target (unless (eq kind :line)
                          (read-avy-target-character)))
+               (origin-window (current-window))
                (origin (copy-point (current-point) :temporary))
                (candidates
                  (ecase kind
@@ -508,7 +634,8 @@
             (ecase result
               (:candidate
                (clear-message)
-               (avy-jump-to-candidate selection))
+               (perform-avy-action *avy-action* selection kind
+                                   origin-window origin))
               (:goto-line
                (clear-message)
                (goto-line selection))

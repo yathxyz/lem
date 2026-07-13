@@ -273,9 +273,12 @@ fallback, zero and singleton candidate sets retain Avy's behavior, and Escape
 or `C-g` removes every label. A size change invalidates the cached screen
 coordinates and aborts on the next Avy input. `scripts/avy-test.sh` verifies
 these paths, jumplist integration, reload cleanup, and source non-mutation in
-the real ncurses frontend. Avy's default `x/X/t/m/n/y/Y/i/z` dispatch actions
-and `?` help are not implemented; exotic display/syntax geometry and exact
-Emacs minibuffer presentation also remain approximate.
+the real ncurses frontend. Avy's default `x/X/t/m/n/y/Y/z` dispatch actions
+restart the selector and provide kill-and-move, kill-and-stay, teleport, mark,
+copy, yank, line-yank, and zap behavior; `?` displays the stock action map.
+The stock `i` key reports an explicit unavailable error because this setup has
+no spell-correction backend. Exotic display/syntax geometry and exact Emacs
+minibuffer presentation remain approximate.
 
 ### Options — `extensions/vi-mode/options.lisp`, README §Options
 Vim-like global options via `(setf (lem-vi-mode:option-value "name") val)` or `:set`.

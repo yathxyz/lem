@@ -138,27 +138,51 @@
          (= 3 (reduce #'max eighty-two :key #'length))
          (avy-test-prefix-free-p eighty-two))))
 
+(defun avy-test-dispatch-defaults-ok-p ()
+  (equal *avy-dispatch-alist*
+         '((#\x . :kill-move)
+           (#\X . :kill-stay)
+           (#\t . :teleport)
+           (#\m . :mark)
+           (#\n . :copy)
+           (#\y . :yank)
+           (#\Y . :yank-line)
+           (#\i . :ispell)
+           (#\z . :zap-to-char))))
+
 (define-command lem-yath-test-avy-static () ()
   (let* ((bindings (avy-test-bindings-ok-p))
          (motions (avy-test-motion-contracts-ok-p))
          (tree (avy-test-tree-contracts-ok-p))
+         (dispatch (avy-test-dispatch-defaults-ok-p))
          (defaults (and (equal *avy-keys*
                                '(#\a #\s #\d #\f #\g #\h #\j #\k #\l))
                         *avy-case-fold-search*
                         *avy-single-candidate-jump*))
          (attribute (ensure-attribute 'lem-yath-avy-lead-attribute nil))
-         (failures (count nil (list bindings motions tree defaults attribute))))
+         (failures
+           (count nil (list bindings motions tree dispatch defaults attribute))))
     (avy-test-log
-     "STATIC bindings=~a motions=~a tree=~a defaults=~a attribute=~a failures=~d"
+     (concatenate
+      'string
+      "STATIC bindings=~a motions=~a tree=~a dispatch=~a defaults=~a "
+      "attribute=~a failures=~d")
      (if bindings "yes" "no")
      (if motions "yes" "no")
      (if tree "yes" "no")
+     (if dispatch "yes" "no")
      (if defaults "yes" "no")
      (if attribute "yes" "no")
      failures)))
 
 (define-command lem-yath-test-avy-record () ()
   (let* ((buffer (current-buffer))
+         (mark (cursor-mark (current-point)))
+         (mark-point (and (lem/buffer/internal:mark-active-p mark)
+                          (lem/buffer/internal:mark-point mark)))
+         (kill (ignore-errors
+                 (lem/common/killring:peek-killring-item
+                  (current-killring) 0)))
          (left-side
            (lem-core::frame-leftside-window (current-frame))))
     (avy-test-log
@@ -166,7 +190,7 @@
       'string
       "STATE point=~d line=~d column=~d char=~a buffer=~a window=~d "
       "state=~a active=~a labels=~d label-buffers=~d frame-floats=~d left-side=~a "
-      "visible=~d map=~a "
+      "visible=~d map=~a mark=~a:~a kill=~a "
       "read-only=~a modified=~a tick=~d history=~d changes=~d text=~a")
      (position-at-point (current-point))
      (line-number-at-point (current-point))
@@ -185,6 +209,9 @@
            (t "live-other"))
      (length *avy-last-visible-labels*)
      (avy-test-label-map)
+     (if mark-point "yes" "no")
+     (if mark-point (position-at-point mark-point) -1)
+     (avy-test-encode kill)
      (if (buffer-read-only-p buffer) "yes" "no")
      (if (buffer-modified-p buffer) "yes" "no")
      (lem/buffer/internal:buffer-modified-tick buffer)

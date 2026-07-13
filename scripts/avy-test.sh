@@ -196,6 +196,7 @@ multi_file="$root/fixtures/multi.txt"
 symbol_file="$root/fixtures/symbols.lisp"
 line_file="$root/fixtures/lines.txt"
 wrap_file="$root/fixtures/wrap.txt"
+actions_file="$root/fixtures/actions.txt"
 
 for number in $(seq 1 12); do
   printf 'x-target-%02d alpha beta\n' "$number"
@@ -217,6 +218,8 @@ done >"$line_file"
   printf '\tx-end\nx-hidden\nx-visible\n'
 } >"$wrap_file"
 
+printf 'ORIGIN|\nalpha qone tail\nbeta qtwo tail\n' >"$actions_file"
+
 # Static contracts, exact 12 -> 4 label narrowing, composited ncurses output,
 # jump history, cancellation, resize cleanup, reload, and read-only invariants.
 primary="lem-yath-avy-primary-$id"
@@ -225,7 +228,7 @@ if start_session "$primary" "$multi_file" 'x-target-01'; then
   lem_keys "$primary" F11
   if wait_report_count '^STATIC ' "$((static_before + 1))" &&
      tail -1 "$LEM_YATH_AVY_REPORT" \
-       | grep -qE '^STATIC bindings=yes motions=yes tree=yes defaults=yes attribute=yes failures=0$'; then
+       | grep -qE '^STATIC bindings=yes motions=yes tree=yes dispatch=yes defaults=yes attribute=yes failures=0$'; then
     pass static-contracts "bindings, motion types, tree, defaults, and face agree"
   else
     fail static-contracts "static contracts diverged" "$primary"
@@ -477,6 +480,99 @@ if start_session "$lines" "$line_file" 'line 01 alpha'; then
     'line=5 column=0 char=l .*state=NORMAL active=no labels=0' "$lines"
 fi
 stop_session "$lines"
+
+# Stock Avy dispatch keys restart the full selector, then act on the selected
+# expression while preserving the original window/point where appropriate.
+actions="lem-yath-avy-actions-$id"
+if start_session "$actions" "$actions_file" 'ORIGIN|'; then
+  marker_before=$(report_count '^MARKER ')
+  lem_keys "$actions" F7
+  wait_report_count '^MARKER ' "$((marker_before + 1))" || true
+
+  send_keys "$actions" ' ' a q '?'
+  if lem_wait_for "$actions" \
+       'x: kill-move.*X: kill-stay.*i: ispell.*z: zap-to-ch' \
+       "$WAIT_TIMEOUT" >/dev/null; then
+    pass dispatch-help "stock action keys are shown without leaving selection"
+  else
+    fail dispatch-help "dispatch help was not shown" "$actions"
+  fi
+  send_keys "$actions" n s
+  record_state "$actions" || fail record "copy action state timed out" "$actions"
+  assert_state dispatch-copy \
+    'point=7 .*mark=no:-1 kill=qtwo .*text=ORIGIN\|\\nalpha qone tail\\nbeta qtwo tail\\n' \
+    "$actions"
+
+  lem_keys "$actions" F7
+  send_keys "$actions" ' ' a q y s
+  record_state "$actions" || fail record "yank action state timed out" "$actions"
+  assert_state dispatch-yank \
+    'kill=qtwo .*text=ORIGINqtwo\|\\nalpha qone tail\\nbeta qtwo tail\\n' \
+    "$actions"
+  send_keys "$actions" u
+
+  lem_keys "$actions" F7
+  send_keys "$actions" ' ' a q Y s
+  record_state "$actions" || fail record "yank-line action state timed out" "$actions"
+  assert_state dispatch-yank-line \
+    'kill=qtwo tail .*text=ORIGINqtwo tail\|\\nalpha qone tail\\nbeta qtwo tail\\n' \
+    "$actions"
+  send_keys "$actions" u
+
+  lem_keys "$actions" F7
+  send_keys "$actions" ' ' a q x s
+  record_state "$actions" || fail record "kill-move action state timed out" "$actions"
+  assert_state dispatch-kill-move \
+    'line=3 column=5 char=  .*kill=qtwo .*text=ORIGIN\|\\nalpha qone tail\\nbeta  tail\\n' \
+    "$actions"
+  send_keys "$actions" u
+
+  lem_keys "$actions" F7
+  send_keys "$actions" ' ' a q X s
+  record_state "$actions" || fail record "kill-stay action state timed out" "$actions"
+  assert_state dispatch-kill-stay \
+    'point=7 .*kill=qtwo .*text=ORIGIN\|\\nalpha qone tail\\nbeta tail\\n' \
+    "$actions"
+  send_keys "$actions" u
+
+  lem_keys "$actions" F7
+  send_keys "$actions" ' ' a q t s
+  record_state "$actions" || fail record "teleport action state timed out" "$actions"
+  assert_state dispatch-teleport \
+    'kill=qtwo .*text=ORIGINqtwo\|\\nalpha qone tail\\nbeta tail\\n' \
+    "$actions"
+  send_keys "$actions" u
+
+  lem_keys "$actions" F7
+  send_keys "$actions" ' ' a q m s
+  record_state "$actions" || fail record "mark action state timed out" "$actions"
+  assert_state dispatch-mark \
+    'line=3 column=9 char=  .*mark=yes:[0-9]+ .*text=ORIGIN\|\\nalpha qone tail\\nbeta qtwo tail\\n' \
+    "$actions"
+  send_keys "$actions" Escape
+
+  lem_keys "$actions" F7
+  send_keys "$actions" ' ' a q i s
+  if lem_wait_for "$actions" 'spell correction is unavailable' "$WAIT_TIMEOUT" \
+       >/dev/null; then
+    pass dispatch-ispell-unavailable \
+      "stock key reports the missing configured spell backend"
+  else
+    fail dispatch-ispell-unavailable "missing backend was not explicit" "$actions"
+  fi
+  record_state "$actions" || fail record "ispell action state timed out" "$actions"
+  assert_state dispatch-ispell-invariants \
+    'point=7 .*text=ORIGIN\|\\nalpha qone tail\\nbeta qtwo tail\\n' \
+    "$actions"
+
+  lem_keys "$actions" F7
+  send_keys "$actions" ' ' a q z s
+  record_state "$actions" || fail record "zap action state timed out" "$actions"
+  assert_state dispatch-zap \
+    'kill=\|\\nalpha qone tail\\nbeta  .*text=ORIGINqtwo tail\\n' \
+    "$actions"
+fi
+stop_session "$actions"
 
 # Normal state sees all text windows; Evil visual state remains current-window
 # only.  The two windows deliberately show the same source to make counts exact.

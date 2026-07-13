@@ -69,7 +69,9 @@ of writing `.fasl` files into the source tree.
   floating labels over visible line, character, and symbol targets. Normal state
   searches every ordinary or side text window, Visual stays in the current
   window, wrapped and hidden rows are respected, and the display never mutates
-  source buffers
+  source buffers. During selection, `x/X/t/m/n/y/Y/z` provide Avy's default
+  kill, teleport, mark, copy, yank, and zap actions, while `?` shows the action
+  keys; `i` reports that no spell backend is configured
 - Prescient-style literal/regexp/initialism filtering and persistent learned
   ranking in command, buffer, and custom prompts; file prompts retain Lem's
   path-aware matching and gain the same ranking
