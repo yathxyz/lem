@@ -51,6 +51,7 @@
                (:file "indent-guides")
                (:file "theme")
                (:file "centered-view")
+               (:file "window-history")
                (:file "ui")
                (:module "apps"
                 :components ((:file "agenda")

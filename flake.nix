@@ -402,6 +402,7 @@
             ui-parity-test = mkTestAppWithLem lemYath "lem-yath-ui-parity-test" "ui-parity-test.sh";
             indent-guides-test = mkTestAppWithLem lemYath "lem-yath-indent-guides-test" "indent-guides-test.sh";
             centered-view-test = mkTestAppWithLem lemYath "lem-yath-centered-view-test" "centered-view-test.sh";
+            window-history-test = mkTestAppWithLem lemYath "lem-yath-window-history-test" "window-history-test.sh";
             help-test = mkTestApp "lem-yath-help-test" "help-test.sh";
             sops-test = mkTestApp "lem-yath-sops-test" "sops-test.sh";
             vcs-test = mkTestAppWithLemAndInputs lemYath vcsRuntimeInputs "lem-yath-vcs-test" "vcs-test.sh";
@@ -447,6 +448,7 @@
             ui-parity = mkCheckWithLem lemYath "ui-parity" "ui-parity-test.sh";
             indent-guides = mkCheckWithLem lemYath "indent-guides" "indent-guides-test.sh";
             centered-view = mkCheckWithLem lemYath "centered-view" "centered-view-test.sh";
+            window-history = mkCheckWithLem lemYath "window-history" "window-history-test.sh";
             help = mkCheck "help" "help-test.sh";
             sops = mkCheck "sops" "sops-test.sh";
             vcs = mkCheckWithLemAndInputs lemYath vcsRuntimeInputs "vcs" "vcs-test.sh";

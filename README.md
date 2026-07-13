@@ -54,6 +54,10 @@ of writing `.fasl` files into the source tree.
 - state-aware terminal cursors and a genuine buffer-local Evil-style Emacs
   state on `C-z`: red-box normal, green-bar insert, cyan-box Emacs, portable
   visual/replace shapes, Emacs mark semantics, and exact prior-state return
+- Winner-style window history on `C-c Left` / `C-c Right`: each tab frame keeps
+  a bounded 200-layout route over split topology, proportions, displayed
+  buffers, selection, and scroll state while retaining live buffer points;
+  restored proportions adapt to terminal resizes
 - Evil's visual-line policy on `SPC y v`: wrapped buffers swap screen/logical
   `j/k`, `gj/gk`, endpoints, insert/append, operators, registers, paste, and
   `V`, with a focused ncurses gate; Lem hard-wraps at display width rather than

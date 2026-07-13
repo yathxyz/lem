@@ -91,7 +91,7 @@ Status legend:
 | display-line-numbers (built-in) | ported | relative numbers render in saved and unsaved programming buffers, compose with other gutters, and stay out of prose and utility buffers (`src/ui.lisp`, `scripts/ui-parity-test.sh`) |
 | centered-view-mode (custom) | ported | `SPC y c` toggles a buffer-local `Center` mode at configurable width 100. A narrow pinned display API supplies balanced per-window margins to drawing, wrapping, horizontal scrolling, and screen-line geometry; resize, split, narrow-window, reload, continuation-row, and restoration behavior are covered by `scripts/centered-view-test.sh` (`src/centered-view.lisp`, `patches/lem-centered-content-width.patch`). |
 | truncate-lines / visual-line-mode / hl-line-mode (built-ins) | ported/partial | `src/ui.lisp` starts with long lines truncated and disables Lem's upstream current-line highlight, matching the active Emacs baseline; `SPC y v` retains buffer-local wrap toggling and activates the configured modal row policy (`scripts/ui-parity-test.sh`, `scripts/screen-line-test.sh`). Emacs word-wrap and Lem display-width wrapping can choose different row boundaries. |
-| tab-bar / winner-mode (built-ins) | partial | no tab header is shown at startup; `C-x t 2` lazily enables Lem's frame multiplexer and creates a tab. Winner-style window-layout undo/redo is absent (`src/ui.lisp`, `scripts/ui-parity-test.sh`). |
+| tab-bar / winner-mode (built-ins) | ported/partial | no tab header is shown at startup; `C-x t 2` lazily enables Lem's frame multiplexer and creates a tab. `C-c Left` / `C-c Right` traverse a bounded, frame-local Winner-style history of ordinary split topology, proportions, buffers, selection, and view positions while preserving live buffer points (`src/window-history.lisp`, `scripts/window-history-test.sh`). Lem's tabs remain frame-multiplexer approximations, and transient/side/attached windows are deliberately outside the history. |
 | dirvish | lem-builtin | `directory-mode` + filer |
 | find-name-dired (built-in) | ported/partial | `M-s f` asynchronously fills a persistent, read-only `*Find*` buffer with safely escaped rows backed by exact paths (`src/find-name.lisp`); Dired marking, long columns, file operations, and process cancellation remain gaps |
 | electric-pair-mode / delete-selection-mode (built-ins) | ported/partial | syntax-table delimiter/quote pairing plus Unicode smart quotes, local balance reuse/skip, numeric prefixes, ordinary region replacement, Emacs-style opener/quote region wrapping, and preflighted adjacent-pair Backspace in Emacs or Vi insert editing; pair deletion preserves completion, prompt, snippet, Paredit, read-only, kill-ring, undo, and Vi-state lifecycles. An unmatched embedded quote is escaped to keep the Lisp string valid instead of reproducing Lispy's raw interior quote, while full forward balance scanning, negative-prefix paired Backspace, Emacs's destructive wide-selection quirk, and zero-result prompt recovery remain gaps (`src/electric-pair.lisp`, `scripts/electric-editing-test.sh`) |
@@ -117,8 +117,11 @@ Status legend:
   Common Lisp only; other modes retain matching-pair highlighting rather than
   Emacs's all-`prog-mode` rainbow coverage.
 - **Tabs and layout history**: startup correctly has no tab row and `C-x t 2`
-  creates one on demand, but Lem's frame multiplexer is not a complete Emacs tab
-  implementation and there is no winner-mode layout history.
+  creates one on demand. The frame multiplexer remains an approximation of
+  Emacs tabs, but each frame now has independent, bounded Winner-style ordinary
+  window history on `C-c Left` / `C-c Right`. Floating, prompt, side, header,
+  and attached windows retain subsystem ownership rather than entering history;
+  configurations containing dead or boring buffers are skipped as a unit.
 - **Surround grammar**: standard `ys`/`ds`/`cs` and visual `S` work, including
   common padded delimiters and syntax-context-aware balanced character pairs.
   Tag/function prompts and full multi-character delimiter editing remain absent;

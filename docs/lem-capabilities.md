@@ -1610,8 +1610,18 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   retains `C-x t` as the reachable tab/frame prefix, and makes `C-x t 2` (also
   `C-x t c`) enable the multiplexer and create a tab on demand. Upstream's global
   `C-z` prefix remains installed, while state-local Evil-compatible `C-z` takes
-  precedence in Vi buffers. There is no winner-style window-layout undo/redo
-  history. There is also `src/tabbar-config.lisp`.
+  precedence in Vi buffers. `lem-yath/src/window-history.lisp` adds a separate
+  200-entry history to every live frame. `C-c Left` and `C-c Right` rebuild the
+  ordinary window tree from recorded split types and proportions, restore exact
+  buffer identity, selected leaf, and marker-tracked view starts, preserve each
+  buffer's live point, coalesce consecutive identical commands, scale proportions
+  after terminal resize, prune dead frames and old configurations, and skip
+  unavailable or `*Completions*` configurations. Prompt, floating, side, header,
+  and attached windows are not captured, so their owning subsystems keep their
+  existing lifecycle. `scripts/window-history-test.sh` drives nested mixed splits,
+  buffer changes, collapse, multi-step undo/redo, live point preservation, resize,
+  coalescing, the exact bound, reload, and independent tab histories through the
+  real ncurses editor. There is also `src/tabbar-config.lisp`.
 - Window splits/commands: `split-active-window-vertically`/`-horizontally`,
   `delete-other-windows` (`C-x 1`), `other-window`/`next-window` (`C-x o`),
   `delete-active-window` (`C-x 0`) — `src/commands/window.lisp`. Floating windows
