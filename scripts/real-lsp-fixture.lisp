@@ -48,6 +48,15 @@
          :connection-mode :stdio
          :command '("harper-ls" "--stdio")
          :program-environment "LEM_YATH_REAL_LSP_HARPER")
+   (list :id "csharp"
+         :directory "csharp/"
+         :file "Main.cs"
+         :mode 'csharp-mode
+         :spec-class 'lem-yath-csharp-spec
+         :language-id "csharp"
+         :connection-mode :stdio
+         :command '("csharp-ls")
+         :program-environment "LEM_YATH_REAL_LSP_CSHARP")
    (list :id "java"
          :directory "java/"
          :file "src/main/java/example/Main.java"
@@ -81,6 +90,7 @@
   '(("rust-analyzer" . "LEM_YATH_REAL_LSP_RUST_ANALYZER")
     ("pyright-langserver" . "LEM_YATH_REAL_LSP_PYRIGHT")
     ("harper-ls" . "LEM_YATH_REAL_LSP_HARPER")
+    ("csharp-ls" . "LEM_YATH_REAL_LSP_CSHARP")
     ("nixd" . "LEM_YATH_REAL_LSP_NIXD")
     ("jdtls" . "LEM_YATH_REAL_LSP_JDTLS")
     ("gopls" . "LEM_YATH_REAL_LSP_GOPLS")
@@ -575,6 +585,8 @@
            (- *real-lsp-test-workspace-configuration-count*
               (real-lsp-test-current-configuration-count current)))
          (failures '()))
+    (when (string= id "csharp")
+      (maybe-pull-current-buffer-diagnostics))
     (flet ((check (condition label)
              (unless condition (push label failures))))
       (check (eq :ready (lem-lsp-mode::workspace-state workspace))
@@ -582,15 +594,27 @@
       (check (eq workspace (lem-lsp-mode::buffer-workspace buffer nil))
              "buffer-workspace")
       (check (lem-lsp-mode/client:alive-p client) "client-alive")
+      (when (string= id "csharp")
+        (check (plusp (length (lem-lsp-mode::buffer-diagnostic-overlays buffer)))
+               "csharp-diagnostics"))
       (when (string= id "markdown")
         (check (plusp configuration-count)
                "workspace-configuration-request")))
     (real-lsp-test-report
-     "STABLE id=~a ok=~a state=~a client-alive=~a configuration-requests=~d failures=~{~a~^,~}"
+     (concatenate
+      'string
+      "STABLE id=~a ok=~a state=~a client-alive=~a diagnostics=~d "
+      "pull-provider=~a pull-last=~a pull-in-flight=~a "
+      "configuration-requests=~d failures=~{~a~^,~}")
      id
      (real-lsp-test-yes-no (null failures))
      (lem-lsp-mode::workspace-state workspace)
      (real-lsp-test-yes-no (lem-lsp-mode/client:alive-p client))
+     (length (lem-lsp-mode::buffer-diagnostic-overlays buffer))
+     (real-lsp-test-yes-no (workspace-pull-diagnostics-p workspace))
+     (or (buffer-value buffer 'lem-yath-pull-diagnostics-last-tick) "none")
+     (real-lsp-test-yes-no
+      (buffer-value buffer 'lem-yath-pull-diagnostics-in-flight))
      configuration-count
      (nreverse failures))))
 

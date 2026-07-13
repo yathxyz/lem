@@ -129,6 +129,7 @@
             ++ lib.optionals pkgs.stdenv.isLinux [ xdg-utils ];
 
           lspRuntimeInputs = with pkgs; [
+            csharp-ls
             gopls
             harper
             jdt-language-server
@@ -254,6 +255,7 @@
             export LEM_YATH_REAL_LSP_RUST_ANALYZER=${lib.getExe pkgs.rust-analyzer}
             export LEM_YATH_REAL_LSP_PYRIGHT=${lib.getExe' pkgs.pyright "pyright-langserver"}
             export LEM_YATH_REAL_LSP_HARPER=${lib.getExe pkgs.harper}
+            export LEM_YATH_REAL_LSP_CSHARP=${lib.getExe pkgs.csharp-ls}
             export LEM_YATH_REAL_LSP_NIXD=${lib.getExe pkgs.nixd}
             export LEM_YATH_REAL_LSP_NIXPKGS_SOURCE=${nixpkgs}
             export LEM_YATH_REAL_LSP_GOPLS=${lib.getExe pkgs.gopls}

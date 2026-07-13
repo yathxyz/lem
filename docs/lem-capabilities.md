@@ -1162,6 +1162,24 @@ notifications remain outside this implementation.
 
 ## 5. LSP  (`extensions/lsp-mode/`, package `lem-lsp-mode`)
 
+Lem-yath adds automatic C# support for `.cs` and `.csx`: its native
+`csharp-mode` supplies C-like indentation, comments, strings, keyword/operator
+highlighting, and a `csharp-ls` spec rooted at the nearest `.sln`, `.csproj`, or
+`.git` marker. The packaged server uses stdio and LSP 3.17 pull diagnostics;
+full reports feed the same diagnostic overlays as push diagnostics, unchanged
+reports preserve them, stale responses are discarded, and server refresh
+requests invalidate the cached result. Because csharp-ls can return an empty
+report while Roslyn is still loading without sending a later refresh, that
+specific initial state is retried for at most 30 seconds. The installed-wrapper
+gate obtains a real `MissingType` semantic diagnostic and verifies server
+cleanup.
+
+This is intentionally partial parity with Emacs `csharp-mode`/
+`csharp-ts-mode`: Lem-yath has no C# tree-sitter mode. It acknowledges dynamic
+file-watch registration and work-done progress creation so conforming servers
+can continue, but it does not provide filesystem notifications or render a
+progress UI.
+
 ### Enable — `lsp-mode.lisp:260` (`define-minor-mode lsp-mode`)
 A language spec auto-adds `enable-lsp-mode` to the mode's hook
 (`define-language-spec` macro, `lsp-mode.lisp:1832-1841`), so opening a file in a mode

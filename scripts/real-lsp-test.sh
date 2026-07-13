@@ -65,6 +65,7 @@ mkdir -p "$HOME" "$LEM_HOME" "$XDG_CACHE_HOME" "$WORKDIR" \
   "$LEM_YATH_REAL_LSP_FIXTURES/rust/src" \
   "$LEM_YATH_REAL_LSP_FIXTURES/python" \
   "$LEM_YATH_REAL_LSP_FIXTURES/markdown/.git" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/csharp" \
   "$LEM_YATH_REAL_LSP_FIXTURES/nix" \
   "$LEM_YATH_REAL_LSP_FIXTURES/java/src/main/java/example" \
   "$LEM_YATH_REAL_LSP_FIXTURES/go" \
@@ -91,6 +92,21 @@ printf '%s\n' 'value: int = 1' \
 
 printf '%s\n' '# Real LSP fixture' '' 'This sentence is deliberately small.' \
   >"$LEM_YATH_REAL_LSP_FIXTURES/markdown/README.md"
+printf '%s\n' \
+  '<Project Sdk="Microsoft.NET.Sdk">' \
+  '  <PropertyGroup>' \
+  '    <TargetFramework>net9.0</TargetFramework>' \
+  '  </PropertyGroup>' \
+  '</Project>' \
+  >"$LEM_YATH_REAL_LSP_FIXTURES/csharp/Fixture.csproj"
+printf '%s\n' \
+  'namespace Fixture;' \
+  '' \
+  'public class Main' \
+  '{' \
+  '    public MissingType Value { get; set; }' \
+  '}' \
+  >"$LEM_YATH_REAL_LSP_FIXTURES/csharp/Main.cs"
 printf '%s\n' \
   '<project xmlns="http://maven.apache.org/POM/4.0.0">' \
   '  <modelVersion>4.0.0</modelVersion>' \
@@ -132,6 +148,7 @@ required_programs=(
   "LEM_YATH_REAL_LSP_RUST_ANALYZER:rust-analyzer"
   "LEM_YATH_REAL_LSP_PYRIGHT:pyright-langserver"
   "LEM_YATH_REAL_LSP_HARPER:harper-ls"
+  "LEM_YATH_REAL_LSP_CSHARP:csharp-ls"
   "LEM_YATH_REAL_LSP_NIXD:nixd"
   "LEM_YATH_REAL_LSP_JDTLS:jdtls"
   "LEM_YATH_REAL_LSP_GOPLS:gopls"
@@ -176,6 +193,23 @@ fail() {
 
 report_line() {
   grep -E "$1" "$LEM_YATH_REAL_LSP_REPORT" 2>/dev/null | tail -1
+}
+
+report_count() {
+  grep -Ec "$1" "$LEM_YATH_REAL_LSP_REPORT" 2>/dev/null || true
+}
+
+wait_report_count() {
+  local pattern=$1 expected=$2 timeout=${3:-10} index=0 count
+  while ((index < timeout * 4)); do
+    count=$(report_count "$pattern")
+    if ((count >= expected)); then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
 }
 
 wait_report() {
@@ -238,7 +272,7 @@ invoke_mx() {
 
 fixture="$(lem-yath_lisp_string "$here/scripts/real-lsp-fixture.lisp")"
 startup_file="$LEM_YATH_REAL_LSP_FIXTURES/rust/src/main.rs"
-expected_fixture_state='FIXTURE ready=yes boot=yes cases=7 command-line-file=yes command-line-workspace=yes lem-home=yes caller-evals=yes'
+expected_fixture_state='FIXTURE ready=yes boot=yes cases=8 command-line-file=yes command-line-workspace=yes lem-home=yes caller-evals=yes'
 
 # LEM_BIN must be the installed lem-yath wrapper.  It loads its own immutable
 # configuration before this test fixture; loading the repository init here
@@ -271,7 +305,7 @@ if (( ! aborted )); then
   done
 fi
 
-for case_id in rust python nix markdown java go terraform; do
+for case_id in rust python nix markdown csharp java go terraform; do
   if ((aborted)); then
     break
   fi
@@ -323,16 +357,33 @@ for case_id in rust python nix markdown java go terraform; do
   # Keep the real server alive past initialization so an immediate post-ready
   # crash cannot be mistaken for the PID death caused by explicit shutdown.
   sleep 1
-  if ! invoke_mx lem-yath-test-real-lsp-record-stable; then
-    fail "$case_id-stable" 'could not inspect post-initialize server health'
-    aborted=1
-    break
+  stable_attempts=1
+  if [ "$case_id" = csharp ]; then
+    # Roslyn loads the project after initialize.  Keep proving that the real
+    # client stays responsive while waiting for its first diagnostics batch.
+    stable_attempts=30
   fi
-
-  stable_state=$(wait_report "^STABLE id=${case_id} " 15)
+  stable_state=
+  for ((attempt = 0; attempt < stable_attempts; attempt++)); do
+    stable_before=$(report_count "^STABLE id=${case_id} ")
+    if ! invoke_mx lem-yath-test-real-lsp-record-stable; then
+      break
+    fi
+    if wait_report_count "^STABLE id=${case_id} " "$((stable_before + 1))" 5; then
+      stable_state=$(report_line "^STABLE id=${case_id} ")
+      if [[ "$stable_state" == *' ok=yes '* ]]; then
+        break
+      fi
+    fi
+    sleep 0.5
+  done
   if [[ "$stable_state" == *' ok=yes '* &&
         "$stable_state" == *' state=READY client-alive=yes '* ]]; then
-    pass "$case_id-stable" 'server remained live after initialization'
+    if [ "$case_id" = csharp ]; then
+      pass "$case_id-stable" 'server remained live and published C# diagnostics'
+    else
+      pass "$case_id-stable" 'server remained live after initialization'
+    fi
   else
     fail "$case_id-stable" "unexpected post-initialize state: ${stable_state:-missing}"
     aborted=1

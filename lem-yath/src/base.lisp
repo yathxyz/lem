@@ -97,6 +97,7 @@ ON-EXIT, if given, is called on the editor thread with the exit code."
                        ("nix-spec" lem-nix-mode:nix-mode)
                        ("python-spec" lem-python-mode:python-mode)
                        ("markdown-spec" lem-markdown-mode:markdown-mode)
+                       ("csharp-spec" csharp-mode)
                        ("java-spec" lem-java-mode:java-mode)))
         (destructuring-bind (label mode) entry
           (let ((spec (lem-lsp-mode/spec:get-language-spec mode)))

@@ -28,6 +28,7 @@
                (:file "actions")
                (:file "snippets")
                (:file "lsp-snippets")
+               (:file "csharp-mode")
                (:file "ide")
                (:file "editorconfig")
                (:file "formatting")

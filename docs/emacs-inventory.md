@@ -481,7 +481,10 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **Fonts/UI basics**: JetBrainsMono, relative line numbers, rainbow-delimiters, which-key-equivalent.
 
 ### Tier 2 — important IDE features
-- **LSP via Eglot** per language (nixd, rust-analyzer, gopls, terraform-ls, manually selected pyright, harper-ls, eclipse-jdt) — Lem has `lem-lsp-mode`; replicate server list and the nixd custom workspace config + Go/Rust/Python/Nix coverage.
+- **LSP via Eglot** per language (nixd, rust-analyzer, gopls, terraform-ls,
+  manually selected pyright, harper-ls, eclipse-jdt, and an unpinned Eglot
+  default for C#) — Lem has `lem-lsp-mode`; replicate server selection and the
+  nixd custom workspace config plus Go/Rust/Python/Nix/C# coverage.
 - **apheleia format-on-save** (`SPC b f`) and **flycheck/flymake** diagnostics policy.
 - **tree-sitter** highlighting (`treesit-auto`) — Lem has its own highlighting; map grammar coverage.
 - **Git**: magit (`SPC g g/G`) + git-gutter + git-timemachine; smart jj/git dispatch; majutsu (jj) if a Lem jj porcelain exists (likely a gap).

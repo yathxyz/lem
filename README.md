@@ -146,10 +146,10 @@ of writing `.fasl` files into the source tree.
   and `SPC p s` workspace-symbol
   search with annotated narrowing; optional Lisp-v2 connections remain globally
   selected when loaded
-- installed LSP stack for Rust, Python, Markdown, Nix, Go, Terraform, and
-  manually enabled Java: rust-analyzer, pyright, harper-ls, flake-aware nixd,
-  gopls, terraform-ls, and JDTLS, plus the Rust toolchain required by
-  rust-analyzer
+- installed LSP stack for Rust, Python, Markdown, C#, Nix, Go, Terraform, and
+  manually enabled Java: rust-analyzer, pyright, harper-ls, csharp-ls,
+  flake-aware nixd, gopls, terraform-ls, and JDTLS, plus the Rust toolchain
+  required by rust-analyzer
 - Legit (Magit approximation) plus packaged `jj` smart dispatch on `SPC g g`;
   the Jujutsu side is a read-only status/log view, while programming buffers get
   buffer-local Git markers, Git status includes navigable tracked-file
