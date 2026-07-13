@@ -77,9 +77,27 @@
      (if visual-p "yes" "no")
      (expreg-test-string-hex selection))))
 
+(define-command lem-yath-test-expreg-stale-contract () ()
+  (alexandria:when-let
+      ((session
+         (buffer-value
+          (current-buffer) 'lem-yath-expand-region-session)))
+    (setf (expand-region-session-tick session)
+          (1- (expand-region-session-tick session))))
+  (expreg-contract)
+  (destructuring-bind (start end) (lem-vi-mode/visual:visual-range)
+    (expreg-test-log
+     "STALE visual=~a selection-hex=~a"
+     (if (lem-vi-mode/visual:visual-p) "yes" "no")
+     (expreg-test-string-hex (points-to-string start end)))))
+
 (dolist (keymap (list *global-keymap*
                       lem-vi-mode:*normal-keymap*
                       lem-vi-mode:*visual-keymap*))
+  (define-key keymap "F6" 'lem-yath-test-expreg-stale-contract)
+  (define-key keymap "F7" 'expreg-contract)
   (define-key keymap "F8" 'lem-yath-test-expreg-record))
 
+(expreg-test-log "COMMAND contract=~a"
+                 (if (find-command "expreg-contract") "yes" "no"))
 (expreg-test-log "READY")

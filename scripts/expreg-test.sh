@@ -78,6 +78,20 @@ expand_once() {
   sleep 0.25
 }
 
+contract_once() {
+  lem_keys "$session" F7
+  sleep 0.25
+}
+
+contract_via_mx() {
+  lem_keys "$session" M-x
+  lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
+  lem_keys "$session" -l expreg-contract
+  sleep 0.15
+  lem_keys "$session" Enter
+  sleep 0.25
+}
+
 assert_selection() {
   local name="$1" label="$2" expected="$3" before line expected_hex
   before=$(report_count '^STATE index=')
@@ -94,6 +108,26 @@ assert_selection() {
     pass "$name" "selected [$expected]"
   else
     fail "$name" "expected [$expected], got: $line"
+  fi
+}
+
+assert_stale_contract_noop() {
+  local before line expected_hex
+  before=$(report_count '^STALE ')
+  lem_keys "$session" F6
+  if ! wait_report_count '^STALE ' "$((before + 1))"; then
+    fail python-contract-stale-tick-noop 'stale contraction probe did not run'
+    return
+  fi
+  line=$(grep '^STALE ' "$report" | tail -n 1)
+  expected_hex=$(hex_of 'foo + bar')
+  if [[ "$line" == *'visual=yes '* &&
+        "$line" == *"selection-hex=$expected_hex" ]]; then
+    pass python-contract-stale-tick-noop \
+      'a stale buffer tick invalidated the contraction stack'
+  else
+    fail python-contract-stale-tick-noop \
+      "stale contraction changed the active range: $line"
   fi
 }
 
@@ -126,6 +160,12 @@ if ! lem_wait_for "$session" 'Dashboard' 40 >/dev/null ||
 fi
 pass boot 'configured Lem loaded the Expreg fixture'
 
+if wait_report_count '^COMMAND contract=yes$' 1; then
+  pass contract-command 'M-x expreg-contract is registered'
+else
+  fail contract-command 'expreg-contract is absent from the command registry'
+fi
+
 if open_case lem-yath-test-expreg-open-python-expression python-expression; then
   expand_once
   assert_selection python-subword python-expression 'value'
@@ -154,6 +194,15 @@ if open_case lem-yath-test-expreg-open-python-expression python-expression; then
   expand_once
   assert_selection python-exhaustion python-expression \
     'result = outer(prefix, inner("(", café_value + 1), wrap(foo + bar))'
+  contract_once
+  assert_selection python-contract-call python-expression \
+    'outer(prefix, inner("(", café_value + 1), wrap(foo + bar))'
+  contract_once
+  assert_selection python-contract-arguments python-expression \
+    '(prefix, inner("(", café_value + 1), wrap(foo + bar))'
+  expand_once
+  assert_selection python-expand-after-contract python-expression \
+    'outer(prefix, inner("(", café_value + 1), wrap(foo + bar))'
 else
   fail python-open 'Python expression fixture did not open'
 fi
@@ -164,9 +213,20 @@ if open_case lem-yath-test-expreg-open-python-cache-sibling \
   sleep 0.2
   expand_once
   assert_selection python-cache-new-visual-word python-cache-sibling 'bar'
+  contract_once
+  assert_selection python-contract-first-level-noop python-cache-sibling 'bar'
   expand_once
   assert_selection python-cache-new-visual-syntax python-cache-sibling \
     'foo + bar'
+  if contract_via_mx; then
+    assert_selection python-contract-via-mx python-cache-sibling 'bar'
+    expand_once
+    assert_selection python-reexpand-new-sequence python-cache-sibling \
+      'foo + bar'
+    assert_stale_contract_noop
+  else
+    fail python-contract-via-mx 'M-x prompt did not accept expreg-contract'
+  fi
 else
   fail python-cache-open 'Python cache sibling fixture did not open'
 fi

@@ -1474,6 +1474,11 @@ keymaps and therefore execute the non-jumping repeat motions directly."
   ranges
   inner-range)
 
+(defstruct expand-region-session
+  tick
+  current
+  history)
+
 (defun expand-region-exact-major-mode-p (buffer mode-class)
   (destructuring-bind (package-name . symbol-name) mode-class
     (alexandria:when-let* ((package (find-package package-name))
@@ -1817,6 +1822,69 @@ newline in the same way as Expreg's paragraph tier."
             (expand-region-delete-point-range candidate)
             nil)))))
 
+(defun expand-region-point-range-positions (range)
+  (cons (position-at-point (first range))
+        (position-at-point (second range))))
+
+(defun expand-region-position-range-to-points (buffer range)
+  (with-point ((start (buffer-start-point buffer))
+               (end (buffer-start-point buffer)))
+    (when (and (move-to-position start (car range))
+               (move-to-position end (cdr range))
+               (point< start end))
+      (list (copy-point start :temporary)
+            (copy-point end :temporary)))))
+
+(defun expand-region-session-current-p (session buffer range)
+  (and session
+       (= (expand-region-session-tick session)
+          (buffer-modified-tick buffer))
+       (equal (expand-region-session-current session)
+              (expand-region-point-range-positions range))))
+
+(defun clear-expand-region-session (&optional (buffer (current-buffer)))
+  (setf (buffer-value buffer 'lem-yath-expand-region-session) nil))
+
+(defun store-expand-region-session (range history)
+  (let ((buffer (point-buffer (first range))))
+    (setf (buffer-value buffer 'lem-yath-expand-region-session)
+          (make-expand-region-session
+           :tick (buffer-modified-tick buffer)
+           :current (expand-region-point-range-positions range)
+           :history history))))
+
+(defun accept-expand-region-range (range prior-range continuing-p)
+  "Select RANGE and retain PRIOR-RANGE only within one valid sequence."
+  (let* ((buffer (point-buffer (first range)))
+         (session (buffer-value buffer 'lem-yath-expand-region-session))
+         (history
+           (when continuing-p
+             (cons (expand-region-point-range-positions prior-range)
+                   (expand-region-session-history session)))))
+    (setf (lem-vi-mode/visual:visual-range) range)
+    (store-expand-region-session
+     (lem-vi-mode/visual:visual-range buffer) history)))
+
+(defun expand-region-next-candidate (start end)
+  "Return the next useful range strictly containing START..END."
+  (alexandria:if-let
+      ((symbol-range (expand-region-symbol-candidate start end)))
+    symbol-range
+    (multiple-value-bind (syntax-range parsed-p)
+        (expand-region-tree-sitter-candidate start end)
+      (let ((delimiter-range
+              (unless parsed-p
+                (enclosing-region-candidate start end))))
+        (cond
+          (syntax-range syntax-range)
+          (parsed-p
+           ;; Python's syntax root is deliberately not a candidate. JSON's
+           ;; document root is retained by the parser collector because it
+           ;; supplies Expreg's final whole-buffer-with-newline tier.
+           nil)
+          (delimiter-range delimiter-range)
+          (t (expand-region-paragraph-candidate start end)))))))
+
 (define-command lem-yath-expand-region () ()
   "Expand the visual region through syntax nodes, delimiters, and text units."
   (if (not (lem-vi-mode/visual:visual-p))
@@ -1824,33 +1892,50 @@ newline in the same way as Expreg's paragraph tier."
         (setf (buffer-value
                (current-buffer) 'lem-yath-expand-region-parser-cache)
               nil)
+        (clear-expand-region-session)
         (lem-vi-mode/visual:vi-visual-char)
         (if word-range
-            (setf (lem-vi-mode/visual:visual-range) word-range)
-            (call-command 'lem-vi-mode/commands:vi-inner-word 1)))
+            (progn
+              (setf (lem-vi-mode/visual:visual-range) word-range)
+              (store-expand-region-session
+               (lem-vi-mode/visual:visual-range) nil))
+            (progn
+              (call-command 'lem-vi-mode/commands:vi-inner-word 1)
+              (when (lem-vi-mode/visual:visual-p)
+                (store-expand-region-session
+                 (lem-vi-mode/visual:visual-range) nil)))))
       (destructuring-bind (start end) (lem-vi-mode/visual:visual-range)
-        (alexandria:if-let
-            ((symbol-range (expand-region-symbol-candidate start end)))
-          (setf (lem-vi-mode/visual:visual-range) symbol-range)
-          (multiple-value-bind (syntax-range parsed-p)
-              (expand-region-tree-sitter-candidate start end)
-            (let ((delimiter-range
-                    (unless parsed-p
-                      (enclosing-region-candidate start end))))
-              (cond
-                (syntax-range
-                 (setf (lem-vi-mode/visual:visual-range) syntax-range))
-                (parsed-p
-                 ;; The syntax root is deliberately not a candidate, matching
-                 ;; Expreg's exhaustion behavior in Python. JSON's document
-                 ;; root is retained above because it supplies Expreg's final
-                 ;; whole-buffer-with-newline tier.
-                 nil)
-                (delimiter-range
-                 (setf (lem-vi-mode/visual:visual-range) delimiter-range))
-                (t
-                 (alexandria:when-let
-                     ((paragraph-range
-                        (expand-region-paragraph-candidate start end)))
-                   (setf (lem-vi-mode/visual:visual-range)
-                         paragraph-range))))))))))
+        (let* ((buffer (current-buffer))
+               (session
+                 (buffer-value buffer 'lem-yath-expand-region-session))
+               (continuing-p
+                 (expand-region-session-current-p
+                  session buffer (list start end))))
+          (unless continuing-p
+            (clear-expand-region-session buffer))
+          (alexandria:when-let
+              ((candidate (expand-region-next-candidate start end)))
+            (accept-expand-region-range
+             candidate (list start end) continuing-p))))))
+
+(define-command expreg-contract () ()
+  "Contract to the preceding region in the current Expreg sequence."
+  (when (lem-vi-mode/visual:visual-p)
+    (destructuring-bind (start end) (lem-vi-mode/visual:visual-range)
+      (let* ((buffer (current-buffer))
+             (session
+               (buffer-value buffer 'lem-yath-expand-region-session)))
+        (if (expand-region-session-current-p
+             session buffer (list start end))
+            (alexandria:when-let*
+                ((history (expand-region-session-history session))
+                 (target (first history))
+                 (range
+                   (expand-region-position-range-to-points buffer target)))
+              (setf (lem-vi-mode/visual:visual-range) range
+                    (buffer-value buffer 'lem-yath-expand-region-session)
+                    (make-expand-region-session
+                     :tick (buffer-modified-tick buffer)
+                     :current target
+                     :history (rest history))))
+            (clear-expand-region-session buffer))))))

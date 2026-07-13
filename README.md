@@ -67,6 +67,9 @@ of writing `.fasl` files into the source tree.
   comment operator (`gc`) plus Lispyville-compatible,
   delimiter-safe structural editing in Common Lisp, Clojure, Scheme/Racket,
   and Emacs Lisp buffers
+- Expreg-style `SPC v` region growth through lexical and Python/JSON syntax
+  tiers; the configured unbound `M-x expreg-contract` walks backward through
+  the generated selection sequence and expansion can then move forward again
 - configured Avy jumps on `SPC l/a/s` use balanced `a/s/d/f/g/h/j/k/l`
   floating labels over visible line, character, and symbol targets. Normal state
   searches every ordinary or side text window, Visual stays in the current
