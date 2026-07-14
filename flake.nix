@@ -548,6 +548,7 @@
             vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
+            lisp-eval-test = mkTestApp "lem-yath-lisp-eval-test" "lisp-eval-test.sh";
             cursor-state-test = mkTestApp "lem-yath-cursor-state-test" "cursor-state-test.sh";
             snipe-test = mkTestApp "lem-yath-snipe-test" "snipe-test.sh";
             avy-test = mkTestApp "lem-yath-avy-test" "avy-test.sh";
@@ -603,6 +604,7 @@
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";
+            lisp-eval = mkCheck "lisp-eval" "lisp-eval-test.sh";
             cursor-state = mkCheck "cursor-state" "cursor-state-test.sh";
             snipe = mkCheck "snipe" "snipe-test.sh";
             avy = mkCheck "avy" "avy-test.sh";

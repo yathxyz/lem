@@ -56,6 +56,7 @@
                (:file "find-name")
                (:file "buffer-list")
                (:file "tools")
+               (:file "lisp-eval")
                (:file "llm")
                (:file "indent-guides")
                (:file "theme")

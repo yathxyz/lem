@@ -93,7 +93,7 @@
 
   ;; compile / eval
   ("c c" 'lem-yath-compile)                   ; SPC c c
-  ("m e e" 'lem-lisp-mode:lisp-eval-last-expression) ; SPC m e e
+  ("m e e" 'lem-yath-lisp-eval-last-expression) ; SPC m e e
 
   ;; context-sensitive actions (Embark-style)
   ("e a" 'lem-yath-act)                       ; SPC e a

@@ -68,6 +68,9 @@ of writing `.fasl` files into the source tree.
   comment operator (`gc`) plus Lispyville-compatible,
   delimiter-safe structural editing in Common Lisp, Clojure, Scheme/Racket,
   and Emacs Lisp buffers
+- `SPC m e e` evaluates exactly the preceding Common Lisp form through Lem's
+  native self-connected SLIME environment in Normal or Visual state; an active
+  Visual selection is preserved rather than being evaluated as a region
 - Expreg-style `SPC v` region growth through lexical and Python/JSON syntax
   tiers, including balanced list interiors inside ordinary and block strings;
   arbitrary Visual selections use their active endpoint and retain contained
@@ -297,6 +300,7 @@ nix run .#agenda-test
 nix run .#agenda-clock-test
 nix run .#interactive-test
 nix run .#structural-test
+nix run .#lisp-eval-test
 ```
 
 The underlying scripts remain parallel-safe via `LEM_YATH_CHECK_ID` and accept
@@ -311,7 +315,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
-`daily-workflows`, `direnv`, `llm-keybinding`, `orderless-completion`, `snippets`, `lsp-snippets`,
+`daily-workflows`, `direnv`, `llm-keybinding`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`,
 `interactive`, `structural`, `roam`, or

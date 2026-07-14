@@ -1616,6 +1616,16 @@ lookup, quickdocs, test-runner, defstruct→defclass, organize-imports, paren-co
 connection-list. Start/connect: `C-c m s` `slime`, `C-c m c` `slime-connect`, `C-c m r`
 restart, `C-c m q` quit. Switch to REPL `C-c C-z`. Keybindings in `lisp-mode.lisp:76-98`.
 
+Lem-yath's global `SPC m e e` wrapper deliberately calls the native
+last-expression evaluator instead of Lem's region-sensitive
+`lisp-eval-at-point`. This matches the configured Emacs `eval-last-sexp`
+command in both Normal and Visual states: only the complete form immediately
+before point is evaluated, while source text, point, and any Visual selection
+remain intact. Evaluation errors open Lem's native SLDB pane and can be
+dismissed back to the unchanged source buffer. `scripts/lisp-eval-test.sh`
+drives the physical chord through all of those paths against the self-connected
+Common Lisp runtime.
+
 ### paredit-mode — `extensions/paredit-mode/paredit-mode.lisp` (`lem-paredit-mode`)
 Real structural editing: `paredit-slurp`, `paredit-barf`, `paredit-splice`(+fwd/bwd),
 `paredit-raise`, `paredit-wrap-round`, `paredit-kill`, `paredit-forward`/`-backward`,
