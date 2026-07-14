@@ -1614,19 +1614,24 @@ heading starts at B, while repeated movement wraps through no priority to the
 opposite bound. GNU Org's `C-c C-s` and `C-c C-d` chords set SCHEDULED and
 DEADLINE fields from validated `YYYY-MM-DD`, `+Nd`, or `+Nw` input, compute the
 weekday, prepend a newly added field as Org does, and replace an existing field
-in place. TODO, priority, and planning changes save immediately and restore the
-logical agenda row after the asynchronous refresh. A shifted or changed source
-heading fails closed instead of editing the line now occupying its stale
-location. `scripts/agenda-test.sh` drives the production entry keys in the
-installed ncurses wrapper and also verifies source scope, grouping, duplicate
-basenames, active-event contexts/ranges/repeaters, TODO, priority, and planning
-persistence, stale-source refusal, refresh races, unmodified/undo-free
-generated buffers, and cleanup.
+in place. Evil-Org's `ct` and GNU Org's `C-c C-q` both replace the current
+heading's local tags. The prompt starts from the existing suffix, completes
+canonical colon-delimited expressions from tags found across the configured
+agenda sources, removes duplicates, offers an explicit clear row for empty
+input, and realigns the result to the active terminal tag column. TODO,
+priority, planning, and tag changes save immediately and restore the logical
+agenda row after the asynchronous refresh. A shifted or changed source heading
+fails closed instead of editing the line now occupying its stale location.
+`scripts/agenda-test.sh` drives the production entry keys in the installed
+ncurses wrapper and also verifies source scope, grouping, duplicate basenames,
+active-event contexts/ranges/repeaters, TODO, priority, planning and tag
+persistence, completion, replacement, clearing, alignment, stale-source
+refusal, refresh races, unmodified/undo-free generated buffers, and cleanup.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
 presentation, planning removal and warning/delay-cookie forms,
-tag/refile/archive mutation, bulk actions, clocks, custom commands,
+refile/archive mutation, bulk actions, clocks, custom commands,
 and the wider org-super-agenda presentation remain explicit gaps.
 
 ---

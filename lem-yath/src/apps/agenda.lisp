@@ -1026,6 +1026,184 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
   "Decrease the current agenda heading priority and save its source."
   (agenda-change-priority :down))
 
+(defun agenda-heading-string-p (line)
+  "Whether LINE starts with a valid Org headline marker."
+  (let ((index 0)
+        (length (length line)))
+    (loop :while (and (< index length) (char= (char line index) #\*))
+          :do (incf index))
+    (and (plusp index)
+         (< index length)
+         (member (char line index) '(#\Space #\Tab)))))
+
+(defun agenda-heading-tag-string (heading)
+  "Return HEADING's canonical local tag suffix, or the empty string."
+  (let* ((line (etypecase heading
+                 (string heading)
+                 (lem:point (line-string heading))))
+         (end (length line)))
+    (loop :while (and (plusp end)
+                      (member (char line (1- end)) '(#\Space #\Tab)))
+          :do (decf end))
+    (if (and (agenda-heading-string-p line)
+             (> end 2)
+             (char= (char line (1- end)) #\:))
+        (let ((start end))
+          (loop :while (and (plusp start)
+                            (org-tag-suffix-character-p
+                             (char line (1- start))))
+                :do (decf start))
+          (if (and (plusp start)
+                   (char= (char line start) #\:)
+                   (member (char line (1- start)) '(#\Space #\Tab))
+                   (loop :for index :from (1+ start) :below (1- end)
+                         :thereis (char/= (char line index) #\:)))
+              (subseq line start end)
+              ""))
+        "")))
+
+(defun agenda-tag-character-p (character)
+  "Whether CHARACTER is valid inside one Org tag."
+  (and (org-tag-suffix-character-p character)
+       (char/= character #\:)))
+
+(defun agenda-normalize-tags (input)
+  "Return INPUT as ordered, unique Org tags.
+
+Like GNU Org, invalid characters separate tags instead of entering a headline
+suffix."
+  (let ((tags '())
+        (start nil)
+        (length (length input)))
+    (labels ((finish-tag (end)
+               (when start
+                 (let ((tag (subseq input start end)))
+                   (unless (member tag tags :test #'string=)
+                     (push tag tags)))
+                 (setf start nil))))
+      (loop :for index :from 0 :to length
+            :for character := (and (< index length) (char input index))
+            :do (if (and character (agenda-tag-character-p character))
+                    (unless start (setf start index))
+                    (finish-tag index))))
+    (nreverse tags)))
+
+(defun agenda-tag-string (tags)
+  "Return TAGS in canonical colon-delimited Org syntax."
+  (if tags (format nil ":~{~a~^:~}:" tags) ""))
+
+(defun agenda-heading-tags (heading)
+  "Return HEADING's ordered local tags."
+  (agenda-normalize-tags (agenda-heading-tag-string heading)))
+
+(defun agenda-known-tags ()
+  "Return unique local tags found in configured agenda sources."
+  (multiple-value-bind (files failures) (agenda-org-files)
+    (declare (ignore failures))
+    (sort
+     (remove-duplicates
+      (loop :for file :in files
+            :nconc
+            (handler-case
+                (with-open-file (stream file :direction :input)
+                  (loop :for line := (read-line stream nil nil)
+                        :while line
+                        :nconc (agenda-heading-tags line)))
+              (error () nil)))
+      :test #'string=)
+     #'string-lessp)))
+
+(defun agenda-tag-completion-items (input known-tags)
+  "Return canonical full-input completions for INPUT from KNOWN-TAGS."
+  (let* ((last-colon (position #\: input :from-end t))
+         (prefix (if last-colon
+                     (subseq input 0 (1+ last-colon))
+                     ":"))
+         (fragment (if last-colon
+                       (subseq input (1+ last-colon))
+                       input)))
+    (append
+     (when (null (agenda-normalize-tags input))
+       (list
+        (lem/completion-mode:make-completion-item
+         :label "[clear local tags]"
+         :insert-text ""
+         :accept-action #'lem-yath-prompt-execute)))
+     (mapcar (lambda (tag) (format nil "~a~a:" prefix tag))
+             (prescient-filter fragment known-tags :category :symbol)))))
+
+(defun agenda-read-tags (heading)
+  "Prompt for replacement local tags on HEADING."
+  (let ((known-tags (agenda-known-tags)))
+    (agenda-normalize-tags
+     (prompt-for-string
+      "Tags: "
+      :initial-value (agenda-heading-tag-string heading)
+      :completion-function
+      (lambda (input) (agenda-tag-completion-items input known-tags))
+      :test-function (constantly t)
+      :history-symbol 'lem-yath-agenda-tags))))
+
+(defun agenda-set-heading-tags (heading tags)
+  "Replace HEADING's local tag suffix with TAGS."
+  (multiple-value-bind (tag-start tag-end blank-start)
+      (org-heading-tag-bounds heading)
+    (declare (ignore tag-start tag-end))
+    (with-point ((start heading)
+                 (end heading))
+      (line-start start)
+      (line-start end)
+      (if blank-start
+          (character-offset start blank-start)
+          (line-end start))
+      (line-end end)
+      (delete-between-points start end)
+      (when tags
+        (insert-string start (format nil " ~a" (agenda-tag-string tags)))))
+    (when tags
+      (org-align-current-heading-tags heading)))
+  tags)
+
+(defun agenda-set-source-tags (file line expected-heading tags)
+  "Replace one exact source heading's local TAGS and save it."
+  (unless (and file (integerp line) (plusp line) expected-heading)
+    (error "No mutable agenda heading on this line"))
+  (let ((buffer (find-file-buffer file)))
+    (with-current-buffer buffer
+      (when (buffer-read-only-p buffer)
+        (error "Agenda source is read-only: ~a" file))
+      (with-point ((heading (buffer-start-point buffer)))
+        (unless (or (= line 1) (line-offset heading (1- line)))
+          (error "Agenda source line no longer exists; refresh the agenda"))
+        (unless (string= expected-heading (line-string heading))
+          (error "Agenda source changed; refresh before editing"))
+        (agenda-set-heading-tags heading tags))
+      ;; The Emacs configuration advises `org-agenda-set-tags' to save its
+      ;; source immediately.
+      (save-buffer buffer)))
+  tags)
+
+(define-command lem-yath-agenda-set-tags () ()
+  "Replace the current agenda heading's local tags and save its source."
+  (let ((agenda-buffer (current-buffer))
+        (entry-key (agenda-entry-key-at-point (current-point)))
+        (file (text-property-at (current-point) :agenda-file))
+        (line (text-property-at (current-point) :agenda-line))
+        (heading (text-property-at (current-point) :agenda-heading)))
+    (if (null file)
+        (message "No agenda entry on this line.")
+        (let ((tags (agenda-read-tags heading)))
+          (handler-case
+              (progn
+                (agenda-set-source-tags file line heading tags)
+                (setf (buffer-value agenda-buffer
+                                    'lem-yath-agenda-restore-entry)
+                      entry-key)
+                (agenda-start-scan agenda-buffer)
+                (message "Tags: ~a" (agenda-tag-string tags)))
+            (error (condition)
+              (message "Agenda tags failed: ~a" condition)))))))
+
 (defun agenda-priority-post-command ()
   "Forget priority repetition after any other command."
   (unless (member (and (this-command) (command-name (this-command)))
@@ -1078,6 +1256,8 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-d" 'lem-yath-agenda-deadline)
 (define-key *lem-yath-agenda-vi-keymap* "K" 'lem-yath-agenda-priority-up)
 (define-key *lem-yath-agenda-vi-keymap* "J" 'lem-yath-agenda-priority-down)
+(define-key *lem-yath-agenda-vi-keymap* "c t" 'lem-yath-agenda-set-tags)
+(define-key *lem-yath-agenda-vi-keymap* "C-c C-q" 'lem-yath-agenda-set-tags)
 (define-key *lem-yath-agenda-vi-keymap* "q" 'quit-active-window)
 
 (defmethod lem-vi-mode/core:mode-specific-keymaps ((mode lem-yath-agenda-mode))
@@ -1091,6 +1271,8 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
 (define-key *lem-yath-agenda-mode-keymap* "C-c C-d" 'lem-yath-agenda-deadline)
 (define-key *lem-yath-agenda-mode-keymap* "K" 'lem-yath-agenda-priority-up)
 (define-key *lem-yath-agenda-mode-keymap* "J" 'lem-yath-agenda-priority-down)
+(define-key *lem-yath-agenda-mode-keymap* "c t" 'lem-yath-agenda-set-tags)
+(define-key *lem-yath-agenda-mode-keymap* "C-c C-q" 'lem-yath-agenda-set-tags)
 (define-key *lem-yath-agenda-mode-keymap* "q" 'quit-active-window)
 
 (remove-hook *post-command-hook* 'agenda-priority-post-command)

@@ -62,6 +62,15 @@ wait_report_count() {
   return 1
 }
 
+wait_file_pattern() {
+  local pattern="$1" file="$2" i
+  for i in $(seq 1 100); do
+    grep -qE "$pattern" "$file" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 printf '%s\n' \
   '#+title: Agenda launch source' \
   '' \
@@ -112,7 +121,7 @@ printf '%s\n' \
   '#+BEGIN_SRC text' \
   '<2026-07-13 Mon>' \
   '#+END_SRC' \
-  '* Comment line exclusion sentinel' \
+  '* Comment line exclusion sentinel :alpha:' \
   '# <2026-07-13 Mon>' \
   >"$work_file"
 
@@ -153,7 +162,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -161,6 +170,7 @@ else
   grep -qF "FILE serial=1 index=2 path=$source_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=3 path=$public_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=4 path=$mcp_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE items=:alpha:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 28 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Today work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -277,6 +287,68 @@ else
   fail priority "one or more priority transitions did not render and persist"
 fi
 
+# Evil-Org ct and GNU Org C-c C-q replace local tags, with completion from the
+# configured agenda sources and immediate aligned source persistence.
+tmux_cmd send-keys -t "$session" c t
+if lem_wait_for "$session" 'Tags:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l :al
+  if lem_wait_for "$session" ':alpha:' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" C-n
+    tmux_cmd send-keys -t "$session" Tab
+    if lem_wait_for "$session" 'Tags:[[:space:]]+:alpha:' 10 >/dev/null; then
+      tmux_cmd send-keys -t "$session" Enter
+      if lem_wait_for "$session" 'NEXT.*Work unscheduled sentinel.*:alpha:' 40 >/dev/null &&
+         grep -qE '^\* NEXT Work unscheduled sentinel +:alpha:$' "$work_file"; then
+        tmux_cmd send-keys -t "$session" F6
+        if wait_report "^POINT mode=LEM-YATH-AGENDA-MODE file=$work_file line=1 .*NEXT.*Work unscheduled sentinel.*:alpha:"; then
+          pass tags-completion "ct completed, aligned, saved, refreshed, and retained its row"
+        else
+          fail tags-completion "tag refresh lost the selected logical row"
+        fi
+      else
+        fail tags-completion "completed tag did not render and persist"
+      fi
+    else
+      fail tags-completion "Tab did not insert the known source tag"
+      tmux_cmd send-keys -t "$session" Escape
+    fi
+  else
+    fail tags-completion "the prompt did not offer a known agenda-source tag"
+    tmux_cmd send-keys -t "$session" Escape
+  fi
+else
+  fail tags-prompt "ct did not open the tags prompt"
+fi
+
+tmux_cmd send-keys -t "$session" C-c C-q
+if lem_wait_for "$session" 'Tags:[[:space:]]+:alpha:' 10 >/dev/null; then
+  for _ in $(seq 1 16); do tmux_cmd send-keys -t "$session" BSpace; done
+  tmux_cmd send-keys -t "$session" -l ':beta:gamma:beta:'
+  tmux_cmd send-keys -t "$session" Enter
+  if lem_wait_for "$session" 'NEXT.*Work unscheduled sentinel.*:beta:gamma:' 40 >/dev/null &&
+     grep -qE '^\* NEXT Work unscheduled sentinel +:beta:gamma:$' "$work_file"; then
+    pass tags-replace "C-c C-q canonicalized and replaced multiple local tags"
+  else
+    fail tags-replace "replacement tags did not render and persist"
+  fi
+else
+  fail tags-replace "C-c C-q did not reopen with current tags"
+fi
+
+tmux_cmd send-keys -t "$session" c t
+if lem_wait_for "$session" 'Tags:[[:space:]]+:beta:gamma:' 10 >/dev/null; then
+  for _ in $(seq 1 20); do tmux_cmd send-keys -t "$session" BSpace; done
+  tmux_cmd send-keys -t "$session" Enter
+  if wait_file_pattern '^\* NEXT Work unscheduled sentinel$' "$work_file" &&
+     lem_wait_for "$session" 'NEXT[[:space:]]+Work unscheduled sentinel' 40 >/dev/null; then
+    pass tags-clear "an empty tag prompt removed the suffix and saved"
+  else
+    fail tags-clear "clearing tags left source syntax behind"
+  fi
+else
+  fail tags-clear "ct did not reopen with replacement tags"
+fi
+
 # GNU Org's agenda chords remain available under Evil-Org. Relative dates use
 # the agenda's current day and source planning fields retain Org's order.
 tmux_cmd send-keys -t "$session" C-c C-s
@@ -333,10 +405,25 @@ fi
 tmux_cmd send-keys -t "$session" F12
 tmux_cmd send-keys -t "$session" F3
 wait_report '^STALE-MADE modified=yes$' || true
+tmux_cmd send-keys -t "$session" c t
+if lem_wait_for "$session" 'Tags:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l stale
+  tmux_cmd send-keys -t "$session" Enter
+  sleep 0.4
+  tmux_cmd send-keys -t "$session" F2
+  if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 1 &&
+     grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+    pass tags-stale "ct refused a shifted row without changing or saving its source"
+  else
+    fail tags-stale "ct changed or saved the wrong source line from a stale row"
+  fi
+else
+  fail tags-stale "ct did not prompt on the stale agenda row"
+fi
 tmux_cmd send-keys -t "$session" K
 sleep 0.4
 tmux_cmd send-keys -t "$session" F2
-if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 1 &&
+if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 2 &&
    grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
   pass priority-stale "K refused a shifted row without changing or saving its source"
 else
@@ -347,7 +434,7 @@ sleep 0.2
 tmux_cmd send-keys -t "$session" w
 sleep 0.4
 tmux_cmd send-keys -t "$session" F2
-if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 2 &&
+if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 3 &&
    grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
   pass todo-stale "t refused a shifted row without changing or saving its source"
 else

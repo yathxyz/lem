@@ -71,7 +71,7 @@
      (concatenate
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
-      "return=~a g=~a t=~a schedule=~a deadline=~a q=~a "
+      "return=~a g=~a t=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
       "J=~a K=~a kill-hooks=~d modified=~a undo=~a "
       "running=~a pending=~a")
      serial
@@ -85,6 +85,8 @@
      (agenda-test-command-name "t")
      (agenda-test-command-name "C-c C-s")
      (agenda-test-command-name "C-c C-d")
+     (agenda-test-command-name "c t")
+     (agenda-test-command-name "C-c C-q")
      (agenda-test-command-name "q")
      (agenda-test-command-name "J")
      (agenda-test-command-name "K")
@@ -103,6 +105,10 @@
           :for index :from 1
           :do (agenda-test-log "FILE serial=~d index=~d path=~a"
                                serial index (agenda-test-path file)))
+    (let ((known-tags (agenda-known-tags)))
+      (agenda-test-log "TAG-COMPLETION serial=~d known=~{~a~^,~} items=~{~a~^,~}"
+                       serial known-tags
+                       (agenda-tag-completion-items ":al" known-tags)))
     (agenda-test-report-entries buffer serial)
     (agenda-test-log "REPORT-DONE serial=~d" serial)))
 
