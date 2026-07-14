@@ -860,8 +860,11 @@ history.
   wildcard, runs GNU find asynchronously with a NUL-delimited argv-safe protocol,
   and fills a persistent read-only `*Find*` buffer. Exact path properties make
   Vi Return safe for spaces, semicolons, literal `*`, `?`, and `[`, and displayed
-  control characters; q leaves the result buffer available. Dired marking, file
-  operations and long columns remain absent. While a search is running,
+  control characters; q leaves the result buffer available. Dired-style `m`
+  and `u` mark or unmark and advance, `U` clears every mark, and `t` toggles
+  all result marks. A fresh search clears marks; `g` retains exact-path marks
+  that still exist in the refreshed result set. File operations and long
+  columns remain absent. While a search is running,
   `C-c C-k` terminates only the subprocess owned by that `*Find*` request and
   leaves a persistent cancelled result buffer that can be retried with `g`.
 - Grep: `lem/grep:grep` and `lem/grep:project-grep` (`src/ext/grep.lisp`, bound

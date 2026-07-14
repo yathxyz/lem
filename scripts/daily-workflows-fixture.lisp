@@ -33,6 +33,11 @@
          (separator (position #\/ native :from-end t)))
     (if separator (subseq native (1+ separator)) native)))
 
+(defun daily-workflows-fixture-native-basename (path)
+  (let* ((native (if (stringp path) path (uiop:native-namestring path)))
+         (separator (position #\/ native :from-end t)))
+    (if separator (subseq native (1+ separator)) native)))
+
 (defun daily-workflows-fixture-encode (string)
   (with-output-to-string (stream)
     (loop for character across string
@@ -195,6 +200,24 @@
      (if (and buffer (buffer-read-only-p buffer)) "yes" "no")
      (buffer-name (current-buffer)))))
 
+(define-command lem-yath-test-record-find-name-marks () ()
+  (multiple-value-bind (line current) (find-name-current-row)
+    (declare (ignore line))
+    (let ((marked
+            (mapcar
+             (lambda (path)
+               (daily-workflows-fixture-encode
+                (daily-workflows-fixture-native-basename path)))
+             (find-name-marked-paths))))
+      (daily-workflows-fixture-log
+       "FIND-MARKS count=~d current=~a marked=~{~a~^,~}"
+       (length marked)
+       (if current
+           (daily-workflows-fixture-encode
+            (daily-workflows-fixture-native-basename current))
+           "none")
+       marked))))
+
 (define-command lem-yath-test-submit-find-name-root () ()
   "Submit the exact fixture root without selecting an automatic child row."
   (lem/prompt-window::replace-prompt-input
@@ -305,7 +328,8 @@
   (define-key keymap "F9" 'lem-yath-test-record-structural-guard)
   (define-key keymap "F10" 'lem-yath-test-record-current-buffer)
   (define-key keymap "F11" 'lem-yath-test-record-find-name-current)
-  (define-key keymap "F12" 'lem-yath-test-record-find-name-persistence))
+  (define-key keymap "F12" 'lem-yath-test-record-find-name-persistence)
+  (define-key keymap "F2" 'lem-yath-test-record-find-name-marks))
 
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F4" 'lem-yath-test-submit-find-name-root)

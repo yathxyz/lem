@@ -8,6 +8,9 @@
 (defvar *find-name-program* nil
   "Absolute find executable override, primarily for controlled tests.")
 
+(define-attribute find-name-marked-attribute
+  (t :foreground :base0E :bold t))
+
 (define-condition find-name-request-cancelled (condition) ())
 
 (defstruct (find-name-request
@@ -90,7 +93,9 @@
        (setf buffer (make-buffer *find-name-buffer-name* :enable-undo-p nil))
        (change-buffer-mode buffer 'lem-yath-find-name-mode)
        (setf (buffer-value buffer :find-name-owner)
-             +find-name-buffer-owner+)
+             +find-name-buffer-owner+
+             (buffer-value buffer :find-name-marks)
+             (make-hash-table :test #'equal))
        buffer)
       ((find-name-owned-buffer-p buffer)
        buffer)
@@ -157,9 +162,45 @@
     (buffer-start (buffer-point buffer))
     (redraw-display)))
 
+(defun find-name-mark-key (path)
+  (uiop:native-namestring path))
+
+(defun find-name-marks (buffer)
+  (or (buffer-value buffer :find-name-marks)
+      (setf (buffer-value buffer :find-name-marks)
+            (make-hash-table :test #'equal))))
+
+(defun find-name-marked-p (buffer path)
+  (gethash (find-name-mark-key path) (find-name-marks buffer)))
+
+(defun find-name-marked-paths (&optional (buffer (current-buffer)))
+  "Return marked result paths in deterministic native-name order."
+  (let ((paths '()))
+    (maphash (lambda (key value)
+               (when value (push key paths)))
+             (find-name-marks buffer))
+    (sort paths #'string<)))
+
+(defun find-name-reconcile-marks (buffer results)
+  "Discard marks that are absent from the newly completed RESULTS."
+  (let ((present (make-hash-table :test #'equal))
+        (marks (find-name-marks buffer))
+        (stale '()))
+    (dolist (result results)
+      (setf (gethash (find-name-mark-key (cdr result)) present) t))
+    (maphash (lambda (key value)
+               (declare (ignore value))
+               (unless (gethash key present)
+                 (push key stale)))
+             marks)
+    (dolist (key stale)
+      (remhash key marks))))
+
 (defun render-find-name-results (buffer root pattern generation results error)
   "Render RESULTS only if GENERATION is still current for BUFFER."
   (when (find-name-current-generation-p buffer generation)
+    (unless error
+      (find-name-reconcile-marks buffer results))
     (with-buffer-read-only buffer nil
       (erase-buffer buffer)
       (let ((point (buffer-end-point buffer)))
@@ -180,10 +221,15 @@
            (with-point ((first-result point :right-inserting))
              (dolist (result results)
                (with-point ((start point :right-inserting))
+                 (let ((marked-p (find-name-marked-p buffer (cdr result))))
+                   (insert-string point (if marked-p "* " "  "))
                  (insert-string point
                                 (format nil "~a~%"
                                         (find-name-display-string (car result))))
-                 (put-text-property start point :find-name-path (cdr result))))
+                   (put-text-property start point :find-name-path (cdr result))
+                   (when marked-p
+                     (put-text-property start point :attribute
+                                        'find-name-marked-attribute)))))
              (move-point (buffer-point buffer) first-result))))))
     (setf (buffer-read-only-p buffer) t)
     (redraw-display)))
@@ -262,12 +308,14 @@
           (ignore-errors (bt2:join-thread error-thread)))
         (release-find-name-process request process)))))
 
-(defun start-find-name-search (buffer root pattern)
+(defun start-find-name-search (buffer root pattern &key preserve-marks)
   "Start a race-safe background search into persistent BUFFER."
   (unless (find-name-owned-buffer-p buffer)
     (editor-error "Not a find-name result buffer"))
   (alexandria:when-let ((previous (buffer-value buffer :find-name-request)))
     (cancel-find-name-request previous))
+  (unless preserve-marks
+    (clrhash (find-name-marks buffer)))
   (let* ((generation (1+ (or (buffer-value buffer :find-name-generation) 0)))
          (request (%make-find-name-request generation buffer)))
     (setf (buffer-value buffer :find-name-generation) generation
@@ -322,6 +370,82 @@
     (switch-to-buffer buffer)
     (start-find-name-search buffer root pattern)))
 
+(defun find-name-current-row ()
+  "Return the current result line start and its exact path."
+  (let ((line (copy-point (current-point) :temporary)))
+    (line-start line)
+    (values line (text-property-at line :find-name-path))))
+
+(defun ensure-current-find-name-buffer ()
+  (unless (find-name-owned-buffer-p (current-buffer))
+    (editor-error "Not a find-name result buffer")))
+
+(defun find-name-set-row-mark (line path marked-p)
+  (let ((buffer (current-buffer))
+        (key (find-name-mark-key path)))
+    (if marked-p
+        (setf (gethash key (find-name-marks buffer)) t)
+        (remhash key (find-name-marks buffer)))
+    (with-buffer-read-only buffer nil
+      (delete-character line 1)
+      (insert-character line (if marked-p #\* #\Space))
+      (with-point ((end line :right-inserting))
+        (line-end end)
+        (put-text-property line end :find-name-path path)
+        (put-text-property line end :attribute
+                           (and marked-p 'find-name-marked-attribute))))))
+
+(defun find-name-move-result-line (direction)
+  (with-point ((next (current-point)))
+    (loop :while (line-offset next direction)
+          :do (line-start next)
+          :when (text-property-at next :find-name-path)
+            :do (move-point (current-point) next)
+                (return t))))
+
+(defun find-name-mark-lines (marked-p count)
+  (ensure-current-find-name-buffer)
+  (let ((count (or count 1)))
+    (when (zerop count)
+      (return-from find-name-mark-lines nil))
+    (let ((direction (if (minusp count) -1 1)))
+      (dotimes (index (abs count))
+        (multiple-value-bind (line path) (find-name-current-row)
+          (unless path
+            (editor-error "No find result on this line"))
+          (find-name-set-row-mark line path marked-p))
+        (unless (find-name-move-result-line direction)
+          (when (< index (1- (abs count)))
+            (return)))))))
+
+(define-command lem-yath-find-name-mark (&optional (count 1)) (:universal)
+  "Mark COUNT result rows and advance, like Dired m."
+  (find-name-mark-lines t count))
+
+(define-command lem-yath-find-name-unmark (&optional (count 1)) (:universal)
+  "Unmark COUNT result rows and advance, like Dired u."
+  (find-name-mark-lines nil count))
+
+(define-command lem-yath-find-name-unmark-all () ()
+  "Remove every ordinary file mark, like Dired U."
+  (ensure-current-find-name-buffer)
+  (clrhash (find-name-marks (current-buffer)))
+  (with-point ((line (buffer-start-point (current-buffer))))
+    (loop
+      (alexandria:when-let ((path (text-property-at line :find-name-path)))
+        (find-name-set-row-mark line path nil))
+      (unless (line-offset line 1) (return)))))
+
+(define-command lem-yath-find-name-toggle-marks () ()
+  "Toggle ordinary marks on every result row, like Dired t."
+  (ensure-current-find-name-buffer)
+  (with-point ((line (buffer-start-point (current-buffer))))
+    (loop
+      (alexandria:when-let ((path (text-property-at line :find-name-path)))
+        (find-name-set-row-mark
+         line path (not (find-name-marked-p (current-buffer) path))))
+      (unless (line-offset line 1) (return)))))
+
 (define-command lem-yath-find-name-open () ()
   "Open the exact find result on the current line."
   (with-point ((point (current-point)))
@@ -340,7 +464,7 @@
          (pattern (buffer-value buffer :find-name-pattern)))
     (unless (and root pattern)
       (editor-error "No find-name search to refresh"))
-    (start-find-name-search buffer root pattern)))
+    (start-find-name-search buffer root pattern :preserve-marks t)))
 
 (define-command lem-yath-find-name-cancel () ()
   "Cancel the find subprocess owned by the current result buffer."
@@ -358,5 +482,9 @@
 
 (define-key *find-name-mode-keymap* "Return" 'lem-yath-find-name-open)
 (define-key *find-name-mode-keymap* "g" 'lem-yath-find-name-refresh)
+(define-key *find-name-mode-keymap* "m" 'lem-yath-find-name-mark)
+(define-key *find-name-mode-keymap* "u" 'lem-yath-find-name-unmark)
+(define-key *find-name-mode-keymap* "U" 'lem-yath-find-name-unmark-all)
+(define-key *find-name-mode-keymap* "t" 'lem-yath-find-name-toggle-marks)
 (define-key *find-name-mode-keymap* "C-c C-k" 'lem-yath-find-name-cancel)
 (define-key *find-name-mode-keymap* "q" 'quit-active-window)

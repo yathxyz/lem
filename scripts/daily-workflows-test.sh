@@ -107,6 +107,22 @@ invoke_test_command() {
   wait_report_count "$report_pattern" "$((count_before + 1))" "$WAIT_TIMEOUT"
 }
 
+check_find_marks() {
+  local session=$1 label=$2 expected=$3 before actual
+  before=$(report_count '^FIND-MARKS ')
+  lem_keys "$session" F2
+  if wait_report_count '^FIND-MARKS ' "$((before + 1))"; then
+    actual=$(grep '^FIND-MARKS ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    if [ "$actual" = "$expected" ]; then
+      pass "$label" "$actual"
+    else
+      fail "$label" "unexpected mark state: $actual" "$session"
+    fi
+  else
+    fail "$label" "the mark-state probe did not run" "$session"
+  fi
+}
+
 line_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/line-eof.txt"
 visual_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/visual.txt"
 visual_line_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/visual-line-eof.txt"
@@ -618,6 +634,56 @@ test_find_name() {
     fail find-name-mode "could not inspect the find result buffer" "$find_session"
   fi
 
+  check_find_marks "$find_session" find-name-marks-initial \
+    'FIND-MARKS count=0 current=00-[.match marked='
+  send_chord "$find_session" m m
+  check_find_marks "$find_session" find-name-mark-advance \
+    'FIND-MARKS count=2 current=literal*.match marked=00-[.match,line\nbreak.match'
+  screen=$(lem_capture "$find_session")
+  if grep -Fq '* ./00-[.match' <<<"$screen" &&
+     grep -Fq '* ./line\nbreak.match' <<<"$screen" &&
+     grep -Fq '  ./literal*.match' <<<"$screen"; then
+    pass find-name-mark-render "marked and unmarked rows have distinct Dired prefixes"
+  else
+    fail find-name-mark-render "the visible mark prefixes do not match the mark set" "$find_session"
+  fi
+
+  printf 'refresh-only match\n' > "$find_root/refresh-only.match"
+  lem_keys "$find_session" g
+  if lem_wait_for "$find_session" 'Status:[[:space:]]+9 matches' "$WAIT_TIMEOUT" >/dev/null; then
+    check_find_marks "$find_session" find-name-mark-refresh \
+      'FIND-MARKS count=2 current=00-[.match marked=00-[.match,line\nbreak.match'
+  else
+    fail find-name-mark-refresh "g did not complete the refreshed search" "$find_session"
+  fi
+  rm -f "$find_root/refresh-only.match"
+  lem_keys "$find_session" g
+  if ! lem_wait_for "$find_session" 'Status:[[:space:]]+8 matches' "$WAIT_TIMEOUT" >/dev/null; then
+    fail find-name-mark-refresh-prune "g did not remove the vanished result" "$find_session"
+  fi
+
+  lem_keys "$find_session" U
+  check_find_marks "$find_session" find-name-unmark-all \
+    'FIND-MARKS count=0 current=00-[.match marked='
+  lem_keys "$find_session" t
+  check_find_marks "$find_session" find-name-toggle-all \
+    'FIND-MARKS count=8 current=00-[.match marked=00-[.match,line\nbreak.match,literal*.match,literal?.match,named-dir.match,later.match,semi;colon.match,space target.match'
+  lem_keys "$find_session" u
+  check_find_marks "$find_session" find-name-unmark-advance \
+    'FIND-MARKS count=7 current=line\nbreak.match marked=line\nbreak.match,literal*.match,literal?.match,named-dir.match,later.match,semi;colon.match,space target.match'
+  lem_keys "$find_session" t
+  check_find_marks "$find_session" find-name-toggle-inverse \
+    'FIND-MARKS count=1 current=line\nbreak.match marked=00-[.match'
+  printf 'refresh-only match\n' > "$find_root/refresh-only.match"
+  lem_keys "$find_session" g
+  if lem_wait_for "$find_session" 'Status:[[:space:]]+9 matches' "$WAIT_TIMEOUT" >/dev/null; then
+    check_find_marks "$find_session" find-name-final-mark-refresh \
+      'FIND-MARKS count=1 current=00-[.match marked=00-[.match'
+  else
+    fail find-name-final-mark-refresh "the marked refresh did not finish" "$find_session"
+  fi
+  rm -f "$find_root/refresh-only.match"
+
   lem_keys "$find_session" Enter
   if lem_wait_for "$find_session" 'FIND OPEN TARGET' "$WAIT_TIMEOUT" >/dev/null; then
     pass find-name-return "Vi Return opened the exact property-backed result"
@@ -668,6 +734,8 @@ test_find_name() {
   if lem_wait_for "$find_session" '\(no matches\)' "$WAIT_TIMEOUT" >/dev/null &&
      [ ! -e "$find_sentinel" ]; then
     pass find-name-argv-safety "shell syntax stayed inert and empty results remained visible"
+    check_find_marks "$find_session" find-name-fresh-search-clears-marks \
+      'FIND-MARKS count=0 current=none marked='
   else
     fail find-name-argv-safety "the pattern executed or empty results were not rendered" "$find_session"
   fi
