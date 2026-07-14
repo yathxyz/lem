@@ -26,6 +26,25 @@
 
 (define-key *global-keymap* "F6" 'lem-yath-test-marginalia-command)
 
+(lem-core:define-color-theme "lem-yath-marginalia-child"
+    ("modus-vivendi-tinted")
+  (:foreground "#eeeeee"))
+
+(define-command lem-yath-test-report-theme () ()
+  (with-open-file (stream (uiop:getenv "LEM_YATH_COMPLETION_REPORT")
+                          :direction :output
+                          :if-exists :append
+                          :if-does-not-exist :create)
+    (format stream "THEME=~a~%" (current-theme))))
+
+(define-command lem-yath-test-restore-theme () ()
+  ;; Persist only an upstream theme: Lem restores its saved theme before the
+  ;; test's --eval form has loaded lem-yath's custom definitions.
+  (load-theme "lem-default" t))
+
+(define-key *global-keymap* "F7" 'lem-yath-test-report-theme)
+(define-key *global-keymap* "F8" 'lem-yath-test-restore-theme)
+
 (define-command lem-yath-test-vertico-shared-prefix-prompt () ()
   "Open a prompt whose initial candidates share a nonempty prefix."
   (prompt-for-string

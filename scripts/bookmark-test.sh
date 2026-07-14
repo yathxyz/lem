@@ -138,11 +138,19 @@ set_bookmark() {
   send_keys "$session" Enter
 }
 
+open_bookmark_prompt() {
+  local session=$1 name=$2
+  invoke_mx "$session" bookmark-jump || return 1
+  lem_wait_for "$session" 'Jump to bookmark:' "$WAIT_TIMEOUT" >/dev/null || return 1
+  send_literal "$session" "$name"
+  sleep 0.4
+  lem_capture "$session" | grep -qE 'Jump to bookmark:'
+}
+
 jump_bookmark() {
   local session=$1 name=$2
   send_keys "$session" Escape Space Enter
   lem_wait_for "$session" 'Jump to bookmark:' "$WAIT_TIMEOUT" >/dev/null || return 1
-  send_keys "$session" F4
   send_literal "$session" "$name"
   send_keys "$session" Enter
 }
@@ -164,6 +172,54 @@ if start_phase "$writer" writer "$root/files/a.txt" &&
   else
     fail keybinding-set 'SPC b m did not create a bookmark' "$writer"
   fi
+
+  if open_bookmark_prompt "$writer" see; then
+    screen=$(lem_capture "$writer")
+    if grep -Eq \
+         'seed[[:space:]]+file.*a\.txt.*L3:C2.*alpha-3' <<<"$screen"; then
+      pass bookmark-annotations \
+        'SPC RET shows type, path, exact line/column, and nearby context'
+    else
+      fail bookmark-annotations \
+        'the bookmark row lacked Marginalia-style context' "$writer"
+    fi
+    send_keys "$writer" C-g
+  else
+    fail bookmark-annotations 'could not open the bookmark prompt' "$writer"
+  fi
+
+  if open_bookmark_prompt "$writer" alpha-3; then
+    screen=$(lem_capture "$writer")
+    if ! grep -Eq '^[[:space:]]*seed[[:space:]]' <<<"$screen"; then
+      pass bookmark-metadata-display-only \
+        'bookmark context did not participate in candidate matching'
+    else
+      fail bookmark-metadata-display-only \
+        'bookmark context leaked into filtering' "$writer"
+    fi
+    send_keys "$writer" C-g
+  else
+    fail bookmark-metadata-display-only \
+      'could not query the bookmark prompt by annotation text' "$writer"
+  fi
+
+  send_keys "$writer" F9
+  if open_bookmark_prompt "$writer" missing; then
+    screen=$(lem_capture "$writer")
+    if grep -Eq \
+         'missing-target[[:space:]]+missing.*missing\.txt.*@7' <<<"$screen"; then
+      pass bookmark-stale-metadata \
+        'a stale target degrades to bounded missing-file metadata'
+    else
+      fail bookmark-stale-metadata \
+        'a missing bookmark target broke or lost its safe annotation' "$writer"
+    fi
+    send_keys "$writer" C-g
+  else
+    fail bookmark-stale-metadata \
+      'a missing bookmark target broke the prompt' "$writer"
+  fi
+  send_keys "$writer" F10
 else
   fail writer-boot 'the bookmark writer did not initialize' "$writer"
 fi

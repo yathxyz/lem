@@ -349,18 +349,30 @@ empty outlines, and a malicious read-time-evaluation form.
 the daily prompt categories. Commands show active bindings and their first
 documentation line; ordinary and project buffers show modified/read-only state,
 size, mode, and path; ordinary, recent, and project files show local Unix modes,
-human size, age or date, and a non-default owner when relevant. Annotations are
-computed after filtering for at most the 100 visible candidates, metadata
-failure degrades to a blank detail, and tests prove annotation text cannot become
-filter input. For upstream command, buffer, and file providers, the layer changes
-only each existing item's display detail, leaving its label, filter text,
-replacement range, insertion text, rank, and acceptance identity intact. Custom
-project and recent-file providers instead create correctly ranged items after
-ranking and preserve the selected raw value through an injective display-label
-mapping. The ncurses gates cover common local regular files and buffer states;
-special file modes, conditional foreign ownership, and metadata-failure fallback
-remain source-inspected. Marginalia's less common category annotators, dynamic
-alignment, and remote-file fields remain outside this approximation.
+human size, age or date, and a non-default owner when relevant. The real
+`load-library` prompt additionally shows loaded state, literal bounded ASDF
+version/description fields, and source directory, registering an exact accepted
+bundled ASD before delegating to Lem's loader when the dumped image omitted it.
+The real `load-theme` prompt shows active state, parent inheritance, and direct
+role count. Bookmark prompts show target type, abbreviated path, exact
+line/column, and bounded containing-line context; they reuse an open buffer or
+read at most 1 MiB without visiting a file or running mode hooks, and stale
+targets degrade to missing-path metadata.
+
+Annotations are computed after filtering for at most the 100 visible candidates,
+metadata failure degrades to blank or safe fallback detail, and tests prove
+annotation text cannot become filter input. For upstream command, buffer, and
+file providers, the layer changes only each existing item's display detail,
+leaving its label, filter text, replacement range, insertion text, rank, and
+acceptance identity intact. Custom project, recent-file, library, theme, and
+bookmark providers create correctly ranged items after ranking and retain the
+selected raw value separately from display metadata. The ncurses gates cover
+common local regular files and buffer states, exact library/theme/bookmark
+acceptance, loaded and active state, theme inheritance, bookmark context, and
+missing targets. Special file modes, conditional foreign ownership, and generic
+metadata-failure fallback remain source-inspected. Marginalia's unsupported face
+and package categories, dynamic alignment, category-aware truncation, and remote
+fields remain outside this approximation.
 
 The active Helpful leader workflows are no longer routed through generic
 apropos. `SPC h k` indexes every currently fbound, package-qualified Lisp symbol

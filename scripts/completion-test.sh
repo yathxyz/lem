@@ -59,6 +59,13 @@ open_query() {
   sleep 0.5
 }
 
+open_command_prompt() {
+  local session=$1 command=$2 prompt=$3
+  open_query "$session" "$command" || return 1
+  lem_keys "$session" Enter
+  lem_wait_for "$session" "$prompt" 10 >/dev/null
+}
+
 close_prompt() {
   lem_keys "$1" Escape
   sleep 0.2
@@ -127,6 +134,156 @@ if start_session "$s1"; then
     fi
   else
     fail annotation-display-only 'could not run the annotation-only query' "$s1"
+  fi
+  close_prompt "$s1"
+
+  if open_command_prompt "$s1" load-library 'load library:'; then
+    tmux_cmd send-keys -t "$s1" -l ollama
+    if lem_wait_for "$s1" 'ollama' 10 >/dev/null; then
+      sleep 0.5
+      screen=$(lem_capture "$s1")
+      if grep -Fq 'An ollama client for Lem.' <<<"$screen" &&
+         grep -Fq 'contrib/ollama/' <<<"$screen"; then
+        pass library-annotations \
+          'load-library shows ASDF description and source directory'
+      else
+        fail library-annotations \
+          'the library row lacked description/source metadata' "$s1"
+      fi
+    else
+      fail library-annotations 'ollama was absent from the library prompt' "$s1"
+    fi
+  else
+    fail library-annotations 'could not open the annotated library prompt' "$s1"
+  fi
+  close_prompt "$s1"
+
+  if open_command_prompt "$s1" load-library 'load library:'; then
+    tmux_cmd send-keys -t "$s1" -l 'An ollama client'
+    sleep 0.6
+    screen=$(lem_capture "$s1")
+    if ! grep -Eq '^[[:space:]]*ollama[[:space:]]' <<<"$screen"; then
+      pass library-metadata-display-only \
+        'a library description could not match its candidate'
+    else
+      fail library-metadata-display-only \
+        'library metadata leaked into filtering' "$s1"
+    fi
+  else
+    fail library-metadata-display-only \
+      'could not reopen the annotated library prompt' "$s1"
+  fi
+  close_prompt "$s1"
+
+  if open_command_prompt "$s1" load-library 'load library:'; then
+    tmux_cmd send-keys -t "$s1" -l tetris
+    if lem_wait_for "$s1" 'tetris' 10 >/dev/null; then
+      lem_keys "$s1" Enter
+      sleep 0.7
+    else
+      fail library-acceptance 'tetris was absent from the library prompt' "$s1"
+      close_prompt "$s1"
+    fi
+  else
+    fail library-acceptance 'could not reopen the library prompt' "$s1"
+  fi
+
+  if open_command_prompt "$s1" load-library 'load library:'; then
+    tmux_cmd send-keys -t "$s1" -l tetris
+    if lem_wait_for "$s1" 'Loaded' 10 >/dev/null; then
+      pass library-acceptance \
+        'one Return registered and delegated the exact library to Lem core'
+      pass library-loaded-state \
+        'a library loaded through the prompt is marked Loaded on reopen'
+    else
+      fail library-acceptance \
+        'the selected library was not loaded by one Return' "$s1"
+      fail library-loaded-state \
+        'the library prompt did not reflect the loaded ASDF system' "$s1"
+    fi
+  else
+    fail library-loaded-state 'could not inspect loaded library state' "$s1"
+  fi
+  close_prompt "$s1"
+
+  if open_command_prompt "$s1" load-theme 'Color theme:'; then
+    tmux_cmd send-keys -t "$s1" -l modus-vivendi-tinted
+    if lem_wait_for "$s1" 'modus-vivendi-tinted' 10 >/dev/null; then
+      sleep 0.5
+      screen=$(lem_capture "$s1")
+      if grep -Fq 'Active' <<<"$screen" &&
+         grep -Fq 'direct' <<<"$screen" &&
+         grep -Eq '[0-9]+ roles' <<<"$screen"; then
+        pass theme-annotations \
+          'load-theme shows active state, inheritance, and role count'
+      else
+        fail theme-annotations \
+          'the active theme row lacked category metadata' "$s1"
+      fi
+    else
+      fail theme-annotations 'the configured theme was absent' "$s1"
+    fi
+  else
+    fail theme-annotations 'could not open the annotated theme prompt' "$s1"
+  fi
+  close_prompt "$s1"
+
+  if open_command_prompt "$s1" load-theme 'Color theme:'; then
+    tmux_cmd send-keys -t "$s1" -l lem-yath-marginalia-child
+    if lem_wait_for "$s1" 'lem-yath-marginalia-child' 10 >/dev/null; then
+      sleep 0.5
+      screen=$(lem_capture "$s1")
+      if grep -Fq 'inherits modus-vivendi-tinted' <<<"$screen" &&
+         grep -Fq '1 roles' <<<"$screen"; then
+        pass theme-inheritance \
+          'an inherited theme exposes its parent and direct role count'
+      else
+        fail theme-inheritance \
+          'the child theme lacked inheritance metadata' "$s1"
+      fi
+      lem_keys "$s1" Enter
+      sleep 0.5
+      before=$(grep -c '^THEME=' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+      before=${before:-0}
+      lem_keys "$s1" F7
+      for _ in $(seq 1 40); do
+        after=$(grep -c '^THEME=' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+        after=${after:-0}
+        [ "$after" -gt "$before" ] && break
+        sleep 0.1
+      done
+      selected_theme=$(grep '^THEME=' "$LEM_YATH_COMPLETION_REPORT" | tail -n 1)
+      if [ "$selected_theme" = 'THEME=lem-yath-marginalia-child' ]; then
+        pass theme-acceptance \
+          'one Return applied the exact annotated theme through Lem core'
+      else
+        fail theme-acceptance \
+          "unexpected selected theme: $selected_theme" "$s1"
+      fi
+      lem_keys "$s1" F8
+      sleep 0.4
+    else
+      fail theme-inheritance 'the fixture child theme was absent' "$s1"
+      close_prompt "$s1"
+    fi
+  else
+    fail theme-inheritance 'could not reopen the annotated theme prompt' "$s1"
+  fi
+
+  if open_command_prompt "$s1" load-theme 'Color theme:'; then
+    tmux_cmd send-keys -t "$s1" -l 'inherits modus-vivendi-tinted'
+    sleep 0.6
+    screen=$(lem_capture "$s1")
+    if ! grep -Fq 'lem-yath-marginalia-child' <<<"$screen"; then
+      pass theme-metadata-display-only \
+        'inheritance metadata could not match its candidate'
+    else
+      fail theme-metadata-display-only \
+        'theme metadata leaked into filtering' "$s1"
+    fi
+  else
+    fail theme-metadata-display-only \
+      'could not reopen the theme prompt for filtering' "$s1"
   fi
   close_prompt "$s1"
 

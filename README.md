@@ -84,6 +84,9 @@ of writing `.fasl` files into the source tree.
 - Prescient-style literal/regexp/initialism filtering and persistent learned
   ranking in command, buffer, and custom prompts; file prompts retain Lem's
   path-aware matching and gain the same ranking
+- bounded, display-only Marginalia-style context for commands, Lisp symbols,
+  buffers, files, loadable Lisp libraries, themes, and bookmarks; metadata
+  failures do not alter candidate identity or prevent ordinary selection
 - completion candidates keep display, filtering, and insertion text separate;
   final insertion and post-accept callbacks are explicit, tracked replacement
   ranges survive filtering, and stale asynchronous results are rejected

@@ -79,6 +79,16 @@
    (mapcar #'bookmark-test-entry-description
            (bookmark-persistence-snapshot))))
 
+(define-command lem-yath-test-bookmark-add-missing () ()
+  (setf (gethash "missing-target" lem-bookmark::*bookmark-table*)
+        (lem-bookmark::make-bookmark
+         :name "missing-target"
+         :filename (merge-pathnames "missing.txt" (buffer-directory))
+         :position 7)))
+
+(define-command lem-yath-test-bookmark-remove-missing () ()
+  (remhash "missing-target" lem-bookmark::*bookmark-table*))
+
 (define-command lem-yath-test-bookmark-clear-prompt () ()
   (lem/prompt-window::replace-prompt-input ""))
 
@@ -88,7 +98,9 @@
   (define-key keymap "F5" 'lem-yath-test-bookmark-record)
   (define-key keymap "F6" 'lem-yath-test-bookmark-writer-a)
   (define-key keymap "F7" 'lem-yath-test-bookmark-writer-b)
-  (define-key keymap "F8" 'lem-yath-test-bookmark-reload))
+  (define-key keymap "F8" 'lem-yath-test-bookmark-reload)
+  (define-key keymap "F9" 'lem-yath-test-bookmark-add-missing)
+  (define-key keymap "F10" 'lem-yath-test-bookmark-remove-missing))
 
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F4" 'lem-yath-test-bookmark-clear-prompt)

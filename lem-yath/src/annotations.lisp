@@ -4,6 +4,8 @@
 
 (defparameter *completion-annotation-limit* 120)
 (defparameter *completion-annotation-max-relative-age* (* 14 24 60 60))
+(defparameter *completion-bookmark-context-byte-limit* (* 1024 1024))
+(defparameter *completion-library-metadata-byte-limit* (* 64 1024))
 
 (defun completion-annotation-one-line (text)
   "Return TEXT as one trimmed line without changing ordinary spacing."
@@ -45,6 +47,17 @@
                  (if (or (< code 32) (= code 127))
                      (format stream "\\x~2,'0X;" code)
                      (write-char character stream)))))))
+
+(defun completion-abbreviated-path (pathname)
+  "Abbreviate a local PATHNAME below HOME without resolving symlinks."
+  (let* ((name (uiop:native-namestring (pathname pathname)))
+         (home
+           (uiop:native-namestring
+            (uiop:ensure-directory-pathname (user-homedir-pathname)))))
+    (completion-path-display-string
+     (if (alexandria:starts-with-subseq home name)
+         (concatenate 'string "~/" (subseq name (length home)))
+         name))))
 
 (defun completion-bounded-annotation (text)
   "Bound one-line annotation TEXT to the terminal-safe display limit."
@@ -324,6 +337,179 @@
        (completion-file-candidate-path
         input directory (completion-label item)))))))
 
+;;; Lisp libraries ----------------------------------------------------------
+
+(defun completion-quicklisp-local-project-directories ()
+  (handler-case
+      (let ((symbol
+              (uiop:find-symbol*
+               :*local-project-directories* :quicklisp)))
+        (when (boundp symbol)
+          (symbol-value symbol)))
+    (error () nil)))
+
+(defun completion-library-asd-files ()
+  "Return bundled and Quicklisp-local Lem library definitions."
+  (let* ((lem-root (asdf:system-source-directory :lem))
+         ;; Marginalia's library category covers the whole load path, not only
+         ;; optional contribs.  The Nix image keeps all bundled ASDs here.
+         (bundled-files
+           (directory (merge-pathnames "**/lem-*.asd" lem-root)))
+         (local-files
+           (loop :for root
+                   :in (completion-quicklisp-local-project-directories)
+                 :append
+                 (directory (merge-pathnames "**/lem-*.asd" root)))))
+    (append bundled-files
+            (set-difference local-files bundled-files
+                            :test #'equal :key #'pathname-name))))
+
+(defun completion-library-choices ()
+  (let ((seen (make-hash-table :test #'equal))
+        (choices nil))
+    (dolist (file (completion-library-asd-files) (nreverse choices))
+      (let ((stem (pathname-name file)))
+        (when (and (stringp stem)
+                   (alexandria:starts-with-subseq "lem-" stem)
+                   (> (length stem) 4))
+          (let ((name (subseq stem 4)))
+            (unless (gethash name seen)
+              (setf (gethash name seen) t)
+              (push (cons name file) choices))))))))
+
+(defun completion-library-form-metadata (pathname)
+  "Read literal ASDF description/version fields without evaluating PATHNAME."
+  (handler-case
+      (let ((size (sb-posix:stat-size
+                   (sb-posix:stat (uiop:native-namestring pathname)))))
+        (when (<= size *completion-library-metadata-byte-limit*)
+          (with-open-file (stream pathname :direction :input)
+            (let ((*read-eval* nil))
+              (loop :repeat 64
+                    :for form := (read stream nil nil)
+                    :while form
+                    :when (and (consp form)
+                               (symbolp (first form))
+                               (string-equal
+                                "DEFSYSTEM" (symbol-name (first form))))
+                      :return
+                      (let* ((options (cddr form))
+                             (description
+                               (ignore-errors
+                                 (getf options :description)))
+                             (version
+                               (ignore-errors (getf options :version))))
+                        (values
+                         (and (stringp description)
+                              (completion-first-documentation-line
+                               description))
+                         (and (or (stringp version) (numberp version))
+                              (princ-to-string version)))))))))
+    (error () (values nil nil))))
+
+(defun completion-library-source-directory (pathname)
+  (let ((directory
+          (uiop:ensure-directory-pathname
+           (uiop:pathname-directory-pathname pathname))))
+    (or
+     (loop :for system :in '(:lem :lem-contrib)
+           :for root := (ignore-errors
+                          (asdf:system-source-directory system))
+           :for relative := (and root
+                                 (ignore-errors
+                                   (enough-namestring directory root)))
+           :when (and relative
+                      (not (alexandria:starts-with-subseq "../" relative)))
+             :return (completion-path-display-string relative))
+     (completion-abbreviated-path directory))))
+
+(defun completion-library-detail (pathname)
+  (handler-case
+      (multiple-value-bind (description version)
+          (completion-library-form-metadata pathname)
+        (let ((system-name (pathname-name pathname)))
+          (completion-join-annotation-fields
+           (when (member system-name (asdf:already-loaded-systems)
+                         :test #'string-equal)
+             "Loaded")
+           version
+           description
+           (completion-library-source-directory pathname))))
+    (error () "")))
+
+(defun completion-prompt-for-library (prompt &key history-symbol)
+  "Read a Lem library with loaded state, metadata, and source annotations."
+  (let ((choices (completion-library-choices))
+        (details (make-hash-table :test #'equal)))
+    (prompt-for-string
+     prompt
+     :completion-function
+     (lambda (input)
+       (completion-annotated-prompt-choices
+        (prescient-filter input choices
+                          :key #'car :category :library)
+        (lambda (pathname)
+          (or (gethash pathname details)
+              (setf (gethash pathname details)
+                    (completion-library-detail pathname))))))
+     :test-function
+     (lambda (name)
+       (not (null (assoc name choices :test #'string=))))
+     :history-symbol history-symbol)))
+
+(defun completion-register-selected-library (name)
+  "Register NAME's exact accepted ASD when the dumped image omitted it."
+  (let ((system-name (format nil "lem-~a" name)))
+    (unless (asdf:find-system system-name nil)
+      (alexandria:when-let
+          ((pathname
+            (cdr (assoc name (completion-library-choices)
+                        :test #'string=))))
+        (asdf:load-asd pathname)))))
+
+(define-command (lem-yath-load-library (:name "load-library")) (name)
+    ((completion-prompt-for-library
+      "load library: " :history-symbol 'load-library))
+  "Load a Lisp library selected from an annotated prompt."
+  (completion-register-selected-library name)
+  (load-library name))
+
+;;; Themes ------------------------------------------------------------------
+
+(defun completion-theme-detail (theme-name)
+  (handler-case
+      (let* ((theme (find-color-theme theme-name))
+             (parent (and theme (lem-core::color-theme-parent theme)))
+             (roles (and theme
+                         (length (lem-core::color-theme-specs theme)))))
+        (completion-join-annotation-fields
+         (when (string= theme-name (or (current-theme) "")) "Active")
+         (if parent (format nil "inherits ~a" parent) "direct")
+         (and roles (format nil "~d roles" roles))))
+    (error () "")))
+
+(defun completion-prompt-for-theme ()
+  "Read a color theme with active, inheritance, and role annotations."
+  (let ((choices
+          (mapcar (lambda (name)
+                    (cons name name))
+                  (lem-core::all-color-themes))))
+    (prompt-for-string
+     "Color theme: "
+     :completion-function
+     (lambda (input)
+       (completion-annotated-prompt-choices
+        (prescient-filter input choices :key #'car :category :theme)
+        #'completion-theme-detail))
+     :test-function #'find-color-theme
+     :history-symbol 'mh-color-theme)))
+
+(define-command (lem-yath-load-theme (:name "load-theme"))
+    (name &optional (save-theme t))
+    ((completion-prompt-for-theme))
+  "Load a color theme selected from an annotated prompt."
+  (load-theme name save-theme))
+
 ;;; Install prompt producer wrappers -----------------------------------------
 
 (defvar *completion-unannotated-command-function* nil)
@@ -394,3 +580,113 @@
                (assoc name choices :test #'string=)))))
       (when choice
         (find-file (cdr (assoc choice choices :test #'string=)))))))
+
+;;; Bookmarks ---------------------------------------------------------------
+
+(defun completion-bookmark-open-buffer (filename)
+  "Return an existing file buffer for FILENAME without opening one."
+  (let ((target (ignore-errors (expand-file-name filename))))
+    (and target
+         (find-if
+          (lambda (buffer)
+            (let ((buffer-file (buffer-filename buffer)))
+              (and buffer-file
+                   (string= target
+                            (ignore-errors
+                              (expand-file-name buffer-file))))))
+          (buffer-list)))))
+
+(defun completion-bookmark-file-text (filename)
+  "Read bounded bookmark text without visiting FILENAME or running hooks."
+  (handler-case
+      (alexandria:if-let
+          ((buffer (completion-bookmark-open-buffer filename)))
+        (when (<= (completion-buffer-size buffer)
+                  *completion-bookmark-context-byte-limit*)
+          (points-to-string (buffer-start-point buffer)
+                            (buffer-end-point buffer)))
+        (let* ((native (uiop:native-namestring (pathname filename)))
+               (stat (sb-posix:stat native))
+               (mode (sb-posix:stat-mode stat)))
+          (when (and (= #o100000 (logand mode #o170000))
+                     (<= (sb-posix:stat-size stat)
+                         *completion-bookmark-context-byte-limit*))
+            (uiop:read-file-string filename))))
+    (error () nil)))
+
+(defun completion-bookmark-position-context (text position)
+  "Return line, column, and the containing line for one-based POSITION."
+  (when (and (stringp text)
+             (integerp position)
+             (<= 1 position (1+ (length text))))
+    (let* ((index (1- position))
+           (previous-newline
+             (position #\Newline text :end index :from-end t))
+           (line-start (if previous-newline (1+ previous-newline) 0))
+           (next-newline (position #\Newline text :start index))
+           (line-end (or next-newline (length text)))
+           (line (1+ (count #\Newline text :end index)))
+           (column (- index line-start))
+           (context
+             (completion-annotation-one-line
+              (subseq text line-start line-end))))
+      (values line column context))))
+
+(defun completion-bookmark-file-kind (filename)
+  (handler-case
+      (case (completion-file-mode-character
+             (sb-posix:stat-mode
+              (sb-posix:lstat
+               (uiop:native-namestring (pathname filename)))))
+        (#\d "directory")
+        (#\l "link")
+        (#\s "socket")
+        (#\p "fifo")
+        ((#\c #\b) "device")
+        (otherwise "file"))
+    (error () "missing")))
+
+(defun completion-bookmark-detail (entry)
+  "Return type, path, position, and bounded context for bookmark ENTRY."
+  (handler-case
+      (let* ((filename (lem-bookmark:bookmark-filename entry))
+             (position (lem-bookmark:bookmark-position entry))
+             (kind (completion-bookmark-file-kind filename))
+             (path (completion-abbreviated-path filename))
+             (text (and position
+                        (string/= kind "directory")
+                        (completion-bookmark-file-text filename))))
+        (multiple-value-bind (line column context)
+            (completion-bookmark-position-context text position)
+          (completion-join-annotation-fields
+           kind
+           path
+           (cond
+             (line (format nil "L~d:C~d" line column))
+             (position (format nil "@~d" position)))
+           context)))
+    (error () "")))
+
+(defun completion-prompt-for-bookmark (prompt)
+  "Read a bookmark with lazy, display-only Marginalia-style metadata."
+  (let ((choices
+          (loop :for entry :being :the :hash-value
+                  :in lem-bookmark::*bookmark-table*
+                :collect (cons (lem-bookmark:bookmark-name entry)
+                               entry))))
+    (prompt-for-string
+     prompt
+     :completion-function
+     (lambda (input)
+       (completion-annotated-prompt-choices
+        (prescient-filter input choices
+                          :key #'car
+                          :category :bookmark)
+        #'completion-bookmark-detail))
+     :test-function
+     (lambda (name)
+       (assoc name choices :test #'string=))
+     :history-symbol 'prompt-for-bookmark)))
+
+(setf (fdefinition 'lem-bookmark::prompt-for-bookmark)
+      #'completion-prompt-for-bookmark)
