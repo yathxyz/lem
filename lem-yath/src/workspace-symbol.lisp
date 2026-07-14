@@ -14,13 +14,38 @@
 (defparameter *workspace-symbol-timeout* 10
   "Seconds before one workspace/symbol request times out.")
 
+(defparameter *workspace-symbol-narrow-kinds*
+  `((#\c "Class" ,lsp:symbol-kind-class)
+    (#\f "Function" ,lsp:symbol-kind-function)
+    (#\e "Enum" ,lsp:symbol-kind-enum)
+    (#\i "Interface" ,lsp:symbol-kind-interface)
+    (#\m "Module" ,lsp:symbol-kind-module)
+    (#\n "Namespace" ,lsp:symbol-kind-namespace)
+    (#\p "Package" ,lsp:symbol-kind-package)
+    (#\s "Struct" ,lsp:symbol-kind-struct)
+    (#\t "Type Parameter" ,lsp:symbol-kind-type-parameter)
+    (#\v "Variable" ,lsp:symbol-kind-variable)
+    (#\A "Array" ,lsp:symbol-kind-array)
+    (#\B "Boolean" ,lsp:symbol-kind-boolean)
+    (#\C "Constant" ,lsp:symbol-kind-constant)
+    (#\E "Enum Member" ,lsp:symbol-kind-enum-member)
+    (#\F "Field" ,lsp:symbol-kind-field)
+    (#\M "Method" ,lsp:symbol-kind-method)
+    (#\N "Number" ,lsp:symbol-kind-number)
+    (#\O "Object" ,lsp:symbol-kind-object)
+    (#\P "Property" ,lsp:symbol-kind-property)
+    (#\S "String" ,lsp:symbol-kind-string)
+    (#\o "Other"))
+  "Pinned Consult-Eglot narrowing keys, labels, and LSP symbol kinds.")
+
 (defstruct (workspace-symbol-candidate
             (:constructor %make-workspace-symbol-candidate))
   symbol
   label
   detail
   filter-text
-  group)
+  group
+  narrow-key)
 
 (defstruct workspace-symbol-session
   workspace
@@ -33,6 +58,7 @@
   prompt-window
   query
   candidates
+  narrow-key
   selected
   preview-candidate
   preview-buffers
@@ -83,6 +109,18 @@
         (lsp:base-symbol-information-kind symbol)))
       "Symbol"))
 
+(defun workspace-symbol-kind-narrow-key (symbol)
+  "Return Consult-Eglot's narrowing key for SYMBOL's LSP kind."
+  (let ((kind (lsp:base-symbol-information-kind symbol)))
+    (or (loop :for entry :in *workspace-symbol-narrow-kinds*
+              :for key = (first entry)
+              :for mapped-kind = (third entry)
+              :when (and mapped-kind
+                         (numberp kind)
+                         (= kind mapped-kind))
+                :return key)
+        #\o)))
+
 (defun workspace-symbol-location-pathname (symbol)
   (alexandria:when-let ((location (workspace-symbol-location symbol)))
     (when (typep location 'lsp:location)
@@ -117,7 +155,8 @@
      :detail detail
      :filter-text (format nil "~a ~a~@[ ~a~]~@[ ~a~]"
                           name kind container location)
-     :group kind)))
+     :group kind
+     :narrow-key (workspace-symbol-kind-narrow-key symbol))))
 
 (defun workspace-symbol-response-candidates (workspace response)
   (unless (lem-lsp-base/type:lsp-null-p response)
@@ -249,15 +288,23 @@
          (setf (workspace-symbol-session-selected session) candidate))))))
 
 (defun workspace-symbol-completion-items (session input)
-  (mapcar
-   (lambda (candidate)
-     (workspace-symbol-completion-item session candidate input))
-   (prescient-filter
-    input
-    (workspace-symbol-session-candidates session)
-    :key #'workspace-symbol-candidate-filter-text
-    :category :workspace-symbol
-    :rank-p nil)))
+  (let* ((narrow-key (workspace-symbol-session-narrow-key session))
+         (candidates
+           (if narrow-key
+               (remove-if-not
+                (lambda (candidate)
+                  (char= narrow-key
+                         (workspace-symbol-candidate-narrow-key candidate)))
+                (workspace-symbol-session-candidates session))
+               (workspace-symbol-session-candidates session))))
+    (mapcar
+     (lambda (candidate)
+       (workspace-symbol-completion-item session candidate input))
+     (prescient-filter
+      input candidates
+      :key #'workspace-symbol-candidate-filter-text
+      :category :workspace-symbol
+      :rank-p nil))))
 
 (defun workspace-symbol-completion-observer (session event item)
   (case event
@@ -431,21 +478,69 @@
                 :name "workspace-symbol-debounce")
                (workspace-symbol-next-delay session)))))))
 
+(defun workspace-symbol-narrow-key-for-input (input)
+  (and (= (length input) 1)
+       (alexandria:when-let
+           ((entry (assoc (char input 0)
+                          *workspace-symbol-narrow-kinds*
+                          :test #'char=)))
+         (first entry))))
+
+(defun workspace-symbol-narrow-label (key)
+  (second (assoc key *workspace-symbol-narrow-kinds* :test #'char=)))
+
+(defun workspace-symbol-prompt-prefix (session)
+  (alexandria:if-let
+      ((key (workspace-symbol-session-narrow-key session)))
+    (format nil "LSP Symbols: [~a] "
+            (workspace-symbol-narrow-label key))
+    "LSP Symbols: "))
+
+(defun workspace-symbol-reset-prompt-prefix (session)
+  "Replace the prompt indicator and clear its input without ending SESSION."
+  (lem/completion-mode:completion-end)
+  (let* ((prompt (lem/prompt-window:current-prompt-window))
+         (buffer (window-buffer prompt)))
+    (setf (slot-value buffer 'lem/prompt-window::prompt-string)
+          (workspace-symbol-prompt-prefix session))
+    (lem/prompt-window::initialize-prompt-buffer buffer)
+    (lem/prompt-window::initialize-prompt prompt)
+    (lem/prompt-window::update-prompt-window prompt)
+    (lem/prompt-window::open-prompt-completion)))
+
 (define-command workspace-symbol-prompt-space () ()
-  (insert-character (current-point) #\Space)
-  (when *workspace-symbol-session*
-    (workspace-symbol-schedule-query
-     *workspace-symbol-session*
-     (lem/prompt-window::get-input-string))))
+  "Narrow on a pinned kind key plus Space; otherwise insert query Space."
+  (let* ((session *workspace-symbol-session*)
+         (input (lem/prompt-window::get-input-string))
+         (narrow-key
+           (and session (workspace-symbol-narrow-key-for-input input))))
+    (if narrow-key
+        (progn
+          (setf (workspace-symbol-session-narrow-key session) narrow-key)
+          (workspace-symbol-schedule-query session "")
+          (workspace-symbol-reset-prompt-prefix session))
+        (progn
+          (insert-character (current-point) #\Space)
+          (when session
+            (workspace-symbol-schedule-query
+             session (lem/prompt-window::get-input-string)))))))
 
 (define-command workspace-symbol-prompt-delete-previous-char () ()
-  (when (point> (current-point)
-                (lem/prompt-window::current-prompt-start-point))
-    (delete-previous-char 1))
-  (when *workspace-symbol-session*
-    (workspace-symbol-schedule-query
-     *workspace-symbol-session*
-     (lem/prompt-window::get-input-string))))
+  "Widen an empty narrowed prompt; otherwise delete one query character."
+  (let ((session *workspace-symbol-session*))
+    (if (and session
+             (workspace-symbol-session-narrow-key session)
+             (zerop (length (lem/prompt-window::get-input-string))))
+        (progn
+          (setf (workspace-symbol-session-narrow-key session) nil)
+          (workspace-symbol-reset-prompt-prefix session))
+        (progn
+          (when (point> (current-point)
+                        (lem/prompt-window::current-prompt-start-point))
+            (delete-previous-char 1))
+          (when session
+            (workspace-symbol-schedule-query
+             session (lem/prompt-window::get-input-string)))))))
 
 (define-command workspace-symbol-prompt-previous-history () ()
   "Move backward through workspace-symbol query history and refresh it."

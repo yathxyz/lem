@@ -167,7 +167,8 @@ of writing `.fasl` files into the source tree.
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,
   and a one-prompt `SPC p s` workspace-symbol search with Consult's minimum
   input, debounce/throttle timing, annotated kind groups, cancellable incremental
-  requests, reversible preview, and Vi-jumplist acceptance; optional Lisp-v2
+  requests, case-sensitive kind-key-plus-Space narrowing with empty-Backspace
+  widening, reversible preview, and Vi-jumplist acceptance; optional Lisp-v2
   connections remain globally selected when loaded
 - installed LSP stack for Rust, Python, Markdown, C#, Nix, Go, Terraform, and
   manually enabled Java: rust-analyzer, pyright, harper-ls, csharp-ls,

@@ -192,6 +192,16 @@ temporarily presents only matching selectable buffer rows
 | **embark-consult** | effective on demand | no user configuration; the pinned Embark package loads it automatically after Consult loads when the installed library is available |
 | **wgrep** | deferred; `wgrep-change-to-wgrep-mode` (editable grep buffers) |
 
+The pinned Consult default leaves `consult-narrow-key` unset.  Its narrow map
+still makes a sole, case-sensitive Consult-Eglot kind key followed by `Space`
+activate that type before the ordinary query is entered; for example, `f Space`
+selects Function and `C Space` selects Constant.  Backspace on an empty narrowed
+prompt widens.  The active map is `c/f/e/i/m/n/p/s/t/v` for the lowercase
+classes, `A/B/C/E/F/M/N/O/P/S` for the uppercase classes, and `o` for every
+unlisted kind.  Lem reproduces this default path rather than inventing a global
+narrow-prefix binding (`src/workspace-symbol.lisp`,
+`scripts/lsp-project-test.sh`).
+
 The Lem port now covers the effective directory-local `consult-outline` path
 without reproducing the Emacs cold-start defect: the exact declaration is read
 without evaluation, `C-c i` keeps its Insert/Visual LLM meaning, and the

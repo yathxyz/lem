@@ -509,6 +509,90 @@ else
     'workspace-symbol prompt could not reopen for history validation'
 fi
 
+# With Consult's default narrow prefix unset, a case-sensitive kind key plus
+# Space narrows before the ordinary query is entered.  The fixture returns a
+# Function and Constant for the same query so both exclusion directions and
+# empty-Backspace widening are visible in the real popup.
+workspace_symbol_alpha_before=$(event_count WORKSPACE_SYMBOL 'query=alpha')
+if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
+  tmux_cmd send-keys -t "$session" -l f
+  lem_keys "$session" Space
+  if lem_wait_for "$session" 'LSP Symbols: \[Function\]' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l alpha
+    if wait_event_count WORKSPACE_SYMBOL 'query=alpha' \
+         "$((workspace_symbol_alpha_before + 1))" &&
+       lem_wait_for "$session" 'AlphaSymbol' 10 >/dev/null; then
+      screen=$(lem_capture "$session")
+      if ! grep -q 'AlphaConstant' <<<"$screen"; then
+        pass workspace-symbol-narrow-function \
+          'f Space shows only Function symbols under a visible indicator'
+      else
+        fail workspace-symbol-narrow-function \
+          'Function narrowing retained a Constant result'
+      fi
+    else
+      fail workspace-symbol-narrow-function \
+        'the narrowed Function query did not produce its matching result'
+    fi
+  else
+    fail workspace-symbol-narrow-function \
+      'f Space did not install the Function prompt indicator'
+  fi
+
+  prompt_backspace 5
+  sleep 0.35
+  tmux_cmd send-keys -t "$session" -l C
+  lem_keys "$session" Space
+  if lem_wait_for "$session" 'LSP Symbols: \[Constant\]' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l alpha
+    if wait_event_count WORKSPACE_SYMBOL 'query=alpha' \
+         "$((workspace_symbol_alpha_before + 2))" &&
+      lem_wait_for "$session" 'AlphaConstant' 10 >/dev/null; then
+      screen=$(lem_capture "$session")
+      if ! grep -qE 'AlphaSymbol[[:space:]]+\[Function\]' <<<"$screen"; then
+        pass workspace-symbol-narrow-case \
+          'uppercase C selects Constant independently of lowercase keys'
+      else
+        fail workspace-symbol-narrow-case \
+          'Constant narrowing retained a Function result'
+      fi
+    else
+      fail workspace-symbol-narrow-case \
+        'the narrowed Constant query did not produce its matching result'
+    fi
+  else
+    fail workspace-symbol-narrow-case \
+      'uppercase C Space did not install the Constant prompt indicator'
+  fi
+
+  prompt_backspace 5
+  sleep 0.35
+  lem_keys "$session" BSpace
+  sleep 0.35
+  screen=$(lem_capture "$session")
+  if grep -q 'LSP Symbols:' <<<"$screen" &&
+     ! grep -q 'LSP Symbols: \[' <<<"$screen"; then
+    tmux_cmd send-keys -t "$session" -l alpha
+    if wait_event_count WORKSPACE_SYMBOL 'query=alpha' \
+         "$((workspace_symbol_alpha_before + 3))" &&
+       lem_wait_for "$session" 'AlphaSymbol' 10 >/dev/null &&
+       lem_wait_for "$session" 'AlphaConstant' 10 >/dev/null; then
+      pass workspace-symbol-widen \
+        'Backspace on an empty narrow restores every symbol kind'
+    else
+      fail workspace-symbol-widen \
+        'the widened query did not restore both fixture kinds'
+    fi
+  else
+    fail workspace-symbol-widen \
+      'empty Backspace did not remove the narrow prompt indicator'
+  fi
+  lem_keys "$session" C-g
+else
+  fail workspace-symbol-narrow-setup \
+    'workspace-symbol prompt could not start for narrowing validation'
+fi
+
 # Restart must replace project A once, reopen both of its live buffers, and
 # leave project B's server and open document untouched.
 invoke_mx lem-yath-test-lsp-activate-project-a >/dev/null || true

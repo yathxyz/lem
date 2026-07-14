@@ -536,6 +536,14 @@ late reply cannot replace newer results. Successful replies retain server order 
 Prescient filters the symbol name, kind, container, and root-relative file annotation;
 the popup also shows contiguous kind groups.
 
+Because the pinned Consult default has no separate narrow-prefix key, entering one
+case-sensitive kind key as the sole input and then pressing `Space` activates the
+corresponding local filter before the real query.  The exact Consult-Eglot map is
+`c/f/e/i/m/n/p/s/t/v`, `A/B/C/E/F/M/N/O/P/S`, and `o` for otherwise unmapped LSP
+kinds.  The prompt shows the selected label, such as `[Function]` or `[Constant]`;
+the prefix itself never reaches the server, and Backspace on an empty narrowed prompt
+widens without closing it.
+
 Focused rows preview their exact UTF-16-aware LSP position in the caller's window
 without recording buffer history or a jump. Moving focus restores the caller first;
 `C-g` and `Escape` restore its exact buffer, point, viewport, horizontal scroll, and Vi
@@ -547,17 +555,17 @@ workspace remains authoritative while previews switch buffers, so incremental qu
 cannot leak to another project.
 
 This remains partial Consult-Eglot parity: Lem has one language workspace per invoking
-buffer rather than Eglot's possible multi-server project aggregation, does not implement
-Consult's symbol-kind narrow prefix, and its typed LSP model discards the package's
-nonstandard optional score field. The final matched-line highlight substitutes for the
-configured Pulsar reveal effect.
+buffer rather than Eglot's possible multi-server project aggregation, and its typed LSP
+model discards the package's nonstandard optional score field. The final matched-line
+highlight substitutes for the configured Pulsar reveal effect.
 
 `scripts/lsp-project-test.sh` exercises the actual ncurses editor against a deterministic
 Python stdio language server. It verifies pending-start deduplication and timeout,
 cross-root isolation, save-as migration and mode-change detachment, notification
 ownership, handler and diagnostic cleanup, stale diagnostic ownership, symbol error
 recovery, minimum-input/debounce timing, annotations and kind groups, focused preview,
-exact abort rollback, query history, one-Return navigation and `C-o`, explicit cancellation,
+case-sensitive Function/Constant narrowing, empty-Backspace widening, exact abort
+rollback, query history, one-Return navigation and `C-o`, explicit cancellation,
 out-of-order stale-response rejection, project-stable incremental routing,
 project-only restart, idle retention/reuse/explicit stop,
 bounded shutdown with forced disposal, graceful exit on responsive paths,
