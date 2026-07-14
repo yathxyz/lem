@@ -1602,18 +1602,21 @@ delivery. Entry lines retain exact source pathname, line, and scanned-heading
 properties. In Vi state, `Return` visits that source, `g` refreshes, `q` closes
 the explicit popup split, and Evil-Org's `t` opens the configured one-key
 TODO/NEXT/WAITING/HOLD/SOMEDAY/DONE/CANCELLED selector. A selected state updates
-and immediately saves the source before refreshing; a shifted or changed source
+and immediately saves the source before refreshing. GNU Org's `C-c C-s` and
+`C-c C-d` chords set SCHEDULED and DEADLINE fields from validated `YYYY-MM-DD`,
+`+Nd`, or `+Nw` input, compute the weekday, prepend a newly added field as Org
+does, and replace an existing field in place. A shifted or changed source
 heading fails closed instead of editing the line now occupying its stale
-location. `scripts/agenda-test.sh` drives all five production entry keys in the
+location. `scripts/agenda-test.sh` drives the production entry keys in the
 installed ncurses wrapper and also verifies source scope, grouping, duplicate
-basenames, persistence, stale-source refusal, refresh races,
+basenames, TODO and planning persistence, stale-source refusal, refresh races,
 unmodified/undo-free generated buffers, and cleanup.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Ordinary active-timestamp events, COMMENT/archive filtering,
-scheduling/deadline/priority/tag/refile/archive mutation, bulk actions, clocks,
-repeating timestamps, custom commands, and the wider org-super-agenda
-presentation remain explicit gaps.
+planning removal and warning/delay-cookie forms, priority/tag/refile/archive
+mutation, bulk actions, clocks, repeating timestamps, custom commands, and the
+wider org-super-agenda presentation remain explicit gaps.
 
 ---
 

@@ -495,6 +495,120 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
       (save-buffer buffer)))
   state)
 
+(defparameter *agenda-weekday-names*
+  #("Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun"))
+
+(defun agenda-date-with-weekday (date)
+  "Return DATE as an active Org timestamp with its computed weekday."
+  (unless (valid-iso-date-p date)
+    (error "Invalid Org date: ~s" date))
+  (let ((year (parse-integer date :start 0 :end 4))
+        (month (parse-integer date :start 5 :end 7))
+        (day (parse-integer date :start 8 :end 10)))
+    (multiple-value-bind (second minute hour decoded-day decoded-month
+                          decoded-year weekday)
+        (decode-universal-time
+         (encode-universal-time 0 0 12 day month year))
+      (declare (ignore second minute hour decoded-day decoded-month
+                       decoded-year))
+      (format nil "<~a ~a>" date (aref *agenda-weekday-names* weekday)))))
+
+(defun agenda-read-date (label)
+  "Read a bounded Org date for LABEL, returning DATE and true on success."
+  (loop
+    :for input := (string-trim '(#\Space #\Tab)
+                               (prompt-for-string
+                                (format nil "~a date (YYYY-MM-DD or +Nd/+Nw): "
+                                        label)))
+    :do (cond
+          ((zerop (length input)) (return (values nil nil)))
+          ((valid-iso-date-p input) (return (values input t)))
+          (t
+           (multiple-value-bind (start end registers register-ends)
+               (ppcre:scan "^\\+([0-9]+)([dDwW])$" input)
+             (declare (ignore end))
+             (if start
+                 (let* ((amount
+                          (parse-integer input
+                                         :start (aref registers 0)
+                                         :end (aref register-ends 0)))
+                        (unit (char-downcase (aref input (aref registers 1))))
+                        (days (* amount (if (char= unit #\w) 7 1))))
+                   (return (values (iso-plus-days days) t)))
+                 (message "Invalid date; use YYYY-MM-DD, +Nd, or +Nw")))))))
+
+(defun agenda-set-planning-field (heading kind date)
+  "Set KIND to DATE on HEADING's immediate Org planning line."
+  (let* ((timestamp (agenda-date-with-weekday date))
+         (field (format nil "~a: ~a" kind timestamp))
+         (scanner (ppcre:create-scanner
+                   (format nil "~a:\\s*<[^>]+>" kind))))
+    (with-point ((planning heading))
+      (if (and (line-offset planning 1)
+               (ppcre:scan *planning-line-scanner* (line-string planning)))
+          (let ((line (line-string planning)))
+            (multiple-value-bind (start end) (ppcre:scan scanner line)
+              (line-start planning)
+              (if start
+                  (progn
+                    (character-offset planning start)
+                    (delete-character planning (- end start))
+                    (insert-string planning field))
+                  (insert-string planning (concatenate 'string field " ")))))
+          (progn
+            (move-point planning heading)
+            (line-end planning)
+            (insert-string planning (format nil "~%~a" field)))))
+    timestamp))
+
+(defun agenda-set-source-planning (file line expected-heading kind date)
+  "Set one exact agenda source planning KIND to DATE and save immediately."
+  (unless (and file (integerp line) (plusp line) expected-heading)
+    (error "No mutable agenda heading on this line"))
+  (let ((buffer (find-file-buffer file))
+        (timestamp nil))
+    (with-current-buffer buffer
+      (when (buffer-read-only-p buffer)
+        (error "Agenda source is read-only: ~a" file))
+      (with-point ((heading (buffer-start-point buffer)))
+        (unless (or (= line 1) (line-offset heading (1- line)))
+          (error "Agenda source line no longer exists; refresh the agenda"))
+        (unless (string= expected-heading (line-string heading))
+          (error "Agenda source changed; refresh before editing"))
+        (setf timestamp (agenda-set-planning-field heading kind date)))
+      (save-buffer buffer))
+    timestamp))
+
+(defun agenda-change-planning (kind label)
+  "Prompt for and persist planning KIND on the current agenda entry."
+  (let ((agenda-buffer (current-buffer))
+        (file (text-property-at (current-point) :agenda-file))
+        (line (text-property-at (current-point) :agenda-line))
+        (heading (text-property-at (current-point) :agenda-heading)))
+    (if (null file)
+        (message "No agenda entry on this line.")
+        (multiple-value-bind (date selected-p) (agenda-read-date label)
+          (when selected-p
+            (handler-case
+                (let ((timestamp
+                        (agenda-set-source-planning
+                         file line heading kind date)))
+                  (setf (buffer-value agenda-buffer
+                                      'lem-yath-agenda-restore-entry)
+                        (list file line kind date))
+                  (agenda-start-scan agenda-buffer)
+                  (message "~a" timestamp))
+              (error (condition)
+                (message "Agenda ~a failed: ~a" label condition))))))))
+
+(define-command lem-yath-agenda-schedule () ()
+  "Set the current agenda heading's SCHEDULED date and save its source."
+  (agenda-change-planning "SCHEDULED" "Schedule"))
+
+(define-command lem-yath-agenda-deadline () ()
+  "Set the current agenda heading's DEADLINE date and save its source."
+  (agenda-change-planning "DEADLINE" "Deadline"))
+
 (define-command lem-yath-agenda-todo () ()
   "Fast-select and persist the TODO state for the agenda row at point."
   (let ((agenda-buffer (current-buffer))
@@ -535,6 +649,8 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
 (define-key *lem-yath-agenda-vi-keymap* "Return" 'lem-yath-agenda-visit)
 (define-key *lem-yath-agenda-vi-keymap* "g" 'lem-yath-agenda-refresh)
 (define-key *lem-yath-agenda-vi-keymap* "t" 'lem-yath-agenda-todo)
+(define-key *lem-yath-agenda-vi-keymap* "C-c C-s" 'lem-yath-agenda-schedule)
+(define-key *lem-yath-agenda-vi-keymap* "C-c C-d" 'lem-yath-agenda-deadline)
 (define-key *lem-yath-agenda-vi-keymap* "q" 'quit-active-window)
 
 (defmethod lem-vi-mode/core:mode-specific-keymaps ((mode lem-yath-agenda-mode))
@@ -544,4 +660,6 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
 (define-key *lem-yath-agenda-mode-keymap* "Return" 'lem-yath-agenda-visit)
 (define-key *lem-yath-agenda-mode-keymap* "g" 'lem-yath-agenda-refresh)
 (define-key *lem-yath-agenda-mode-keymap* "t" 'lem-yath-agenda-todo)
+(define-key *lem-yath-agenda-mode-keymap* "C-c C-s" 'lem-yath-agenda-schedule)
+(define-key *lem-yath-agenda-mode-keymap* "C-c C-d" 'lem-yath-agenda-deadline)
 (define-key *lem-yath-agenda-mode-keymap* "q" 'quit-active-window)

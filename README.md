@@ -175,7 +175,8 @@ of writing `.fasl` files into the source tree.
   `$WORKDIR`, with public TODO capture over `$PUBLIC_ORG_DIR`
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope, modal Return/g/q navigation, and Evil-Org-style
-  `t` fast TODO selection with immediate source persistence
+  `t` fast TODO selection plus `C-c C-s`/`C-c C-d` planning edits with
+  immediate source persistence
 - streaming OpenRouter LLM client + claude/codex/grok CLI backends
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
   (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli

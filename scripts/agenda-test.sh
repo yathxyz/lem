@@ -120,7 +120,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO q=QUIT-ACTIVE-WINDOW kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE q=QUIT-ACTIVE-WINDOW kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -170,6 +170,57 @@ if lem_wait_for "$session" 'NEXT[[:space:]]+Work unscheduled sentinel' 40 >/dev/
   fi
 else
   fail todo "agenda TODO selection did not persist and refresh"
+fi
+
+# GNU Org's agenda chords remain available under Evil-Org. Relative dates use
+# the agenda's current day and source planning fields retain Org's order.
+tmux_cmd send-keys -t "$session" C-c C-s
+if lem_wait_for "$session" 'Schedule date' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l +2d
+  tmux_cmd send-keys -t "$session" Enter
+  if lem_wait_for "$session" 'SCHEDULED 2026-07-14' 40 >/dev/null &&
+     grep -q '^SCHEDULED: <2026-07-14 Tue>$' "$work_file"; then
+    pass schedule "C-c C-s resolves a relative date, saves, and refreshes"
+  else
+    fail schedule "agenda scheduling did not persist the relative date"
+  fi
+else
+  fail schedule-prompt "C-c C-s did not open the schedule date prompt"
+fi
+
+tmux_cmd send-keys -t "$session" C-c C-d
+if lem_wait_for "$session" 'Deadline date' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 2026-07-16
+  tmux_cmd send-keys -t "$session" Enter
+  if lem_wait_for "$session" 'DEADLINE 2026-07-16' 40 >/dev/null &&
+     grep -q '^DEADLINE: <2026-07-16 Thu> SCHEDULED: <2026-07-14 Tue>$' "$work_file"; then
+    tmux_cmd send-keys -t "$session" F6
+    if wait_report "^POINT mode=LEM-YATH-AGENDA-MODE file=$work_file line=1 .*DEADLINE 2026-07-16"; then
+      pass deadline "C-c C-d prepends, saves, refreshes, and retains its row"
+    else
+      fail deadline "deadline refresh lost the selected logical row"
+    fi
+  else
+    fail deadline "agenda deadline did not preserve Org planning order"
+  fi
+else
+  fail deadline-prompt "C-c C-d did not open the deadline date prompt"
+fi
+
+# Updating an existing field replaces it in place instead of duplicating or
+# reordering the other planning field.
+tmux_cmd send-keys -t "$session" C-c C-s
+if lem_wait_for "$session" 'Schedule date' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 2026-07-15
+  tmux_cmd send-keys -t "$session" Enter
+  if lem_wait_for "$session" 'SCHEDULED 2026-07-15' 40 >/dev/null &&
+     grep -q '^DEADLINE: <2026-07-16 Thu> SCHEDULED: <2026-07-15 Wed>$' "$work_file"; then
+    pass reschedule "an existing planning field was replaced once in place"
+  else
+    fail reschedule "rescheduling duplicated or reordered planning fields"
+  fi
+else
+  fail reschedule-prompt "C-c C-s did not reopen for an existing field"
 fi
 
 # If a live source buffer has shifted since the scan, the stored line must not

@@ -71,7 +71,8 @@
      (concatenate
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
-      "return=~a g=~a t=~a q=~a kill-hooks=~d modified=~a undo=~a "
+      "return=~a g=~a t=~a schedule=~a deadline=~a q=~a "
+      "kill-hooks=~d modified=~a undo=~a "
       "running=~a pending=~a")
      serial
      (symbol-name (buffer-major-mode buffer))
@@ -82,6 +83,8 @@
      (agenda-test-command-name "Return")
      (agenda-test-command-name "g")
      (agenda-test-command-name "t")
+     (agenda-test-command-name "C-c C-s")
+     (agenda-test-command-name "C-c C-d")
      (agenda-test-command-name "q")
      (agenda-test-hook-count
       'agenda-kill-buffer-cleanup
