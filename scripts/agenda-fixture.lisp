@@ -72,7 +72,7 @@
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
       "return=~a g=~a t=~a schedule=~a deadline=~a q=~a "
-      "kill-hooks=~d modified=~a undo=~a "
+      "J=~a K=~a kill-hooks=~d modified=~a undo=~a "
       "running=~a pending=~a")
      serial
      (symbol-name (buffer-major-mode buffer))
@@ -86,6 +86,8 @@
      (agenda-test-command-name "C-c C-s")
      (agenda-test-command-name "C-c C-d")
      (agenda-test-command-name "q")
+     (agenda-test-command-name "J")
+     (agenda-test-command-name "K")
      (agenda-test-hook-count
       'agenda-kill-buffer-cleanup
       (variable-value 'kill-buffer-hook :buffer buffer))

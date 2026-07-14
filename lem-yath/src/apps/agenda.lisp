@@ -899,6 +899,141 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
   "Set the current agenda heading's DEADLINE date and save its source."
   (agenda-change-planning "DEADLINE" "Deadline"))
 
+(defvar *agenda-last-priority-direction* nil)
+(defvar *agenda-last-priority-target* nil)
+
+(defun agenda-heading-priority-bounds (heading)
+  "Return priority cookie bounds and value on HEADING."
+  (let ((line (line-string heading)))
+    (multiple-value-bind (start end registers register-ends)
+        (ppcre:scan
+         (format nil "^\\*+\\s+(?:~a\\s+)?(\\[#([A-Z])\\])(?:\\s+|$)"
+                 *org-todo-keyword-pattern*)
+         line)
+      (declare (ignore start end))
+      (when (and registers (aref registers 0))
+        (values (aref registers 0)
+                (aref register-ends 0)
+                (aref line (aref registers 1)))))))
+
+(defun agenda-set-heading-priority (heading priority)
+  "Set HEADING's priority cookie to PRIORITY, or remove it when NIL."
+  (multiple-value-bind (cookie-start cookie-end old-priority)
+      (agenda-heading-priority-bounds heading)
+    (with-point ((point heading))
+      (line-start point)
+      (cond
+        (old-priority
+         (character-offset point cookie-start)
+         (if priority
+             (progn
+               (character-offset point 2)
+               (delete-character point 1)
+               (insert-character point priority))
+             (let* ((line (line-string heading))
+                    (delete-length
+                      (+ (- cookie-end cookie-start)
+                         (if (and (< cookie-end (length line))
+                                  (char= (aref line cookie-end) #\Space))
+                             1 0))))
+               (delete-character point delete-length))))
+        (priority
+         (multiple-value-bind (todo-start todo-end todo-state)
+             (org-heading-todo-bounds heading)
+           (declare (ignore todo-start))
+           (if todo-state
+               (progn
+                 (character-offset point todo-end)
+                 (insert-string point (format nil " [#~c]" priority)))
+               (let ((line (line-string heading)))
+                 (multiple-value-bind (start end)
+                     (ppcre:scan "^\\*+\\s+" line)
+                   (declare (ignore start))
+                   (character-offset point end)
+                   (insert-string point (format nil "[#~c] " priority)))))))))
+    priority))
+
+(defun agenda-next-priority (current direction repeated-p)
+  "Return the GNU Org A/B/C priority reached from CURRENT in DIRECTION."
+  (if current
+      (ecase direction
+        (:up (case current (#\A nil) (#\B #\A) (#\C #\B)))
+        (:down (case current (#\A #\B) (#\B #\C) (#\C nil))))
+      (if repeated-p
+          (ecase direction (:up #\C) (:down #\A))
+          #\B)))
+
+(defun agenda-set-source-priority
+    (file line expected-heading direction repeated-p)
+  "Move one exact source heading priority in DIRECTION and save it."
+  (unless (and file (integerp line) (plusp line) expected-heading)
+    (error "No mutable agenda heading on this line"))
+  (let ((buffer (find-file-buffer file))
+        (priority nil))
+    (with-current-buffer buffer
+      (when (buffer-read-only-p buffer)
+        (error "Agenda source is read-only: ~a" file))
+      (with-point ((heading (buffer-start-point buffer)))
+        (unless (or (= line 1) (line-offset heading (1- line)))
+          (error "Agenda source line no longer exists; refresh the agenda"))
+        (unless (string= expected-heading (line-string heading))
+          (error "Agenda source changed; refresh before editing"))
+        (setf priority
+              (agenda-next-priority
+               (nth-value 2 (agenda-heading-priority-bounds heading))
+               direction repeated-p))
+        (agenda-set-heading-priority heading priority))
+      (save-buffer buffer))
+    priority))
+
+(defun agenda-change-priority (direction)
+  "Move the current agenda heading priority in DIRECTION."
+  (let* ((agenda-buffer (current-buffer))
+         (entry-key (agenda-entry-key-at-point (current-point)))
+         (file (text-property-at (current-point) :agenda-file))
+         (line (text-property-at (current-point) :agenda-line))
+         (heading (text-property-at (current-point) :agenda-heading))
+         (target (and file (list file line)))
+         (repeated-p
+           (and (eq direction *agenda-last-priority-direction*)
+                (equal target *agenda-last-priority-target*))))
+    (if (null file)
+        (progn
+          (setf *agenda-last-priority-direction* nil
+                *agenda-last-priority-target* nil)
+          (message "No agenda entry on this line."))
+        (handler-case
+            (let ((priority
+                    (agenda-set-source-priority
+                     file line heading direction repeated-p)))
+              (setf *agenda-last-priority-direction* direction
+                    *agenda-last-priority-target* target
+                    (buffer-value agenda-buffer
+                                  'lem-yath-agenda-restore-entry)
+                    entry-key)
+              (agenda-start-scan agenda-buffer)
+              (message "Priority ~a" (or priority "removed")))
+          (error (condition)
+            (setf *agenda-last-priority-direction* nil
+                  *agenda-last-priority-target* nil)
+            (message "Agenda priority failed: ~a" condition))))))
+
+(define-command lem-yath-agenda-priority-up () ()
+  "Increase the current agenda heading priority and save its source."
+  (agenda-change-priority :up))
+
+(define-command lem-yath-agenda-priority-down () ()
+  "Decrease the current agenda heading priority and save its source."
+  (agenda-change-priority :down))
+
+(defun agenda-priority-post-command ()
+  "Forget priority repetition after any other command."
+  (unless (member (and (this-command) (command-name (this-command)))
+                  '(lem-yath-agenda-priority-up
+                    lem-yath-agenda-priority-down))
+    (setf *agenda-last-priority-direction* nil
+          *agenda-last-priority-target* nil)))
+
 (define-command lem-yath-agenda-todo () ()
   "Fast-select and persist the TODO state for the agenda row at point."
   (let ((agenda-buffer (current-buffer))
@@ -941,6 +1076,8 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
 (define-key *lem-yath-agenda-vi-keymap* "t" 'lem-yath-agenda-todo)
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-s" 'lem-yath-agenda-schedule)
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-d" 'lem-yath-agenda-deadline)
+(define-key *lem-yath-agenda-vi-keymap* "K" 'lem-yath-agenda-priority-up)
+(define-key *lem-yath-agenda-vi-keymap* "J" 'lem-yath-agenda-priority-down)
 (define-key *lem-yath-agenda-vi-keymap* "q" 'quit-active-window)
 
 (defmethod lem-vi-mode/core:mode-specific-keymaps ((mode lem-yath-agenda-mode))
@@ -952,4 +1089,9 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
 (define-key *lem-yath-agenda-mode-keymap* "t" 'lem-yath-agenda-todo)
 (define-key *lem-yath-agenda-mode-keymap* "C-c C-s" 'lem-yath-agenda-schedule)
 (define-key *lem-yath-agenda-mode-keymap* "C-c C-d" 'lem-yath-agenda-deadline)
+(define-key *lem-yath-agenda-mode-keymap* "K" 'lem-yath-agenda-priority-up)
+(define-key *lem-yath-agenda-mode-keymap* "J" 'lem-yath-agenda-priority-down)
 (define-key *lem-yath-agenda-mode-keymap* "q" 'quit-active-window)
+
+(remove-hook *post-command-hook* 'agenda-priority-post-command)
+(add-hook *post-command-hook* 'agenda-priority-post-command)

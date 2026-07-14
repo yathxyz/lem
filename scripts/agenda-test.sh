@@ -52,6 +52,16 @@ wait_report() {
   return 1
 }
 
+wait_report_count() {
+  local pattern="$1" expected="$2" count i
+  for i in $(seq 1 100); do
+    count="$(grep -cE "$pattern" "$LEM_YATH_AGENDA_REPORT" || true)"
+    [ "$count" -ge "$expected" ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 printf '%s\n' \
   '#+title: Agenda launch source' \
   '' \
@@ -143,7 +153,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE q=QUIT-ACTIVE-WINDOW kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -206,6 +216,67 @@ else
   fail todo "agenda TODO selection did not persist and refresh"
 fi
 
+# Evil-Org J/K preserve GNU Org's default-priority and repeated-wrap rules.
+priority_ok=1
+tmux_cmd send-keys -t "$session" K
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+\[#B\][[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT \[#B\] Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+tmux_cmd send-keys -t "$session" K
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+\[#A\][[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT \[#A\] Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+tmux_cmd send-keys -t "$session" K
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+tmux_cmd send-keys -t "$session" K
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+\[#C\][[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT \[#C\] Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+tmux_cmd send-keys -t "$session" J
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+tmux_cmd send-keys -t "$session" J
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+\[#A\][[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT \[#A\] Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+tmux_cmd send-keys -t "$session" K
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+# A non-priority command breaks repetition; a fresh J must also start at B.
+tmux_cmd send-keys -t "$session" F6
+sleep 0.2
+tmux_cmd send-keys -t "$session" J
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+\[#B\][[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT \[#B\] Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+tmux_cmd send-keys -t "$session" J
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+\[#C\][[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT \[#C\] Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+tmux_cmd send-keys -t "$session" J
+if ! lem_wait_for "$session" 'NEXT[[:space:]]+Work unscheduled sentinel' 40 >/dev/null ||
+   ! grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+  priority_ok=0
+fi
+if [ "$priority_ok" = 1 ]; then
+  pass priority "J/K matched default B, A/B/C movement, and repeated wrap"
+else
+  fail priority "one or more priority transitions did not render and persist"
+fi
+
 # GNU Org's agenda chords remain available under Evil-Org. Relative dates use
 # the agenda's current day and source planning fields retain Org's order.
 tmux_cmd send-keys -t "$session" C-c C-s
@@ -262,16 +333,25 @@ fi
 tmux_cmd send-keys -t "$session" F12
 tmux_cmd send-keys -t "$session" F3
 wait_report '^STALE-MADE modified=yes$' || true
+tmux_cmd send-keys -t "$session" K
+sleep 0.4
+tmux_cmd send-keys -t "$session" F2
+if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 1 &&
+   grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+  pass priority-stale "K refused a shifted row without changing or saving its source"
+else
+  fail priority-stale "K changed or saved the wrong source line from a stale row"
+fi
 tmux_cmd send-keys -t "$session" t
 sleep 0.2
 tmux_cmd send-keys -t "$session" w
 sleep 0.4
 tmux_cmd send-keys -t "$session" F2
-if wait_report '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' &&
+if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 2 &&
    grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
-  pass todo-stale "a stale agenda row failed closed without saving the wrong line"
+  pass todo-stale "t refused a shifted row without changing or saving its source"
 else
-  fail todo-stale "a stale agenda row changed or saved the wrong source line"
+  fail todo-stale "t changed or saved the wrong source line from a stale row"
 fi
 
 # q must close the popped agenda and restore the source view.

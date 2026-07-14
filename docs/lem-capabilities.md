@@ -1608,21 +1608,25 @@ delivery. Entry lines retain exact source pathname, line, and scanned-heading
 properties. In Vi state, `Return` visits that source, `g` refreshes, `q` closes
 the explicit popup split, and Evil-Org's `t` opens the configured one-key
 TODO/NEXT/WAITING/HOLD/SOMEDAY/DONE/CANCELLED selector. A selected state updates
-and immediately saves the source before refreshing. GNU Org's `C-c C-s` and
-`C-c C-d` chords set SCHEDULED and DEADLINE fields from validated `YYYY-MM-DD`,
-`+Nd`, or `+Nw` input, compute the weekday, prepend a newly added field as Org
-does, and replace an existing field in place. A shifted or changed source
+and immediately saves the source before refreshing. Evil-Org's `K` and `J`
+raise and lower GNU Org's default A/B/C priority cookies: an unprioritized
+heading starts at B, while repeated movement wraps through no priority to the
+opposite bound. GNU Org's `C-c C-s` and `C-c C-d` chords set SCHEDULED and
+DEADLINE fields from validated `YYYY-MM-DD`, `+Nd`, or `+Nw` input, compute the
+weekday, prepend a newly added field as Org does, and replace an existing field
+in place. TODO, priority, and planning changes save immediately and restore the
+logical agenda row after the asynchronous refresh. A shifted or changed source
 heading fails closed instead of editing the line now occupying its stale
 location. `scripts/agenda-test.sh` drives the production entry keys in the
 installed ncurses wrapper and also verifies source scope, grouping, duplicate
-basenames, active-event contexts/ranges/repeaters, TODO and planning
+basenames, active-event contexts/ranges/repeaters, TODO, priority, and planning
 persistence, stale-source refusal, refresh races, unmodified/undo-free
 generated buffers, and cleanup.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
 presentation, planning removal and warning/delay-cookie forms,
-priority/tag/refile/archive mutation, bulk actions, clocks, custom commands,
+tag/refile/archive mutation, bulk actions, clocks, custom commands,
 and the wider org-super-agenda presentation remain explicit gaps.
 
 ---
