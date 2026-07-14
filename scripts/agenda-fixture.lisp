@@ -5,6 +5,7 @@
 
 (defvar *agenda-test-report-serial* 0)
 (defvar *agenda-test-original-top-level-org-files* nil)
+(defvar *agenda-test-stale-source* nil)
 
 (defun agenda-test-report-path ()
   (or (uiop:getenv "LEM_YATH_AGENDA_REPORT")
@@ -70,7 +71,7 @@
      (concatenate
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
-      "return=~a g=~a q=~a kill-hooks=~d modified=~a undo=~a "
+      "return=~a g=~a t=~a q=~a kill-hooks=~d modified=~a undo=~a "
       "running=~a pending=~a")
      serial
      (symbol-name (buffer-major-mode buffer))
@@ -80,6 +81,7 @@
      (agenda-buffer-generation buffer)
      (agenda-test-command-name "Return")
      (agenda-test-command-name "g")
+     (agenda-test-command-name "t")
      (agenda-test-command-name "q")
      (agenda-test-hook-count
       'agenda-kill-buffer-cleanup
@@ -110,6 +112,35 @@
 (define-command lem-yath-test-agenda-goto-public () ()
   (move-point (current-point)
               (agenda-test-find-line "Public visit sentinel")))
+
+(define-command lem-yath-test-agenda-goto-work-todo () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Work unscheduled sentinel")))
+
+(define-command lem-yath-test-agenda-make-source-stale () ()
+  (let* ((file (text-property-at (current-point) :agenda-file))
+         (buffer (and file (find-file-buffer file))))
+    (unless buffer
+      (error "Agenda source buffer is unavailable"))
+    (with-current-buffer buffer
+      (insert-string (buffer-start-point buffer)
+                     (format nil "# unsaved stale line~%")))
+    (setf *agenda-test-stale-source* buffer)
+    (agenda-test-log "STALE-MADE modified=~a"
+                     (if (buffer-modified-p buffer) "yes" "no"))))
+
+(define-command lem-yath-test-agenda-report-stale-source () ()
+  (let ((buffer *agenda-test-stale-source*))
+    (unless buffer
+      (error "No stale agenda source was prepared"))
+    (with-current-buffer buffer
+      (with-point ((point (buffer-start-point buffer)))
+        (let ((first (line-string point)))
+          (line-offset point 1)
+          (agenda-test-log
+           "STALE-SOURCE modified=~a first=~s second=~s"
+           (if (buffer-modified-p buffer) "yes" "no")
+           first (line-string point)))))))
 
 (define-command lem-yath-test-agenda-point-report () ()
   (let ((file (text-property-at (current-point) :agenda-file))
@@ -207,6 +238,12 @@
 (define-key *lem-yath-agenda-vi-keymap* "F4" 'lem-yath-test-agenda-report)
 (define-key *lem-yath-agenda-vi-keymap* "F5" 'lem-yath-test-agenda-goto-public)
 (define-key *lem-yath-agenda-vi-keymap* "F6" 'lem-yath-test-agenda-point-report)
+(define-key *lem-yath-agenda-vi-keymap* "F12"
+  'lem-yath-test-agenda-goto-work-todo)
+(define-key *lem-yath-agenda-vi-keymap* "F3"
+  'lem-yath-test-agenda-make-source-stale)
+(define-key *lem-yath-agenda-vi-keymap* "F2"
+  'lem-yath-test-agenda-report-stale-source)
 (define-key *lem-yath-agenda-vi-keymap* "F9" 'lem-yath-test-agenda-race)
 (define-key *lem-yath-agenda-vi-keymap* "F10" 'lem-yath-test-agenda-kill)
 (define-key *lem-yath-agenda-vi-keymap* "F11"

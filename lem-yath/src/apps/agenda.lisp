@@ -32,7 +32,7 @@
 
 (defstruct (agenda-item (:constructor make-agenda-item))
   "One parsed heading: its TODO keyword, text, source file/line and date."
-  keyword text file line date kind)
+  keyword text file line heading date kind)
 
 (defparameter *heading-scanner*
   (ppcre:create-scanner
@@ -98,6 +98,7 @@
    :text (agenda-item-text item)
    :file (agenda-item-file item)
    :line (agenda-item-line item)
+   :heading (agenda-item-heading item)
    :date date
    :kind kind))
 
@@ -137,6 +138,7 @@ with both SCHEDULED and DEADLINE fields produces one item for each field."
                                         :text text
                                         :file path
                                         :line lineno
+                                        :heading line
                                         :date nil
                                         :kind nil)
                                        current-planned-p nil
@@ -244,7 +246,13 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
           (with-point ((start point))
             (insert-string point (format nil "  ~a~%" (agenda-display-line item)))
             (put-text-property start point :agenda-file (agenda-item-file item))
-            (put-text-property start point :agenda-line (agenda-item-line item)))))
+            (put-text-property start point :agenda-line (agenda-item-line item))
+            (put-text-property start point :agenda-heading
+                               (agenda-item-heading item))
+            (put-text-property start point :agenda-kind
+                               (agenda-item-kind item))
+            (put-text-property start point :agenda-date
+                               (agenda-item-date item)))))
     (insert-string point (format nil "~%"))))
 
 (defun agenda-error-text (condition)
@@ -268,9 +276,28 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
                      "source discovery")
                  (agenda-error-text (cdr failure))))))))
 
+(defun agenda-entry-key-at-point (point)
+  (alexandria:when-let ((file (text-property-at point :agenda-file)))
+    (list file
+          (text-property-at point :agenda-line)
+          (text-property-at point :agenda-kind)
+          (text-property-at point :agenda-date))))
+
+(defun agenda-restore-entry-point (buffer key)
+  "Move BUFFER's point to the first rendered row matching KEY."
+  (with-point ((point (buffer-start-point buffer)))
+    (loop
+      (when (equal key (agenda-entry-key-at-point point))
+        (move-point (buffer-point buffer) point)
+        (return t))
+      (unless (line-offset point 1)
+        (return nil)))))
+
 (defun render-agenda (buffer items &optional failures)
   "Fill BUFFER with grouped ITEMS and any source FAILURES on the editor thread."
-  (let ((now (funcall *agenda-now-function*)))
+  (let ((now (funcall *agenda-now-function*))
+        (restore-key (buffer-value buffer 'lem-yath-agenda-restore-entry)))
+    (setf (buffer-value buffer 'lem-yath-agenda-restore-entry) nil)
     (with-buffer-read-only buffer nil
       (erase-buffer buffer)
       (multiple-value-bind (overdue today upcoming todos)
@@ -282,8 +309,9 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
         (insert-agenda-section
          buffer (format nil "Upcoming (~a days)" *agenda-upcoming-days*) upcoming)
         (insert-agenda-section buffer "TODOs" todos)
-        (insert-agenda-failures buffer failures))))
-  (buffer-start (buffer-point buffer))
+        (insert-agenda-failures buffer failures)))
+    (unless (and restore-key (agenda-restore-entry-point buffer restore-key))
+      (buffer-start (buffer-point buffer))))
   (setf (buffer-read-only-p buffer) t)
   (buffer-unmark buffer)
   (redraw-display))
@@ -419,6 +447,76 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
         (agenda-start-scan buffer)
         (message "No agenda buffer to refresh."))))
 
+(defparameter *agenda-todo-fast-keys*
+  '((#\t . "TODO")
+    (#\n . "NEXT")
+    (#\w . "WAITING")
+    (#\h . "HOLD")
+    (#\s . "SOMEDAY")
+    (#\d . "DONE")
+    (#\c . "CANCELLED"))
+  "Fast-selection keys from the configured Org TODO sequence.")
+
+(defun agenda-prompt-todo-state ()
+  "Return a selected TODO state and true, or NIL/NIL when cancelled."
+  (loop
+    :for character :=
+      (prompt-for-character
+       "TODO [t]odo [n]ext [w]ait [h]old [s]omeday [d]one [c]ancelled [SPC] none [q] quit: ")
+    :do (cond
+          ((null character) (return (values nil nil)))
+          ((char= character #\Space) (return (values nil t)))
+          ((member character '(#\q #\Q #\Escape) :test #'char=)
+           (return (values nil nil)))
+          (t
+           (alexandria:if-let
+               ((entry (assoc (char-downcase character)
+                              *agenda-todo-fast-keys*)))
+             (return (values (cdr entry) t))
+             (message "Unknown TODO key: ~a" character))))))
+
+(defun agenda-set-source-todo (file line expected-heading state)
+  "Set one exact agenda source heading to STATE and save it immediately.
+
+EXPECTED-HEADING prevents a stale agenda row from changing a different line."
+  (unless (and file (integerp line) (plusp line) expected-heading)
+    (error "No mutable agenda heading on this line"))
+  (let ((buffer (find-file-buffer file)))
+    (with-current-buffer buffer
+      (when (buffer-read-only-p buffer)
+        (error "Agenda source is read-only: ~a" file))
+      (with-point ((heading (buffer-start-point buffer)))
+        (unless (or (= line 1) (line-offset heading (1- line)))
+          (error "Agenda source line no longer exists; refresh the agenda"))
+        (unless (string= expected-heading (line-string heading))
+          (error "Agenda source changed; refresh before editing"))
+        (org-set-heading-todo-state heading state))
+      ;; The Emacs configuration advises `org-agenda-todo' to save its source.
+      (save-buffer buffer)))
+  state)
+
+(define-command lem-yath-agenda-todo () ()
+  "Fast-select and persist the TODO state for the agenda row at point."
+  (let ((agenda-buffer (current-buffer))
+        (entry-key (agenda-entry-key-at-point (current-point)))
+        (file (text-property-at (current-point) :agenda-file))
+        (line (text-property-at (current-point) :agenda-line))
+        (heading (text-property-at (current-point) :agenda-heading)))
+    (if (null file)
+        (message "No agenda entry on this line.")
+        (multiple-value-bind (state selected-p) (agenda-prompt-todo-state)
+          (when selected-p
+            (handler-case
+                (progn
+                  (agenda-set-source-todo file line heading state)
+                  (setf (buffer-value agenda-buffer
+                                      'lem-yath-agenda-restore-entry)
+                        entry-key)
+                  (agenda-start-scan agenda-buffer)
+                  (message "TODO state: ~a" (or state "none")))
+              (error (condition)
+                (message "Agenda TODO failed: ~a" condition))))))))
+
 (define-command lem-yath-agenda () ()
   "Show grouped actions from the configured top-level Org agenda files."
   (let ((directories (agenda-directories)))
@@ -436,6 +534,7 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
 
 (define-key *lem-yath-agenda-vi-keymap* "Return" 'lem-yath-agenda-visit)
 (define-key *lem-yath-agenda-vi-keymap* "g" 'lem-yath-agenda-refresh)
+(define-key *lem-yath-agenda-vi-keymap* "t" 'lem-yath-agenda-todo)
 (define-key *lem-yath-agenda-vi-keymap* "q" 'quit-active-window)
 
 (defmethod lem-vi-mode/core:mode-specific-keymaps ((mode lem-yath-agenda-mode))
@@ -444,4 +543,5 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
 
 (define-key *lem-yath-agenda-mode-keymap* "Return" 'lem-yath-agenda-visit)
 (define-key *lem-yath-agenda-mode-keymap* "g" 'lem-yath-agenda-refresh)
+(define-key *lem-yath-agenda-mode-keymap* "t" 'lem-yath-agenda-todo)
 (define-key *lem-yath-agenda-mode-keymap* "q" 'quit-active-window)

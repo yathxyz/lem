@@ -120,7 +120,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH q=QUIT-ACTIVE-WINDOW kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO q=QUIT-ACTIVE-WINDOW kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -151,6 +151,42 @@ else
   else
     fail sources "source set, grouping, or effective keymap differed"
   fi
+fi
+
+# Evil-Org agenda t opens the configured one-key TODO selector, persists the
+# chosen state immediately, and refreshes every duplicate agenda row.
+tmux_cmd send-keys -t "$session" F12
+sleep 0.2
+tmux_cmd send-keys -t "$session" t
+sleep 0.2
+tmux_cmd send-keys -t "$session" n
+if lem_wait_for "$session" 'NEXT[[:space:]]+Work unscheduled sentinel' 40 >/dev/null &&
+   grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+  tmux_cmd send-keys -t "$session" F6
+  if wait_report "^POINT mode=LEM-YATH-AGENDA-MODE file=$work_file line=1 .*NEXT.*Work unscheduled sentinel"; then
+    pass todo "t selects NEXT, saves, refreshes, and retains the logical row"
+  else
+    fail todo "agenda TODO refresh lost the selected logical row"
+  fi
+else
+  fail todo "agenda TODO selection did not persist and refresh"
+fi
+
+# If a live source buffer has shifted since the scan, the stored line must not
+# mutate whichever heading now occupies that location.
+tmux_cmd send-keys -t "$session" F12
+tmux_cmd send-keys -t "$session" F3
+wait_report '^STALE-MADE modified=yes$' || true
+tmux_cmd send-keys -t "$session" t
+sleep 0.2
+tmux_cmd send-keys -t "$session" w
+sleep 0.4
+tmux_cmd send-keys -t "$session" F2
+if wait_report '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' &&
+   grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+  pass todo-stale "a stale agenda row failed closed without saving the wrong line"
+else
+  fail todo-stale "a stale agenda row changed or saved the wrong source line"
 fi
 
 # q must close the popped agenda and restore the source view.

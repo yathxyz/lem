@@ -1598,17 +1598,22 @@ unscheduled TODO sections.
 Scanning runs away from the editor thread. Refresh requests coalesce behind one
 worker per buffer, generations reject stale results, source failures are shown
 instead of becoming a false empty agenda, and killed buffers reject late
-delivery. Entry lines retain exact source pathname and line properties. In Vi
-state, `Return` visits that source, `g` refreshes, and `q` closes the explicit
-popup split. `scripts/agenda-test.sh` drives all four production entry keys in
-the installed ncurses wrapper and also verifies source scope, grouping,
-duplicate basenames, refresh races, unmodified/undo-free generated buffers, and
-cleanup.
+delivery. Entry lines retain exact source pathname, line, and scanned-heading
+properties. In Vi state, `Return` visits that source, `g` refreshes, `q` closes
+the explicit popup split, and Evil-Org's `t` opens the configured one-key
+TODO/NEXT/WAITING/HOLD/SOMEDAY/DONE/CANCELLED selector. A selected state updates
+and immediately saves the source before refreshing; a shifted or changed source
+heading fails closed instead of editing the line now occupying its stale
+location. `scripts/agenda-test.sh` drives all five production entry keys in the
+installed ncurses wrapper and also verifies source scope, grouping, duplicate
+basenames, persistence, stale-source refusal, refresh races,
+unmodified/undo-free generated buffers, and cleanup.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Ordinary active-timestamp events, COMMENT/archive filtering,
-agenda editing, bulk actions, clocks, repeating timestamps, custom commands,
-and the wider org-super-agenda presentation remain explicit gaps.
+scheduling/deadline/priority/tag/refile/archive mutation, bulk actions, clocks,
+repeating timestamps, custom commands, and the wider org-super-agenda
+presentation remain explicit gaps.
 
 ---
 
