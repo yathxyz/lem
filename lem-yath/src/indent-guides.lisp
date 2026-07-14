@@ -180,7 +180,7 @@
 (defun transform-lem-yath-display-line (buffer point logical-line window)
   "Apply every lem-yath display-only line transformation in load order."
   (transform-indent-guide-line buffer point logical-line window)
-  (transform-find-name-display-line buffer point logical-line window))
+  (transform-dirvish-display-line buffer point logical-line window))
 
 (setf (variable-value 'lem-core::display-line-transform-function :global)
       'transform-lem-yath-display-line)

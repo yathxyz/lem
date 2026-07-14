@@ -867,8 +867,10 @@ history.
   rename, or delete the marked set (falling back to the current row), with
   exact argv path handling, collision prompts, result refreshes, and Dired's
   per-top-level confirmations for recursive directory copies and non-empty
-  directory deletion. Matching the pinned Dirvish defaults, each result also
-  renders a display-only, six-cell file-size field at the right edge; directories
+  directory deletion. Through the shared presentation in
+  `lem-yath/src/dirvish.lisp`, each result also matches the pinned Dirvish
+  defaults by rendering a display-only, six-cell file-size field at the right
+  edge; directories
   show their direct child count, and resizing recomputes alignment without
   changing result-buffer text. Dired's wider operation surface remains absent.
   While a search is running,
@@ -1690,8 +1692,18 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   `#-os-windows` in `lem.asd:294`). Uses **libvterm via CFFI** (`ffi.lisp`,
   `terminal.c`). Command `M-x terminal` (`terminal-mode.lisp:84`). A real terminal
   emulator inside Lem. (In the nix ncurses image, libvterm is linked.)
-- **File manager / filer**: `directory-mode` (dired-like, `src/ext/directory-mode/`)
-  and `src/ext/filer.lisp` (a tree/column filer). `find-file` on a directory opens it.
+- **File manager / filer**: `directory-mode` (Dired-like,
+  `src/ext/directory-mode/`) is the ordinary full-buffer directory browser and
+  `src/ext/filer.lisp` is a separate tree/column side browser. `find-file` on a
+  directory opens `directory-mode`. Lem-yath's `src/dirvish.lisp` replaces the
+  stock icon/date/detail rows there with the pinned Dirvish default presentation:
+  compact names plus a display-only six-cell file-size field at the right edge,
+  or direct-child count for directories. Resizing preserves alignment without
+  changing buffer text; refreshes remain clean and read-only, and native
+  directory-mode visiting, marking, sorting, copy, rename, and deletion continue
+  to operate on exact path properties. Dirvish preview dispatchers, header and
+  mode-line segments, layout switching, subtree/collapse extensions, and its
+  wider integrations are not reproduced. Filer retains its own tree presentation.
 - **Encodings**: `extensions/encodings/` (`lem-encodings`): utf-8/16, cp932, euc-jp,
   gb2312, iso-8859-1, 8bit. `prompt-for-encodings`, `*default-external-format*`
   (`:detect-encoding` default).

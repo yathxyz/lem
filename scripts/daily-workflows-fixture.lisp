@@ -238,7 +238,7 @@
                     line nil active-modes (current-window))))
             (return
               (list (lem-core::logical-line-string logical-line)
-                    (text-property-at line :find-name-size)
+                    (text-property-at line :dirvish-size)
                     (line-string line))))))
       (unless (line-offset line 1)
         (return nil)))))

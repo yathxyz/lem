@@ -52,6 +52,7 @@
               ./patches/lem-hidden-lines.patch
               ./patches/lem-buffer-write-function.patch
               ./patches/lem-display-line-transformer.patch
+              ./patches/lem-directory-buffer-clean.patch
             ];
           };
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (
@@ -396,6 +397,7 @@
             formatting-test = mkTestApp "lem-yath-formatting-test" "formatting-test.sh";
             prompt-completion-test = mkTestApp "lem-yath-prompt-completion-test" "prompt-completion-test.sh";
             daily-workflows-test = mkTestApp "lem-yath-daily-workflows-test" "daily-workflows-test.sh";
+            dirvish-test = mkTestAppWithLem lemYath "lem-yath-dirvish-test" "dirvish-test.sh";
             buffer-list-test = mkTestAppWithLem lemYath "lem-yath-buffer-list-test" "buffer-list-test.sh";
             direnv-test = mkTestApp "lem-yath-direnv-test" "direnv-test.sh";
             project-navigation-test = mkTestApp "lem-yath-project-navigation-test" "project-navigation-test.sh";
@@ -443,6 +445,7 @@
             formatting = mkCheck "formatting" "formatting-test.sh";
             prompt-completion = mkCheck "prompt-completion" "prompt-completion-test.sh";
             daily-workflows = mkCheck "daily-workflows" "daily-workflows-test.sh";
+            dirvish = mkCheckWithLem lemYath "dirvish" "dirvish-test.sh";
             buffer-list = mkCheckWithLem lemYath "buffer-list" "buffer-list-test.sh";
             direnv = mkCheck "direnv" "direnv-test.sh";
             project-navigation = mkCheck "project-navigation" "project-navigation-test.sh";

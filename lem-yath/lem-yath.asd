@@ -46,6 +46,7 @@
                (:file "roam")
                (:file "notes")
                (:file "roam-capture")
+               (:file "dirvish")
                (:file "find-name")
                (:file "buffer-list")
                (:file "tools")
