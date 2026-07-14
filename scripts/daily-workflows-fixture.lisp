@@ -201,6 +201,12 @@
    (namestring (daily-workflows-fixture-path "find-name/")))
   (lem/prompt-window::prompt-execute))
 
+(define-command lem-yath-test-use-slow-find () ()
+  (setf *find-name-program*
+        (uiop:parse-native-namestring
+         (uiop:getenv "LEM_YATH_DAILY_WORKFLOWS_SLOW_FIND")))
+  (daily-workflows-fixture-log "FIND-SLOW READY"))
+
 (define-command lem-yath-test-find-name-buffer-guards () ()
   (let ((collision-rejected-p nil)
         (collision-intact-p nil)

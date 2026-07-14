@@ -5,6 +5,18 @@
 (defparameter *find-name-buffer-name* "*Find*")
 (defconstant +find-name-buffer-owner+ 'lem-yath-find-name)
 (defvar *find-name-mode-keymap* (make-keymap))
+(defvar *find-name-program* nil
+  "Absolute find executable override, primarily for controlled tests.")
+
+(define-condition find-name-request-cancelled (condition) ())
+
+(defstruct (find-name-request
+            (:constructor %make-find-name-request (generation buffer)))
+  generation
+  buffer
+  (cancelled-p nil)
+  process
+  (lock (bt2:make-lock :name "lem-yath/find-name-request")))
 
 (define-major-mode lem-yath-find-name-mode nil
     (:name "Find Name"
@@ -91,6 +103,29 @@
        (find-name-owned-buffer-p buffer)
        (eql generation (buffer-value buffer :find-name-generation))))
 
+(defun find-name-request-live-p (request)
+  (bt2:with-lock-held ((find-name-request-lock request))
+    (not (find-name-request-cancelled-p request))))
+
+(defun find-name-request-current-p (request)
+  (let ((buffer (find-name-request-buffer request)))
+    (and (find-name-current-generation-p
+         buffer (find-name-request-generation request))
+         (eq request (buffer-value buffer :find-name-request))
+         (find-name-request-live-p request))))
+
+(defun cancel-find-name-request (request)
+  "Invalidate REQUEST and terminate only the subprocess it owns."
+  (let ((process nil))
+    (bt2:with-lock-held ((find-name-request-lock request))
+      (unless (find-name-request-cancelled-p request)
+        (setf (find-name-request-cancelled-p request) t
+              process (find-name-request-process request)
+              (find-name-request-process request) nil)))
+    (when process
+      (ignore-errors (uiop:terminate-process process)))
+    (not (null process))))
+
 (defun find-name-insert-header (point root pattern status)
   (insert-string point (format nil "Find name results~%"))
   (insert-string point
@@ -110,6 +145,18 @@
   (buffer-start (buffer-point buffer))
   (redraw-display))
 
+(defun render-find-name-cancelled (buffer root pattern generation)
+  (when (find-name-current-generation-p buffer generation)
+    (with-buffer-read-only buffer nil
+      (erase-buffer buffer)
+      (find-name-insert-header
+       (buffer-end-point buffer) root pattern "cancelled")
+      (insert-string (buffer-end-point buffer)
+                     (format nil "Search cancelled. Press g to retry.~%")))
+    (setf (buffer-read-only-p buffer) t)
+    (buffer-start (buffer-point buffer))
+    (redraw-display)))
+
 (defun render-find-name-results (buffer root pattern generation results error)
   "Render RESULTS only if GENERATION is still current for BUFFER."
   (when (find-name-current-generation-p buffer generation)
@@ -125,7 +172,8 @@
                      (if (= 1 (length results)) "match" "matches"))))
         (cond
           (error
-           (insert-string point "Search failed. Press g to retry.\n"))
+           (insert-string point
+                          (format nil "Search failed. Press g to retry.~%")))
           ((null results)
            (insert-string point "(no matches)\n"))
           (t
@@ -140,51 +188,113 @@
     (setf (buffer-read-only-p buffer) t)
     (redraw-display)))
 
-(defun run-find-name (root pattern)
-  (let ((find (executable-find "find")))
+(defun find-name-read-stream (stream)
+  (let ((chunk (make-string 8192))
+        (output (make-string-output-stream)))
+    (loop :for length := (read-sequence chunk stream)
+          :until (zerop length)
+          :do (write-sequence chunk output :end length))
+    (get-output-stream-string output)))
+
+(defun launch-find-name-process (arguments root request)
+  "Launch ARGUMENTS and atomically attach the child to REQUEST."
+  (bt2:with-lock-held ((find-name-request-lock request))
+    (when (find-name-request-cancelled-p request)
+      (error 'find-name-request-cancelled))
+    (setf (find-name-request-process request)
+          (uiop:launch-program arguments
+                               :directory root
+                               :output :stream
+                               :error-output :stream))))
+
+(defun release-find-name-process (request process)
+  (bt2:with-lock-held ((find-name-request-lock request))
+    (when (eq process (find-name-request-process request))
+      (setf (find-name-request-process request) nil))))
+
+(defun run-find-name (root pattern request)
+  (let ((find (or *find-name-program* (executable-find "find"))))
     (unless find
       (error "GNU find is not available"))
-    (multiple-value-bind (output error-output exit-code)
-        (uiop:run-program
-         (list (namestring find) "." "-name" pattern "-print0")
-         :directory root
-         :output :string
-         :error-output :string
-         :ignore-error-status t)
-      (if (and (integerp exit-code) (zerop exit-code))
-          (values (find-name-results root output) nil)
-          (values nil
-                  (let ((message
-                          (string-trim '(#\Space #\Tab #\Newline #\Return)
-                                       (or error-output ""))))
-                    (if (plusp (length message))
-                        message
-                        (format nil "find exited with status ~a" exit-code))))))))
+    (let ((process nil)
+          (finished-p nil)
+          (error-thread nil))
+      (unwind-protect
+           (progn
+             (setf process
+                   (launch-find-name-process
+                    (list (namestring find) "." "-name" pattern "-print0")
+                    root request))
+             (let ((error-output ""))
+               (setf error-thread
+                     (bt2:make-thread
+                      (lambda ()
+                        (setf error-output
+                              (with-open-stream
+                                  (stream (uiop:process-info-error-output process))
+                                (find-name-read-stream stream))))
+                      :name "lem-yath/find-name-stderr"))
+               (let ((output
+                       (with-open-stream
+                           (stream (uiop:process-info-output process))
+                         (find-name-read-stream stream)))
+                     (exit-code (uiop:wait-process process)))
+                 (bt2:join-thread error-thread)
+                 (setf error-thread nil
+                       finished-p t)
+                 (unless (find-name-request-live-p request)
+                   (error 'find-name-request-cancelled))
+                 (if (and (integerp exit-code) (zerop exit-code))
+                     (values (find-name-results root output) nil)
+                     (values nil
+                             (let ((message
+                                     (string-trim
+                                      '(#\Space #\Tab #\Newline #\Return)
+                                      error-output)))
+                               (if (plusp (length message))
+                                   message
+                                   (format nil "find exited with status ~a"
+                                           exit-code))))))))
+        (when (and process (not finished-p))
+          (ignore-errors (uiop:terminate-process process))
+          (ignore-errors (uiop:wait-process process)))
+        (when error-thread
+          (ignore-errors (bt2:join-thread error-thread)))
+        (release-find-name-process request process)))))
 
 (defun start-find-name-search (buffer root pattern)
   "Start a race-safe background search into persistent BUFFER."
   (unless (find-name-owned-buffer-p buffer)
     (editor-error "Not a find-name result buffer"))
-  (let ((generation (1+ (or (buffer-value buffer :find-name-generation) 0))))
+  (alexandria:when-let ((previous (buffer-value buffer :find-name-request)))
+    (cancel-find-name-request previous))
+  (let* ((generation (1+ (or (buffer-value buffer :find-name-generation) 0)))
+         (request (%make-find-name-request generation buffer)))
     (setf (buffer-value buffer :find-name-generation) generation
           (buffer-value buffer :find-name-root) root
-          (buffer-value buffer :find-name-pattern) pattern)
+          (buffer-value buffer :find-name-pattern) pattern
+          (buffer-value buffer :find-name-request) request)
     (render-find-name-searching buffer root pattern)
     (bt2:make-thread
      (lambda ()
        (handler-case
            (multiple-value-bind (results error)
-               (run-find-name root pattern)
+               (run-find-name root pattern request)
              (send-event
               (lambda ()
-                (render-find-name-results
-                 buffer root pattern generation results error))))
+                (when (find-name-request-current-p request)
+                  (setf (buffer-value buffer :find-name-request) nil)
+                  (render-find-name-results
+                   buffer root pattern generation results error)))))
+         (find-name-request-cancelled ())
          (error (condition)
            (let ((message (princ-to-string condition)))
              (send-event
               (lambda ()
-                (render-find-name-results
-                 buffer root pattern generation nil message)))))))
+                (when (find-name-request-current-p request)
+                  (setf (buffer-value buffer :find-name-request) nil)
+                  (render-find-name-results
+                   buffer root pattern generation nil message))))))))
      :name "lem-yath/find-name")))
 
 (defun normalize-find-name-root (directory base)
@@ -232,6 +342,21 @@
       (editor-error "No find-name search to refresh"))
     (start-find-name-search buffer root pattern)))
 
+(define-command lem-yath-find-name-cancel () ()
+  "Cancel the find subprocess owned by the current result buffer."
+  (let* ((buffer (current-buffer))
+         (request (buffer-value buffer :find-name-request)))
+    (when (and request (find-name-request-current-p request))
+      (cancel-find-name-request request)
+      (when (eq request (buffer-value buffer :find-name-request))
+        (setf (buffer-value buffer :find-name-request) nil)
+        (render-find-name-cancelled
+         buffer
+         (buffer-value buffer :find-name-root)
+         (buffer-value buffer :find-name-pattern)
+         (find-name-request-generation request))))))
+
 (define-key *find-name-mode-keymap* "Return" 'lem-yath-find-name-open)
 (define-key *find-name-mode-keymap* "g" 'lem-yath-find-name-refresh)
+(define-key *find-name-mode-keymap* "C-c C-k" 'lem-yath-find-name-cancel)
 (define-key *find-name-mode-keymap* "q" 'quit-active-window)

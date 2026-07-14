@@ -861,7 +861,9 @@ history.
   and fills a persistent read-only `*Find*` buffer. Exact path properties make
   Vi Return safe for spaces, semicolons, literal `*`, `?`, and `[`, and displayed
   control characters; q leaves the result buffer available. Dired marking, file
-  operations, long columns, and process cancellation remain absent.
+  operations and long columns remain absent. While a search is running,
+  `C-c C-k` terminates only the subprocess owned by that `*Find*` request and
+  leaves a persistent cancelled result buffer that can be retried with `g`.
 - Grep: `lem/grep:grep` and `lem/grep:project-grep` (`src/ext/grep.lisp`, bound
   `C-x p g`). Default command **`git grep -nHI`** (`grep.lisp:14-18`); change with
   `(setf lem/grep:*grep-command* "rg")` or `lem/grep:change-grep-command`. Results are

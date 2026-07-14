@@ -11,6 +11,9 @@ export LEM_HOME="$root/lem-home/"
 export XDG_CACHE_HOME="$root/cache"
 export LEM_YATH_DAILY_WORKFLOWS_ROOT="$root/fixture"
 export LEM_YATH_DAILY_WORKFLOWS_REPORT="$root/report"
+export LEM_YATH_DAILY_WORKFLOWS_SLOW_FIND="$root/slow-find"
+export LEM_YATH_DAILY_WORKFLOWS_FIND_STARTED="$root/find-started"
+export LEM_YATH_DAILY_WORKFLOWS_FIND_TERMINATED="$root/find-terminated"
 mkdir -p "$HOME" "$WORKDIR" "$LEM_HOME" "$XDG_CACHE_HOME" \
   "$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing"
 : > "$LEM_YATH_DAILY_WORKFLOWS_REPORT"
@@ -49,6 +52,16 @@ wait_report_count() {
     if (( $(report_count "$pattern") >= expected )); then
       return 0
     fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+wait_for_file() {
+  local path=$1 timeout=${2:-$WAIT_TIMEOUT} index=0
+  while ((index < timeout * 4)); do
+    [ -e "$path" ] && return 0
     sleep 0.25
     index=$((index + 1))
   done
@@ -115,6 +128,20 @@ printf 'literal question match\n' > "$find_root/literal?.match"
 newline_match=$'line\nbreak.match'
 printf 'newline match\n' > "$find_root/$newline_match"
 printf 'find source\n' > "$find_source"
+printf '%s\n' \
+  "#!$(command -v python3)" \
+  'import os' \
+  'import signal' \
+  'from pathlib import Path' \
+  'Path(os.environ["LEM_YATH_DAILY_WORKFLOWS_FIND_STARTED"]).touch()' \
+  'def terminate(_signum, _frame):' \
+  '    Path(os.environ["LEM_YATH_DAILY_WORKFLOWS_FIND_TERMINATED"]).touch()' \
+  '    raise SystemExit(143)' \
+  'signal.signal(signal.SIGTERM, terminate)' \
+  'while True:' \
+  '    signal.pause()' \
+  > "$LEM_YATH_DAILY_WORKFLOWS_SLOW_FIND"
+chmod +x "$LEM_YATH_DAILY_WORKFLOWS_SLOW_FIND"
 
 # M-j duplicates the last line even when the source file has no final newline,
 # and the entire insertion is one undo unit.
@@ -643,6 +670,32 @@ test_find_name() {
     pass find-name-argv-safety "shell syntax stayed inert and empty results remained visible"
   else
     fail find-name-argv-safety "the pattern executed or empty results were not rendered" "$find_session"
+  fi
+
+  if invoke_test_command "$find_session" lem-yath-test-use-slow-find '^FIND-SLOW READY$'; then
+    send_chord "$find_session" M-s f
+    if lem_wait_for "$find_session" 'Find name in directory:' "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$find_session" F4
+    fi
+    if lem_wait_for "$find_session" 'Name pattern:' "$WAIT_TIMEOUT" >/dev/null; then
+      send_chord "$find_session" C-a C-k
+      tmux_cmd send-keys -t "$find_session" -l '*.slow'
+      lem_keys "$find_session" Enter
+    fi
+    if lem_wait_for "$find_session" 'Status:[[:space:]]+searching' "$WAIT_TIMEOUT" >/dev/null &&
+       wait_for_file "$LEM_YATH_DAILY_WORKFLOWS_FIND_STARTED" "$WAIT_TIMEOUT"; then
+      send_chord "$find_session" C-c C-k
+      if lem_wait_for "$find_session" 'Status:[[:space:]]+cancelled' "$WAIT_TIMEOUT" >/dev/null &&
+         wait_for_file "$LEM_YATH_DAILY_WORKFLOWS_FIND_TERMINATED" "$WAIT_TIMEOUT"; then
+        pass find-name-cancel "C-c C-k terminated only the active find and retained cancelled results"
+      else
+        fail find-name-cancel "the active find process was not cancelled cleanly" "$find_session"
+      fi
+    else
+      fail find-name-cancel-start "the controlled long-running find did not start" "$find_session"
+    fi
+  else
+    fail find-name-cancel-setup "could not select the controlled find executable" "$find_session"
   fi
 
   lem_stop "$find_session"
