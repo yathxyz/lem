@@ -81,6 +81,29 @@ printf '%s\n' \
   'SCHEDULED: <2026-07-12 Sun> DEADLINE: <2026-07-15 Wed>' \
   '* TODO Invalid planning sentinel' \
   'SCHEDULED: <2026-02-30 Mon>' \
+  '* Heading event sentinel <2026-07-12 Sun>' \
+  '* Body event sentinel' \
+  'Meeting <2026-07-13 Mon 10:00>' \
+  '* Range event sentinel <2026-07-14 Tue>--<2026-07-16 Thu>' \
+  '* Repeating event sentinel <2026-07-01 Wed +1w>' \
+  '* Daily repeat sentinel <2026-07-11 Sat +2d>' \
+  '* Catch-up repeat sentinel <2026-07-01 Wed ++1w>' \
+  '* Restart repeat sentinel <2026-07-01 Wed .+1w>' \
+  '* Monthly repeat sentinel <2026-06-15 Mon +1m>' \
+  '* Yearly repeat sentinel <2025-07-15 Tue +1y>' \
+  '* DONE Completed event sentinel <2026-07-13 Mon>' \
+  '* Inactive event exclusion sentinel [2026-07-14 Tue]' \
+  '* COMMENT Comment subtree exclusion sentinel <2026-07-13 Mon>' \
+  '** TODO Comment child exclusion sentinel' \
+  '* Archived subtree exclusion sentinel :ARCHIVE:' \
+  '<2026-07-13 Mon>' \
+  '** TODO Archive child exclusion sentinel' \
+  '* Source block exclusion sentinel' \
+  '#+BEGIN_SRC text' \
+  '<2026-07-13 Mon>' \
+  '#+END_SRC' \
+  '* Comment line exclusion sentinel' \
+  '# <2026-07-13 Mon>' \
   >"$work_file"
 
 printf '%s\n' \
@@ -128,12 +151,23 @@ else
   grep -qF "FILE serial=1 index=2 path=$source_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=3 path=$public_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=4 path=$mcp_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 12 ] || static_ok=0
+  [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 28 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Today work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Plain today sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*MCP today sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=UPCOMING .*Upcoming work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=TODAY .*Heading event sentinel.*\[EVENT 2026-07-12\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=TODAY .*Body planning text sentinel.*\[EVENT 2026-07-12\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=UPCOMING .*Body event sentinel.*\[EVENT 2026-07-13 10:00\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=UPCOMING .*DONE.*Completed event sentinel.*\[EVENT 2026-07-13\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  [ "$(grep -c '^ENTRY serial=1 section=UPCOMING .*Range event sentinel.*\[EVENT 2026-07-1[4-6] [1-3]/3\]' "$LEM_YATH_AGENDA_REPORT")" = 3 ] || static_ok=0
+  grep -qE '^ENTRY serial=1 section=UPCOMING .*Repeating event sentinel.*\[EVENT 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  [ "$(grep -c '^ENTRY serial=1 section=UPCOMING .*Daily repeat sentinel.*\[EVENT 2026-07-1[3579]\]' "$LEM_YATH_AGENDA_REPORT")" = 4 ] || static_ok=0
+  grep -qE '^ENTRY serial=1 section=UPCOMING .*Catch-up repeat sentinel.*\[EVENT 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=UPCOMING .*Restart repeat sentinel.*\[EVENT 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=UPCOMING .*Monthly repeat sentinel.*\[EVENT 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=UPCOMING .*Yearly repeat sentinel.*\[EVENT 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODOS .*Work unscheduled sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODOS .*Hold work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODOS .*Public visit sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -143,7 +177,7 @@ else
   grep -qE '^ENTRY serial=1 section=TODAY .*Dual planning sentinel.*\[SCHEDULED 2026-07-12\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=UPCOMING .*Dual planning sentinel.*\[DEADLINE 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^WARNING serial=1 .*Invalid Org planning date.*2026-02-30' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  if grep -qE '^ENTRY serial=1 .*Nested (work|public)|^ENTRY serial=1 .*Hidden file|^ENTRY serial=1 .*Uppercase extension|^ENTRY serial=1 .*Done dated|^ENTRY serial=1 .*Cancelled dated|^ENTRY serial=1 .*Far future' "$LEM_YATH_AGENDA_REPORT"; then
+  if grep -qE '^ENTRY serial=1 .*Nested (work|public)|^ENTRY serial=1 .*Hidden file|^ENTRY serial=1 .*Uppercase extension|^ENTRY serial=1 .*Done dated|^ENTRY serial=1 .*Cancelled dated|^ENTRY serial=1 .*Far future|^ENTRY serial=1 .*Inactive event exclusion|^ENTRY serial=1 .*Comment (subtree|child|line) exclusion|^ENTRY serial=1 .*Archive(d| child) .*exclusion|^ENTRY serial=1 .*Source block exclusion' "$LEM_YATH_AGENDA_REPORT"; then
     static_ok=0
   fi
   if [ "$static_ok" = 1 ]; then

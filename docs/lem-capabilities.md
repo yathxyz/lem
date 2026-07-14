@@ -1593,7 +1593,13 @@ configuration's existing canonical roots: `$WORKDIR`, `$PUBLIC_ORG_DIR`, and
 non-hidden lowercase `.org` files. The parser recognizes the configured TODO
 sequence plus immediate Org planning lines, preserves separate SCHEDULED and
 DEADLINE rows, and groups entries into overdue, today, seven-day upcoming, and
-unscheduled TODO sections.
+unscheduled TODO sections. Ordinary active timestamps on headings or body text
+join the today/upcoming sections; inactive timestamps do not. Timed events
+retain their start time, date ranges expand inclusively with occurrence
+indices, and `+`, `++`, and `.+` day/week/month/year repeaters generate the same
+agenda occurrences across the visible horizon. COMMENT and ARCHIVE subtrees,
+drawers, source blocks, and comment lines are excluded, while completed
+headings can still contribute timestamp events as in GNU Org.
 
 Scanning runs away from the editor thread. Refresh requests coalesce behind one
 worker per buffer, generations reject stale results, source failures are shown
@@ -1609,14 +1615,15 @@ does, and replace an existing field in place. A shifted or changed source
 heading fails closed instead of editing the line now occupying its stale
 location. `scripts/agenda-test.sh` drives the production entry keys in the
 installed ncurses wrapper and also verifies source scope, grouping, duplicate
-basenames, TODO and planning persistence, stale-source refusal, refresh races,
-unmodified/undo-free generated buffers, and cleanup.
+basenames, active-event contexts/ranges/repeaters, TODO and planning
+persistence, stale-source refusal, refresh races, unmodified/undo-free
+generated buffers, and cleanup.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
-dispatcher. Ordinary active-timestamp events, COMMENT/archive filtering,
-planning removal and warning/delay-cookie forms, priority/tag/refile/archive
-mutation, bulk actions, clocks, repeating timestamps, custom commands, and the
-wider org-super-agenda presentation remain explicit gaps.
+dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
+presentation, planning removal and warning/delay-cookie forms,
+priority/tag/refile/archive mutation, bulk actions, clocks, custom commands,
+and the wider org-super-agenda presentation remain explicit gaps.
 
 ---
 

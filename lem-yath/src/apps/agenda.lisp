@@ -32,7 +32,8 @@
 
 (defstruct (agenda-item (:constructor make-agenda-item))
   "One parsed heading: its TODO keyword, text, source file/line and date."
-  keyword text file line heading date kind)
+  keyword text file line heading date kind event-p end-date repeater time
+  occurrence-index occurrence-count)
 
 (defparameter *heading-scanner*
   (ppcre:create-scanner
@@ -48,6 +49,23 @@
 (defvar *planning-line-scanner*
   (ppcre:create-scanner "^\\s*(?:SCHEDULED|DEADLINE):")
   "Matches an Org planning line immediately below a heading.")
+
+(defvar *active-timestamp-scanner*
+  (ppcre:create-scanner "<([^>\\r\\n]+)>(?:--<([^>\\r\\n]+)>)?")
+  "Matches one active Org timestamp or timestamp range.")
+
+(defvar *timestamp-date-scanner*
+  (ppcre:create-scanner "^(\\d{4}-\\d{2}-\\d{2})(?:\\s|$)")
+  "Extracts the date at the start of active timestamp contents.")
+
+(defvar *timestamp-time-scanner*
+  (ppcre:create-scanner
+   "(?:^|\\s)([0-9]{1,2}:[0-9]{2})(?:-[0-9]{1,2}:[0-9]{2})?(?:\\s|$)")
+  "Extracts an optional start time from active timestamp contents.")
+
+(defvar *timestamp-repeater-scanner*
+  (ppcre:create-scanner "(?:^|\\s)([.+]*\\+[0-9]+[dDwWmMyY])(?:\\s|$)")
+  "Extracts a supported Org repeater cookie.")
 
 (defun agenda-existing-directory (directory)
   (ignore-errors
@@ -100,67 +118,196 @@
    :line (agenda-item-line item)
    :heading (agenda-item-heading item)
    :date date
-   :kind kind))
+   :kind kind
+   :event-p nil))
+
+(defun agenda-timestamp-field (scanner contents)
+  (multiple-value-bind (start end registers register-ends)
+      (ppcre:scan scanner contents)
+    (declare (ignore start end))
+    (when (and registers (aref registers 0))
+      (subseq contents (aref registers 0) (aref register-ends 0)))))
+
+(defun agenda-parse-active-timestamp (contents)
+  "Return DATE, TIME, and REPEATER parsed from timestamp CONTENTS."
+  (let ((date (agenda-timestamp-field *timestamp-date-scanner* contents)))
+    (when (and date (valid-iso-date-p date))
+      (values date
+              (agenda-timestamp-field *timestamp-time-scanner* contents)
+              (agenda-timestamp-field *timestamp-repeater-scanner* contents)))))
+
+(defun agenda-active-timestamp-specs (line)
+  "Return valid active timestamp specifications found in LINE."
+  (loop :with offset = 0
+        :with specs
+        :while (< offset (length line))
+        :do (multiple-value-bind (start end registers register-ends)
+                (ppcre:scan *active-timestamp-scanner* line :start offset)
+              (unless start (return (nreverse specs)))
+              (let ((first
+                      (subseq line (aref registers 0)
+                              (aref register-ends 0)))
+                    (second
+                      (and (aref registers 1)
+                           (subseq line (aref registers 1)
+                                   (aref register-ends 1)))))
+                (multiple-value-bind (date time repeater)
+                    (agenda-parse-active-timestamp first)
+                  (when date
+                    (let ((end-date
+                            (and second
+                                 (nth-value
+                                  0 (agenda-parse-active-timestamp second)))))
+                      (push (list :date date :time time :repeater repeater
+                                  :end-date end-date
+                                  :raw (subseq line start end))
+                            specs)))))
+              (setf offset end))
+        :finally (return (nreverse specs))))
+
+(defun agenda-item-with-event (item spec &optional heading-line-p)
+  (make-agenda-item
+   :keyword (agenda-item-keyword item)
+   :text (if (and heading-line-p (null (getf spec :end-date)))
+             (string-trim
+              '(#\Space #\Tab)
+              (ppcre:regex-replace-all
+               (ppcre:quote-meta-chars (getf spec :raw))
+               (agenda-item-text item) ""))
+             (agenda-item-text item))
+   :file (agenda-item-file item)
+   :line (agenda-item-line item)
+   :heading (agenda-item-heading item)
+   :date (getf spec :date)
+   :kind "TIMESTAMP"
+   :event-p t
+   :end-date (getf spec :end-date)
+   :repeater (getf spec :repeater)
+   :time (getf spec :time)))
 
 (defun parse-org-file (path)
   "Return parsed agenda items and, as a second value, warnings or read errors.
 Only the planning line immediately below a heading is structural.  A heading
-with both SCHEDULED and DEADLINE fields produces one item for each field."
+with both SCHEDULED and DEADLINE fields produces one item for each field.
+Ordinary active timestamps belong to their containing visible heading."
   (handler-case
       (with-open-file (in path :direction :input :external-format :utf-8)
          (let ((items '())
                (warnings '())
                (current nil)
                (current-planned-p nil)
-               (planning-line-open-p nil))
+               (planning-line-open-p nil)
+               (suppressed-level nil)
+               (block-p nil)
+               (drawer-p nil))
            (labels ((finish-current ()
                       (when (and current (not current-planned-p))
-                        (push current items))))
+                        (push current items)))
+                    (emit-events (line)
+                      (when current
+                        (dolist (spec (agenda-active-timestamp-specs line))
+                          (push (agenda-item-with-event
+                                 current spec
+                                 (string= line (agenda-item-heading current)))
+                                items))))
+                    (comment-heading-p (text)
+                      (or (string= text "COMMENT")
+                          (alexandria:starts-with-subseq "COMMENT " text)))
+                    (archive-heading-p (line)
+                      (not (null
+                            (ppcre:scan "(?:^|\\s):ARCHIVE:\\s*$" line)))))
              (loop :for line := (read-line in nil)
                    :for lineno :from 1
                    :while line
-                   :do (multiple-value-bind (start end gs ge)
-                           (ppcre:scan *heading-scanner* line)
-                         (declare (ignore end))
-                         (if start
-                             (progn
-                               (finish-current)
-                               (let ((keyword
-                                       (when (aref gs 0)
-                                         (subseq line (aref gs 0) (aref ge 0))))
-                                     (text
-                                       (string-trim
-                                        '(#\Space #\Tab)
-                                        (subseq line (aref gs 1) (aref ge 1)))))
-                                 (setf current
-                                       (make-agenda-item
-                                        :keyword keyword
-                                        :text text
-                                        :file path
-                                        :line lineno
-                                        :heading line
-                                        :date nil
-                                        :kind nil)
-                                       current-planned-p nil
-                                       planning-line-open-p t)))
-                             (when (and current planning-line-open-p)
-                               (when (ppcre:scan *planning-line-scanner* line)
-                                 (ppcre:do-register-groups (kind date)
-                                     (*planning-scanner* line)
-                                   (if (valid-iso-date-p date)
-                                       (progn
-                                         (push (agenda-item-with-planning
-                                                current kind date)
-                                               items)
-                                         (setf current-planned-p t))
-                                       (push
-                                        (make-condition
-                                         'simple-error
-                                         :format-control
-                                         "Invalid Org planning date ~s at line ~d"
-                                         :format-arguments (list date lineno))
-                                        warnings))))
-                               (setf planning-line-open-p nil)))))
+                   :do
+                      (cond
+                        (block-p
+                         (when (ppcre:scan
+                                "(?i)^\\s*#\\+end_" line)
+                           (setf block-p nil)))
+                        ((ppcre:scan "(?i)^\\s*#\\+begin_" line)
+                         (setf block-p t
+                               planning-line-open-p nil))
+                        (t
+                         (multiple-value-bind (start end gs ge)
+                             (ppcre:scan *heading-scanner* line)
+                           (declare (ignore end))
+                           (if start
+                               (progn
+                                 (finish-current)
+                                 (setf drawer-p nil block-p nil)
+                                 (let* ((level (org-heading-level-from-line line))
+                                        (keyword
+                                          (when (aref gs 0)
+                                            (subseq line (aref gs 0)
+                                                    (aref ge 0))))
+                                        (text
+                                          (string-trim
+                                           '(#\Space #\Tab)
+                                           (subseq line (aref gs 1)
+                                                   (aref ge 1)))))
+                                   (when (and suppressed-level
+                                              (<= level suppressed-level))
+                                     (setf suppressed-level nil))
+                                   (let ((suppressed-p
+                                           (or suppressed-level
+                                               (comment-heading-p text)
+                                               (archive-heading-p line))))
+                                     (when (and suppressed-p
+                                                (null suppressed-level))
+                                       (setf suppressed-level level))
+                                     (setf current
+                                           (unless suppressed-p
+                                             (make-agenda-item
+                                              :keyword keyword
+                                              :text text
+                                              :file path
+                                              :line lineno
+                                              :heading line
+                                              :date nil
+                                              :kind nil))
+                                           current-planned-p nil
+                                           planning-line-open-p
+                                           (not suppressed-p))
+                                     (unless suppressed-p
+                                       (emit-events line)))))
+                               (when current
+                                 (let ((planning-p
+                                         (and planning-line-open-p
+                                              (ppcre:scan
+                                               *planning-line-scanner* line))))
+                                   (when planning-p
+                                     (ppcre:do-register-groups (kind date)
+                                         (*planning-scanner* line)
+                                       (if (valid-iso-date-p date)
+                                           (progn
+                                             (push
+                                              (agenda-item-with-planning
+                                               current kind date)
+                                              items)
+                                             (setf current-planned-p t))
+                                           (push
+                                            (make-condition
+                                             'simple-error
+                                             :format-control
+                                             "Invalid Org planning date ~s at line ~d"
+                                             :format-arguments
+                                             (list date lineno))
+                                            warnings))))
+                                   (setf planning-line-open-p nil)
+                                   (cond
+                                     ((ppcre:scan
+                                       "^\\s*:[[:alnum:]_-]+:\\s*$" line)
+                                      (setf drawer-p
+                                            (not (ppcre:scan
+                                                  "^\\s*:END:\\s*$" line))))
+                                     ((and drawer-p
+                                           (ppcre:scan
+                                            "^\\s*:END:\\s*$" line))
+                                      (setf drawer-p nil))
+                                     ((or planning-p drawer-p
+                                          (ppcre:scan "^\\s*#" line)))
+                                     (t (emit-events line))))))))))
              (finish-current))
            (values (nreverse items) (nreverse warnings))))
     (error (condition)
@@ -187,6 +334,124 @@ with both SCHEDULED and DEADLINE fields produces one item for each field."
       (declare (ignore new-sec new-min new-hour))
       (format nil "~4,'0d-~2,'0d-~2,'0d" new-year new-month new-day))))
 
+(defun agenda-date-components (date)
+  (values (parse-integer date :start 0 :end 4)
+          (parse-integer date :start 5 :end 7)
+          (parse-integer date :start 8 :end 10)))
+
+(defun agenda-date-ordinal (date)
+  "Return a timezone-independent day ordinal for DATE."
+  (multiple-value-bind (year month day) (agenda-date-components date)
+    (floor (encode-universal-time 0 0 12 day month year 0) 86400)))
+
+(defun agenda-add-calendar (date amount unit)
+  "Add AMOUNT units UNIT (d, w, m, or y) to DATE."
+  (multiple-value-bind (year month day) (agenda-date-components date)
+    (ecase unit
+      ((#\d #\w)
+       (multiple-value-bind (second minute hour new-day new-month new-year)
+           (decode-universal-time
+            (+ (encode-universal-time 0 0 12 day month year 0)
+               (* amount (if (char= unit #\w) 7 1) 86400))
+            0)
+         (declare (ignore second minute hour))
+         (format nil "~4,'0d-~2,'0d-~2,'0d" new-year new-month new-day)))
+      (#\m
+       (let* ((zero-month (+ (* year 12) (1- month) amount))
+              (new-year (floor zero-month 12))
+              (new-month (1+ (mod zero-month 12)))
+              (new-day (min day (days-in-month new-month new-year))))
+         (format nil "~4,'0d-~2,'0d-~2,'0d"
+                 new-year new-month new-day)))
+      (#\y
+       (let* ((new-year (+ year amount))
+              (new-day (min day (days-in-month month new-year))))
+         (format nil "~4,'0d-~2,'0d-~2,'0d"
+                 new-year month new-day))))))
+
+(defun agenda-repeater-parts (repeater)
+  (when repeater
+    (multiple-value-bind (start end registers register-ends)
+        (ppcre:scan "^[.+]*\\+([0-9]+)([dDwWmMyY])$" repeater)
+      (declare (ignore end))
+      (when start
+        (values
+         (parse-integer repeater
+                        :start (aref registers 0)
+                        :end (aref register-ends 0))
+         (char-downcase (aref repeater (aref registers 1))))))))
+
+(defun agenda-repeater-start-index (base today amount unit)
+  (let ((estimate
+          (ecase unit
+            ((#\d #\w)
+             (let ((step (* amount (if (char= unit #\w) 7 1))))
+               (max 0 (ceiling (- (agenda-date-ordinal today)
+                                  (agenda-date-ordinal base))
+                               step))))
+            (#\m
+             (multiple-value-bind (base-year base-month base-day)
+                 (agenda-date-components base)
+               (declare (ignore base-day))
+               (multiple-value-bind (today-year today-month today-day)
+                   (agenda-date-components today)
+                 (declare (ignore today-day))
+                 (max 0 (floor (- (+ (* today-year 12) today-month)
+                                  (+ (* base-year 12) base-month))
+                               amount)))))
+            (#\y
+             (multiple-value-bind (base-year base-month base-day)
+                 (agenda-date-components base)
+               (declare (ignore base-month base-day))
+               (multiple-value-bind (today-year today-month today-day)
+                   (agenda-date-components today)
+                 (declare (ignore today-month today-day))
+                 (max 0 (floor (- today-year base-year) amount))))))))
+    (loop :for index :from estimate
+          :for date := (agenda-add-calendar base (* index amount) unit)
+          :when (not (string< date today)) :return index)))
+
+(defun agenda-item-occurrence (item date &optional index count)
+  (let ((occurrence (copy-agenda-item item)))
+    (setf (agenda-item-date occurrence) date
+          (agenda-item-end-date occurrence) nil
+          (agenda-item-repeater occurrence) nil
+          (agenda-item-occurrence-index occurrence) index
+          (agenda-item-occurrence-count occurrence) count)
+    occurrence))
+
+(defun agenda-event-occurrences (item today horizon)
+  "Expand ITEM into event rows intersecting TODAY through HORIZON."
+  (let ((base (agenda-item-date item))
+        (end (agenda-item-end-date item))
+        (repeater (agenda-item-repeater item)))
+    (cond
+      (end
+       (let* ((base-ordinal (agenda-date-ordinal base))
+              (count (1+ (- (agenda-date-ordinal end) base-ordinal)))
+              (first-offset
+                (max 0 (- (agenda-date-ordinal today) base-ordinal)))
+              (last-offset
+                (min (1- count)
+                     (- (agenda-date-ordinal horizon) base-ordinal))))
+         (when (plusp count)
+           (loop :for offset :from first-offset :to last-offset
+                 :for date := (agenda-add-calendar base offset #\d)
+                 :collect (agenda-item-occurrence
+                           item date (1+ offset) count)))))
+      (repeater
+       (multiple-value-bind (amount unit) (agenda-repeater-parts repeater)
+         (when (and amount (plusp amount))
+           (loop :with start :=
+                   (agenda-repeater-start-index base today amount unit)
+                 :for index :from start
+                 :for date :=
+                   (agenda-add-calendar base (* index amount) unit)
+                 :while (string<= date horizon)
+                 :collect (agenda-item-occurrence item date)))))
+      ((and (not (string< base today)) (string<= base horizon))
+       (list (agenda-item-occurrence item base))))))
+
 ;;; --- grouping ------------------------------------------------------------
 
 (defun open-keyword-p (kw)
@@ -206,6 +471,12 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
       (let ((date (agenda-item-date item))
             (kw (agenda-item-keyword item)))
         (cond
+          ((agenda-item-event-p item)
+           (dolist (occurrence
+                    (agenda-event-occurrences item today horizon))
+             (if (string= (agenda-item-date occurrence) today)
+                 (push occurrence today-items)
+                 (push occurrence upcoming))))
           ((and date (not (done-keyword-p kw)))
            (cond
              ((string< date today) (push item overdue))
@@ -213,8 +484,13 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
              ((string<= date horizon) (push item upcoming))))
           ((and (null date) (open-keyword-p kw))
            (push item todos)))))
-    (flet ((by-date (a b) (string< (or (agenda-item-date a) "")
-                                   (or (agenda-item-date b) ""))))
+    (flet ((by-date (a b)
+             (let ((a-date (or (agenda-item-date a) ""))
+                   (b-date (or (agenda-item-date b) "")))
+               (or (string< a-date b-date)
+                   (and (string= a-date b-date)
+                        (string< (or (agenda-item-time a) "")
+                                 (or (agenda-item-time b) "")))))))
       (values (stable-sort (nreverse overdue) #'by-date)
               (nreverse today-items)
               (stable-sort (nreverse upcoming) #'by-date)
@@ -226,8 +502,16 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
   "One display line for ITEM, including planning kind/date when present."
   (let ((planning
           (if (agenda-item-date item)
-              (format nil "  [~a ~a]"
-                      (agenda-item-kind item) (agenda-item-date item))
+              (format nil "  [~a ~a~@[ ~a~]~@[ ~a~]]"
+                      (if (agenda-item-event-p item)
+                          "EVENT"
+                          (agenda-item-kind item))
+                      (agenda-item-date item)
+                      (agenda-item-time item)
+                      (and (agenda-item-occurrence-index item)
+                           (format nil "~d/~d"
+                                   (agenda-item-occurrence-index item)
+                                   (agenda-item-occurrence-count item))))
               "")))
     (format nil "~9a ~a~a   (~a:~a)"
             (or (agenda-item-keyword item) "")
@@ -252,7 +536,11 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
             (put-text-property start point :agenda-kind
                                (agenda-item-kind item))
             (put-text-property start point :agenda-date
-                               (agenda-item-date item)))))
+                               (agenda-item-date item))
+            (put-text-property start point :agenda-time
+                               (agenda-item-time item))
+            (put-text-property start point :agenda-occurrence-index
+                               (agenda-item-occurrence-index item)))))
     (insert-string point (format nil "~%"))))
 
 (defun agenda-error-text (condition)
@@ -281,7 +569,9 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
     (list file
           (text-property-at point :agenda-line)
           (text-property-at point :agenda-kind)
-          (text-property-at point :agenda-date))))
+          (text-property-at point :agenda-date)
+          (text-property-at point :agenda-time)
+          (text-property-at point :agenda-occurrence-index))))
 
 (defun agenda-restore-entry-point (buffer key)
   "Move BUFFER's point to the first rendered row matching KEY."
@@ -595,7 +885,7 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
                          file line heading kind date)))
                   (setf (buffer-value agenda-buffer
                                       'lem-yath-agenda-restore-entry)
-                        (list file line kind date))
+                        (list file line kind date nil nil))
                   (agenda-start-scan agenda-buffer)
                   (message "~a" timestamp))
               (error (condition)
