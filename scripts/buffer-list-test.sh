@@ -88,11 +88,11 @@ else
 fi
 
 lem_keys "$session" C-x C-b
-if lem_wait_for "$session" 'Group[[:space:]]+Buffer[[:space:]]+File' 15 >/dev/null; then
+if lem_wait_for "$session" 'Buffer[[:space:]]+File' 15 >/dev/null; then
   screen=$(lem_capture "$session")
   missing=0
   for group in org tramp emacs ediff dired terminal help Default; do
-    if ! grep -Eq "(^|[[:space:]])${group}([[:space:]]|$)" <<<"$screen"; then
+    if ! grep -Fq "[ ${group} ]" <<<"$screen"; then
       missing=1
     fi
   done
@@ -100,22 +100,62 @@ if lem_wait_for "$session" 'Group[[:space:]]+Buffer[[:space:]]+File' 15 >/dev/nu
      grep -q 'buffer-list-zz-target\.txt' <<<"$screen" &&
      grep -Fq 'buffer-list-control\nname' <<<"$screen" &&
      grep -q '\*Org Src directory-first-match\*' <<<"$screen"; then
-    pass grouped-ui "the chooser displays every group and escapes control characters"
+    pass grouped-ui "the chooser displays distinct Ibuffer headings and escaped rows"
   else
-    fail grouped-ui "the grouped chooser omitted labels or fixture rows"
+    fail grouped-ui "the grouped chooser omitted headings or fixture rows"
   fi
 else
   fail grouped-ui "C-x C-b did not open the grouped multi-column chooser"
 fi
 
+# Heading rows are presentation/control rows, never buffer-operation targets.
+lem_keys "$session" C-k
+lem_keys "$session" C-s
+lem_keys "$session" Space
+sleep 0.3
+screen=$(lem_capture "$session")
+if grep -Fq '[ org ]' <<<"$screen" &&
+   grep -q '\*Org Src buffer-list\*' <<<"$screen" &&
+   ! grep -Eq 'x[[:space:]]+\[ org \]' <<<"$screen"; then
+  pass heading-safety "kill, save, and mark cannot target a group heading"
+else
+  fail heading-safety "a buffer action mutated or marked a group heading"
+fi
+lem_keys "$session" BTab
+
+# The first row is the first nonempty group heading.  Return follows Ibuffer:
+# hide its rows, retain an ellipsis heading, and expand it again in place.
+lem_keys "$session" Enter
+sleep 0.4
+screen=$(lem_capture "$session")
+if grep -Fq '[ org ... ]' <<<"$screen" &&
+   ! grep -q '\*Org Src buffer-list\*' <<<"$screen" &&
+   grep -Fq '[ tramp ]' <<<"$screen"; then
+  pass grouped-collapse "Return collapsed only the focused Ibuffer group"
+else
+  fail grouped-collapse "the focused heading did not collapse safely"
+fi
+
+lem_keys "$session" Enter
+sleep 0.4
+screen=$(lem_capture "$session")
+if grep -Fq '[ org ]' <<<"$screen" &&
+   grep -q '\*Org Src buffer-list\*' <<<"$screen" &&
+   ! grep -Fq '[ org ... ]' <<<"$screen"; then
+  pass grouped-expand "Return restored the collapsed group in place"
+else
+  fail grouped-expand "the focused heading did not expand safely"
+fi
+
 tmux_cmd send-keys -t "$session" -l 'zz-target'
 sleep 0.6
 screen=$(lem_capture "$session")
-if grep -Eq 'Default[[:space:]]+buffer-list-zz-target\.txt' <<<"$screen" &&
-   ! grep -Eq 'Default[[:space:]]+buffer-list-source\.txt' <<<"$screen"; then
-  pass grouped-filter "live filtering retains the selected row's group identity"
+if grep -q 'buffer-list-zz-target\.txt' <<<"$screen" &&
+   [[ $(grep -c 'buffer-list-source\.txt' <<<"$screen") -eq 1 ]] &&
+   ! grep -Eq '\[ (org|Default) (\.\.\. )?\]' <<<"$screen"; then
+  pass grouped-filter "live filtering presents matching buffers without heading traps"
 else
-  fail grouped-filter "filtering lost group identity or retained unrelated rows"
+  fail grouped-filter "filtering retained headings or unrelated rows"
 fi
 
 lem_keys "$session" Enter
@@ -149,7 +189,7 @@ fi
 
 lem_keys "$session" C-x C-b
 tmux_cmd send-keys -t "$session" -l 'save-target'
-if lem_wait_for "$session" 'Default[[:space:]]+buffer-list-save-target\.txt' 15 >/dev/null; then
+if lem_wait_for "$session" 'buffer-list-save-target\.txt' 15 >/dev/null; then
   lem_keys "$session" Space
   lem_keys "$session" C-s
   sleep 0.5

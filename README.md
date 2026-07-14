@@ -148,8 +148,9 @@ of writing `.fasl` files into the source tree.
   current-line highlight or startup tab header, `C-x t 2` tabs on demand, and
   six Modus-matched delimiter depths in Common Lisp buffers
 - `C-x C-b` grouped like the effective Ibuffer setup: ordered, first-match
-  org/tramp/emacs/ediff/dired/terminal/help groups, hidden empty groups, and a
-  Default tail, while retaining fuzzy filtering, marks, save/kill, and Return
+  org/tramp/emacs/ediff/dired/terminal/help headings, hidden empty groups, and a
+  Default tail. Return collapses or expands a heading, while live filtering,
+  marks, save/kill, and Return selection remain available
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
   deduplication and timeout, explicit buffer ownership with save-as migration,
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,

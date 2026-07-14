@@ -745,10 +745,12 @@ through the ncurses editor.
   marked multi-column chooser in the configured exclusive first-match
   org/tramp/emacs/ediff/dired/terminal/help order, hides empty groups, preserves
   recency within each group, and appends unmatched buffers as `Default`.
-  Fuzzy narrowing repeats group identity on each result; Return, mark/save/kill,
-  and control-character-safe display remain available. The real TUI verifies
-  classification, ordering, empty-group omission, filtering, selection, and
-  reload. Ibuffer's collapsible heading rows and wider sort/filter/format
+  Distinct `[ name ]` headings collapse to `[ name ... ]` with Return and are
+  excluded from buffer actions. Fuzzy narrowing temporarily displays only
+  matching selectable buffers; Return, mark/save/kill, and control-character-safe
+  display remain available. The real TUI verifies classification, ordering,
+  empty-group omission, heading collapse/expansion and safety, filtering,
+  selection, marked actions, and reload. Ibuffer's wider sort/filter/format
   commands are not reproduced.
 - Recent files: `M-g r` opens an annotated Lem persistent-MRU prompt after
   lem-yath sets the loaded

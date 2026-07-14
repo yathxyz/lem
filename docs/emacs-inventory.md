@@ -123,10 +123,10 @@ and the current window from Visual or operator state with or without a prefix.
 | `C-x C-b` | `ibuffer` | ibuffer (custom saved filter groups: org/tramp/emacs/ediff/dired/terminal/help) |
 
 The Lem mapping preserves that group order and Ibuffer's exclusive first-match
-partition, omits empty groups, and retains unmatched buffers under `Default`.
-Its native popup renders the group beside the first row instead of using a
-separate collapsible Ibuffer heading (`src/buffer-list.lisp`,
-`scripts/buffer-list-test.sh`).
+partition, omits empty groups, retains unmatched buffers under `Default`, and
+renders each group as a distinct collapsible heading. Live name filtering
+temporarily presents only matching selectable buffer rows
+(`src/buffer-list.lisp`, `scripts/buffer-list-test.sh`).
 
 ### 1.4 Mode-local bindings
 
