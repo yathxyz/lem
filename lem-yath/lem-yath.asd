@@ -59,6 +59,7 @@
                (:file "ui")
                (:module "apps"
                 :components ((:file "agenda")
+                             (:file "agenda-archive")
                              (:file "citar")
                              (:file "devdocs")
                              (:file "elfeed")

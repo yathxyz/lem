@@ -1622,16 +1622,31 @@ input, and realigns the result to the active terminal tag column. TODO,
 priority, planning, and tag changes save immediately and restore the logical
 agenda row after the asynchronous refresh. A shifted or changed source heading
 fails closed instead of editing the line now occupying its stale location.
+Evil-Org's `dA` archives the complete current subtree, while `da` first asks
+`Archive this subtree or entry?`; GNU Org's `$`, `C-c $`, `C-c C-x C-s`, and
+`C-c C-x C-a` routes reach the same default command. The bounded port mirrors
+the configured `%s_archive::` location: it creates or appends the adjacent
+`_archive` file, promotes the moved root to level one, preserves descendants
+and existing properties, and records Org's default `ARCHIVE_TIME`,
+`ARCHIVE_FILE`, `ARCHIVE_OLPATH`, `ARCHIVE_CATEGORY`, `ARCHIVE_TODO`, and
+`ARCHIVE_ITAGS` context. The destination is saved before source deletion, so a
+failed second write can leave a recoverable duplicate but cannot lose the
+subtree. Exact scanned-heading validation happens before either file changes;
+file- or heading-local custom archive locations are refused rather than
+silently ignored.
 `scripts/agenda-test.sh` drives the production entry keys in the installed
 ncurses wrapper and also verifies source scope, grouping, duplicate basenames,
 active-event contexts/ranges/repeaters, TODO, priority, planning and tag
-persistence, completion, replacement, clearing, alignment, stale-source
-refusal, refresh races, unmodified/undo-free generated buffers, and cleanup.
+persistence, completion, replacement, clearing, alignment, archive
+confirmation/subtree shape/context/durability, custom-route refusal,
+stale-source refusal, refresh races, unmodified/undo-free generated buffers,
+and cleanup.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
 presentation, planning removal and warning/delay-cookie forms,
-refile/archive mutation, bulk actions, clocks, custom commands,
+refiling, custom archive destinations and local archive sibling/tag commands,
+bulk actions, clocks, custom commands,
 and the wider org-super-agenda presentation remain explicit gaps.
 
 ---

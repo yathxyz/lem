@@ -72,7 +72,8 @@
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
       "return=~a g=~a t=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
-      "J=~a K=~a kill-hooks=~d modified=~a undo=~a "
+      "J=~a K=~a dA=~a da=~a dollar=~a archive=~a kill-hooks=~d "
+      "modified=~a undo=~a "
       "running=~a pending=~a")
      serial
      (symbol-name (buffer-major-mode buffer))
@@ -90,6 +91,10 @@
      (agenda-test-command-name "q")
      (agenda-test-command-name "J")
      (agenda-test-command-name "K")
+     (agenda-test-command-name "d A")
+     (agenda-test-command-name "d a")
+     (agenda-test-command-name "$")
+     (agenda-test-command-name "C-c C-x C-a")
      (agenda-test-hook-count
       'agenda-kill-buffer-cleanup
       (variable-value 'kill-buffer-hook :buffer buffer))
@@ -127,6 +132,10 @@
 (define-command lem-yath-test-agenda-goto-work-todo () ()
   (move-point (current-point)
               (agenda-test-find-line "Work unscheduled sentinel")))
+
+(define-command lem-yath-test-agenda-goto-archive () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Archive action sentinel")))
 
 (define-command lem-yath-test-agenda-make-source-stale () ()
   (let* ((file (text-property-at (current-point) :agenda-file))
@@ -251,6 +260,8 @@
 (define-key *lem-yath-agenda-vi-keymap* "F6" 'lem-yath-test-agenda-point-report)
 (define-key *lem-yath-agenda-vi-keymap* "F12"
   'lem-yath-test-agenda-goto-work-todo)
+(define-key *lem-yath-agenda-vi-keymap* "F1"
+  'lem-yath-test-agenda-goto-archive)
 (define-key *lem-yath-agenda-vi-keymap* "F3"
   'lem-yath-test-agenda-make-source-stale)
 (define-key *lem-yath-agenda-vi-keymap* "F2"

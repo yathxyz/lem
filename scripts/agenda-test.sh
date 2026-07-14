@@ -23,6 +23,7 @@ source_file="$WORKDIR/source.org"
 work_file="$WORKDIR/same.org"
 public_file="$PUBLIC_ORG_DIR/same.org"
 mcp_file="$PUBLIC_ORG_DIR/mcp/mcp.org"
+archive_file="${work_file}_archive"
 session="lem-agenda-$id"
 FAILED=0
 
@@ -65,7 +66,7 @@ wait_report_count() {
 wait_file_pattern() {
   local pattern="$1" file="$2" i
   for i in $(seq 1 100); do
-    grep -qE "$pattern" "$file" && return 0
+    [ -f "$file" ] && grep -qE "$pattern" "$file" && return 0
     sleep 0.1
   done
   return 1
@@ -123,11 +124,22 @@ printf '%s\n' \
   '#+END_SRC' \
   '* Comment line exclusion sentinel :alpha:' \
   '# <2026-07-13 Mon>' \
+  '* Archive parent sentinel :parenttag:shared:' \
+  '** TODO Archive action sentinel :localtag:shared:' \
+  'DEADLINE: <2026-07-14 Tue>' \
+  ':PROPERTIES:' \
+  ':CUSTOM: keep' \
+  ':ARCHIVE_TIME: old' \
+  ':END:' \
+  'Archive body sentinel.' \
+  '*** NEXT Archive child sentinel' \
+  'Child body sentinel.' \
+  '* TODO After archive sentinel' \
   >"$work_file"
 
 printf '%s\n' \
   '#+title: Public agenda' \
-  '' \
+  '#+ARCHIVE: custom-archive.org::* Archived' \
   '* SOMEDAY Public visit sentinel' \
   >"$public_file"
 
@@ -162,7 +174,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -170,8 +182,8 @@ else
   grep -qF "FILE serial=1 index=2 path=$source_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=3 path=$public_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=4 path=$mcp_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE items=:alpha:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 28 ] || static_ok=0
+  grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,parenttag,shared items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 31 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Today work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Plain today sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -205,6 +217,70 @@ else
   else
     fail sources "source set, grouping, or effective keymap differed"
   fi
+fi
+
+# Evil-Org da asks before using the configured default archive command.  dA
+# performs the same subtree move directly.  Lem persists the archive first so
+# an interrupted second save can duplicate a subtree but cannot lose it.
+tmux_cmd send-keys -t "$session" F1
+tmux_cmd send-keys -t "$session" d a
+if lem_wait_for "$session" 'Archive this subtree or entry' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" n
+  sleep 0.3
+  if grep -q '^\*\* TODO Archive action sentinel' "$work_file" &&
+     [ ! -e "$archive_file" ]; then
+    pass archive-cancel "da cancellation leaves source and destination untouched"
+  else
+    fail archive-cancel "declining da still changed an archive file"
+  fi
+else
+  fail archive-cancel "da did not request Evil-Org's confirmation"
+fi
+
+tmux_cmd send-keys -t "$session" d A
+archive_ok=1
+wait_file_pattern '^\* TODO Archive action sentinel' "$archive_file" || archive_ok=0
+if grep -q 'Archive action sentinel\|Archive child sentinel' "$work_file"; then
+  archive_ok=0
+fi
+grep -q '^\* Archive parent sentinel' "$work_file" || archive_ok=0
+grep -q '^\* TODO After archive sentinel$' "$work_file" || archive_ok=0
+grep -q '^#    -\*- mode: org -\*-$' "$archive_file" || archive_ok=0
+grep -qF "Archived entries from file $work_file" "$archive_file" || archive_ok=0
+grep -qE '^\* TODO Archive action sentinel +:localtag:shared:$' "$archive_file" || archive_ok=0
+grep -q '^DEADLINE: <2026-07-14 Tue>$' "$archive_file" || archive_ok=0
+grep -q '^:CUSTOM: keep$' "$archive_file" || archive_ok=0
+grep -q '^:ARCHIVE_TIME: 2026-07-12 Sun 12:00$' "$archive_file" || archive_ok=0
+grep -qF ":ARCHIVE_FILE: $work_file" "$archive_file" || archive_ok=0
+grep -q '^:ARCHIVE_OLPATH: Archive parent sentinel$' "$archive_file" || archive_ok=0
+grep -q '^:ARCHIVE_CATEGORY: same$' "$archive_file" || archive_ok=0
+grep -q '^:ARCHIVE_TODO: TODO$' "$archive_file" || archive_ok=0
+grep -q '^:ARCHIVE_ITAGS: parenttag$' "$archive_file" || archive_ok=0
+grep -q '^\*\* NEXT Archive child sentinel$' "$archive_file" || archive_ok=0
+grep -q '^Child body sentinel\.$' "$archive_file" || archive_ok=0
+tmux_cmd send-keys -t "$session" F4
+wait_report '^REPORT-DONE serial=2$' || archive_ok=0
+if grep -qE '^ENTRY serial=2 .*Archive (action|child) sentinel' "$LEM_YATH_AGENDA_REPORT"; then
+  archive_ok=0
+fi
+if [ "$archive_ok" = 1 ]; then
+  pass archive "dA moved, annotated, saved, and removed a complete subtree"
+else
+  fail archive "default subtree archive differed from the pinned Org shape"
+fi
+
+# A file-local override would route data somewhere other than the configured
+# default.  That broader archive grammar is intentionally unsupported and must
+# refuse before creating the default destination or changing the source.
+tmux_cmd send-keys -t "$session" F5
+tmux_cmd send-keys -t "$session" d A
+if lem_wait_for "$session" 'Custom Org archive location' 10 >/dev/null &&
+   grep -q '^\* SOMEDAY Public visit sentinel$' "$public_file" &&
+   [ ! -e "${public_file}_archive" ] &&
+   [ ! -e "$PUBLIC_ORG_DIR/custom-archive.org" ]; then
+  pass archive-custom "dA fails closed on a file-local archive destination"
+else
+  fail archive-custom "dA ignored or partially applied a custom archive route"
 fi
 
 # Evil-Org agenda t opens the configured one-key TODO selector, persists the
@@ -441,6 +517,18 @@ else
   fail todo-stale "t changed or saved the wrong source line from a stale row"
 fi
 
+archive_checksum="$(sha256sum "$archive_file" | cut -d' ' -f1)"
+tmux_cmd send-keys -t "$session" d A
+sleep 0.4
+tmux_cmd send-keys -t "$session" F2
+if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 4 &&
+   [ "$(sha256sum "$archive_file" | cut -d' ' -f1)" = "$archive_checksum" ] &&
+   grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+  pass archive-stale "dA refused a shifted row before touching either file"
+else
+  fail archive-stale "dA archived or saved from a stale agenda row"
+fi
+
 # q must close the popped agenda and restore the source view.
 tmux_cmd send-keys -t "$session" q
 sleep 0.5
@@ -489,8 +577,8 @@ printf '%s\n' '* TODO Refreshed top-level sentinel' >>"$work_file"
 tmux_cmd send-keys -t "$session" g g g
 if lem_wait_for "$session" 'Refreshed top-level sentinel' 40 >/dev/null; then
   tmux_cmd send-keys -t "$session" F4
-  wait_report '^REPORT-DONE serial=2$' || true
-  if grep -qE '^ENTRY serial=2 section=TODOS .*Refreshed top-level sentinel' "$LEM_YATH_AGENDA_REPORT"; then
+  wait_report '^REPORT-DONE serial=3$' || true
+  if grep -qE '^ENTRY serial=3 section=TODOS .*Refreshed top-level sentinel' "$LEM_YATH_AGENDA_REPORT"; then
     pass refresh "g rebuilds from changed agenda sources"
   else
     fail refresh "screen refreshed but source properties were absent"
@@ -503,11 +591,11 @@ fi
 tmux_cmd send-keys -t "$session" F11
 lem_wait_for "$session" 'Injected agenda root failure' 40 >/dev/null || true
 tmux_cmd send-keys -t "$session" F4
-if wait_report '^REPORT-DONE serial=3$' &&
-   grep -qE '^ENTRY serial=3 .*Work unscheduled sentinel' "$LEM_YATH_AGENDA_REPORT" &&
-   grep -qE '^ENTRY serial=3 .*Public visit sentinel' "$LEM_YATH_AGENDA_REPORT" &&
-   ! grep -qE '^ENTRY serial=3 .*MCP today sentinel' "$LEM_YATH_AGENDA_REPORT" &&
-   grep -qE '^WARNING serial=3 .*Injected agenda root failure' "$LEM_YATH_AGENDA_REPORT"; then
+if wait_report '^REPORT-DONE serial=4$' &&
+   grep -qE '^ENTRY serial=4 .*Work unscheduled sentinel' "$LEM_YATH_AGENDA_REPORT" &&
+   grep -qE '^ENTRY serial=4 .*Public visit sentinel' "$LEM_YATH_AGENDA_REPORT" &&
+   ! grep -qE '^ENTRY serial=4 .*MCP today sentinel' "$LEM_YATH_AGENDA_REPORT" &&
+   grep -qE '^WARNING serial=4 .*Injected agenda root failure' "$LEM_YATH_AGENDA_REPORT"; then
   pass discovery "a failed root warns while healthy roots remain visible"
 else
   fail discovery "one failed root erased healthy agenda sources or stayed silent"

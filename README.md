@@ -178,7 +178,9 @@ of writing `.fasl` files into the source tree.
   modal Return/g/q navigation, and Evil-Org-style `t` fast TODO selection plus
   `J`/`K` GNU Org priority cycling, `C-c C-s`/`C-c C-d` planning edits, and
   `ct`/`C-c C-q` completion-backed local-tag replacement and clearing,
-  all with immediate source persistence
+  all with immediate source persistence. Evil-Org `dA` archives a complete
+  subtree to Org's default sibling `_archive` file, while `da` confirms first;
+  archive metadata and both files are persisted destination-first
 - streaming OpenRouter LLM client + claude/codex/grok CLI backends
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
   (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli
