@@ -180,7 +180,9 @@ of writing `.fasl` files into the source tree.
   `ct`/`C-c C-q` completion-backed local-tag replacement and clearing,
   all with immediate source persistence. Evil-Org `dA` archives a complete
   subtree to Org's default sibling `_archive` file, while `da` confirms first;
-  archive metadata and both files are persisted destination-first
+  archive metadata and both files are persisted destination-first. GNU Org's
+  `C-c C-w` completes over the current file's level-one headings and
+  refiles the selected complete subtree as the target's final child.
 - streaming OpenRouter LLM client + claude/codex/grok CLI backends
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
   (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli

@@ -198,9 +198,9 @@
           (concatenate 'string prefix (make-string spaces :initial-element #\Space)
                        tags)))))
 
-(defun agenda-archive-normalize-subtree-lines (text root-level)
-  "Normalize TEXT's real headings so its root becomes level one."
-  (let ((remove-count (1- root-level))
+(defun agenda-adjust-subtree-level-lines (text old-level new-level)
+  "Adjust TEXT's real headings from OLD-LEVEL to NEW-LEVEL."
+  (let ((delta (- new-level old-level))
         (open-block nil)
         (result '()))
     (dolist (line (agenda-archive-split-lines text) (nreverse result))
@@ -216,9 +216,18 @@
            (push line result))
           ((org-heading-level-from-line line)
            (push (agenda-archive-align-heading-line
-                  (subseq line remove-count))
+                  (cond
+                    ((plusp delta)
+                     (concatenate 'string
+                                  (make-string delta :initial-element #\*) line))
+                    ((minusp delta) (subseq line (- delta)))
+                    (t line)))
                  result))
           (t (push line result)))))))
+
+(defun agenda-archive-normalize-subtree-lines (text root-level)
+  "Normalize TEXT's real headings so its root becomes level one."
+  (agenda-adjust-subtree-level-lines text root-level 1))
 
 (defun agenda-archive-property-line-index (lines start end name)
   (loop :for index :from start :below end

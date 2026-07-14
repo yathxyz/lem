@@ -60,6 +60,7 @@
                (:module "apps"
                 :components ((:file "agenda")
                              (:file "agenda-archive")
+                             (:file "agenda-refile")
                              (:file "citar")
                              (:file "devdocs")
                              (:file "elfeed")

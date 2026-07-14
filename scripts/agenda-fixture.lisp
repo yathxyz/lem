@@ -72,7 +72,7 @@
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
       "return=~a g=~a t=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
-      "J=~a K=~a dA=~a da=~a dollar=~a archive=~a kill-hooks=~d "
+      "J=~a K=~a dA=~a da=~a dollar=~a archive=~a refile=~a kill-hooks=~d "
       "modified=~a undo=~a "
       "running=~a pending=~a")
      serial
@@ -95,6 +95,7 @@
      (agenda-test-command-name "d a")
      (agenda-test-command-name "$")
      (agenda-test-command-name "C-c C-x C-a")
+     (agenda-test-command-name "C-c C-w")
      (agenda-test-hook-count
       'agenda-kill-buffer-cleanup
       (variable-value 'kill-buffer-hook :buffer buffer))
@@ -135,7 +136,10 @@
 
 (define-command lem-yath-test-agenda-goto-archive () ()
   (move-point (current-point)
-              (agenda-test-find-line "Archive action sentinel")))
+              (handler-case
+                  (agenda-test-find-line "Archive action sentinel")
+                (error ()
+                  (agenda-test-find-line "Refile action sentinel")))))
 
 (define-command lem-yath-test-agenda-make-source-stale () ()
   (let* ((file (text-property-at (current-point) :agenda-file))

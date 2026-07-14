@@ -72,6 +72,24 @@ wait_file_pattern() {
   return 1
 }
 
+wait_file_last_line() {
+  local pattern="$1" file="$2" i
+  for i in $(seq 1 100); do
+    [ -f "$file" ] && tail -n 1 "$file" | grep -qE "$pattern" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+wait_screen_absent() {
+  local pattern="$1" i
+  for i in $(seq 1 100); do
+    ! lem_capture "$session" | grep -qE "$pattern" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 printf '%s\n' \
   '#+title: Agenda launch source' \
   '' \
@@ -135,6 +153,15 @@ printf '%s\n' \
   '*** NEXT Archive child sentinel' \
   'Child body sentinel.' \
   '* TODO After archive sentinel' \
+  '* Refile source parent sentinel' \
+  '** TODO Refile action sentinel :movetag:' \
+  'Refile body sentinel.' \
+  '*** NEXT Refile child sentinel' \
+  'Refile child body.' \
+  '* Refile [[id:target][target]] sentinel :targettag:' \
+  'Target body sentinel.' \
+  '** Existing target child sentinel' \
+  'Existing target body.' \
   >"$work_file"
 
 printf '%s\n' \
@@ -174,7 +201,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -182,8 +209,8 @@ else
   grep -qF "FILE serial=1 index=2 path=$source_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=3 path=$public_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=4 path=$mcp_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,parenttag,shared items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 31 ] || static_ok=0
+  grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,movetag,parenttag,shared,targettag items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 33 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Today work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Plain today sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -267,6 +294,79 @@ if [ "$archive_ok" = 1 ]; then
   pass archive "dA moved, annotated, saved, and removed a complete subtree"
 else
   fail archive "default subtree archive differed from the pinned Org shape"
+fi
+
+# With the user's nil org-refile-targets, GNU Org offers same-file level-one
+# headings.  C-c C-w must cancel without mutation, then complete an existing
+# target and append the whole subtree as that target's last child.
+tmux_cmd send-keys -t "$session" F1
+refile_before="$(sha256sum "$work_file" | cut -d' ' -f1)"
+tmux_cmd send-keys -t "$session" C-c C-w
+if lem_wait_for "$session" 'Refile subtree.*Refile action sentinel.*to:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" Escape
+  sleep 0.3
+  if [ "$(sha256sum "$work_file" | cut -d' ' -f1)" = "$refile_before" ]; then
+    pass refile-cancel "C-c C-w cancellation leaves the source untouched"
+  else
+    fail refile-cancel "cancelling the refile prompt changed the source"
+  fi
+else
+  fail refile-cancel "C-c C-w did not open the same-file target prompt"
+fi
+
+tmux_cmd send-keys -t "$session" F1
+tmux_cmd send-keys -t "$session" C-c C-w
+if lem_wait_for "$session" 'Refile subtree.*Refile action sentinel.*to:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'Refile tar'
+  if lem_wait_for "$session" 'Refile target sentinel' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" C-n
+    tmux_cmd send-keys -t "$session" Tab
+    if lem_wait_for "$session" 'to:[[:space:]]+Refile target sentinel' 10 >/dev/null; then
+      tmux_cmd send-keys -t "$session" Enter
+      wait_file_last_line '^Refile child body sentinel\.$' "$work_file" || true
+      wait_screen_absent 'Scanning\.\.\.' || true
+    else
+      fail refile-completion "Tab did not insert the matching level-one target"
+      tmux_cmd send-keys -t "$session" Escape
+    fi
+  else
+    fail refile-completion "the target completion did not offer the level-one heading"
+    tmux_cmd send-keys -t "$session" Escape
+  fi
+else
+  fail refile-prompt "C-c C-w did not reopen the target prompt"
+fi
+
+refile_target_line="$(grep -n '^\* Refile \[\[id:target\]\[target\]\] sentinel ' "$work_file" | cut -d: -f1)"
+refile_existing_line="$(grep -n '^\*\* Existing target child sentinel$' "$work_file" | cut -d: -f1)"
+refile_action_line="$(grep -n '^\*\* TODO Refile action sentinel ' "$work_file" | cut -d: -f1)"
+refile_child_line="$(grep -n '^\*\*\* NEXT Refile child sentinel$' "$work_file" | cut -d: -f1)"
+refile_source_line="$(grep -n '^\* Refile source parent sentinel$' "$work_file" | cut -d: -f1)"
+refile_ok=1
+[ -n "$refile_target_line" ] || refile_ok=0
+[ -n "$refile_existing_line" ] || refile_ok=0
+[ -n "$refile_action_line" ] || refile_ok=0
+[ -n "$refile_child_line" ] || refile_ok=0
+[ -n "$refile_source_line" ] || refile_ok=0
+if [ "$refile_ok" = 1 ]; then
+  [ "$refile_target_line" -eq $((refile_source_line + 1)) ] || refile_ok=0
+  [ "$refile_existing_line" -eq $((refile_target_line + 2)) ] || refile_ok=0
+  [ "$refile_action_line" -eq $((refile_existing_line + 2)) ] || refile_ok=0
+  [ "$refile_child_line" -eq $((refile_action_line + 2)) ] || refile_ok=0
+fi
+grep -qE '^\*\* TODO Refile action sentinel +:movetag:$' "$work_file" || refile_ok=0
+grep -q '^Refile body sentinel\.$' "$work_file" || refile_ok=0
+grep -q '^Refile child body\.$' "$work_file" || refile_ok=0
+[ "$(grep -c 'Refile action sentinel' "$work_file")" = 1 ] || refile_ok=0
+if [ "$refile_ok" = 1 ]; then
+  tmux_cmd send-keys -t "$session" F6
+  if wait_report "^POINT mode=LEM-YATH-AGENDA-MODE file=$work_file line=$refile_action_line .*TODO.*Refile action sentinel.*:movetag:"; then
+    pass refile "C-c C-w completed, moved, saved, refreshed, and retained its row"
+  else
+    fail refile "the source moved correctly but agenda refresh lost its logical row"
+  fi
+else
+  fail refile "the persisted subtree did not match the pinned Org hierarchy and order"
 fi
 
 # A file-local override would route data somewhere other than the configured
@@ -527,6 +627,16 @@ if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" se
   pass archive-stale "dA refused a shifted row before touching either file"
 else
   fail archive-stale "dA archived or saved from a stale agenda row"
+fi
+
+tmux_cmd send-keys -t "$session" C-c C-w
+sleep 0.4
+tmux_cmd send-keys -t "$session" F2
+if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 5 &&
+   grep -q '^\* NEXT Work unscheduled sentinel$' "$work_file"; then
+  pass refile-stale "C-c C-w refused a shifted row before prompting or saving"
+else
+  fail refile-stale "C-c C-w moved or saved from a stale agenda row"
 fi
 
 # q must close the popped agenda and restore the source view.

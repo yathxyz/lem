@@ -1634,19 +1634,32 @@ failed second write can leave a recoverable duplicate but cannot lose the
 subtree. Exact scanned-heading validation happens before either file changes;
 file- or heading-local custom archive locations are refused rather than
 silently ignored.
+GNU Org's agenda `C-c C-w` mirrors the active default
+`org-refile-targets=nil` policy. It completes over real level-one headings in
+the selected entry's source file, with TODO/priority/tag normalization and
+bracket-link display text matching Org. Duplicate display names resolve to the
+first source-order target, as they do through Org's completion table. After an
+exact source-and-target recheck, the whole selected subtree becomes the
+target's final child; its relative hierarchy, body, and tags are preserved and
+heading levels and tag columns are adjusted. Cancellation is mutation-free.
+The same-file move saves once, restores the original in-memory text if the
+transaction signals, refreshes the agenda, and restores the logical row at its
+new source line. A stale agenda row fails before opening target completion.
 `scripts/agenda-test.sh` drives the production entry keys in the installed
 ncurses wrapper and also verifies source scope, grouping, duplicate basenames,
 active-event contexts/ranges/repeaters, TODO, priority, planning and tag
 persistence, completion, replacement, clearing, alignment, archive
 confirmation/subtree shape/context/durability, custom-route refusal,
+same-file refile completion/cancellation/hierarchy/persistence/row restoration,
 stale-source refusal, refresh races, unmodified/undo-free generated buffers,
 and cleanup.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
 presentation, planning removal and warning/delay-cookie forms,
-refiling, custom archive destinations and local archive sibling/tag commands,
-bulk actions, clocks, custom commands,
+configurable or cross-file refile targets, target creation/copy/reverse and
+prefix/cache variants, custom archive destinations and local archive
+sibling/tag commands, bulk actions, clocks, custom commands,
 and the wider org-super-agenda presentation remain explicit gaps.
 
 ---
