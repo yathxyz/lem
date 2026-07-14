@@ -582,7 +582,7 @@ test_find_name() {
   start_ops_search() {
     local pattern=$1 expected=$2
     send_chord "$find_session" M-s f
-    lem_wait_for "$find_session" 'Find name in directory:' "$WAIT_TIMEOUT" >/dev/null || return 1
+    lem_wait_for "$find_session" 'ind name in directory:' "$WAIT_TIMEOUT" >/dev/null || return 1
     lem_keys "$find_session" F1
     lem_wait_for "$find_session" 'Name pattern:' "$WAIT_TIMEOUT" >/dev/null || return 1
     send_chord "$find_session" C-a C-k
@@ -609,7 +609,7 @@ test_find_name() {
   fi
 
   send_chord "$find_session" M-s f
-  if ! lem_wait_for "$find_session" 'Find name in directory:' "$WAIT_TIMEOUT" >/dev/null; then
+  if ! lem_wait_for "$find_session" 'ind name in directory:' "$WAIT_TIMEOUT" >/dev/null; then
     fail find-name-directory-prompt "M-s f did not prompt for a directory" "$find_session"
     return
   fi
@@ -642,6 +642,35 @@ test_find_name() {
   else
     fail find-name-render "the persistent result buffer rendered the wrong rows" "$find_session"
   fi
+
+  tmux_cmd resize-window -t "$find_session" -x 100 -y 30
+  sleep "$KEY_DELAY"
+  if invoke_test_command "$find_session" lem-yath-test-record-find-name-display '^FIND-DISPLAY '; then
+    actual=$(grep '^FIND-DISPLAY ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    if [ "$actual" = 'FIND-DISPLAY width=100 file-cells=100 file-tail=....17 file-size=....17 file-buffer=.../00-[.match directory-cells=100 directory-tail=.....0 directory-size=.....0 directory-buffer=.../named-dir.match modified=no' ] &&
+       lem_capture "$find_session" | grep -Eq '00-\[\.match +17$'; then
+      pass find-name-dirvish-size "Dirvish file sizes align at the right edge without entering buffer text"
+    else
+      fail find-name-dirvish-size "unexpected 100-column size rendering: $actual" "$find_session"
+    fi
+  else
+    fail find-name-dirvish-size "could not inspect the rendered file-size attribute" "$find_session"
+  fi
+
+  tmux_cmd resize-window -t "$find_session" -x 64 -y 30
+  sleep "$KEY_DELAY"
+  if invoke_test_command "$find_session" lem-yath-test-record-find-name-display '^FIND-DISPLAY '; then
+    actual=$(grep '^FIND-DISPLAY ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    if [ "$actual" = 'FIND-DISPLAY width=64 file-cells=64 file-tail=....17 file-size=....17 file-buffer=.../00-[.match directory-cells=64 directory-tail=.....0 directory-size=.....0 directory-buffer=.../named-dir.match modified=no' ]; then
+      pass find-name-dirvish-resize "right-edge file and directory metadata followed the resized window"
+    else
+      fail find-name-dirvish-resize "unexpected 64-column size rendering: $actual" "$find_session"
+    fi
+  else
+    fail find-name-dirvish-resize "could not inspect size alignment after resize" "$find_session"
+  fi
+  tmux_cmd resize-window -t "$find_session" -x 100 -y 30
+  sleep "$KEY_DELAY"
 
   before=$(report_count '^FIND-CURRENT ')
   lem_keys "$find_session" F11
@@ -741,7 +770,7 @@ test_find_name() {
   # A shell-looking wildcard is one argv element. It must neither execute the
   # embedded command nor prevent the empty result buffer from being useful.
   send_chord "$find_session" M-s f
-  if ! lem_wait_for "$find_session" 'Find name in directory:' "$WAIT_TIMEOUT" >/dev/null; then
+  if ! lem_wait_for "$find_session" 'ind name in directory:' "$WAIT_TIMEOUT" >/dev/null; then
     fail find-name-safety-directory "the second search did not prompt for a directory" "$find_session"
     return
   fi
@@ -764,7 +793,7 @@ test_find_name() {
 
   if invoke_test_command "$find_session" lem-yath-test-use-slow-find '^FIND-SLOW READY$'; then
     send_chord "$find_session" M-s f
-    if lem_wait_for "$find_session" 'Find name in directory:' "$WAIT_TIMEOUT" >/dev/null; then
+    if lem_wait_for "$find_session" 'ind name in directory:' "$WAIT_TIMEOUT" >/dev/null; then
       lem_keys "$find_session" F4
     fi
     if lem_wait_for "$find_session" 'Name pattern:' "$WAIT_TIMEOUT" >/dev/null; then

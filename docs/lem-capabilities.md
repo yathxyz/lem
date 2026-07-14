@@ -867,7 +867,10 @@ history.
   rename, or delete the marked set (falling back to the current row), with
   exact argv path handling, collision prompts, result refreshes, and Dired's
   per-top-level confirmations for recursive directory copies and non-empty
-  directory deletion. Long columns and Dired's wider operation surface remain absent.
+  directory deletion. Matching the pinned Dirvish defaults, each result also
+  renders a display-only, six-cell file-size field at the right edge; directories
+  show their direct child count, and resizing recomputes alignment without
+  changing result-buffer text. Dired's wider operation surface remains absent.
   While a search is running,
   `C-c C-k` terminates only the subprocess owned by that `*Find*` request and
   leaves a persistent cancelled result buffer that can be retried with `g`.

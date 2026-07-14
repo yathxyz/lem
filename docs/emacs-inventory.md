@@ -119,7 +119,7 @@ and the current window from Visual or operator state with or without a prefix.
 | `M-j` | `duplicate-dwim` | Duplicate line/region |
 | `M-g r` | `recentf` | Recent files |
 | `M-s g` | `grep` | Grep |
-| `M-s f` | `find-name-dired` | Find files by name -> dired |
+| `M-s f` | `find-name-dired` | Find files by name -> Dirvish-overridden dired |
 | `C-x C-b` | `ibuffer` | ibuffer (custom saved filter groups: org/tramp/emacs/ediff/dired/terminal/help) |
 
 The Lem mapping preserves that group order and Ibuffer's exclusive first-match
@@ -335,7 +335,7 @@ blame, and `q` to quit.
 - **rainbow-delimiters**: `rainbow-delimiters-mode` on every `prog-mode` buffer; the Emacs configuration does not impose a six-depth or Common-Lisp-only restriction.
 - **Fonts**: JetBrainsMono Nerd Font family chain (`JetBrainsMono Nerd Font Mono` -> `JetBrainsMono Nerd Font` -> `JetBrainsMono`), default height `120`. Applied to `default` + `fixed-pitch` via hooks (`after-init`, `window-setup`, `after-make-frame-functions`). `font-use-system-font nil`.
 - **Tabs / windows**: tab hints are enabled and close/new buttons are hidden, but `tab-bar-mode` itself is **not** enabled, so startup has no tab bar. Emacs retains the built-in `C-x t` prefix (`C-x t 2` creates a tab on demand). `winner-mode` is enabled after init with its default 200-entry per-frame history and `C-c Left` / `C-c Right` bindings for window-layout undo/redo. The Lem port now supplies those bindings with bounded frame-local split, buffer, selection, view, resize, and repeated-command behavior (`src/window-history.lisp`, `scripts/window-history-test.sh`). `split-width-threshold 170`, `split-height-threshold nil`. `switch-to-buffer-obey-display-actions t`. `org-roam` buffers show in a right side window (width 0.4).
-- **dirvish**: `dirvish-override-dired-mode` on `after-init` (dirvish replaces dired everywhere).
+- **dirvish**: `dirvish-override-dired-mode` on `after-init` (dirvish replaces dired everywhere). The pinned package retains its defaults: details hidden and a single six-cell `file-size` attribute at the right edge; directories show their direct child count in that field.
 - **Custom view modes**:
   - `yath/centered-view-mode` (`SPC y c`): balanced window margins to center text at `yath/centered-view-width` (default 100).
   - `yath/business-document-mode` & `yath/business-visual-mode`: an entire alternate "office document" presentation profile (proportional fonts: Aptos/Segoe UI/etc.; modus-operandi theme; calm faces; simplified modeline; variable-pitch; centered docs). **Auto-enabled only on hosts in `yath/business-visual-hosts` (default `("workwin")`).** Applies to org/markdown/text/message/notmuch/elfeed/nov/eww/helpful/Info modes. Large amount of code; T2/T3 for porting.

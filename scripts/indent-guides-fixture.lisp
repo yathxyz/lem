@@ -69,7 +69,7 @@
          "yes" "no")
      (if (eq (variable-value
               'lem-core::display-line-transform-function :global)
-             'transform-indent-guide-line)
+             'transform-lem-yath-display-line)
          "yes" "no"))))
 
 (define-command lem-yath-test-indent-guides-code-screen () ()
@@ -118,7 +118,7 @@
      "RELOAD transformer=~a enabled=~a"
      (if (eq (variable-value
               'lem-core::display-line-transform-function :global)
-             'transform-indent-guide-line)
+             'transform-lem-yath-display-line)
          "yes" "no")
      (if (variable-value 'lem-yath-indent-guides :default buffer)
          "yes" "no"))))

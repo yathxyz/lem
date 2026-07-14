@@ -148,7 +148,8 @@
               (lem-core::logical-line-end-of-line-cursor-attribute logical-line)
               nil)))))
 
-(defun transform-indent-guide-line (buffer point logical-line)
+(defun transform-indent-guide-line (buffer point logical-line &optional window)
+  (declare (ignore window))
   (when (and (programming-buffer-p buffer)
              (variable-value 'lem-yath-indent-guides :default buffer))
     (multiple-value-bind (indentation blank-p)
@@ -176,8 +177,13 @@
           (setf (lem-core::logical-line-string logical-line) string
                 (lem-core::logical-line-attributes logical-line) attributes))))))
 
+(defun transform-lem-yath-display-line (buffer point logical-line window)
+  "Apply every lem-yath display-only line transformation in load order."
+  (transform-indent-guide-line buffer point logical-line window)
+  (transform-find-name-display-line buffer point logical-line window))
+
 (setf (variable-value 'lem-core::display-line-transform-function :global)
-      'transform-indent-guide-line)
+      'transform-lem-yath-display-line)
 
 (define-command lem-yath-toggle-indent-guides () ()
   "Toggle display-only indentation guides in the current buffer."

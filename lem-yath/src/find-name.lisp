@@ -12,6 +12,17 @@
 (define-attribute find-name-marked-attribute
   (t :foreground :base0E :bold t))
 
+(define-attribute find-name-size-attribute
+  (t :foreground :base03))
+
+(defconstant +find-name-dirvish-file-count-overflow+ 15000)
+
+(defstruct (find-name-result
+            (:constructor make-find-name-result (display path size)))
+  display
+  path
+  size)
+
 (define-condition find-name-request-cancelled (condition) ())
 
 (defstruct (find-name-request
@@ -25,6 +36,7 @@
 (define-major-mode lem-yath-find-name-mode nil
     (:name "Find Name"
      :keymap *find-name-mode-keymap*)
+  (setf (variable-value 'line-wrap :buffer (current-buffer)) nil)
   (setf (buffer-read-only-p (current-buffer)) t))
 
 ;; Pinned Lem's Vi keymap assembly does not include ordinary major-mode maps.
@@ -72,14 +84,16 @@
                     (find-name-relative-path record)))))
 
 (defun find-name-results (root output)
-  "Turn GNU find's NUL OUTPUT into sorted (DISPLAY . ABSOLUTE) entries."
+  "Turn GNU find's NUL OUTPUT into sorted, metadata-bearing entries."
   (sort
    (mapcar
     (lambda (record)
-      (cons record (find-name-absolute-path root record)))
+      (let ((path (find-name-absolute-path root record)))
+        (make-find-name-result
+         record path (find-name-dirvish-size path))))
     (find-name-split-nul output))
    #'string<
-   :key #'car))
+   :key #'find-name-result-display))
 
 (defun find-name-owned-buffer-p (buffer)
   (and (eq (buffer-value buffer :find-name-owner)
@@ -148,6 +162,7 @@
     (erase-buffer buffer)
     (find-name-insert-header (buffer-end-point buffer) root pattern "searching..."))
   (setf (buffer-read-only-p buffer) t)
+  (buffer-unmark buffer)
   (buffer-start (buffer-point buffer))
   (redraw-display))
 
@@ -160,6 +175,7 @@
       (insert-string (buffer-end-point buffer)
                      (format nil "Search cancelled. Press g to retry.~%")))
     (setf (buffer-read-only-p buffer) t)
+    (buffer-unmark buffer)
     (buffer-start (buffer-point buffer))
     (redraw-display)))
 
@@ -188,7 +204,9 @@
         (marks (find-name-marks buffer))
         (stale '()))
     (dolist (result results)
-      (setf (gethash (find-name-mark-key (cdr result)) present) t))
+      (setf (gethash (find-name-mark-key (find-name-result-path result))
+                     present)
+            t))
     (maphash (lambda (key value)
                (declare (ignore value))
                (unless (gethash key present)
@@ -222,17 +240,25 @@
            (with-point ((first-result point :right-inserting))
              (dolist (result results)
                (with-point ((start point :right-inserting))
-                 (let ((marked-p (find-name-marked-p buffer (cdr result))))
+                 (let ((marked-p
+                         (find-name-marked-p
+                          buffer (find-name-result-path result))))
                    (insert-string point (if marked-p "* " "  "))
-                 (insert-string point
-                                (format nil "~a~%"
-                                        (find-name-display-string (car result))))
-                   (put-text-property start point :find-name-path (cdr result))
+                   (insert-string
+                    point
+                    (format nil "~a~%"
+                            (find-name-display-string
+                             (find-name-result-display result))))
+                   (put-text-property
+                    start point :find-name-path (find-name-result-path result))
+                   (put-text-property
+                    start point :find-name-size (find-name-result-size result))
                    (when marked-p
                      (put-text-property start point :attribute
                                         'find-name-marked-attribute)))))
              (move-point (buffer-point buffer) first-result))))))
     (setf (buffer-read-only-p buffer) t)
+    (buffer-unmark buffer)
     (redraw-display)))
 
 (defun find-name-read-stream (stream)
@@ -403,6 +429,116 @@
   (alexandria:when-let ((stat (find-name-path-stat path)))
     (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
        sb-posix:s-ifdir)))
+
+(defun find-name-count-directory-entries (path)
+  "Count PATH's direct children, bounded like Dirvish's default attribute."
+  (let* ((output
+           (find-name-run-file-program
+            "find"
+            (list "-H" (find-name-native-path path)
+                  "-mindepth" "1" "-maxdepth" "1" "-printf" ".")))
+         (count (length output)))
+    (if (>= count (- +find-name-dirvish-file-count-overflow+ 2))
+        :many
+        count)))
+
+(defun find-name-six-cell-field (text)
+  (let ((length (length text)))
+    (cond
+      ((> length 6) (subseq text (- length 6)))
+      ((< length 6)
+       (concatenate 'string
+                    (make-string (- 6 length) :initial-element #\Space)
+                    text))
+      (t text))))
+
+(defun find-name-dirvish-human-readable (number base)
+  "Format NUMBER in Dirvish's six-cell size/count representation."
+  (let ((value (coerce number 'double-float))
+        (base (coerce base 'double-float))
+        (prefixes '("" "k" "M" "G" "T" "P" "E" "Z" "Y")))
+    (loop :while (and (>= value base) (rest prefixes))
+          :do (setf value (/ value base)
+                    prefixes (rest prefixes)))
+    (let* ((fraction (mod value 1d0))
+           (fractional-p
+             (and (< value 10d0)
+                  (>= fraction 0.05d0)
+                  (< fraction 0.95d0))))
+      (find-name-six-cell-field
+       (format nil
+               (if fractional-p "~,1f~a" "~d~a")
+               (if fractional-p value (round value))
+               (first prefixes))))))
+
+(defun find-name-dirvish-size (path)
+  "Return the pinned Dirvish default six-cell size attribute for PATH."
+  (handler-case
+      (let* ((native (find-name-native-path path))
+             (stat (sb-posix:lstat native))
+             (type (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)))
+        (cond
+          ((= type sb-posix:s-ifdir)
+           (let ((count (find-name-count-directory-entries native)))
+             (if (eq count :many)
+                 " MANY "
+                 (find-name-dirvish-human-readable count 1000))))
+          ((= type sb-posix:s-iflnk)
+           (handler-case
+               (let ((target (sb-posix:stat native)))
+                 (if (= (logand (sb-posix:stat-mode target) sb-posix:s-ifmt)
+                        sb-posix:s-ifdir)
+                     (let ((count (find-name-count-directory-entries native)))
+                       (if (eq count :many)
+                           " MANY "
+                           (find-name-dirvish-human-readable count 1000)))
+                     (find-name-dirvish-human-readable
+                      (sb-posix:stat-size target) 1024)))
+             (error ()
+               (find-name-dirvish-human-readable
+                (sb-posix:stat-size stat) 1024))))
+          (t
+           (find-name-dirvish-human-readable
+            (sb-posix:stat-size stat) 1024))))
+    (error () " ---- ")))
+
+(defun find-name-extend-display-size (logical-line width size)
+  "Right-align six-cell SIZE in LOGICAL-LINE without changing source text."
+  (let* ((string (lem-core::logical-line-string logical-line))
+         (display-width (lem/common/character:string-width string))
+         (padding (- width display-width (length size))))
+    (when (plusp padding)
+      (let* ((source-end (length string))
+             (start (+ source-end padding))
+             (end (+ start (length size)))
+             (cursor
+               (lem-core::logical-line-end-of-line-cursor-attribute
+                logical-line))
+             (attributes (lem-core::logical-line-attributes logical-line)))
+        (setf string
+              (concatenate 'string string
+                           (make-string padding :initial-element #\Space)
+                           size))
+        (when cursor
+          (setf attributes
+                (lem-core::overlay-attributes
+                 attributes source-end (1+ source-end) cursor)
+                (lem-core::logical-line-end-of-line-cursor-attribute
+                 logical-line)
+                nil))
+        (setf (lem-core::logical-line-string logical-line) string
+              (lem-core::logical-line-attributes logical-line)
+              (lem-core::overlay-attributes
+               attributes start end 'find-name-size-attribute))))))
+
+(defun transform-find-name-display-line (buffer point logical-line window)
+  "Add the configured Dirvish size attribute to visible find result rows."
+  (when (and window
+             (find-name-owned-buffer-p buffer)
+             (>= (lem-core::window-body-width window) 20))
+    (alexandria:when-let ((size (text-property-at point :find-name-size)))
+      (find-name-extend-display-size
+       logical-line (lem-core::window-body-width window) size))))
 
 (defun find-name-program-path (name)
   (or (executable-find name)
@@ -619,7 +755,8 @@
 
 (defun find-name-set-row-mark (line path marked-p)
   (let ((buffer (current-buffer))
-        (key (find-name-mark-key path)))
+        (key (find-name-mark-key path))
+        (size (text-property-at line :find-name-size)))
     (if marked-p
         (setf (gethash key (find-name-marks buffer)) t)
         (remhash key (find-name-marks buffer)))
@@ -629,8 +766,10 @@
       (with-point ((end line :right-inserting))
         (line-end end)
         (put-text-property line end :find-name-path path)
+        (put-text-property line end :find-name-size size)
         (put-text-property line end :attribute
-                           (and marked-p 'find-name-marked-attribute))))))
+                           (and marked-p 'find-name-marked-attribute))))
+    (buffer-unmark buffer)))
 
 (defun find-name-move-result-line (direction)
   (with-point ((next (current-point)))

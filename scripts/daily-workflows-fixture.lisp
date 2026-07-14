@@ -218,6 +218,55 @@
            "none")
        marked))))
 
+(defun daily-workflows-fixture-visible-field (string)
+  (substitute #\. #\Space string))
+
+(defun daily-workflows-fixture-find-name-row (basename)
+  (with-point ((line (buffer-start-point (current-buffer))))
+    (loop
+      (let ((path (text-property-at line :find-name-path)))
+        (when (and path
+                   (string=
+                    basename
+                    (daily-workflows-fixture-native-basename path)))
+          (let* ((active-modes
+                   (lem-core::get-active-modes-class-instance
+                    (current-buffer)))
+                 (lem-core::*active-modes* active-modes)
+                 (logical-line
+                   (lem-core::create-logical-line
+                    line nil active-modes (current-window))))
+            (return
+              (list (lem-core::logical-line-string logical-line)
+                    (text-property-at line :find-name-size)
+                    (line-string line))))))
+      (unless (line-offset line 1)
+        (return nil)))))
+
+(define-command lem-yath-test-record-find-name-display () ()
+  (destructuring-bind (file-line file-size file-buffer-line)
+      (daily-workflows-fixture-find-name-row "00-[.match")
+    (destructuring-bind (directory-line directory-size directory-buffer-line)
+        (daily-workflows-fixture-find-name-row "named-dir.match")
+      (daily-workflows-fixture-log
+       (concatenate
+        'string
+        "FIND-DISPLAY width=~d file-cells=~d file-tail=~a file-size=~a "
+        "file-buffer=~a directory-cells=~d directory-tail=~a "
+        "directory-size=~a directory-buffer=~a modified=~a")
+       (lem-core::window-body-width (current-window))
+       (lem/common/character:string-width file-line)
+       (daily-workflows-fixture-visible-field
+        (subseq file-line (- (length file-line) 6)))
+       (daily-workflows-fixture-visible-field file-size)
+       (daily-workflows-fixture-visible-field file-buffer-line)
+       (lem/common/character:string-width directory-line)
+       (daily-workflows-fixture-visible-field
+        (subseq directory-line (- (length directory-line) 6)))
+       (daily-workflows-fixture-visible-field directory-size)
+       (daily-workflows-fixture-visible-field directory-buffer-line)
+       (if (buffer-modified-p (current-buffer)) "yes" "no")))))
+
 (define-command lem-yath-test-submit-find-name-root () ()
   "Submit the exact fixture root without selecting an automatic child row."
   (lem/prompt-window::replace-prompt-input
