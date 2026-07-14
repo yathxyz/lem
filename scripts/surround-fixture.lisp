@@ -165,6 +165,32 @@
 (define-command lem-yath-test-surround-add-form () ()
   (surround-test-setup "add-form" "alpha beta" "alpha"))
 
+(define-command lem-yath-test-surround-block-forward () ()
+  (surround-test-setup
+   "block-forward" (format nil "aa11zz~%bb22yy~%cc33xx~%") "11"))
+
+(define-command lem-yath-test-surround-block-reverse () ()
+  (surround-test-setup
+   "block-reverse" (format nil "aa11zz~%bb22yy~%cc33xx~%") "33"))
+
+(define-command lem-yath-test-surround-block-short () ()
+  (surround-test-setup
+   "block-short" (format nil "aa11zz~%b~%cc33xx~%") "11"))
+
+(define-command lem-yath-test-surround-block-partial () ()
+  (surround-test-setup
+   "block-partial" (format nil "aa11zz~%bb2~%cc33xx~%") "11"))
+
+(define-command lem-yath-test-surround-block-eol-left () ()
+  (surround-test-setup
+   "block-eol-left" (format nil "aa11zz~%b~%cc33xx~%")
+   "aa" :point-adjust 1))
+
+(define-command lem-yath-test-surround-block-protected () ()
+  (surround-test-setup
+   "block-protected" (format nil "aa11zz~%bb22yy~%cc33xx~%") "11"
+   :protected-range '(9 . 10)))
+
 (define-command lem-yath-test-surround-tag-delete () ()
   (surround-test-setup
    "tag-delete" "<div><span>alpha</span></div>" "alpha"))

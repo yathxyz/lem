@@ -15,7 +15,7 @@ Status legend:
 |---|---|---|
 | evil | lem-builtin+ported/partial | `lem-vi-mode`, enabled in `src/vi.lisp`; `src/cursor-state.lisp` supplies the configured cursors and buffer-local Emacs state. `SPC y v` activates the patched conditional screen/logical policy for `j/k`, `gj/gk`, `0/g0`, `$/g$`, `I/A`, `D/C`, line operators/registers, paste, and `V`, restoring ordinary logical-line behavior when disabled (`patches/lem-vi-screen-line.patch`, `scripts/screen-line-test.sh`). Lem's display-width row breaking remains an approximation of Emacs word wrapping. |
 | evil-collection | lem-builtin | vi-mode's own mode integrations |
-| evil-surround | ported/partial | standard `ys`/`ds`/`cs`, visual `S`, and common delimiter padding. Character deletion/change chooses the narrowest balanced enclosure, keeps code/string/comment/Lisp-fence delimiters in safe domains, ignores escapes and syntax decoys, preflights both edits, and fails closed on malformed or multi-character block-string delimiters. Tag/function prompts remain gaps (`src/vi.lisp`, `scripts/surround-test.sh`) |
+| evil-surround | ported/partial | standard `ys`/`ds`/`cs`, visual `S`, row-wise Visual Block surrounds, common delimiter padding, tags, and ordinary/prefix call prompts. Character deletion/change chooses the narrowest balanced enclosure, keeps code/string/comment/Lisp-fence delimiters in safe domains, ignores escapes and syntax decoys, preflights both edits, and fails closed on malformed or multi-character block-string delimiters. Mode-local custom pair functions and full minibuffer editing remain gaps (`src/vi.lisp`, `scripts/surround-test.sh`) |
 | evil-snipe | ported | configured 2.1.3 behavior: visible `s/S/f/F/t/T`, whole-visible `;`/`,` and transient pair repeats, exact inclusive/exclusive operators, counts/dot/jumplist behavior, leading-whitespace skipping, and incremental/final faces (`src/vi.lisp`, `scripts/snipe-test.sh`) |
 | evil-nerd-commenter | ported | `g c` operator (`src/vi.lisp`) |
 | evil-org | ported/partial | native `.org` buffers provide mode-local folding, visible-line and heading navigation, Org-aware `o/O`, context-dispatched Meta editing, and all eight active `ae/ie`, `aE/iE`, `ar/ir`, `aR/iR` operator/Visual text objects. The separate boundary model covers conservative inline objects/cells, bracket/plain links, paragraphs/rows/flat blocks, point-sensitive items/lists, formula-owning tables, sections/headlines, count anchoring/ancestry, owned post-blank, exact char/line shapes, reverse Visual ranges, and class-specific fail-closed unsafe-list, drawer/orphan-property, nested/unclosed-block, and unsupported-inline contexts without shadowing normal `a/i`, stock words, surround, or Snipe. `M-h/l` targets one heading/list item/table column or prose word; `M-k/j` moves heading/list trees or rows; `M-H/L` uses tree/column scope; `M-K/J` handles a table row or literal non-CLOCK line. True `<`/`>` ranges, region-aware Meta behavior, broader element navigation/endpoints, richer unsupported Org syntax, and shift-control/calendar semantics remain gaps (`src/org/`, `scripts/org-test.sh`, `scripts/org-operator-test.sh`). |
@@ -124,8 +124,9 @@ Status legend:
   and attached windows retain subsystem ownership rather than entering history;
   configurations containing dead or boring buffers are skipped as a unit.
 - **Surround grammar**: standard `ys`/`ds`/`cs` and visual `S` work, including
-  common padded delimiters and syntax-context-aware balanced character pairs.
-  Tag/function prompts and full multi-character delimiter editing remain absent;
+  row-wise Visual Block edits, common padded delimiters, tags, call forms, and
+  syntax-context-aware balanced character pairs. Mode-local custom pairs, full
+  minibuffer editing, and multi-character delimiter editing remain absent;
   Python triple-quote edits fail closed.
 - **Formatting lifecycle**: mapped programming modes with an available,
   successful backend format synchronously before the ordinary save, so the

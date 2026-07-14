@@ -79,11 +79,12 @@ last_result() {
 }
 
 assert_result() {
-  local name=$1 label=$2 text=$3 modified=$4 anchor=$5 line hex
+  local name=$1 label=$2 text=$3 modified=$4 anchor=$5 expected_point=${6:-} line hex
   line=$(last_result "$label")
   hex=$(hex_of "$text")
   if [[ "$line" == *"text-hex=$hex "* &&
-        "$line" == *"anchor=$anchor modified=$modified mark=no state=NORMAL"* ]]; then
+        "$line" == *"anchor=$anchor modified=$modified mark=no state=NORMAL"* &&
+        ( -z "$expected_point" || "$line" == *" point=$expected_point "* ) ]]; then
     pass "$name" "$label matched text, cursor/mark contract, and Vi state"
   else
     fail "$name" "unexpected result: $line"
@@ -325,6 +326,65 @@ if setup_and_keys lem-yath-test-surround-add-form add-form y s i w '#'; then
   assert_result hash-pair-add add-form '#{alpha} beta' yes yes
 else
   fail hash-pair-add 'hash-pair insertion did not complete'
+fi
+
+block_source=$'aa11zz\nbb22yy\ncc33xx\n'
+block_compact=$'aa[11]zz\nbb[22]yy\ncc[33]xx\n'
+if setup_and_keys lem-yath-test-surround-block-forward \
+    block-forward C-v j j l S ']'; then
+  assert_result block-forward block-forward "$block_compact" yes no 3
+  lem_keys "$session" u
+  sleep 0.25
+  record_result block-forward &&
+    assert_result block-forward-one-undo block-forward "$block_source" no no
+else
+  fail block-forward 'forward Visual Block surround did not complete'
+fi
+
+if setup_and_keys lem-yath-test-surround-block-reverse \
+    block-reverse C-v k k l S ']'; then
+  assert_result block-reverse block-reverse "$block_compact" yes no 5
+else
+  fail block-reverse 'reverse-corner Visual Block surround did not complete'
+fi
+
+block_spaced=$'aa( 11 )zz\nbb( 22 )yy\ncc( 33 )xx\n'
+if setup_and_keys lem-yath-test-surround-block-forward \
+    block-forward C-v j j l S '('; then
+  assert_result block-spaced block-forward "$block_spaced" yes no 3
+else
+  fail block-spaced 'spaced Visual Block surround did not complete'
+fi
+
+block_short=$'aa[11]zz\nb\ncc[33]xx\n'
+if setup_and_keys lem-yath-test-surround-block-short \
+    block-short C-v j j l S ']'; then
+  assert_result block-short-skip block-short "$block_short" yes no 3
+else
+  fail block-short-skip 'short row was not skipped'
+fi
+
+block_partial=$'aa[11]zz\nbb[2]\ncc[33]xx\n'
+if setup_and_keys lem-yath-test-surround-block-partial \
+    block-partial C-v j j l S ']'; then
+  assert_result block-short-partial block-partial "$block_partial" yes no 3
+else
+  fail block-short-partial 'partially covered row was not surrounded to EOL'
+fi
+
+block_eol_left=$'a[a1]1zz\nb[]\nc[c3]3xx\n'
+if setup_and_keys lem-yath-test-surround-block-eol-left \
+    block-eol-left C-v j j l S ']'; then
+  assert_result block-eol-at-left block-eol-left "$block_eol_left" yes no 2
+else
+  fail block-eol-at-left 'row ending at the left column was not surrounded'
+fi
+
+if setup_and_keys lem-yath-test-surround-block-protected \
+    block-protected C-v j j l S ']'; then
+  assert_result block-read-only-preflight block-protected "$block_source" no no
+else
+  fail block-read-only-preflight 'protected block boundary partially mutated'
 fi
 
 if setup_and_keys lem-yath-test-surround-tag-delete tag-delete d s t; then

@@ -263,7 +263,9 @@ ordinary call prompts on `f`, and prefix forms on `C-f`. The XML path matches
 nested tags while respecting quoted `>` characters and self-closing children;
 tag changes preserve prior attributes when submitted with Return and discard
 them when the new tag ends explicitly with `>`. Malformed nesting and
-multi-character block-string delimiters fail closed.
+multi-character block-string delimiters fail closed. Visual Block `S` applies
+the chosen pair independently to each covered row with the pinned package's
+corner orientation, short-line, cursor, state-exit, and one-step undo behavior.
 
 Lem-yath supplies the configured Evil/Avy navigation separately in
 `src/avy.lisp`. `SPC l/a/s` select visible line, character, and symbol-start

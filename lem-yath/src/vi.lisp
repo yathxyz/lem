@@ -206,14 +206,66 @@
                    (concatenate 'string " " close))
            (values open close))))))
 
+(defun surround-block-cursor-position (start end)
+  "Return Evil-surround's post-edit cursor position for a block range."
+  (with-point ((cursor start))
+    ;; Evil expands a top-right block boundary by one character before it
+    ;; starts editing, then returns to that absolute buffer position.  A
+    ;; boundary already at EOL is exclusive and is not expanded.
+    (when (and (> (point-column start) (point-column end))
+               (< (point-column cursor) (length (line-string cursor))))
+      (character-offset cursor 1))
+    (position-at-point cursor)))
+
+(defun surround-visual-block-ranges (start end)
+  "Return Evil-surround-compatible row ranges for the active Visual Block."
+  (let ((left-column (min (point-column start) (point-column end)))
+        ranges)
+    ;; Reuse vi-mode's displayed selection geometry so reversed corners,
+    ;; tabs, and an endpoint at EOL agree with the block the user sees.
+    (lem-vi-mode/visual:apply-visual-range
+     (lambda (row-start row-end)
+       ;; evil-surround skips rows whose EOL is left of the block.  A row
+       ;; ending exactly at the left column is retained as an empty range.
+       (when (>= (point-column row-start) left-column)
+         (push (list (copy-point row-start :right-inserting)
+                     (copy-point row-end :left-inserting))
+               ranges))))
+    (nreverse ranges)))
+
+(defun ensure-surround-insertions-writable (ranges)
+  "Preflight every insertion boundary in RANGES before changing the buffer."
+  (unless lem/buffer/internal:*inhibit-read-only*
+    (when ranges
+      (lem/buffer/internal::check-read-only-buffer
+       (point-buffer (first (first ranges)))))
+    (dolist (range ranges)
+      (lem/buffer/internal::check-read-only-at-point (first range) 0)
+      (lem/buffer/internal::check-read-only-at-point (second range) 0))))
+
+(defun insert-surrounding-ranges (ranges open close)
+  "Insert OPEN and CLOSE around every point pair in RANGES."
+  (dolist (range ranges)
+    (destructuring-bind (start end) range
+      (insert-string end close)
+      (insert-string start open))))
+
 (lem-vi-mode:define-operator lem-yath-surround-operator (start end type) ("<R>")
   (:move-point nil)
   (multiple-value-bind (open close)
       (surround-insertion-pair (read-vi-character "Surround with: "))
-    (with-point ((s start :right-inserting)
-                 (e end :left-inserting))
-      (insert-string e close)
-      (insert-string s open))))
+    (if (eq type :block)
+        (let ((cursor-position (surround-block-cursor-position start end))
+              (ranges (surround-visual-block-ranges start end)))
+          (ensure-surround-insertions-writable ranges)
+          (insert-surrounding-ranges ranges open close)
+          ;; Evil returns to the upper boundary's pre-edit absolute position,
+          ;; rather than following that boundary as a marker through inserts.
+          (move-to-position (current-point) cursor-position))
+        (with-point ((s start :right-inserting)
+                     (e end :left-inserting))
+          (insert-string e close)
+          (insert-string s open)))))
 
 (defun surround-quoted-state-p (state)
   (member (pps-state-type state) '(:string :block-string :fence)))
