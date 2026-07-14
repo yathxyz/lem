@@ -244,6 +244,20 @@ write_fixtures() {
   printf '%s\n' '"alpha" beta' >"$WORKDIR/surround-change.org"
   printf '%s\n' 'alpha beta gamma' >"$WORKDIR/snipe.org"
   printf '%s\n' '* Static routing' >"$WORKDIR/static.org"
+  printf '%s\n' '1. one' '2. two' '3. three' \
+    >"$WORKDIR/delete-ordered.org"
+  printf '%s\n' '1. one' '5. [@5] five' '6. six' \
+    >"$WORKDIR/delete-ordered-counter.org"
+  printf '%s\n' '1. top' '   1. child' '2. second' '3. third' \
+    >"$WORKDIR/delete-ordered-nested.org"
+  printf '%s\n' '1. one' '   continuation' '2. two' \
+    >"$WORKDIR/delete-ordered-unsafe.org"
+  printf '%s\n' '* TODO Alpha beta :work:' \
+    >"$WORKDIR/delete-heading-tag.org"
+  printf '%s\n' '| abc | de |' >"$WORKDIR/delete-table.org"
+  printf '%s\n' '| abc | de |' >"$WORKDIR/delete-table-backward.org"
+  printf '%s\n' '| abc | de |' >"$WORKDIR/delete-table-count.org"
+  printf '%s\n' '| abc | de |' >"$WORKDIR/delete-table-visual.org"
   printf '%s\n' \
     '[[file:target.org][described link]] tail' \
     >"$WORKDIR/link-outer.org"
@@ -370,9 +384,114 @@ if start_case static "$WORKDIR/static.org" 'Static routing'; then
        'STATIC normal=yes operator=yes visual=yes stock=yes snipe=yes safe=yes commands=yes' \
        "$LEM_YATH_ORG_OPERATOR_REPORT"; then
     pass static-routing \
-      "normal a/i, eight local routes, aw/iw, and operator x/X coexist"
+      "normal d/x/X, visual defaults, text objects, and operator Snipe coexist"
   else
     fail static-routing "effective Org routing contract differed" "$CASE_SESSION"
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+# Evil-Org's destructive base map repairs ordinary numbered lists and tags,
+# preserves a single deleted table cell's width, and leaves counted/Visual
+# table deletion on ordinary Evil semantics.
+if start_case delete-ordered "$WORKDIR/delete-ordered.org" '1\. one'; then
+  if operate_and_record delete-ordered "$CASE_SESSION" d d; then
+    assert_state delete-ordered delete-ordered "$CASE_SESSION" \
+      'text=1. two\n2. three\n bytes=' \
+      'register=1. one\n register-type=line' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state delete-ordered "$CASE_SESSION"
+    assert_state delete-ordered-undo delete-ordered "$CASE_SESSION" \
+      'text=1. one\n2. two\n3. three\n bytes=' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case delete-ordered-counter \
+     "$WORKDIR/delete-ordered-counter.org" '1\. one'; then
+  if operate_and_record delete-ordered-counter "$CASE_SESSION" d d; then
+    assert_state delete-ordered-counter delete-ordered-counter \
+      "$CASE_SESSION" 'text=5. [@5] five\n6. six\n bytes=' \
+      'register=1. one\n register-type=line' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case delete-ordered-nested \
+     "$WORKDIR/delete-ordered-nested.org" '1\. top'; then
+  if operate_and_record delete-ordered-nested "$CASE_SESSION" 2 d d; then
+    assert_state delete-ordered-nested delete-ordered-nested \
+      "$CASE_SESSION" 'text=1. second\n2. third\n bytes=' \
+      'register=1. top\n   1. child\n register-type=line' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case delete-ordered-unsafe \
+     "$WORKDIR/delete-ordered-unsafe.org" '1\. one'; then
+  if operate_and_record delete-ordered-unsafe "$CASE_SESSION" d d; then
+    assert_state delete-ordered-unsafe delete-ordered-unsafe \
+      "$CASE_SESSION" \
+      'text=1. one\n   continuation\n2. two\n bytes=' \
+      'register= register-type=none' 'small= small-type=none' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case delete-heading-tag \
+     "$WORKDIR/delete-heading-tag.org" 'Alpha beta'; then
+  send_keys "$CASE_SESSION" 2 w
+  if operate_and_record delete-heading-tag "$CASE_SESSION" d a w; then
+    assert_state delete-heading-tag delete-heading-tag "$CASE_SESSION" \
+      'text=* TODO beta' ':work:\n bytes=78 ' \
+      'register=Alpha  register-type=char' \
+      'small=Alpha  small-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case delete-table "$WORKDIR/delete-table.org" 'abc'; then
+  send_keys "$CASE_SESSION" 3 l
+  if operate_and_record delete-table "$CASE_SESSION" x; then
+    assert_state delete-table delete-table "$CASE_SESSION" \
+      'text=| ac  | de |\n bytes=' 'register=b register-type=char' \
+      'small=b small-type=char' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state delete-table "$CASE_SESSION"
+    assert_state delete-table-undo delete-table "$CASE_SESSION" \
+      'text=| abc | de |\n bytes=' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case delete-table-backward \
+     "$WORKDIR/delete-table-backward.org" 'abc'; then
+  send_keys "$CASE_SESSION" 4 l
+  if operate_and_record delete-table-backward "$CASE_SESSION" X; then
+    assert_state delete-table-backward delete-table-backward \
+      "$CASE_SESSION" 'text=| ac  | de |\n bytes=' \
+      'register=b register-type=char' 'small=b small-type=char'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case delete-table-count "$WORKDIR/delete-table-count.org" 'abc'; then
+  send_keys "$CASE_SESSION" 3 l
+  if operate_and_record delete-table-count "$CASE_SESSION" 2 x; then
+    assert_state delete-table-count delete-table-count "$CASE_SESSION" \
+      'text=| a | de |\n bytes=' 'register=bc register-type=char' \
+      'small=bc small-type=char'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case delete-table-visual "$WORKDIR/delete-table-visual.org" 'abc'; then
+  send_keys "$CASE_SESSION" 3 l v l
+  if operate_and_record delete-table-visual "$CASE_SESSION" x; then
+    assert_state delete-table-visual delete-table-visual "$CASE_SESSION" \
+      'text=| a | de |\n bytes=' 'register=bc register-type=char' \
+      'small=bc small-type=char' 'state=normal selection=none'
   fi
   stop_case "$CASE_SESSION"
 fi

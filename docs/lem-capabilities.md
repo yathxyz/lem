@@ -1500,7 +1500,10 @@ overlapping nested folds, non-file link variants, and several broader commands
 above remain outside this focused gate.
 
 `scripts/org-operator-test.sh` independently drives the installed-wrapper TUI.
-It dynamically exercises all eight bindings with delete/yank operators over
+It exercises normal `d/x/X` against safe nested ordered lists, `[@N]` counter
+cookies, unsupported continuation repair, headline-tag alignment, single-cell
+table padding, counts, Visual deletion, registers, and one-step undo. It also
+dynamically exercises all eight text-object bindings with delete/yank operators over
 opaque/nested markup, bracket/plain links, timestamps, table cells/rules and
 formula ownership, paragraphs, headlines, flat leaf and recursive blocks,
 point-sensitive and empty lists, owned post-blank, and subtrees. It verifies
@@ -1510,8 +1513,8 @@ normal-state aborts (including nested and opaque unsupported syntax), and exact
 Visual-abort preservation. It statically
 resolves all eight Visual routes and dynamically covers characterwise,
 linewise, reverse, and repeated selection through `ae`, `ar`, and `aR`. It
-also verifies normal `a/i`, `daw`, `ys`/`ds`/`cs`, and operator-Snipe `x/X`
-routing.
+also verifies normal `a/i`, `daw`, `ys`/`ds`/`cs`, and that Visual defaults and
+operator-Snipe `x/X` routing remain intact.
 
 The pinned Evil-Org base bindings `0/$/I/A` are exact for the configured
 `org-special-ctrl-a/e=nil`: endpoints remain literal, `I` starts at column zero
@@ -1519,9 +1522,19 @@ on real headings and items but at indentation elsewhere, and `A` appends after
 headline tags. Source-block heading/list lookalikes retain ordinary Evil
 indentation behavior.
 
+Normal `d` follows the pinned Evil-Org repair boundary after ordinary Evil
+deletion: safe ordered-list segments are renumbered by indentation, explicit
+`[@N]` counter cookies restart numbering, nested levels remain independent, and
+headline tags are realigned to the active terminal profile. Continuation lines,
+tab-structured items, and mixed ordered/unordered markers at one indentation
+cannot yet be repaired exactly, so those deletions abort before text or registers
+change. Normal one-character `x/X` inserts replacement table padding like
+`org-delete-char`; counted and Visual deletion deliberately retain ordinary Evil
+semantics.
+
 This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
 footnote, nested-special, and malformed text-object contexts; structural
-operators; true `<`/`>` Org
+repairs beyond the bounded `d/x/X` behavior; true `<`/`>` Org
 ranges, region-aware Meta operations, generic Org-element
 movement, shift-control commands, and richer list/table semantics; timestamp,
 scheduling, and deadline

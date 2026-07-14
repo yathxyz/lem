@@ -73,6 +73,11 @@
          (visual 'lem-vi-mode/visual::visual-char)
          (normal-a (org-operator-test-binding-in-state normal "a"))
          (normal-i (org-operator-test-binding-in-state normal "i"))
+         (normal-d (org-operator-test-binding-in-state normal "d"))
+         (normal-x (org-operator-test-binding-in-state normal "x"))
+         (normal-big-x (org-operator-test-binding-in-state normal "X"))
+         (visual-d (org-operator-test-binding-in-state visual "d"))
+         (visual-x (org-operator-test-binding-in-state visual "x"))
          (operator-ae (org-operator-test-binding-in-state operator "a e"))
          (operator-ie (org-operator-test-binding-in-state operator "i e"))
          (operator-ae-big (org-operator-test-binding-in-state operator "a E"))
@@ -88,8 +93,13 @@
          (operator-o (org-operator-test-binding-in-state operator "o"))
          (operator-meta-l
            (org-operator-test-binding-in-state operator "M-l"))
-         (normal-ok (and (string= normal-a "VI-APPEND")
-                         (string= normal-i "VI-INSERT")))
+         (normal-ok
+           (and (string= normal-a "VI-APPEND")
+                (string= normal-i "VI-INSERT")
+                (string= normal-d "LEM-YATH-ORG-DELETE-OR-SURROUND")
+                (string= normal-x "LEM-YATH-ORG-DELETE-NEXT-CHAR")
+                (string= normal-big-x
+                         "LEM-YATH-ORG-DELETE-PREVIOUS-CHAR")))
          (operator-ok (org-operator-test-routes-p operator))
          (visual-ok (org-operator-test-routes-p visual))
          (stock-ok (and (string= operator-aw "VI-A-WORD")
@@ -100,17 +110,21 @@
                 (string= operator-big-x
                          "LEM-YATH-SNIPE-OPERATOR-BACKWARD-EXCLUSIVE")))
          (safe-ok
-           (and (not (string= operator-o "LEM-YATH-ORG-OPEN-BELOW"))
+           (and (not (string= visual-d "LEM-YATH-ORG-DELETE-OR-SURROUND"))
+                (not (string= visual-x "LEM-YATH-ORG-DELETE-NEXT-CHAR"))
+                (not (string= operator-o "LEM-YATH-ORG-OPEN-BELOW"))
                 (not (string= operator-meta-l
                               "LEM-YATH-ORG-METARIGHT"))))
          (commands-ok (org-operator-test-commands-p)))
     (org-operator-test-log
      (concatenate
       'string
-      "ROUTES normal-a=~a normal-i=~a op-ae=~a op-ie=~a "
+      "ROUTES normal-a=~a normal-i=~a normal-d=~a normal-x=~a normal-X=~a "
+      "visual-d=~a visual-x=~a op-ae=~a op-ie=~a "
       "op-aE=~a op-iE=~a op-ar=~a op-ir=~a op-aR=~a op-iR=~a "
       "op-aw=~a op-iw=~a op-x=~a op-X=~a op-o=~a op-M-l=~a")
-     normal-a normal-i operator-ae operator-ie operator-ae-big operator-ie-big
+     normal-a normal-i normal-d normal-x normal-big-x visual-d visual-x
+     operator-ae operator-ie operator-ae-big operator-ie-big
      operator-ar operator-ir operator-ar-big operator-ir-big operator-aw
      operator-iw operator-x operator-big-x operator-o operator-meta-l)
     (org-operator-test-log

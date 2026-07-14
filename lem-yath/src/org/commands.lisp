@@ -1272,6 +1272,296 @@ The second value is the length of SECOND in its new leading position."
       (org-table-align)
       (message "No supported Org context action at point")))
 
+;;; --- Evil-Org destructive editing ---------------------------------------
+
+(defvar *org-tags-column* -77
+  "Configured terminal headline-tag column.
+
+A negative value right-aligns the tag suffix so it ends at the absolute value,
+matching the active Emacs terminal profile.")
+
+(defun org-tag-suffix-character-p (character)
+  "Whether CHARACTER may occur in an Org headline tag suffix."
+  (or (alphanumericp character)
+      (member character '(#\_ #\@ #\# #\% #\:))))
+
+(defun org-heading-tag-bounds (&optional (point (current-point)))
+  "Return tag start, end, and preceding-blank start columns on POINT's line."
+  (when (org-heading-line-p point)
+    (let* ((line (line-string point))
+           (end (length line)))
+      (loop :while (and (plusp end)
+                        (member (char line (1- end)) '(#\Space #\Tab)))
+            :do (decf end))
+      (when (and (> end 2) (char= (char line (1- end)) #\:))
+        (let ((start end))
+          (loop :while (and (plusp start)
+                            (org-tag-suffix-character-p
+                             (char line (1- start))))
+                :do (decf start))
+          (when (and (plusp start)
+                     (char= (char line start) #\:)
+                     (member (char line (1- start)) '(#\Space #\Tab))
+                     (loop :for index :from (1+ start) :below (1- end)
+                           :thereis (not (char= (char line index) #\:))))
+            (let ((blank start))
+              (loop :while (and (plusp blank)
+                                (member (char line (1- blank))
+                                        '(#\Space #\Tab)))
+                    :do (decf blank))
+              (values start end blank))))))))
+
+(defun org-align-current-heading-tags ()
+  "Match `org-fix-tags-on-the-fly' for the configured terminal profile."
+  (multiple-value-bind (tag-start tag-end blank-start)
+      (org-heading-tag-bounds)
+    (when (and tag-start (< (point-charpos (current-point)) tag-start))
+      (let* ((tag-width (- tag-end tag-start))
+             (configured *org-tags-column*)
+             (target (cond ((minusp configured)
+                            (- (abs configured) tag-width))
+                           ((plusp configured) configured)
+                           (t (1+ blank-start))))
+             (new-start (max target (1+ blank-start)))
+             (origin-column (point-charpos (current-point)))
+             (in-blank-p (and (> origin-column blank-start)
+                              (<= origin-column tag-start))))
+        (unless (= new-start tag-start)
+          (with-point ((start (current-point))
+                       (end (current-point)))
+            (line-start start)
+            (line-start end)
+            (character-offset start blank-start)
+            (character-offset end tag-start)
+            (delete-between-points start end)
+            (insert-character start #\Space (- new-start blank-start)))
+          (when in-blank-p
+            (move-to-column (current-point) origin-column)))))))
+
+(defun org-ordered-item-number-info (point)
+  "Return indentation, number bounds/value, and counter cookie for POINT."
+  (multiple-value-bind (start end register-starts register-ends)
+      (cl-ppcre:scan
+       "^(\\s*)([0-9]+)([.)])(\\s+)(?:\\[@([0-9]+)\\]\\s+)?"
+       (line-string point))
+    (declare (ignore start end))
+    (when (and register-starts (aref register-starts 1))
+      (let ((cookie-start (and (> (length register-starts) 4)
+                               (aref register-starts 4))))
+        (values (aref register-ends 0)
+                (aref register-starts 1)
+                (aref register-ends 1)
+                (parse-integer
+                 (subseq (line-string point)
+                         (aref register-starts 1)
+                         (aref register-ends 1)))
+                (and cookie-start
+                     (parse-integer
+                      (subseq (line-string point)
+                              cookie-start
+                              (aref register-ends 4)))))))))
+
+(defun org-list-repair-segment-lines (anchor)
+  "Return the nonblank, non-heading segment surrounding list ANCHOR."
+  (with-point ((start anchor))
+    (line-start start)
+    (loop
+      (with-point ((previous start))
+        (unless (line-offset previous -1)
+          (return))
+        (when (or (zerop (length (line-string previous)))
+                  (org-heading-line-p previous))
+          (return))
+        (move-point start previous)))
+    (loop :with lines := nil
+          :with point := (copy-point start :temporary)
+          :for line := (line-string point)
+          :until (or (zerop (length line))
+                     (org-heading-line-p point))
+          :do (push (copy-point point :temporary) lines)
+          :unless (line-offset point 1)
+            :do (return (nreverse lines))
+          :finally (return (nreverse lines)))))
+
+(defun org-ordered-list-repair-plan (anchor)
+  "Return repair lines and safety for the ordered list around ANCHOR."
+  (let ((lines (org-list-repair-segment-lines anchor))
+        (types (make-hash-table :test #'eql))
+        (ordered-p nil)
+        (safe-p t))
+    (dolist (line lines)
+      (multiple-value-bind (indent content-column)
+          (org-list-item-columns line)
+        (declare (ignore content-column))
+        (unless (and indent
+                     (not (org-list-line-structural-tab-p line)))
+          (setf safe-p nil)
+          (return))
+        (let* ((type (if (org-list-ordered-item-p line)
+                         :ordered :unordered))
+               (prior (gethash indent types)))
+          (when (and prior (not (eq prior type)))
+            (setf safe-p nil)
+            (return))
+          (setf (gethash indent types) type)
+          (when (eq type :ordered)
+            (setf ordered-p t)))))
+    (values lines safe-p ordered-p)))
+
+(defun org-delete-crosses-current-line-p (start end)
+  "Whether START..END extends outside point's current logical line."
+  (with-point ((line-start (current-point))
+               (line-end (current-point)))
+    (line-start line-start)
+    (line-end line-end)
+    (or (point< start line-start) (point< line-end end))))
+
+(defun org-delete-ordered-anchor (start end)
+  "Return a candidate ordered-list repair anchor for START..END."
+  (when (org-delete-crosses-current-line-p start end)
+    (or (and (org-list-ordered-item-p (current-point))
+             (copy-point (current-point) :temporary))
+        (and (org-list-ordered-item-p start)
+             (copy-point start :temporary))
+        (and (org-list-ordered-item-p end)
+             (copy-point end :temporary)))))
+
+(defun org-preflight-ordered-delete (start end)
+  "Return whether deletion needs repair; abort unsafe repair before mutation."
+  (alexandria:if-let ((anchor (org-delete-ordered-anchor start end)))
+    (multiple-value-bind (lines safe-p ordered-p)
+        (org-ordered-list-repair-plan anchor)
+      (declare (ignore lines))
+      (unless (and safe-p ordered-p)
+        (message "Ordered-list deletion needs unsupported structural repair")
+        (error 'lem-vi-mode/core:operator-abort))
+      t)
+    nil))
+
+(defun org-repair-ordered-list-at-point ()
+  "Renumber the safe ordered-list segment containing point."
+  (unless (org-list-ordered-item-p (current-point))
+    (return-from org-repair-ordered-list-at-point nil))
+  (multiple-value-bind (lines safe-p ordered-p)
+      (org-ordered-list-repair-plan (current-point))
+    (unless (and safe-p ordered-p)
+      (return-from org-repair-ordered-list-at-point nil))
+    (let ((next-by-indent (make-hash-table :test #'eql))
+          (changes nil))
+      (dolist (line lines)
+        (multiple-value-bind (indent number-start number-end old cookie)
+            (org-ordered-item-number-info line)
+          (multiple-value-bind (item-indent content-column)
+              (org-list-item-columns line)
+            (declare (ignore content-column))
+            (let ((deeper nil))
+              (maphash (lambda (key value)
+                         (declare (ignore value))
+                         (when (> key item-indent) (push key deeper)))
+                       next-by-indent)
+              (dolist (key deeper) (remhash key next-by-indent)))
+            (if indent
+                (let ((new (or cookie
+                               (1+ (gethash indent next-by-indent 0)))))
+                  (setf (gethash indent next-by-indent) new)
+                  (unless (= old new)
+                    (push (list (copy-point line :temporary)
+                                number-start number-end new)
+                          changes)))
+                (remhash item-indent next-by-indent)))))
+      (dolist (change changes)
+        (destructuring-bind (line start-column end-column number) change
+          (with-point ((start line) (end line))
+            (line-start start)
+            (line-start end)
+            (character-offset start start-column)
+            (character-offset end end-column)
+            (delete-between-points start end)
+            (insert-string start (princ-to-string number)))))
+      t)))
+
+(defun org-delete-range (start end type &key repair-p)
+  "Delete START..END through Vi and apply configured Org repairs."
+  (let ((ordered-p (and repair-p
+                        (org-preflight-ordered-delete start end))))
+    (if repair-p
+        (let ((lem-core::*this-command*
+                (get-command 'lem-vi-mode/commands:vi-delete)))
+          (lem-vi-mode/commands:vi-delete start end type))
+        (lem-vi-mode/commands:vi-delete start end type))
+    (when ordered-p
+      (org-repair-ordered-list-at-point))
+    (org-align-current-heading-tags)))
+
+(defun org-table-single-delete-padding-p (start end)
+  "Whether one-character START..END deletion gets Org table padding."
+  (and (same-line-p start end)
+       (= 1 (- (position-at-point end) (position-at-point start)))
+       (org-table-line-p start)
+       (not (eql (character-at start) #\|))
+       (find-if (lambda (character)
+                  (not (member character '(#\Space #\Tab))))
+                (line-string start)
+                :end (point-charpos start))
+       (position #\| (line-string start)
+                 :start (1+ (point-charpos start)))))
+
+(defun org-pad-table-after-single-delete ()
+  "Insert replacement padding before the next table separator."
+  (let* ((line (line-string (current-point)))
+         (separator (position #\| line :start (point-charpos (current-point)))))
+    (when separator
+      (with-point ((point (current-point)))
+        (line-start point)
+        (character-offset point separator)
+        (insert-character point #\Space)))))
+
+(defun org-delete-character-range (start end type)
+  "Delete one normal-state character range with Org table/tag behavior."
+  (let ((pad-p (org-table-single-delete-padding-p start end)))
+    (org-delete-range start end type)
+    (when pad-p
+      (org-pad-table-after-single-delete))))
+
+(lem-vi-mode:define-operator lem-yath-org-delete (start end type) ("<R>")
+  (:move-point nil)
+  (org-delete-range start end type :repair-p t))
+
+(lem-vi-mode:define-operator lem-yath-org-delete-lines (start end type) ("<R>")
+  (:motion lem-yath-line-motion :move-point nil)
+  (org-delete-range start end type :repair-p t))
+
+(lem-vi-mode:define-operator lem-yath-org-delete-to-zero
+    (start end type) ("<R>")
+  (:motion lem-yath-zero-motion :move-point nil)
+  (org-delete-range start end type :repair-p t))
+
+(lem-vi-mode:define-operator lem-yath-org-delete-next-char
+    (start end type) ("<R>")
+  (:motion lem-vi-mode/commands:vi-forward-char :move-point nil)
+  (org-delete-character-range start end type))
+
+(lem-vi-mode:define-operator lem-yath-org-delete-previous-char
+    (start end type) ("<R>")
+  (:motion lem-vi-mode/commands:vi-backward-char :move-point nil)
+  (org-delete-character-range start end type))
+
+(define-command lem-yath-org-delete-or-surround (argument) (:universal-nil)
+  "Dispatch Evil-Org d without losing surround or counted motions."
+  (multiple-value-bind (key combined-argument counted-p)
+      (lem-yath-read-operator-key argument)
+    (case (key-to-char key)
+      (#\s
+       (if counted-p
+           (call-vi-operator 'lem-yath-org-delete combined-argument key)
+           (lem-yath-surround-delete)))
+      (#\d
+       (call-command 'lem-yath-org-delete-lines combined-argument))
+      (#\0
+       (call-command 'lem-yath-org-delete-to-zero combined-argument))
+      (otherwise
+       (call-vi-operator 'lem-yath-org-delete combined-argument key)))))
+
 ;;; --- Vi state maps --------------------------------------------------------
 
 (defvar *org-vi-normal-keymap* (make-keymap :description '*org-vi-normal-keymap*))
@@ -1322,6 +1612,9 @@ The second value is the length of SECOND in its new leading position."
 (define-key *org-vi-normal-keymap* "$" 'lem-yath-end-of-line)
 (define-key *org-vi-normal-keymap* "I" 'lem-yath-org-insert-line)
 (define-key *org-vi-normal-keymap* "A" 'lem-yath-append-line)
+(define-key *org-vi-normal-keymap* "d" 'lem-yath-org-delete-or-surround)
+(define-key *org-vi-normal-keymap* "x" 'lem-yath-org-delete-next-char)
+(define-key *org-vi-normal-keymap* "X" 'lem-yath-org-delete-previous-char)
 (define-key *org-vi-normal-keymap* "C-Return" 'lem-yath-org-insert-heading)
 (define-key *org-vi-normal-keymap* "C-Shift-Return"
   'lem-yath-org-insert-todo-heading)
