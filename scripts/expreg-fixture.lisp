@@ -45,6 +45,10 @@
   (expreg-test-open "LEM_YATH_EXPREG_PYTHON_EXPRESSION"
                     "python-cache-sibling" "bar"))
 
+(define-command lem-yath-test-expreg-open-python-arbitrary () ()
+  (expreg-test-open "LEM_YATH_EXPREG_PYTHON_EXPRESSION"
+                    "python-arbitrary" "value"))
+
 (define-command lem-yath-test-expreg-open-python-decoy () ()
   (expreg-test-open "LEM_YATH_EXPREG_PYTHON_DECOY"
                     "python-decoy" "delimiter"))
@@ -74,19 +78,23 @@
 (define-command lem-yath-test-expreg-record () ()
   (let* ((buffer (current-buffer))
          (visual-p (lem-vi-mode/visual:visual-p))
+         (range
+           (when visual-p
+             (lem-vi-mode/visual:visual-range)))
          (selection
-           (if visual-p
-               (destructuring-bind (start end)
-                   (lem-vi-mode/visual:visual-range)
-                 (points-to-string start end))
+           (if range
+               (points-to-string (first range) (second range))
                "")))
     (incf *expreg-test-record-count*)
     (expreg-test-log
-     "STATE index=~d label=~a language=~a visual=~a selection-hex=~a"
+     "STATE index=~d label=~a language=~a visual=~a point=~d start=~d end=~d selection-hex=~a"
      *expreg-test-record-count*
      (expreg-test-label buffer)
      (or (expand-region-tree-sitter-language buffer) "fallback")
      (if visual-p "yes" "no")
+     (position-at-point (current-point))
+     (if range (position-at-point (first range)) -1)
+     (if range (position-at-point (second range)) -1)
      (expreg-test-string-hex selection))))
 
 (define-command lem-yath-test-expreg-stale-contract () ()

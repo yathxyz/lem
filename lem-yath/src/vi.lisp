@@ -1988,6 +1988,76 @@ newline in the same way as Expreg's paragraph tier."
           (delimiter-range delimiter-range)
           (t (expand-region-paragraph-candidate start end)))))))
 
+(defun expand-region-position-range-contained-p (range start end)
+  "Return true when integer RANGE is contained by START..END."
+  (and (<= (position-at-point start) (car range))
+       (<= (cdr range) (position-at-point end))))
+
+(defun expand-region-ordered-point-range (start end)
+  "Return START and END in ascending buffer order."
+  (if (expand-region-point<= start end)
+      (list start end)
+      (list end start)))
+
+(defun expand-region-candidates-at-point (point)
+  "Return the configured generated regions at POINT, smallest first.
+
+This is the candidate sequence Expreg computes before it considers an active
+region.  Keeping that distinction matters for an arbitrary Visual selection:
+contained candidates are contraction history, while the next candidate is
+selected even when it does not contain the old Visual range."
+  (let* ((buffer (point-buffer point))
+         (initial (expand-region-initial-word-range point))
+         (range
+           (or initial
+               (list (copy-point point :temporary)
+                     (copy-point point :temporary))))
+         (candidates nil))
+    (setf (buffer-value buffer 'lem-yath-expand-region-parser-cache) nil)
+    (unwind-protect
+         (progn
+           (when initial
+             (push (expand-region-point-range-positions range) candidates))
+           (loop :for next :=
+                   (expand-region-next-candidate
+                    (first range) (second range))
+                 :while next
+                 :do (expand-region-delete-point-range range)
+                     (setf range next)
+                     (push (expand-region-point-range-positions range)
+                           candidates))
+           (nreverse candidates))
+      (expand-region-delete-point-range range))))
+
+(defun expand-region-start-visual-sequence (start end origin)
+  "Start an Expreg sequence from arbitrary Visual START..END at ORIGIN."
+  (let* ((buffer (point-buffer start))
+         (candidates (expand-region-candidates-at-point origin))
+         (skipped nil))
+    ;; Pinned Expreg moves every generated candidate contained in the active
+    ;; region onto its previous stack.  The arbitrary region itself is never a
+    ;; contraction tier.
+    (loop :while (and candidates
+                      (expand-region-position-range-contained-p
+                       (first candidates) start end))
+          :do (push (pop candidates) skipped))
+    (cond
+      (candidates
+       (alexandria:when-let
+           ((range
+              (expand-region-position-range-to-points
+               buffer (first candidates))))
+         (setf (lem-vi-mode/visual:visual-range) range)
+         (store-expand-region-session
+          (lem-vi-mode/visual:visual-range buffer) skipped)))
+      (skipped
+       ;; When every candidate was contained, Expreg leaves the arbitrary
+       ;; selection visible.  Its largest skipped candidate is conceptually
+       ;; current, so the first contraction targets the next smaller one.
+       (store-expand-region-session (list start end) (rest skipped)))
+      (t
+       (clear-expand-region-session buffer)))))
+
 (define-command lem-yath-expand-region () ()
   "Expand the visual region through syntax nodes, delimiters, and text units."
   (if (not (lem-vi-mode/visual:visual-p))
@@ -2008,37 +2078,46 @@ newline in the same way as Expreg's paragraph tier."
                 (store-expand-region-session
                  (lem-vi-mode/visual:visual-range) nil)))))
       (destructuring-bind (start end) (lem-vi-mode/visual:visual-range)
-        (let* ((buffer (current-buffer))
-               (session
-                 (buffer-value buffer 'lem-yath-expand-region-session))
-               (continuing-p
-                 (expand-region-session-current-p
-                  session buffer (list start end))))
-          (unless continuing-p
-            (clear-expand-region-session buffer))
-          (alexandria:when-let
-              ((candidate (expand-region-next-candidate start end)))
-            (accept-expand-region-range
-             candidate (list start end) continuing-p))))))
+        (destructuring-bind (ordered-start ordered-end)
+            (expand-region-ordered-point-range start end)
+          (let* ((buffer (current-buffer))
+                 (session
+                   (buffer-value buffer 'lem-yath-expand-region-session))
+                 (ordered-range (list ordered-start ordered-end))
+                 (continuing-p
+                   (expand-region-session-current-p
+                    session buffer ordered-range)))
+            (if continuing-p
+                (alexandria:when-let
+                    ((candidate
+                       (expand-region-next-candidate
+                        ordered-start ordered-end)))
+                  (accept-expand-region-range
+                   candidate ordered-range t))
+                (progn
+                  (clear-expand-region-session buffer)
+                  (expand-region-start-visual-sequence
+                   ordered-start ordered-end (current-point)))))))))
 
 (define-command expreg-contract () ()
   "Contract to the preceding region in the current Expreg sequence."
   (when (lem-vi-mode/visual:visual-p)
     (destructuring-bind (start end) (lem-vi-mode/visual:visual-range)
-      (let* ((buffer (current-buffer))
-             (session
-               (buffer-value buffer 'lem-yath-expand-region-session)))
-        (if (expand-region-session-current-p
-             session buffer (list start end))
-            (alexandria:when-let*
-                ((history (expand-region-session-history session))
-                 (target (first history))
-                 (range
-                   (expand-region-position-range-to-points buffer target)))
-              (setf (lem-vi-mode/visual:visual-range) range
-                    (buffer-value buffer 'lem-yath-expand-region-session)
-                    (make-expand-region-session
-                     :tick (buffer-modified-tick buffer)
-                     :current target
-                     :history (rest history))))
-            (clear-expand-region-session buffer))))))
+      (let ((ordered-range (expand-region-ordered-point-range start end)))
+        (let* ((buffer (current-buffer))
+               (session
+                 (buffer-value buffer 'lem-yath-expand-region-session)))
+          (if (expand-region-session-current-p
+               session buffer ordered-range)
+              (alexandria:when-let*
+                  ((history (expand-region-session-history session))
+                   (target (first history))
+                   (range
+                     (expand-region-position-range-to-points buffer target)))
+                (setf (lem-vi-mode/visual:visual-range) range
+                      (buffer-value buffer 'lem-yath-expand-region-session)
+                      (make-expand-region-session
+                       :tick (buffer-modified-tick buffer)
+                       :current target
+                       :history (rest history))))
+              (clear-expand-region-session buffer)))))))

@@ -237,6 +237,44 @@ else
   fail python-cache-open 'Python cache sibling fixture did not open'
 fi
 
+if open_case lem-yath-test-expreg-open-python-arbitrary python-arbitrary; then
+  # Forward Visual endpoint is the plus sign.  Pinned Expreg generates from
+  # that endpoint, skips no smaller region, and replaces the arbitrary range
+  # with the containing binary expression.
+  lem_keys "$session" v
+  lem_keys "$session" 6 l
+  sleep 0.2
+  assert_selection python-arbitrary-forward-seed python-arbitrary 'value +'
+  expand_once
+  assert_selection python-arbitrary-forward python-arbitrary \
+    'café_value + 1'
+  contract_once
+  assert_selection python-arbitrary-forward-contract-noop python-arbitrary \
+    'café_value + 1'
+
+  # Reversing the same Visual selection puts the endpoint on "v".  The
+  # generated word is skipped into Expreg's previous stack, so expansion lands
+  # on the symbol and contraction descends to the generated word—not to the
+  # arbitrary original range.
+  open_case lem-yath-test-expreg-open-python-arbitrary python-arbitrary
+  lem_keys "$session" 6 l
+  lem_keys "$session" v
+  lem_keys "$session" 6 h
+  sleep 0.2
+  assert_selection python-arbitrary-reverse-seed python-arbitrary 'value +'
+  expand_once
+  assert_selection python-arbitrary-reverse python-arbitrary 'café_value'
+  contract_once
+  assert_selection python-arbitrary-reverse-contract python-arbitrary 'value'
+  contract_once
+  assert_selection python-arbitrary-reverse-floor python-arbitrary 'value'
+  expand_once
+  assert_selection python-arbitrary-reverse-reexpand python-arbitrary \
+    'café_value'
+else
+  fail python-arbitrary-open 'Python arbitrary Visual fixture did not open'
+fi
+
 if open_case lem-yath-test-expreg-open-python-decoy python-decoy; then
   expand_once
   assert_selection python-string-word python-decoy 'delimiter'
