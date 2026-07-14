@@ -153,6 +153,11 @@ of writing `.fasl` files into the source tree.
   final buffer; commands use direct argument vectors with a timeout, and only
   manual formatting can fall back to a ready LSP formatter when no mapped
   backend is available
+- Flycheck-style non-LSP diagnostics in programming buffers, with the configured
+  Ruff-to-Mypy, Clang, Cargo, gofmt/vet/build, Bash, JSON, and Nix checker
+  chains; checks run on mode enable, save, newline, or 500 ms idle change,
+  reuse the LSP overlay/list/navigation UI, refuse SOPS plaintext, and yield
+  diagnostics completely while an LSP workspace owns the buffer
 - relative line numbers in programming buffers only, matching the Emacs
   `prog-mode` scope while leaving prose and utility buffers clean
 - the current Modus Vivendi Tinted palette, truncated long lines, no global
@@ -171,7 +176,8 @@ of writing `.fasl` files into the source tree.
   widening, reversible preview, and Vi-jumplist acceptance; optional Lisp-v2
   connections remain globally selected when loaded
 - installed LSP stack for Rust, Python, Markdown, C#, Nix, Go, Terraform, and
-  manually enabled Java: rust-analyzer, pyright, harper-ls, csharp-ls,
+  Java, with Python and Java deliberately enabled manually: rust-analyzer,
+  pyright, harper-ls, csharp-ls,
   flake-aware nixd, gopls, terraform-ls, and JDTLS, plus the Rust toolchain
   required by rust-analyzer
 - Legit (Magit approximation) plus packaged `jj` smart dispatch on `SPC g g`;

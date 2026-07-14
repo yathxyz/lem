@@ -34,6 +34,7 @@
               ./patches/lem-transient-delay-race.patch
               ./patches/lem-transient-bottom-restore.patch
               ./patches/lem-project-lsp-workspaces.patch
+              ./patches/lem-lsp-buffer-lifecycle-hooks.patch
               ./patches/lem-lsp-pipe-stdio.patch
               ./patches/lem-lsp-json-type-error.patch
               ./patches/lem-grep-writeback.patch
@@ -109,6 +110,7 @@
             [
               bash
               black
+              clang
               clang-tools
               coreutils
               curl
@@ -123,7 +125,10 @@
               gnugrep
               gnused
               nixfmt-rfc-style
+              mypy
+              python3
               ripgrep
+              ruff
               rustfmt
               sops
               which
@@ -192,6 +197,8 @@
             name = "lem";
             runtimeInputs = defaultRuntimeInputs;
             text = ''
+              export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
+
               cache_home="''${XDG_CACHE_HOME:-''${HOME:-/tmp}/.cache}"
               source_key="$(printf '%s' '${self}/lem-yath' | sha256sum | cut -c1-16)"
               asdf_cache="$cache_home/lem-yath/asdf/$source_key"
@@ -422,6 +429,7 @@
             avy-test = mkTestApp "lem-yath-avy-test" "avy-test.sh";
             lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
             real-lsp-test = mkRealLspTestApp "lem-yath-real-lsp-test" "real-lsp-test.sh";
+            lint-test = mkTestAppWithLemAndInputs lemYath rustRuntimeInputs "lem-yath-lint-test" "lint-test.sh";
           };
 
           checks = {
@@ -472,6 +480,7 @@
             avy = mkCheck "avy" "avy-test.sh";
             lsp-project = mkCheckWithLem lemLspTest "lsp-project" "lsp-project-test.sh";
             real-lsp = mkRealLspCheck "real-lsp" "real-lsp-test.sh";
+            lint = mkCheckWithLemAndInputs lemYath rustRuntimeInputs "lint" "lint-test.sh";
             parity-ledger =
               pkgs.runCommand "lem-yath-parity-ledger-check" { nativeBuildInputs = [ pkgs.python3 ]; }
                 ''

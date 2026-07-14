@@ -207,10 +207,30 @@ Return a sorted alist whose NIL values mean that a variable must be unset."
            object)
           (sort changes #'string-lessp :key #'car))))))
 
+(defun direnv-merge-runtime-path (path)
+  "Append configured Lem runtime bins to PATH without shadowing the project."
+  (let ((runtime (uiop:getenv "LEM_YATH_RUNTIME_PATH"))
+        (seen '()))
+    (when (or path runtime)
+      (format nil "~{~a~^:~}"
+              (loop :for directory
+                      :in (append
+                           (uiop:split-string (or path "") :separator ":")
+                           (uiop:split-string (or runtime "") :separator ":"))
+                    :when (and (plusp (length directory))
+                               (not (member directory seen :test #'string=)))
+                      :collect directory
+                      :and :do (push directory seen))))))
+
 (defun direnv-set-environment-value (name value)
-  (if value
-      (setf (uiop:getenv name) value)
-      (uiop:symbol-call :sb-posix :unsetenv name)))
+  (let ((effective-value
+          (if (string= name "PATH")
+              (direnv-merge-runtime-path value)
+              value)))
+    (if effective-value
+        (setf (uiop:getenv name) effective-value)
+        (uiop:symbol-call :sb-posix :unsetenv name))
+    effective-value))
 
 (defun direnv-apply-changes (changes)
   "Apply prevalidated CHANGES and return their inverse.

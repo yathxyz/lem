@@ -162,14 +162,21 @@
               (write-sequence buffer output :end length))
     (get-output-stream-string output)))
 
-(defun launch-project-process (arguments directory request)
-  "Launch ARGUMENTS and atomically assign the process to REQUEST."
+(defun launch-project-process
+    (arguments directory request &key input environment)
+  "Launch ARGUMENTS and atomically assign the process to REQUEST.
+
+INPUT is an optional character stream.  ENVIRONMENT is an optional SBCL-style
+list of NAME=VALUE strings captured by the editor thread."
   (flet ((start-process ()
-           (uiop:launch-program
-            (project-timeout-command arguments)
-            :directory directory
-            :output :stream
-            :error-output :stream)))
+           (apply #'uiop:launch-program
+                  (project-timeout-command arguments)
+                  :directory directory
+                  :output :stream
+                  :error-output :stream
+                  (append (when input (list :input input))
+                          (when environment
+                            (list :environment environment))))))
     (if request
         (bt2:with-lock-held ((project-request-lock request))
           (when (project-request-cancelled-p request)
@@ -186,6 +193,7 @@
 
 (defun run-project-program
     (arguments &key directory request
+                    input environment
                     (output-limit *project-process-output-limit*))
   "Run argv list ARGUMENTS with a timeout and separately bounded output.
 
@@ -193,10 +201,14 @@ Return bounded stdout, bounded stderr, and the exit status.  When REQUEST is
 provided, cancellation and process ownership are atomic and request-local."
   (let ((process nil)
         (finished-p nil)
-        (error-thread nil))
+        (error-thread nil)
+        (input-stream (and input (make-string-input-stream input))))
     (unwind-protect
          (progn
-           (setf process (launch-project-process arguments directory request))
+           (setf process
+                 (launch-project-process arguments directory request
+                                         :input input-stream
+                                         :environment environment))
            (let ((error-output "")
                  (error-failure nil))
              (setf error-thread
@@ -228,6 +240,8 @@ provided, cancellation and process ownership are atomic and request-local."
         (ignore-errors (uiop:wait-process process)))
       (when error-thread
         (ignore-errors (bt2:join-thread error-thread)))
+      (when input-stream
+        (ignore-errors (close input-stream)))
       (release-project-process request process))))
 
 (defun project-git-rev-parse (git directory argument &key request)

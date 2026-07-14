@@ -1207,7 +1207,11 @@ environment.
 `direnv export json` updates SBCL's global process environment synchronously.
 Consequently a changed `PATH` is visible to lem-yath executable discovery and
 to formatters, terminals, language servers, and other subprocesses launched
-after the update. Already-running subprocesses are unchanged. `M-x
+after the update. In the installed wrapper, project/Direnv PATH entries remain
+first and the exact packaged runtime bins are appended as a deduplicated
+fallback. Direnv can therefore select a project-local tool without unloading
+packaged checkers, formatters, or language servers when no project override
+exists. Already-running subprocesses are unchanged. `M-x
 direnv-update-environment` forces a refresh, while `M-x direnv-allow` is the
 only editor command that authorizes the current `.envrc`; automatic hooks never
 grant trust.
@@ -1244,6 +1248,47 @@ directory/listener buffers and ineligible scratch retention, post-command
 directory changes, denied files without auto-allow, explicit allow and manual
 refresh, hard timeout retention, malformed-output prevalidation, and recovery.
 The static production probe also covers successful empty export output.
+
+### Flycheck-style diagnostics — `lem-yath/src/lint.lisp` (verified subset)
+
+Programming buffers enable `lem-yath-lint-mode` unless Lem LSP owns the
+buffer. Checks start when the mode is enabled, after save, immediately after a
+newline insertion, or after 500 milliseconds of idle time following another
+change. Every replacement check advances a generation, terminates its owned
+bounded subprocess, and rejects results whose buffer tick, filename, mode,
+generation, request, or LSP ownership became stale. Checker input and each
+output stream are bounded, and subprocesses receive the editor thread's
+captured Direnv environment.
+
+The finite configured checker registry follows the effective Emacs tools:
+Python runs Ruff over unsaved stdin and chains to Mypy for a clean saved file
+when Ruff has no syntax error; C and C++ use Clang with GCC fallback; Rust uses
+Cargo metadata plus `cargo test --no-run` for the owning target; Go runs
+gofmt, vet, and build or test; POSIX shell uses Bash syntax checking; JSON uses
+`python -m json.tool`; and Nix uses `nix-instantiate --parse`. The installed
+application supplies Ruff, Mypy, Python, Clang, Go, Cargo, Bash, and the other
+runtime dependencies. Temporary, read-only, and decrypted SOPS buffers are
+never submitted to a checker.
+
+Diagnostics use Lem LSP's existing severity overlays, point popup, navigable
+list, and next/previous location representation. The modeline shows `FlyC`
+state and error/warning counts. Flycheck's effective `C-c ! c/n/p/l` prefix is
+available while the linter mode is active; global `M-g n` and `M-g p` navigate
+either linter or LSP diagnostics. Explicit LSP attach clears and disables the
+linter, while detach restores it only when it was expected before management.
+Python is the deliberate exception to language-spec auto-start: Pyright stays
+registered for manual `M-x lsp-mode`, matching the Emacs configuration's lack
+of a Python Eglot hook, so Ruff/Mypy own Python by default.
+
+`scripts/lint-test.sh` runs the installed ncurses package against real Ruff,
+Mypy, Clang, Bash, JSON, Nix, Go, and Cargo failures. It also verifies exact
+hooks and bindings, automatic trigger timing, shared overlays/navigation,
+SOPS refusal, LSP handoff, captured runtime PATH, process cancellation, and
+stale-result rejection. `scripts/real-lsp-test.sh` independently performs the
+real Pyright handoff and verifies linter restoration after all programming LSP
+workspaces shut down. The remaining gap is Flycheck's open-ended checker
+catalog and its checker-selection, verification, compile-output,
+explanation, and error-copy interfaces.
 
 ### Transparent SOPS editing — `lem-yath/src/sops.lisp` (verified approximation)
 
@@ -1292,7 +1337,9 @@ progress UI.
 A language spec auto-adds `enable-lsp-mode` to the mode's hook
 (`define-language-spec` macro, `lsp-mode.lisp:1832-1841`), so opening a file in a mode
 that has a spec auto-starts LSP. Manual: `M-x lsp-mode`. Disable temporarily inside a
-body with `(lem-lsp-mode:without-lsp-mode () …)`.
+body with `(lem-lsp-mode:without-lsp-mode () …)`. Lem-yath registers its Pyright
+spec without that hook, so Python is manual and the non-LSP checker remains the
+default diagnostics provider.
 
 ### Registering servers — `define-language-spec` (`lsp-mode.lisp:1832`)
 ```lisp

@@ -29,7 +29,8 @@
          :language-id "python"
          :connection-mode :stdio
          :command '("pyright-langserver" "--stdio")
-         :program-environment "LEM_YATH_REAL_LSP_PYRIGHT")
+         :program-environment "LEM_YATH_REAL_LSP_PYRIGHT"
+         :manual t)
    (list :id "nix"
          :directory "nix/"
          :file "default.nix"
@@ -402,9 +403,12 @@
                  "initialization-timer")
           (check (null (lem-lsp-mode::workspace-startup-spinner workspace))
                  "startup-spinner")
+          (check (not (mode-active-p buffer 'lem-yath-lint-mode))
+                 "lint-disabled")
           (when (getf case :manual)
             (check (real-lsp-test-current-manual-clean-p current)
-                   "manual-start-clean")
+                   "manual-start-clean"))
+          (when (string= id "java")
             (check (uiop:directory-exists-p
                     (java-jdtls-data-pathname expected-root))
                    "jdtls-data-directory")))
@@ -448,7 +452,10 @@
                               buffer 'lem-lsp-mode::lsp-mode))))))
         (switch-to-buffer buffer)
         (when manual-p
-          (lem-yath-java-lsp))
+          (if (string= (getf case :id) "java")
+              (lem-yath-java-lsp)
+              (with-current-buffer buffer
+                (lem-lsp-mode::lsp-mode t))))
         (let* ((workspace
                  (buffer-value buffer 'lem-lsp-mode::lsp-workspace))
                (client (and workspace
@@ -553,7 +560,12 @@
       (check (null (lem-lsp-mode::workspace-initialization-timer workspace))
              "initialization-timer")
       (check (null (lem-lsp-mode::workspace-startup-spinner workspace))
-             "startup-spinner"))
+             "startup-spinner")
+      (when (programming-buffer-p buffer)
+        (check (mode-active-p buffer 'lem-yath-lint-mode)
+               "lint-restored")
+        (check (null (buffer-value buffer 'lem-yath-lint-was-enabled))
+               "lint-restore-state")))
     (real-lsp-test-report
      (concatenate
       'string

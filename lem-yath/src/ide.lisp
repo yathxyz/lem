@@ -17,13 +17,26 @@
   :readme-url "https://rust-analyzer.github.io/"
   :connection-mode :stdio)
 
-(lem-lsp-mode:define-language-spec (lem-yath-python-spec lem-python-mode:python-mode)
-  :language-id "python"
-  :root-uri-patterns '("pyproject.toml" "setup.py" "requirements.txt" "poetry.lock")
-  :command '("pyright-langserver" "--stdio")
-  :install-command "nix profile install nixpkgs#pyright"
-  :readme-url "https://github.com/microsoft/pyright"
-  :connection-mode :stdio)
+;; Python is deliberately registered without the mode hook installed by
+;; DEFINE-LANGUAGE-SPEC.  The Emacs configuration does not call eglot-ensure
+;; from python-mode, so Flycheck remains authoritative unless Eglot is enabled
+;; manually.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defclass lem-yath-python-spec (lem-lsp-mode/spec::spec) ()
+    (:default-initargs
+     :language-id "python"
+     :root-uri-patterns '("pyproject.toml" "setup.py" "requirements.txt" "poetry.lock")
+     :command '("pyright-langserver" "--stdio")
+     :install-command "nix profile install nixpkgs#pyright"
+     :readme-url "https://github.com/microsoft/pyright"
+     :connection-mode :stdio
+     :mode 'lem-python-mode:python-mode))
+  (lem-lsp-mode/spec:register-language-spec
+   'lem-python-mode:python-mode
+   (make-instance 'lem-yath-python-spec))
+  (alexandria:when-let
+      ((hook (mode-hook-variable 'lem-python-mode:python-mode)))
+    (remove-hook (symbol-value hook) 'lem-lsp-mode::enable-lsp-mode)))
 
 (lem-lsp-mode:define-language-spec (lem-yath-markdown-spec lem-markdown-mode:markdown-mode)
   :language-id "markdown"

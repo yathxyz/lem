@@ -34,6 +34,7 @@
                (:file "formatting")
                (:file "git")
                (:file "project")
+               (:file "lint")
                (:file "project-picker")
                (:file "workspace-symbol")
                (:file "project-outline")
