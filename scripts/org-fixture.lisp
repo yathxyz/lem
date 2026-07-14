@@ -48,6 +48,10 @@
    (org-test-attribute-name "target.org")
    (org-test-attribute-name "print('hello')"))
   (let ((tab (org-test-binding "Tab"))
+        (zero (org-test-binding "0"))
+        (end (org-test-binding "$"))
+        (insert-line (org-test-binding "I"))
+        (append-line (org-test-binding "A"))
         (little-t (org-test-binding "t"))
         (big-t (org-test-binding "T"))
         (return (org-test-binding "Return"))
@@ -57,11 +61,16 @@
     (org-test-log
      (concatenate
       'string
-      "KEYS tab-org=~a t-todo=~a T-todo=~a return-org=~a "
+      "KEYS tab-org=~a zero-org=~a end-org=~a I-org=~a A-org=~a "
+      "t-todo=~a T-todo=~a return-org=~a "
       "c-return-org=~a cs-return-org=~a m-o-other=~a")
      (if (member tab '("LEM-YATH-ORG-CYCLE" "LEM-YATH-SNIPPET-TAB")
                  :test #'string=)
          "yes" "no")
+     (if (string= zero "LEM-YATH-ZERO") "yes" "no")
+     (if (string= end "LEM-YATH-END-OF-LINE") "yes" "no")
+     (if (string= insert-line "LEM-YATH-ORG-INSERT-LINE") "yes" "no")
+     (if (string= append-line "LEM-YATH-APPEND-LINE") "yes" "no")
      (if (string= little-t "LEM-YATH-ORG-TODO") "yes" "no")
      (if (string= big-t "LEM-YATH-ORG-TODO") "yes" "no")
      (if (member return '("LEM-YATH-ORG-CYCLE" "LEM-YATH-ORG-META-RETURN")
@@ -166,6 +175,8 @@
 (define-org-test-goto-command lem-yath-test-org-goto-parent "* TODO Parent" t)
 (define-org-test-goto-command lem-yath-test-org-goto-parent-body
   "Parent body sentinel" t)
+(define-org-test-goto-command lem-yath-test-org-goto-indented-prose
+  "indented prose sentinel" t)
 (define-org-test-goto-command lem-yath-test-org-goto-grand-body
   "Grand body sentinel" t)
 (define-org-test-goto-command lem-yath-test-org-goto-list "- [ ] first" t)
@@ -195,6 +206,8 @@
   "- separate a" t)
 (define-org-test-goto-command lem-yath-test-org-goto-edge-source-list
   "- source list lookalike" t)
+(define-org-test-goto-command lem-yath-test-org-goto-edge-source-indented-list
+  "- indented source list lookalike" t)
 (define-org-test-goto-command lem-yath-test-org-goto-edge-source-table
   "| source | table |" t)
 (define-org-test-goto-command lem-yath-test-org-goto-edge-mismatched-list

@@ -1513,9 +1513,15 @@ linewise, reverse, and repeated selection through `ae`, `ar`, and `aR`. It
 also verifies normal `a/i`, `daw`, `ys`/`ds`/`cs`, and operator-Snipe `x/X`
 routing.
 
+The pinned Evil-Org base bindings `0/$/I/A` are exact for the configured
+`org-special-ctrl-a/e=nil`: endpoints remain literal, `I` starts at column zero
+on real headings and items but at indentation elsewhere, and `A` appends after
+headline tags. Source-block heading/list lookalikes retain ordinary Evil
+indentation behavior.
+
 This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
-footnote, nested-special, and malformed text-object contexts; Org-aware
-endpoints, insert/append commands, and structural operators; true `<`/`>` Org
+footnote, nested-special, and malformed text-object contexts; structural
+operators; true `<`/`>` Org
 ranges, region-aware Meta operations, generic Org-element
 movement, shift-control commands, and richer list/table semantics; timestamp,
 scheduling, and deadline

@@ -30,6 +30,7 @@ write_fixture() {
     'SCHEDULED: <2026-07-12 Sun>' \
     'Parent body sentinel with *bold* and /italic/.' \
     'Parent second prose line.' \
+    '  indented prose sentinel' \
     '** NEXT Child' \
     'Child body sentinel.' \
     '*** Grandchild' \
@@ -88,6 +89,7 @@ write_fixture() {
     '' \
     '#+begin_src text' \
     '- source list lookalike' \
+    '  - indented source list lookalike' \
     '| source | table |' \
     '#+end_src' \
     '' \
@@ -203,7 +205,7 @@ write_fixture
 if start_org static; then
   mx "$ORG_SESSION" lem-yath-test-org-static-report
   if wait_report '^STATIC mode=ORG-MODE programming=no heading=DOCUMENT-HEADER1-ATTRIBUTE todo=ORG-TODO-ATTRIBUTE drawer=DOCUMENT-METADATA-ATTRIBUTE timestamp=ORG-TIMESTAMP-ATTRIBUTE table=DOCUMENT-TABLE-ATTRIBUTE link=DOCUMENT-LINK-ATTRIBUTE source=DOCUMENT-CODE-BLOCK-ATTRIBUTE$' &&
-     wait_report '^KEYS tab-org=yes t-todo=no T-todo=no return-org=no c-return-org=yes cs-return-org=yes m-o-other=yes$' &&
+     wait_report '^KEYS tab-org=yes zero-org=yes end-org=yes I-org=yes A-org=yes t-todo=no T-todo=no return-org=no c-return-org=yes cs-return-org=yes m-o-other=yes$' &&
      screen_has "$ORG_SESSION" 'Org'; then
     pass static "Org mode, semantic faces, and active Evil key-theme boundaries match"
   else
@@ -938,6 +940,83 @@ if start_org structure-edge; then
       "$real_after_literal_report" "$real_after_literal_restore" \
       "$sparse_data_report" \
       "${guard_report:-}" "$one_row_delete_report" "$one_row_restore_report"
+  fi
+fi
+
+# 12: Evil-Org's unconditional 0/$/I/A base bindings retain their exact
+# configured endpoint and insertion policy.  org-special-ctrl-a/e is nil in
+# the pinned Emacs profile: I uses literal column zero for headings/items and
+# indentation for prose, while A stays at the literal line end after tags.
+if start_org endpoints; then
+  mx "$ORG_SESSION" lem-yath-test-org-goto-list
+  tmux_cmd send-keys -t "$ORG_SESSION" I
+  tmux_cmd send-keys -t "$ORG_SESSION" -l 'item-prefix '
+  tmux_cmd send-keys -t "$ORG_SESSION" Escape
+  sleep 0.2
+  item_i_ok=0
+  screen_has "$ORG_SESSION" '^item-prefix - \[ \] first' && item_i_ok=1
+
+  mx "$ORG_SESSION" lem-yath-test-org-goto-indented-prose
+  tmux_cmd send-keys -t "$ORG_SESSION" I
+  tmux_cmd send-keys -t "$ORG_SESSION" -l 'prose-prefix '
+  tmux_cmd send-keys -t "$ORG_SESSION" Escape
+  sleep 0.2
+  prose_i_ok=0
+  screen_has "$ORG_SESSION" '^  prose-prefix indented prose sentinel' &&
+    prose_i_ok=1
+
+  mx "$ORG_SESSION" lem-yath-test-org-goto-parent
+  tmux_cmd send-keys -t "$ORG_SESSION" A
+  tmux_cmd send-keys -t "$ORG_SESSION" -l ' end-sentinel'
+  tmux_cmd send-keys -t "$ORG_SESSION" Escape
+  sleep 0.2
+  append_ok=0
+  screen_has "$ORG_SESSION" 'Parent :work: end-sentinel$' && append_ok=1
+
+  mx "$ORG_SESSION" lem-yath-test-org-goto-parent
+  tmux_cmd send-keys -t "$ORG_SESSION" I
+  tmux_cmd send-keys -t "$ORG_SESSION" -l 'heading-prefix '
+  tmux_cmd send-keys -t "$ORG_SESSION" Escape
+  sleep 0.2
+  heading_i_ok=0
+  screen_has "$ORG_SESSION" '^heading-prefix \* TODO Parent' && heading_i_ok=1
+
+  mx "$ORG_SESSION" lem-yath-test-org-goto-indented-prose
+  tmux_cmd send-keys -t "$ORG_SESSION" '$'
+  mx "$ORG_SESSION" lem-yath-test-org-point-report
+  end_report=$(grep '^POINT ' "$LEM_YATH_ORG_REPORT" | tail -n1)
+  end_ok=0
+  grep -qF 'column=37 text="  prose-prefix indented prose sentinel"' \
+    <<<"$end_report" && end_ok=1
+  : >"$LEM_YATH_ORG_REPORT"
+  tmux_cmd send-keys -t "$ORG_SESSION" 0
+  mx "$ORG_SESSION" lem-yath-test-org-point-report
+  zero_ok=0
+  grep -qF 'column=0 text="  prose-prefix indented prose sentinel"' \
+    "$LEM_YATH_ORG_REPORT" && zero_ok=1
+
+  mx "$ORG_SESSION" lem-yath-test-org-open-edge
+  mx "$ORG_SESSION" lem-yath-test-org-goto-edge-source-indented-list
+  tmux_cmd send-keys -t "$ORG_SESSION" I
+  tmux_cmd send-keys -t "$ORG_SESSION" -l 'source-prefix '
+  tmux_cmd send-keys -t "$ORG_SESSION" Escape
+  sleep 0.2
+  source_i_ok=0
+  screen_has "$ORG_SESSION" '^  source-prefix - indented source list lookalike' &&
+    source_i_ok=1
+
+  if [ "$item_i_ok" = 1 ] && [ "$prose_i_ok" = 1 ] &&
+     [ "$append_ok" = 1 ] && [ "$heading_i_ok" = 1 ] &&
+     [ "$end_ok" = 1 ] && [ "$zero_ok" = 1 ] &&
+     [ "$source_i_ok" = 1 ]; then
+    pass endpoints "0/$/I/A match configured Evil-Org endpoint and insertion semantics"
+  else
+    fail endpoints "an Evil-Org endpoint or insertion command diverged" "$ORG_SESSION"
+    printf 'endpoint flags item-I=%s prose-I=%s A=%s heading-I=%s end=%s zero=%s source-I=%s\n' \
+      "$item_i_ok" "$prose_i_ok" "$append_ok" "$heading_i_ok" \
+      "$end_ok" "$zero_ok" "$source_i_ok"
+    printf '%s\n' "$end_report"
+    cat "$LEM_YATH_ORG_REPORT"
   fi
 fi
 

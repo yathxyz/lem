@@ -253,6 +253,21 @@ In a table, align it and advance to the next cell."
   (unless (org-open-list-or-table nil)
     (org-insert-heading-after-subtree)))
 
+(define-command lem-yath-org-insert-line () ()
+  "Enter Insert like Evil-Org's I with the configured Org defaults.
+
+The active Emacs configuration leaves `org-special-ctrl-a/e' disabled.
+Evil-Org consequently inserts at literal column zero on headings and list
+items, but retains Evil's indentation-aware I everywhere else.  Reusing the
+bounded native Org predicates also keeps list and heading lookalikes inside
+source blocks on the ordinary Evil path."
+  (if (or (org-heading-line-p (current-point))
+          (org-list-item-line-p (current-point)))
+      (progn
+        (line-start (current-point))
+        (org-enter-insert-state))
+      (call-command 'lem-yath-insert-line nil)))
+
 (defun org-list-item-line-p (point)
   (not (null (org-list-prefix point))))
 
@@ -1303,6 +1318,10 @@ The second value is the length of SECOND in its new leading position."
 
 (define-key *org-vi-normal-keymap* "o" 'lem-yath-org-open-below)
 (define-key *org-vi-normal-keymap* "O" 'lem-yath-org-open-above)
+(define-key *org-vi-normal-keymap* "0" 'lem-yath-zero)
+(define-key *org-vi-normal-keymap* "$" 'lem-yath-end-of-line)
+(define-key *org-vi-normal-keymap* "I" 'lem-yath-org-insert-line)
+(define-key *org-vi-normal-keymap* "A" 'lem-yath-append-line)
 (define-key *org-vi-normal-keymap* "C-Return" 'lem-yath-org-insert-heading)
 (define-key *org-vi-normal-keymap* "C-Shift-Return"
   'lem-yath-org-insert-todo-heading)
