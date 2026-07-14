@@ -92,8 +92,10 @@ of writing `.fasl` files into the source tree.
   ranges survive filtering, and stale asynchronous results are rejected
 - an Embark-style, typed action dispatcher on `SPC e a` covers contiguous
   regions, URLs, existing local files, identifiers, buffers, native mode menus,
-  completion candidates, and search locations; completion-local `C-c a` can
-  copy without closing the popup or accept the captured candidate exactly once
+  completion candidates, and search locations; repeating `SPC e a` cycles every
+  valid target at point and wraps before dispatch, while completion-local
+  `C-c a` can copy without closing the popup or accept the captured candidate
+  exactly once
 - exact expansion of the configured private Org `jjs` source-block snippet and
   a data-only Yasnippet session engine over the flake-pinned community corpus;
   numbered, anonymous, and nested fields, defaults, mirrors, escapes, safe

@@ -1,9 +1,10 @@
 ;;;; Context-sensitive, Embark-style actions for the object at point.
 ;;;;
-;;;; A target is classified once, in a strict priority order, and owns a
-;;;; snapshot of its originating window, buffer, and point.  The transient is
-;;;; generated from typed action registrations and reads exactly one key.  All
-;;;; copied points and transient state are released through unwind-protect.
+;;;; Targets are classified once, in strict priority order, and share a snapshot
+;;;; of their originating window, buffer, and point.  The transient is generated
+;;;; from typed action registrations; the invoking chord cycles targets, and a
+;;;; one-key action dispatches the selected target.  All copied points and
+;;;; transient state are released through unwind-protect.
 
 (in-package :lem-yath)
 
@@ -120,6 +121,34 @@
   (format nil "Completion: ~a"
           (action-summary-text (completion-action-target-text target))))
 
+(defgeneric action-target-identity (target)
+  (:method ((target action-target))
+    (list (class-name (class-of target)) target)))
+
+(defmethod action-target-identity ((target region-action-target))
+  (list 'region (region-action-target-text target)))
+
+(defmethod action-target-identity ((target file-action-target))
+  (list 'file
+        (uiop:native-namestring (file-action-target-pathname target))))
+
+(defmethod action-target-identity ((target url-action-target))
+  (list 'url (url-action-target-url target)))
+
+(defmethod action-target-identity ((target identifier-action-target))
+  (list 'identifier (identifier-action-target-text target)))
+
+(defmethod action-target-identity ((target location-action-target))
+  (let ((point (location-action-target-point target)))
+    (list 'location (point-buffer point) (position-at-point point))))
+
+(defmethod action-target-identity ((target buffer-action-target))
+  (list 'buffer (buffer-action-target-buffer target)))
+
+(defmethod action-target-identity ((target completion-action-target))
+  (list 'completion (completion-action-target-context target)
+                    (completion-action-target-item target)))
+
 (defun action-summary-text (text &optional (limit 64))
   (let* ((one-line
            (substitute #\Space #\Return
@@ -187,11 +216,16 @@
 (defmethod cleanup-action-target-payload ((target location-action-target))
   (ignore-errors (delete-point (location-action-target-point target))))
 
-(defun cleanup-action-target (target)
-  "Release TARGET's copied points.  Safe to call more than once."
+(defun cleanup-action-target-payload-only (target)
   (when (and target (not (action-target-cleaned-p target)))
     (setf (action-target-cleaned-p target) t)
-    (cleanup-action-target-payload target)
+    (cleanup-action-target-payload target))
+  nil)
+
+(defun cleanup-action-target (target)
+  "Release TARGET's copied points.  Safe to call more than once."
+  (when target
+    (cleanup-action-target-payload-only target)
     (cleanup-action-origin (action-target-origin target)))
   nil)
 
@@ -586,6 +620,43 @@ On failure ORIGIN is cleaned before NIL is returned."
       (unless origin-transferred-p
         (cleanup-action-origin origin)))))
 
+(defun unique-action-targets (targets)
+  "Keep the first target for each typed identity and release duplicate payloads."
+  (let ((seen (make-hash-table :test #'equal))
+        (result nil))
+    (dolist (target targets (nreverse result))
+      (let ((identity (action-target-identity target)))
+        (if (gethash identity seen)
+            (cleanup-action-target-payload-only target)
+            (progn
+              (setf (gethash identity seen) t)
+              (push target result)))))))
+
+(defun detect-action-targets (&key (origin (snapshot-action-origin))
+                                   (context :ordinary))
+  "Return every unique target for CONTEXT in provider priority order.
+
+The returned targets share and jointly own ORIGIN.  If classification aborts,
+all copied payload points and ORIGIN are released before the condition escapes."
+  (let ((targets nil)
+        (origin-transferred-p nil))
+    (unwind-protect
+         (progn
+           (dolist (provider (action-target-providers))
+             (when (member context
+                           (action-target-provider-contexts provider))
+               (alexandria:when-let
+                   ((target (call-action-target-provider provider origin)))
+                 (push target targets))))
+           (setf targets (unique-action-targets (nreverse targets)))
+           (when targets
+             (setf origin-transferred-p t))
+           targets)
+      (unless origin-transferred-p
+        (dolist (target targets)
+          (cleanup-action-target-payload-only target))
+        (cleanup-action-origin origin)))))
+
 (defun detect-completion-action-target ()
   (detect-action-target :context :completion))
 
@@ -641,9 +712,19 @@ On failure ORIGIN is cleaned before NIL is returned."
          (t (string< (action-definition-key left)
                      (action-definition-key right))))))))
 
-(defun build-action-keymap (target &optional (actions (actions-for-target target)))
+(defparameter *action-target-cycle-key* "Space e a")
+
+(defun build-action-keymap
+    (target &optional (actions (actions-for-target target))
+                      target-number target-count)
   "Build a fresh transient keymap for TARGET's resolved action set."
-  (let ((keymap (make-keymap :description (action-target-summary target))))
+  (let ((keymap
+          (make-keymap
+           :description
+           (if (and target-number target-count (> target-count 1))
+               (format nil "[~d/~d] ~a" target-number target-count
+                       (action-target-summary target))
+               (action-target-summary target)))))
     (setf (lem/transient::keymap-show-p keymap) t
           (lem/transient::keymap-display-style keymap) :column)
     (dolist (action actions)
@@ -657,6 +738,12 @@ On failure ORIGIN is cleaned before NIL is returned."
     (setf (lem-core::prefix-description
            (lem-core::keymap-find keymap (lem-core::parse-keyspec "q")))
           "cancel")
+    (when (and target-count (> target-count 1))
+      (define-key keymap *action-target-cycle-key* 'nop-command)
+      (setf (lem-core::prefix-description
+             (lem-core::keymap-find
+              keymap (lem-core::parse-keyspec *action-target-cycle-key*)))
+            "next target"))
     keymap))
 
 (defun invoke-action-by-key
@@ -688,27 +775,49 @@ non-interactive test and extension hook."
                       (action-definition-label action) condition)
              :failed)))))))
 
+(defun dispatch-action-targets (targets)
+  "Display and dispatch TARGETS, cycling with the invoking leader chord."
+  (let ((targets (copy-list targets)))
+    (unless targets
+      (return-from dispatch-action-targets nil))
+    (let ((index 0)
+          (count (length targets)))
+      (unwind-protect
+           (loop
+             (let* ((target (nth index targets))
+                    (actions (actions-for-target target))
+                    (keymap (build-action-keymap
+                             target actions (1+ index) count)))
+               (let ((lem/transient:*transient-popup-delay* 0))
+                 (keymap-activate keymap))
+               (redraw-display)
+               (let* ((key-sequence (read-key-sequence))
+                      (key-name
+                        (lem-core::keyseq-to-string key-sequence)))
+                 (lem/transient::hide-transient)
+                 (cond
+                   ((and (> count 1)
+                         (string= key-name *action-target-cycle-key*))
+                    (setf index (mod (1+ index) count)))
+                   (t
+                    (let ((result
+                            (and (= 1 (length key-sequence))
+                                 (invoke-action-by-key
+                                  target key-sequence actions))))
+                      (unless result
+                        (message "No action is bound to ~a" key-name))
+                      (return result)))))))
+        (lem/transient::hide-transient)
+        (mapc #'cleanup-action-target targets)))))
+
 (defun dispatch-action-target (target)
-  "Display TARGET's dynamic transient, read one key, and dispatch it."
-  (unwind-protect
-       (let* ((actions (actions-for-target target))
-              (keymap (build-action-keymap target actions)))
-         (let ((lem/transient:*transient-popup-delay* 0))
-           (keymap-activate keymap))
-         (redraw-display)
-         (let* ((key (read-key))
-                (key-name (lem-core::keyseq-to-string (list key)))
-                (result (invoke-action-by-key target key-name actions)))
-           (unless result
-             (message "No action is bound to ~a" key-name))
-           result))
-    (lem/transient::hide-transient)
-    (cleanup-action-target target)))
+  "Display TARGET's dynamic transient, read one action, and dispatch it."
+  (dispatch-action-targets (list target)))
 
 (define-command lem-yath-act () ()
-  "Act on the highest-priority region, object, identifier, or buffer target."
-  (alexandria:when-let ((target (detect-action-target)))
-    (dispatch-action-target target)))
+  "Act on a region, object, identifier, or buffer target at point."
+  (alexandria:when-let ((targets (detect-action-targets)))
+    (dispatch-action-targets targets)))
 
 (define-command lem-yath-act-completion () ()
   "Act on the currently focused, still-valid completion item."

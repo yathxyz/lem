@@ -149,6 +149,53 @@
                    *action-target-provider-registry*))
         (check (and aborted (action-origin-cleaned-p origin))
                "aborting-provider-cleans-origin"))
+      (let ((origin (snapshot-action-origin))
+            (target nil)
+            (aborted nil))
+        (unwind-protect
+             (progn
+               (register-action-target-provider
+                'actions-fixture-target-before-abort
+                'buffer-action-target
+                (lambda (provider-origin)
+                  (setf target
+                        (make-instance
+                         'buffer-action-target
+                         :origin provider-origin
+                         :buffer (action-origin-buffer provider-origin))))
+                :priority -2000)
+               (register-action-target-provider
+                'actions-fixture-aborting-all-provider
+                'action-target
+                (lambda (provider-origin)
+                  (declare (ignore provider-origin))
+                  (error 'editor-abort))
+                :priority -1999)
+               (handler-case
+                   (detect-action-targets :origin origin)
+                 (editor-abort ()
+                   (setf aborted t))))
+          (remhash 'actions-fixture-target-before-abort
+                   *action-target-provider-registry*)
+          (remhash 'actions-fixture-aborting-all-provider
+                   *action-target-provider-registry*))
+        (check (and aborted target
+                    (action-target-cleaned-p target)
+                    (action-origin-cleaned-p origin))
+               "multi-target-abort-cleans-owned-state"))
+      (let* ((targets (detect-action-targets))
+             (origin (and targets (action-target-origin (first targets)))))
+        (unwind-protect
+             (check (and (> (length targets) 1)
+                         (every (lambda (target)
+                                  (eq origin (action-target-origin target)))
+                                targets))
+                    "multi-targets-share-origin")
+          (mapc #'cleanup-action-target targets))
+        (check (and origin
+                    (action-origin-cleaned-p origin)
+                    (every #'action-target-cleaned-p targets))
+               "multi-target-cleanup-idempotent"))
       (actions-fixture-log
        "SUMMARY STATIC ~a failures=~d providers=~d actions=~d"
        (if (zerop failures) "PASS" "FAIL")

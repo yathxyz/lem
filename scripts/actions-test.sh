@@ -173,6 +173,48 @@ fi
 pass transient-cancel 'q canceled immediately without changing the target'
 
 goto_source_line 2
+open_actions
+if ! wait_screen '\[1/3\][[:space:]]+URL:' || ! wait_screen 'open URL'; then
+  die target-cycle 'the highest-priority URL target did not open first'
+fi
+open_actions
+if ! wait_screen '\[2/3\][[:space:]]+Identifier:' ||
+   ! wait_screen 'find definitions' ||
+   lem_capture "$session" | grep -qiE 'open URL'; then
+  die target-cycle 'repeating SPC e a did not advance to the identifier target'
+fi
+open_actions
+if ! wait_screen '\[3/3\][[:space:]]+Buffer:' || ! wait_screen 'save buffer' ||
+   lem_capture "$session" | grep -qiE 'find definitions'; then
+  die target-cycle 'the second cycle did not advance to the buffer target'
+fi
+open_actions
+if ! wait_screen '\[1/3\][[:space:]]+URL:' || ! wait_screen 'open URL' ||
+   lem_capture "$session" | grep -qiE 'save buffer'; then
+  die target-cycle 'the target cycle did not wrap to the URL'
+fi
+lem_keys "$session" q
+pass target-cycle 'repeated SPC e a cycled URL, identifier, buffer, then wrapped'
+
+goto_source_line 2
+open_actions
+open_actions
+if ! wait_screen 'copy identifier'; then
+  die target-cycle-dispatch 'the cycled identifier menu did not remain actionable'
+fi
+before=$(report_count '^STATE ')
+lem_keys "$session" w
+sleep 0.25
+lem_keys "$session" F5
+if ! wait_report_count '^STATE ' "$((before + 1))" ||
+   ! tail -n 1 "$LEM_YATH_ACTIONS_REPORT" | grep -qE \
+     '^STATE .*kill=https ';
+then
+  die target-cycle-dispatch 'w acted on the wrong target after cycling'
+fi
+pass target-cycle-dispatch 'an action used the cycled target rather than the first target'
+
+goto_source_line 2
 before=$(report_count '^STATE ')
 lem_keys "$session" Space e a w
 sleep 0.35

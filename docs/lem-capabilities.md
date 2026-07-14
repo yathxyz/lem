@@ -446,10 +446,16 @@ entry by stable ID, so reloading built-ins remains idempotent without deleting
 unrelated third-party registrations.  `SPC e a` resolves the current context in
 this order: an active contiguous region, a property-backed `*Find*` path, a
 movable peek-source row, an HTTP(S) URL or existing local path at point, a syntax
-identifier, and finally the current buffer.  Providers are extensible, and a
-failing provider or action does not prevent later dispatches.  The dispatcher
-refuses ambiguous duplicate action keys rather than showing a menu whose result
-depends on registration order.
+identifier, and finally the current buffer.  Outside completion it retains every
+unique result in that order, deduplicated by typed target identity.  Repeating
+the exact invoking chord, `SPC e a`, advances to the next target and wraps; the
+menu title shows `[current/total]`, and the subsequent action uses that cycled
+target.  Every target shares one origin snapshot, while target-local
+copied points and the origin are all released on action, cancellation, or a
+later provider abort.  Providers are extensible, and a failing ordinary provider
+or action does not prevent later dispatches.  The dispatcher refuses ambiguous
+duplicate action keys rather than showing a menu whose result depends on
+registration order.
 
 The resolved target kind and only its applicable actions appear immediately in
 a terminal-safe, one-key transient:
@@ -478,17 +484,18 @@ The registry and bindings can be reloaded without accumulating duplicate
 providers, actions, or keys.
 
 `scripts/actions-test.sh` exercises the normal/visual leader binding, forward
-and reverse regions, labeled transient dispatch and cancellation, URL copying,
-relative and property-backed file navigation, identifier definition/reference
-delegation, native-menu delegation, completion copy/accept lifecycle, Find and
-peek locations, stale-origin cleanup, and reload idempotence through the actual
+and reverse regions, labeled transient dispatch and cancellation, exact-chord
+URL/identifier/buffer cycling and wraparound, action dispatch after cycling,
+shared-origin cleanup including provider abort, URL copying, relative and
+property-backed file navigation, identifier definition/reference delegation,
+native-menu delegation, completion copy/accept lifecycle, Find and peek
+locations, stale-origin cleanup, and reload idempotence through the actual
 ncurses editor.  LSP code-action gating, external opening, and the buffer action
 variants are source-inspected but are not dynamically covered by that suite.
 
 This is intentionally partial Embark parity.  Visual-block selections are not
-region targets.  Target cycling, act-all, collect/export/live views, arbitrary
-Embark action-map composition, and the richer embark-consult adapter set are not
-implemented.
+region targets.  Act-all, collect/export/live views, arbitrary Embark action-map
+composition, and the richer embark-consult adapter set are not implemented.
 
 ### Project-scoped LSP workspaces and symbols (verified)
 
