@@ -112,6 +112,11 @@ of writing `.fasl` files into the source tree.
   groups with reversible preview-on-move. The project switch menu preserves
   `f/g/d/v/e/o`, with root-correct Git status and close terminal/M-x
   approximations for Emacs's Eshell and arbitrary-command entries
+- the Emacs configuration tree's directory-local `C-c i` opens a
+  Consult-style Elisp outline in Normal and Emacs states: line-numbered
+  headings retain source order, Prescient filtering previews and recenters
+  matches, `C-g` restores the exact point/view, Return records a Vi jump, and
+  the `.dir-locals.el` declaration is parsed as bounded data without evaluation
 - current-buffer Direnv integration is implemented in `src/direnv.lisp`: file
   buffers, derived process-oriented modes, and explicitly marked process output
   buffers update Lem's global process environment, so `PATH` lookup and future
@@ -204,7 +209,7 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 completion, completion-lifecycle, automatic-completion, Embark-style actions,
 editing, formatting, Orderless completion, snippets, LSP snippets, real installed
 language-server handshakes, daily-workflows, Direnv environment switching,
-electric-editing, grouped-buffer-list, UI parity, project navigation, VCS,
+electric-editing, grouped-buffer-list, UI parity, project navigation and outline, VCS,
 persistence, bookmarks,
 retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
@@ -233,6 +238,7 @@ nix run .#lsp-snippet-test
 nix run .#lsp-project-test
 nix run .#real-lsp-test
 nix run .#project-navigation-test
+nix run .#project-outline-test
 nix run .#persistence-test
 nix run .#bookmark-test
 nix run .#vundo-test
@@ -265,7 +271,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
 `daily-workflows`, `direnv`, `llm-keybinding`, `orderless-completion`, `snippets`, `lsp-snippets`,
-`lsp-project`, `real-lsp`, `project-navigation`, `persistence`, `bookmarks`,
+`lsp-project`, `real-lsp`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`,
 `interactive`, `structural`, `roam`, or
 `notes` to run only that gate.

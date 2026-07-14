@@ -324,6 +324,27 @@ synchronous singleton. `Tab` inserts the focused candidate and refreshes
 completion without closing the prompt; one `Return` accepts it and submits the
 prompt. `M-p` and `M-n` traverse prompt history and reopen completion.
 
+### Directory-local Consult outline — `lem-yath/src/project-outline.lisp` (verified)
+
+The audited Emacs configuration binds `C-c i` to `consult-outline` only for
+Emacs Lisp files below a project `.dir-locals.el` that also declares
+`outline-regexp` as `;;;`. Lem-yath discovers the nearest declaration but never
+evaluates it: the reader accepts at most 64 KiB, disables reader evaluation,
+requires one complete form, and enables the hidden buffer-local mode only for
+that exact binding and regexp. Its state-aware mode map exposes the command in
+Normal and the custom Emacs state while preserving the configured LLM action in
+Insert and Visual states.
+
+The selector scans full matching lines in source order, includes longer
+semicolon prefixes, displays line numbers, and uses Prescient matching without
+learned reordering. Focus changes preview the match column in the source window
+and recenter it. A prompt-local `C-g` or Escape restores the exact source point,
+view, horizontal scroll, and invoking Vi state; Return commits the same
+match-column jump and records it in the Vi jumplist. The real ncurses gate in
+`scripts/project-outline-test.sh` covers presentation, preview, cancellation,
+immediate reopen, final jump/return, key precedence, outside-tree isolation,
+empty outlines, and a malicious read-time-evaluation form.
+
 `lem-yath/src/annotations.lisp` supplies a bounded Marginalia-style layer for
 the daily prompt categories. Commands show active bindings and their first
 documentation line; ordinary and project buffers show modified/read-only state,

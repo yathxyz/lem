@@ -192,6 +192,13 @@ temporarily presents only matching selectable buffer rows
 | **embark-consult** | effective on demand | no user configuration; the pinned Embark package loads it automatically after Consult loads when the installed library is available |
 | **wgrep** | deferred; `wgrep-change-to-wgrep-mode` (editable grep buffers) |
 
+The Lem port now covers the effective directory-local `consult-outline` path
+without reproducing the Emacs cold-start defect: the exact declaration is read
+without evaluation, `C-c i` keeps its Insert/Visual LLM meaning, and the
+Normal/Emacs-state selector retains source order, preview rollback, matched-text
+placement, recentering, and jumplist return (`src/project-outline.lisp`,
+`scripts/project-outline-test.sh`).
+
 The `embark-consult` load path comes from the pinned package rather than this
 configuration: its `embark.el` registers a `with-eval-after-load` form for
 Consult and then requires the installed integration library.  It is therefore

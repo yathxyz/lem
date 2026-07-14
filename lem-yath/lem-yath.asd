@@ -35,6 +35,7 @@
                (:file "git")
                (:file "project")
                (:file "project-picker")
+               (:file "project-outline")
                (:module "org"
                 :serial t
                 :components ((:file "parser")
