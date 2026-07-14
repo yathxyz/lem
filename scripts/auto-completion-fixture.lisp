@@ -255,6 +255,16 @@
     (setf (buffer-directory) directory))
   (auto-test-report "SETUP file directory=~a" (buffer-directory)))
 
+(define-command lem-yath-test-auto-cape-order-setup () ()
+  (auto-test-reset-current-buffer)
+  (auto-test-fill-buffer "*auto-completion-source*"
+                         'lem-yath-auto-test-mode
+                         (format nil "./alphaDabbrev~%prettyHugeBuffer~%"))
+  (alexandria:when-let ((directory
+                         (uiop:getenv "LEM_YATH_AUTO_COMPLETION_FILE_DIR")))
+    (setf (buffer-directory) directory))
+  (auto-test-report "SETUP cape-order directory=~a" (buffer-directory)))
+
 (defun auto-test-async-provider (point then)
   (multiple-value-bind (start end query)
       (auto-completion-symbol-bounds point)
@@ -1207,6 +1217,8 @@
   "C-c z p" 'lem-yath-test-auto-primary-setup)
 (define-key lem-vi-mode:*normal-keymap*
   "C-c z f" 'lem-yath-test-auto-file-setup)
+(define-key lem-vi-mode:*normal-keymap*
+  "C-c z q" 'lem-yath-test-auto-cape-order-setup)
 (define-key lem-vi-mode:*normal-keymap*
   "C-c z x" 'lem-yath-test-auto-cancel-setup)
 (define-key lem-vi-mode:*normal-keymap*

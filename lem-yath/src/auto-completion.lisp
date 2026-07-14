@@ -79,6 +79,19 @@
     (skip-chars-forward end #'syntax-symbol-char-p)
     (values start end (points-to-string start cursor))))
 
+(defun auto-completion-dabbrev-character-p (character)
+  "Match the ordinary Emacs syntax constituents used by Cape Dabbrev."
+  (or (syntax-symbol-char-p character)
+      (find character "/-" :test #'char=)))
+
+(defun auto-completion-dabbrev-bounds (point)
+  (with-point ((start point)
+               (cursor point)
+               (end point))
+    (skip-chars-backward start #'auto-completion-dabbrev-character-p)
+    (skip-chars-forward end #'auto-completion-dabbrev-character-p)
+    (values start end (points-to-string start cursor))))
+
 (defun auto-completion-symbol-prefix-length (point)
   (multiple-value-bind (start end prefix)
       (auto-completion-symbol-bounds point)
@@ -142,23 +155,46 @@ directory already exists."
                           (buffer-major-mode buffer))
                   :collect other)))
 
+(defun auto-completion-dabbrev-line-words (line)
+  (loop :with words
+        :with length = (length line)
+        :for start :from 0 :below length
+        :when (auto-completion-dabbrev-character-p (aref line start))
+          :do (let ((end start))
+                (loop :while (and (< end length)
+                                  (auto-completion-dabbrev-character-p
+                                   (aref line end)))
+                      :do (incf end))
+                (push (subseq line start end) words)
+                (setf start (1- end)))
+        :finally (return (nreverse words))))
+
+(defun auto-completion-dabbrev-buffer-words (buffer)
+  (with-current-buffer buffer
+    (with-open-stream (stream
+                       (make-buffer-input-stream
+                        (buffer-start-point buffer)))
+      (loop :for line := (read-line stream nil)
+            :while line
+            :append (auto-completion-dabbrev-line-words line)))))
+
 (defun auto-completion-dabbrev-words (point prefix)
   (let* ((buffer (point-buffer point))
-         (buffers (auto-completion-same-mode-buffers buffer))
          (words
-           (append
-            (lem/abbrev::collect-buffer-words-order-proximity point)
-            (mapcan #'lem/abbrev::scan-buffer-words (rest buffers)))))
+           (mapcan #'auto-completion-dabbrev-buffer-words
+                   (auto-completion-same-mode-buffers buffer))))
     (remove-duplicates
      (remove-if
       (lambda (word)
-        (string-equal prefix word))
+        (or (string-equal prefix word)
+            (not (alexandria:starts-with-subseq
+                  prefix word :test #'char-equal))))
       words)
      :test #'string-equal)))
 
 (defun auto-completion-dabbrev-items (point)
   (multiple-value-bind (start end prefix)
-      (auto-completion-symbol-bounds point)
+      (auto-completion-dabbrev-bounds point)
     (when (>= (length prefix) *auto-completion-prefix-length*)
       (stable-sort
        (mapcar
@@ -248,13 +284,16 @@ directory already exists."
 
 (defun auto-completion-provider (&optional (point (current-point)))
   (or (auto-completion-primary-spec (point-buffer point))
-      (if (auto-completion-file-context-p point)
-          (lem/completion-mode:make-completion-spec
-           #'auto-completion-file-items
-           :test-function #'auto-completion-file-input-valid-p)
-          (lem/completion-mode:make-completion-spec
-           #'auto-completion-dabbrev-items
-           :test-function #'auto-completion-case-fold-input-valid-p))))
+      (let ((dabbrev-items (auto-completion-dabbrev-items point)))
+        (if dabbrev-items
+            (lem/completion-mode:make-completion-spec
+             (lambda (ignored-point)
+               (declare (ignore ignored-point))
+               dabbrev-items)
+             :test-function #'auto-completion-case-fold-input-valid-p)
+            (lem/completion-mode:make-completion-spec
+             #'auto-completion-file-items
+             :test-function #'auto-completion-file-input-valid-p)))))
 
 (defun auto-completion-prefix-ready-p (point)
   (if (auto-completion-primary-spec (point-buffer point))

@@ -79,6 +79,7 @@ run_fixture_command() {
     lem-yath-test-auto-middle-setup) key=m ;;
     lem-yath-test-auto-primary-setup) key=p ;;
     lem-yath-test-auto-file-setup) key=f ;;
+    lem-yath-test-auto-cape-order-setup) key=q ;;
     lem-yath-test-auto-cancel-setup) key=x ;;
     *) return 1 ;;
   esac
@@ -838,6 +839,47 @@ if run_fixture_command lem-yath-test-auto-file-setup &&
   fi
 else
   fail file-setup "could not prepare the file scenario"
+fi
+
+if run_fixture_command lem-yath-test-auto-cape-order-setup &&
+   wait_report '^SETUP cape-order directory=' 10 && enter_insert; then
+  tmux_cmd send-keys -t "$session" -l ./alp
+  if lem_wait_for "$session" '/alphaDabbrev' 10 >/dev/null; then
+    screen=$(lem_capture "$session")
+    if ! grep -q 'alpha-file.txt' <<<"$screen"; then
+      pass cape-ordered-fallback "a path-shaped dabbrev candidate preempted Cape file completion"
+    else
+      fail cape-ordered-fallback "file candidates leaked beside the first nonempty Cape provider"
+    fi
+    lem_keys "$session" Enter
+    sleep 0.3
+    lem_keys "$session" F7
+    if wait_report '^STATE none buffer=\./alphaDabbrev timer=NIL$' 5; then
+      pass cape-dabbrev-range "Cape dabbrev replaced its slash-prefixed range"
+    else
+      fail cape-dabbrev-range "Cape dabbrev used the wrong path replacement range"
+    fi
+  else
+    fail cape-ordered-fallback "path-shaped dabbrev did not win the ordered fallback"
+  fi
+else
+  fail cape-ordered-setup "could not prepare the ordered Cape scenario"
+fi
+
+if run_fixture_command lem-yath-test-auto-cape-order-setup &&
+   wait_report '^SETUP cape-order directory=' 10 && enter_insert; then
+  tmux_cmd send-keys -t "$session" -l phb
+  sleep 0.5
+  lem_keys "$session" F7
+  screen=$(lem_capture "$session")
+  if ! grep -q 'prettyHugeBuffer' <<<"$screen" &&
+     wait_report '^STATE none buffer=phb timer=NIL$' 5; then
+    pass cape-prefix-only "Cape dabbrev did not turn Orderless into a global word matcher"
+  else
+    fail cape-prefix-only "a non-prefix dabbrev candidate bypassed Cape's dynamic table"
+  fi
+else
+  fail cape-prefix-setup "could not prepare the Cape prefix scenario"
 fi
 
 if run_fixture_command lem-yath-test-auto-cancel-setup &&
