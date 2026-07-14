@@ -24,52 +24,6 @@ In a table, align it and advance to the next cell."
         (org-cycle-global-visibility)
         (redraw-display))))
 
-;;; --- heading navigation ---------------------------------------------------
-
-(defun org-move-to-heading (heading)
-  (when heading
-    (move-point (current-point) heading)
-    (line-start (current-point))
-    t))
-
-(lem-vi-mode:define-motion lem-yath-org-forward-element (&optional (count 1))
-    (:universal)
-  (:type :exclusive)
-  (dotimes (_ (or count 1))
-    (unless (org-move-to-heading (org-next-heading-point))
-      (return))))
-
-(lem-vi-mode:define-motion lem-yath-org-backward-element (&optional (count 1))
-    (:universal)
-  (:type :exclusive)
-  (dotimes (_ (or count 1))
-    (unless (org-move-to-heading (org-previous-heading-point))
-      (return))))
-
-(lem-vi-mode:define-motion lem-yath-org-up-element (&optional (count 1))
-    (:universal)
-  (:type :exclusive)
-  (dotimes (_ (or count 1))
-    (unless (org-move-to-heading (org-parent-heading-point))
-      (return))))
-
-(lem-vi-mode:define-motion lem-yath-org-down-element (&optional (count 1))
-    (:universal)
-  (:type :exclusive)
-  (dotimes (_ (or count 1))
-    (unless (org-move-to-heading (org-first-child-heading-point))
-      (return))))
-
-(lem-vi-mode:define-motion lem-yath-org-top (&optional (count 1)) (:universal)
-  (:type :exclusive)
-  (let ((wanted (or count 1)))
-    (with-point ((point (current-point)))
-      (loop
-        (when (= wanted (or (org-heading-level-at point) 0))
-          (return (org-move-to-heading point)))
-        (unless (line-offset point -1)
-          (return))))))
-
 (lem-vi-mode:define-motion lem-yath-org-next-visible-line (&optional (count 1))
     (:universal)
   (:type :line)
@@ -781,9 +735,17 @@ still use TARGET as their cursor destination."
 
 ;;; --- checkboxes and lists -------------------------------------------------
 
+(defvar *org-recursive-block-list-navigation-p* nil
+  "Allow list parsing inside a confirmed recursive Org block.
+
+This is bound only by element-tree navigation for greater blocks such as
+quote and center.  Source-block editing and structural transforms retain the
+ordinary fail-closed block guard.")
+
 (defun org-list-prefix (point)
   "Return the reusable list prefix on POINT's line, or NIL."
-  (when (org-inside-block-p point)
+  (when (and (org-inside-block-p point)
+             (not *org-recursive-block-list-navigation-p*))
     (return-from org-list-prefix nil))
   (let ((line (line-string point)))
     (multiple-value-bind (start end register-starts register-ends)
@@ -911,7 +873,8 @@ source blocks on the ordinary Evil path."
 
 (defun org-list-item-columns (&optional (point (current-point)))
   "Return indentation, list-content, and text columns for POINT's item."
-  (when (org-inside-block-p point)
+  (when (and (org-inside-block-p point)
+             (not *org-recursive-block-list-navigation-p*))
     (return-from org-list-item-columns nil))
   (multiple-value-bind (start end register-starts register-ends)
       (cl-ppcre:scan

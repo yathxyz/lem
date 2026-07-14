@@ -249,6 +249,54 @@ write_fixtures() {
   printf '%s\n' '"alpha" beta' >"$WORKDIR/surround-change.org"
   printf '%s\n' 'alpha beta gamma' >"$WORKDIR/snipe.org"
   printf '%s\n' '* Static routing' >"$WORKDIR/static.org"
+  printf '%s\n' \
+    'Preamble paragraph.' \
+    '#+title: Element navigation' \
+    'After title.' \
+    '* Root' \
+    'SCHEDULED: <2026-07-14 Tue>' \
+    ':PROPERTIES:' \
+    ':ID: root-id' \
+    ':END:' \
+    'Intro paragraph.' \
+    'continued intro.' \
+    '- item one' \
+    '  continuation one' \
+    '  - nested child' \
+    '- item two' \
+    '' \
+    '| a | b |' \
+    '| c | d |' \
+    '#+TBLFM: $1=1' \
+    '' \
+    '#+begin_quote' \
+    'Quote paragraph.' \
+    '- quote item' \
+    '#+end_quote' \
+    '' \
+    '#+begin_src text' \
+    'source body' \
+    '#+end_src' \
+    '** Child' \
+    'Child body.' \
+    '*** Grand' \
+    'Grand body.' \
+    '** Child sibling' \
+    'Sibling body.' \
+    '* Other' \
+    'Other body.' >"$WORKDIR/navigation-elements.org"
+  printf '%s\n' \
+    '* Empty' \
+    '* Parent' \
+    '** Child' \
+    '* Drawer' \
+    ':PROPERTIES:' \
+    ':END:' \
+    'Drawer tail.' \
+    '* Quote' \
+    '#+begin_quote' \
+    '#+end_quote' \
+    'Quote tail.' >"$WORKDIR/navigation-empty-elements.org"
   printf '%s\n' 'One.  Two!  Three?' 'Four.' '' 'Five.  Six.' \
     >"$WORKDIR/navigation-sentence.org"
   printf '%s\n' \
@@ -461,6 +509,286 @@ if start_case static "$WORKDIR/static.org" 'Static routing'; then
       "normal d/x/X/< />, doubled shifts, visual defaults, text objects, and operator Snipe coexist"
   else
     fail static-routing "effective Org routing contract differed" "$CASE_SESSION"
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+# Evil-Org's gh/gl/gk/gj/gH maps follow GNU Org's element tree rather than
+# merely visiting headings.  These cases cover every supported greater-element
+# family and retain exact Normal-state endpoints under literal keys.
+if start_case element-forward "$WORKDIR/navigation-elements.org" \
+     'Preamble paragraph'; then
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-preamble element-forward "$CASE_SESSION" \
+      'line=2 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 3 j 0
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-headline element-forward "$CASE_SESSION" \
+      'line=34 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 6 j 0
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-property element-forward "$CASE_SESSION" \
+      'line=9 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 10 j 0
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-list element-forward "$CASE_SESSION" \
+      'line=16 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 12 j 4 l
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-nested-item element-forward "$CASE_SESSION" \
+      'line=14 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 15 j 2 l
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-table-row element-forward "$CASE_SESSION" \
+      'line=17 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 17 j 0
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-formula element-forward "$CASE_SESSION" \
+      'line=20 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 19 j 0
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-quote element-forward "$CASE_SESSION" \
+      'line=25 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 20 j 0
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-quote-body element-forward "$CASE_SESSION" \
+      'line=22 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 24 j 0
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-source element-forward "$CASE_SESSION" \
+      'line=28 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 27 j 0
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-child element-forward "$CASE_SESSION" \
+      'line=32 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 28 j 0
+  if operate_and_record element-forward "$CASE_SESSION" g j; then
+    assert_state element-forward-child-body element-forward "$CASE_SESSION" \
+      'line=30 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case element-backward "$WORKDIR/navigation-elements.org" \
+     'Preamble paragraph'; then
+  send_keys "$CASE_SESSION" 8 j 5 l
+  if operate_and_record element-backward "$CASE_SESSION" g k; then
+    assert_state element-backward-mid-paragraph element-backward \
+      "$CASE_SESSION" 'line=9 column=0' 'modified=no'
+  fi
+  if operate_and_record element-backward "$CASE_SESSION" g k; then
+    assert_state element-backward-drawer element-backward "$CASE_SESSION" \
+      'line=6 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 13 j 0
+  if operate_and_record element-backward "$CASE_SESSION" g k; then
+    assert_state element-backward-item element-backward "$CASE_SESSION" \
+      'line=11 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 15 j 0
+  if operate_and_record element-backward "$CASE_SESSION" g k; then
+    assert_state element-backward-table element-backward "$CASE_SESSION" \
+      'line=11 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 19 j 0
+  if operate_and_record element-backward "$CASE_SESSION" g k; then
+    assert_state element-backward-quote element-backward "$CASE_SESSION" \
+      'line=16 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 29 j 0
+  if operate_and_record element-backward "$CASE_SESSION" g k; then
+    assert_state element-backward-grand element-backward "$CASE_SESSION" \
+      'line=28 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 31 j 0
+  if operate_and_record element-backward "$CASE_SESSION" g k; then
+    assert_state element-backward-sibling element-backward "$CASE_SESSION" \
+      'line=28 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 33 j 0
+  if operate_and_record element-backward "$CASE_SESSION" g k; then
+    assert_state element-backward-root element-backward "$CASE_SESSION" \
+      'line=4 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case element-up-down-top "$WORKDIR/navigation-elements.org" \
+     'Preamble paragraph'; then
+  send_keys "$CASE_SESSION" 8 j 5 l
+  if operate_and_record element-up-down-top "$CASE_SESSION" g h; then
+    assert_state element-up-paragraph element-up-down-top "$CASE_SESSION" \
+      'line=4 column=0' 'modified=no'
+  fi
+  if operate_and_record element-up-down-top "$CASE_SESSION" g l; then
+    assert_state element-down-heading element-up-down-top "$CASE_SESSION" \
+      'line=5 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 10 j 0
+  if operate_and_record element-up-down-top "$CASE_SESSION" g l; then
+    assert_state element-down-list element-up-down-top "$CASE_SESSION" \
+      'line=11 column=1' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 15 j 0
+  if operate_and_record element-up-down-top "$CASE_SESSION" g l; then
+    assert_state element-down-table element-up-down-top "$CASE_SESSION" \
+      'line=16 column=1' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 19 j 0
+  if operate_and_record element-up-down-top "$CASE_SESSION" g l; then
+    assert_state element-down-quote element-up-down-top "$CASE_SESSION" \
+      'line=21 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 25 j 0
+  if operate_and_record element-up-down-top "$CASE_SESSION" g l; then
+    assert_state element-down-source-noop element-up-down-top \
+      "$CASE_SESSION" 'line=26 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 10 j 3 l
+  if operate_and_record element-up-down-top "$CASE_SESSION" g h; then
+    assert_state element-up-item element-up-down-top "$CASE_SESSION" \
+      'line=11 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 12 j 4 l
+  if operate_and_record element-up-down-top "$CASE_SESSION" g h; then
+    assert_state element-up-nested-item element-up-down-top "$CASE_SESSION" \
+      'line=13 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 16 j 2 l
+  if operate_and_record element-up-down-top "$CASE_SESSION" g h; then
+    assert_state element-up-table-row element-up-down-top "$CASE_SESSION" \
+      'line=16 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 20 j 0
+  if operate_and_record element-up-down-top "$CASE_SESSION" g h; then
+    assert_state element-up-quote-body element-up-down-top "$CASE_SESSION" \
+      'line=20 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 25 j 0
+  if operate_and_record element-up-down-top "$CASE_SESSION" g h; then
+    assert_state element-up-source element-up-down-top "$CASE_SESSION" \
+      'line=4 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 29 j 0
+  if operate_and_record element-up-down-top "$CASE_SESSION" g h; then
+    assert_state element-up-grand element-up-down-top "$CASE_SESSION" \
+      'line=28 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 30 j 0
+  if operate_and_record element-up-down-top "$CASE_SESSION" g H; then
+    assert_state element-top element-up-down-top "$CASE_SESSION" \
+      'line=4 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 0
+  if operate_and_record element-up-down-top "$CASE_SESSION" g H; then
+    assert_state element-top-preamble-noop element-up-down-top \
+      "$CASE_SESSION" 'line=1 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case element-count "$WORKDIR/navigation-elements.org" \
+     'Preamble paragraph'; then
+  if operate_and_record element-count "$CASE_SESSION" 2 g j; then
+    assert_state element-forward-count element-count "$CASE_SESSION" \
+      'line=3 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 31 j 0
+  if operate_and_record element-count "$CASE_SESSION" 2 g k; then
+    assert_state element-backward-count element-count "$CASE_SESSION" \
+      'line=4 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 30 j 0
+  if operate_and_record element-count "$CASE_SESSION" 2 g h; then
+    assert_state element-up-count element-count "$CASE_SESSION" \
+      'line=28 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case element-delete "$WORKDIR/navigation-elements.org" \
+     'Preamble paragraph'; then
+  send_keys "$CASE_SESSION" 3 j 0
+  if operate_and_record element-delete "$CASE_SESSION" d g j; then
+    assert_state element-delete-subtree element-delete "$CASE_SESSION" \
+      'text=Preamble paragraph.\n#+title: Element navigation\nAfter title.\n* Other\nOther body.\n bytes=' \
+      'register=* Root\nSCHEDULED: <2026-07-14 Tue>\n' \
+      'Sibling body.\n register-type=line' \
+      'state=normal selection=none' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    if record_state element-delete "$CASE_SESSION"; then
+      assert_state element-delete-undo element-delete "$CASE_SESSION" \
+        'text=Preamble paragraph.\n#+title: Element navigation\nAfter title.\n* Root\n' \
+        '* Other\nOther body.\n bytes=' 'modified=no'
+    fi
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case element-visual "$WORKDIR/navigation-elements.org" \
+     'Preamble paragraph'; then
+  send_keys "$CASE_SESSION" 3 j 0 v g j
+  if lem_wait_for "$CASE_SESSION" 'VISUAL' "$WAIT_TIMEOUT" >/dev/null &&
+     record_state element-visual "$CASE_SESSION"; then
+    assert_state element-visual-subtree element-visual "$CASE_SESSION" \
+      'state=visual-char selection=char' \
+      'selected=* Root\nSCHEDULED: <2026-07-14 Tue>\n' \
+      'Sibling body.\n*' 'line=34 column=0' 'modified=no'
+  else
+    fail element-visual-subtree \
+      "Visual element motion did not settle or report" "$CASE_SESSION"
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case element-malformed "$WORKDIR/unsafe-unclosed.org" \
+     'body without end'; then
+  if operate_and_record element-malformed "$CASE_SESSION" g j; then
+    assert_state element-malformed-forward element-malformed "$CASE_SESSION" \
+      'text=#+begin_src text\nbody without end\n bytes=' \
+      'point=1 line=1 column=0' 'state=normal selection=none' \
+      'register= register-type=none' 'modified=no'
+  fi
+  if operate_and_record element-malformed "$CASE_SESSION" d g j; then
+    assert_state element-malformed-operator element-malformed "$CASE_SESSION" \
+      'text=#+begin_src text\nbody without end\n bytes=' \
+      'point=1 line=1 column=0' 'state=normal selection=none' \
+      'register= register-type=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case element-empty "$WORKDIR/navigation-empty-elements.org" \
+     'Empty'; then
+  if operate_and_record element-empty "$CASE_SESSION" g l; then
+    assert_state element-empty-headline element-empty "$CASE_SESSION" \
+      'point=1 line=1 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g j 0
+  if operate_and_record element-empty "$CASE_SESSION" g l; then
+    assert_state element-heading-child element-empty "$CASE_SESSION" \
+      'line=3 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 4 j 0
+  if operate_and_record element-empty "$CASE_SESSION" g l; then
+    assert_state element-empty-drawer element-empty "$CASE_SESSION" \
+      'line=5 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" g g 8 j 0
+  if operate_and_record element-empty "$CASE_SESSION" g l; then
+    assert_state element-empty-quote element-empty "$CASE_SESSION" \
+      'line=9 column=0' 'modified=no'
   fi
   stop_case "$CASE_SESSION"
 fi

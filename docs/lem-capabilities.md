@@ -1443,8 +1443,8 @@ cycles the first global overview/contents/all implementation. Changes clear
 folds, arbitrary movement into hidden text reveals it, and hidden rows are not
 written to disk.
 
-The bounded editing layer supplies visible-row `j/k`,
-`gh/gl/gk/gj/gH` heading navigation, Org-aware `o/O`, heading insertion,
+The bounded editing layer supplies visible-row `j/k`, GNU-style
+`gh/gl/gk/gj/gH` element-tree navigation, Org-aware `o/O`, heading insertion,
 and context-dispatched Meta editing. `M-h/l` changes one heading or list item
 and moves a table column, while falling back to prose-word motion. `M-k/j`
 moves heading/simple unordered-list trees or table rows. `M-H/L` uses complete
@@ -1457,6 +1457,12 @@ blocks, including mismatched nested end markers, are excluded from heading,
 list, and table dispatch; literal `M-K/J` line dragging remains available.
 
 The always-active Evil-Org base motions are also local to `.org` buffers.
+`gh/gl/gk/gj` reproduce `org-up/down/backward/forward-element` across
+headlines and sections, paragraphs and affiliated keywords, planning lines,
+property drawers, nested list items and plain lists, table rows and formulas,
+and matched quote/source blocks; `gH` climbs to the top ancestor headline.
+Counts, Normal and Visual destinations, exclusive operator shapes, empty
+elements, and malformed blocks follow the pinned Emacs oracle.
 `(`/`)` use the pinned Emacs double-space sentence rules across wrapped prose;
 inside tables they use GNU Org field boundaries and its complete-count behavior.
 `{`/`}` use structural paragraph units rather than generic blank-line motion:

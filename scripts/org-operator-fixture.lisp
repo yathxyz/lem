@@ -63,7 +63,12 @@
   '(("(" lem-yath-org-backward-sentence)
     (")" lem-yath-org-forward-sentence)
     ("{" lem-yath-org-backward-paragraph)
-    ("}" lem-yath-org-forward-paragraph)))
+    ("}" lem-yath-org-forward-paragraph)
+    ("g h" lem-yath-org-up-element)
+    ("g l" lem-yath-org-down-element)
+    ("g k" lem-yath-org-backward-element)
+    ("g j" lem-yath-org-forward-element)
+    ("g H" lem-yath-org-top)))
 
 (defun org-operator-test-routes-p (state)
   (loop :for (keys command) :in *org-operator-test-object-routes*

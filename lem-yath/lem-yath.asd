@@ -42,6 +42,7 @@
                              (:file "mode")
                              (:file "commands")
                              (:file "structure")
+                             (:file "element-navigation")
                              (:file "text-objects")))
                (:file "roam")
                (:file "notes")
