@@ -158,6 +158,10 @@ of writing `.fasl` files into the source tree.
   chains; checks run on mode enable, save, newline, or 500 ms idle change,
   reuse the LSP overlay/list/navigation UI, refuse SOPS plaintext, and yield
   diagnostics completely while an LSP workspace owns the buffer
+- automatic per-buffer tree-sitter highlighting from 19 packaged grammar/query
+  pairs across existing language modes, with predicate-aware capture
+  precedence, Unicode-safe reparsing, and the original mode parser as fallback;
+  indentation, LSP, and structural editing remain owned by their normal modes
 - relative line numbers in programming buffers only, matching the Emacs
   `prog-mode` scope while leaving prose and utility buffers clean
 - the current Modus Vivendi Tinted palette, truncated long lines, no global

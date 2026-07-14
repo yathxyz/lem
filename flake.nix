@@ -105,6 +105,115 @@
             }
           );
 
+          treeSitterGrammars = pkgs.tree-sitter-grammars;
+          javascriptHighlights = pkgs.concatText "lem-yath-javascript-highlights.scm" [
+            "${treeSitterGrammars.tree-sitter-javascript}/queries/highlights.scm"
+            "${treeSitterGrammars.tree-sitter-javascript}/queries/highlights-params.scm"
+            "${treeSitterGrammars.tree-sitter-javascript}/queries/highlights-jsx.scm"
+          ];
+          typescriptHighlights = pkgs.concatText "lem-yath-typescript-highlights.scm" [
+            "${treeSitterGrammars.tree-sitter-javascript}/queries/highlights.scm"
+            "${treeSitterGrammars.tree-sitter-typescript.src}/queries/highlights.scm"
+          ];
+          tsxHighlights = pkgs.concatText "lem-yath-tsx-highlights.scm" [
+            "${treeSitterGrammars.tree-sitter-javascript}/queries/highlights.scm"
+            "${treeSitterGrammars.tree-sitter-javascript}/queries/highlights-jsx.scm"
+            "${treeSitterGrammars.tree-sitter-typescript.src}/queries/highlights.scm"
+          ];
+          treeSitterSpecs = [
+            {
+              name = "bash";
+              grammar = treeSitterGrammars.tree-sitter-bash;
+            }
+            {
+              name = "c";
+              grammar = treeSitterGrammars.tree-sitter-c;
+            }
+            {
+              name = "c_sharp";
+              grammar = treeSitterGrammars.tree-sitter-c-sharp;
+            }
+            {
+              name = "clojure";
+              grammar = treeSitterGrammars.tree-sitter-clojure;
+            }
+            {
+              name = "css";
+              grammar = treeSitterGrammars.tree-sitter-css;
+            }
+            {
+              name = "go";
+              grammar = treeSitterGrammars.tree-sitter-go;
+            }
+            {
+              name = "html";
+              grammar = treeSitterGrammars.tree-sitter-html;
+            }
+            {
+              name = "java";
+              grammar = treeSitterGrammars.tree-sitter-java;
+            }
+            {
+              name = "javascript";
+              grammar = treeSitterGrammars.tree-sitter-javascript;
+              query = javascriptHighlights;
+            }
+            {
+              name = "json";
+              grammar = treeSitterGrammars.tree-sitter-json;
+            }
+            {
+              name = "lua";
+              grammar = treeSitterGrammars.tree-sitter-lua;
+            }
+            {
+              name = "markdown";
+              grammar = treeSitterGrammars.tree-sitter-markdown;
+            }
+            {
+              name = "nix";
+              grammar = treeSitterGrammars.tree-sitter-nix;
+            }
+            {
+              name = "python";
+              grammar = treeSitterGrammars.tree-sitter-python;
+            }
+            {
+              name = "rust";
+              grammar = treeSitterGrammars.tree-sitter-rust;
+            }
+            {
+              name = "toml";
+              grammar = treeSitterGrammars.tree-sitter-toml;
+            }
+            {
+              name = "typescript";
+              grammar = treeSitterGrammars.tree-sitter-typescript;
+              query = typescriptHighlights;
+            }
+            {
+              name = "tsx";
+              grammar = treeSitterGrammars.tree-sitter-tsx;
+              query = tsxHighlights;
+            }
+            {
+              name = "yaml";
+              grammar = treeSitterGrammars.tree-sitter-yaml;
+            }
+          ];
+          treeSitterBundle = pkgs.linkFarm "lem-yath-tree-sitter-bundle" (
+            lib.concatMap (spec: [
+              {
+                name = "${spec.name}/parser";
+                path = "${spec.grammar}/parser";
+              }
+              {
+                name = "${spec.name}/highlights.scm";
+                path = spec.query or "${spec.grammar}/queries/highlights.scm";
+              }
+            ]) treeSitterSpecs
+          );
+
           coreRuntimeInputs =
             with pkgs;
             [
@@ -198,6 +307,7 @@
             runtimeInputs = defaultRuntimeInputs;
             text = ''
               export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
+              export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
 
               cache_home="''${XDG_CACHE_HOME:-''${HOME:-/tmp}/.cache}"
               source_key="$(printf '%s' '${self}/lem-yath' | sha256sum | cut -c1-16)"
@@ -430,6 +540,7 @@
             lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
             real-lsp-test = mkRealLspTestApp "lem-yath-real-lsp-test" "real-lsp-test.sh";
             lint-test = mkTestAppWithLemAndInputs lemYath rustRuntimeInputs "lem-yath-lint-test" "lint-test.sh";
+            tree-sitter-test = mkTestAppWithLem lemYath "lem-yath-tree-sitter-test" "tree-sitter-test.sh";
           };
 
           checks = {
@@ -481,6 +592,7 @@
             lsp-project = mkCheckWithLem lemLspTest "lsp-project" "lsp-project-test.sh";
             real-lsp = mkRealLspCheck "real-lsp" "real-lsp-test.sh";
             lint = mkCheckWithLemAndInputs lemYath rustRuntimeInputs "lint" "lint-test.sh";
+            tree-sitter = mkCheckWithLem lemYath "tree-sitter" "tree-sitter-test.sh";
             parity-ledger =
               pkgs.runCommand "lem-yath-parity-ledger-check" { nativeBuildInputs = [ pkgs.python3 ]; }
                 ''

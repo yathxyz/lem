@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Real installed-Lem coverage for configured treesit-auto-style highlighting.
+set -uo pipefail
+
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$here/scripts/tui-driver.sh"
+
+id="${LEM_YATH_CHECK_ID:-tree-sitter-$$}"
+session="lem-yath-tree-sitter-$id"
+root="$(mktemp -d "${TMPDIR:-/tmp}/lem-yath-tree-sitter.XXXXXX")"
+export HOME="$root/home"
+export XDG_CACHE_HOME="$root/cache"
+export WORKDIR="$root/work"
+export LEM_YATH_TREE_SITTER_REPORT="$root/report"
+export LEM_YATH_TREE_SITTER_FILE="$root/main.py"
+mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR"
+: >"$LEM_YATH_TREE_SITTER_REPORT"
+
+cleanup() {
+  lem_stop "$session" || true
+  case "${root:-}" in
+    */lem-yath-tree-sitter.*) rm -rf -- "$root" ;;
+    *) printf 'Refusing unsafe tree-sitter cleanup path: %s\n' \
+         "${root:-<unset>}" >&2 ;;
+  esac
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+printf '%s\n' \
+  'lower = "hello"' \
+  'Upper = lower' \
+  'custom(Upper)' \
+  'print(Upper)' \
+  'if Upper:' \
+  '    pass' \
+  >"$LEM_YATH_TREE_SITTER_FILE"
+
+fixture="$(lem-yath_lisp_string "$here/scripts/tree-sitter-fixture.lisp")"
+lem_start "$session" "$LEM_YATH_TREE_SITTER_FILE" --eval "(load #P$fixture)"
+
+for _ in $(seq 1 480); do
+  if grep -q '^SUMMARY ' "$LEM_YATH_TREE_SITTER_REPORT" 2>/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
+
+if ! grep -q '^SUMMARY ' "$LEM_YATH_TREE_SITTER_REPORT" 2>/dev/null; then
+  printf 'TREE-SITTER TEST FAILED: Lem produced no summary\n' >&2
+  lem_capture "$session" >&2 || true
+  sed -n '1,260p' "$LEM_YATH_TREE_SITTER_REPORT" >&2 || true
+  exit 1
+fi
+
+sed -n '1,320p' "$LEM_YATH_TREE_SITTER_REPORT"
+grep -q '^SUMMARY PASS failures=0 grammars=19/19$' \
+  "$LEM_YATH_TREE_SITTER_REPORT"

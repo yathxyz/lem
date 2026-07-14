@@ -999,7 +999,7 @@ temporary buffers, avoid file/mode/switch/kill hooks, and skip undecodable,
 binary, or over-1-MiB files; ordinary window-display hooks can still run. They
 deliberately do not activate major
 modes because Lem has no generic isolated activation path: arbitrary mode hooks
-and shared tree-sitter parser state could otherwise leak from a preview.
+and unrelated native or service state could otherwise leak from a preview.
 The two-process ncurses gate is `scripts/project-navigation-test.sh`; it also
 forces overlapping cancellation, hostile submodule fixtures, grouped picker
 lifecycle/identity cases, lexical symlinks, and filtering beyond the display
@@ -1316,9 +1316,11 @@ notifications remain outside this implementation.
 ## 5. LSP  (`extensions/lsp-mode/`, package `lem-lsp-mode`)
 
 Lem-yath adds automatic C# support for `.cs` and `.csx`: its native
-`csharp-mode` supplies C-like indentation, comments, strings, keyword/operator
-highlighting, and a `csharp-ls` spec rooted at the nearest `.sln`, `.csproj`, or
-`.git` marker. The packaged server uses stdio and LSP 3.17 pull diagnostics;
+`csharp-mode` supplies C-like indentation and a bounded TextMate fallback,
+while `src/tree-sitter.lisp` automatically installs the packaged C# parser and
+highlight query in eligible buffers. A `csharp-ls` spec is rooted at the
+nearest `.sln`, `.csproj`, or `.git` marker. The packaged server uses stdio and
+LSP 3.17 pull diagnostics;
 full reports feed the same diagnostic overlays as push diagnostics, unchanged
 reports preserve them, stale responses are discarded, and server refresh
 requests invalidate the cached result. Because csharp-ls can return an empty
@@ -1328,9 +1330,11 @@ gate obtains a real `MissingType` semantic diagnostic and verifies server
 cleanup.
 
 This is intentionally partial parity with Emacs `csharp-mode`/
-`csharp-ts-mode`: Lem-yath has no C# tree-sitter mode. It acknowledges dynamic
-file-watch registration and work-done progress creation so conforming servers
-can continue, but it does not provide filesystem notifications or render a
+`csharp-ts-mode`: tree-sitter supplies highlighting, but the native mode and
+C-like indentation remain in control rather than reproducing the full
+tree-sitter major-mode semantics. Lem-yath acknowledges dynamic file-watch
+registration and work-done progress creation so conforming servers can
+continue, but it does not provide filesystem notifications or render a
 progress UI.
 
 ### Enable — `lsp-mode.lisp:260` (`define-minor-mode lsp-mode`)
@@ -1408,10 +1412,9 @@ highlighting.
 
 ## 6. Tree-sitter  (`extensions/tree-sitter/`, package `lem-tree-sitter`)
 
-Depends on `tree-sitter-cl` (FFI bindings). **Both `tree-sitter-cl` and `lem-tree-sitter`
-are built into the nix image** (`flake.nix:351`). Bundled grammars (LD_LIBRARY_PATH in
-`flake.nix:372`): **json, markdown, yaml, nix, python, javascript, typescript, go, perl,
-clojure** (10 languages).
+Depends on `tree-sitter-cl` (FFI bindings). **Both `tree-sitter-cl` and
+`lem-tree-sitter` are built into the Nix image.** Upstream Lem exposes the API
+below but does not automatically wire it into language modes.
 
 ### What it provides — `extensions/tree-sitter/integration.lisp`, `package.lisp`
 - `treesitter-parser` class — a `syntax-parser` replacement using highlights.scm/
@@ -1424,13 +1427,34 @@ clojure** (10 languages).
 - `enable-tree-sitter-for-all-modes`, `tree-sitter-available-p`,
   `get-buffer-treesitter-parser` (exported, `package.lisp`).
 
-### How it's enabled — **manual, not automatic.**
-There is **no minor mode and no auto-wiring**: shipped language modes still use their
-TextMate/regex syntax tables. To use tree-sitter you call `enable-tree-sitter-for-mode`
-with a grammar name + a `highlights.scm` path. There is no ready set of bundled `.scm`
-queries inside the lem package (you supply query paths). So tree-sitter is a
-**capability/API**, not a turnkey feature — budget config effort. Incremental reparse is
-supported (`record-tree-sitter-edit`, lines 220-249).
+### Lem-yath automatic policy — `lem-yath/src/tree-sitter.lisp`
+
+The installed wrapper exports a deterministic bundle containing a parser and
+`highlights.scm` query for **Bash, C, C#, Clojure, CSS, Go, HTML, Java,
+JavaScript, JSON, Lua, Markdown, Nix, Python, Rust, TOML, TypeScript, TSX, and
+YAML** (19 grammar/query pairs). Eligible buffers automatically receive a
+fresh parser when their existing Lem major mode has a corresponding entry.
+File-backed buffers are eligible regardless of name; fileless buffers whose
+names begin with a space or `*` are excluded, matching the configured Emacs
+`treesit-auto` policy. Missing bundles, unavailable FFI support, and activation
+errors leave the mode's original TextMate/regex parser in place.
+
+Each buffer gets a copied syntax table and its own parser, query, tree, edit
+cache, and tick. Mode changes and buffer deletion release the native parser
+state. Query predicates needed by the packaged highlight files (`match?`,
+`eq?`, and `any-of?`) are evaluated before capture application, and later
+query patterns refine generic captures deterministically. The configuration
+uses highlighting only: mode selection, indentation, LSP, and structural
+editing remain owned by their existing implementations.
+
+This approximates the configured Emacs `treesit-font-lock-level 3`; it does not
+load injection or locals queries. In particular, captures guarded by
+`#is-not? local` are omitted rather than risking false builtin highlighting.
+For correctness across Unicode and multiline edits, Lem-yath reparses the
+current buffer text from scratch once per changed buffer tick instead of using
+upstream Lem's approximate incremental byte edit. Languages without a Lem
+major mode remain separate mode gaps. The installed-runtime gate is
+`scripts/tree-sitter-test.sh`.
 
 ---
 
@@ -2125,8 +2149,9 @@ bounded native editing subset in §8, but not GNU Org's Babel/export ecosystem),
 **no upstream snippet system** (no yasnippet/tempel;
 only dynamic abbrev `M-/`; lem-yath adds the bounded data-only subset in §4),
 **no static abbrev tables**, **completion has fuzzy primitives but
-no Orderless/Prescient framework**, **tree-sitter is a manual API** (no auto-enabled
-tree-sitter modes; you wire grammars+queries yourself, 10 grammars bundled), **vi-mode
+no Orderless/Prescient framework**, **upstream tree-sitter is a manual API**
+(lem-yath supplies 19 automatic grammar/query mappings for existing modes, with
+the limitations in §6), **vi-mode
 lacks surround/sneak/easymotion**, **legit lacks blame/bisect/cherry-pick/region-staging**,
 and the **nix image cannot freely `ql:quickload` new deps at runtime** (extension-manager
 is compiled out), so anything outside `lem/extensions` must be added at image/ASDF time.

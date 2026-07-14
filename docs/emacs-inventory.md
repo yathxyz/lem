@@ -285,7 +285,7 @@ Diagnostics policy (`yath/eglot-managed-diagnostics`): when an Eglot-managed buf
 
 `eglot-ensure` wrapper `yath/eglot-ensure` skips minibuffers and remote (TRAMP) dirs.
 
-**Tree-sitter**: `treesit-auto` with `treesit-auto-install nil` (grammars from Nix `treesit-grammars.with-all-grammars` / `$TREE_SITTER_GRAMMARS`), `global-treesit-auto-mode 1`, added to `auto-mode-alist` for all. `treesit-font-lock-level 4`. An advice skips activation in transient internal buffers.
+**Tree-sitter**: `treesit-auto` with `treesit-auto-install nil` (grammars from Nix `treesit-grammars.with-all-grammars` / `$TREE_SITTER_GRAMMARS`), `global-treesit-auto-mode 1`, added to `auto-mode-alist` for all. `treesit-font-lock-level 3`. An advice skips activation in transient internal buffers.
 
 **apheleia** = formatter-on-save: `apheleia-mode` on `prog-mode` (`SPC b f` = `apheleia-format-buffer`). Uses apheleia's default per-language formatter registry (no custom formatter overrides in elisp) — backed by the Nix-provided binaries below.
 
@@ -509,7 +509,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
   default for C#) — Lem has `lem-lsp-mode`; replicate server selection and the
   nixd custom workspace config plus Go/Rust/Python/Nix/C# coverage.
 - **apheleia format-on-save** (`SPC b f`) and **flycheck/flymake** diagnostics policy.
-- **tree-sitter** highlighting (`treesit-auto`) — Lem has its own highlighting; map grammar coverage.
+- **tree-sitter** highlighting (`treesit-auto`) — Lem-yath now automatically applies its packaged grammar/query bundle to the corresponding existing Lem modes; dedicated missing language modes remain a separate gap.
 - **Git**: magit (`SPC g g/G`) + git-gutter + git-timemachine; smart jj/git dispatch; majutsu (jj) if a Lem jj porcelain exists (likely a gap).
 - **dape** debugging (Python/Go/Rust/C) — likely partial/gap in Lem.
 - **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — Lem now has bounded native Org editing, metadata-aware Org/Markdown roam-node selection, the configured five roam capture templates with finalize/abort and deferred insertion, daily, journal, general Org capture, and agenda implementations. Org-roam database/backlink/autosync semantics and the full general capture/journal interfaces remain gaps.

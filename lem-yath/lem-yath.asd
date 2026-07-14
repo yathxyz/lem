@@ -29,6 +29,7 @@
                (:file "snippets")
                (:file "lsp-snippets")
                (:file "csharp-mode")
+               (:file "tree-sitter")
                (:file "ide")
                (:file "editorconfig")
                (:file "formatting")
