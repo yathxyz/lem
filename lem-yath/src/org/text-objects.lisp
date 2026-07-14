@@ -158,6 +158,10 @@ line too many."
   ;; Operator-pending receives only genuine motions from the Org normal map.
   ;; Point-mutating normal commands such as o/O, Tab, and Meta structure edits
   ;; must never be executed by Lem's motion reader.
+  ;; A repeated range operator must resolve to itself so >> and << can use
+  ;; Lem's native doubled-operator line selection.
+  (define-key *org-vi-operator-keymap* "<" 'lem-yath-org-shift-left)
+  (define-key *org-vi-operator-keymap* ">" 'lem-yath-org-shift-right)
   (define-key *org-vi-operator-keymap* "j" 'lem-yath-org-next-visible-line)
   (define-key *org-vi-operator-keymap* "k" 'lem-yath-org-previous-visible-line)
   (define-key *org-vi-operator-keymap* "g h" 'lem-yath-org-up-element)

@@ -1272,6 +1272,247 @@ The second value is the length of SECOND in its new leading position."
       (org-table-align)
       (message "No supported Org context action at point")))
 
+;;; --- Evil-Org range shifting --------------------------------------------
+
+(defun org-operator-lines (start end type visual-p)
+  "Return the logical lines selected by an operator START..END range."
+  (with-point ((first start)
+               (last end))
+    (line-start first)
+    (line-start last)
+    ;; A doubled normal-state line operator receives an exclusive point at
+    ;; the following BOL.  Visual-line ranges and ordinary motions do not.
+    (when (and (not visual-p)
+               (member type '(:line :screen-line))
+               (point< first last)
+               (zerop (point-charpos end)))
+      (line-offset last -1))
+    (loop :with lines := nil
+          :with point := (copy-point first :temporary)
+          :do (push (copy-point point :temporary) lines)
+          :when (same-line-p point last)
+            :do (return (nreverse lines))
+          :unless (line-offset point 1)
+            :do (return (nreverse lines)))))
+
+(defun org-lines-contain-line-p (lines point)
+  (not (null (find-if (lambda (line) (same-line-p line point)) lines))))
+
+(defun org-lines-contained-p (lines container)
+  (every (lambda (line) (org-lines-contain-line-p container line)) lines))
+
+(defun org-abort-range-shift (control &rest arguments)
+  (message (apply #'format nil control arguments))
+  (error 'lem-vi-mode/core:operator-abort))
+
+(defun org-shift-heading-range (lines direction)
+  "Promote or demote the heading lines in LINES by one level."
+  (let ((headings (remove-if-not #'org-heading-line-p lines)))
+    (when (and (minusp direction)
+               (find-if (lambda (line)
+                          (= 1 (org-heading-level-at line)))
+                        headings))
+      (org-abort-range-shift "A level-1 heading cannot be promoted"))
+    (org-clear-folds (current-buffer))
+    (dolist (heading headings)
+      (with-point ((point heading))
+        (line-start point)
+        (if (plusp direction)
+            (insert-character point #\*)
+            (delete-character point 1)))
+      (org-align-current-heading-tags heading))
+    t))
+
+(defun org-list-context-lines-for-range ()
+  "Return the conservative contiguous list segment around point."
+  (when (org-list-item-line-p (current-point))
+    (org-list-repair-segment-lines (current-point))))
+
+(defun org-list-context-ordered-p (lines)
+  (not (null (find-if #'org-list-ordered-item-p lines))))
+
+(defun org-list-tree-contained-in-lines-p (item lines)
+  "Whether every nonblank line owned by ITEM is represented in LINES."
+  (alexandria:when-let ((end (org-list-item-tree-end item)))
+    (with-point ((point item))
+      (line-start point)
+      (loop :while (point< point end)
+            :for text := (line-string point)
+            :unless (or (zerop (length text))
+                        (org-lines-contain-line-p lines point))
+              :return nil
+            :unless (line-offset point 1)
+              :return t
+            :finally (return t)))))
+
+(defun org-preflight-ordered-range-shift (context)
+  "Reject a numbered-list shift whose renumbering cannot be exact."
+  (when (org-list-context-ordered-p context)
+    (multiple-value-bind (lines safe-p ordered-p)
+        (org-ordered-list-repair-plan (current-point))
+      (declare (ignore lines ordered-p))
+      (unless safe-p
+        (org-abort-range-shift
+         "Ordered-list shifting needs unsupported structural repair")))))
+
+(defun org-convert-top-level-star-items (lines delta)
+  "Prevent star list items shifted to column zero from becoming headings."
+  (dolist (line lines)
+    (let ((indent (nth-value 0 (org-list-item-columns line))))
+      (when (and indent
+                 (zerop (+ indent delta))
+                 (org-list-star-item-p line))
+        (with-point ((bullet line))
+          (line-start bullet)
+          (delete-character bullet 1)
+          (insert-character bullet #\-))))))
+
+(defun org-shift-list-lines (lines delta)
+  (org-clear-folds (current-buffer))
+  (dolist (line lines)
+    (unless (zerop (length (line-string line)))
+      (org-shift-line-indentation line delta)))
+  (org-convert-top-level-star-items lines delta))
+
+(defun org-top-list-whole-shift-p (selected context visual-p direction)
+  "Whether Evil-Org applies its first-item whole-list indentation rule."
+  (and (plusp direction)
+       (not visual-p)
+       selected
+       context
+       (same-line-p (first selected) (first context))
+       (same-line-p (current-point) (first context))
+       (zerop (nth-value 0 (org-list-item-columns (first context))))))
+
+(defun org-safe-whole-list-context-p (context)
+  "Whether CONTEXT can be shifted literally without Org reflow."
+  (and context
+       (every (lambda (line)
+                (and (not (org-list-line-structural-tab-p line))
+                     (or (org-list-item-line-p line)
+                         (zerop (length (line-string line)))
+                         (plusp (org-line-indentation line)))))
+              context)))
+
+(defun org-shift-list-range (selected context direction visual-p)
+  "Shift SELECTED list lines in DIRECTION using pinned Evil-Org semantics."
+  (unless (org-lines-contained-p selected context)
+    (return-from org-shift-list-range nil))
+  (let ((origin-column (point-charpos (current-point))))
+    (org-preflight-ordered-range-shift context)
+    (if (org-top-list-whole-shift-p selected context visual-p direction)
+        (progn
+          (unless (org-safe-whole-list-context-p context)
+            (org-abort-range-shift
+             "The top-level list needs unsupported continuation repair"))
+          ;; org-list-indent-item-generic uses one literal column for this
+          ;; special first-item path, not the ordinary sibling content column.
+          (org-shift-list-lines context 1)
+          (move-to-column (current-point) (1+ origin-column)))
+        (progn
+          (unless (every #'org-list-item-line-p selected)
+            (org-abort-range-shift
+             "Range list shifting with continuation text is unsupported"))
+          (when (find-if #'org-list-line-structural-tab-p context)
+            (org-abort-range-shift
+             "Tab-indented list structure cannot be shifted exactly"))
+          (when (find-if #'org-list-item-has-direct-body-p selected)
+            (org-abort-range-shift
+             "List items with continuation text cannot be shifted exactly"))
+          (when (and (minusp direction)
+                     (find-if
+                      (lambda (item)
+                        (and (org-list-item-has-child-p item)
+                             (not (org-list-tree-contained-in-lines-p
+                                   item selected))))
+                      selected))
+            (org-abort-range-shift
+             "Cannot outdent a list item without its children"))
+          (let* ((first (first selected))
+                 (indent (nth-value 0 (org-list-item-columns first)))
+                 (target (org-list-indent-target first direction)))
+            (unless target
+              (org-abort-range-shift
+               "Cannot ~:[outdent~;indent~] this list range"
+               (plusp direction)))
+            (let ((delta (- target indent)))
+              (org-shift-list-lines selected delta)
+              (move-to-column (current-point)
+                              (max 0 (+ origin-column delta))))))))
+  (when (org-list-context-ordered-p context)
+    (org-repair-ordered-list-at-point))
+  t)
+
+(defun org-table-range-column-count (start end)
+  "Return Evil-Org's table moves represented by START..END.
+
+Ordinary operator counts only widen a short character range and therefore do
+not inherently multiply the move.  A range crossing multiple cell boundaries
+does move the column once per selected boundary."
+  (max 1 (count #\| (points-to-string start end))))
+
+(defun org-shift-table-column-range (start end direction)
+  "Move the current table column according to the one-line range."
+  (let ((steps (org-table-range-column-count start end)))
+    (unless (org-table-structural-editable-p)
+      (return-from org-shift-table-column-range nil))
+    ;; Pinned evil-org-table-move-column anchors a rightward move at BEG and a
+    ;; leftward move at END, independent of the active Visual endpoint.
+    (move-point (current-point) (if (plusp direction) start end))
+    (multiple-value-bind (table-start table-end) (org-table-bounds)
+      (let* ((lines (org-table-row-lines table-start table-end))
+             (columns (org-table-data-column-count lines))
+             (cell (and columns
+                        (min columns (max 1 (org-table-cell-index)))))
+             (target (and cell (+ cell (* direction steps)))))
+        (unless (and target (<= 1 target columns))
+          (org-abort-range-shift "Cannot move table column further"))))
+    (loop :repeat steps
+          :do
+      (unless (org-table-move-column direction)
+        (org-abort-range-shift "Cannot move table column further")))
+    t))
+
+(defun org-shift-lines-fixed (lines direction)
+  "Apply Evil's configured four-column shift to LINES."
+  (let ((delta (* direction 4)))
+    (org-clear-folds (current-buffer))
+    (dolist (line lines)
+      (unless (zerop (length (line-string line)))
+        (org-shift-line-indentation line delta)))
+    t))
+
+(defun org-shift-range (start end type direction)
+  "Dispatch Evil-Org's structural range shift in DIRECTION."
+  (let* ((visual-p (lem-vi-mode/visual:visual-p))
+         (selected (org-operator-lines start end type visual-p)))
+    (cond
+      ((or (org-heading-line-p (current-point))
+           (org-heading-line-p start))
+       (org-shift-heading-range selected direction))
+      ((and (org-table-line-p (current-point))
+            (same-line-p start end))
+       (org-shift-table-column-range start end direction))
+      ((alexandria:when-let ((context (org-list-context-lines-for-range)))
+         (and (org-lines-contained-p selected context)
+              (org-shift-list-range selected context direction visual-p))))
+      ((and (not visual-p) (org-table-line-p (current-point)))
+       (multiple-value-bind (table-start table-end) (org-table-bounds)
+         (org-shift-lines-fixed
+          (org-operator-lines table-start table-end :exclusive t)
+          direction)))
+      (t (org-shift-lines-fixed selected direction)))))
+
+(lem-vi-mode:define-operator lem-yath-org-shift-right
+    (start end type) ("<R>")
+  (:move-point nil)
+  (org-shift-range start end type 1))
+
+(lem-vi-mode:define-operator lem-yath-org-shift-left
+    (start end type) ("<R>")
+  (:move-point nil)
+  (org-shift-range start end type -1))
+
 ;;; --- Evil-Org destructive editing ---------------------------------------
 
 (defvar *org-tags-column* -77
@@ -1311,11 +1552,11 @@ matching the active Emacs terminal profile.")
                     :do (decf blank))
               (values start end blank))))))))
 
-(defun org-align-current-heading-tags ()
+(defun org-align-current-heading-tags (&optional (point (current-point)))
   "Match `org-fix-tags-on-the-fly' for the configured terminal profile."
   (multiple-value-bind (tag-start tag-end blank-start)
-      (org-heading-tag-bounds)
-    (when (and tag-start (< (point-charpos (current-point)) tag-start))
+      (org-heading-tag-bounds point)
+    (when (and tag-start (< (point-charpos point) tag-start))
       (let* ((tag-width (- tag-end tag-start))
              (configured *org-tags-column*)
              (target (cond ((minusp configured)
@@ -1323,12 +1564,12 @@ matching the active Emacs terminal profile.")
                            ((plusp configured) configured)
                            (t (1+ blank-start))))
              (new-start (max target (1+ blank-start)))
-             (origin-column (point-charpos (current-point)))
+             (origin-column (point-charpos point))
              (in-blank-p (and (> origin-column blank-start)
                               (<= origin-column tag-start))))
         (unless (= new-start tag-start)
-          (with-point ((start (current-point))
-                       (end (current-point)))
+          (with-point ((start point)
+                       (end point))
             (line-start start)
             (line-start end)
             (character-offset start blank-start)
@@ -1336,7 +1577,7 @@ matching the active Emacs terminal profile.")
             (delete-between-points start end)
             (insert-character start #\Space (- new-start blank-start)))
           (when in-blank-p
-            (move-to-column (current-point) origin-column)))))))
+            (move-to-column point origin-column)))))))
 
 (defun org-ordered-item-number-info (point)
   "Return indentation, number bounds/value, and counter cookie for POINT."
@@ -1587,11 +1828,8 @@ matching the active Emacs terminal profile.")
   (define-key keymap "M-L" 'lem-yath-org-shiftmetaright)
   (define-key keymap "M-K" 'lem-yath-org-shiftmetaup)
   (define-key keymap "M-J" 'lem-yath-org-shiftmetadown)
-  ;; Evil-Org's < and > are range operators, not aliases for org-metaleft
-  ;; and org-metaright.  Fail closed until the native range operators below
-  ;; are available instead of silently changing an enclosing subtree.
-  (undefine-key keymap "<")
-  (undefine-key keymap ">"))
+  (define-key keymap "<" 'lem-yath-org-shift-left)
+  (define-key keymap ">" 'lem-yath-org-shift-right))
 
 (configure-org-vi-common-map *org-vi-normal-keymap*)
 (configure-org-vi-common-map *org-vi-visual-keymap*)

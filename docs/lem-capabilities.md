@@ -1503,7 +1503,12 @@ above remain outside this focused gate.
 It exercises normal `d/x/X` against safe nested ordered lists, `[@N]` counter
 cookies, unsupported continuation repair, headline-tag alignment, single-cell
 table padding, counts, Visual deletion, registers, and one-step undo. It also
-dynamically exercises all eight text-object bindings with delete/yank operators over
+dynamically verifies doubled, counted, motion, and Visual `<`/`>` ranges across
+headings, safe unordered and ordered lists, the top-level whole-list special
+case, table columns and whole tables, and prose, including leftward movement,
+wide Visual cell ranges, count nonmultiplication, undo, and fail-closed
+top-level/formula boundaries. It dynamically exercises all eight text-object
+bindings with delete/yank operators over
 opaque/nested markup, bracket/plain links, timestamps, table cells/rules and
 formula ownership, paragraphs, headlines, flat leaf and recursive blocks,
 point-sensitive and empty lists, owned post-blank, and subtrees. It verifies
@@ -1532,10 +1537,24 @@ change. Normal one-character `x/X` inserts replacement table padding like
 `org-delete-char`; counted and Visual deletion deliberately retain ordinary Evil
 semantics.
 
+The pinned Evil-Org `<`/`>` range operators are available in Normal and Visual
+states. Heading ranges promote or demote only selected heading lines by one
+level. Safe list-item ranges move by the surrounding list's indentation step
+and repair ordered numbering; `>>` on the first top-level item reproduces
+Evil-Org's unusual one-column whole-list shift, including continuation lines.
+A same-line table range moves the current column once per selected cell
+boundary; the tested short operator and motion counts still move it only once.
+`>>`/`<<` shift the complete table by the configured four columns. Other text
+ranges use the same four-column shift. Counts extend the selected line range
+without multiplying the shift, Visual operations return to
+Normal, and successful mutations form one undo step. Promotion of a level-one
+heading, partial child-list outdents, continuation/tab-structured list ranges,
+and formula-owning table-column moves abort before mutation.
+
 This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
 footnote, nested-special, and malformed text-object contexts; structural
-repairs beyond the bounded `d/x/X` behavior; true `<`/`>` Org
-ranges, region-aware Meta operations, generic Org-element
+repairs beyond the bounded `d/x/X/< />` behavior; region-aware Meta operations,
+generic Org-element
 movement, shift-control commands, and richer list/table semantics; timestamp,
 scheduling, and deadline
 workflows; source-block editing or execution; Babel, LaTeX preview, export and

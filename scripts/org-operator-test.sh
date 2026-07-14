@@ -258,6 +258,20 @@ write_fixtures() {
   printf '%s\n' '| abc | de |' >"$WORKDIR/delete-table-backward.org"
   printf '%s\n' '| abc | de |' >"$WORKDIR/delete-table-count.org"
   printf '%s\n' '| abc | de |' >"$WORKDIR/delete-table-visual.org"
+  printf '%s\n' '* H1' 'body' '* H2' 'body2' '** Child' \
+    >"$WORKDIR/shift-heading.org"
+  printf '%s\n' '* H1' 'body' >"$WORKDIR/shift-heading-abort.org"
+  printf '%s\n' '- one' '- two' '  - child' '- three' \
+    >"$WORKDIR/shift-list.org"
+  printf '%s\n' '1. one' '2. two' '3. three' \
+    >"$WORKDIR/shift-ordered.org"
+  printf '%s\n' '- one' '  continuation' '- two' \
+    >"$WORKDIR/shift-list-top.org"
+  printf '%s\n' '| a | b | c |' '| d | e | f |' \
+    >"$WORKDIR/shift-table.org"
+  printf '%s\n' '| a | b |' '| c | d |' '#+TBLFM: $1=1' \
+    >"$WORKDIR/shift-table-formula.org"
+  printf '%s\n' 'alpha' 'beta' 'gamma' >"$WORKDIR/shift-prose.org"
   printf '%s\n' \
     '[[file:target.org][described link]] tail' \
     >"$WORKDIR/link-outer.org"
@@ -384,9 +398,184 @@ if start_case static "$WORKDIR/static.org" 'Static routing'; then
        'STATIC normal=yes operator=yes visual=yes stock=yes snipe=yes safe=yes commands=yes' \
        "$LEM_YATH_ORG_OPERATOR_REPORT"; then
     pass static-routing \
-      "normal d/x/X, visual defaults, text objects, and operator Snipe coexist"
+      "normal d/x/X/< />, doubled shifts, visual defaults, text objects, and operator Snipe coexist"
   else
     fail static-routing "effective Org routing contract differed" "$CASE_SESSION"
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+# The pinned base map makes < and > true range operators.  They dispatch by
+# Org context while retaining ordinary Evil ranges, counts, Visual exit, and
+# one-step undo.
+if start_case shift-heading "$WORKDIR/shift-heading.org" 'H1'; then
+  if operate_and_record shift-heading "$CASE_SESSION" '>' 2 j; then
+    assert_state shift-heading shift-heading "$CASE_SESSION" \
+      'text=** H1\nbody\n** H2\nbody2\n** Child\n bytes=' \
+      'state=normal selection=none' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state shift-heading "$CASE_SESSION"
+    assert_state shift-heading-undo shift-heading "$CASE_SESSION" \
+      'text=* H1\nbody\n* H2\nbody2\n** Child\n bytes=' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-heading-left "$WORKDIR/shift-heading.org" 'Child'; then
+  send_keys "$CASE_SESSION" 4 j
+  if operate_and_record shift-heading-left "$CASE_SESSION" '<' '<'; then
+    assert_state shift-heading-left shift-heading-left "$CASE_SESSION" \
+      'text=* H1\nbody\n* H2\nbody2\n* Child\n bytes=' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-heading-abort \
+     "$WORKDIR/shift-heading-abort.org" 'H1'; then
+  if operate_and_record shift-heading-abort "$CASE_SESSION" '<' '<'; then
+    assert_state shift-heading-abort shift-heading-abort "$CASE_SESSION" \
+      'text=* H1\nbody\n bytes=' 'modified=no' \
+      'state=normal selection=none'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-list-single "$WORKDIR/shift-list.org" 'two'; then
+  send_keys "$CASE_SESSION" j
+  if operate_and_record shift-list-single "$CASE_SESSION" '>' '>'; then
+    assert_state shift-list-single shift-list-single "$CASE_SESSION" \
+      'text=- one\n  - two\n  - child\n- three\n bytes=' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-list-range "$WORKDIR/shift-list.org" 'two'; then
+  send_keys "$CASE_SESSION" j
+  if operate_and_record shift-list-range "$CASE_SESSION" '>' j; then
+    assert_state shift-list-range shift-list-range "$CASE_SESSION" \
+      'text=- one\n  - two\n    - child\n- three\n bytes=' 'modified=yes'
+    if operate_and_record shift-list-range "$CASE_SESSION" '<' j; then
+      assert_state shift-list-range-left shift-list-range "$CASE_SESSION" \
+        'text=- one\n- two\n  - child\n- three\n bytes=' 'modified=yes'
+    fi
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-ordered "$WORKDIR/shift-ordered.org" '2\. two'; then
+  send_keys "$CASE_SESSION" j
+  if operate_and_record shift-ordered "$CASE_SESSION" '>' '>'; then
+    assert_state shift-ordered shift-ordered "$CASE_SESSION" \
+      'text=1. one\n   1. two\n2. three\n bytes=' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-list-top "$WORKDIR/shift-list-top.org" 'one'; then
+  if operate_and_record shift-list-top "$CASE_SESSION" '>' '>'; then
+    assert_state shift-list-top shift-list-top "$CASE_SESSION" \
+      'text= - one\n   continuation\n - two\n bytes=' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-table-column "$WORKDIR/shift-table.org" ' a '; then
+  send_keys "$CASE_SESSION" 2 l
+  if operate_and_record shift-table-column "$CASE_SESSION" '>' l; then
+    assert_state shift-table-column shift-table-column "$CASE_SESSION" \
+      'text=| b | a | c |\n| e | d | f |\n bytes=' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state shift-table-column "$CASE_SESSION"
+    assert_state shift-table-column-undo shift-table-column "$CASE_SESSION" \
+      'text=| a | b | c |\n| d | e | f |\n bytes=' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-table-column-motion-count \
+     "$WORKDIR/shift-table.org" ' a '; then
+  send_keys "$CASE_SESSION" 2 l
+  if operate_and_record shift-table-column-motion-count \
+       "$CASE_SESSION" '>' 2 l; then
+    assert_state shift-table-column-motion-count \
+      shift-table-column-motion-count "$CASE_SESSION" \
+      'text=| b | a | c |\n| e | d | f |\n bytes=' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-table-column-operator-count \
+     "$WORKDIR/shift-table.org" ' a '; then
+  send_keys "$CASE_SESSION" 2 l
+  if operate_and_record shift-table-column-operator-count \
+       "$CASE_SESSION" 2 '>' l; then
+    assert_state shift-table-column-operator-count \
+      shift-table-column-operator-count "$CASE_SESSION" \
+      'text=| b | a | c |\n| e | d | f |\n bytes=' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-table-column-left "$WORKDIR/shift-table.org" ' a '; then
+  send_keys "$CASE_SESSION" 6 l
+  if operate_and_record shift-table-column-left "$CASE_SESSION" '<' l; then
+    assert_state shift-table-column-left shift-table-column-left \
+      "$CASE_SESSION" \
+      'text=| b | a | c |\n| e | d | f |\n bytes=' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-table-column-wide-visual \
+     "$WORKDIR/shift-table.org" ' a '; then
+  send_keys "$CASE_SESSION" 2 l v 8 l
+  if operate_and_record shift-table-column-wide-visual \
+       "$CASE_SESSION" '>'; then
+    assert_state shift-table-column-wide-visual \
+      shift-table-column-wide-visual "$CASE_SESSION" \
+      'text=| b | c | a |\n| e | f | d |\n bytes=' \
+      'state=normal selection=none' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-table-lines "$WORKDIR/shift-table.org" ' a '; then
+  send_keys "$CASE_SESSION" 2 l
+  if operate_and_record shift-table-lines "$CASE_SESSION" '>' '>'; then
+    assert_state shift-table-lines shift-table-lines "$CASE_SESSION" \
+      'text=    | a | b | c |\n    | d | e | f |\n bytes=' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-table-formula \
+     "$WORKDIR/shift-table-formula.org" ' a '; then
+  send_keys "$CASE_SESSION" 2 l
+  if operate_and_record shift-table-formula "$CASE_SESSION" '>' l; then
+    assert_state shift-table-formula shift-table-formula "$CASE_SESSION" \
+      'text=| a | b |\n| c | d |\n#+TBLFM: $1=1\n bytes=' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-prose "$WORKDIR/shift-prose.org" 'alpha'; then
+  if operate_and_record shift-prose "$CASE_SESSION" 2 '>' '>'; then
+    assert_state shift-prose shift-prose "$CASE_SESSION" \
+      'text=    alpha\n    beta\ngamma\n bytes=' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state shift-prose "$CASE_SESSION"
+    assert_state shift-prose-undo shift-prose "$CASE_SESSION" \
+      'text=alpha\nbeta\ngamma\n bytes=' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case shift-heading-visual "$WORKDIR/shift-heading.org" 'H1'; then
+  send_keys "$CASE_SESSION" V 2 j
+  if operate_and_record shift-heading-visual "$CASE_SESSION" '>'; then
+    assert_state shift-heading-visual shift-heading-visual "$CASE_SESSION" \
+      'text=** H1\nbody\n** H2\nbody2\n** Child\n bytes=' \
+      'state=normal selection=none' 'modified=yes'
   fi
   stop_case "$CASE_SESSION"
 fi
