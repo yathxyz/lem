@@ -170,6 +170,14 @@ invoke_mx() {
   fi
 }
 
+prompt_backspace() {
+  local count=$1 index=0
+  while ((index < count)); do
+    lem_keys "$session" BSpace
+    index=$((index + 1))
+  done
+}
+
 confirm_yes_prompt() {
   local pattern=$1
   lem_wait_for "$session" "$pattern" 10 >/dev/null || return 1
@@ -298,62 +306,207 @@ fi
 invoke_mx lem-yath-test-lsp-activate-project-a >/dev/null ||
   fail workspace-symbol-origin 'could not activate project A'
 
-# A server-side error must close the first request cleanly enough for an
-# immediate second workspace-symbol invocation to succeed.  A recurring
-# diagnostics popup may replace the transient error text, so the protocol
-# error request and the successful follow-up are the stable assertions.
-if invoke_mx lem-yath-workspace-symbol 'Workspace symbol query:'; then
-  tmux_cmd send-keys -t "$session" -l explode
-  lem_keys "$session" Enter
-  if wait_event_count WORKSPACE_SYMBOL 'query=explode' 1; then
-    pass workspace-symbol-error 'server returned the deliberate error response'
-  else
-    fail workspace-symbol-error 'the deliberate workspace/symbol request was not observed'
-  fi
-else
-  fail workspace-symbol-error 'workspace-symbol query prompt did not open'
-fi
+# Capture the source window before the picker so abort can be checked against
+# its exact point, viewport, and horizontal scroll rather than only its file.
+source_count=$(report_count '^SYMBOL_SOURCE ')
+lem_keys "$session" F11
+wait_report_count '^SYMBOL_SOURCE ' "$((source_count + 1))" || true
+symbol_origin=$(grep '^SYMBOL_SOURCE ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+symbol_origin_key=${symbol_origin%% prompt=*}
 
-if invoke_mx lem-yath-workspace-symbol 'Workspace symbol query:'; then
-  tmux_cmd send-keys -t "$session" -l alpha
-  lem_keys "$session" Enter
+# Consult's defaults require three characters and debounce the resulting
+# request.  Typing two characters and waiting longer than the debounce must
+# not touch the server.
+workspace_symbol_events_before=$(event_count WORKSPACE_SYMBOL '')
+if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
+  tmux_cmd send-keys -t "$session" -l al
+  sleep 0.45
+  if [ "$(event_count WORKSPACE_SYMBOL '')" -eq \
+       "$workspace_symbol_events_before" ]; then
+    pass workspace-symbol-min-input \
+      'two characters do not start an async workspace request'
+  else
+    fail workspace-symbol-min-input \
+      'a workspace request escaped Consult minimum-input gating'
+  fi
+
+  tmux_cmd send-keys -t "$session" -l pha
   if wait_event_count WORKSPACE_SYMBOL 'query=alpha' 1 &&
-     lem_wait_for "$session" 'Workspace symbol:' 10 >/dev/null; then
-    # Fresh test state preserves server order, so AlphaSymbol is the focused
-    # first row.  The empty prompt remains unchanged until Return accepts it.
-    if lem_wait_for "$session" 'AlphaSymbol' 10 >/dev/null &&
-       lem_wait_for "$session" 'symbols.fixture' 10 >/dev/null; then
-      screen=$(lem_capture "$session")
-      if grep -qi 'Function' <<<"$screen" &&
-         grep -q 'Project A' <<<"$screen" &&
-         grep -q 'symbols.fixture' <<<"$screen"; then
-        pass workspace-symbol-annotations \
-          'name, kind, container, and source file are visible'
+     lem_wait_for "$session" 'AlphaSymbol' 10 >/dev/null &&
+     lem_wait_for "$session" 'symbols.fixture' 10 >/dev/null; then
+    assert_event_count workspace-symbol-debounce WORKSPACE_SYMBOL \
+      'query=alpha' 1
+    screen=$(lem_capture "$session")
+    if grep -qi 'Function' <<<"$screen" &&
+       grep -q 'Project A' <<<"$screen" &&
+       grep -q 'symbols.fixture' <<<"$screen"; then
+      pass workspace-symbol-annotations \
+        'name, kind group, container, and source file are visible'
+    else
+      fail workspace-symbol-annotations \
+        'workspace-symbol candidate is missing a Consult annotation'
+    fi
+
+    source_count=$(report_count '^SYMBOL_SOURCE ')
+    lem_keys "$session" F11
+    if wait_report_count '^SYMBOL_SOURCE ' "$((source_count + 1))"; then
+      symbol_preview=$(grep '^SYMBOL_SOURCE ' \
+        "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+      if [[ "$symbol_preview" == \
+           *'/project-a/symbols.fixture line=3 column=4 '* &&
+          "$symbol_preview" == *'prompt=yes preview=yes query="alpha"' ]]; then
+        pass workspace-symbol-preview \
+          'focused result previews its exact LSP position'
       else
-        fail workspace-symbol-annotations \
-          'workspace-symbol candidate is missing an annotation'
-      fi
-      lem_keys "$session" Enter
-      before=$(report_count '^LOCATION ')
-      lem_keys "$session" F12
-      if wait_report_count '^LOCATION ' "$((before + 1))"; then
-        location=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
-        if [[ "$location" == *'/project-a/symbols.fixture line=3 column=4' ]]; then
-          pass workspace-symbol-jump 'selection opened project A at LSP line 2, character 4'
-        else
-          fail workspace-symbol-jump "unexpected selection location: $location"
-        fi
-      else
-        fail workspace-symbol-jump 'could not record the post-selection location'
+        fail workspace-symbol-preview \
+          "unexpected preview state: $symbol_preview"
       fi
     else
-      fail workspace-symbol-results 'successful response did not populate the result prompt'
+      fail workspace-symbol-preview 'could not inspect the source window'
+    fi
+
+    lem_keys "$session" C-g
+    sleep 0.35
+    source_count=$(report_count '^SYMBOL_SOURCE ')
+    lem_keys "$session" F11
+    if wait_report_count '^SYMBOL_SOURCE ' "$((source_count + 1))"; then
+      symbol_restored=$(grep '^SYMBOL_SOURCE ' \
+        "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+      symbol_restored_key=${symbol_restored%% prompt=*}
+      if [ "$symbol_restored_key" = "$symbol_origin_key" ] &&
+         [[ "$symbol_restored" == *'prompt=no preview=no query=""' ]]; then
+        pass workspace-symbol-cancel \
+          'C-g restores the exact source buffer, point, viewport, and scroll'
+      else
+        fail workspace-symbol-cancel \
+          "abort did not restore origin: $symbol_restored"
+      fi
+    else
+      fail workspace-symbol-cancel 'could not inspect the cancelled picker'
     fi
   else
-    fail workspace-symbol-results 'successful workspace/symbol request did not complete'
+    fail workspace-symbol-results \
+      'the debounced response did not populate the incremental picker'
+    lem_keys "$session" C-g
   fi
 else
-  fail workspace-symbol-recovery 'a second workspace-symbol command could not start'
+  fail workspace-symbol-prompt 'the single incremental prompt did not open'
+fi
+
+# A server-side error must leave the same prompt usable.  Replacing its input
+# immediately issues a successful request without reopening the command.
+if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
+  tmux_cmd send-keys -t "$session" -l explode
+  if wait_event_count WORKSPACE_SYMBOL 'query=explode' 1 &&
+     lem_wait_for "$session" 'LSP Symbols:' 10 >/dev/null; then
+    pass workspace-symbol-error-recovery \
+      'a failed request leaves the incremental prompt active'
+  else
+    fail workspace-symbol-error-recovery \
+      'the server error closed or wedged the workspace-symbol prompt'
+  fi
+
+  prompt_backspace 7
+  tmux_cmd send-keys -t "$session" -l alpha
+  if wait_event_count WORKSPACE_SYMBOL 'query=alpha' 2 &&
+     lem_wait_for "$session" 'AlphaSymbol' 10 >/dev/null; then
+    lem_keys "$session" Enter
+    sleep 0.45
+    before=$(report_count '^LOCATION ')
+    lem_keys "$session" F12
+    if wait_report_count '^LOCATION ' "$((before + 1))"; then
+      location=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+      if [[ "$location" == \
+           *'/project-a/symbols.fixture line=3 column=4' ]]; then
+        pass workspace-symbol-jump \
+          'one Return commits the exact project-A LSP location'
+      else
+        fail workspace-symbol-jump "unexpected selection location: $location"
+      fi
+    else
+      fail workspace-symbol-jump 'could not record the post-selection location'
+    fi
+
+    lem_keys "$session" C-o
+    sleep 0.35
+    before=$(report_count '^LOCATION ')
+    lem_keys "$session" F12
+    if wait_report_count '^LOCATION ' "$((before + 1))"; then
+      location=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+      if [[ "$location" == *'/project-a/one.fixture '* ]]; then
+        pass workspace-symbol-jumplist \
+          'Vi C-o returns from the accepted Consult-style jump'
+      else
+        fail workspace-symbol-jumplist \
+          "C-o did not return to the invoking buffer: $location"
+      fi
+    fi
+  else
+    fail workspace-symbol-error-recovery \
+      'the same prompt did not recover with a successful query'
+    lem_keys "$session" C-g
+  fi
+else
+  fail workspace-symbol-error-recovery \
+    'workspace-symbol prompt could not start for the error scenario'
+fi
+
+# The slow response is deliberately superseded.  The client must remove its
+# callback, send $/cancelRequest, reject the stale generation, and retain the
+# invoking project's workspace even though preview changes the source buffer.
+invoke_mx lem-yath-test-lsp-activate-project-a >/dev/null || true
+if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
+  tmux_cmd send-keys -t "$session" -l slowalpha
+  if wait_event_count WORKSPACE_SYMBOL 'query=slowalpha' 1; then
+    prompt_backspace 9
+    tmux_cmd send-keys -t "$session" -l beta
+    if wait_event_count CANCEL_REQUEST \
+         "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" 1 &&
+       wait_event_count WORKSPACE_SYMBOL 'query=beta' 1 &&
+       lem_wait_for "$session" 'BetaSymbol' 10 >/dev/null; then
+      screen=$(lem_capture "$session")
+      if ! grep -q 'StaleSymbol' <<<"$screen" &&
+         grep -E '^WORKSPACE_SYMBOL[[:space:]]' \
+           "$LEM_YATH_LSP_TEST_EVENTS" |
+           grep -F "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" |
+           grep -Fq 'query=beta'; then
+        pass workspace-symbol-stale-response \
+          'superseded callback is cancelled and cannot replace newer results'
+        pass workspace-symbol-stable-routing \
+          'all incremental requests stay on the invoking project workspace'
+      else
+        fail workspace-symbol-stale-response \
+          'a stale result appeared or the request changed projects'
+      fi
+    else
+      fail workspace-symbol-stale-response \
+        'cancellation or the replacement response was not observed'
+    fi
+  else
+    fail workspace-symbol-stale-response 'the delayed request was not observed'
+  fi
+  lem_keys "$session" C-g
+else
+  fail workspace-symbol-stale-response \
+    'workspace-symbol prompt could not start for the stale-response scenario'
+fi
+
+# Accepting a row must retain the search input in history, not replace it with
+# the selected symbol label.  This mirrors Consult's :input history.
+if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
+  lem_keys "$session" M-p
+  if wait_event_count WORKSPACE_SYMBOL 'query=alpha' 3 &&
+     lem_wait_for "$session" 'LSP Symbols: alpha' 10 >/dev/null; then
+    pass workspace-symbol-history \
+      'M-p restores and reissues the accepted search query'
+  else
+    fail workspace-symbol-history \
+      'history stored a selected label or failed to refresh the query'
+  fi
+  lem_keys "$session" C-g
+else
+  fail workspace-symbol-history \
+    'workspace-symbol prompt could not reopen for history validation'
 fi
 
 # Restart must replace project A once, reopen both of its live buffers, and

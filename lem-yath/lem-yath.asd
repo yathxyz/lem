@@ -35,6 +35,7 @@
                (:file "git")
                (:file "project")
                (:file "project-picker")
+               (:file "workspace-symbol")
                (:file "project-outline")
                (:module "org"
                 :serial t

@@ -124,7 +124,13 @@ class FixtureServer:
     def workspace_symbols(self, query: str) -> list[dict[str, Any]]:
         target_uri = self.root_uri.rstrip("/") + "/symbols.fixture"
         container = Path(self.root_path).name.replace("-", " ").title()
-        prefix = "Beta" if "beta" in query.casefold() else "Alpha"
+        folded_query = query.casefold()
+        if "slowalpha" in folded_query:
+            prefix = "Stale"
+        elif "beta" in folded_query:
+            prefix = "Beta"
+        else:
+            prefix = "Alpha"
         return [
             {
                 "name": f"{prefix}Symbol",
@@ -231,7 +237,14 @@ class FixtureServer:
                 return self.error(
                     request_id, -32001, "fixture workspace-symbol failure"
                 )
+            if query == "slowalpha":
+                self.log("WORKSPACE_SYMBOL_DELAY", query=query, delay_ms=900)
+                time.sleep(0.9)
             return self.response(request_id, self.workspace_symbols(query))
+
+        if method == "$/cancelRequest":
+            self.log("CANCEL_REQUEST", request_id=params.get("id", ""))
+            return None
 
         if method == "shutdown":
             self.log("SHUTDOWN", delay_ms=self.shutdown_delay_ms)

@@ -1,0 +1,558 @@
+;;;; Consult-Eglot-style incremental workspace symbol navigation.
+
+(in-package :lem-yath)
+
+(defparameter *workspace-symbol-minimum-input* 3
+  "Minimum query length, matching Consult's async default.")
+
+(defparameter *workspace-symbol-debounce-milliseconds* 200
+  "Quiet interval before an incremental workspace/symbol request.")
+
+(defparameter *workspace-symbol-throttle-milliseconds* 500
+  "Minimum interval between incremental workspace/symbol requests.")
+
+(defparameter *workspace-symbol-timeout* 10
+  "Seconds before one workspace/symbol request times out.")
+
+(defstruct (workspace-symbol-candidate
+            (:constructor %make-workspace-symbol-candidate))
+  symbol
+  label
+  detail
+  filter-text
+  group)
+
+(defstruct workspace-symbol-session
+  workspace
+  origin-window
+  origin-buffer
+  origin-point
+  origin-view-point
+  origin-horizontal-scroll-start
+  origin-state
+  prompt-window
+  query
+  candidates
+  selected
+  preview-candidate
+  preview-buffers
+  timer
+  request
+  (generation 0)
+  last-request-start
+  active-p)
+
+(defvar *workspace-symbol-session* nil)
+
+(defparameter *workspace-symbol-prompt-keymap*
+  (let ((keymap (make-keymap :description "Workspace symbol prompt")))
+    (define-key keymap "C-g" 'lem/prompt-window::prompt-quit)
+    (define-key keymap "Escape" 'lem/prompt-window::prompt-quit)
+    (define-key keymap "M-p" 'workspace-symbol-prompt-previous-history)
+    (define-key keymap "M-n" 'workspace-symbol-prompt-next-history)
+    (define-key keymap "Space" 'workspace-symbol-prompt-space)
+    (define-key keymap 'delete-previous-char
+      'workspace-symbol-prompt-delete-previous-char)
+    (define-key keymap "Backspace"
+      'workspace-symbol-prompt-delete-previous-char)
+    (define-key keymap "C-h" 'workspace-symbol-prompt-delete-previous-char)
+    keymap))
+
+(defun workspace-symbol-provider-p (workspace)
+  (handler-case
+      (not (null
+            (lsp:server-capabilities-workspace-symbol-provider
+             (lem-lsp-mode::workspace-server-capabilities workspace))))
+    (unbound-slot () nil)))
+
+(defun workspace-symbol-location (symbol)
+  (typecase symbol
+    (lsp:symbol-information
+     (lsp:symbol-information-location symbol))
+    (lsp:workspace-symbol
+     (lsp:workspace-symbol-location symbol))))
+
+(defun workspace-symbol-container (symbol)
+  (handler-case (lsp:base-symbol-information-container-name symbol)
+    (unbound-slot () nil)))
+
+(defun workspace-symbol-kind-name (symbol)
+  (or (nth-value
+       0
+       (lem-lsp-mode::symbol-kind-to-string-and-attribute
+        (lsp:base-symbol-information-kind symbol)))
+      "Symbol"))
+
+(defun workspace-symbol-location-pathname (symbol)
+  (alexandria:when-let ((location (workspace-symbol-location symbol)))
+    (when (typep location 'lsp:location)
+      (ignore-errors
+        (lem-lsp-base/utils:uri-to-pathname
+         (lsp:location-uri location))))))
+
+(defun workspace-symbol-location-summary (workspace symbol)
+  (let ((location (workspace-symbol-location symbol)))
+    (when (typep location 'lsp:location)
+      (let* ((file (workspace-symbol-location-pathname symbol))
+             (root (lem-lsp-mode::workspace-root-pathname workspace))
+             (range (lsp:location-range location))
+             (line (1+ (lsp:position-line (lsp:range-start range)))))
+        (when file
+          (format nil "~a:~d"
+                  (or (and root
+                           (ignore-errors (enough-namestring file root)))
+                      (namestring file))
+                  line))))))
+
+(defun workspace-symbol-to-candidate (workspace symbol)
+  (let* ((name (lsp:base-symbol-information-name symbol))
+         (kind (workspace-symbol-kind-name symbol))
+         (container (workspace-symbol-container symbol))
+         (location (workspace-symbol-location-summary workspace symbol))
+         (detail (format nil "[~a]~@[ ~a~]~@[ — ~a~]"
+                         kind container location)))
+    (%make-workspace-symbol-candidate
+     :symbol symbol
+     :label name
+     :detail detail
+     :filter-text (format nil "~a ~a~@[ ~a~]~@[ ~a~]"
+                          name kind container location)
+     :group kind)))
+
+(defun workspace-symbol-response-candidates (workspace response)
+  (unless (lem-lsp-base/type:lsp-null-p response)
+    (map 'list
+         (lambda (symbol)
+           (workspace-symbol-to-candidate workspace symbol))
+         response)))
+
+(defun workspace-symbol-session-restorable-p (session)
+  (and (project-picker-live-window-p
+        (workspace-symbol-session-origin-window session))
+       (project-picker-live-buffer-p
+        (workspace-symbol-session-origin-buffer session))
+       (alive-point-p (workspace-symbol-session-origin-point session))
+       (alive-point-p (workspace-symbol-session-origin-view-point session))))
+
+(defun workspace-symbol-restore-origin (session)
+  "Restore the exact buffer, point, viewport, and horizontal scroll."
+  (when (workspace-symbol-session-restorable-p session)
+    (let ((window (workspace-symbol-session-origin-window session))
+          (buffer (workspace-symbol-session-origin-buffer session)))
+      (with-current-window window
+        (unless (eq (current-buffer) buffer)
+          (lem-core::%switch-to-buffer buffer nil nil))
+        (move-point (buffer-point buffer)
+                    (workspace-symbol-session-origin-point session))
+        (move-point (window-view-point window)
+                    (workspace-symbol-session-origin-view-point session))
+        (setf (window-parameter window 'lem-core::horizontal-scroll-start)
+              (workspace-symbol-session-origin-horizontal-scroll-start
+               session))))))
+
+(defun workspace-symbol-restore-origin-state (session)
+  (let ((window (workspace-symbol-session-origin-window session))
+        (state (workspace-symbol-session-origin-state session)))
+    (when (and state
+               (project-picker-live-window-p window)
+               (eq (current-window) window))
+      (setf (lem-vi-mode/core:current-state) state))))
+
+(defun workspace-symbol-delete-origin-points (session)
+  (dolist (point (list (workspace-symbol-session-origin-point session)
+                       (workspace-symbol-session-origin-view-point session)))
+    (when point
+      (ignore-errors (delete-point point))))
+  (setf (workspace-symbol-session-origin-point session) nil
+        (workspace-symbol-session-origin-view-point session) nil))
+
+(defun workspace-symbol-track-preview-buffer (session buffer created-p)
+  (when created-p
+    (pushnew buffer
+             (workspace-symbol-session-preview-buffers session)
+             :test #'eq))
+  buffer)
+
+(defun workspace-symbol-candidate-buffer (candidate)
+  (alexandria:when-let
+      ((pathname
+        (workspace-symbol-location-pathname
+         (workspace-symbol-candidate-symbol candidate))))
+    (project-picker-open-file-buffer pathname)))
+
+(defun workspace-symbol-delete-preview-buffers (session &optional keep)
+  (dolist (buffer (workspace-symbol-session-preview-buffers session))
+    (when (and (project-picker-live-buffer-p buffer)
+               (not (eq buffer keep))
+               (not (buffer-modified-p buffer))
+               (null (get-buffer-windows buffer)))
+      (ignore-errors (delete-buffer buffer))))
+  (setf (workspace-symbol-session-preview-buffers session) nil))
+
+(defun workspace-symbol-clear-preview (session)
+  (when (workspace-symbol-session-preview-candidate session)
+    (workspace-symbol-restore-origin session)
+    (setf (workspace-symbol-session-preview-candidate session) nil)))
+
+(defun workspace-symbol-preview (session candidate)
+  "Preview CANDIDATE without recording a buffer-history or jump entry."
+  (when (and (workspace-symbol-session-active-p session)
+             (not (eq candidate
+                      (workspace-symbol-session-preview-candidate session))))
+    (handler-case
+        (progn
+          (workspace-symbol-clear-preview session)
+          (let* ((symbol (workspace-symbol-candidate-symbol candidate))
+                 (location (workspace-symbol-location symbol))
+                 (pathname (workspace-symbol-location-pathname symbol)))
+            (when (and (typep location 'lsp:location)
+                       pathname
+                       (uiop:file-exists-p pathname)
+                       (workspace-symbol-session-restorable-p session))
+              (multiple-value-bind (buffer created-p)
+                  (find-file-buffer pathname)
+                (workspace-symbol-track-preview-buffer
+                 session buffer created-p)
+                (with-current-window
+                    (workspace-symbol-session-origin-window session)
+                  (lem-core::%switch-to-buffer buffer nil t)
+                  (unless (lem-lsp-mode::move-to-workspace-position
+                           (buffer-point buffer)
+                           (lsp:range-start (lsp:location-range location))
+                           (workspace-symbol-session-workspace session))
+                    (error "Invalid workspace-symbol position"))
+                  (window-recenter (current-window)))
+                (setf (workspace-symbol-session-preview-candidate session)
+                      candidate)))))
+      (error ()
+        (ignore-errors (workspace-symbol-restore-origin session))
+        (setf (workspace-symbol-session-preview-candidate session) nil)))))
+
+(defun workspace-symbol-completion-item (session candidate input)
+  (with-point ((start (lem/prompt-window::current-prompt-start-point))
+               (end (lem/prompt-window::current-prompt-start-point)))
+    (let ((candidate candidate))
+      (lem/completion-mode:make-completion-item
+       :label (workspace-symbol-candidate-label candidate)
+       :insert-text input
+       :detail (workspace-symbol-candidate-detail candidate)
+       :filter-text (workspace-symbol-candidate-filter-text candidate)
+       :group (workspace-symbol-candidate-group candidate)
+       :start start
+       :end (line-end end)
+       :focus-action
+       (lambda (context)
+         (declare (ignore context))
+         (workspace-symbol-preview session candidate))
+       :accept-action
+       (lambda ()
+         (setf (workspace-symbol-session-selected session) candidate))))))
+
+(defun workspace-symbol-completion-items (session input)
+  (mapcar
+   (lambda (candidate)
+     (workspace-symbol-completion-item session candidate input))
+   (prescient-filter
+    input
+    (workspace-symbol-session-candidates session)
+    :key #'workspace-symbol-candidate-filter-text
+    :category :workspace-symbol
+    :rank-p nil)))
+
+(defun workspace-symbol-completion-observer (session event item)
+  (case event
+    (:present
+     (unless item
+       (workspace-symbol-clear-preview session)))
+    (:end
+     (workspace-symbol-clear-preview session))))
+
+(defun workspace-symbol-install-completion-options (session)
+  (setf
+   (workspace-symbol-session-prompt-window session)
+   (lem/prompt-window:current-prompt-window)
+   (variable-value
+    'lem/completion-mode:completion-context-options-function
+    :buffer (current-buffer))
+   (lambda (spec)
+     (declare (ignore spec))
+     (list
+      :narrowing nil
+      :observer-function
+      (lambda (context event item)
+        (declare (ignore context))
+        (workspace-symbol-completion-observer session event item))))))
+
+(defun workspace-symbol-prompt-active-p (session)
+  (and (workspace-symbol-session-active-p session)
+       (workspace-symbol-session-prompt-window session)
+       (eq (workspace-symbol-session-prompt-window session)
+           (ignore-errors (lem/prompt-window:current-prompt-window)))))
+
+(defun workspace-symbol-refresh-completion (session)
+  (when (workspace-symbol-prompt-active-p session)
+    (lem/completion-mode:completion-end)
+    (when (workspace-symbol-session-candidates session)
+      (lem/prompt-window::open-prompt-completion))))
+
+(defun workspace-symbol-stop-timer (session)
+  (alexandria:when-let ((timer (workspace-symbol-session-timer session)))
+    (unless (timer-expired-p timer)
+      (stop-timer timer))
+    (setf (workspace-symbol-session-timer session) nil)))
+
+(defun workspace-symbol-cancel-request (session)
+  "Forget the callback for SESSION's request and notify the server."
+  (alexandria:when-let ((request (workspace-symbol-session-request session)))
+    (setf (workspace-symbol-session-request session) nil)
+    (handler-case
+        (let* ((client
+                 (lem-lsp-mode::workspace-client
+                  (workspace-symbol-session-workspace session)))
+               (id (jsonrpc:request-id request))
+               (jsonrpc-client
+                 (lem-language-client/client:client-connection client))
+               (connection
+                 (jsonrpc::transport-connection
+                  (jsonrpc::jsonrpc-transport jsonrpc-client))))
+          (jsonrpc/connection:remove-callback-for-id connection id)
+          (lem-language-client/request:request
+           client
+           (make-instance 'lsp:/cancel-request)
+           (make-instance 'lsp:cancel-params :id id)))
+      (error (condition)
+        (log:warn "Could not cancel workspace-symbol request: ~A"
+                  condition)))))
+
+(defun workspace-symbol-current-request-p
+    (session generation query request)
+  (and (workspace-symbol-prompt-active-p session)
+       (= generation (workspace-symbol-session-generation session))
+       (string= query (or (workspace-symbol-session-query session) ""))
+       (eq request (workspace-symbol-session-request session))))
+
+(defun workspace-symbol-finish-response
+    (session generation query request response)
+  (when (workspace-symbol-current-request-p
+         session generation query request)
+    (let ((candidates
+            (handler-case
+                (workspace-symbol-response-candidates
+                 (workspace-symbol-session-workspace session) response)
+              (error (condition)
+                (workspace-symbol-finish-error
+                 session generation query request
+                 (princ-to-string condition) nil)
+                (return-from workspace-symbol-finish-response nil)))))
+      (setf (workspace-symbol-session-request session) nil
+            (workspace-symbol-session-candidates session) candidates)
+      (workspace-symbol-refresh-completion session))))
+
+(defun workspace-symbol-finish-error
+    (session generation query request message code)
+  (when (workspace-symbol-current-request-p
+         session generation query request)
+    (setf (workspace-symbol-session-request session) nil
+          (workspace-symbol-session-candidates session) nil)
+    (workspace-symbol-refresh-completion session)
+    (message "Workspace symbol search failed: ~a~@[ (code ~a)~]"
+             message code)))
+
+(defun workspace-symbol-start-request (session generation query)
+  (when (and (workspace-symbol-prompt-active-p session)
+             (= generation (workspace-symbol-session-generation session))
+             (string= query (workspace-symbol-session-query session)))
+    (setf (workspace-symbol-session-timer session) nil
+          (workspace-symbol-session-last-request-start session)
+          (get-internal-real-time))
+    (let ((request nil)
+          (jsonrpc:*default-timeout* *workspace-symbol-timeout*))
+      (handler-case
+          (progn
+            (setf request
+                  (lem-language-client/request:request-async
+                   (lem-lsp-mode::workspace-client
+                    (workspace-symbol-session-workspace session))
+                   (make-instance 'lsp:workspace/symbol)
+                   (make-instance 'lsp:workspace-symbol-params :query query)
+                   (lambda (response)
+                     (send-event
+                      (lambda ()
+                        (workspace-symbol-finish-response
+                         session generation query request response))))
+                   (lambda (message code)
+                     (send-event
+                      (lambda ()
+                        (workspace-symbol-finish-error
+                         session generation query request message code))))))
+            (setf (workspace-symbol-session-request session) request))
+        (error (condition)
+          (workspace-symbol-finish-error
+           session generation query request
+           (princ-to-string condition) nil))))))
+
+(defun workspace-symbol-next-delay (session)
+  (let ((last (workspace-symbol-session-last-request-start session)))
+    (if (null last)
+        *workspace-symbol-debounce-milliseconds*
+        (let* ((elapsed
+                 (floor
+                  (* 1000
+                     (/ (- (get-internal-real-time) last)
+                        internal-time-units-per-second))))
+               (throttle-remaining
+                 (max 0
+                      (- *workspace-symbol-throttle-milliseconds*
+                         elapsed))))
+          (max *workspace-symbol-debounce-milliseconds*
+               throttle-remaining)))))
+
+(defun workspace-symbol-schedule-query (session input)
+  (unless (or (workspace-symbol-session-selected session)
+              (string= input
+                       (or (workspace-symbol-session-query session) "")))
+    (incf (workspace-symbol-session-generation session))
+    (workspace-symbol-stop-timer session)
+    (workspace-symbol-cancel-request session)
+    (setf (workspace-symbol-session-query session) input
+          (workspace-symbol-session-candidates session) nil)
+    (workspace-symbol-clear-preview session)
+    (when lem/completion-mode::*completion-context*
+      (lem/completion-mode:completion-end))
+    (when (>= (length input) *workspace-symbol-minimum-input*)
+      (let ((generation (workspace-symbol-session-generation session))
+            (query (copy-seq input)))
+        (setf (workspace-symbol-session-timer session)
+              (start-timer
+               (make-timer
+                (lambda ()
+                  (workspace-symbol-start-request
+                   session generation query))
+                :name "workspace-symbol-debounce")
+               (workspace-symbol-next-delay session)))))))
+
+(define-command workspace-symbol-prompt-space () ()
+  (insert-character (current-point) #\Space)
+  (when *workspace-symbol-session*
+    (workspace-symbol-schedule-query
+     *workspace-symbol-session*
+     (lem/prompt-window::get-input-string))))
+
+(define-command workspace-symbol-prompt-delete-previous-char () ()
+  (when (point> (current-point)
+                (lem/prompt-window::current-prompt-start-point))
+    (delete-previous-char 1))
+  (when *workspace-symbol-session*
+    (workspace-symbol-schedule-query
+     *workspace-symbol-session*
+     (lem/prompt-window::get-input-string))))
+
+(define-command workspace-symbol-prompt-previous-history () ()
+  "Move backward through workspace-symbol query history and refresh it."
+  (lem/prompt-window::prompt-previous-history)
+  (when *workspace-symbol-session*
+    (workspace-symbol-schedule-query
+     *workspace-symbol-session*
+     (lem/prompt-window::get-input-string))))
+
+(define-command workspace-symbol-prompt-next-history () ()
+  "Move forward through workspace-symbol query history and refresh it."
+  (lem/prompt-window::prompt-next-history)
+  (when *workspace-symbol-session*
+    (workspace-symbol-schedule-query
+     *workspace-symbol-session*
+     (lem/prompt-window::get-input-string))))
+
+(defun workspace-symbol-read-candidate (session)
+  (let ((*workspace-symbol-session* session)
+        (*prompt-after-activate-hook*
+          (cons (cons (lambda ()
+                        (workspace-symbol-install-completion-options session))
+                      0)
+                *prompt-after-activate-hook*)))
+    (prompt-for-string
+     "LSP Symbols: "
+     :completion-function
+     (lambda (input)
+       (workspace-symbol-completion-items session input))
+     :test-function
+     (lambda (input)
+       (and (workspace-symbol-session-selected session)
+            (string= input (workspace-symbol-session-query session))))
+     :edit-callback
+     (lambda (input)
+       (workspace-symbol-schedule-query session input))
+     :history-symbol 'lem-yath-workspace-symbol
+     :special-keymap *workspace-symbol-prompt-keymap*))
+  (workspace-symbol-session-selected session))
+
+(defun goto-workspace-symbol (workspace candidate)
+  (let* ((symbol (workspace-symbol-candidate-symbol candidate))
+         (location (workspace-symbol-location symbol)))
+    (unless (typep location 'lsp:location)
+      (editor-error
+       "The language server returned a workspace symbol without a location."))
+    (let ((xref (lem-lsp-mode::convert-location location workspace)))
+      (unless xref
+        (editor-error
+         "The workspace symbol location is not a readable local file."))
+      (lem/language-mode::push-location-stack (current-point))
+      (lem-vi-mode/jumplist:with-jumplist
+        (lem/language-mode:go-to-location xref #'switch-to-buffer))
+      (window-recenter (current-window))
+      (lem/peek-source:highlight-matched-line (current-point)))))
+
+(defun workspace-symbol-make-session (workspace)
+  (let ((window (current-window))
+        (buffer (current-buffer)))
+    (make-workspace-symbol-session
+     :workspace workspace
+     :origin-window window
+     :origin-buffer buffer
+     :origin-point (copy-point (buffer-point buffer) :right-inserting)
+     :origin-view-point
+     (copy-point (window-view-point window) :right-inserting)
+     :origin-horizontal-scroll-start
+     (window-parameter window 'lem-core::horizontal-scroll-start)
+     :origin-state (ignore-errors (lem-vi-mode/core:current-state))
+     :query ""
+     :active-p t)))
+
+(defun workspace-symbol-cleanup (session committed-candidate)
+  (setf (workspace-symbol-session-active-p session) nil)
+  (incf (workspace-symbol-session-generation session))
+  (workspace-symbol-stop-timer session)
+  (workspace-symbol-cancel-request session)
+  (unless committed-candidate
+    (workspace-symbol-restore-origin session))
+  (workspace-symbol-delete-preview-buffers
+   session
+   (and committed-candidate
+        (workspace-symbol-candidate-buffer committed-candidate)))
+  (workspace-symbol-restore-origin-state session)
+  (workspace-symbol-delete-origin-points session))
+
+(define-command lem-yath-workspace-symbol () ()
+  "Incrementally query the invoking LSP workspace and jump to one symbol."
+  (handler-case
+      (let ((workspace (lem-lsp-mode::check-connection)))
+        (unless (workspace-symbol-provider-p workspace)
+          (editor-error
+           "The current language server does not provide workspace symbols."))
+        (let ((session (workspace-symbol-make-session workspace))
+              (committed nil))
+          (unwind-protect
+               (alexandria:when-let
+                   ((candidate (workspace-symbol-read-candidate session)))
+                 (workspace-symbol-restore-origin session)
+                 (workspace-symbol-clear-preview session)
+                 (workspace-symbol-delete-preview-buffers
+                  session (workspace-symbol-candidate-buffer candidate))
+                 (with-current-window
+                     (workspace-symbol-session-origin-window session)
+                   (goto-workspace-symbol workspace candidate))
+                 (setf committed candidate))
+            (workspace-symbol-cleanup session committed))))
+    (editor-abort () nil)
+    (error (condition)
+      (message "Workspace symbol search failed: ~a" condition))))

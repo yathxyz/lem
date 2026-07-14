@@ -508,17 +508,39 @@ Late initialization, diagnostics, completion, signature, xref, and highlight cal
 must still match the ready workspace and originating buffer ownership before affecting
 the editor.
 
-`SPC p s` now sends `workspace/symbol` to that captured project. The first prompt is
-the server query; the second applies the configured Prescient matching to name, kind,
-container, and root-relative file annotations, opening only the selected file. This is
-a bounded two-stage approximation of Consult: it lacks per-keystroke server queries,
-cancellation, and preview-on-move.
+`SPC p s` captures that project once and opens one `LSP Symbols:` prompt. It matches
+Consult's configured asynchronous defaults: no request below three characters, a
+200-millisecond quiet interval, and at most one request start per 500 milliseconds.
+Every replacement query cancels the pending timer, removes an in-flight JSON-RPC
+callback, sends `$/cancelRequest`, and advances a generation so even an uncancellable
+late reply cannot replace newer results. Successful replies retain server order while
+Prescient filters the symbol name, kind, container, and root-relative file annotation;
+the popup also shows contiguous kind groups.
+
+Focused rows preview their exact UTF-16-aware LSP position in the caller's window
+without recording buffer history or a jump. Moving focus restores the caller first;
+`C-g` and `Escape` restore its exact buffer, point, viewport, horizontal scroll, and Vi
+state and dispose clean preview buffers. One Return preserves the search text in prompt
+history, restores the caller, performs one ordinary final jump, recenters and highlights
+it, and records both Lem's xref stack and the Vi jumplist for `C-o`. A server error leaves
+the same prompt live. The captured
+workspace remains authoritative while previews switch buffers, so incremental queries
+cannot leak to another project.
+
+This remains partial Consult-Eglot parity: Lem has one language workspace per invoking
+buffer rather than Eglot's possible multi-server project aggregation, does not implement
+Consult's symbol-kind narrow prefix, and its typed LSP model discards the package's
+nonstandard optional score field. The final matched-line highlight substitutes for the
+configured Pulsar reveal effect.
 
 `scripts/lsp-project-test.sh` exercises the actual ncurses editor against a deterministic
 Python stdio language server. It verifies pending-start deduplication and timeout,
 cross-root isolation, save-as migration and mode-change detachment, notification
 ownership, handler and diagnostic cleanup, stale diagnostic ownership, symbol error
-recovery and navigation, project-only restart, idle retention/reuse/explicit stop,
+recovery, minimum-input/debounce timing, annotations and kind groups, focused preview,
+exact abort rollback, query history, one-Return navigation and `C-o`, explicit cancellation,
+out-of-order stale-response rejection, project-stable incremental routing,
+project-only restart, idle retention/reuse/explicit stop,
 bounded shutdown with forced disposal, graceful exit on responsive paths,
 old-process death, and editor-exit cleanup. Static contracts
 cover exact and glob root markers, `.git/` directory fallback, filesystem-root

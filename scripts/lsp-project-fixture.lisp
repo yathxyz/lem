@@ -338,6 +338,11 @@
                       (leader-binding-command
                        lem-vi-mode:*visual-keymap* "p s")))
              "workspace-symbol-leader-binding")
+      (check (and (= 3 *workspace-symbol-minimum-input*)
+                  (= 200 *workspace-symbol-debounce-milliseconds*)
+                  (= 500 *workspace-symbol-throttle-milliseconds*)
+                  (= 10 *workspace-symbol-timeout*))
+             "workspace-symbol-consult-async-defaults")
       (lsp-project-test-report "SUMMARY STATIC ~a failures=~d"
                                (if (zerop failures) "PASS" "FAIL")
                                failures))))
@@ -393,6 +398,33 @@
    (or (buffer-filename (current-buffer)) "none")
    (line-number-at-point (current-point))
    (point-charpos (current-point))))
+
+(define-command lem-yath-test-lsp-record-workspace-symbol-source () ()
+  (let* ((session *workspace-symbol-session*)
+         (window
+           (or (and session
+                    (workspace-symbol-session-origin-window session))
+               (current-window))))
+    (with-current-window window
+      (lsp-project-test-report
+       (concatenate
+        'string
+        "SYMBOL_SOURCE file=~a line=~d column=~d "
+        "view-line=~d view-column=~d hscroll=~a "
+        "prompt=~a preview=~a query=~s")
+       (or (buffer-filename (current-buffer)) "none")
+       (line-number-at-point (current-point))
+       (point-charpos (current-point))
+       (line-number-at-point (window-view-point window))
+       (point-charpos (window-view-point window))
+       (or (window-parameter window 'lem-core::horizontal-scroll-start) 0)
+       (lsp-project-test-yes-no session)
+       (lsp-project-test-yes-no
+        (and session
+             (workspace-symbol-session-preview-candidate session)))
+       (if session
+           (workspace-symbol-session-query session)
+           "")))))
 
 (define-command lem-yath-test-lsp-close-project-a () ()
   (dolist (buffer (list *lsp-project-test-a-one*
@@ -865,6 +897,11 @@
 (dolist (keymap (list *global-keymap*
                       lem-vi-mode:*normal-keymap*
                       lem-vi-mode:*insert-keymap*))
-  (define-key keymap "F12" 'lem-yath-test-lsp-record-location))
+  (define-key keymap "F12" 'lem-yath-test-lsp-record-location)
+  (define-key keymap "F11"
+    'lem-yath-test-lsp-record-workspace-symbol-source))
+
+(define-key *workspace-symbol-prompt-keymap* "F11"
+  'lem-yath-test-lsp-record-workspace-symbol-source)
 
 (lsp-project-test-report "READY")

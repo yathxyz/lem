@@ -160,9 +160,10 @@ of writing `.fasl` files into the source tree.
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
   deduplication and timeout, explicit buffer ownership with save-as migration,
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,
-  and `SPC p s` workspace-symbol
-  search with annotated narrowing; optional Lisp-v2 connections remain globally
-  selected when loaded
+  and a one-prompt `SPC p s` workspace-symbol search with Consult's minimum
+  input, debounce/throttle timing, annotated kind groups, cancellable incremental
+  requests, reversible preview, and Vi-jumplist acceptance; optional Lisp-v2
+  connections remain globally selected when loaded
 - installed LSP stack for Rust, Python, Markdown, C#, Nix, Go, Terraform, and
   manually enabled Java: rust-analyzer, pyright, harper-ls, csharp-ls,
   flake-aware nixd, gopls, terraform-ls, and JDTLS, plus the Rust toolchain
