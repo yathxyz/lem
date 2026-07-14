@@ -378,6 +378,10 @@ to its top-level, non-hidden `.org` files. `initial-major-mode org-mode`.
 - Agenda sources are the top-level `.org` files in the three existing roots above; roam, journal, and other nested trees are not included by those directory entries.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
+- Effective agenda `I/O` is state-dependent: Evil-Org motion state shadows the
+  base map with stock single-current-clock commands; Emacs state reaches the
+  custom delegated-clock commands. The latter use bulk-marked rows (or the
+  current row for `I`), and unmarked `O` closes open clocks in all agenda files.
 
 ### Visuals & babel
 - **org-modern**: `org-modern-mode` on org buffers + `org-modern-agenda` on agenda finalize.

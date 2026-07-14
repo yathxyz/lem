@@ -32,6 +32,10 @@ cat > "$form" <<EOF
         (*standard-output* s))
     (handler-case
         (progn
+          ;; The packaged Lem image may already know the installed system.
+          ;; Clear that registry entry so this check cannot silently compile
+          ;; an immutable store copy instead of CHECK_SRC.
+          (asdf:clear-system "lem-yath")
           (asdf:load-asd #P"$check_src/lem-yath.asd")
           (asdf:load-system "lem-yath" :force t)
           (format s "~%LOAD OK~%"))

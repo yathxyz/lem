@@ -1654,12 +1654,37 @@ same-file refile completion/cancellation/hierarchy/persistence/row restoration,
 stale-source refusal, refresh races, unmodified/undo-free generated buffers,
 and cleanup.
 
+`src/apps/agenda-clock.lisp` preserves the effective Evil/base key shadowing
+rather than assigning one meaning to `I/O`. In Vi state, `I` starts the single
+GNU Org-style current clock and first closes any different tracked clock at the
+same current minute; repeating it on the same heading is a no-op, and `O`
+closes that clock independent of point. In C-z Emacs state, `I` runs the
+configured delegated-clock behavior over bulk-marked rows or the current row,
+using one shared start time and refusing a second open clock in the same
+heading section. Emacs-state `O` closes all open clocks at marked headings, or
+all semantic open clocks in every top-level agenda file when no rows are
+marked. New clocks use Org's default `LOGBOOK` placement after planning and a
+property drawer; closed lines retain Org's minute timestamp and space-padded
+`H:MM` duration shape. Every mutation saves its source immediately.
+
+The Evil mark surface (`m`, `~`, `*`, `%`, `M`) and base surface (`m`, `M-m`,
+`*`, `M-*`, `%`, `u`, `U`) render Org's `>` prefix. Each rendered occurrence,
+including duplicate rows for one heading, owns a live insertion-type source
+point. Marks therefore follow earlier insertions in the same file, remain
+visible across the clock-triggered asynchronous refresh, and still fail closed
+if the target heading itself changes. `scripts/agenda-clock-test.sh` exercises
+the state-specific maps, all/invert/regexp/clear marking, stock switching and
+continuation, duplicate marked targets, shared times, cross-file close,
+source-block decoys, persistence, refresh restoration, live-marker movement,
+and stale unmarked rows in ncurses Lem.
+
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
 presentation, planning removal and warning/delay-cookie forms,
 configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive
-sibling/tag commands, bulk actions, clocks, custom commands,
+sibling/tag commands, the arbitrary `x`/`B` bulk-action dispatcher, clock
+goto/cancel/report commands and prefix variants, custom commands,
 and the wider org-super-agenda presentation remain explicit gaps.
 
 ---

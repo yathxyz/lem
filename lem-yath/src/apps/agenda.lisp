@@ -28,6 +28,12 @@
 (defvar *agenda-now-function* #'get-universal-time
   "Function returning the current universal time; replaceable in tests.")
 
+(defvar *agenda-row-marked-p-function* nil
+  "Optional function called with an agenda buffer and stable rendered-row key.")
+
+(defvar *agenda-buffer-cleanup-functions* nil
+  "Functions called with an agenda buffer immediately before it is killed.")
+
 ;;; --- parsing -------------------------------------------------------------
 
 (defstruct (agenda-item (:constructor make-agenda-item))
@@ -520,27 +526,68 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
             (file-namestring (agenda-item-file item))
             (agenda-item-line item))))
 
-(defun insert-agenda-section (buffer title items)
+(defun agenda-item-mark-base-key (item)
+  "Return ITEM's source-aware identity, excluding duplicate render position."
+  (list (uiop:native-namestring (agenda-item-file item))
+        (agenda-item-line item)
+        (agenda-item-heading item)
+        (agenda-item-kind item)
+        (agenda-item-date item)
+        (agenda-item-time item)
+        (agenda-item-occurrence-index item)))
+
+(defun agenda-item-mark-key (item duplicate-index)
+  "Return ITEM's identity including DUPLICATE-INDEX among identical rows."
+  (append (agenda-item-mark-base-key item) (list duplicate-index)))
+
+(defun agenda-row-mark-key-at-point (point)
+  "Return POINT's source-aware bulk-mark identity, or NIL off an entry row."
+  (alexandria:when-let ((file (text-property-at point :agenda-file)))
+    (list (uiop:native-namestring file)
+          (text-property-at point :agenda-line)
+          (text-property-at point :agenda-heading)
+          (text-property-at point :agenda-kind)
+          (text-property-at point :agenda-date)
+          (text-property-at point :agenda-time)
+          (text-property-at point :agenda-occurrence-index)
+          (text-property-at point :agenda-duplicate-index))))
+
+(defun insert-agenda-section (buffer title items duplicate-counts)
   "Insert TITLE and ITEMS with exact source file/line text properties."
   (let ((point (buffer-end-point buffer)))
     (insert-string point (format nil "~a~%" title))
     (if (null items)
         (insert-string point (format nil "  (none)~%"))
         (dolist (item items)
-          (with-point ((start point))
-            (insert-string point (format nil "  ~a~%" (agenda-display-line item)))
-            (put-text-property start point :agenda-file (agenda-item-file item))
-            (put-text-property start point :agenda-line (agenda-item-line item))
-            (put-text-property start point :agenda-heading
-                               (agenda-item-heading item))
-            (put-text-property start point :agenda-kind
-                               (agenda-item-kind item))
-            (put-text-property start point :agenda-date
-                               (agenda-item-date item))
-            (put-text-property start point :agenda-time
-                               (agenda-item-time item))
-            (put-text-property start point :agenda-occurrence-index
-                               (agenda-item-occurrence-index item)))))
+          (let* ((base-key (agenda-item-mark-base-key item))
+                 (duplicate-index (1+ (gethash base-key duplicate-counts 0)))
+                 (mark-key (agenda-item-mark-key item duplicate-index))
+                 (marked-p
+                   (and *agenda-row-marked-p-function*
+                        (funcall *agenda-row-marked-p-function*
+                                 buffer mark-key))))
+            (setf (gethash base-key duplicate-counts) duplicate-index)
+            (with-point ((start point))
+              (insert-string point
+                             (format nil "~a ~a~%"
+                                     (if marked-p ">" " ")
+                                     (agenda-display-line item)))
+              (put-text-property start point :agenda-file
+                                 (agenda-item-file item))
+              (put-text-property start point :agenda-line
+                                 (agenda-item-line item))
+              (put-text-property start point :agenda-heading
+                                 (agenda-item-heading item))
+              (put-text-property start point :agenda-kind
+                                 (agenda-item-kind item))
+              (put-text-property start point :agenda-date
+                                 (agenda-item-date item))
+              (put-text-property start point :agenda-time
+                                 (agenda-item-time item))
+              (put-text-property start point :agenda-occurrence-index
+                                 (agenda-item-occurrence-index item))
+              (put-text-property start point :agenda-duplicate-index
+                                 duplicate-index)))))
     (insert-string point (format nil "~%"))))
 
 (defun agenda-error-text (condition)
@@ -586,7 +633,8 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
 (defun render-agenda (buffer items &optional failures)
   "Fill BUFFER with grouped ITEMS and any source FAILURES on the editor thread."
   (let ((now (funcall *agenda-now-function*))
-        (restore-key (buffer-value buffer 'lem-yath-agenda-restore-entry)))
+        (restore-key (buffer-value buffer 'lem-yath-agenda-restore-entry))
+        (duplicate-counts (make-hash-table :test #'equal)))
     (setf (buffer-value buffer 'lem-yath-agenda-restore-entry) nil)
     (with-buffer-read-only buffer nil
       (erase-buffer buffer)
@@ -594,11 +642,12 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
           (group-items items now)
         (let ((point (buffer-end-point buffer)))
           (insert-string point (format nil "Agenda  (~a)~%~%" (today-iso now))))
-        (insert-agenda-section buffer "Overdue" overdue)
-        (insert-agenda-section buffer "Today" today)
+        (insert-agenda-section buffer "Overdue" overdue duplicate-counts)
+        (insert-agenda-section buffer "Today" today duplicate-counts)
         (insert-agenda-section
-         buffer (format nil "Upcoming (~a days)" *agenda-upcoming-days*) upcoming)
-        (insert-agenda-section buffer "TODOs" todos)
+         buffer (format nil "Upcoming (~a days)" *agenda-upcoming-days*)
+         upcoming duplicate-counts)
+        (insert-agenda-section buffer "TODOs" todos duplicate-counts)
         (insert-agenda-failures buffer failures)))
     (unless (and restore-key (agenda-restore-entry-point buffer restore-key))
       (buffer-start (buffer-point buffer))))
@@ -708,6 +757,8 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
 (defun agenda-kill-buffer-cleanup (&optional (buffer (current-buffer)))
   ;; Invalidate any worker that still holds BUFFER before Lem disposes it.
   (when (agenda-buffer-live-p buffer)
+    (dolist (function *agenda-buffer-cleanup-functions*)
+      (funcall function buffer))
     (agenda-next-generation buffer)
     (setf (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)))
 
@@ -1262,7 +1313,10 @@ suffix."
 
 (defmethod lem-vi-mode/core:mode-specific-keymaps ((mode lem-yath-agenda-mode))
   (declare (ignore mode))
-  (list *lem-yath-agenda-vi-keymap*))
+  ;; Evil-Org's motion map shadows the base Org agenda map, but C-z Emacs
+  ;; state must expose the base bindings (notably the user's custom I/O).
+  (unless (lem-yath-emacs-state-p)
+    (list *lem-yath-agenda-vi-keymap*)))
 
 (define-key *lem-yath-agenda-mode-keymap* "Return" 'lem-yath-agenda-visit)
 (define-key *lem-yath-agenda-mode-keymap* "g" 'lem-yath-agenda-refresh)

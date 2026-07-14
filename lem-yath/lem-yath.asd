@@ -61,6 +61,7 @@
                 :components ((:file "agenda")
                              (:file "agenda-archive")
                              (:file "agenda-refile")
+                             (:file "agenda-clock")
                              (:file "citar")
                              (:file "devdocs")
                              (:file "elfeed")

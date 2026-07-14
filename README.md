@@ -182,7 +182,13 @@ of writing `.fasl` files into the source tree.
   subtree to Org's default sibling `_archive` file, while `da` confirms first;
   archive metadata and both files are persisted destination-first. GNU Org's
   `C-c C-w` completes over the current file's level-one headings and
-  refiles the selected complete subtree as the target's final child.
+  refiles the selected complete subtree as the target's final child. Agenda
+  clocking preserves the effective state split in the Emacs setup: Vi `I/O`
+  controls one GNU Org-style global clock, while C-z Emacs-state `I/O` starts
+  concurrent delegated clocks on the current or bulk-marked rows and closes
+  marked clocks—or every open clock across agenda files when nothing is
+  marked. Evil/base mark keys render `>` prefixes and keep live source points
+  across clock insertions and agenda refreshes.
 - streaming OpenRouter LLM client + claude/codex/grok CLI backends
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
   (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli
@@ -202,7 +208,7 @@ electric-editing, grouped-buffer-list, UI parity, project navigation, VCS,
 persistence, bookmarks,
 retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
-roam, native Org, agenda, and parity-ledger checks. The ledger can also be
+roam, native Org, agenda, agenda-clock, and parity-ledger checks. The ledger can also be
 validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
@@ -241,6 +247,7 @@ nix run .#notes-test
 nix run .#roam-test
 nix run .#org-test
 nix run .#agenda-test
+nix run .#agenda-clock-test
 nix run .#interactive-test
 nix run .#structural-test
 ```
