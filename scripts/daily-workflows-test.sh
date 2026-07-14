@@ -130,11 +130,14 @@ lisp_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/guard.lisp"
 find_root="$LEM_YATH_DAILY_WORKFLOWS_ROOT/find-name"
 find_source="$find_root/source.txt"
 find_sentinel="$find_root/INJECTED"
+find_ops_root="$LEM_YATH_DAILY_WORKFLOWS_ROOT/find-name-ops"
+find_copy_target="$LEM_YATH_DAILY_WORKFLOWS_ROOT/find-name-copy-target"
 printf 'first\nomega' > "$line_file"
 printf 'prefix TOKEN suffix\n' > "$visual_file"
 printf 'first\nomega' > "$visual_line_file"
 printf '(a b c)\n' > "$lisp_file"
-mkdir -p "$find_root/nested" "$find_root/named-dir.match"
+mkdir -p "$find_root/nested" "$find_root/named-dir.match" \
+  "$find_ops_root/copy-tree.op" "$find_ops_root/tree.op" "$find_copy_target"
 printf 'FIND OPEN TARGET\n' > "$find_root/00-[.match"
 printf 'nested match\n' > "$find_root/nested/later.match"
 printf 'semicolon match\n' > "$find_root/semi;colon.match"
@@ -144,6 +147,12 @@ printf 'literal question match\n' > "$find_root/literal?.match"
 newline_match=$'line\nbreak.match'
 printf 'newline match\n' > "$find_root/$newline_match"
 printf 'find source\n' > "$find_source"
+printf 'hostile copy one\n' > "$find_ops_root/alpha;one.op"
+printf 'hostile copy two\n' > "$find_ops_root/beta space.op"
+printf 'rename target\n' > "$find_ops_root/move.op"
+printf 'delete target\n' > "$find_ops_root/delete.op"
+printf 'recursive copy child\n' > "$find_ops_root/copy-tree.op/child.txt"
+printf 'recursive child\n' > "$find_ops_root/tree.op/child.txt"
 printf '%s\n' \
   "#!$(command -v python3)" \
   'import os' \
@@ -569,6 +578,19 @@ fi
 
 test_find_name() {
   local find_session="lem-yath-daily-find-$id" screen before actual
+
+  start_ops_search() {
+    local pattern=$1 expected=$2
+    send_chord "$find_session" M-s f
+    lem_wait_for "$find_session" 'Find name in directory:' "$WAIT_TIMEOUT" >/dev/null || return 1
+    lem_keys "$find_session" F1
+    lem_wait_for "$find_session" 'Name pattern:' "$WAIT_TIMEOUT" >/dev/null || return 1
+    send_chord "$find_session" C-a C-k
+    tmux_cmd send-keys -t "$find_session" -l "$pattern"
+    lem_keys "$find_session" Enter
+    lem_wait_for "$find_session" "Status:[[:space:]]+$expected" "$WAIT_TIMEOUT" >/dev/null || return 1
+    sleep "$KEY_DELAY"
+  }
   if ! start_fixture_session "$find_session" editing "$find_source" ||
      ! lem_wait_for "$find_session" 'find source' "$BOOT_TIMEOUT" >/dev/null; then
     fail find-name-boot "could not open the find-name source buffer" "$find_session"
@@ -577,7 +599,7 @@ test_find_name() {
 
   if invoke_test_command "$find_session" lem-yath-test-find-name-buffer-guards '^FIND-GUARDS '; then
     actual=$(grep '^FIND-GUARDS ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
-    if [ "$actual" = 'FIND-GUARDS collision-rejected=yes collision-intact=yes stale-start-rejected=yes stale-intact=yes' ]; then
+    if [ "$actual" = 'FIND-GUARDS collision-rejected=yes collision-intact=yes stale-start-rejected=yes stale-intact=yes root-copy-rejected=yes' ]; then
       pass find-name-buffer-guards "unowned buffers and mode-changed async targets stayed untouched"
     else
       fail find-name-buffer-guards "unexpected ownership guard result: $actual" "$find_session"
@@ -764,6 +786,160 @@ test_find_name() {
     fi
   else
     fail find-name-cancel-setup "could not select the controlled find executable" "$find_session"
+  fi
+
+  # A new process is used for the operation checks because the cancellation
+  # probe deliberately replaces the find executable in this one.
+  lem_stop "$find_session"
+  find_session="lem-yath-daily-find-ops-$id"
+  if ! start_fixture_session "$find_session" editing "$find_source" ||
+     ! lem_wait_for "$find_session" 'find source' "$BOOT_TIMEOUT" >/dev/null; then
+    fail find-name-operations-boot "could not open the file-operation fixture" "$find_session"
+    return
+  fi
+
+  if start_ops_search '*.op' '6 matches'; then
+    send_chord "$find_session" Escape m m
+    if invoke_test_command "$find_session" lem-yath-test-find-name-bindings '^FIND-BINDINGS '; then
+      actual=$(grep '^FIND-BINDINGS ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+      if [ "$actual" = 'FIND-BINDINGS C=LEM-YATH-FIND-NAME-COPY R=LEM-YATH-FIND-NAME-RENAME D=LEM-YATH-FIND-NAME-DELETE m=LEM-YATH-FIND-NAME-MARK' ]; then
+        pass find-name-normal-bindings "Dired commands override conflicting Vi Normal keys only in *Find*"
+      else
+        fail find-name-normal-bindings "unexpected Vi Normal bindings: $actual" "$find_session"
+      fi
+    else
+      fail find-name-normal-bindings "could not inspect the active *Find* keymaps" "$find_session"
+    fi
+    lem_keys "$find_session" C
+    if lem_wait_for "$find_session" 'opy to:' "$WAIT_TIMEOUT" >/dev/null; then
+      pass find-name-copy-prompt "C opened Lem's file-completion destination prompt"
+    else
+      fail find-name-copy-prompt "C did not open the copy destination prompt" "$find_session"
+    fi
+    if invoke_test_command "$find_session" lem-yath-test-find-name-copy-to-target '^FIND-COPY-COMMAND done$' &&
+       lem_wait_for "$find_session" 'Status:[[:space:]]+6 matches' "$WAIT_TIMEOUT" >/dev/null &&
+       cmp -s "$find_ops_root/alpha;one.op" "$find_copy_target/alpha;one.op" &&
+       cmp -s "$find_ops_root/beta space.op" "$find_copy_target/beta space.op"; then
+      pass find-name-copy "C copied the marked hostile pathnames into an existing directory"
+    else
+      fail find-name-copy "marked copy did not preserve both exact pathnames" "$find_session"
+    fi
+
+    lem_keys "$find_session" U
+    printf 'collision sentinel\n' > "$find_copy_target/alpha;one.op"
+    lem_keys "$find_session" m
+    send_chord "$find_session" Escape Escape M-x
+    tmux_cmd send-keys -t "$find_session" -l 'lem-yath-test-find-name-copy-to-target'
+    lem_keys "$find_session" Enter
+    if lem_wait_for "$find_session" 'Overwrite .*alpha;one\.op' "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$find_session" n
+    fi
+    sleep 0.5
+    if [ "$(cat "$find_copy_target/alpha;one.op")" = 'collision sentinel' ]; then
+      pass find-name-copy-refusal "declining the collision prompt left the destination untouched"
+    else
+      fail find-name-copy-refusal "copy overwrote a destination after refusal" "$find_session"
+    fi
+  else
+    fail find-name-operations-search "could not produce the operation fixture results" "$find_session"
+  fi
+
+  if start_ops_search 'copy-tree.op' '1 match'; then
+    before=$(report_count '^FIND-COPY-COMMAND done$')
+    send_chord "$find_session" Escape Escape M-x
+    tmux_cmd send-keys -t "$find_session" -l 'lem-yath-test-find-name-copy-to-target'
+    lem_keys "$find_session" Enter
+    if lem_wait_for "$find_session" 'Recursively copy directory' "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$find_session" n
+    fi
+    wait_report_count '^FIND-COPY-COMMAND done$' "$((before + 1))" || true
+    if [ ! -e "$find_copy_target/copy-tree.op" ]; then
+      pass find-name-copy-directory-refusal "declining recursive copy left the destination absent"
+    else
+      fail find-name-copy-directory-refusal "recursive copy ran after refusal" "$find_session"
+    fi
+
+    before=$(report_count '^FIND-COPY-COMMAND done$')
+    send_chord "$find_session" Escape Escape M-x
+    tmux_cmd send-keys -t "$find_session" -l 'lem-yath-test-find-name-copy-to-target'
+    lem_keys "$find_session" Enter
+    if lem_wait_for "$find_session" 'Recursively copy directory' "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$find_session" y
+    fi
+    if wait_report_count '^FIND-COPY-COMMAND done$' "$((before + 1))" &&
+       [ "$(cat "$find_copy_target/copy-tree.op/child.txt")" = 'recursive copy child' ]; then
+      pass find-name-copy-directory "directory copy required explicit top-level confirmation"
+    else
+      fail find-name-copy-directory "confirmed recursive copy did not preserve the directory" "$find_session"
+    fi
+  else
+    fail find-name-copy-directory-search "could not isolate the recursive-copy fixture" "$find_session"
+  fi
+
+  if start_ops_search 'move.op' '1 match'; then
+    lem_keys "$find_session" R
+    if lem_wait_for "$find_session" 'ename to:' "$WAIT_TIMEOUT" >/dev/null; then
+      pass find-name-rename-prompt "R opened Lem's file-completion destination prompt"
+    else
+      fail find-name-rename-prompt "R did not open the rename destination prompt" "$find_session"
+    fi
+    if invoke_test_command "$find_session" lem-yath-test-find-name-rename-to-target '^FIND-RENAME-COMMAND done$' &&
+       lem_wait_for "$find_session" 'Status:[[:space:]]+0 matches' "$WAIT_TIMEOUT" >/dev/null &&
+       [ ! -e "$find_ops_root/move.op" ] &&
+       [ "$(cat "$find_ops_root/renamed.op")" = 'rename target' ]; then
+      pass find-name-rename "R renamed the current unmarked result and refreshed the search"
+    else
+      fail find-name-rename "current-row rename did not move the exact source" "$find_session"
+    fi
+  else
+    fail find-name-rename-search "could not isolate the rename fixture" "$find_session"
+  fi
+
+  if start_ops_search 'delete.op' '1 match'; then
+    lem_keys "$find_session" D
+    if lem_wait_for "$find_session" 'Delete 1 selected entry' "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$find_session" y
+    fi
+    if lem_wait_for "$find_session" 'Status:[[:space:]]+0 matches' "$WAIT_TIMEOUT" >/dev/null &&
+       [ ! -e "$find_ops_root/delete.op" ]; then
+      pass find-name-delete "D confirmed and deleted the current ordinary file"
+    else
+      fail find-name-delete "confirmed ordinary deletion did not refresh cleanly" "$find_session"
+    fi
+  else
+    fail find-name-delete-search "could not isolate the delete fixture" "$find_session"
+  fi
+
+  if start_ops_search 'tree.op' '1 match'; then
+    lem_keys "$find_session" D
+    if lem_wait_for "$find_session" 'Delete 1 selected entry' "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$find_session" y
+    fi
+    if lem_wait_for "$find_session" 'Recursively delete directory' "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$find_session" n
+    fi
+    sleep 0.5
+    if [ -f "$find_ops_root/tree.op/child.txt" ]; then
+      pass find-name-delete-directory-refusal "declining recursive deletion retained the complete directory"
+    else
+      fail find-name-delete-directory-refusal "recursive refusal removed directory contents" "$find_session"
+    fi
+
+    lem_keys "$find_session" D
+    if lem_wait_for "$find_session" 'Delete 1 selected entry' "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$find_session" y
+    fi
+    if lem_wait_for "$find_session" 'Recursively delete directory' "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$find_session" y
+    fi
+    if lem_wait_for "$find_session" 'Status:[[:space:]]+0 matches' "$WAIT_TIMEOUT" >/dev/null &&
+       [ ! -e "$find_ops_root/tree.op" ]; then
+      pass find-name-delete-directory "D required both confirmations before recursive deletion"
+    else
+      fail find-name-delete-directory "confirmed recursive deletion did not remove the directory" "$find_session"
+    fi
+  else
+    fail find-name-delete-directory-search "could not isolate the directory fixture" "$find_session"
   fi
 
   lem_stop "$find_session"

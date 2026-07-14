@@ -5,6 +5,7 @@
 (defparameter *find-name-buffer-name* "*Find*")
 (defconstant +find-name-buffer-owner+ 'lem-yath-find-name)
 (defvar *find-name-mode-keymap* (make-keymap))
+(defvar *find-name-vi-keymap* (make-keymap))
 (defvar *find-name-program* nil
   "Absolute find executable override, primarily for controlled tests.")
 
@@ -29,7 +30,7 @@
 ;; Pinned Lem's Vi keymap assembly does not include ordinary major-mode maps.
 (defmethod lem-vi-mode/core:mode-specific-keymaps
     ((mode lem-yath-find-name-mode))
-  (list *find-name-mode-keymap*))
+  (list *find-name-vi-keymap*))
 
 (defun find-name-split-nul (string)
   "Return the nonempty NUL-terminated records in STRING."
@@ -380,6 +381,242 @@
   (unless (find-name-owned-buffer-p (current-buffer))
     (editor-error "Not a find-name result buffer")))
 
+(defun find-name-native-path (path)
+  (etypecase path
+    (string path)
+    (pathname (uiop:native-namestring path))))
+
+(defun find-name-path-stat (path)
+  "Return PATH's lstat data, including for dangling symbolic links."
+  #+sbcl
+  (handler-case
+      (sb-posix:lstat (find-name-native-path path))
+    (error () nil))
+  #-sbcl
+  (error "Find-name file operations require the supported SBCL runtime"))
+
+(defun find-name-path-exists-p (path)
+  (not (null (find-name-path-stat path))))
+
+(defun find-name-real-directory-p (path)
+  "Return true only for an actual directory, never a symlink to one."
+  (alexandria:when-let ((stat (find-name-path-stat path)))
+    (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
+       sb-posix:s-ifdir)))
+
+(defun find-name-program-path (name)
+  (or (executable-find name)
+      (editor-error "Required file-operation program is unavailable: ~a" name)))
+
+(defun find-name-run-file-program (name arguments)
+  "Run NAME with exact argv ARGUMENTS and return its standard output."
+  (multiple-value-bind (output error-output exit-code)
+      (uiop:run-program
+       (cons (namestring (find-name-program-path name)) arguments)
+       :output :string
+       :error-output :string
+       :ignore-error-status t)
+    (unless (and (integerp exit-code) (zerop exit-code))
+      (let ((detail
+              (string-trim '(#\Space #\Tab #\Newline #\Return)
+                           error-output)))
+        (error "~a failed~@[ (~a)~]: ~a"
+               name exit-code
+               (if (plusp (length detail)) detail "no diagnostic"))))
+    output))
+
+(defun find-name-directory-nonempty-p (path)
+  "Return whether real directory PATH has at least one child."
+  (plusp
+   (length
+    (find-name-run-file-program
+     "find"
+     (list (find-name-native-path path)
+           "-mindepth" "1" "-maxdepth" "1" "-printf" "." "-quit")))))
+
+(defun find-name-operation-paths ()
+  "Return existing marked paths, or the existing current-row path."
+  (ensure-current-find-name-buffer)
+  (when (buffer-value (current-buffer) :find-name-request)
+    (editor-error "Wait for the find-name search to finish, or cancel it"))
+  (let ((paths (find-name-marked-paths)))
+    (when (null paths)
+      (multiple-value-bind (line current) (find-name-current-row)
+        (declare (ignore line))
+        (unless current
+          (editor-error "No marked or current find result"))
+        (setf paths (list (find-name-native-path current)))))
+    (dolist (path paths)
+      (unless (find-name-path-exists-p path)
+        (editor-error "Find result no longer exists: ~a"
+                      (find-name-display-string path))))
+    paths))
+
+(defun find-name-native-basename (path)
+  (let* ((native (string-right-trim '(#\/) (find-name-native-path path)))
+         (slash (position #\/ native :from-end t)))
+    (when (zerop (length native))
+      (editor-error "Cannot derive a destination name for filesystem root"))
+    (subseq native (if slash (1+ slash) 0))))
+
+(defun find-name-path-below (directory basename)
+  (uiop:parse-native-namestring
+   (concatenate 'string
+                (string-right-trim '(#\/) (find-name-native-path directory))
+                "/"
+                basename)))
+
+(defun find-name-destination-pairs (sources target)
+  "Resolve SOURCES to exact destinations beneath TARGET where appropriate."
+  (let* ((target (find-name-native-path target))
+         (target-directory-p (find-name-real-directory-p target)))
+    (when (and (rest sources) (not target-directory-p))
+      (editor-error "The destination for multiple files must be an existing directory"))
+    (let ((pairs
+            (mapcar
+             (lambda (source)
+               (cons source
+                     (find-name-native-path
+                      (if target-directory-p
+                          (find-name-path-below
+                           target (find-name-native-basename source))
+                          target))))
+             sources)))
+      (dolist (pair pairs)
+        (when (string= (car pair) (cdr pair))
+          (editor-error "Source and destination are the same: ~a"
+                        (find-name-display-string (car pair))))
+        (when (and (member (cdr pair) sources :test #'string=)
+                   (not (string= (car pair) (cdr pair))))
+          (editor-error "A destination is also a selected source: ~a"
+                        (find-name-display-string (cdr pair)))))
+      (let ((seen (make-hash-table :test #'equal)))
+        (dolist (pair pairs)
+          (when (gethash (cdr pair) seen)
+            (editor-error "Selected entries have the same destination: ~a"
+                          (find-name-display-string (cdr pair))))
+          (setf (gethash (cdr pair) seen) t)))
+      pairs)))
+
+(defun find-name-confirm-overwrites (pairs)
+  "Preflight PAIRS and omit existing destinations the user declines."
+  (loop :for pair :in pairs
+        :unless (and (find-name-path-exists-p (cdr pair))
+                     (not
+                      (prompt-for-y-or-n-p
+                       (format nil "Overwrite ~a?"
+                               (find-name-display-string (cdr pair))))))
+          :collect pair))
+
+(defun find-name-confirm-recursive-copies (pairs)
+  "Apply Dired's top-level confirmation policy to directory copies."
+  (loop :for pair :in pairs
+        :unless (and (find-name-real-directory-p (car pair))
+                     (not
+                      (prompt-for-y-or-n-p
+                       (format nil "Recursively copy directory ~a?"
+                               (find-name-display-string (car pair))))))
+          :collect pair))
+
+(defun find-name-refresh-after-operation ()
+  (start-find-name-search
+   (current-buffer)
+   (buffer-value (current-buffer) :find-name-root)
+   (buffer-value (current-buffer) :find-name-pattern)
+   :preserve-marks t))
+
+(defun find-name-perform-pairs (verb pairs program arguments mark-renames-p)
+  "Apply PROGRAM to PAIRS, refreshing even after a partial failure."
+  (let ((completed 0)
+        (failure nil)
+        (marks (find-name-marks (current-buffer))))
+    (dolist (pair pairs)
+      (handler-case
+          (progn
+            (find-name-run-file-program
+             program (append arguments (list (car pair) (cdr pair))))
+            (when (and mark-renames-p
+                       (gethash (find-name-mark-key (car pair)) marks))
+              (remhash (find-name-mark-key (car pair)) marks)
+              (setf (gethash (find-name-mark-key (cdr pair)) marks) t))
+            (incf completed))
+        (error (condition)
+          (setf failure condition)
+          (return))))
+    (when (plusp completed)
+      (find-name-refresh-after-operation))
+    (when failure
+      (editor-error "~a stopped after ~d of ~d entries: ~a"
+                    verb completed (length pairs) failure))
+    (if (plusp completed)
+        (message "~a ~d ~a"
+                 verb completed (if (= completed 1) "entry" "entries"))
+        (message "No entries changed"))))
+
+(defun find-name-prompt-destination (prompt)
+  (prompt-for-file prompt
+                   :directory (buffer-directory (current-buffer))
+                   :existing nil))
+
+(defun find-name-copy-to (target)
+  (let* ((sources (find-name-operation-paths))
+         (pairs (find-name-confirm-overwrites
+                 (find-name-confirm-recursive-copies
+                  (find-name-destination-pairs sources target)))))
+    (find-name-perform-pairs
+     "Copied" pairs "cp" '("-aT" "--remove-destination" "--") nil)))
+
+(define-command lem-yath-find-name-copy () ()
+  "Copy marked entries, or the current entry, like Dired C."
+  (find-name-copy-to (find-name-prompt-destination "Copy to: ")))
+
+(defun find-name-rename-to (target)
+  (let* ((sources (find-name-operation-paths))
+         (pairs (find-name-confirm-overwrites
+                 (find-name-destination-pairs sources target))))
+    (find-name-perform-pairs "Renamed" pairs "mv" '("-T" "--") t)))
+
+(define-command lem-yath-find-name-rename () ()
+  "Rename marked entries, or the current entry, like Dired R."
+  (find-name-rename-to (find-name-prompt-destination "Rename to: ")))
+
+(define-command lem-yath-find-name-delete () ()
+  "Delete marked entries, or the current entry, like Dired D."
+  (let ((paths (find-name-operation-paths)))
+    (unless
+        (prompt-for-y-or-n-p
+         (format nil "Delete ~d selected ~a?"
+                 (length paths) (if (= (length paths) 1) "entry" "entries")))
+      (message "No deletions performed")
+      (return-from lem-yath-find-name-delete nil))
+    (let ((completed 0)
+          (failure nil)
+          (marks (find-name-marks (current-buffer))))
+      (dolist (path paths)
+        (unless (and (find-name-real-directory-p path)
+                     (find-name-directory-nonempty-p path)
+                     (not
+                      (prompt-for-y-or-n-p
+                       (format nil "Recursively delete directory ~a?"
+                               (find-name-display-string path)))))
+          (handler-case
+              (progn
+                (find-name-run-file-program
+                 "rm" (list (if (find-name-real-directory-p path) "-rf" "-f")
+                            "--" path))
+                (remhash (find-name-mark-key path) marks)
+                (incf completed))
+            (error (condition)
+              (setf failure condition)
+              (return)))))
+      (when (plusp completed)
+        (find-name-refresh-after-operation))
+      (when failure
+        (editor-error "Delete stopped after ~d of ~d entries: ~a"
+                      completed (length paths) failure))
+      (message "Deleted ~d ~a"
+               completed (if (= completed 1) "entry" "entries")))))
+
 (defun find-name-set-row-mark (line path marked-p)
   (let ((buffer (current-buffer))
         (key (find-name-mark-key path)))
@@ -480,11 +717,15 @@
          (buffer-value buffer :find-name-pattern)
          (find-name-request-generation request))))))
 
-(define-key *find-name-mode-keymap* "Return" 'lem-yath-find-name-open)
-(define-key *find-name-mode-keymap* "g" 'lem-yath-find-name-refresh)
-(define-key *find-name-mode-keymap* "m" 'lem-yath-find-name-mark)
-(define-key *find-name-mode-keymap* "u" 'lem-yath-find-name-unmark)
-(define-key *find-name-mode-keymap* "U" 'lem-yath-find-name-unmark-all)
-(define-key *find-name-mode-keymap* "t" 'lem-yath-find-name-toggle-marks)
-(define-key *find-name-mode-keymap* "C-c C-k" 'lem-yath-find-name-cancel)
-(define-key *find-name-mode-keymap* "q" 'quit-active-window)
+(dolist (keymap (list *find-name-mode-keymap* *find-name-vi-keymap*))
+  (define-key keymap "Return" 'lem-yath-find-name-open)
+  (define-key keymap "g" 'lem-yath-find-name-refresh)
+  (define-key keymap "m" 'lem-yath-find-name-mark)
+  (define-key keymap "u" 'lem-yath-find-name-unmark)
+  (define-key keymap "U" 'lem-yath-find-name-unmark-all)
+  (define-key keymap "t" 'lem-yath-find-name-toggle-marks)
+  (define-key keymap "C" 'lem-yath-find-name-copy)
+  (define-key keymap "R" 'lem-yath-find-name-rename)
+  (define-key keymap "D" 'lem-yath-find-name-delete)
+  (define-key keymap "C-c C-k" 'lem-yath-find-name-cancel)
+  (define-key keymap "q" 'quit-active-window))

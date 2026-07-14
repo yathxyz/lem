@@ -224,6 +224,34 @@
    (namestring (daily-workflows-fixture-path "find-name/")))
   (lem/prompt-window::prompt-execute))
 
+(define-command lem-yath-test-submit-find-name-ops-root () ()
+  (lem/prompt-window::replace-prompt-input
+   (namestring (daily-workflows-fixture-path "find-name-ops/")))
+  (lem/prompt-window::prompt-execute))
+
+(define-command lem-yath-test-find-name-copy-to-target () ()
+  (find-name-copy-to
+   (namestring (daily-workflows-fixture-path "find-name-copy-target/")))
+  (daily-workflows-fixture-log "FIND-COPY-COMMAND done"))
+
+(defun daily-workflows-fixture-key-command (keys)
+  (let* ((prefix (lem-core::lookup-keybind (lem-core::parse-keyspec keys)))
+         (command (and prefix (lem-core::prefix-suffix prefix))))
+    (if command (string command) "none")))
+
+(define-command lem-yath-test-find-name-bindings () ()
+  (daily-workflows-fixture-log
+   "FIND-BINDINGS C=~a R=~a D=~a m=~a"
+   (daily-workflows-fixture-key-command "C")
+   (daily-workflows-fixture-key-command "R")
+   (daily-workflows-fixture-key-command "D")
+   (daily-workflows-fixture-key-command "m")))
+
+(define-command lem-yath-test-find-name-rename-to-target () ()
+  (find-name-rename-to
+   (namestring (daily-workflows-fixture-path "find-name-ops/renamed.op")))
+  (daily-workflows-fixture-log "FIND-RENAME-COMMAND done"))
+
 (define-command lem-yath-test-use-slow-find () ()
   (setf *find-name-program*
         (uiop:parse-native-namestring
@@ -234,7 +262,8 @@
   (let ((collision-rejected-p nil)
         (collision-intact-p nil)
         (stale-start-rejected-p nil)
-        (stale-intact-p nil))
+        (stale-intact-p nil)
+        (root-copy-rejected-p nil))
     (let ((buffer (make-buffer *find-name-buffer-name* :enable-undo-p nil)))
       (unwind-protect
            (progn
@@ -273,15 +302,21 @@
                                               (buffer-end-point buffer)))))
         (when (member buffer (buffer-list) :test #'eq)
           (delete-buffer buffer))))
+    (handler-case
+        (find-name-destination-pairs
+         '("/") (namestring (daily-workflows-fixture-path "find-name/")))
+      (error ()
+        (setf root-copy-rejected-p t)))
     (daily-workflows-fixture-log
      (concatenate
       'string
       "FIND-GUARDS collision-rejected=~a collision-intact=~a "
-      "stale-start-rejected=~a stale-intact=~a")
+      "stale-start-rejected=~a stale-intact=~a root-copy-rejected=~a")
      (if collision-rejected-p "yes" "no")
      (if collision-intact-p "yes" "no")
      (if stale-start-rejected-p "yes" "no")
-     (if stale-intact-p "yes" "no"))))
+     (if stale-intact-p "yes" "no")
+     (if root-copy-rejected-p "yes" "no"))))
 
 (define-command lem-yath-test-setup-buffer-list () ()
   (let* ((alpha-path
@@ -333,6 +368,8 @@
 
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F4" 'lem-yath-test-submit-find-name-root)
+(define-key lem/prompt-window::*prompt-mode-keymap*
+  "F1" 'lem-yath-test-submit-find-name-ops-root)
 
 (let ((phase (or (uiop:getenv "LEM_YATH_DAILY_WORKFLOWS_PHASE") "editing")))
   (cond

@@ -863,8 +863,12 @@ history.
   control characters; q leaves the result buffer available. Dired-style `m`
   and `u` mark or unmark and advance, `U` clears every mark, and `t` toggles
   all result marks. A fresh search clears marks; `g` retains exact-path marks
-  that still exist in the refreshed result set. File operations and long
-  columns remain absent. While a search is running,
+  that still exist in the refreshed result set. `C`, `R`, and `D` copy,
+  rename, or delete the marked set (falling back to the current row), with
+  exact argv path handling, collision prompts, result refreshes, and Dired's
+  per-top-level confirmations for recursive directory copies and non-empty
+  directory deletion. Long columns and Dired's wider operation surface remain absent.
+  While a search is running,
   `C-c C-k` terminates only the subprocess owned by that `*Find*` request and
   leaves a persistent cancelled result buffer that can be retried with `g`.
 - Grep: `lem/grep:grep` and `lem/grep:project-grep` (`src/ext/grep.lisp`, bound
