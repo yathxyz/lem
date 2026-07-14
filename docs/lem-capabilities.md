@@ -553,9 +553,11 @@ ends ordinary completion. Prompt completion remains Vertico-Prescient, and file
 completion remains path-aware.
 
 Automatic contexts also reproduce Corfu's selected-candidate interaction.  An
-ordinary initial preselection is accepted by `Tab` or `Return`; exact input that
-matches a non-first candidate starts on a real prompt row, where neither key can
-accept a hidden item. `C-n`/`C-p`, arrow keys, beginning/end commands, and
+ordinary initial preselection is accepted by `Tab` or `Return`; a same-case
+exact candidate is moved to the front, while provider-valid input distinct from
+the first candidate (such as a case-folded exact match) starts on a real prompt
+row, where neither key can accept a hidden item. `C-n`/`C-p`, arrow keys,
+beginning/end commands, and
 `M-n`/`M-p` navigate without cycling. Moving off the preselection draws a
 source-aligned, display-only preview: source text, point, modified tick, dirty
 state, and retained undo history remain unchanged.
@@ -579,11 +581,13 @@ same cleanup path.
 Lem has no inline display overlay equivalent to Corfu's child-frame overlay.
 The ncurses implementation therefore uses a borderless one-row floating window
 and suppresses preview when a multiline or wrapped replacement cannot be shown
-exactly.  Corfu's `test-completion` predicate is not available through Lem's
-provider API; prompt-row validity is conservatively inferred from exact
-candidate insertion text and can differ for provider-specific predicates. Float
-ownership is verified in the target single-frame ncurses frontend; multi-frame
-GUI ownership remains unverified.
+exactly. Completion specs expose a provider validity predicate over the complete
+input and unfiltered candidate batch. Automatic completion uses that predicate
+for Corfu's `preselect=valid`; absent or failing predicates fail closed instead
+of inferring truth from insertion text. Configured non-file providers use
+case-folded validity, while file validity remains case-sensitive as in Emacs on
+the target Linux filesystem. Float ownership is verified in the target
+single-frame ncurses frontend; multi-frame GUI ownership remains unverified.
 
 This is deliberately an approximation rather than a full Orderless claim:
 CL-PPCRE and Emacs use different regexp dialects. The pinned `&` annotation

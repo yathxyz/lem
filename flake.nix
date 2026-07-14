@@ -53,6 +53,7 @@
               ./patches/lem-buffer-write-function.patch
               ./patches/lem-display-line-transformer.patch
               ./patches/lem-directory-buffer-clean.patch
+              ./patches/lem-completion-validity.patch
             ];
           };
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (

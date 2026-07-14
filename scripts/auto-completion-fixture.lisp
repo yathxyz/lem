@@ -12,6 +12,7 @@
 (defvar *auto-test-corfu-accept-count* 0)
 (defvar *auto-test-valid-focus-count* 0)
 (defvar *auto-test-valid-accept-count* 0)
+(defvar *auto-test-valid-labels* '("Valid" "ValidExtra"))
 (defvar *auto-test-sentinel-window* nil)
 (defvar *auto-test-sentinel-buffer* nil)
 (defvar *auto-test-recursive-change-group* nil)
@@ -130,7 +131,7 @@
      *auto-test-corfu-labels*)))
 
 (defun auto-test-valid-provider (point)
-  "Keep an exact candidate behind a longer first item for preselect=valid."
+  "Expose controlled candidates for Corfu `preselect=valid' oracles."
   (multiple-value-bind (start end prefix)
       (auto-completion-symbol-bounds point)
     (auto-test-report "VALID REQUEST ~a" prefix)
@@ -156,7 +157,7 @@
                             label
                             *auto-test-valid-accept-count*
                             (auto-test-buffer-text)))))
-     '("validExtra" "valid"))))
+     *auto-test-valid-labels*)))
 
 (define-command lem-yath-test-auto-corfu-setup () ()
   (auto-test-reset-current-buffer)
@@ -181,15 +182,35 @@
   (auto-test-reset-current-buffer)
   (setf *auto-test-valid-focus-count* 0
         *auto-test-valid-accept-count* 0
+        *auto-test-valid-labels* '("Valid" "ValidExtra")
         *auto-test-origin-buffer* (current-buffer))
   (auto-test-fill-buffer "*auto-completion-source*"
                          'lem-yath-auto-test-mode
                          "")
   (setf (variable-value 'lem/language-mode:completion-spec
                         :buffer (current-buffer))
-        #'auto-test-valid-provider)
+        (lem/completion-mode:make-completion-spec
+         #'auto-test-valid-provider
+         :test-function #'auto-completion-case-fold-input-valid-p))
   (insert-string (current-point) "vali")
-  (auto-test-report "SETUP valid"))
+  (auto-test-report "SETUP valid-fold"))
+
+(define-command lem-yath-test-auto-exact-setup () ()
+  (auto-test-reset-current-buffer)
+  (setf *auto-test-valid-focus-count* 0
+        *auto-test-valid-accept-count* 0
+        *auto-test-valid-labels* '("exactExtra" "exact")
+        *auto-test-origin-buffer* (current-buffer))
+  (auto-test-fill-buffer "*auto-completion-source*"
+                         'lem-yath-auto-test-mode
+                         "")
+  (setf (variable-value 'lem/language-mode:completion-spec
+                        :buffer (current-buffer))
+        (lem/completion-mode:make-completion-spec
+         #'auto-test-valid-provider
+         :test-function #'auto-completion-case-fold-input-valid-p))
+  (insert-string (current-point) "exac")
+  (auto-test-report "SETUP exact"))
 
 (define-command lem-yath-test-auto-corfu-lisp-setup () ()
   (lem-yath-test-auto-corfu-setup)
@@ -1170,6 +1191,8 @@
   "C-c z c" 'lem-yath-test-auto-corfu-setup)
 (define-key lem-vi-mode:*normal-keymap*
   "C-c z v" 'lem-yath-test-auto-valid-setup)
+(define-key lem-vi-mode:*normal-keymap*
+  "C-c z e" 'lem-yath-test-auto-exact-setup)
 (define-key lem-vi-mode:*normal-keymap*
   "C-c z r" 'lem-yath-test-auto-corfu-middle-setup)
 (define-key lem-vi-mode:*normal-keymap*

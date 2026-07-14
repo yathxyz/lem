@@ -209,9 +209,11 @@ Orderless + mode/Cape CAPFs in ordinary buffers. Yasnippet expands separately
 through `TAB`; it is not a Cape candidate source.
 
 The pinned Corfu source supplies the active defaults `corfu-preselect 'valid`
-and `corfu-preview-current 'insert`.  Thus a valid input distinct from the
-first candidate starts on Corfu's prompt row; otherwise the first candidate is
-preselected without being previewed.  Moving to another candidate displays a
+and `corfu-preview-current 'insert`.  Corfu first moves a same-case exact
+candidate to the front.  A provider-valid input still distinct from that first
+candidate (including a case-folded exact match) starts on Corfu's prompt row;
+otherwise the first candidate is preselected without being previewed. Moving to
+another candidate displays a
 non-mutating preview which is committed before subsequent ordinary input.
 `TAB` completes, `RET` inserts the selection, `Escape` resets selection/input in
 stages, `C-g` quits while retaining typed input, and `M-Space` inserts the

@@ -71,6 +71,7 @@ run_fixture_command() {
     lem-yath-test-auto-completion-static-checks) key=s ;;
     lem-yath-test-auto-corfu-setup) key=c ;;
     lem-yath-test-auto-valid-setup) key=v ;;
+    lem-yath-test-auto-exact-setup) key=e ;;
     lem-yath-test-auto-corfu-middle-setup) key=r ;;
     lem-yath-test-auto-async-setup) key=a ;;
     lem-yath-test-auto-dabbrev-setup) key=d ;;
@@ -100,11 +101,20 @@ setup_corfu_popup() {
 
 setup_valid_popup() {
   run_fixture_command lem-yath-test-auto-valid-setup &&
-    wait_report '^SETUP valid$' 10 &&
+    wait_report '^SETUP valid-fold$' 10 &&
     lem_keys "$session" a &&
     lem_wait_for "$session" 'INSERT' 5 >/dev/null &&
     tmux_cmd send-keys -t "$session" -l d &&
-    lem_wait_for "$session" 'validExtra' 10 >/dev/null
+    lem_wait_for "$session" 'ValidExtra' 10 >/dev/null
+}
+
+setup_exact_popup() {
+  run_fixture_command lem-yath-test-auto-exact-setup &&
+    wait_report '^SETUP exact$' 10 &&
+    lem_keys "$session" a &&
+    lem_wait_for "$session" 'INSERT' 5 >/dev/null &&
+    tmux_cmd send-keys -t "$session" -l t &&
+    lem_wait_for "$session" 'exactExtra' 10 >/dev/null
 }
 
 report_corfu_state() {
@@ -150,16 +160,34 @@ if setup_valid_popup; then
   valid_accept_after=$(grep -c '^VALID ACCEPT ' "$LEM_YATH_AUTO_COMPLETION_REPORT" 2>/dev/null || true)
   if grep -q 'buffer="valid".*preselect=NIL selected=NIL preview=NIL.*focus=NIL.*items=2 valid-focus=0 valid-accept=0' <<<"$valid_prompt" &&
      grep -q 'buffer="valid".*preselect=NIL selected=NIL preview=NIL.*focus=NIL.*items=2 valid-focus=0 valid-accept=0' <<<"$valid_tab" &&
-     grep -q 'preselect=NIL selected="validExtra" preview=T.*focus=T.*valid-focus=1 valid-accept=0' <<<"$valid_focus" &&
+     grep -q 'preselect=NIL selected="Valid" preview=T.*focus=T.*valid-focus=1 valid-accept=0' <<<"$valid_focus" &&
      grep -q 'preselect=NIL selected=NIL preview=NIL.*focus=NIL.*valid-focus=1 valid-accept=0' <<<"$valid_return" &&
      [ "$valid_accept_after" -eq "$valid_accept_before" ] &&
      wait_report '^STATE none buffer=valid timer=NIL$' 5; then
-    pass corfu-preselect-valid "exact input stayed on a real prompt row until explicit navigation"
+    pass corfu-preselect-valid "provider-valid case-folded input stayed on the prompt row"
   else
     fail corfu-preselect-valid "valid prompt focus or acceptance diverged: $valid_prompt / $valid_tab / $valid_focus / $valid_return"
   fi
 else
-  fail corfu-preselect-valid-setup "could not prepare the exact-valid prompt scenario"
+  fail corfu-preselect-valid-setup "could not prepare the provider-valid prompt scenario"
+fi
+
+if setup_exact_popup; then
+  exact_state=$(report_corfu_state || true)
+  exact_accept_before=$(grep -c '^VALID ACCEPT exact ' "$LEM_YATH_AUTO_COMPLETION_REPORT" 2>/dev/null || true)
+  lem_keys "$session" Tab
+  sleep 0.2
+  lem_keys "$session" F7
+  exact_accept_after=$(grep -c '^VALID ACCEPT exact ' "$LEM_YATH_AUTO_COMPLETION_REPORT" 2>/dev/null || true)
+  if grep -q 'buffer="exact".*preselect="exact" selected="exact" preview=NIL.*items=2' <<<"$exact_state" &&
+     [ "$exact_accept_after" -eq $((exact_accept_before + 1)) ] &&
+     wait_report '^STATE none buffer=exact timer=NIL$' 5; then
+    pass corfu-preselect-exact "same-case exact candidate moved first and remained actionable"
+  else
+    fail corfu-preselect-exact "exact candidate ordering or acceptance diverged: $exact_state"
+  fi
+else
+  fail corfu-preselect-exact-setup "could not prepare the same-case exact scenario"
 fi
 
 if setup_corfu_popup; then

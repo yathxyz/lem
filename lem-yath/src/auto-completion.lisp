@@ -160,33 +160,88 @@ directory already exists."
   (multiple-value-bind (start end prefix)
       (auto-completion-symbol-bounds point)
     (when (>= (length prefix) *auto-completion-prefix-length*)
-      (mapcar
-       (lambda (word)
-         (lem/completion-mode:make-completion-item
-          :label word
-          :filter-text word
-          :insert-text word
-          :detail "Dabbrev"
-          :start start
-          :end end))
-       (auto-completion-dabbrev-words point prefix)))))
+      (stable-sort
+       (mapcar
+        (lambda (word)
+          (lem/completion-mode:make-completion-item
+           :label word
+           :filter-text word
+           :insert-text word
+           :detail "Dabbrev"
+           :start start
+           :end end))
+        (auto-completion-dabbrev-words point prefix))
+       #'auto-completion-corfu-item-before-p))))
 
 (defun auto-completion-file-items (point)
   (multiple-value-bind (input start end)
       (auto-completion-file-context point)
     (when input
-      (mapcar
-       (lambda (filename)
-         (let ((label (tail-of-pathname filename)))
-           (lem/completion-mode:make-completion-item
-            :label label
-            :filter-text label
-            :insert-text label
-            :detail "File"
-            :start start
-            :end end)))
-       (ignore-errors
-         (completion-file input (buffer-directory)))))))
+      (auto-completion-corfu-order-items
+       input
+       (stable-sort
+        (mapcar
+         (lambda (filename)
+           (let ((label (tail-of-pathname filename)))
+             (lem/completion-mode:make-completion-item
+              :label label
+              :filter-text label
+              :insert-text label
+              :detail "File"
+              :start start
+              :end end)))
+         (ignore-errors
+           (completion-file input (buffer-directory))))
+       #'auto-completion-corfu-item-before-p)
+       t))))
+
+(defun auto-completion-item-label (item)
+  (lem/completion-mode:completion-item-label item))
+
+(defun auto-completion-corfu-item-before-p (left right)
+  "Implement pinned Corfu's default length-then-alphabetical order."
+  (let ((left (auto-completion-item-label left))
+        (right (auto-completion-item-label right)))
+    (or (< (length left) (length right))
+        (and (= (length left) (length right))
+             (string< left right)))))
+
+(defun auto-completion-move-label-to-front (label items)
+  (let ((matches (remove-if-not
+                  (lambda (item)
+                    (string= label (auto-completion-item-label item)))
+                  items)))
+    (if matches
+        (nconc matches
+               (remove-if (lambda (item) (member item matches :test #'eq))
+                          items))
+        items)))
+
+(defun auto-completion-corfu-order-items (input items &optional file-p)
+  "Apply Corfu's exact-candidate and file-directory fronting rules."
+  (let ((items (if (and file-p
+                        (not (alexandria:ends-with #\/ input)))
+                   (auto-completion-move-label-to-front
+                    (concatenate 'string input "/") items)
+                   items)))
+    (auto-completion-move-label-to-front input items)))
+
+(defun auto-completion-orderless-filter-items (input items)
+  (auto-completion-corfu-order-items
+   input (orderless-filter-completion-items input items)))
+
+(defun auto-completion-input-matches-items-p (input items test)
+  (not (null (find input items
+                   :test test
+                   :key #'auto-completion-item-label))))
+
+(defun auto-completion-case-fold-input-valid-p (input items)
+  "Match the configured non-file `completion-ignore-case' behavior."
+  (auto-completion-input-matches-items-p input items #'string-equal))
+
+(defun auto-completion-file-input-valid-p (input items)
+  "Match Emacs file-table validity on the case-sensitive target filesystem."
+  (auto-completion-input-matches-items-p input items #'string=))
 
 (defun auto-completion-primary-spec (&optional (buffer (current-buffer)))
   (variable-value 'lem/language-mode:completion-spec :buffer buffer))
@@ -194,8 +249,12 @@ directory already exists."
 (defun auto-completion-provider (&optional (point (current-point)))
   (or (auto-completion-primary-spec (point-buffer point))
       (if (auto-completion-file-context-p point)
-          #'auto-completion-file-items
-          #'auto-completion-dabbrev-items)))
+          (lem/completion-mode:make-completion-spec
+           #'auto-completion-file-items
+           :test-function #'auto-completion-file-input-valid-p)
+          (lem/completion-mode:make-completion-spec
+           #'auto-completion-dabbrev-items
+           :test-function #'auto-completion-case-fold-input-valid-p))))
 
 (defun auto-completion-prefix-ready-p (point)
   (if (auto-completion-primary-spec (point-buffer point))
@@ -234,14 +293,15 @@ directory already exists."
       (lem/completion-mode:completion-item-insert-text item)))
 
 (defun auto-completion-valid-prompt-p (context items)
-  "Approximate Corfu's `preselect=valid' from provider candidate strings."
+  "Implement Corfu's provider-aware `preselect=valid' prompt rule."
   (alexandria:when-let* ((input (auto-completion-context-input context))
                          (first (first items)))
-    (let ((first-text (auto-completion-item-preview-text first)))
-      (and (not (string= input first-text))
-           (find input items
-                 :test #'string=
-                 :key #'auto-completion-item-preview-text)))))
+    (let ((first-label (auto-completion-item-label first)))
+      (and (not (string= input first-label))
+           (not (and (auto-completion-file-context-p (current-point))
+                     (string= (concatenate 'string input "/") first-label)))
+           (lem/completion-mode:completion-context-input-valid-p
+            context input)))))
 
 (defun auto-completion-popup (session)
   (lem/completion-mode::context-popup-menu
@@ -629,8 +689,7 @@ directory already exists."
   (not (null (lem/prompt-window:current-prompt-window))))
 
 (defun auto-completion-context-options (spec)
-  "Apply Orderless only to ordinary, non-file in-buffer completion."
-  (declare (ignore spec))
+  "Apply the provider's configured Corfu filtering and validity semantics."
   (cond
     ;; Vertico only displays and filters prompt candidates.  Merely opening a
     ;; synchronous list must not insert its common prefix or accept a singleton.
@@ -638,9 +697,15 @@ directory already exists."
      (list :narrowing nil))
     ((and (null (auto-completion-primary-spec))
           (auto-completion-file-context-p (current-point)))
-     (list :observer-function #'auto-completion-context-observer))
+     (list :test-function
+           (or (lem/completion-mode::spec-test-function spec)
+               #'auto-completion-file-input-valid-p)
+           :observer-function #'auto-completion-context-observer))
     (t
-     (list :filter-function #'orderless-filter-completion-items
+     (list :filter-function #'auto-completion-orderless-filter-items
+           :test-function
+           (or (lem/completion-mode::spec-test-function spec)
+               #'auto-completion-case-fold-input-valid-p)
            :separator #\Space
            :observer-function #'auto-completion-context-observer))))
 
