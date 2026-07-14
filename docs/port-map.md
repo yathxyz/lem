@@ -225,7 +225,11 @@ Status legend:
   kills or query strings remain live but are not written. Concurrent merging
   preserves additions, while a stale process can resurrect a history clear.
 - **Rectangle duplication**: `M-j` matches line and contiguous-region behavior,
-  including Vi character/line selections, but V-BLOCK remains unsupported.
+  including Vi character/line selections. It also matches the pinned Evil
+  V-BLOCK behavior: the block is not an Emacs rectangle or ordinary active
+  region, so the cursor line is duplicated while the block and both corners
+  remain live. A separate Emacs-style `rectangle-mark-mode` and its
+  duplicate-to-the-right behavior remain absent.
 - **Electric-pair scope**: syntax-table pairs, Unicode smart quotes, numeric
   prefixes, escapes, local syntax-safe closer reuse/skip, and preflighted
   adjacent-pair Backspace are covered. Full forward balance scanning across

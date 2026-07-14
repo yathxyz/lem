@@ -940,7 +940,11 @@ In-buffer completion popup: `src/ext/completion-mode.lisp` (`lem/completion-mode
 regions. The ncurses suite checks the otherwise easy-to-miss unterminated-EOF
 newline rule against Emacs, point retention at EOF, one-step undo, forward and
 reverse Vi character selections, V-LINE state, and Paredit's mode-local structural
-override. V-BLOCK/rectangle duplication remains an explicit gap.
+override. It also reproduces the pinned Emacs/Evil V-BLOCK quirk: because Evil
+does not enable `rectangle-mark-mode` or an ordinary active region, `M-j`
+duplicates the active cursor line, keeps V-BLOCK live, and lets the opposite
+corner track inserted text. Lem still has no separate Emacs-style
+`rectangle-mark-mode` whose `M-j` duplicates the rectangle to its right.
 
 ### Electric pairs and self-insert selection replacement — `lem-yath/src/electric-pair.lisp` (verified)
 

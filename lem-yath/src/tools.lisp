@@ -61,16 +61,26 @@ Runs from the project root; the worker runs on a background thread."
       (insert-string insertion (duplicate-string text count))
       (move-point (current-point) saved-point))))
 
+(defun duplicate-visual-block-current-line (buffer count)
+  "Match duplicate-dwim under Evil Visual Block and retain its live corners."
+  (let ((visual-state (lem-vi-mode/core:buffer-state buffer)))
+    (with-point ((saved-mark (buffer-mark buffer) :right-inserting))
+      (duplicate-current-line count)
+      (setf (buffer-mark buffer) saved-mark
+            (lem-vi-mode/core:buffer-state buffer) visual-state))))
+
 (defun duplicate-region-bounds (buffer)
   "Return the active contiguous region in BUFFER, or no values."
   (cond
     ((and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
           (lem-vi-mode/visual:visual-p buffer))
-     (when (lem-vi-mode/visual:visual-block-p buffer)
-       (editor-error "Visual-block duplication is not implemented"))
-     (destructuring-bind (first second)
-         (lem-vi-mode/visual:visual-range buffer)
-       (values (point-min first second) (point-max first second))))
+     ;; Evil does not expose its Visual Block as Emacs rectangle-mark-mode or
+     ;; as an ordinary active region.  The configured duplicate-dwim therefore
+     ;; falls through to duplicate-line while leaving Visual Block active.
+     (unless (lem-vi-mode/visual:visual-block-p buffer)
+       (destructuring-bind (first second)
+           (lem-vi-mode/visual:visual-range buffer)
+         (values (point-min first second) (point-max first second)))))
     ((and (not (typep (current-global-mode) 'lem-vi-mode:vi-mode))
           (buffer-mark-p buffer))
      (let ((start (region-beginning buffer))
@@ -113,10 +123,14 @@ Runs from the project root; the worker runs on a background thread."
 
 (define-command lem-yath-duplicate-dwim (&optional (count 1)) (:universal)
   "Duplicate an active contiguous region or the current line COUNT times."
-  (let ((count (or count 1)))
+  (let ((count (or count 1))
+        (buffer (current-buffer)))
     (when (plusp count)
-      (multiple-value-bind (start end)
-          (duplicate-region-bounds (current-buffer))
-        (if start
-            (duplicate-active-region start end count)
-            (duplicate-current-line count))))))
+      (if (and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
+               (lem-vi-mode/visual:visual-block-p buffer))
+          (duplicate-visual-block-current-line buffer count)
+          (multiple-value-bind (start end)
+              (duplicate-region-bounds buffer)
+            (if start
+                (duplicate-active-region start end count)
+                (duplicate-current-line count)))))))

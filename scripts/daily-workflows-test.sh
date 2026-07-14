@@ -125,6 +125,7 @@ check_find_marks() {
 
 line_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/line-eof.txt"
 visual_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/visual.txt"
+visual_block_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/visual-block.txt"
 visual_line_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/visual-line-eof.txt"
 lisp_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/guard.lisp"
 find_root="$LEM_YATH_DAILY_WORKFLOWS_ROOT/find-name"
@@ -134,6 +135,7 @@ find_ops_root="$LEM_YATH_DAILY_WORKFLOWS_ROOT/find-name-ops"
 find_copy_target="$LEM_YATH_DAILY_WORKFLOWS_ROOT/find-name-copy-target"
 printf 'first\nomega' > "$line_file"
 printf 'prefix TOKEN suffix\n' > "$visual_file"
+printf 'aa11zz\nbb22yy\ncc33xx\n' > "$visual_block_file"
 printf 'first\nomega' > "$visual_line_file"
 printf '(a b c)\n' > "$lisp_file"
 mkdir -p "$find_root/nested" "$find_root/named-dir.match" \
@@ -294,6 +296,96 @@ else
   fail duplicate-visual-reverse-boot "could not open the reverse visual fixture" "$reverse_session"
 fi
 lem_stop "$reverse_session"
+
+# Evil Visual Block does not activate Emacs rectangle-mark-mode, so the pinned
+# duplicate-dwim duplicates the active cursor line and retains the block.
+block_session="lem-yath-daily-visual-block-$id"
+if start_fixture_session "$block_session" editing "$visual_block_file" &&
+   lem_wait_for "$block_session" 'aa11zz' "$BOOT_TIMEOUT" >/dev/null; then
+  visual_before_count=$(report_count '^VISUAL label=visual-before ')
+  send_chord "$block_session" C-v j j l l F5
+  if wait_report_count '^VISUAL label=visual-before ' "$((visual_before_count + 1))"; then
+    before_state=$(grep '^VISUAL label=visual-before ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    before_state=${before_state#* active=}
+    visual_after_count=$(report_count '^VISUAL label=visual-after ')
+    send_chord "$block_session" 2 M-j F6
+    if wait_report_count '^VISUAL label=visual-after ' "$((visual_after_count + 1))"; then
+      after_state=$(grep '^VISUAL label=visual-after ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+      after_state=${after_state#* active=}
+      actual=$(grep '^BUFFER label=visual-after ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+      if [ "$before_state" = "$after_state" ] &&
+         [[ "$after_state" == yes\ type=block\ * ]] &&
+         [ "$actual" = 'BUFFER label=visual-after text=aa11zz\nbb22yy\ncc33xx\ncc33xx\ncc33xx\n' ]; then
+        pass duplicate-visual-block-count "2 M-j duplicated the active cursor line and retained the block"
+      else
+        fail duplicate-visual-block-count "before=[$before_state] after=[$after_state] text=[$actual]" "$block_session"
+      fi
+    else
+      fail duplicate-visual-block-after "the post-M-j block probe did not run" "$block_session"
+    fi
+  else
+    fail duplicate-visual-block-before "the Visual Block probe did not run" "$block_session"
+  fi
+  buffer_after_count=$(report_count '^BUFFER label=line-after-duplicate ')
+  send_chord "$block_session" Escape u F7
+  if wait_report_count '^BUFFER label=line-after-duplicate ' "$((buffer_after_count + 1))"; then
+    actual=$(grep '^BUFFER label=line-after-duplicate ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    if [ "$actual" = 'BUFFER label=line-after-duplicate text=aa11zz\nbb22yy\ncc33xx\n' ]; then
+      pass duplicate-visual-block-undo "one undo removed both counted copies"
+    else
+      fail duplicate-visual-block-undo "unexpected undo result: $actual" "$block_session"
+    fi
+  else
+    fail duplicate-visual-block-undo "the block undo probe did not run" "$block_session"
+  fi
+else
+  fail duplicate-visual-block-boot "could not open the Visual Block fixture" "$block_session"
+fi
+lem_stop "$block_session"
+
+# With the active corner above the mark, duplicate-dwim copies the top cursor
+# line; the lower mark follows its original text as Emacs markers do.
+block_reverse_session="lem-yath-daily-visual-block-reverse-$id"
+if start_fixture_session "$block_reverse_session" editing "$visual_block_file" &&
+   lem_wait_for "$block_reverse_session" 'cc33xx' "$BOOT_TIMEOUT" >/dev/null; then
+  visual_before_count=$(report_count '^VISUAL label=visual-before ')
+  send_chord "$block_reverse_session" G 0 C-v k k l l F5
+  if wait_report_count '^VISUAL label=visual-before ' "$((visual_before_count + 1))"; then
+    before_state=$(grep '^VISUAL label=visual-before ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    before_state=${before_state#* active=}
+    visual_after_count=$(report_count '^VISUAL label=visual-after ')
+    send_chord "$block_reverse_session" M-j F6
+    if wait_report_count '^VISUAL label=visual-after ' "$((visual_after_count + 1))"; then
+      after_state=$(grep '^VISUAL label=visual-after ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+      after_state=${after_state#* active=}
+      actual=$(grep '^BUFFER label=visual-after ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+      before_point=${before_state#* point=}
+      before_point=${before_point%% *}
+      after_point=${after_state#* point=}
+      after_point=${after_point%% *}
+      before_start=${before_state#* start=}
+      before_start=${before_start%% *}
+      after_start=${after_state#* start=}
+      after_start=${after_start%% *}
+      if [[ "$before_state" == yes\ type=block\ * ]] &&
+         [[ "$after_state" == yes\ type=block\ * ]] &&
+         [ "$before_point" = "$after_point" ] &&
+         [ "$after_start" -eq "$((before_start + 7))" ] &&
+         [ "$actual" = 'BUFFER label=visual-after text=aa11zz\naa11zz\nbb22yy\ncc33xx\n' ]; then
+        pass duplicate-visual-block-reverse "reverse block duplicated its cursor line and moved the later mark"
+      else
+        fail duplicate-visual-block-reverse "before=[$before_state] after=[$after_state] text=[$actual]" "$block_reverse_session"
+      fi
+    else
+      fail duplicate-visual-block-reverse "the reverse block post-M-j probe did not run" "$block_reverse_session"
+    fi
+  else
+    fail duplicate-visual-block-reverse "the reverse Visual Block probe did not run" "$block_reverse_session"
+  fi
+else
+  fail duplicate-visual-block-reverse-boot "could not open the reverse Visual Block fixture" "$block_reverse_session"
+fi
+lem_stop "$block_reverse_session"
 
 # Vi V-LINE on an unterminated final line follows Emacs' newline behavior and
 # retains its linewise subtype and exact selection.

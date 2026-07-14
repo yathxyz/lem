@@ -169,7 +169,7 @@ temporarily presents only matching selectable buffer rows
 - **Undo**: `evil-undo-system 'undo-redo` (built-in). `vundo` for a visual undo tree (`SPC u`), `vundo-glyph-alist = vundo-unicode-symbols`. Undo limits raised: `undo-limit` 13*160000, `undo-strong-limit` 13*240000, `undo-outer-limit` 2*24000000.
 - **multiple-cursors**: declared in nix; **no keybindings or config**. Only used *internally* by `init-ai.el` to draw a fake cursor overlay during gptel streaming (`mc/make-cursor-overlay-at-point`). Not an interactive editing feature here.
 - **expreg**: region expansion (see §1.5).
-- **Misc**: `kill-do-not-save-duplicates t`, `set-mark-command-repeat-pop t`, no lockfiles, no backup files, no auto-save. `M-j` = `duplicate-dwim`. `delete-selection-mode`.
+- **Misc**: `kill-do-not-save-duplicates t`, `set-mark-command-repeat-pop t`, no lockfiles, no backup files, no auto-save. `M-j` = `duplicate-dwim`. In the pinned Emacs/Evil combination, Evil Visual Block leaves both `rectangle-mark-mode` and the ordinary region inactive, so `M-j` duplicates the active cursor line while retaining the block; only a native Emacs rectangular region takes `duplicate-dwim`'s duplicate-to-the-right path. `delete-selection-mode`.
 
 ---
 
