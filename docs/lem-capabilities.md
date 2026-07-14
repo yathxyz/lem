@@ -1456,6 +1456,18 @@ and every visual Meta operation fail byte-identically. Type-matched source
 blocks, including mismatched nested end markers, are excluded from heading,
 list, and table dispatch; literal `M-K/J` line dragging remains available.
 
+The always-active Evil-Org base motions are also local to `.org` buffers.
+`(`/`)` use the pinned Emacs double-space sentence rules across wrapped prose;
+inside tables they use GNU Org field boundaries and its complete-count behavior.
+`{`/`}` use structural paragraph units rather than generic blank-line motion:
+headings, prose, flat one-line lists, item-wise continuation/nested lists,
+tables with associated `#+TBLFM`, affiliated keyword-plus-prose groups,
+property lines, blank-separated block bodies, and consecutive clocks all match
+the pinned GNU Org endpoints. Counts and negative counts work in Normal,
+Visual, and operator-pending states. Exclusive operators reproduce Evil's BOL
+linewise promotion and its mid-line newline exclusion, while Normal and Visual
+motions retain the destination cursor and characterwise selection behavior.
+
 A separate on-demand boundary model and Vi adapter implement all eight bindings
 in the active Evil-Org text-object theme: `ae/ie`, `aE/iE`, `ar/ir`, and
 `aR/iR` in operator-pending and Visual states. The bounded model covers inline
@@ -1500,6 +1512,11 @@ overlapping nested folds, non-file link variants, and several broader commands
 above remain outside this focused gate.
 
 `scripts/org-operator-test.sh` independently drives the installed-wrapper TUI.
+Its sentence/paragraph section resolves `(`/`)`/`{`/`}` in Normal, Visual, and
+operator maps and checks double-space and wrapped sentences, table counts,
+adjacent and blank-separated structures, complex lists, property lines, block
+paragraphs, formula tables, clock groups, forward/backward counts, deletion
+shape, registers, undo, and Visual selection against the pinned Emacs oracle.
 It exercises normal `d/x/X` against safe nested ordered lists, `[@N]` counter
 cookies, unsupported continuation repair, headline-tag alignment, single-cell
 table padding, counts, Visual deletion, registers, and one-step undo. It also

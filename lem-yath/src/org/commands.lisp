@@ -85,6 +85,644 @@ In a table, align it and advance to the next cell."
            (current-point) (or count 1))
       (move-to-column (current-point) column))))
 
+;;; --- Evil-Org sentence and paragraph navigation -------------------------
+
+(defun org-navigation-point-at-column (line column)
+  (with-point ((point line))
+    (line-start point)
+    (character-offset point column)
+    (copy-point point :temporary)))
+
+(defun org-sentence-terminal-character-p (character)
+  (find character ".?!…‽" :test #'char=))
+
+(defun org-sentence-closing-character-p (character)
+  (find character "]\"'”’)}»›" :test #'char=))
+
+(defun org-sentence-whitespace-character-p (character)
+  (or (member character '(#\Space #\Tab #\Newline #\Return))
+      (= (char-code character) #xA0)))
+
+(defun org-sentence-horizontal-space-character-p (character)
+  (or (char= character #\Space)
+      (= (char-code character) #xA0)))
+
+(defun org-sentence-start-offsets (text)
+  "Return Emacs-compatible sentence starts in the Org unit TEXT.
+
+The active profile requires two horizontal spaces, a tab, or a line ending
+after terminal punctuation.  Whitespace following that terminator belongs to
+the boundary, so a wrapped sentence starts at its first non-space character."
+  (loop :with starts := nil
+        :with length := (length text)
+        :for index :from 0 :below length
+        :when (org-sentence-terminal-character-p (char text index))
+          :do
+             (let ((cursor (1+ index)))
+               (loop :while (and (< cursor length)
+                                  (org-sentence-closing-character-p
+                                   (char text cursor)))
+                     :do (incf cursor))
+               (let ((space-start cursor))
+                 (loop :while (and (< cursor length)
+                                    (org-sentence-horizontal-space-character-p
+                                     (char text cursor)))
+                       :do (incf cursor))
+                 (when (or (= cursor length)
+                           (and (< cursor length)
+                                (member (char text cursor)
+                                        '(#\Tab #\Newline #\Return)))
+                           (>= (- cursor space-start) 2))
+                   (loop :while (and (< cursor length)
+                                     (org-sentence-whitespace-character-p
+                                      (char text cursor)))
+                         :do (incf cursor))
+                   (push cursor starts))))
+        :finally (return (remove-duplicates (nreverse starts)))))
+
+(defun org-navigation-point-at-offset (start offset)
+  (with-point ((point start))
+    (character-offset point offset)
+    (copy-point point :temporary)))
+
+(defun org-navigation-offset-from (start point)
+  (length (points-to-string start point)))
+
+(defun org-next-prose-sentence-point (origin)
+  (multiple-value-bind (start end) (org-navigation-unit-bounds origin)
+    (if (and start end)
+        (let* ((text (points-to-string start end))
+               (origin-offset (org-navigation-offset-from start origin))
+               (next-offset
+                 (find-if (lambda (candidate) (> candidate origin-offset))
+                          (org-sentence-start-offsets text))))
+          (if next-offset
+              (org-navigation-point-at-offset start next-offset)
+              (copy-point end :temporary)))
+        (copy-point (buffer-end-point (point-buffer origin)) :temporary))))
+
+(defun org-previous-prose-sentence-point (origin)
+  (multiple-value-bind (start end) (org-navigation-unit-bounds origin)
+    (declare (ignore end))
+    (if start
+        (let* ((text (points-to-string start origin))
+               (origin-offset (length text))
+               (candidates
+                 (remove-if-not
+                  (lambda (candidate) (< candidate origin-offset))
+                  (cons 0 (org-sentence-start-offsets text)))))
+          (if candidates
+              (org-navigation-point-at-offset start (car (last candidates)))
+              (with-point ((previous origin))
+                (if (line-offset previous -1)
+                    (progn
+                      (line-start previous)
+                      (copy-point previous :temporary))
+                    (copy-point
+                     (buffer-start-point (point-buffer origin))
+                     :temporary)))))
+        (copy-point (buffer-start-point (point-buffer origin)) :temporary))))
+
+(defun org-table-navigation-cell-spans (origin)
+  "Return ordered table cell spans around ORIGIN without reformatting text.
+
+Each span is (LINE LEFT-PIPE RIGHT-PIPE BEGIN END).  BEGIN and END reproduce
+`org-table-beginning-of-field' and `org-table-end-of-field' cursor columns."
+  (multiple-value-bind (table-start table-end) (org-table-bounds origin)
+    (when table-start
+      (with-point ((line table-start))
+        (loop :with spans := nil
+              :for text := (line-string line)
+              :unless (org-table-separator-line-p text)
+                :do
+                   (let ((pipes
+                           (loop :for character :across text
+                                 :for column :from 0
+                                 :when (char= character #\|)
+                                   :collect column)))
+                     (loop :for left :in pipes
+                           :for right :in (rest pipes)
+                           :for begin := (1+ left)
+                           :do
+                              (when (and (< begin right)
+                                         (char= (char text begin) #\Space))
+                                (incf begin))
+                              (let ((end right))
+                                (loop :while (and (> end (1+ left))
+                                                  (char= (char text (1- end))
+                                                         #\Space))
+                                      :do (decf end))
+                                ;; Org leaves point on one padding space in an
+                                ;; otherwise empty cell.
+                                (when (and (= end (1+ left))
+                                           (< end right)
+                                           (char= (char text end) #\Space))
+                                  (incf end))
+                                (push
+                                 (list (copy-point line :temporary) left right
+                                       (org-navigation-point-at-column
+                                        line begin)
+                                       (org-navigation-point-at-column
+                                        line end))
+                                 spans))))
+              :when (same-line-p line table-end)
+                :do (return (nreverse spans))
+              :unless (line-offset line 1)
+                :do (return (nreverse spans)))))))
+
+(defun org-table-current-cell-position (spans origin)
+  (position-if
+   (lambda (span)
+     (and (same-line-p (first span) origin)
+          (<= (second span) (point-charpos origin) (third span))))
+   spans))
+
+(defun org-table-sentence-target (origin count forward-p)
+  (let* ((spans (org-table-navigation-cell-spans origin))
+         (current (and spans (org-table-current-cell-position spans origin))))
+    (when current
+      (let* ((distance (1- count))
+             (candidate (+ current (if forward-p distance (- distance))))
+             (point-index (if forward-p 4 3))
+             (target (and (<= 0 candidate) (< candidate (length spans))
+                          (nth point-index (nth candidate spans)))))
+        ;; At or beyond a field boundary, Org advances one additional field.
+        (when (and target
+                   (if forward-p
+                       (not (point< origin target))
+                       (not (point< target origin))))
+          (incf candidate (if forward-p 1 -1))
+          (setf target
+                (and (<= 0 candidate) (< candidate (length spans))
+                     (nth point-index (nth candidate spans)))))
+        target))))
+
+(defun org-move-sentence (count forward-p)
+  (let ((remaining (abs (or count 1)))
+        (direction-forward-p
+          (if (minusp (or count 1)) (not forward-p) forward-p)))
+    ;; Evil-Org chooses table behavior once, from the initial position, and
+    ;; passes the complete count to Org.  Repeating one-field operations is
+    ;; observably different at field boundaries (notably for backward counts).
+    (if (org-table-line-p (current-point))
+        (alexandria:when-let
+            ((target (org-table-sentence-target
+                      (current-point) remaining direction-forward-p)))
+          (unless (point= target (current-point))
+            (move-point (current-point) target)))
+        (dotimes (_ remaining)
+          (let ((target
+                  (if direction-forward-p
+                      (org-next-prose-sentence-point (current-point))
+                      (org-previous-prose-sentence-point (current-point)))))
+            (unless (and target (not (point= target (current-point))))
+              (return))
+            (move-point (current-point) target))))))
+
+(defun org-evil-exclusive-motion-range (origin target)
+  "Return Evil's operator shape for an exclusive ORIGIN-to-TARGET motion.
+
+Evil promotes a non-empty exclusive motion between two line beginnings to a
+linewise operator range, and excludes the newline when only the destination is
+at a line beginning.  Lem does neither centrally, so these Org motions return
+the equivalent operator endpoints explicitly.  Normal and Visual execution
+still use TARGET as their cursor destination."
+  (cond
+    ((and (not (point= origin target))
+          (zerop (point-charpos origin))
+          (zerop (point-charpos target)))
+     (let* ((start (if (point< origin target) origin target))
+            (exclusive-end (if (point< origin target) target origin)))
+       (with-point ((last-line exclusive-end))
+         (line-offset last-line -1)
+         (line-start last-line)
+         (lem-vi-mode/core:make-range
+          (copy-point start :temporary)
+          (copy-point last-line :temporary)
+          :line))))
+    ;; For a forward exclusive motion from mid-line to the next BOL, Evil
+    ;; excludes the intervening newline.  Lem's raw range would join the two
+    ;; lines, so expose the previous EOL as the operator endpoint instead.
+    ((and (point< origin target)
+          (zerop (point-charpos target)))
+     (with-point ((end target))
+       (line-offset end -1)
+       (line-end end)
+       (lem-vi-mode/core:make-range
+        (copy-point origin :temporary)
+        (copy-point end :temporary)
+        :exclusive)))
+    (t
+     (lem-vi-mode/core:make-range
+      (copy-point origin :temporary)
+      (copy-point target :temporary)
+      :exclusive))))
+
+(defun org-run-evil-exclusive-motion (function &rest arguments)
+  (with-point ((origin (current-point)))
+    (apply function arguments)
+    (org-evil-exclusive-motion-range origin (current-point))))
+
+(lem-vi-mode:define-motion lem-yath-org-forward-sentence
+    (&optional (count 1)) (:universal)
+  (:type :exclusive :jump t)
+  (org-run-evil-exclusive-motion #'org-move-sentence count t))
+
+(lem-vi-mode:define-motion lem-yath-org-backward-sentence
+    (&optional (count 1)) (:universal)
+  (:type :exclusive :jump t)
+  (org-run-evil-exclusive-motion #'org-move-sentence count nil))
+
+(defun org-navigation-blank-line-p (point)
+  (not (null (cl-ppcre:scan "^\\s*$" (line-string point)))))
+
+(defun org-navigation-keyword-line-p (point)
+  (and (null (org-block-marker (line-string point)))
+       (not (null (cl-ppcre:scan "(?i)^\\s*#\\+" (line-string point))))))
+
+(defun org-navigation-table-formula-line-p (point)
+  (not (null (cl-ppcre:scan
+              "(?i)^\\s*#\\+TBLFM:"
+              (line-string point)))))
+
+(defun org-navigation-formula-table-origin (origin)
+  (when (org-navigation-table-formula-line-p origin)
+    (with-point ((point origin))
+      (line-start point)
+      (loop
+        (unless (line-offset point -1)
+          (return nil))
+        (cond
+          ((org-table-line-p point)
+           (return (copy-point point :temporary)))
+          ((not (org-navigation-table-formula-line-p point))
+           (return nil)))))))
+
+(defun org-navigation-property-line-p (line)
+  (let* ((trimmed (string-left-trim '(#\Space #\Tab) line))
+         (second-colon
+           (and (plusp (length trimmed))
+                (char= (char trimmed 0) #\:)
+                (position #\: trimmed :start 1))))
+    (and second-colon
+         (> second-colon 1)
+         (every (lambda (character)
+                  (not (member character '(#\Space #\Tab #\Newline #\Return))))
+                (subseq trimmed 1 second-colon)))))
+
+(defun org-navigation-clock-line-p (point)
+  (not (null (cl-ppcre:scan "(?i)^\\s*CLOCK:" (line-string point)))))
+
+(defun org-navigation-clock-bounds (origin)
+  (when (org-navigation-clock-line-p origin)
+    (with-point ((start origin)
+                 (last origin))
+      (line-start start)
+      (line-start last)
+      (loop :while
+              (with-point ((previous start))
+                (and (line-offset previous -1)
+                     (org-navigation-clock-line-p previous)
+                     (progn (move-point start previous) t))))
+      (loop :while
+              (with-point ((next last))
+                (and (line-offset next 1)
+                     (org-navigation-clock-line-p next)
+                     (progn (move-point last next) t))))
+      (values (copy-point start :temporary)
+              (org-navigation-line-after last)))))
+
+(defun org-navigation-special-single-line-p (point)
+  (let ((line (line-string point)))
+    (or (org-heading-line-p point)
+        (org-block-marker line)
+        (org-navigation-property-line-p line)
+        (cl-ppcre:scan
+         "(?i)^\\s*(?:SCHEDULED|DEADLINE|CLOSED|CLOCK):" line))))
+
+(defun org-navigation-structural-line-p (point)
+  (or (org-table-line-p point)
+      (org-list-item-line-p point)
+      (org-navigation-keyword-line-p point)
+      (org-navigation-special-single-line-p point)))
+
+(defun org-navigation-line-after (origin)
+  (with-point ((point origin))
+    (line-start point)
+    (if (line-offset point 1)
+        (copy-point point :temporary)
+        (copy-point (buffer-end-point (point-buffer point)) :temporary))))
+
+(defun org-navigation-list-anchor (origin)
+  "Return the nearest list item whose tree owns ORIGIN."
+  (if (org-list-item-line-p origin)
+      (with-point ((point origin))
+        (line-start point)
+        (copy-point point :temporary))
+      (with-point ((point origin))
+        (line-start point)
+        (loop
+          (unless (line-offset point -1)
+            (return nil))
+          (when (or (org-navigation-blank-line-p point)
+                    (org-heading-line-p point)
+                    (org-table-line-p point)
+                    (org-navigation-keyword-line-p point)
+                    (org-block-marker (line-string point)))
+            (return nil))
+          (when (org-list-item-line-p point)
+            (alexandria:when-let ((end (org-list-item-tree-end point)))
+              (when (point< origin end)
+                (return (copy-point point :temporary)))))))))
+
+(defun org-navigation-list-continuation-line-p (point)
+  (and (plusp (length (line-string point)))
+       (plusp (org-line-indentation point))
+       (not (org-navigation-structural-line-p point))))
+
+(defun org-navigation-full-list-bounds (anchor)
+  (with-point ((start anchor)
+               (end anchor))
+    (loop
+      (with-point ((previous start))
+        (unless (line-offset previous -1)
+          (return))
+        (unless (or (org-list-item-line-p previous)
+                    (org-navigation-list-continuation-line-p previous))
+          (return))
+        (move-point start previous)))
+    (loop
+      (with-point ((next end))
+        (unless (line-offset next 1)
+          (move-point end (buffer-end-point (point-buffer end)))
+          (return))
+        (unless (or (org-list-item-line-p next)
+                    (org-navigation-list-continuation-line-p next))
+          (move-point end next)
+          (return))
+        (move-point end next)))
+    (values (copy-point start :temporary)
+            (copy-point end :temporary))))
+
+(defun org-navigation-flat-single-line-list-p (start end)
+  "Whether START..END is GNU Org's whole-list paragraph special case."
+  (with-point ((line start))
+    (let ((indentation nil))
+      (loop
+        (unless (org-list-item-line-p line)
+          (return nil))
+        (let ((line-indentation (org-line-indentation line)))
+          (if indentation
+              (unless (= indentation line-indentation)
+                (return nil))
+              (setf indentation line-indentation)))
+        (with-point ((next line))
+          (unless (and (line-offset next 1) (point< next end))
+            (return t))
+          (move-point line next))))))
+
+(defun org-navigation-complex-list-item-bounds (anchor)
+  "Return the item paragraph at ANCHOR, stopping at the next item line."
+  (with-point ((start anchor)
+               (end anchor))
+    (line-start start)
+    (line-start end)
+    (loop
+      (with-point ((next end))
+        (unless (line-offset next 1)
+          (move-point end (buffer-end-point (point-buffer end)))
+          (return))
+        (cond
+          ((org-list-item-line-p next)
+           (move-point end next)
+           (return))
+          ((org-navigation-list-continuation-line-p next)
+           (move-point end next))
+          (t
+           (move-point end next)
+           (return)))))
+    (values (copy-point start :temporary)
+            (copy-point end :temporary))))
+
+(defun org-navigation-list-bounds (origin)
+  (alexandria:when-let ((anchor (org-navigation-list-anchor origin)))
+    (multiple-value-bind (start end)
+        (org-navigation-full-list-bounds anchor)
+      (if (org-navigation-flat-single-line-list-p start end)
+          (values start end)
+          (org-navigation-complex-list-item-bounds anchor)))))
+
+(defun org-navigation-table-bounds (origin)
+  (multiple-value-bind (start last-line-end) (org-table-bounds origin)
+    (when start
+      (with-point ((end last-line-end))
+        (if (line-offset end 1)
+            (progn
+              (line-start end)
+              ;; Associated formulas belong to the table element.
+              (loop :while (and (not (end-buffer-p end))
+                                (not (null
+                                      (cl-ppcre:scan
+                                       "(?i)^\\s*#\\+TBLFM:"
+                                       (line-string end)))))
+                    :do (unless (line-offset end 1)
+                          (move-point
+                           end (buffer-end-point (point-buffer end)))
+                          (return))))
+            (move-point end (buffer-end-point (point-buffer end))))
+        (values start (copy-point end :temporary))))))
+
+(defun org-navigation-ordinary-line-p (point)
+  (and (not (org-navigation-blank-line-p point))
+       (not (org-navigation-structural-line-p point))))
+
+(defun org-navigation-ordinary-bounds (origin)
+  (when (org-navigation-ordinary-line-p origin)
+    (with-point ((start origin)
+                 (end origin))
+      (line-start start)
+      (line-start end)
+      (loop :while
+              (with-point ((previous start))
+                (and (line-offset previous -1)
+                     (org-navigation-ordinary-line-p previous)
+                     (progn (move-point start previous) t))))
+      (loop :while
+              (with-point ((next end))
+                (and (line-offset next 1)
+                     (org-navigation-ordinary-line-p next)
+                     (progn (move-point end next) t))))
+      (values (copy-point start :temporary)
+              (org-navigation-line-after end)))))
+
+(defun org-navigation-keyword-bounds (origin)
+  "Return consecutive keywords plus their following prose paragraph."
+  (when (org-navigation-keyword-line-p origin)
+    (with-point ((start origin)
+                 (end origin))
+      (let ((includes-prose-p nil))
+        (line-start start)
+        (line-start end)
+        (loop :while
+                (with-point ((previous start))
+                  (and (line-offset previous -1)
+                       (org-navigation-keyword-line-p previous)
+                       (progn (move-point start previous) t))))
+        (loop :while
+                (with-point ((next end))
+                  (and (line-offset next 1)
+                       (org-navigation-keyword-line-p next)
+                       (progn (move-point end next) t))))
+        (with-point ((next end))
+          (when (and (line-offset next 1)
+                     (org-navigation-ordinary-line-p next))
+            (multiple-value-bind (paragraph-start paragraph-end)
+                (org-navigation-ordinary-bounds next)
+              (declare (ignore paragraph-start))
+              (setf includes-prose-p t)
+              (move-point end paragraph-end))))
+        (values (copy-point start :temporary)
+                (if includes-prose-p
+                    (copy-point end :temporary)
+                    (org-navigation-line-after end)))))))
+
+(defun org-navigation-affiliated-keyword (origin)
+  "Return the keyword group affiliated with ORIGIN's prose paragraph."
+  (when (org-navigation-ordinary-line-p origin)
+    (multiple-value-bind (start end) (org-navigation-ordinary-bounds origin)
+      (declare (ignore end))
+      (with-point ((previous start))
+        (when (and (line-offset previous -1)
+                   (org-navigation-keyword-line-p previous)
+                   (not (org-navigation-table-formula-line-p previous)))
+          (copy-point previous :temporary))))))
+
+(defun org-navigation-single-line-bounds (origin)
+  (when (org-navigation-special-single-line-p origin)
+    (with-point ((start origin))
+      (line-start start)
+      (values (copy-point start :temporary)
+              (org-navigation-line-after start)))))
+
+(defun org-navigation-unit-bounds (origin)
+  "Return START and exclusive structural END for Org paragraph motion."
+  (unless (org-navigation-blank-line-p origin)
+    (cond
+      ((org-table-line-p origin) (org-navigation-table-bounds origin))
+      ((org-navigation-formula-table-origin origin)
+       (org-navigation-table-bounds
+        (org-navigation-formula-table-origin origin)))
+      ((org-navigation-clock-line-p origin)
+       (org-navigation-clock-bounds origin))
+      ((org-navigation-list-anchor origin)
+       (org-navigation-list-bounds origin))
+      ((org-navigation-keyword-line-p origin)
+       (org-navigation-keyword-bounds origin))
+      ((org-navigation-affiliated-keyword origin)
+       (org-navigation-keyword-bounds
+        (org-navigation-affiliated-keyword origin)))
+      ((org-navigation-special-single-line-p origin)
+       (org-navigation-single-line-bounds origin))
+      (t (org-navigation-ordinary-bounds origin)))))
+
+(defun org-navigation-next-nonblank-line (origin)
+  (with-point ((point origin))
+    (line-start point)
+    (loop :while (org-navigation-blank-line-p point)
+          :unless (line-offset point 1)
+            :do (return nil))
+    (unless (end-buffer-p point)
+      (copy-point point :temporary))))
+
+(defun org-navigation-previous-nonblank-line (origin)
+  (with-point ((point origin))
+    (line-start point)
+    (loop
+      (unless (line-offset point -1)
+        (return nil))
+      (unless (org-navigation-blank-line-p point)
+        (return (copy-point point :temporary))))))
+
+(defun org-navigation-reach-start (start)
+  "Match Org's preference for the visible blank line before START."
+  (with-point ((target start)
+               (previous start))
+    (line-start target)
+    (line-start previous)
+    (when (and (line-offset previous -1)
+               (org-navigation-blank-line-p previous))
+      (move-point target previous))
+    (copy-point target :temporary)))
+
+(defun org-forward-paragraph-once ()
+  (let ((anchor
+          (if (org-navigation-blank-line-p (current-point))
+              (org-navigation-next-nonblank-line (current-point))
+              (copy-point (current-point) :temporary))))
+    (when anchor
+      (multiple-value-bind (start end) (org-navigation-unit-bounds anchor)
+        (declare (ignore start))
+        (when end
+          (move-point (current-point) end)
+          t)))))
+
+(defun org-backward-paragraph-once ()
+  (cond
+    ((org-navigation-blank-line-p (current-point))
+     (alexandria:when-let
+         ((previous (org-navigation-previous-nonblank-line (current-point))))
+       (multiple-value-bind (start end) (org-navigation-unit-bounds previous)
+         (declare (ignore end))
+         (when start
+           (move-point (current-point) (org-navigation-reach-start start))
+           t))))
+    (t
+     (multiple-value-bind (start end)
+         (org-navigation-unit-bounds (current-point))
+       (declare (ignore end))
+       (when start
+         (cond
+           ((point< start (current-point))
+            (move-point (current-point) (org-navigation-reach-start start))
+            t)
+           (t
+            (with-point ((previous start))
+              (if (and (line-offset previous -1)
+                       (org-navigation-blank-line-p previous))
+                  (progn
+                    (move-point (current-point) previous)
+                    t)
+                  (alexandria:when-let
+                      ((line (org-navigation-previous-nonblank-line start)))
+                    (multiple-value-bind (previous-start previous-end)
+                        (org-navigation-unit-bounds line)
+                      (declare (ignore previous-end))
+                      (when previous-start
+                        (move-point
+                         (current-point)
+                         (org-navigation-reach-start previous-start))
+                        t))))))))))))
+
+(defun org-move-paragraph (count forward-p)
+  (let ((remaining (abs (or count 1)))
+        (direction-forward-p
+          (if (minusp (or count 1)) (not forward-p) forward-p)))
+    (dotimes (_ remaining)
+      (unless (if direction-forward-p
+                  (org-forward-paragraph-once)
+                  (org-backward-paragraph-once))
+        (return)))))
+
+(lem-vi-mode:define-motion lem-yath-org-forward-paragraph
+    (&optional (count 1)) (:universal)
+  (:type :exclusive :jump t)
+  (org-run-evil-exclusive-motion #'org-move-paragraph count t))
+
+(lem-vi-mode:define-motion lem-yath-org-backward-paragraph
+    (&optional (count 1)) (:universal)
+  (:type :exclusive :jump t)
+  (org-run-evil-exclusive-motion #'org-move-paragraph count nil))
+
 ;;; --- TODO workflow --------------------------------------------------------
 
 (defun org-heading-todo-bounds (heading)
@@ -1815,6 +2453,10 @@ matching the active Emacs terminal profile.")
   (define-key keymap "Tab" 'lem-yath-org-cycle)
   (define-key keymap "g Tab" 'lem-yath-org-cycle)
   (define-key keymap "Shift-Tab" 'lem-yath-org-shift-tab)
+  (define-key keymap "(" 'lem-yath-org-backward-sentence)
+  (define-key keymap ")" 'lem-yath-org-forward-sentence)
+  (define-key keymap "{" 'lem-yath-org-backward-paragraph)
+  (define-key keymap "}" 'lem-yath-org-forward-paragraph)
   (define-key keymap "g h" 'lem-yath-org-up-element)
   (define-key keymap "g l" 'lem-yath-org-down-element)
   (define-key keymap "g k" 'lem-yath-org-backward-element)

@@ -59,8 +59,18 @@
     ("a R" lem-yath-org-a-subtree)
     ("i R" lem-yath-org-inner-subtree)))
 
+(defparameter *org-operator-test-motion-routes*
+  '(("(" lem-yath-org-backward-sentence)
+    (")" lem-yath-org-forward-sentence)
+    ("{" lem-yath-org-backward-paragraph)
+    ("}" lem-yath-org-forward-paragraph)))
+
 (defun org-operator-test-routes-p (state)
   (loop :for (keys command) :in *org-operator-test-object-routes*
+        :always (org-operator-test-route-p state keys command)))
+
+(defun org-operator-test-motion-routes-p (state)
+  (loop :for (keys command) :in *org-operator-test-motion-routes*
         :always (org-operator-test-route-p state keys command)))
 
 (defun org-operator-test-commands-p ()
@@ -147,14 +157,19 @@
      (concatenate
       'string
       "STATIC normal=~a operator=~a visual=~a stock=~a snipe=~a "
-      "safe=~a commands=~a")
+      "safe=~a commands=~a motions=~a")
      (if normal-ok "yes" "no")
      (if operator-ok "yes" "no")
      (if visual-ok "yes" "no")
      (if stock-ok "yes" "no")
      (if snipe-ok "yes" "no")
      (if safe-ok "yes" "no")
-     (if commands-ok "yes" "no"))))
+     (if commands-ok "yes" "no")
+     (if (and (org-operator-test-motion-routes-p normal)
+              (org-operator-test-motion-routes-p operator)
+              (org-operator-test-motion-routes-p visual))
+         "yes"
+         "no"))))
 
 (defun org-operator-test-state-name ()
   (let ((state (lem-vi-mode/core:current-state)))

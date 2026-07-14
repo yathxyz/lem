@@ -162,6 +162,10 @@ line too many."
   ;; Lem's native doubled-operator line selection.
   (define-key *org-vi-operator-keymap* "<" 'lem-yath-org-shift-left)
   (define-key *org-vi-operator-keymap* ">" 'lem-yath-org-shift-right)
+  (define-key *org-vi-operator-keymap* "(" 'lem-yath-org-backward-sentence)
+  (define-key *org-vi-operator-keymap* ")" 'lem-yath-org-forward-sentence)
+  (define-key *org-vi-operator-keymap* "{" 'lem-yath-org-backward-paragraph)
+  (define-key *org-vi-operator-keymap* "}" 'lem-yath-org-forward-paragraph)
   (define-key *org-vi-operator-keymap* "j" 'lem-yath-org-next-visible-line)
   (define-key *org-vi-operator-keymap* "k" 'lem-yath-org-previous-visible-line)
   (define-key *org-vi-operator-keymap* "g h" 'lem-yath-org-up-element)

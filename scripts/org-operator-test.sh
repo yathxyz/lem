@@ -19,6 +19,7 @@ source "$here/scripts/tui-driver.sh"
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-60}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-15}"
 KEY_DELAY="${KEY_DELAY:-0.18}"
+CASE_PREFIX="${LEM_YATH_ORG_OPERATOR_CASE_PREFIX:-}"
 
 fixture_lisp="$(lem-yath_lisp_string \
   "$here/scripts/org-operator-fixture.lisp")"
@@ -91,6 +92,10 @@ send_keys() {
 start_case() {
   local phase=$1 file=$2 sentinel=$3
   local session="lem-org-operator-${phase}-${id}" ready_before
+  if [ -n "$CASE_PREFIX" ] && [ "$phase" != "$CASE_PREFIX" ] &&
+     [[ "$phase" != "$CASE_PREFIX"-* ]]; then
+    return 1
+  fi
   ready_before=$(report_count "^READY phase=${phase}$")
   export LEM_YATH_ORG_OPERATOR_PHASE="$phase"
   sessions+=("$session")
@@ -244,6 +249,61 @@ write_fixtures() {
   printf '%s\n' '"alpha" beta' >"$WORKDIR/surround-change.org"
   printf '%s\n' 'alpha beta gamma' >"$WORKDIR/snipe.org"
   printf '%s\n' '* Static routing' >"$WORKDIR/static.org"
+  printf '%s\n' 'One.  Two!  Three?' 'Four.' '' 'Five.  Six.' \
+    >"$WORKDIR/navigation-sentence.org"
+  printf '%s\n' \
+    'Wrapped first line' \
+    'continues without ending. Next single-space sentence?' \
+    'After terminal.' '' \
+    'Indented paragraph' \
+    '  continues here!' >"$WORKDIR/navigation-sentence-wrapped.org"
+  printf '%s\n' '| aa | bb | cc |' '| dd | ee | ff |' \
+    >"$WORKDIR/navigation-table.org"
+  printf '%s\n' \
+    '* Heading' \
+    'Paragraph text.' \
+    '- item one' \
+    '- item two' \
+    '| aa | bb |' \
+    '| cc | dd |' \
+    '#+name: sample' \
+    'Next paragraph.' \
+    '** Child' \
+    'Child body.' >"$WORKDIR/navigation-structure.org"
+  printf '%s\n' \
+    '* Heading' \
+    'First paragraph line.' \
+    'continued here.' \
+    '' \
+    '- item one' \
+    '- item two' \
+    '' \
+    ':PROPERTIES:' \
+    ':ID: value' \
+    ':END:' \
+    '' \
+    '#+begin_src text' \
+    'block one' \
+    '' \
+    'block two' \
+    '#+end_src' >"$WORKDIR/navigation-separated.org"
+  printf '%s\n' \
+    '- first item' \
+    '  continuation text' \
+    '- second item' \
+    '' \
+    '- parent' \
+    '  - child' \
+    '- sibling' >"$WORKDIR/navigation-complex-list.org"
+  printf '%s\n' \
+    '| a | b |' \
+    '| c | d |' \
+    '#+TBLFM: $1=1' \
+    'AFTER' >"$WORKDIR/navigation-formula-table.org"
+  printf '%s\n' \
+    'CLOCK: [2026-07-14 Tue 09:00]--[2026-07-14 Tue 10:00] =>  1:00' \
+    'CLOCK: [2026-07-14 Tue 11:00]--[2026-07-14 Tue 12:00] =>  1:00' \
+    'AFTER' >"$WORKDIR/navigation-clocks.org"
   printf '%s\n' '1. one' '2. two' '3. three' \
     >"$WORKDIR/delete-ordered.org"
   printf '%s\n' '1. one' '5. [@5] five' '6. six' \
@@ -395,12 +455,338 @@ write_fixtures
 if start_case static "$WORKDIR/static.org" 'Static routing'; then
   if record_state static "$CASE_SESSION" &&
      grep -Fxq \
-       'STATIC normal=yes operator=yes visual=yes stock=yes snipe=yes safe=yes commands=yes' \
+       'STATIC normal=yes operator=yes visual=yes stock=yes snipe=yes safe=yes commands=yes motions=yes' \
        "$LEM_YATH_ORG_OPERATOR_REPORT"; then
     pass static-routing \
       "normal d/x/X/< />, doubled shifts, visual defaults, text objects, and operator Snipe coexist"
   else
     fail static-routing "effective Org routing contract differed" "$CASE_SESSION"
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+# Evil-Org's always-active sentence motions use Emacs double-space sentence
+# boundaries, while table rows dispatch to Org field boundaries with the
+# complete count.  These assertions are literal-key TUI checks.
+if start_case navigation-sentence-forward \
+     "$WORKDIR/navigation-sentence.org" 'One.*Two'; then
+  if operate_and_record navigation-sentence-forward "$CASE_SESSION" ')'; then
+    assert_state navigation-sentence-forward navigation-sentence-forward \
+      "$CASE_SESSION" 'point=7 line=1 column=6' \
+      'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-sentence-count \
+     "$WORKDIR/navigation-sentence.org" 'One.*Two'; then
+  if operate_and_record navigation-sentence-count "$CASE_SESSION" 2 ')'; then
+    assert_state navigation-sentence-count navigation-sentence-count \
+      "$CASE_SESSION" 'point=13 line=1 column=12' \
+      'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-sentence-backward \
+     "$WORKDIR/navigation-sentence.org" 'One.*Two'; then
+  send_keys "$CASE_SESSION" 12 l
+  if operate_and_record navigation-sentence-backward "$CASE_SESSION" '('; then
+    assert_state navigation-sentence-backward navigation-sentence-backward \
+      "$CASE_SESSION" 'point=7 line=1 column=6' \
+      'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-sentence-wrapped-forward \
+     "$WORKDIR/navigation-sentence-wrapped.org" 'Wrapped first'; then
+  if operate_and_record navigation-sentence-wrapped-forward \
+       "$CASE_SESSION" ')'; then
+    assert_state navigation-sentence-wrapped-forward \
+      navigation-sentence-wrapped-forward "$CASE_SESSION" \
+      'line=3 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-sentence-wrapped-backward \
+     "$WORKDIR/navigation-sentence-wrapped.org" 'After terminal'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record navigation-sentence-wrapped-backward \
+       "$CASE_SESSION" '('; then
+    assert_state navigation-sentence-wrapped-backward \
+      navigation-sentence-wrapped-backward "$CASE_SESSION" \
+      'line=1 column=0' 'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-table-forward \
+     "$WORKDIR/navigation-table.org" 'aa.*bb'; then
+  send_keys "$CASE_SESSION" 2 l
+  if operate_and_record navigation-table-forward "$CASE_SESSION" 2 ')'; then
+    assert_state navigation-table-forward navigation-table-forward \
+      "$CASE_SESSION" 'line=1 column=9' \
+      'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-table-backward \
+     "$WORKDIR/navigation-table.org" 'aa.*bb'; then
+  send_keys "$CASE_SESSION" j 7 l
+  if operate_and_record navigation-table-backward "$CASE_SESSION" 2 '('; then
+    assert_state navigation-table-backward navigation-table-backward \
+      "$CASE_SESSION" 'line=2 column=2' \
+      'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+# GNU Org paragraph motions traverse adjacent structural units.  Affiliated
+# keywords and their prose form one unit, as do single-line lists and tables.
+if start_case navigation-structure-forward \
+     "$WORKDIR/navigation-structure.org" 'Heading'; then
+  if operate_and_record navigation-structure-forward "$CASE_SESSION" '}'; then
+    assert_state navigation-heading-forward navigation-structure-forward \
+      "$CASE_SESSION" 'line=2 column=0' 'modified=no'
+  fi
+  if operate_and_record navigation-structure-forward "$CASE_SESSION" '}'; then
+    assert_state navigation-prose-forward navigation-structure-forward \
+      "$CASE_SESSION" 'line=3 column=0' 'modified=no'
+  fi
+  if operate_and_record navigation-structure-forward "$CASE_SESSION" '}'; then
+    assert_state navigation-list-forward navigation-structure-forward \
+      "$CASE_SESSION" 'line=5 column=0' 'modified=no'
+  fi
+  if operate_and_record navigation-structure-forward "$CASE_SESSION" '}'; then
+    assert_state navigation-table-forward-paragraph \
+      navigation-structure-forward "$CASE_SESSION" \
+      'line=7 column=0' 'modified=no'
+  fi
+  if operate_and_record navigation-structure-forward "$CASE_SESSION" '}'; then
+    assert_state navigation-keyword-forward navigation-structure-forward \
+      "$CASE_SESSION" 'line=9 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-structure-backward \
+     "$WORKDIR/navigation-structure.org" 'Child body'; then
+  send_keys "$CASE_SESSION" 8 j
+  if operate_and_record navigation-structure-backward "$CASE_SESSION" '{'; then
+    assert_state navigation-child-backward navigation-structure-backward \
+      "$CASE_SESSION" 'line=7 column=0' 'modified=no'
+  fi
+  if operate_and_record navigation-structure-backward "$CASE_SESSION" '{'; then
+    assert_state navigation-keyword-backward navigation-structure-backward \
+      "$CASE_SESSION" 'line=5 column=0' 'modified=no'
+  fi
+  if operate_and_record navigation-structure-backward "$CASE_SESSION" '{'; then
+    assert_state navigation-table-backward-paragraph \
+      navigation-structure-backward "$CASE_SESSION" \
+      'line=3 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-separated-count \
+     "$WORKDIR/navigation-separated.org" 'First paragraph'; then
+  send_keys "$CASE_SESSION" j
+  if operate_and_record navigation-separated-count "$CASE_SESSION" 2 '}'; then
+    assert_state navigation-separated-count navigation-separated-count \
+      "$CASE_SESSION" 'line=7 column=0' \
+      'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-drawer-forward \
+     "$WORKDIR/navigation-separated.org" 'ID: value'; then
+  send_keys "$CASE_SESSION" 8 j
+  if operate_and_record navigation-drawer-forward "$CASE_SESSION" '}'; then
+    assert_state navigation-drawer-forward navigation-drawer-forward \
+      "$CASE_SESSION" 'line=10 column=0' \
+      'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-block-forward \
+     "$WORKDIR/navigation-separated.org" 'block one'; then
+  send_keys "$CASE_SESSION" 12 j
+  if operate_and_record navigation-block-forward "$CASE_SESSION" '}'; then
+    assert_state navigation-block-forward navigation-block-forward \
+      "$CASE_SESSION" 'line=14 column=0' \
+      'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-block-backward \
+     "$WORKDIR/navigation-separated.org" 'block two'; then
+  send_keys "$CASE_SESSION" 14 j
+  if operate_and_record navigation-block-backward "$CASE_SESSION" '{'; then
+    assert_state navigation-block-backward navigation-block-backward \
+      "$CASE_SESSION" 'line=14 column=0' \
+      'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-complex-list-forward \
+     "$WORKDIR/navigation-complex-list.org" 'first item'; then
+  if operate_and_record navigation-complex-list-forward \
+       "$CASE_SESSION" '}'; then
+    assert_state navigation-complex-list-first \
+      navigation-complex-list-forward "$CASE_SESSION" \
+      'line=3 column=0' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record navigation-complex-list-forward \
+       "$CASE_SESSION" '}'; then
+    assert_state navigation-complex-list-parent \
+      navigation-complex-list-forward "$CASE_SESSION" \
+      'line=6 column=0' 'modified=no'
+  fi
+  if operate_and_record navigation-complex-list-forward \
+       "$CASE_SESSION" '}'; then
+    assert_state navigation-complex-list-child \
+      navigation-complex-list-forward "$CASE_SESSION" \
+      'line=7 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-complex-list-continuation \
+     "$WORKDIR/navigation-complex-list.org" 'continuation text'; then
+  send_keys "$CASE_SESSION" j
+  if operate_and_record navigation-complex-list-continuation \
+       "$CASE_SESSION" '}'; then
+    assert_state navigation-complex-list-continuation \
+      navigation-complex-list-continuation "$CASE_SESSION" \
+      'line=3 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-complex-list-backward \
+     "$WORKDIR/navigation-complex-list.org" 'second item'; then
+  send_keys "$CASE_SESSION" 2 j 2 l
+  if operate_and_record navigation-complex-list-backward \
+       "$CASE_SESSION" '{'; then
+    assert_state navigation-complex-list-backward \
+      navigation-complex-list-backward "$CASE_SESSION" \
+      'line=3 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-formula-forward \
+     "$WORKDIR/navigation-formula-table.org" 'a.*b'; then
+  if operate_and_record navigation-formula-forward "$CASE_SESSION" '}'; then
+    assert_state navigation-formula-forward navigation-formula-forward \
+      "$CASE_SESSION" 'line=4 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-formula-backward \
+     "$WORKDIR/navigation-formula-table.org" 'AFTER'; then
+  send_keys "$CASE_SESSION" 3 j
+  if operate_and_record navigation-formula-backward "$CASE_SESSION" '{'; then
+    assert_state navigation-formula-backward navigation-formula-backward \
+      "$CASE_SESSION" 'line=1 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-clocks-forward \
+     "$WORKDIR/navigation-clocks.org" '09:00'; then
+  if operate_and_record navigation-clocks-forward "$CASE_SESSION" '}'; then
+    assert_state navigation-clocks-forward navigation-clocks-forward \
+      "$CASE_SESSION" 'line=3 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-clocks-backward \
+     "$WORKDIR/navigation-clocks.org" 'AFTER'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record navigation-clocks-backward "$CASE_SESSION" '{'; then
+    assert_state navigation-clocks-backward navigation-clocks-backward \
+      "$CASE_SESSION" 'line=1 column=0' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+# Exclusive motion shape must survive both operator-pending and Visual state.
+if start_case navigation-delete-sentence \
+     "$WORKDIR/navigation-sentence.org" 'One.*Two'; then
+  if operate_and_record navigation-delete-sentence "$CASE_SESSION" d ')'; then
+    assert_state navigation-delete-sentence navigation-delete-sentence \
+      "$CASE_SESSION" 'text=Two!  Three?\nFour.\n\nFive.  Six.\n bytes=' \
+      'register=One.   register-type=char' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state navigation-delete-sentence "$CASE_SESSION"
+    assert_state navigation-delete-sentence-undo navigation-delete-sentence \
+      "$CASE_SESSION" \
+      'text=One.  Two!  Three?\nFour.\n\nFive.  Six.\n bytes=' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-delete-paragraph \
+     "$WORKDIR/navigation-structure.org" 'Heading'; then
+  if operate_and_record navigation-delete-paragraph "$CASE_SESSION" d '}'; then
+    assert_state navigation-delete-paragraph navigation-delete-paragraph \
+      "$CASE_SESSION" 'text=Paragraph text.\n- item one\n' \
+      'register=* Heading\n register-type=line' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-delete-paragraph-midline \
+     "$WORKDIR/navigation-structure.org" 'Heading'; then
+  send_keys "$CASE_SESSION" 2 l
+  if operate_and_record navigation-delete-paragraph-midline \
+       "$CASE_SESSION" d '}'; then
+    assert_state navigation-delete-paragraph-midline \
+      navigation-delete-paragraph-midline "$CASE_SESSION" \
+      'text=* \nParagraph text.\n- item one\n' \
+      'register=Heading register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-visual-sentence \
+     "$WORKDIR/navigation-sentence.org" 'One.*Two'; then
+  send_keys "$CASE_SESSION" v ')'
+  if lem_wait_for "$CASE_SESSION" 'VISUAL' "$WAIT_TIMEOUT" >/dev/null &&
+     record_state navigation-visual-sentence "$CASE_SESSION"; then
+    assert_state navigation-visual-sentence navigation-visual-sentence \
+      "$CASE_SESSION" 'state=visual-char selection=char' \
+      'selected=One.  T' 'modified=no'
+  else
+    fail navigation-visual-sentence \
+      "Visual sentence motion did not settle or report" "$CASE_SESSION"
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case navigation-visual-paragraph \
+     "$WORKDIR/navigation-structure.org" 'Heading'; then
+  send_keys "$CASE_SESSION" v '}'
+  if lem_wait_for "$CASE_SESSION" 'VISUAL' "$WAIT_TIMEOUT" >/dev/null &&
+     record_state navigation-visual-paragraph "$CASE_SESSION"; then
+    assert_state navigation-visual-paragraph navigation-visual-paragraph \
+      "$CASE_SESSION" 'state=visual-char selection=char' \
+      'selected=* Heading\nP' 'modified=no'
+  else
+    fail navigation-visual-paragraph \
+      "Visual paragraph motion did not settle or report" "$CASE_SESSION"
   fi
   stop_case "$CASE_SESSION"
 fi
