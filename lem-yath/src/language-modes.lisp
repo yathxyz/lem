@@ -88,6 +88,12 @@
    :open-pattern "[({\\[][ \\t]*(?://.*)?$"
    :close-pattern "^[ \\t]*[]})]"))
 
+(defun gdscript-calc-indent (point)
+  (language-simple-indent
+   point 4
+   :open-pattern "(?::|[({\\[])[ \\t]*(?:#.*)?$"
+   :close-pattern "^[ \\t]*(?:(?:elif|else)\\b|[]})])"))
+
 (defvar *just-syntax-table*
   (let ((table
           (make-syntax-table
@@ -206,8 +212,38 @@
                       :name 'syntax-constant-attribute))))
     table))
 
+(defvar *gdscript-syntax-table*
+  (let ((table
+          (make-syntax-table
+           :space-chars '(#\Space #\Tab #\Newline)
+           :symbol-chars '(#\_ #\$)
+           :paren-pairs '((#\( . #\)) (#\{ . #\}) (#\[ . #\]))
+           :string-quote-chars '(#\' #\")
+           :line-comment-string "#")))
+    (set-syntax-parser
+     table
+     (make-configured-language-tmlanguage
+      :line-comment "#"
+      :strings '("'" "\"")
+      :keywords '("and" "as" "assert" "await" "break" "breakpoint"
+                  "class" "class_name" "const" "continue" "elif" "else"
+                  "enum" "export" "extends" "for" "func" "if" "in" "is"
+                  "match" "not" "onready" "or" "pass" "return" "self"
+                  "signal" "static" "super" "tool" "var" "when" "while"
+                  "yield")
+      :extra-patterns
+      (list
+       (make-tm-match "^[ \\t]*func[ \\t]+[A-Za-z_][A-Za-z0-9_]*"
+                      :name 'syntax-function-name-attribute)
+       (make-tm-match "\\b(?:true|false|null)\\b"
+                      :name 'syntax-constant-attribute)
+       (make-tm-match "@[A-Za-z_][A-Za-z0-9_]*"
+                      :name 'syntax-constant-attribute))))
+    table))
+
 (defmacro define-configured-language-mode
-    (mode name syntax-table hook width comment indent-function)
+    (mode name syntax-table hook width comment indent-function
+     &optional indent-tabs)
   `(define-major-mode ,mode lem/language-mode:language-mode
        (:name ,name
         :description ,(format nil "~a source editing" name)
@@ -215,7 +251,7 @@
         :syntax-table ,syntax-table
         :mode-hook ,hook)
      (setf (variable-value 'enable-syntax-highlight) t
-           (variable-value 'indent-tabs-mode) nil
+           (variable-value 'indent-tabs-mode) ,indent-tabs
            (variable-value 'tab-width) ,width
            (variable-value 'calc-indent-function) ',indent-function
            (variable-value 'lem/language-mode:line-comment) ,comment
@@ -232,6 +268,9 @@
  nushell-mode "Nushell" *nushell-syntax-table* *nushell-mode-hook* 2 "#" nushell-calc-indent)
 (define-configured-language-mode
  typst-mode "Typst" *typst-syntax-table* *typst-mode-hook* 4 "//" typst-calc-indent)
+(define-configured-language-mode
+ gdscript-mode "GDScript" *gdscript-syntax-table* *gdscript-mode-hook*
+ 4 "#" gdscript-calc-indent t)
 
 (define-file-associations just-mode
   ((:file-namestring "Justfile")
@@ -246,6 +285,7 @@
   ((:file-namestring "nginx.conf")))
 (define-file-type ("nu") nushell-mode)
 (define-file-type ("typ") typst-mode)
+(define-file-type ("gd") gdscript-mode)
 (define-program-name-with-mode ("nu") nushell-mode)
 
 (defun language-mode-buffer-prefix (buffer limit)

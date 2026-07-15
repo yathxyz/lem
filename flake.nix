@@ -166,6 +166,11 @@
               grammar = treeSitterGrammars.tree-sitter-go;
             }
             {
+              name = "gdscript";
+              grammar = treeSitterGrammars.tree-sitter-gdscript;
+              query = ./queries/gdscript-highlights.scm;
+            }
+            {
               name = "html";
               grammar = treeSitterGrammars.tree-sitter-html;
             }
@@ -595,7 +600,9 @@
             org-test = mkTestAppWithLem lemYath "lem-yath-org-test" "org-test.sh";
             org-planning-test = mkTestAppWithLem lemYath "lem-yath-org-planning-test" "org-planning-test.sh";
             org-timestamp-test = mkTestAppWithLem lemYath "lem-yath-org-timestamp-test" "org-timestamp-test.sh";
-            org-source-edit-test = mkTestAppWithLem lemYath "lem-yath-org-source-edit-test" "org-source-edit-test.sh";
+            org-source-edit-test =
+              mkTestAppWithLem lemYath "lem-yath-org-source-edit-test"
+                "org-source-edit-test.sh";
             org-babel-test = mkTestAppWithLemAndInputs lemYath [
               pkgs.postgresql
             ] "lem-yath-org-babel-test" "org-babel-test.sh";
@@ -640,6 +647,7 @@
             avy-test = mkTestApp "lem-yath-avy-test" "avy-test.sh";
             lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
             real-lsp-test = mkRealLspTestApp "lem-yath-real-lsp-test" "real-lsp-test.sh";
+            gdscript-test = mkTestAppWithLem lemYath "lem-yath-gdscript-test" "gdscript-test.sh";
             lint-test = mkTestAppWithLemAndInputs lemYath rustRuntimeInputs "lem-yath-lint-test" "lint-test.sh";
             tree-sitter-test = mkTestAppWithLem lemYath "lem-yath-tree-sitter-test" "tree-sitter-test.sh";
             dap-test = mkTestAppWithLemAndInputs lemYath (
@@ -708,6 +716,7 @@
             avy = mkCheck "avy" "avy-test.sh";
             lsp-project = mkCheckWithLem lemLspTest "lsp-project" "lsp-project-test.sh";
             real-lsp = mkRealLspCheck "real-lsp" "real-lsp-test.sh";
+            gdscript = mkCheckWithLem lemYath "gdscript" "gdscript-test.sh";
             lint = mkCheckWithLemAndInputs lemYath rustRuntimeInputs "lint" "lint-test.sh";
             tree-sitter = mkCheckWithLem lemYath "tree-sitter" "tree-sitter-test.sh";
             dap = mkCheckWithLemAndInputs lemYath (dapRuntimeInputs ++ rustRuntimeInputs) "dap" "dap-test.sh";

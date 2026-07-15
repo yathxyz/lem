@@ -92,7 +92,7 @@
      "deterministic-bundle-is-present"
      root)
     (tree-sitter-test-check
-     (and (= 22 (length *tree-sitter-specs*))
+     (and (= 23 (length *tree-sitter-specs*))
           (every
            (lambda (spec)
              (and (probe-file (tree-sitter-spec-parser-path spec))
@@ -338,12 +338,14 @@
   (merge-pathnames relative *tree-sitter-test-language-mode-root*))
 
 (defun tree-sitter-test-open-language-file (relative)
-  (let ((buffer (find-file-buffer (tree-sitter-test-language-path relative))))
+  (let ((buffer
+          (lem-lsp-mode:without-lsp-mode ()
+            (find-file-buffer (tree-sitter-test-language-path relative)))))
     (tree-sitter-test-disable-lint buffer)
     buffer))
 
 (defun tree-sitter-test-check-mode-file
-    (relative expected-mode &key grammar width comment programming)
+    (relative expected-mode &key grammar width comment programming tabs)
   (let ((buffer nil))
     (unwind-protect
          (handler-case
@@ -358,9 +360,12 @@
                   (= width (variable-value 'tab-width))
                   (format nil "~a-uses-configured-indent-width" relative))
                  (tree-sitter-test-check
-                  (string= comment
+                 (string= comment
                            (variable-value 'lem/language-mode:line-comment))
                   (format nil "~a-uses-configured-comment" relative))
+                 (tree-sitter-test-check
+                  (eq tabs (not (null (variable-value 'indent-tabs-mode))))
+                  (format nil "~a-uses-configured-tab-policy" relative))
                  (tree-sitter-test-check
                   (eq programming (not (null (programming-buffer-p buffer))))
                   (format nil "~a-retains-emacs-mode-class" relative)))
@@ -384,7 +389,8 @@
              ("nginx/sites/site.conf" "$host"
               lem:syntax-variable-attribute)
              ("script.nu" "let" lem:syntax-keyword-attribute)
-             ("document.typ" "Heading" lem:document-header1-attribute)))
+             ("document.typ" "Heading" lem:document-header1-attribute)
+             ("player.gd" "ready" lem:syntax-function-name-attribute)))
     (destructuring-bind (relative text expected) entry
       (let ((buffer nil))
         (unwind-protect
@@ -442,13 +448,17 @@
   (tree-sitter-test-check-mode-file
    "document.typ" 'typst-mode :grammar "typst" :width 4 :comment "//"
    :programming nil)
+  (tree-sitter-test-check-mode-file
+   "player.gd" 'gdscript-mode :grammar "gdscript" :width 4 :comment "#"
+   :programming t :tabs t)
   (tree-sitter-test-check-language-highlighting)
   (dolist (entry
            `((just-mode ,(format nil "build:~%") 4)
              (meson-mode ,(format nil "if true~%") 2)
              (nginx-mode ,(format nil "server {~%") 4)
              (nushell-mode ,(format nil "if true {~%") 2)
-             (typst-mode ,(format nil "#let value = (~%") 4)))
+             (typst-mode ,(format nil "#let value = (~%") 4)
+             (gdscript-mode ,(format nil "func ready():~%") 4)))
     (destructuring-bind (mode text expected) entry
       (tree-sitter-test-check
        (= expected (tree-sitter-test-indent-result mode text))
@@ -457,7 +467,8 @@
            `((meson-mode ,(format nil "if true~%  value = 1~%endif") 0)
              (nginx-mode ,(format nil "server {~%    listen 80;~%}") 0)
              (nushell-mode ,(format nil "if true {~%  print yes~%}") 0)
-             (typst-mode ,(format nil "#let value = (~%    1~%)") 0)))
+             (typst-mode ,(format nil "#let value = (~%    1~%)") 0)
+             (gdscript-mode ,(format nil "if true:~%\tpass~%else:") 0)))
     (destructuring-bind (mode text expected) entry
       (tree-sitter-test-check
        (= expected (tree-sitter-test-indent-result mode text))

@@ -70,6 +70,8 @@ printf '%s\n' '#!/usr/bin/env nu' 'let answer = 42' \
   >"$LEM_YATH_LANGUAGE_MODE_ROOT/nu-script"
 printf '%s\n' '= Heading' '#let answer = 42' \
   >"$LEM_YATH_LANGUAGE_MODE_ROOT/document.typ"
+printf '%s\n' 'extends Node' 'func ready():' $'\tpass' \
+  >"$LEM_YATH_LANGUAGE_MODE_ROOT/player.gd"
 
 fixture="$(lem-yath_lisp_string "$here/scripts/tree-sitter-fixture.lisp")"
 lem_start "$session" "$LEM_YATH_TREE_SITTER_FILE" --eval "(load #P$fixture)"
@@ -89,5 +91,5 @@ if ! grep -q '^SUMMARY ' "$LEM_YATH_TREE_SITTER_REPORT" 2>/dev/null; then
 fi
 
 sed -n '1,320p' "$LEM_YATH_TREE_SITTER_REPORT"
-grep -q '^SUMMARY PASS failures=0 grammars=22/22$' \
+grep -q '^SUMMARY PASS failures=0 grammars=23/23$' \
   "$LEM_YATH_TREE_SITTER_REPORT"

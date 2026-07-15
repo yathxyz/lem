@@ -1482,6 +1482,16 @@ registration and work-done progress creation so conforming servers can
 continue, but it does not provide filesystem notifications or render a
 progress UI.
 
+GDScript files use a native `gdscript-mode` with the pinned `.gd`, comment,
+tab-width-4 indentation, and programming-mode behavior. The packaged GDScript
+parser supplies highlighting and Expreg nodes. Its automatic LSP spec roots at
+`project.godot` and connects to the already-running Godot editor over TCP; it
+derives the editor-settings version from `project.godot`, honors a configured
+`network/language_server/remote_port`, and otherwise uses port 6005. Lem does
+not launch or own a Godot process. `scripts/gdscript-test.sh` verifies a real
+ncurses handshake, exact language/root/port delivery, external-client
+ownership, and nonfatal connection refusal.
+
 ### Enable — `lsp-mode.lisp:260` (`define-minor-mode lsp-mode`)
 A language spec auto-adds `enable-lsp-mode` to the mode's hook
 (`define-language-spec` macro, `lsp-mode.lisp:1832-1841`), so opening a file in a mode
@@ -1631,8 +1641,8 @@ below but does not automatically wire it into language modes.
 
 The installed wrapper exports a deterministic bundle containing a parser and
 `highlights.scm` query for **Bash, C, C#, Clojure, CSS, Go, HTML, Java,
-JavaScript, JSON, Just, Lua, Markdown, Nix, Nu, Python, Rust, TOML, TypeScript,
-TSX, Typst, and YAML** (22 grammar/query pairs). Eligible buffers automatically receive a
+GDScript, JavaScript, JSON, Just, Lua, Markdown, Nix, Nu, Python, Rust, TOML,
+TypeScript, TSX, Typst, and YAML** (23 grammar/query pairs). Eligible buffers automatically receive a
 fresh parser when their existing Lem major mode has a corresponding entry.
 File-backed buffers are eligible regardless of name; fileless buffers whose
 names begin with a space or `*` are excluded, matching the configured Emacs
@@ -1647,11 +1657,12 @@ query patterns refine generic captures deterministically. The configuration
 uses highlighting only: mode selection, indentation, LSP, and structural
 editing remain owned by their existing implementations.
 
-`lem-yath/src/language-modes.lisp` supplies the previously absent Just, Meson,
-nginx, Nushell, and Typst modes. It reproduces the pinned filename associations,
-nginx content fallback, Nu shebang, comment syntax, and indentation widths.
-Just, Nu, and Typst participate in this parser bundle and Expreg; Meson and
-nginx retain bounded TextMate fallback highlighting.
+`lem-yath/src/language-modes.lisp` supplies the previously absent GDScript,
+Just, Meson, nginx, Nushell, and Typst modes. It reproduces the pinned filename
+associations, nginx content fallback, Nu shebang, comment syntax, indentation
+widths, and GDScript's local tab policy. GDScript, Just, Nu, and Typst
+participate in this parser bundle and Expreg; Meson and nginx retain bounded
+TextMate fallback highlighting.
 
 This approximates the configured Emacs `treesit-font-lock-level 3`; it does not
 load injection or locals queries. In particular, captures guarded by

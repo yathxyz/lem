@@ -12,6 +12,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import socket
 import sys
 import time
 from typing import Any, BinaryIO
@@ -28,6 +29,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initialize-delay-ms", type=int, default=0)
     parser.add_argument("--shutdown-delay-ms", type=int, default=0)
     parser.add_argument("--publish-diagnostics", action="store_true")
+    parser.add_argument("--tcp-port", type=int)
+    parser.add_argument("--port-file", type=Path)
     return parser.parse_args()
 
 
@@ -192,7 +195,11 @@ class FixtureServer:
         if method == "textDocument/didOpen":
             document = params.get("textDocument") or {}
             uri = str(document.get("uri") or "")
-            self.log("DID_OPEN", uri=uri)
+            self.log(
+                "DID_OPEN",
+                uri=uri,
+                language_id=document.get("languageId", ""),
+            )
             if self.publish_diagnostics:
                 self.log("PUBLISH_DIAGNOSTICS", uri=uri)
                 return {
@@ -264,16 +271,16 @@ class FixtureServer:
             self.log("NOTIFICATION", method=method)
         return None
 
-    def run(self) -> int:
+    def run(self, input_stream: BinaryIO, output_stream: BinaryIO) -> int:
         try:
             while True:
-                message = read_message(sys.stdin.buffer)
+                message = read_message(input_stream)
                 if message is None:
                     self.log("EOF")
                     return 0
                 response = self.handle(message)
                 if response is not None:
-                    write_message(sys.stdout.buffer, response)
+                    write_message(output_stream, response)
         except EOFError:
             return 0
         except Exception as error:
@@ -283,12 +290,29 @@ class FixtureServer:
 
 def main() -> int:
     args = parse_args()
-    return FixtureServer(
+    server = FixtureServer(
         args.events,
         args.initialize_delay_ms,
         args.shutdown_delay_ms,
         args.publish_diagnostics,
-    ).run()
+    )
+    if args.tcp_port is None:
+        return server.run(sys.stdin.buffer, sys.stdout.buffer)
+
+    if args.port_file is None:
+        raise SystemExit("--port-file is required with --tcp-port")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", args.tcp_port))
+        listener.listen(1)
+        args.port_file.write_text(
+            f"{listener.getsockname()[1]}\n", encoding="ascii"
+        )
+        connection, _address = listener.accept()
+        with connection:
+            with connection.makefile("rb") as input_stream:
+                with connection.makefile("wb") as output_stream:
+                    return server.run(input_stream, output_stream)
 
 
 if __name__ == "__main__":

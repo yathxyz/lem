@@ -28,6 +28,8 @@
    (make-tree-sitter-spec
     :mode 'lem-go-mode:go-mode :language "go")
    (make-tree-sitter-spec
+    :mode 'gdscript-mode :language "gdscript")
+   (make-tree-sitter-spec
     :mode 'lem-html-mode:html-mode :language "html")
    (make-tree-sitter-spec
     :mode 'lem-java-mode:java-mode :language "java")

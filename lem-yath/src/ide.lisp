@@ -54,6 +54,71 @@
   :readme-url "https://github.com/razzmatazz/csharp-language-server"
   :connection-mode :stdio)
 
+;;; --- Godot's externally hosted GDScript server ---------------------------
+
+(defparameter *godot-language-server-default-port* 6005)
+
+(defun godot-config-directory ()
+  (uiop:ensure-directory-pathname
+   (merge-pathnames
+    "godot/"
+    (alexandria:if-let ((xdg (uiop:getenv "XDG_CONFIG_HOME")))
+      (uiop:ensure-directory-pathname xdg)
+      (merge-pathnames ".config/" (user-homedir-pathname))))))
+
+(defun godot-project-version (&optional directory)
+  "Return the editor-settings version used by the current Godot project."
+  (let* ((directory (or directory (buffer-directory (current-buffer))))
+         (root (and directory (find-up directory "project.godot")))
+         (file (and root (merge-pathnames "project.godot" root))))
+    (when (and file (probe-file file))
+      (let ((source (uiop:read-file-string file)))
+        (cond
+          ((cl-ppcre:scan "(?m)^config_version[ \\t]*=[ \\t]*(?:3|4)[ \\t]*$"
+                         source)
+           "3")
+          (t
+           (multiple-value-bind (match groups)
+               (cl-ppcre:scan-to-strings
+                "config/features[ \\t]*=[ \\t]*PackedStringArray\\(\"([^\",)]+)\""
+                source)
+             (when match
+               (let ((version (aref groups 0)))
+                 (if (string= version "4.0") "4" version))))))))))
+
+(defun godot-language-server-port (&optional directory)
+  "Read Godot's configured LSP port, falling back to its stock port."
+  (or
+   (ignore-errors
+     (alexandria:when-let*
+         ((version (godot-project-version directory))
+          (settings
+            (merge-pathnames
+             (format nil "editor_settings-~a.tres" version)
+             (godot-config-directory)))
+          (source (and (probe-file settings)
+                       (uiop:read-file-string settings))))
+       (multiple-value-bind (match groups)
+           (cl-ppcre:scan-to-strings
+            "network/language_server/remote_port[ \\t]*=[ \\t]*([0-9]+)"
+            source)
+         (when match
+           (parse-integer (aref groups 0))))))
+   *godot-language-server-default-port*))
+
+(lem-lsp-mode:define-language-spec
+    (lem-yath-gdscript-spec gdscript-mode)
+  :language-id "gdscript"
+  :root-uri-patterns '("project.godot")
+  :command nil
+  :readme-url "https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/"
+  :connection-mode :tcp
+  :port 6005)
+
+(defmethod lem-lsp-mode/spec:spec-port ((spec lem-yath-gdscript-spec))
+  (declare (ignore spec))
+  (godot-language-server-port))
+
 ;;; --- LSP 3.17 pull diagnostics ------------------------------------------
 
 (defvar *pull-diagnostics-idle-timer* nil)

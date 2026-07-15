@@ -123,7 +123,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   joins its reader, and reaps the broker; terminal status does not wait for a
   descendant that merely retains inherited stdout
 - Expreg-style `SPC v` region growth through lexical tiers and syntax nodes
-  from every one of the 22 packaged tree-sitter modes, including balanced list
+  from every one of the 23 packaged tree-sitter modes, including balanced list
   interiors inside ordinary and block strings; arbitrary Visual selections use
   their active endpoint and retain contained generated tiers for contraction.
   The configured unbound
@@ -213,14 +213,15 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   chains; checks run on mode enable, save, newline, or 500 ms idle change,
   reuse the LSP overlay/list/navigation UI, refuse SOPS plaintext, and yield
   diagnostics completely while an LSP workspace owns the buffer
-- automatic per-buffer tree-sitter highlighting from 22 packaged grammar/query
+- automatic per-buffer tree-sitter highlighting from 23 packaged grammar/query
   pairs across existing language modes, with predicate-aware capture
   precedence, Unicode-safe reparsing, and the original mode parser as fallback;
   indentation, LSP, and structural editing remain owned by their normal modes
-- dedicated Just, Meson, nginx, Nushell, and Typst modes with the pinned
-  filename, nginx-content, and Nu-shebang associations; Just, Nu, and Typst use
-  packaged tree-sitter highlighting while Meson and nginx retain bounded
-  TextMate fallbacks
+- dedicated GDScript, Just, Meson, nginx, Nushell, and Typst modes with the
+  pinned filename, nginx-content, and Nu-shebang associations; GDScript, Just,
+  Nu, and Typst use packaged tree-sitter highlighting while Meson and nginx
+  retain bounded TextMate fallbacks. GDScript automatically connects to the
+  running Godot language server using the project-derived editor-settings port
 - relative line numbers in programming buffers only, matching the Emacs
   `prog-mode` scope while leaving prose and utility buffers clean
 - the current Modus Vivendi Tinted palette, truncated long lines, no global
@@ -370,7 +371,8 @@ integrated terminal, reusable editor server/client,
 prompt and in-buffer completion, completion-lifecycle, automatic-completion,
 Embark-style actions,
 editing, formatting, Orderless completion, snippets, LSP snippets, real installed
-language-server handshakes, tree-sitter highlighting, real DAP adapter
+language-server handshakes (including an external Godot TCP server), tree-sitter
+highlighting, real DAP adapter
 workflows, daily-workflows, Direnv environment switching,
 electric-editing, grouped-buffer-list, UI parity, project navigation and outline, VCS,
 persistence, bookmarks,
@@ -409,6 +411,7 @@ nix run .#snippet-test
 nix run .#lsp-snippet-test
 nix run .#lsp-project-test
 nix run .#real-lsp-test
+nix run .#gdscript-test
 nix run .#tree-sitter-test
 nix run .#dap-test
 nix run .#project-navigation-test
