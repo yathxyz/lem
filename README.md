@@ -154,11 +154,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   `C-c a` can copy without closing the popup or accept the captured candidate
   exactly once
 - exact expansion of the configured private Org `jjs` source-block snippet and
-  a data-only Yasnippet session engine over the flake-pinned community corpus;
+  a bounded Yasnippet compatibility engine over the flake-pinned community corpus;
   numbered, anonymous, and nested fields, defaults, mirrors, escapes, safe
-  indentation directives, forward/reverse field navigation, and a Prescient
-  `M-x` insertion prompt are supported for 2,243 definitions; the 144 executable
-  or conditional definitions remain unavailable, and embedded Elisp is never evaluated
+  indentation directives, safe date/filename/comment backquotes, common pure
+  field transforms, six context conditions, forward/reverse field navigation,
+  and a Prescient `M-x` insertion prompt are supported for 2,318 definitions;
+  69 definitions remain unavailable, and arbitrary embedded Elisp is never evaluated
 - LSP `insertTextFormat=Snippet` candidates enter the same field-session UI
   after `insertText`, `TextEdit`, or `InsertReplaceEdit` acceptance; direct and
   lazily resolved `additionalTextEdits` share the acceptance undo step,

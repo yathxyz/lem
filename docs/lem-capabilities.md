@@ -410,7 +410,7 @@ refresh retains path-aware candidates while asynchronous validation stays strict
 The LSP adapter consequently honors plain `filterText`, `insertText`,
 `TextEdit`, and `InsertReplaceEdit` new-text precedence. Provider-relative
 replacement ranges are retained with tracked start/end points and per-item
-offsets while the user continues editing. When lem-yath's data-only handler is
+offsets while the user continues editing. When lem-yath's literal LSP handler is
 installed, the client advertises snippet support and routes
 `insertTextFormat=Snippet` through that final-insertion seam. It also advertises
 `InsertReplaceEdit` support and the one lazy property it implements,
@@ -692,10 +692,12 @@ ranges, and prompt/file isolation through the real ncurses editor.
 The configured wrapper searches the repository's private snippets before the
 exact flake-pinned `yasnippet-snippets` commit
 `606ee926df6839243098de6d71332a697518cb86`. That collection contains 2,387
-definitions. Every snippet file is treated solely as data; the corpus audit
-classifies 2,243 definitions as portable and 144 that require executable or
-conditional behavior as explicitly unavailable, and no embedded Emacs Lisp is
-ever evaluated. The
+definitions. Every snippet file is still treated solely as data: a bounded
+semantic translator recognizes exact, audited dynamic forms without invoking a
+Lisp reader or evaluator. The corpus audit classifies 2,318 definitions as
+supported and 69 as explicitly unavailable. The supported set includes 75
+definitions that previously required dynamic behavior; arbitrary embedded
+Emacs Lisp remains non-executable. The
 configured private corpus contains one snippet, `org-mode/srcblock.snpt`; its
 `jjs` trigger, `language` field, and final blank-line `$0` position are
 reproduced exactly. Native `.org` buffers now select the same `org-mode` snippet
@@ -709,6 +711,17 @@ repeated braced placeholders, simple mirrors, escaped syntax characters,
 while their owning field changes, including dependencies nested inside a
 containing field. Field order follows Yasnippet's numbered, anonymous, then-zero
 ordering, including its observed repeated-placeholder ownership rules.
+
+Trusted file snippets additionally translate the pinned corpus's pure
+date/time, user, filename/class-name, comment-delimiter, selection, UUID, C++
+namespace, and Clojure namespace backquote forms. Pure field mirrors cover case
+conversion, initial capitalization, class-name extraction, display-width
+underlines, numeric increment, comma-list normalization, and the audited
+C/C++/C# conditionals. Six common conditions reproduce the configured shell,
+Go, and JavaScript comment-context behavior. Values are bounded to 1 MiB and
+escaped back into the structural renderer, so filenames or selected text cannot
+inject fields. This policy is attached explicitly to parsed local files; LSP
+templates use a separate literal policy.
 
 `Tab` expands a matching trigger or advances the active field; `Shift-Tab`
 moves backward. `C-g` ends the session without deleting its text. At the start
@@ -807,13 +820,15 @@ BibTeX snippets deliberately skip automatic indentation: deterministic template
 text approximates Emacs' intended steady state, not its transient indentation
 calls.
 
-This is not full Yasnippet parity. The 144 definitions requiring backquoted
-Elisp, field transforms, nontrivial conditions, command execution, or unsupported
-`expand-env` forms cannot expand. Active sessions do not stack, direct snippet
+This is not full Yasnippet parity. The remaining 69 definitions comprise 18
+DIX-specific conditions, five unsupported or malformed backquote cases, and 46
+choice, side-effecting, embedded, or mode-specific field transforms. The pinned
+corpus contains no command snippets. Active sessions do not stack, direct snippet
 key bindings are not installed, undo/redo does not revive a field session on
 redo, and strict TextMate snippet grammar is not implemented. The file-snippet TUI gate
 is `nix run .#snippet-test`; it drives the private snippet, portable field
-grammar, the Prescient selector, navigation and editing keys,
+grammar, bounded dynamic forms, exact corpus audit, the Prescient selector,
+navigation and editing keys,
 completion/Vi/Paredit precedence,
 indentation, lifecycle cleanup, undo, and a real pinned Python community snippet
 through the ncurses editor.

@@ -1,10 +1,10 @@
-;;;; Yasnippet-compatible, data-only snippet sessions.
+;;;; Yasnippet-compatible snippet sessions.
 ;;;;
 ;;;; The configured Emacs loads one private snippet directory followed by the
 ;;;; pinned yasnippet-snippets collection.  Lem has no native snippet engine,
-;;;; so this module implements the portable part of Yasnippet's file format:
-;;;; numbered fields, defaults, nesting, mirrors, escapes, Tab navigation and
-;;;; the $0 exit.  Executable Emacs Lisp is deliberately never evaluated.
+;;;; so this module implements its portable file format plus a bounded,
+;;;; non-evaluating translation of the pure dynamic forms used by that pinned
+;;;; collection.  Arbitrary Emacs Lisp is deliberately never evaluated.
 
 (in-package :lem-yath)
 
@@ -51,6 +51,7 @@
 
 (defvar *snippet-table-cache* (make-hash-table :test #'equal))
 (defvar *snippet-editing* nil)
+(defvar *snippet-time-function* #'get-universal-time)
 
 (define-attribute snippet-inactive-field)
 
@@ -68,6 +69,8 @@
   body
   pathname
   table
+  evaluation-policy
+  condition-policy
   supported-p
   unsupported-reason
   fixed-indent-p
@@ -80,7 +83,8 @@
   sequence
   start
   end
-  placeholder-p)
+  placeholder-p
+  transform-kind)
 
 (defstruct snippet-rendering
   text
@@ -95,6 +99,7 @@
   sequence
   overlay
   mirrors
+  mirror-transforms
   modified-p
   disabled-p)
 
@@ -141,9 +146,13 @@
 
 (define-command lem-yath-insert-snippet () ()
   "Select and insert a portable snippet without typing its trigger."
-  (let ((templates
-          (remove-if-not #'snippet-template-supported-p
-                         (snippet-active-templates))))
+  (let* ((point (current-point))
+         (templates
+           (remove-if-not
+            (lambda (template)
+              (and (snippet-template-supported-p template)
+                   (snippet-condition-allows-p template point)))
+            (snippet-active-templates))))
     (if (null templates)
         (message "No portable snippets are active for this buffer")
         (let* ((choices
@@ -422,25 +431,505 @@
                     (write-char character output)
                     (incf index))))))
 
-(defun snippet-executable-body-reason (body)
+(defun snippet-canonical-elisp (source)
+  "Return SOURCE without insignificant whitespace outside string literals."
+  (with-output-to-string (output)
+    (loop :with quoted-p = nil
+          :with escaped-p = nil
+          :for character :across source
+          :do (cond
+                (escaped-p
+                 (write-char character output)
+                 (setf escaped-p nil))
+                ((and quoted-p (char= character #\\))
+                 (write-char character output)
+                 (setf escaped-p t))
+                ((char= character #\")
+                 (write-char character output)
+                 (setf quoted-p (not quoted-p)))
+                ((and (not quoted-p)
+                      (find character '(#\Space #\Tab #\Newline #\Return)
+                            :test #'char=)))
+                (t (write-char character output))))))
+
+(defparameter *snippet-safe-backquote-forms*
+  '((("(format-time-string\"%Y\")") . :year)
+    (("(format-time-string\"%Y-%m-%d\")") . :date)
+    (("(format-time-string\"%Y-%m-%dT%H:%M:%S%:z\")") . :timestamp)
+    (("(user-full-name)" "user-full-name") . :user-full-name)
+    (("(yas-jsx-get-class-name-by-file-name)") . :jsx-class-name)
+    (("(yas-php-get-class-name-by-file-name)") . :file-stem)
+    (("(file-name-nondirectory(file-name-sans-extension(buffer-file-name)))")
+     . :file-stem)
+    (("(file-name-nondirectory(file-name-sans-extension(or(buffer-file-name)(buffer-name))))"
+      "(file-name-base(or(buffer-file-name)(buffer-name)))")
+     . :file-stem-or-buffer)
+    (("(file-name-nondirectory(buffer-file-name))") . :file-name)
+    (("(file-name-base(orbuffer-file-name(buffer-name)))")
+     . :file-stem-or-buffer)
+    (("(concat(capitalize(file-name-nondirectory(directory-file-name(file-name-directorybuffer-file-name))))\".\")")
+     . :elixir-directory-prefix)
+    (("(mapconcat'capitalize(split-string(file-name-base)\"_\")\"\")")
+     . :elixir-file-class)
+    (("(upcase(replace-regexp-in-string\"[^A-Za-z0-9_]\"\"_\"(file-name-nondirectory(or(buffer-file-name)))))")
+     . :include-guard)
+    (("comment-start") . :comment-start)
+    (("comment-end") . :comment-end)
+    (("(yas-trimmed-comment-start)" "(yas-trimmed-add-comment)")
+     . :trimmed-comment-start)
+    (("(unless(eq(lengthcomment-end)0)(concat\" \"(yas-trimmed-comment-end)))")
+     . :optional-comment-end)
+    (("yas/selected-text") . :selected-text)
+    (("(oryas/selected-text(carkill-ring))") . :selected-or-kill)
+    (("(org-id-uuid)") . :uuid)
+    (("(if(eq(point)(line-end-position))\";\"\"\")") . :line-end-semicolon)
+    (("(progn(goto-char(point-min))(unless(re-search-forward\"^using\\\\s-+namespace std;\"nil'no-error)\"std::\"))"
+      "(progn(goto-char(point-min))(unless(re-search-forward\"^using\\\\s-+namespace std;\"nil'no-errer)\"std::\"))")
+     . :cxx-std-prefix)
+    (("(let((fn(capitalize(file-name-nondirectory(file-name-sans-extension(or(buffer-file-name)(buffer-name(current-buffer))))))))(replace-regexp-in-string\"_\"\"\"fntt))")
+     . :capitalized-file-stem)
+    (("(let((fn(capitalize(file-name-nondirectory(file-name-sans-extension(or(buffer-file-name)(buffer-name(current-buffer))))))))(while(string-match\"_\"fn)(setqfn(replace-match\"\"nilnilfn)))fn)")
+     . :capitalized-file-stem)
+    (("(cl-flet((try-src-prefix(pathsrc-pfx)(let((parts(split-stringpathsrc-pfx)))(if(=2(lengthparts))(cl-secondparts)nil))))(let*((p(buffer-file-name))(p2(cl-first(cl-remove-if-not(lambda(x)x)(mapcar(lambda(pfx)(try-src-prefixppfx))'(\"/src/cljs/\"\"/src/clj/\"\"/src/\"\"/test/\")))))(p3(file-name-sans-extensionp2))(p4(mapconcat(lambda(x)x)(split-stringp3\"/\")\".\")))(replace-regexp-in-string\"_\"\"-\"p4)))")
+     . :clojure-namespace))
+  "Canonical forms translated without invoking an Emacs Lisp evaluator.")
+
+(defun snippet-safe-backquote-kind (expression)
+  (let ((canonical (snippet-canonical-elisp expression)))
+    (loop :for (forms . kind) :in *snippet-safe-backquote-forms*
+          :when (member canonical forms :test #'string=)
+            :return kind)))
+
+(defparameter *snippet-safe-transform-forms*
+  '((("(upcaseyas-text)") . :upcase)
+    (("(downcaseyas-text)") . :downcase)
+    (("(upcase-initialsyas-text)") . :upcase-initials)
+    (("(yas/substryas-text\"[^: ]*\")"
+      "(yas-c++-class-nameyas-text)") . :before-colon)
+    (("(make-string(string-widthyas-text)?\\=)") . :underline-equals)
+    (("(make-string(string-widthyas-text)?\\-)") . :underline-hyphens)
+    (("(number-to-string(1+(string-to-numberyas-text)))") . :increment)
+    (("((yas-snake-caseyas-text))") . :snake-upcase)
+    (("(yas-text)") . :identity)
+    (("(replace-regexp-in-string\"  *\"\" \"(subst-char-in-string?,? yas-text))")
+     . :comma-list)
+    (("(if(>(lengthyas-text)0)(format\"_%s%s\"(downcase(substringyas-text01))(substringyas-text1(lengthyas-text)))\"\")")
+     . :private-field)
+    (("(if(string=(upcaseyas-text)\"VOID\")\"\"(format\"%s%s%s\"\"\\n/// <returns><c>\"yas-text\"</c></returns>\"))")
+     . :csharp-return-doc)
+    (("(if(string-match\"%\"yas-text)\", \"\"\\);\")")
+     . :printf-middle)
+    (("(if(string-match\"%\"yas-text)\"\\);\"\"\")")
+     . :printf-end)
+    (("(if(string-match\"\\{\"yas-text)\"\\}\"\"\")")
+     . :close-brace))
+  "Pure mirror transforms implemented without evaluating snippet code.")
+
+(defun snippet-safe-transform-kind (expression)
+  (let ((canonical (snippet-canonical-elisp expression)))
+    (loop :for (forms . kind) :in *snippet-safe-transform-forms*
+          :when (member canonical forms :test #'string=)
+            :return kind)))
+
+(defun snippet-transform-expression-at (source index)
+  "Return an expression and end offset for `$...(' syntax at INDEX."
+  (let ((cursor index)
+        (length (length source)))
+    (unless (and (< cursor length) (char= (char source cursor) #\$))
+      (return-from snippet-transform-expression-at (values nil nil)))
+    (loop :while (and (< cursor length)
+                      (char= (char source cursor) #\$))
+          :do (incf cursor))
+    (loop :while (and (< cursor length)
+                      (find (char source cursor)
+                            '(#\Space #\Tab #\Newline #\Return)
+                            :test #'char=))
+          :do (incf cursor))
+    (unless (and (< cursor length) (char= (char source cursor) #\())
+      (return-from snippet-transform-expression-at (values nil nil)))
+    (let ((start cursor)
+          (depth 0)
+          (quoted-p nil)
+          (escaped-p nil))
+      (loop :while (< cursor length)
+            :for character = (char source cursor)
+            :do (cond
+                  (escaped-p (setf escaped-p nil))
+                  ((and quoted-p (char= character #\\))
+                   (setf escaped-p t))
+                  ((char= character #\")
+                   (setf quoted-p (not quoted-p)))
+                  ((not quoted-p)
+                   (cond ((char= character #\() (incf depth))
+                         ((char= character #\))
+                          (decf depth)
+                          (when (zerop depth)
+                            (return-from snippet-transform-expression-at
+                              (values (subseq source start (1+ cursor))
+                                      (1+ cursor))))))))
+            :do (incf cursor))
+      (values nil nil))))
+
+(defun snippet-pure-transform-at (source index)
+  "Return a safe transform kind and offset after its field-closing brace."
+  (multiple-value-bind (expression after-expression)
+      (snippet-transform-expression-at source index)
+    (when expression
+      (let ((cursor after-expression))
+        (loop :while (and (< cursor (length source))
+                          (find (char source cursor)
+                                '(#\Space #\Tab #\Newline #\Return)
+                                :test #'char=))
+              :do (incf cursor))
+        (when (and (< cursor (length source))
+                   (char= (char source cursor) #\}))
+          (values (snippet-safe-transform-kind expression) (1+ cursor)))))))
+
+(defun snippet-safe-transform-reason (body)
   (loop :with field-depth = 0
-        :for index :from 0 :below (length body)
+        :with index = 0
+        :while (< index (length body))
         :for character = (char body index)
         :for unescaped-p = (snippet-unescaped-p body index)
-        :when (and unescaped-p
-                   (or (char= character #\`)
-                       (and (plusp field-depth)
-                            (snippet-transform-start-p body index))))
-          :do (return "embedded Emacs Lisp or a field transform")
-        :when (and unescaped-p
-                   (char= character #\$)
-                   (< (1+ index) (length body))
-                   (char= (char body (1+ index)) #\{))
-          :do (incf field-depth)
-        :when (and unescaped-p
-                   (char= character #\})
-                   (plusp field-depth))
-          :do (decf field-depth)))
+        :do (cond
+              ((and unescaped-p
+                    (plusp field-depth)
+                    (snippet-transform-start-p body index))
+               (multiple-value-bind (kind after-field)
+                   (snippet-pure-transform-at body index)
+                 (let ((before index))
+                   (loop :while (and (plusp before)
+                                     (find (char body (1- before))
+                                           '(#\Space #\Tab #\Newline #\Return)
+                                           :test #'char=))
+                         :do (decf before))
+                   (unless (and kind after-field (plusp before)
+                                (char= (char body (1- before)) #\:))
+                     (return "an unsupported field transform"))
+                   (setf index after-field)
+                   (decf field-depth))))
+              ((and unescaped-p
+                    (char= character #\$)
+                    (< (1+ index) (length body))
+                    (char= (char body (1+ index)) #\{))
+               (incf field-depth)
+               (incf index))
+              ((and unescaped-p (char= character #\}) (plusp field-depth))
+               (decf field-depth)
+               (incf index))
+              (t (incf index)))))
+
+(defun snippet-upcase-initials (string)
+  (let ((result (copy-seq string))
+        (word-start-p t))
+    (loop :for index :below (length result)
+          :for character = (char result index)
+          :do (cond
+                ((alphanumericp character)
+                 (when word-start-p
+                   (setf (char result index) (char-upcase character)))
+                 (setf word-start-p nil))
+                (t (setf word-start-p t))))
+    result))
+
+(defun snippet-apply-transform (kind text)
+  (case kind
+    (:upcase (string-upcase text))
+    (:downcase (string-downcase text))
+    (:upcase-initials (snippet-upcase-initials text))
+    (:before-colon
+     (subseq text 0 (or (position-if (lambda (character)
+                                      (find character '(#\: #\Space)
+                                            :test #'char=))
+                                    text)
+                        (length text))))
+    (:underline-equals
+     (make-string (lem/common/character:string-width text)
+                  :initial-element #\=))
+    (:underline-hyphens
+     (make-string (lem/common/character:string-width text)
+                  :initial-element #\-))
+    (:increment
+     (write-to-string
+      (1+ (or (parse-integer text :junk-allowed t) 0))))
+    (:snake-upcase
+     (format nil "~{~a~^_~}"
+             (mapcar #'string-upcase
+                     (remove-if (lambda (part) (zerop (length part)))
+                                (cl-ppcre:split "[^[:alnum:]_]+" text)))))
+    (:identity text)
+    (:comma-list
+     (string-trim '(#\Space #\Tab #\Newline #\Return)
+                  (cl-ppcre:regex-replace-all
+                   "[ ]+" (substitute #\Space #\, text) " ")))
+    (:private-field
+     (if (zerop (length text)) ""
+         (concatenate 'string "_"
+                      (string-downcase (subseq text 0 1))
+                      (subseq text 1))))
+    (:csharp-return-doc
+     (if (string= (string-upcase text) "VOID") ""
+         (format nil "~%/// <returns><c>~a</c></returns>" text)))
+    (:printf-middle (if (find #\% text) ", " ");"))
+    (:printf-end (if (find #\% text) ");" ""))
+    (:close-brace (if (find #\{ text) "}" ""))
+    (otherwise (error "Unsupported snippet field transform"))))
+
+(defun snippet-map-backquotes (body function)
+  "Replace every unescaped backquoted expression in BODY through FUNCTION."
+  (with-output-to-string (output)
+    (loop :with index = 0
+          :with length = (length body)
+          :while (< index length)
+          :for character = (char body index)
+          :do (if (and (char= character #\`)
+                       (snippet-unescaped-p body index))
+                  (let ((end
+                          (loop :for scan-index :from (1+ index) :below length
+                                :when (and (char= (char body scan-index) #\`)
+                                           (snippet-unescaped-p body scan-index))
+                                  :return scan-index)))
+                    (unless end
+                      (error "Unclosed backquoted snippet expression"))
+                    (write-string
+                     (funcall function (subseq body (1+ index) end)) output)
+                    (setf index (1+ end)))
+                  (progn
+                    (write-char character output)
+                    (incf index))))))
+
+(defun snippet-safe-backquote-reason (body)
+  (handler-case
+      (progn
+        (snippet-map-backquotes
+         body
+         (lambda (expression)
+           (unless (snippet-safe-backquote-kind expression)
+             (error "unsupported"))
+           ""))
+        nil)
+    (error () "unsupported backquoted Emacs Lisp")))
+
+(defun snippet-file-stem (name)
+  (let* ((basename (file-namestring (pathname name)))
+         (dot (position #\. basename :from-end t)))
+    (if (and dot (plusp dot)) (subseq basename 0 dot) basename)))
+
+(defun snippet-buffer-file-or-name (buffer)
+  (or (buffer-filename buffer) (buffer-name buffer)))
+
+(defun snippet-path-last-component (path)
+  (let* ((trimmed (string-right-trim '(#\/ #\\) (namestring (pathname path))))
+         (slash (position-if (lambda (character)
+                               (find character '(#\/ #\\) :test #'char=))
+                             trimmed :from-end t)))
+    (subseq trimmed (if slash (1+ slash) 0))))
+
+(defun snippet-comment-parts (buffer)
+  (let* ((syntax-table (buffer-syntax-table buffer))
+         (line
+           (or (variable-value 'lem/language-mode:insertion-line-comment
+                               :buffer buffer)
+               (variable-value 'lem/language-mode:line-comment
+                               :buffer buffer)))
+         (block (and syntax-table
+                     (first
+                      (lem/buffer/syntax-table:syntax-table-block-comment-pairs
+                       syntax-table)))))
+    (values (or line (car block) "")
+            (if line "" (or (cdr block) "")))))
+
+(defun snippet-selected-text (buffer)
+  (multiple-value-bind (start end) (action-region-bounds buffer)
+    (and start (points-to-string start end))))
+
+(defun snippet-latest-kill ()
+  (ignore-errors
+    (lem/common/killring:peek-killring-item (current-killring) 0)))
+
+(defun snippet-user-full-name ()
+  (let* ((passwd (ignore-errors
+                   (completion-posix-call "GETPWUID" (sb-posix:getuid))))
+         (gecos (and passwd
+                     (ignore-errors
+                       (completion-posix-call "PASSWD-GECOS" passwd))))
+         (full-name (and (stringp gecos)
+                         (first (uiop:split-string gecos :separator '(#\,))))))
+    (or (and full-name (plusp (length full-name)) full-name)
+        (uiop:getenv "NAME")
+        (uiop:getenv "USER")
+        "")))
+
+(defun snippet-format-time (kind)
+  (multiple-value-bind (second minute hour day month year weekday dst timezone)
+      (decode-universal-time (funcall *snippet-time-function*))
+    (declare (ignore weekday))
+    (case kind
+      (:year (format nil "~4,'0d" year))
+      (:date (format nil "~4,'0d-~2,'0d-~2,'0d" year month day))
+      (:timestamp
+       (let* ((offset (+ (- timezone) (if dst 1 0)))
+              (sign (if (minusp offset) #\- #\+))
+              (minutes (round (* (abs offset) 60))))
+         (multiple-value-bind (zone-hour zone-minute) (floor minutes 60)
+           (format nil "~4,'0d-~2,'0d-~2,'0dT~2,'0d:~2,'0d:~2,'0d~c~2,'0d:~2,'0d"
+                   year month day hour minute second sign
+                   zone-hour zone-minute)))))))
+
+(defun snippet-uuid-v4 ()
+  (let ((octets (loop :repeat 16 :collect (random 256))))
+    (setf (nth 6 octets) (logior #x40 (logand #x0f (nth 6 octets)))
+          (nth 8 octets) (logior #x80 (logand #x3f (nth 8 octets))))
+    (string-downcase
+     (format nil "~{~2,'0x~}~{-~{~2,'0x~}~}"
+             (subseq octets 0 4)
+             (list (subseq octets 4 6) (subseq octets 6 8)
+                   (subseq octets 8 10) (subseq octets 10 16))))))
+
+(defun snippet-cxx-std-prefix (buffer)
+  (if (cl-ppcre:scan "(^|\\n)using[ \\t]+namespace[ \\t]+std;"
+                     (points-to-string (buffer-start-point buffer)
+                                       (buffer-end-point buffer)))
+      ""
+      "std::"))
+
+(defun snippet-clojure-namespace (buffer)
+  (let* ((filename (namestring (or (buffer-filename buffer)
+                                   (error "A file is required"))))
+         (prefixes '("/src/cljs/" "/src/clj/" "/src/" "/test/"))
+         (relative
+           (loop :for prefix :in prefixes
+                 :for position = (search prefix filename)
+                 :when position
+                   :return (subseq filename (+ position (length prefix))))))
+    (unless relative (error "The file is outside a source tree"))
+    (let ((dot (position #\. relative :from-end t)))
+      (substitute #\- #\_
+                  (substitute #\. #\/
+                              (if dot (subseq relative 0 dot) relative))))))
+
+(defun snippet-evaluate-backquote (expression buffer point)
+  (let* ((kind (or (snippet-safe-backquote-kind expression)
+                   (error "Unsupported backquoted snippet expression")))
+         (file (buffer-filename buffer))
+         (fallback (snippet-buffer-file-or-name buffer))
+         (value
+           (case kind
+             ((:year :date :timestamp) (snippet-format-time kind))
+             (:user-full-name (snippet-user-full-name))
+             (:file-stem (snippet-file-stem (or file (error "A file is required"))))
+             (:file-stem-or-buffer (snippet-file-stem fallback))
+             (:file-name (file-namestring (or file (error "A file is required"))))
+             (:jsx-class-name
+              (let ((stem (and file (snippet-file-stem file))))
+                (cond ((null stem) "")
+                      ((string= stem "index")
+                       (snippet-path-last-component
+                        (uiop:pathname-directory-pathname file)))
+                      (t stem))))
+             (:elixir-directory-prefix
+              (format nil "~:(~a~)."
+                      (snippet-path-last-component
+                       (uiop:pathname-directory-pathname
+                        (or file (error "A file is required"))))))
+             (:elixir-file-class
+              (format nil "~{~:(~a~)~}"
+                      (uiop:split-string (snippet-file-stem fallback)
+                                         :separator '(#\_))))
+             (:include-guard
+              (string-upcase
+               (cl-ppcre:regex-replace-all
+                "[^A-Za-z0-9_]" (file-namestring (or file (error "A file is required"))) "_")))
+             (:comment-start
+              (multiple-value-bind (start end) (snippet-comment-parts buffer)
+                (declare (ignore end))
+                (cond
+                  ((zerop (length start)) "")
+                  ((find (char start (1- (length start)))
+                         '(#\Space #\Tab) :test #'char=)
+                   start)
+                  (t (concatenate 'string start " ")))))
+             (:trimmed-comment-start
+              (multiple-value-bind (start end) (snippet-comment-parts buffer)
+                (declare (ignore end))
+                (string-trim '(#\Space #\Tab #\Newline #\Return) start)))
+             (:comment-end
+              (multiple-value-bind (start end) (snippet-comment-parts buffer)
+                (declare (ignore start)) end))
+             (:optional-comment-end
+              (multiple-value-bind (start end) (snippet-comment-parts buffer)
+                (declare (ignore start))
+                (if (zerop (length end)) ""
+                    (concatenate 'string " "
+                                 (string-trim '(#\Space #\Tab #\Newline #\Return)
+                                              end)))))
+             (:selected-text (or (snippet-selected-text buffer) ""))
+             (:selected-or-kill
+              (or (snippet-selected-text buffer) (snippet-latest-kill) ""))
+             (:uuid (snippet-uuid-v4))
+             (:line-end-semicolon
+              (with-point ((line-end point))
+                (line-end line-end)
+                (if (point= point line-end) ";" "")))
+             (:cxx-std-prefix (snippet-cxx-std-prefix buffer))
+             (:capitalized-file-stem
+              (remove #\_ (string-capitalize (snippet-file-stem fallback))))
+             (:clojure-namespace (snippet-clojure-namespace buffer))
+             (otherwise (error "Unsupported safe snippet expression")))))
+    (unless (and (stringp value) (<= (length value) (* 1024 1024)))
+      (error "Unsafe snippet expression result"))
+    value))
+
+(defun snippet-escape-render-literal (string)
+  (with-output-to-string (output)
+    (loop :for character :across string
+          :when (find character '(#\\ #\$ #\`) :test #'char=)
+            :do (write-char #\\ output)
+          :do (write-char character output))))
+
+(defun snippet-expand-safe-backquotes (body buffer point)
+  (snippet-map-backquotes
+   body
+   (lambda (expression)
+     (snippet-escape-render-literal
+      (snippet-evaluate-backquote expression buffer point)))))
+
+(defun snippet-executable-body-reason (body)
+  (or (snippet-safe-transform-reason body)
+      (snippet-safe-backquote-reason body)))
+
+(defun snippet-condition-policy (condition)
+  "Classify CONDITION without reading or evaluating it."
+  (let ((canonical (and condition (snippet-canonical-elisp condition))))
+    (cond
+      ((or (null canonical) (string-equal canonical "t"))
+       (values t nil))
+      ((string= canonical "(not(membermajor-mode'(sh-modebash-ts-mode)))")
+       (values t :not-shell))
+      ((string= canonical
+                "(progn(forward-line0)(not(and(eq(point-min)(point))(looking-at-p\"package\"))))")
+       (values t :go-main))
+      ((string= canonical
+                "(=(js2-node-type(js2-node-at-point))js2-COMMENT)")
+       (values t :in-comment))
+      ((string= canonical
+                "(not(=(js2-node-type(js2-node-at-point))js2-COMMENT))")
+       (values t :outside-comment))
+      (t (values nil nil)))))
+
+(defun snippet-condition-allows-p (template point)
+  (case (snippet-template-condition-policy template)
+    (:not-shell
+     (not (eq (buffer-major-mode (point-buffer point))
+              'lem-posix-shell-mode:posix-shell-mode)))
+    (:go-main
+     (with-point ((line point))
+       (line-start line)
+       (not (and (point= line (buffer-start-point (point-buffer line)))
+                 (alexandria:starts-with-subseq "package" (line-string line))))))
+    (:in-comment (in-comment-p point))
+    (:outside-comment (not (in-comment-p point)))
+    (otherwise t)))
 
 (defun snippet-expand-env-policy (expand-env)
   "Recognize the complete data-only expand-env vocabulary in the pinned set."
@@ -503,32 +992,35 @@
                                   fixed-indent-p
                                   auto-indent-first-line-p)
                 (snippet-expand-env-policy expand-env)
-              (let* ((key (if (or key binding)
-                              key
-                              (file-namestring pathname)))
-                     (body-reason (snippet-executable-body-reason body))
-                     (reason
-                       (cond
-                         ((and condition
-                               (not (string-equal condition "t")))
-                          "an executable # condition")
-                         ((and type (string-equal type "command"))
-                          "a command snippet")
-                         ((not expand-env-supported-p)
-                          "an unsupported # expand-env")
-                         (body-reason body-reason))))
-                (make-snippet-template
-                 :name name
-                 :key key
-                 :uuid uuid
-                 :body body
-                 :pathname pathname
-                 :table table
-                 :supported-p (null reason)
-                 :unsupported-reason reason
-                 :fixed-indent-p fixed-indent-p
-                 :auto-indent-first-line-p
-                 auto-indent-first-line-p))))))
+              (multiple-value-bind (condition-supported-p condition-policy)
+                  (snippet-condition-policy condition)
+                (let* ((key (if (or key binding)
+                                key
+                                (file-namestring pathname)))
+                       (body-reason (snippet-executable-body-reason body))
+                       (reason
+                         (cond
+                           ((not condition-supported-p)
+                            "an unsupported # condition")
+                           ((and type (string-equal type "command"))
+                            "a command snippet")
+                           ((not expand-env-supported-p)
+                            "an unsupported # expand-env")
+                           (body-reason body-reason))))
+                  (make-snippet-template
+                   :name name
+                   :key key
+                   :uuid uuid
+                   :body body
+                   :pathname pathname
+                   :table table
+                   :evaluation-policy :safe-yasnippet
+                   :condition-policy condition-policy
+                   :supported-p (null reason)
+                   :unsupported-reason reason
+                   :fixed-indent-p fixed-indent-p
+                   :auto-indent-first-line-p
+                   auto-indent-first-line-p)))))))
     (error () nil)))
 
 (defun snippet-template-identity (template)
@@ -610,9 +1102,17 @@
                 (setf (gethash number simple-fields) occurrence))))))
     ordered))
 
-(defun snippet-render-template (template)
-  "Render TEMPLATE to plain text and position records without evaluating code."
-  (let* ((source (snippet-template-body template))
+(defun snippet-render-template
+    (template &optional (buffer (current-buffer)) (point (buffer-point buffer)))
+  "Render TEMPLATE to plain text and position records.
+
+Only trusted file templates may use the bounded Yasnippet translation layer."
+  (let* ((source
+           (if (eq (snippet-template-evaluation-policy template)
+                   :safe-yasnippet)
+               (snippet-expand-safe-backquotes
+                (snippet-template-body template) buffer point)
+               (snippet-template-body template)))
          (length (length source))
          (output (make-array 128 :element-type 'character
                              :adjustable t :fill-pointer 0))
@@ -698,20 +1198,38 @@
                                          occurrences))
                                  (setf index (1+ after-number)))
                                 (t
-                                 (let* ((sequence (next-sequence))
-                                        (id (field-id sequence))
-                                        (start (output-position)))
-                                   (setf index
-                                         (parse-segment
-                                          (1+ after-number) #\} id))
-                                   (push (make-snippet-occurrence
-                                          :id id :number number
-                                          :parent-id parent-id
-                                          :sequence sequence
-                                          :start start
-                                          :end (output-position)
-                                          :placeholder-p t)
-                                         occurrences))))
+                                 (multiple-value-bind (transform-kind
+                                                       after-transform)
+                                     (snippet-pure-transform-at
+                                      source (1+ after-number))
+                                   (if transform-kind
+                                       (let ((position (output-position))
+                                             (sequence (next-sequence)))
+                                         (push
+                                          (make-snippet-occurrence
+                                           :id (simple-id sequence)
+                                           :number number
+                                           :parent-id parent-id
+                                           :sequence sequence
+                                           :start position :end position
+                                           :placeholder-p nil
+                                           :transform-kind transform-kind)
+                                          occurrences)
+                                         (setf index after-transform))
+                                       (let* ((sequence (next-sequence))
+                                              (id (field-id sequence))
+                                              (start (output-position)))
+                                         (setf index
+                                               (parse-segment
+                                                (1+ after-number) #\} id))
+                                         (push (make-snippet-occurrence
+                                                :id id :number number
+                                                :parent-id parent-id
+                                                :sequence sequence
+                                                :start start
+                                                :end (output-position)
+                                                :placeholder-p t)
+                                               occurrences))))))
                               ;; Yas's anonymous placeholder syntax is
                               ;; `${default}` (including digit-leading text
                               ;; such as `${12px}`), not `${:default}`.
@@ -818,12 +1336,20 @@
                   :for primary = (snippet-primary-occurrence group)
                   :for primary-overlay =
                     (snippet-occurrence-overlay root-start primary)
+                  :for mirror-occurrences =
+                    (remove primary group :test #'eq)
                   :for mirrors =
-                    (nreverse
-                     (loop :for occurrence :in group
-                           :unless (eq occurrence primary)
-                             :collect (snippet-occurrence-overlay
-                                       root-start occurrence)))
+                    (mapcar (lambda (occurrence)
+                              (snippet-occurrence-overlay
+                               root-start occurrence))
+                            mirror-occurrences)
+                  :for mirror-transforms =
+                    (loop :for occurrence :in mirror-occurrences
+                          :for overlay :in mirrors
+                          :when (snippet-occurrence-transform-kind occurrence)
+                            :collect
+                            (cons overlay
+                                  (snippet-occurrence-transform-kind occurrence)))
                   :for field =
                     (make-snippet-field
                      :id id
@@ -837,6 +1363,7 @@
                      :sequence (snippet-occurrence-sequence primary)
                      :overlay primary-overlay
                      :mirrors mirrors
+                     :mirror-transforms mirror-transforms
                      :modified-p nil
                      :disabled-p nil)
                   :collect field)))
@@ -902,7 +1429,16 @@
                                (snippet-overlay-string
                                 (snippet-field-overlay field))))
                          (dolist (mirror (snippet-field-mirrors field))
-                           (snippet-replace-overlay-string mirror text))))
+                           (let ((transform
+                                   (cdr (assoc
+                                         mirror
+                                         (snippet-field-mirror-transforms field)
+                                         :test #'eq))))
+                             (snippet-replace-overlay-string
+                              mirror
+                              (if transform
+                                  (snippet-apply-transform transform text)
+                                  text))))))
                      (setf (gethash id done) t))))))
       (dolist (field fields)
         (sync-field field)))))
@@ -1098,7 +1634,8 @@
                          (lambda (template)
                            (and (snippet-template-key template)
                                 (string= text
-                                         (snippet-template-key template))))
+                                         (snippet-template-key template))
+                                (snippet-condition-allows-p template point)))
                          templates)))
           (when matching
             (return (values matching start point))))))))
@@ -1237,7 +1774,9 @@ Tab reports the failure without also invoking its fallback indentation."
       (progn
         (snippet-install-rendering
          template
-         (snippet-render-template template)
+         (snippet-render-template template
+                                  (point-buffer trigger-end)
+                                  trigger-end)
          trigger-start
          trigger-end)
         t)

@@ -5,6 +5,8 @@
 
 (defvar *snippet-test-org-buffer* nil)
 
+(declaim (ftype function snippet-test-report snippet-test-hex))
+
 (defun snippet-test-format-table-vector (tables)
   (format nil "(~{~a~^ ~})" tables))
 
@@ -72,6 +74,135 @@
     (snippet-test-ancestry-case
      "run-shell" 'lem-shell-mode::run-shell-mode
      '("run-shell-mode" "fundamental-mode")))))
+
+(defun snippet-test-audit-community-corpus ()
+  (let* ((fixture-root
+           (uiop:ensure-directory-pathname
+            (first (uiop:split-string (uiop:getenv "LEM_YATH_SNIPPET_DIRS")
+                                      :separator '(#\:)))))
+         (templates
+           (loop :with largest = nil
+                 :for root :in (snippet-root-directories)
+                 :unless (uiop:pathname-equal root fixture-root)
+                   :do (let ((parsed
+                               (remove nil
+                                       (mapcar
+                                        (lambda (pathname)
+                                          (snippet-parse-definition
+                                           pathname "audit"))
+                                        (snippet-directory-files-recursively
+                                         root)))))
+                         (when (> (length parsed) (length largest))
+                           (setf largest parsed)))
+                 :finally (return largest)))
+         (supported (count-if #'snippet-template-supported-p templates))
+         (unsupported (- (length templates) supported)))
+    (snippet-test-report
+     "CORPUS total=~d supported=~d unsupported=~d safe-backquote=~d safe-condition=~d"
+     (length templates) supported unsupported
+     (count-if
+      (lambda (template)
+        (and (snippet-template-supported-p template)
+             (find #\` (snippet-template-body template))))
+      templates)
+     (count-if
+      (lambda (template)
+        (and (snippet-template-supported-p template)
+             (snippet-template-condition-policy template)))
+      templates))
+    (dolist (reason (remove-duplicates
+                     (remove nil
+                             (mapcar #'snippet-template-unsupported-reason
+                                     templates))
+                     :test #'string=))
+      (snippet-test-report
+       "CORPUS-REASON count=~d reason=~a"
+       (count reason templates :key #'snippet-template-unsupported-reason
+                                :test #'equal)
+       reason))
+    (dolist (template templates)
+      (when (equal (snippet-template-unsupported-reason template)
+                   "unsupported backquoted Emacs Lisp")
+        (snippet-test-report "CORPUS-UNSUPPORTED name=~a path=~a"
+                             (snippet-template-name template)
+                             (snippet-template-pathname template))))))
+
+(defun snippet-test-safe-dynamic-oracle ()
+  (let ((buffer (make-buffer " *snippet-dynamic-oracle*" :temporary t)))
+    (unwind-protect
+         (handler-case
+             (let* ((root (uiop:ensure-directory-pathname
+                           (merge-pathnames "components/"
+                                            (uiop:ensure-directory-pathname
+                                             (uiop:getenv "WORKDIR")))))
+                    (filename (merge-pathnames "index.js" root)))
+               (ensure-directories-exist filename)
+               (setf (buffer-filename buffer) filename)
+               (change-buffer-mode buffer 'lem-c-mode:c-mode)
+               (insert-string (buffer-point buffer)
+                              "using namespace std;\n")
+               (let* ((point (buffer-end-point buffer))
+                      (jsx (snippet-evaluate-backquote
+                            "(yas-jsx-get-class-name-by-file-name)"
+                            buffer point))
+                      (comment (snippet-evaluate-backquote
+                                "comment-start" buffer point))
+                      (std-prefix (snippet-evaluate-backquote
+                                   "(progn (goto-char (point-min)) (unless (re-search-forward \"^using\\\\s-+namespace std;\" nil 'no-error) \"std::\"))"
+                                   buffer point))
+                      (uuid (snippet-uuid-v4))
+                      (clojure-buffer
+                        (make-buffer " *snippet-clojure-oracle*"
+                                     :temporary t)))
+                 (unwind-protect
+                      (progn
+                        (let ((clojure-file
+                                (merge-pathnames
+                                 "project/src/clj/foo_bar/core.clj"
+                                 (uiop:ensure-directory-pathname
+                                  (uiop:getenv "WORKDIR")))))
+                          (ensure-directories-exist clojure-file)
+                          (setf (buffer-filename clojure-buffer)
+                                clojure-file))
+                        (let ((ok
+                                (and
+                                 (string= jsx "components")
+                                 (string= comment "// ")
+                                 (string= std-prefix "")
+                                 (string= (snippet-clojure-namespace
+                                           clojure-buffer)
+                                          "foo-bar.core")
+                                 (cl-ppcre:scan
+                                  "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                                  uuid)
+                                 (string= (snippet-apply-transform
+                                           :upcase "mixed") "MIXED")
+                                 (string= (snippet-apply-transform
+                                           :before-colon "Child : Parent")
+                                          "Child")
+                                 (string= (snippet-apply-transform
+                                           :increment "9") "10")
+                                 (string= (snippet-apply-transform
+                                           :private-field "Title")
+                                          "_title"))))
+                          (snippet-test-report
+                           "DYNAMIC-ORACLE ok=~a jsx=~a comment=~a clojure=~a uuid=~a std=~a upcase=~a before=~a increment=~a private=~a"
+                           (if ok "yes" "no") jsx
+                           (snippet-test-hex comment)
+                           (snippet-clojure-namespace clojure-buffer)
+                           uuid
+                           (snippet-test-hex std-prefix)
+                           (snippet-apply-transform :upcase "mixed")
+                           (snippet-apply-transform
+                            :before-colon "Child : Parent")
+                           (snippet-apply-transform :increment "9")
+                           (snippet-apply-transform :private-field "Title"))
+                          ok))
+                   (delete-buffer clojure-buffer))))
+           (error (condition)
+             (snippet-test-report "DYNAMIC-ORACLE ok=no error=~a" condition)
+             nil))
+      (delete-buffer buffer))))
 
 (defun snippet-test-switch-to-plain-buffer ()
   (let ((buffer (or (get-buffer "*snippet-test-fundamental*")
@@ -188,6 +319,37 @@
 (define-command lem-yath-test-snippet-selector-setup () ()
   (snippet-test-reset-fundamental "selector"))
 
+(define-command lem-yath-test-snippet-dynamic-date-setup () ()
+  (snippet-test-reset-fundamental "dynamic-date")
+  (setf *snippet-time-function*
+        (lambda () (encode-universal-time 56 34 12 9 2 2031))))
+
+(define-command lem-yath-test-snippet-dynamic-file-setup () ()
+  (snippet-test-reset-fundamental "dynamic-file")
+  (setf (buffer-filename (current-buffer))
+        (merge-pathnames "widget-card.js"
+                         (uiop:ensure-directory-pathname
+                          (uiop:getenv "WORKDIR")))))
+
+(define-command lem-yath-test-snippet-unsafe-setup () ()
+  (snippet-test-reset-fundamental "unsafe"))
+
+(define-command lem-yath-test-snippet-transform-setup () ()
+  (snippet-test-reset-fundamental "transform"))
+
+(define-command lem-yath-test-snippet-condition-true-setup () ()
+  (switch-to-buffer
+   (or (get-buffer "*snippet-test-condition-true*")
+       (make-buffer "*snippet-test-condition-true*")))
+  (snippet-test-reset "condition-true" 'lem-c-mode:c-mode))
+
+(define-command lem-yath-test-snippet-condition-false-setup () ()
+  (switch-to-buffer
+   (or (get-buffer "*snippet-test-condition-false*")
+       (make-buffer "*snippet-test-condition-false*")))
+  (snippet-test-reset
+   "condition-false" 'lem-posix-shell-mode:posix-shell-mode))
+
 (defun snippet-test-completion-items (input)
   (list
    (lem/completion-mode:make-completion-item
@@ -302,6 +464,8 @@
 
 (snippet-reload)
 (let ((ancestry-ok-p (snippet-test-verify-ancestry)))
+  (snippet-test-audit-community-corpus)
+  (snippet-test-safe-dynamic-oracle)
   (snippet-test-report "ANCESTRY-SUMMARY ok=~a"
                        (if ancestry-ok-p "yes" "no"))
   (snippet-test-report "READY roots=~d ancestry=~a"

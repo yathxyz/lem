@@ -19,7 +19,8 @@ fi
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR" \
   "$fixture_snippet_root/org-mode" \
   "$fixture_snippet_root/fundamental-mode" \
-  "$fixture_snippet_root/lisp-mode"
+  "$fixture_snippet_root/lisp-mode" \
+  "$fixture_snippet_root/prog-mode"
 : >"$LEM_YATH_SNIPPET_TEST_REPORT"
 
 write_snippet() { # write_snippet <path> <name> <key> <body-line>...
@@ -73,8 +74,29 @@ write_snippet "$fixture_snippet_root/fundamental-mode/mode-change" \
   'mode change cleanup' 'mchg' '${1:value}-$0'
 write_snippet "$fixture_snippet_root/fundamental-mode/manual-picker" \
   'manual picker' 'pick-never-typed' '${1:chosen}-$0'
+write_snippet "$fixture_snippet_root/fundamental-mode/dynamic-date" \
+  'safe dynamic date' 'dyn-date' 'DATE=`(format-time-string "%Y-%m-%d")`:$0'
+write_snippet "$fixture_snippet_root/fundamental-mode/dynamic-file" \
+  'safe dynamic file name' 'dyn-file' \
+  'CLASS=${1:`(file-name-base (or (buffer-file-name) (buffer-name)))`}:$0'
+write_snippet "$fixture_snippet_root/fundamental-mode/unsafe-form" \
+  'unsafe dynamic form' 'unsafe' '`(shell-command "touch /tmp/never")`$0'
+write_snippet "$fixture_snippet_root/fundamental-mode/transform" \
+  'safe field transform' 'xform' \
+  '${1:Heading}' \
+  '${1:$(make-string (string-width yas-text) ?\=)}' \
+  '$0'
 write_snippet "$fixture_snippet_root/lisp-mode/after-mode-change" \
   'after mode change' 'aftermode' '${1:ready}-$0'
+
+{
+  printf '%s\n' '# -*- mode: snippet -*-'
+  printf '%s\n' '# name: non-shell condition'
+  printf '%s\n' '# key: onlyprog'
+  printf '%s\n' "# condition: (not (member major-mode '(sh-mode bash-ts-mode)))"
+  printf '%s\n' '# --'
+  printf '%s\n' 'CONDITION-ALLOWED-$0'
+} >"$fixture_snippet_root/prog-mode/conditional"
 
 # Exercise both safe indentation directives together.  `$>' first asks the
 # active mode to indent the marker line; fixed indentation then prefixes the
@@ -215,13 +237,17 @@ lem_start_lem-yath_eval "$session" "(load #P$fixture)" "$scratch"
 if lem_wait_for "$session" 'NORMAL' "$BOOT_TIMEOUT" >/dev/null &&
    wait_report '^ANCESTRY-SUMMARY ok=' "$BOOT_TIMEOUT"; then
   if grep -q '^ANCESTRY-SUMMARY ok=yes$' "$LEM_YATH_SNIPPET_TEST_REPORT" &&
+     grep -q \
+       '^CORPUS total=2387 supported=2318 unsupported=69 safe-backquote=62 safe-condition=6$' \
+       "$LEM_YATH_SNIPPET_TEST_REPORT" &&
+     grep -q '^DYNAMIC-ORACLE ok=yes ' "$LEM_YATH_SNIPPET_TEST_REPORT" &&
      wait_report \
        '^READY roots=([2-9]|[1-9][0-9]+) ancestry=yes$' "$BOOT_TIMEOUT"; then
     pass boot \
-      "fixture roots loaded and exact language ancestry vectors matched"
+      "fixture roots, exact ancestry, and pinned corpus counts matched"
   else
     fail boot "one or more snippet ancestry vectors differed"
-    sed -n '/^ANCESTRY /p;/^ANCESTRY-SUMMARY /p' \
+    sed -n '/^ANCESTRY /p;/^ANCESTRY-SUMMARY /p;/^CORPUS/p;/^DYNAMIC-ORACLE/p' \
       "$LEM_YATH_SNIPPET_TEST_REPORT" 2>/dev/null || true
     exit 1
   fi
@@ -258,6 +284,95 @@ if run_mx lem-yath-test-snippet-private-setup && enter_insert; then
   fi
 else
   fail private-setup "could not prepare the private .org scenario"
+fi
+
+# Trusted file snippets translate the pinned corpus's bounded dynamic forms at
+# expansion time.  Date and filename values remain ordinary literal text while
+# preserving the surrounding field session.
+if run_mx lem-yath-test-snippet-dynamic-date-setup && enter_insert; then
+  send_literal dyn-date
+  lem_keys "$session" Tab
+  if record_state dynamic-date; then
+    assert_state safe-dynamic-date dynamic-date $'DATE=2031-02-09:\n' \
+      'active=no' 'field=none' 'completion=no'
+  else
+    fail safe-dynamic-date "dynamic date state probe did not run"
+  fi
+else
+  fail safe-dynamic-date "could not prepare dynamic date expansion"
+fi
+
+if run_mx lem-yath-test-snippet-dynamic-file-setup && enter_insert; then
+  send_literal dyn-file
+  lem_keys "$session" Tab
+  if record_state dynamic-file; then
+    assert_state safe-dynamic-filename dynamic-file $'CLASS=widget-card:\n' \
+      'active=yes' 'field=1' 'completion=no'
+  else
+    fail safe-dynamic-filename "dynamic filename state probe did not run"
+  fi
+else
+  fail safe-dynamic-filename "could not prepare dynamic filename expansion"
+fi
+
+# An unrecognized form is never read or invoked.  Tab reports it as unavailable
+# and retains the trigger exactly, proving the fail-closed boundary physically.
+if run_mx lem-yath-test-snippet-unsafe-setup && enter_insert; then
+  send_literal unsafe
+  lem_keys "$session" Tab
+  if record_state unsafe; then
+    assert_state unsafe-form-fail-closed unsafe unsafe \
+      'active=no' 'field=none' 'completion=no'
+  else
+    fail unsafe-form-fail-closed "unsafe form state probe did not run"
+  fi
+else
+  fail unsafe-form-fail-closed "could not prepare unsafe-form scenario"
+fi
+
+# A pure field transform is a dependency-aware mirror: editing the heading
+# recomputes its display-width underline without making the mirror navigable.
+if run_mx lem-yath-test-snippet-transform-setup && enter_insert; then
+  send_literal xform
+  lem_keys "$session" Tab
+  send_literal Title
+  if record_state transform; then
+    assert_state safe-field-transform transform $'Title\n=====\n\n' \
+      'active=yes' 'field=1' 'completion=no'
+  else
+    fail safe-field-transform "transform state probe did not run"
+  fi
+else
+  fail safe-field-transform "could not prepare field-transform scenario"
+fi
+
+# The common prog-mode condition is evaluated from Lem's actual major mode:
+# it expands in C and is absent in a shell buffer.
+if run_mx lem-yath-test-snippet-condition-true-setup && enter_insert; then
+  send_literal onlyprog
+  lem_keys "$session" Tab
+  if record_state condition-true; then
+    assert_state safe-condition-true condition-true \
+      $'CONDITION-ALLOWED-\n' 'active=no' 'field=none'
+  else
+    fail safe-condition-true "true-condition state probe did not run"
+  fi
+else
+  fail safe-condition-true "could not prepare true-condition scenario"
+fi
+
+if run_mx lem-yath-test-snippet-condition-false-setup && enter_insert; then
+  send_literal onlyprog
+  lem_keys "$session" Tab
+  if record_state condition-false; then
+    assert_state safe-condition-false condition-false \
+      '            onlyprog' \
+      'active=no' 'field=none'
+  else
+    fail safe-condition-false "false-condition state probe did not run"
+  fi
+else
+  fail safe-condition-false "could not prepare false-condition scenario"
 fi
 
 # The manual selector exposes the same portable templates without requiring a
