@@ -1747,6 +1747,30 @@ that file. This is a bounded magit-todos approximation: the synchronous
 and does not implement configurable keywords or magit-todos grouping. A small
 pinned-upstream patch exposes the status-section hook used by this integration.
 
+### GitHub Forge workflow — `lem-yath/src/forge.lisp`
+
+The installed wrapper packages `gh`, but authentication remains owned by the
+user's existing GitHub CLI and Git credential-helper setup; Lem neither reads
+nor persists a token. `M-x lem-yath-forge`,
+`lem-yath-forge-list-pullreqs`, and `lem-yath-forge-list-issues` open bounded
+GitHub.com topic lists. `C-j`/`C-k` or `j`/`k` navigate, Return fetches a full
+topic, `P`/`I`/`a` switch views, `g` explicitly refreshes, `r` opens a multiline
+comment composition, `s` confirms close or reopens, `b` opens the topic
+externally, and `c i`/`c p` open multiline issue or pull-request composition.
+Compositions submit with `C-c C-c` and cancel with `C-c C-k`.
+
+The current Emacs configuration sets `forge-add-default-bindings` to nil, so
+the port deliberately installs no global or leader binding. A successful
+explicit fetch populates an in-memory per-repository cache that Legit renders
+as navigable PR/issue rows; ordinary status redraws never contact GitHub.
+Every Git and `gh` subprocess uses bounded direct argv. The network-free
+installed-editor gate uses a stateful fake `gh` in a repository path containing
+spaces and a shell metacharacter, and exercises listing, inspection, multiline
+comment and issue submission, close/reopen, cached previews, and argv secrecy.
+This is a focused GitHub.com approximation: GitLab and GitHub Enterprise,
+notifications, labels/assignees, review/merge administration, and Forge's
+persistent offline database are not implemented.
+
 `SPC g t` opens a read-only history buffer at the source point. `C-k` selects
 the older revision, `C-j` the newer revision, `g t g` an oldest-numbered
 revision, `g t t` a revision by commit subject, and `q` returns to the exact

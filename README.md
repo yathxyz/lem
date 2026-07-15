@@ -258,7 +258,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   TODO/FIXME rows, and `SPC g t` supplies the audited git-timemachine
   revision-navigation workflow. Legit's Vi-normal file/hunk staging, commit,
   push/pull, branch, and stash workflows are driven end-to-end against isolated
-  real remotes by the VCS acceptance gate
+  real remotes by the VCS acceptance gate. Packaged `gh` also backs
+  command-accessible GitHub Forge lists, detail views, multiline creation and
+  comments, close/reopen actions, external browsing, and cache-only Legit
+  status previews without taking ownership of credentials
 - metadata-aware Org file/heading and pinned md-roam node completion with
   find/insert/random workflows. A typed missing title opens the configured
   one-key `n/c/p/s/m` roam capture templates; `C-c C-c` finalizes the new Org
@@ -376,7 +379,7 @@ editing, formatting, Orderless completion, snippets, LSP snippets, real installe
 language-server handshakes (including an external Godot TCP server), tree-sitter
 highlighting, real DAP adapter
 workflows, daily-workflows, Direnv environment switching,
-electric-editing, grouped-buffer-list, UI parity, project navigation and outline, VCS,
+electric-editing, grouped-buffer-list, UI parity, project navigation and outline, VCS and Forge,
 persistence, bookmarks,
 retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
 credential-free backend streaming/resume, private preset persistence, web
@@ -429,6 +432,7 @@ nix run .#electric-editing-test
 nix run .#ui-parity-test
 nix run .#vcs-test
 nix run .#jj-porcelain-test
+nix run .#forge-test
 nix run .#notes-test
 nix run .#roam-test
 nix run .#roam-backlink-test

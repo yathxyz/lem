@@ -37,6 +37,7 @@
                (:file "editorconfig")
                (:file "formatting")
                (:file "git")
+               (:file "forge")
                (:file "project")
                (:file "lint")
                (:file "dap")

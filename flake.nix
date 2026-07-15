@@ -312,7 +312,10 @@
             rustc
           ];
 
-          vcsRuntimeInputs = with pkgs; [ jujutsu ];
+          vcsRuntimeInputs = with pkgs; [
+            gh
+            jujutsu
+          ];
 
           defaultRuntimeInputs =
             coreRuntimeInputs
@@ -638,6 +641,9 @@
             jj-porcelain-test =
               mkTestAppWithLemAndInputs lemYath vcsRuntimeInputs "lem-yath-jj-porcelain-test"
                 "jj-porcelain-test.sh";
+            forge-test =
+              mkTestAppWithLemAndInputs lemYath vcsRuntimeInputs "lem-yath-forge-test"
+                "forge-test.sh";
             vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
@@ -710,6 +716,7 @@
             jj-porcelain =
               mkCheckWithLemAndInputs lemYath vcsRuntimeInputs "jj-porcelain"
                 "jj-porcelain-test.sh";
+            forge = mkCheckWithLemAndInputs lemYath vcsRuntimeInputs "forge" "forge-test.sh";
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";
