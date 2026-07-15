@@ -1,14 +1,17 @@
 ;;;; Persistent Org-roam-style backlinks over the bounded note corpus.
 ;;;;
 ;;;; The panel owns no database.  One asynchronous immutable snapshot resolves
-;;;; Org ID links and md-roam title/alias wiki links, then cheap post-command
-;;;; lookups keep the visible panel on the nearest node at point.  `g' rebuilds
-;;;; the snapshot from descriptor-verified files.
+;;;; Org ID links, md-roam title/alias wiki links, and ROAM_REFS citation/URL
+;;;; reflinks, then cheap post-command lookups keep the visible panel on the
+;;;; nearest node at point.  `g' rebuilds the snapshot from descriptor-verified
+;;;; files.
 
 (in-package :lem-yath)
 
 (defparameter *roam-backlink-buffer-name* "*org-roam*")
 (defparameter *roam-backlink-occurrence-limit* 100000)
+(defparameter *roam-backlink-ref-per-node-limit* 64)
+(defparameter *roam-backlink-ref-entry-limit* 100000)
 (defparameter *roam-backlink-preview-character-limit* 16384)
 (defparameter *roam-backlink-render-character-limit* (* 1024 1024))
 
@@ -24,7 +27,7 @@
 
 (defstruct (roam-backlink-snapshot
             (:constructor make-roam-backlink-snapshot))
-  nodes id-index file-index backlinks skipped-files)
+  nodes id-index file-index backlinks reflinks skipped-files)
 
 (defstruct (roam-backlink-heading
             (:constructor make-roam-backlink-heading))
@@ -317,6 +320,165 @@
           (setf index (+ end 2)))))
     (nreverse links)))
 
+(defun roam-backlink-citation-key-character-p (character)
+  (or (alphanumericp character)
+      (member character '(#\- #\_ #\+ #\: #\. #\/))))
+
+(defun roam-backlink-balanced-bracket-end (line start)
+  (loop :with depth := 0
+        :for index :from start :below (length line)
+        :for character := (char line index)
+        :do (cond
+              ((char= character #\[) (incf depth))
+              ((char= character #\])
+               (decf depth)
+               (when (zerop depth) (return (1+ index)))))))
+
+(defun roam-backlink-citation-links (line)
+  "Return (COLUMN KEY LITERAL) triples for Org cite elements in LINE."
+  (let ((links '()) (index 0))
+    (loop
+      (let ((start (search "[cite:" line :start2 index :test #'char-equal)))
+        (unless start (return))
+        (let ((end (roam-backlink-balanced-bracket-end line start)))
+          (unless end (return))
+          (let ((literal (subseq line start end))
+                (seen (make-hash-table :test #'equal))
+                (cursor (+ start 6)))
+            (loop :while (< cursor end)
+                  :for at := (position #\@ line :start cursor :end end)
+                  :while at
+                  :for key-start := (1+ at)
+                  :for key-end := (or (position-if-not
+                                        #'roam-backlink-citation-key-character-p
+                                        line :start key-start :end end)
+                                       end)
+                  :do (when (and (> key-end key-start)
+                                 (not (gethash (subseq line key-start key-end)
+                                               seen)))
+                        (let ((key (subseq line key-start key-end)))
+                          (setf (gethash key seen) t)
+                          (push (list start key literal) links)))
+                      (setf cursor (max (1+ at) key-end)))
+          (setf index end)))))
+    (nreverse links)))
+
+(defun roam-backlink-markdown-citations (line)
+  "Return (COLUMN KEY LITERAL) triples for md-roam Pandoc citations."
+  (let ((links '()) (index 0))
+    (loop :while (< index (length line))
+          :for at := (position #\@ line :start index)
+          :while at
+          :for key-start := (1+ at)
+          :for key-end := (or (position-if-not
+                                #'roam-backlink-citation-key-character-p
+                                line :start key-start)
+                               (length line))
+          :do (when (and (> key-end key-start)
+                         (or (zerop at)
+                             (not (alphanumericp (char line (1- at))))))
+                (push (list at
+                            (subseq line key-start key-end)
+                            (subseq line at key-end))
+                      links))
+              (setf index (max (1+ at) key-end)))
+    (nreverse links)))
+
+(defun roam-backlink-http-ref-p (text)
+  (or (alexandria:starts-with-subseq "http://" text :test #'char-equal)
+      (alexandria:starts-with-subseq "https://" text :test #'char-equal)))
+
+(defun roam-backlink-normalized-refs (value)
+  "Parse the bounded ROAM_REFS subset present in the configured corpus."
+  (let ((refs '())
+        (seen (make-hash-table :test #'equal)))
+    (dolist (token (roam-org-aliases value))
+      (let ((keys
+              (cond
+                ((and (> (length token) 1) (char= (char token 0) #\@))
+                 (list (cons :cite (subseq token 1))))
+                ((alexandria:starts-with-subseq
+                  "[cite:" token :test #'char-equal)
+                 (mapcar (lambda (link) (cons :cite (second link)))
+                         (roam-backlink-citation-links token)))
+                ((roam-backlink-http-ref-p token)
+                 (list (cons :link token))))))
+        (dolist (key keys)
+          (when (and (< (length refs) *roam-backlink-ref-per-node-limit*)
+                     (plusp (length (cdr key)))
+                     (not (gethash key seen)))
+            (setf (gethash key seen) t)
+            (push key refs)))))
+    (nreverse refs)))
+
+(defun roam-backlink-link-literal (line start ref)
+  "Return the source column and exact link literal containing REF."
+  (cond
+    ((and (>= start 2) (string= "[[" line :start2 (- start 2) :end2 start))
+     (alexandria:if-let ((end (search "]]" line :start2 (+ start (length ref)))))
+       (values (- start 2) (subseq line (- start 2) (+ end 2)))
+       (values start ref)))
+    ((and (>= start 2) (string= "](" line :start2 (- start 2) :end2 start))
+     (let ((open (position #\[ line :end (- start 2) :from-end t))
+           (close (position #\) line :start (+ start (length ref)))))
+       (if (and open close)
+           (values open (subseq line open (1+ close)))
+           (values start ref))))
+    (t (values start ref))))
+
+(defun roam-backlink-balanced-url-end (line start)
+  "Return the end of one URL, preserving balanced parentheses."
+  (let ((depth 0))
+    (loop :for index :from start :below (length line)
+          :for character := (char line index)
+          :do (cond
+                ((or (member character
+                             '(#\Space #\Tab #\Newline #\Return
+                               #\[ #\] #\< #\> #\"))
+                     (not (graphic-char-p character)))
+                 (return index))
+                ((char= character #\()
+                 (incf depth))
+                ((char= character #\))
+                 (if (plusp depth)
+                     (decf depth)
+                     (return index))))
+          :finally (return (length line)))))
+
+(defun roam-backlink-url-end (line start)
+  (cond
+    ((and (>= start 2) (string= "[[" line :start2 (- start 2) :end2 start))
+     (or (position #\] line :start start) (length line)))
+    ((and (>= start 2) (string= "](" line :start2 (- start 2) :end2 start))
+     (roam-backlink-balanced-url-end line start))
+    (t
+     (let ((end (roam-backlink-balanced-url-end line start)))
+       (loop :while (and (> end start)
+                         (member (char line (1- end))
+                                 '(#\. #\, #\; #\! #\?)))
+             :do (decf end))
+       end))))
+
+(defun roam-backlink-reference-links (line ref-index)
+  "Return (KEY COLUMN LITERAL) triples for indexed HTTP(S) refs in LINE."
+  (let ((links '()) (index 0))
+    (loop :while (< index (length line))
+          :for http := (search "http://" line :start2 index :test #'char-equal)
+          :for https := (search "https://" line :start2 index :test #'char-equal)
+          :for start := (cond ((and http https) (min http https))
+                              (http http)
+                              (https https))
+          :while start
+          :for end := (roam-backlink-url-end line start)
+          :for ref := (subseq line start end)
+          :for key := (cons :link ref)
+          :do (when (gethash key ref-index)
+                (multiple-value-bind (column literal)
+                    (roam-backlink-link-literal line start ref)
+                  (push (list key column literal) links)))
+              (setf index (max (1+ start) end)))
+    (nreverse links)))
+
 (defun roam-backlink-heading-outline (stack)
   (mapcar #'roam-backlink-heading-title (reverse stack)))
 
@@ -326,7 +488,80 @@
               :return (roam-backlink-heading-node heading))
       file-node))
 
-(defun roam-backlink-parse-org-file (file add-occurrence)
+(defun roam-backlink-drawer-ref-value (lines start)
+  (when (and start (< start (length lines))
+             (string-equal ":PROPERTIES:" (aref lines start)))
+    (loop :for index :from (1+ start) :below (length lines)
+          :for line := (aref lines index)
+          :do (when (string-equal ":END:" line) (return nil))
+              (multiple-value-bind (name value present-p)
+                  (roam-org-property-fields line)
+                (unless present-p (return nil))
+                (when (string= name "ROAM_REFS") (return value))))))
+
+(defun roam-backlink-org-ref-pairs (file)
+  (let* ((lines (roam-backlink-file-lines file))
+         (nodes (roam-backlink-file-nodes file))
+         (pairs '()))
+    (alexandria:when-let ((file-node
+                           (roam-backlink-file-node nodes :org-file)))
+      (let ((first-content
+              (position-if (lambda (line)
+                             (plusp (length
+                                     (string-trim '(#\Space #\Tab) line))))
+                           lines)))
+        (alexandria:when-let*
+            ((value (roam-backlink-drawer-ref-value lines first-content)))
+          (dolist (ref (roam-backlink-normalized-refs value))
+            (push (cons file-node ref) pairs)))))
+    (dolist (node nodes)
+      (when (eq (roam-node-kind node) :org-heading)
+        (alexandria:when-let*
+            ((drawer (roam-org-heading-drawer-start
+                      lines (1- (roam-node-line node))))
+             (value (roam-backlink-drawer-ref-value lines drawer)))
+          (dolist (ref (roam-backlink-normalized-refs value))
+            (push (cons node ref) pairs)))))
+    (nreverse pairs)))
+
+(defun roam-backlink-markdown-ref-pairs (file)
+  (let* ((lines (roam-backlink-file-lines file))
+         (node (roam-backlink-file-node
+                (roam-backlink-file-nodes file) :markdown-file))
+         (closing (and (> (length lines) 1)
+                       (position-if
+                        (lambda (line)
+                          (or (string= line "---") (string= line "...")))
+                        lines :start 1))))
+    (when (and node closing)
+      (loop :for index :from 1 :below closing
+            :for line := (aref lines index)
+            :do (multiple-value-bind (key value)
+                    (roam-yaml-key-value line)
+                  (when (and key (string-equal key "ROAM_REFS"))
+                    (return
+                      (mapcar (lambda (ref) (cons node ref))
+                              (roam-backlink-normalized-refs value)))))))))
+
+(defun roam-backlink-file-ref-pairs (file)
+  (ecase (roam-backlink-file-kind file)
+    (:org (roam-backlink-org-ref-pairs file))
+    (:markdown (roam-backlink-markdown-ref-pairs file))))
+
+(defun roam-backlink-source-occurrence
+    (file source target-id line column literal outline preview)
+  (make-roam-backlink-occurrence
+   :target-id target-id
+   :source-node source
+   :pathname (roam-backlink-file-pathname file)
+   :line line
+   :column column
+   :link-text literal
+   :outline outline
+   :preview preview))
+
+(defun roam-backlink-parse-org-file
+    (file ref-index add-backlink add-reflink)
   (let* ((lines (roam-backlink-file-lines file))
          (nodes (roam-backlink-file-nodes file))
          (file-node (roam-backlink-file-node nodes :org-file))
@@ -379,22 +614,36 @@
                            (roam-backlink-heading-source headings file-node))
                          (outline (roam-backlink-heading-outline headings)))
                      (when source
-                       (dolist (link (roam-backlink-org-id-links line))
-                         (funcall
-                          add-occurrence
-                          (make-roam-backlink-occurrence
-                           :target-id (second link)
-                           :source-node source
-                           :pathname (roam-backlink-file-pathname file)
-                           :line (1+ index)
-                           :column (first link)
-                           :link-text (third link)
-                           :outline outline
-                           :preview (roam-backlink-org-preview
-                                     lines (first headings) index)))))))))))))
+                       (let ((preview
+                               (roam-backlink-org-preview
+                                lines (first headings) index)))
+                         (dolist (link (roam-backlink-org-id-links line))
+                           (funcall
+                            add-backlink
+                            (roam-backlink-source-occurrence
+                             file source (second link) (1+ index)
+                             (first link) (third link) outline preview)))
+                         (dolist (link (roam-backlink-citation-links line))
+                           (dolist (target
+                                    (gethash (cons :cite (second link))
+                                             ref-index))
+                             (funcall
+                              add-reflink
+                              (roam-backlink-source-occurrence
+                               file source (roam-node-id target) (1+ index)
+                               (first link) (third link) outline preview))))
+                         (dolist (link
+                                  (roam-backlink-reference-links
+                                   line ref-index))
+                           (dolist (target (gethash (first link) ref-index))
+                             (funcall
+                              add-reflink
+                              (roam-backlink-source-occurrence
+                               file source (roam-node-id target) (1+ index)
+                               (second link) (third link) outline preview))))))))))))))
 
 (defun roam-backlink-parse-markdown-file
-    (file id-index name-index add-occurrence)
+    (file id-index name-index ref-index add-backlink add-reflink)
   (let* ((lines (roam-backlink-file-lines file))
          (source (roam-backlink-file-node
                   (roam-backlink-file-nodes file) :markdown-file))
@@ -402,22 +651,33 @@
     (when source
       (loop :for index :from start :below (length lines)
             :for line := (aref lines index)
-            :do (dolist (link (roam-backlink-wiki-links line))
-                  (alexandria:when-let
-                      ((target (roam-backlink-resolve-wiki-target
-                                (second link) id-index name-index)))
-                    (funcall
-                     add-occurrence
-                     (make-roam-backlink-occurrence
-                      :target-id (roam-node-id target)
-                      :source-node source
-                      :pathname (roam-backlink-file-pathname file)
-                      :line (1+ index)
-                      :column (first link)
-                      :link-text (third link)
-                      :outline nil
-                      :preview (roam-backlink-markdown-preview
-                                lines index)))))))))
+            :do (let ((preview
+                        (roam-backlink-markdown-preview lines index)))
+                  (dolist (link (roam-backlink-wiki-links line))
+                    (alexandria:when-let
+                        ((target (roam-backlink-resolve-wiki-target
+                                  (second link) id-index name-index)))
+                      (funcall
+                       add-backlink
+                       (roam-backlink-source-occurrence
+                        file source (roam-node-id target) (1+ index)
+                        (first link) (third link) nil preview))))
+                  (dolist (link (roam-backlink-markdown-citations line))
+                    (dolist (target
+                             (gethash (cons :cite (second link)) ref-index))
+                      (funcall
+                       add-reflink
+                       (roam-backlink-source-occurrence
+                        file source (roam-node-id target) (1+ index)
+                        (first link) (third link) nil preview))))
+                  (dolist (link
+                           (roam-backlink-reference-links line ref-index))
+                    (dolist (target (gethash (first link) ref-index))
+                      (funcall
+                       add-reflink
+                       (roam-backlink-source-occurrence
+                        file source (roam-node-id target) (1+ index)
+                        (second link) (third link) nil preview)))))))))
 
 (defun roam-backlink-occurrence-less-p (left right)
   (let ((left-node (roam-backlink-occurrence-source-node left))
@@ -448,7 +708,8 @@
         (make-roam-backlink-snapshot
          :nodes nil :id-index (make-hash-table :test #'equal)
          :file-index (make-hash-table :test #'equal)
-         :backlinks (make-hash-table :test #'equal) :skipped-files 0)))
+         :backlinks (make-hash-table :test #'equal)
+         :reflinks (make-hash-table :test #'equal) :skipped-files 0)))
     (let ((files '())
           (nodes '())
           (total-bytes 0)
@@ -482,8 +743,11 @@
                         files))))))
       (let ((id-index (make-hash-table :test #'equal))
             (name-index (make-hash-table :test #'equal))
+            (ref-index (make-hash-table :test #'equal))
             (file-index (make-hash-table :test #'equal))
             (backlinks (make-hash-table :test #'equal))
+            (reflinks (make-hash-table :test #'equal))
+            (ref-entry-count 0)
             (occurrence-count 0))
         (dolist (node nodes)
           (roam-backlink-index-push id-index (roam-node-id node) node)
@@ -492,10 +756,17 @@
             (roam-backlink-add-name name-index alias node)))
         (dolist (file files)
           (setf (gethash (roam-backlink-path-key
-                          (roam-backlink-file-pathname file))
+                         (roam-backlink-file-pathname file))
                          file-index)
-                file))
-        (labels ((add-occurrence (occurrence)
+                file)
+          (dolist (pair (roam-backlink-file-ref-pairs file))
+            (incf ref-entry-count)
+            (when (> ref-entry-count *roam-backlink-ref-entry-limit*)
+              (editor-error
+               "Roam index exceeds the ~d-reference safety limit."
+               *roam-backlink-ref-entry-limit*))
+            (roam-backlink-index-push ref-index (cdr pair) (car pair))))
+        (labels ((record-occurrence (table occurrence)
                    ;; Missing and globally ambiguous destinations cannot be
                    ;; displayed safely as one current Org-roam node.
                    (when (roam-backlink-unique-index-value
@@ -505,25 +776,36 @@
                      (when (> occurrence-count
                               *roam-backlink-occurrence-limit*)
                        (editor-error
-                        "Roam index exceeds the ~d-backlink safety limit."
+                        "Roam index exceeds the ~d-link occurrence safety limit."
                         *roam-backlink-occurrence-limit*))
                      (roam-backlink-index-push
-                      backlinks
+                      table
                       (roam-backlink-occurrence-target-id occurrence)
-                      occurrence))))
+                      occurrence)))
+                 (add-backlink (occurrence)
+                   (record-occurrence backlinks occurrence))
+                 (add-reflink (occurrence)
+                   (record-occurrence reflinks occurrence)))
           (dolist (file files)
             (ecase (roam-backlink-file-kind file)
-              (:org (roam-backlink-parse-org-file file #'add-occurrence))
+              (:org
+               (roam-backlink-parse-org-file
+                file ref-index #'add-backlink #'add-reflink))
               (:markdown
                (roam-backlink-parse-markdown-file
-                file id-index name-index #'add-occurrence)))))
+                file id-index name-index ref-index
+                #'add-backlink #'add-reflink)))))
         (maphash (lambda (id occurrences)
                    (setf (gethash id backlinks)
                          (sort occurrences #'roam-backlink-occurrence-less-p)))
                  backlinks)
+        (maphash (lambda (id occurrences)
+                   (setf (gethash id reflinks)
+                         (sort occurrences #'roam-backlink-occurrence-less-p)))
+                 reflinks)
         (make-roam-backlink-snapshot
          :nodes nodes :id-index id-index :file-index file-index
-         :backlinks backlinks :skipped-files skipped)))))
+         :backlinks backlinks :reflinks reflinks :skipped-files skipped)))))
 
 (defun roam-backlink-snapshot-node-at-point (snapshot buffer)
   (let ((filename (ignore-errors (buffer-filename buffer))))
@@ -575,7 +857,8 @@
   (let ((outline (roam-backlink-occurrence-outline occurrence)))
     (if outline (format nil "~{~a~^ > ~}" outline) "Top")))
 
-(defun roam-backlink-insert-occurrence (point occurrence remaining)
+(defun roam-backlink-insert-occurrence
+    (point occurrence remaining &optional reflink-p)
   (let ((text
           (format nil "~a (~a)~%~a~%~%"
                   (roam-node-title
@@ -588,8 +871,26 @@
                   (format nil "…~%"))))
     (with-point ((start point))
       (insert-string point text)
-      (put-text-property start point :roam-backlink occurrence))
+      (put-text-property start point :roam-backlink occurrence)
+      (when reflink-p
+        (put-text-property start point :roam-reflink t)))
     (length text)))
+
+(defun roam-backlink-insert-section
+    (point heading occurrences remaining &optional reflink-p)
+  (let ((header (format nil "~a~%~%" heading)))
+    (when (> (length header) remaining)
+      (return-from roam-backlink-insert-section 0))
+    (insert-string point header)
+    (decf remaining (length header))
+    (dolist (occurrence occurrences remaining)
+      (when (<= remaining 2)
+        (when (plusp remaining)
+          (insert-string point (subseq (format nil "…~%") 0 remaining)))
+        (return 0))
+      (decf remaining
+            (roam-backlink-insert-occurrence
+             point occurrence remaining reflink-p)))))
 
 (defun roam-backlink-render-message (buffer text key)
   (with-buffer-read-only buffer nil
@@ -608,6 +909,9 @@
                            (gethash id
                                     (roam-backlink-snapshot-backlinks
                                      snapshot))))
+         (reflinks (and (null (cdr id-nodes))
+                        (gethash id
+                                 (roam-backlink-snapshot-reflinks snapshot))))
          (key (list id (roam-node-relative-path node) (roam-node-line node))))
     (with-buffer-read-only buffer nil
       (erase-buffer buffer)
@@ -618,23 +922,22 @@
            (insert-string
             point
             (format nil
-                    "Backlinks unavailable: this node ID is globally ambiguous.~%")))
-          ((null occurrences)
-           (insert-string point (format nil "No backlinks.~%")))
+                    "Links unavailable: this node ID is globally ambiguous.~%")))
+          ((and (null occurrences) (null reflinks))
+           (insert-string point (format nil "No backlinks or reflinks.~%")))
           (t
-           (insert-string point (format nil "Backlinks:~%~%"))
            (let ((remaining (- *roam-backlink-render-character-limit*
                                (- (position-at-point
                                    (buffer-end-point buffer))
                                   (position-at-point
                                    (buffer-start-point buffer))))))
-             (dolist (occurrence occurrences)
-               (when (<= remaining 2)
-                 (insert-string point (format nil "…~%"))
-                 (return))
-               (decf remaining
-                     (roam-backlink-insert-occurrence
-                      point occurrence remaining))))))))
+             (when occurrences
+               (setf remaining
+                     (roam-backlink-insert-section
+                      point "Backlinks:" occurrences remaining)))
+             (when (and reflinks (plusp remaining))
+               (roam-backlink-insert-section
+                point "Reflinks:" reflinks remaining t)))))))
     (setf (buffer-value buffer 'lem-yath-roam-backlink-target-key) key
           (buffer-read-only-p buffer) t)
     (buffer-start (buffer-point buffer))
@@ -655,7 +958,7 @@
              (roam-backlink-render-message
               panel
               (format nil
-                      "Backlinks~%~%Save this note to refresh its backlink snapshot.~%")
+                      "Org-roam links~%~%Save this note to refresh its link snapshot.~%")
               key))))
         (t
          (alexandria:when-let
@@ -810,14 +1113,14 @@
     (list *lem-yath-roam-backlink-vi-keymap*)))
 
 (define-command lem-yath-roam-backlink-visit () ()
-  "Visit the exact source link represented by the current backlink row."
+  "Visit the exact source represented by the current backlink or reflink row."
   (let ((occurrence (text-property-at (current-point) :roam-backlink)))
     (if occurrence
         (roam-backlink-visit-occurrence (current-buffer) occurrence)
-        (message "No backlink on this line."))))
+        (message "No Org-roam link on this line."))))
 
 (define-command lem-yath-roam-backlink-refresh () ()
-  "Rebuild the visible Org-roam backlink snapshot."
+  "Rebuild the visible Org-roam link snapshot."
   (let* ((panel (current-buffer))
          (origin (buffer-value panel 'lem-yath-roam-backlink-origin-buffer))
          (window (buffer-value panel 'lem-yath-roam-backlink-origin-window)))

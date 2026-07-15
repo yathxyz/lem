@@ -1795,39 +1795,46 @@ The node and capture paths recursively index canonical `.org` and `.md` files
 below startup-cached `$WORKDIR/roam`. Org file and ID-bearing heading nodes plus
 pinned md-roam YAML IDs, titles, aliases, and tags share the completion surface
 used by find, insert, random, and the configured five-template capture flow.
-Individual files, aggregate bytes, scanner output, pathnames, files, nodes, and
-backlink occurrences all have explicit limits; reads verify the opened regular
-file descriptor and containment beneath the canonical roam root.
+Individual files, aggregate bytes, scanner output, pathnames, files, nodes,
+reference declarations, and combined backlink/reflink occurrences all have
+explicit limits; reads verify the opened regular file descriptor and
+containment beneath the canonical roam root.
 
 `M-x org-roam-buffer-toggle` supplies the persistent `*org-roam*` view in the
 configured right-side window at 0.4 of the display width. One asynchronous
 immutable snapshot maps bracketed Org `id:` links and pinned md-roam
-`[[Title or Alias]]` links to their unique nodes. The panel follows the nearest
-file or ID-bearing heading from cheap span lookups, retains the last valid node
-through prompts and unrelated buffers, sorts every occurrence by source-node
-title like Org-roam, and renders the source title, complete outline, and a
-bounded direct-content preview. Duplicate target IDs and ambiguous wiki names
-fail closed rather than pointing at an arbitrary note.
+`[[Title or Alias]]` links to their unique nodes. It also indexes direct file or
+heading `ROAM_REFS` and reproduces Org-roam's separate `Reflinks:` section for
+matching Org citations, md-roam/Pandoc citations, and ordinary Org or Markdown
+HTTP(S) links—the forms present in the configured corpus. The panel follows the
+nearest file or ID-bearing heading from cheap span lookups, retains the last
+valid node through prompts and unrelated buffers, sorts every occurrence by
+source-node title like Org-roam, and renders the source title, complete outline,
+and a bounded direct-content preview. Duplicate target IDs and ambiguous wiki
+names fail closed rather than pointing at an arbitrary note.
 
-`Return` revalidates the source node and exact link literal before opening its
-line and column in the recorded main window. Saving a canonical Org or Markdown
-note while the panel is visible coalesces an asynchronous full-snapshot rebuild;
+`Return` revalidates the source node and exact link or citation literal before
+opening its line and column in the recorded main window. Saving a canonical Org
+or Markdown note while the panel is visible coalesces an asynchronous
+full-snapshot rebuild;
 `g` provides the same refresh for out-of-band changes, and `q` restores a main
 window before closing the side window. The save hook does no indexing while the
 panel is hidden, avoiding permanent background work on the laptop.
 The panel refuses to delete a right-side window after another subsystem has
 replaced it, and configuration reload invalidates workers, closes the owned
 window, kills the private buffer, and removes its post-command hook.
-`scripts/roam-backlink-test.sh` proves ID and md-roam resolution, block/comment
-exclusion, outline/preview ownership, M-x display, automatic node switching,
-exact Return navigation, stale refusal, refresh, side-window ownership, close,
+`scripts/roam-backlink-test.sh` proves ID and md-roam resolution, Org and
+Markdown citation/URL reflinks, block/comment exclusion, outline/preview
+ownership, M-x display, automatic node switching, exact Return navigation,
+stale refusal, manual and save-driven refresh, side-window ownership, close,
 and reload cleanup through the packaged ncurses editor.
 
 This remains an in-memory snapshot rather than claiming Org-roam's persistent
 SQLite database. External changes require `g`; there is no always-on incremental
-autosync, reflink/citation section, Markdown inline-file backlink extraction,
-or wiki-link-follow command yet. Unsaved note geometry is not applied to the
-disk-derived graph and is shown as requiring a save.
+autosync, arbitrary non-HTTP(S) third-party reference-scheme extraction,
+Markdown inline-file backlink extraction, or wiki-link-follow command yet.
+Unsaved note geometry is not applied to the disk-derived graph and is shown as
+requiring a save.
 
 ### Native Org mode — `lem-yath/src/org/` (verified approximation)
 

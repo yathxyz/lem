@@ -29,6 +29,7 @@ cat >"$roam/target.org" <<'EOF'
 :PROPERTIES:
 :ID: target-id
 :ROAM_ALIASES: "Target Alias"
+:ROAM_REFS: @target-cite https://example.test/target https://example.test/a_(balanced)_path
 :END:
 #+title: Target Node
 
@@ -45,6 +46,9 @@ cat >"$roam/source.org" <<'EOF'
 :END:
 #+title: Alpha Source
 Top [[id:target-id][first]]
+Citation [cite:@target-cite]
+Reference [[https://example.test/target][external]]
+Balanced https://example.test/a_(balanced)_path
 # [[id:target-id][comment decoy]]
 #+begin_src text
 [[id:target-id][block decoy]]
@@ -68,6 +72,9 @@ id: markdown-source-id
 title: Markdown Source
 ---
 Markdown [[Target Alias]]
+Citation [@target-cite]
+Reference [external](https://example.test/target)
+Balanced [external](https://example.test/a_(balanced)_path)
 EOF
 
 fixture_lisp="$(lem-yath_lisp_string "$here/scripts/roam-backlink-fixture.lisp")"
@@ -100,7 +107,7 @@ wait_panel_occurrences() {
     tmux_cmd send-keys -t "$session" F5
     sleep 0.25
     latest="$(grep '^PANEL ' "$LEM_YATH_ROAM_BACKLINK_REPORT" | tail -n 1)"
-    if [[ "$latest" =~ target=target-id[[:space:]]occurrences=$expected$ ]]; then
+    if [[ "$latest" =~ target=target-id[[:space:]]occurrences=${expected}[[:space:]]reflinks=[0-9]+$ ]]; then
       return 0
     fi
     index=$((index + 1))
@@ -116,9 +123,9 @@ fi
 tmux_cmd send-keys -t "$session" Escape
 sleep 0.5
 
-if report_has '^STATIC target=4 child=1 owners=source-file-id,source-file-id,markdown-source-id,source-heading-id child-owner=source-heading-id no-buffers=yes$' &&
+if report_has '^STATIC target=4 child=1 reflinks=6 owners=source-file-id,source-file-id,markdown-source-id,source-heading-id ref-owners=source-file-id,source-file-id,source-file-id,markdown-source-id,markdown-source-id,markdown-source-id child-owner=source-heading-id no-buffers=yes$' &&
    report_has '^STATIC-DETAIL heading-outline=\("Parent" "Source Heading"\) heading-preview=yes decoy=no alias=yes$'; then
-  pass snapshot 'ID and md-roam links resolve with source ownership, outline, and preview'
+  pass snapshot 'backlinks and citation/URL reflinks resolve with source ownership and previews'
 else
   fail snapshot 'bounded snapshot parsing or ownership differed'
 fi
@@ -127,7 +134,7 @@ mx org-roam-buffer-toggle
 if lem_wait_for "$session" 'Backlinks:' 20 >/dev/null; then
   tmux_cmd send-keys -t "$session" F5
   sleep 0.4
-  if report_has '^PANEL live=yes visible=yes width=[0-9]+ display=[0-9]+ target=target-id occurrences=4$'; then
+  if report_has '^PANEL live=yes visible=yes width=[0-9]+ display=[0-9]+ target=target-id occurrences=4 reflinks=6$'; then
     pass panel 'M-x toggle opened the persistent 0.4-width right-side panel'
   else
     fail panel 'right-side visibility, target, or occurrence count differed'
@@ -136,12 +143,27 @@ else
   fail panel 'asynchronous backlink panel did not render'
 fi
 
+tmux_cmd send-keys -t "$session" F3
+sleep 0.4
+tmux_cmd send-keys -t "$session" Enter
+sleep 0.7
+tmux_cmd send-keys -t "$session" F9
+sleep 0.4
+if report_has '^ORIGIN file=source.org line=6 column=9 text="Citation \[cite:@target-cite\]"$'; then
+  pass reflink-visit 'Return opened the exact citation represented by a reflink row'
+else
+  fail reflink-visit 'Return did not preserve the exact reflink source position'
+fi
+tmux_cmd send-keys -t "$session" F7
+sleep 0.5
+lem_wait_for "$session" 'Backlinks:' 10 >/dev/null || true
+
 tmux_cmd send-keys -t "$session" F6
 sleep 0.5
 if lem_wait_for "$session" 'Child Target' 10 >/dev/null; then
   tmux_cmd send-keys -t "$session" F5
   sleep 0.4
-  if report_has '^PANEL .* target=child-id occurrences=1$'; then
+  if report_has '^PANEL .* target=child-id occurrences=1 reflinks=0$'; then
     pass node-switch 'post-command redisplay followed the nearest ID-bearing child node'
   else
     fail node-switch 'panel did not switch to the child node snapshot'
