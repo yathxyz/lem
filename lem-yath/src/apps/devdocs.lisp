@@ -8,10 +8,13 @@
 
 (in-package :lem-yath)
 
+(declaim (ftype function run-project-program))
+(declaim (special *project-process-timeout*))
+
 (defvar *devdocs-docsets*
   (list "go" "rust" "python~3.12" "nix" "javascript" "typescript")
-  "DevDocs slugs offered to `lem-yath-devdocs-lookup', mirroring the languages in
-this config. `lem-yath-devdocs-install' adds more for the current session.")
+  "Common slugs offered initially by `lem-yath-devdocs-lookup'.
+`lem-yath-devdocs-install' validates and adds more for the current session.")
 
 (defvar *devdocs-base-url* "https://documents.devdocs.io"
   "Where DevDocs serves index.json and the per-entry HTML pages.")
@@ -21,8 +24,14 @@ this config. `lem-yath-devdocs-install' adds more for the current session.")
 
 (defvar *devdocs-buffer-name* "*lem-yath-devdocs*")
 
-(defvar *devdocs-curl-timeout* "10"
-  "curl --max-time for every DevDocs fetch (seconds, as a string).")
+(defvar *devdocs-curl-timeout* 10
+  "curl --max-time for every DevDocs fetch, in seconds.")
+
+(defvar *devdocs-output-limit* (* 16 1024 1024)
+  "Maximum stdout or stderr accepted from one DevDocs request.")
+
+(defvar *devdocs-request-generation* 0
+  "Monotonic owner for asynchronous index and page requests.")
 
 ;;; --- mode: read-only viewer with q (quit) and b (browser fallback) ----------
 
@@ -30,6 +39,9 @@ this config. `lem-yath-devdocs-install' adds more for the current session.")
     (:name "DevDocs"
      :keymap *devdocs-mode-keymap*)
   (setf (buffer-read-only-p (current-buffer)) t))
+
+(defmethod lem-vi-mode/core:mode-specific-keymaps ((mode devdocs-mode))
+  (list *devdocs-mode-keymap*))
 
 (define-key *devdocs-mode-keymap* "q" 'quit-active-window)
 (define-key *devdocs-mode-keymap* "b" 'lem-yath-devdocs-open-in-browser)
@@ -40,14 +52,19 @@ this config. `lem-yath-devdocs-install' adds more for the current session.")
   "Fetch URL with curl, returning its body string, or NIL on any failure.
 Never signals: a missing binary, network error or non-zero exit yields NIL."
   (handler-case
-      (multiple-value-bind (out err code)
-          (uiop:run-program (list "curl" "-fsSL" "--max-time" *devdocs-curl-timeout* url)
-                            :output :string
-                            :error-output :string
-                            :ignore-error-status t)
-        (declare (ignore err))
-        (when (and (integerp code) (zerop code) (plusp (length out)))
-          out))
+      (let ((curl (executable-find "curl"))
+            (*project-process-timeout* (+ *devdocs-curl-timeout* 2)))
+        (unless curl (return-from devdocs-curl nil))
+        (multiple-value-bind (out err code)
+            (run-project-program
+             (list (uiop:native-namestring curl)
+                   "-fsSL"
+                   "--max-time" (princ-to-string *devdocs-curl-timeout*)
+                   url)
+             :directory (uiop:getcwd)
+             :output-limit *devdocs-output-limit*)
+          (declare (ignore err))
+          (when (and (eql code 0) (plusp (length out))) out)))
     (error () nil)))
 
 ;;; --- index.json -------------------------------------------------------------
@@ -69,13 +86,35 @@ Never signals: a missing binary, network error or non-zero exit yields NIL."
                 :collect (cons name path)))
     (error () nil)))
 
-(defun devdocs-index (slug)
-  "Return SLUG's entries as a list of (name . path), fetching+caching on miss.
-Returns NIL (and leaves the cache untouched) when offline or unparsable."
-  (or (gethash slug *devdocs-index-cache*)
-      (alexandria:when-let* ((body (devdocs-curl (devdocs-index-url slug)))
-                             (entries (devdocs-parse-index body)))
-        (setf (gethash slug *devdocs-index-cache*) entries))))
+(defun devdocs-next-generation ()
+  "Invalidate older asynchronous work and return the new request generation."
+  (incf *devdocs-request-generation*))
+
+(defun devdocs-request-current-p (generation)
+  "Whether GENERATION still owns the interactive DevDocs workflow."
+  (= generation *devdocs-request-generation*))
+
+(defun devdocs-with-index (slug generation continuation)
+  "Call CONTINUATION with SLUG's entries on the editor thread.
+Use the session cache immediately; otherwise fetch off-thread and cache only a
+valid latest-generation response."
+  (alexandria:if-let ((cached (gethash slug *devdocs-index-cache*)))
+    (when (devdocs-request-current-p generation)
+      (funcall continuation cached))
+    (bt2:make-thread
+     (lambda ()
+       (let* ((body (devdocs-curl (devdocs-index-url slug)))
+              (entries (and body (devdocs-parse-index body))))
+         (send-event
+          (lambda ()
+            (when (devdocs-request-current-p generation)
+              (if entries
+                  (progn
+                    (setf (gethash slug *devdocs-index-cache*) entries)
+                    (funcall continuation entries))
+                  (message "DevDocs: couldn't load index for ~a (offline?)"
+                           slug)))))))
+     :name "lem-yath/devdocs-index")))
 
 ;;; --- entry page -------------------------------------------------------------
 
@@ -133,7 +172,7 @@ code blocks legible by turning block-level tags into newlines."
 
 ;;; --- rendering --------------------------------------------------------------
 
-(defun devdocs-show-text (slug path text)
+(defun devdocs-show-text (slug path text generation)
   "Populate the *lem-yath-devdocs* buffer with TEXT (editor thread only).
 Records SLUG/PATH on the buffer so the `b' browser fallback can use them."
   (let ((buffer (make-buffer *devdocs-buffer-name*)))
@@ -146,12 +185,13 @@ Records SLUG/PATH on the buffer so the `b' browser fallback can use them."
                              text)))
     (change-buffer-mode buffer 'devdocs-mode)
     (setf (buffer-value buffer 'devdocs-slug) slug
-          (buffer-value buffer 'devdocs-path) path)
+          (buffer-value buffer 'devdocs-path) path
+          (buffer-value buffer 'devdocs-generation) generation)
     (move-point (buffer-point buffer) (buffer-start-point buffer))
-    (switch-to-buffer buffer)
+    (switch-to-window (pop-to-buffer buffer))
     (redraw-display)))
 
-(defun devdocs-fetch-and-show (slug name path)
+(defun devdocs-fetch-and-show (slug name path generation)
   "On a worker thread: fetch SLUG/PATH's page, strip it, and display it.
 Marshals the buffer update back onto the editor thread; degrades to a message."
   (bt2:make-thread
@@ -159,9 +199,11 @@ Marshals the buffer update back onto the editor thread; degrades to a message."
      (let ((html (devdocs-curl (devdocs-page-url slug path))))
        (send-event
         (lambda ()
-          (if html
-              (devdocs-show-text slug path (devdocs-html-to-text html))
-              (message "DevDocs: couldn't fetch ~a (offline?)" name))))))
+          (when (devdocs-request-current-p generation)
+            (if html
+                (devdocs-show-text
+                 slug path (devdocs-html-to-text html) generation)
+                (message "DevDocs: couldn't fetch ~a (offline?)" name)))))))
    :name "lem-yath/devdocs"))
 
 ;;; --- prompts ----------------------------------------------------------------
@@ -185,18 +227,33 @@ Marshals the buffer update back onto the editor thread; degrades to a message."
 
 ;;; --- commands ---------------------------------------------------------------
 
+(defun devdocs-register-docset (slug)
+  "Offer SLUG in later completion without duplicating it."
+  (unless (member slug *devdocs-docsets* :test #'string=)
+    (setf *devdocs-docsets* (append *devdocs-docsets* (list slug)))))
+
+(defun devdocs-prompt-and-fetch-entry (slug entries generation)
+  "Prompt within ENTRIES, then fetch the chosen page for GENERATION."
+  (when (devdocs-request-current-p generation)
+    (let ((name (devdocs-prompt-entry entries)))
+      (when (and name (plusp (length name)))
+        (alexandria:when-let ((path (cdr (assoc name entries :test #'string=))))
+          (message "DevDocs: fetching ~a..." name)
+          (devdocs-fetch-and-show slug name path generation))))))
+
 (define-command lem-yath-devdocs-install () ()
-  "Add a docset slug to *devdocs-docsets* for this session (devdocs-install).
-Persisted only in the running image, mirroring how the Emacs command pulls a
-docset down on demand."
+  "Fetch and cache a docset index for this session (devdocs-install)."
   (let ((slug (string-trim '(#\Space) (prompt-for-string "Install docset slug: "))))
-    (cond ((zerop (length slug))
-           (message "DevDocs: no slug given"))
-          ((member slug *devdocs-docsets* :test #'string=)
-           (message "DevDocs: ~a already available" slug))
-          (t
-           (setf *devdocs-docsets* (append *devdocs-docsets* (list slug)))
-           (message "DevDocs: added ~a" slug)))))
+    (if (zerop (length slug))
+        (message "DevDocs: no slug given")
+        (let ((generation (devdocs-next-generation)))
+          (message "DevDocs: installing ~a..." slug)
+          (devdocs-with-index
+           slug generation
+           (lambda (entries)
+             (declare (ignore entries))
+             (devdocs-register-docset slug)
+             (message "DevDocs: installed ~a for this session" slug)))))))
 
 (define-command lem-yath-devdocs-lookup () ()
   "Look up DevDocs documentation (devdocs-lookup, SPC h d).
@@ -204,15 +261,12 @@ Pick a docset, then an entry; the page is fetched and rendered on a background
 thread, so the editor never blocks. Offline degrades to a message."
   (let ((slug (devdocs-prompt-docset)))
     (when (plusp (length slug))
-      (message "DevDocs: fetching index for ~a..." slug)
-      (let ((entries (devdocs-index slug)))
-        (if (null entries)
-            (message "DevDocs: couldn't load index for ~a (offline?)" slug)
-            (let ((name (devdocs-prompt-entry entries)))
-              (when (and name (plusp (length name)))
-                (alexandria:when-let ((path (cdr (assoc name entries :test #'string=))))
-                  (message "DevDocs: fetching ~a..." name)
-                  (devdocs-fetch-and-show slug name path)))))))))
+      (let ((generation (devdocs-next-generation)))
+        (message "DevDocs: fetching index for ~a..." slug)
+        (devdocs-with-index
+         slug generation
+         (lambda (entries)
+           (devdocs-prompt-and-fetch-entry slug entries generation)))))))
 
 (define-command lem-yath-devdocs-open-in-browser () ()
   "Open the current DevDocs entry in a browser via xdg-open (fallback `b')."
@@ -220,9 +274,13 @@ thread, so the editor never blocks. Offline degrades to a message."
     (alexandria:if-let ((slug (buffer-value buffer 'devdocs-slug))
                         (path (buffer-value buffer 'devdocs-path)))
       (let ((url (devdocs-browser-url slug path)))
-        (handler-case
-            (progn
-              (uiop:launch-program (list "xdg-open" url))
-              (message "DevDocs: opened ~a" url))
-          (error () (message "DevDocs: couldn't launch browser for ~a" url))))
+        (alexandria:if-let ((opener (executable-find "xdg-open")))
+          (handler-case
+              (progn
+                (uiop:launch-program
+                 (list (uiop:native-namestring opener) url)
+                 :output nil :error-output nil)
+                (message "DevDocs: opened ~a" url))
+            (error () (message "DevDocs: couldn't launch browser for ~a" url)))
+          (message "DevDocs: xdg-open is unavailable")))
       (message "DevDocs: no entry in this buffer"))))
