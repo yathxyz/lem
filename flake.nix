@@ -648,6 +648,7 @@
             notmuch-test =
               mkTestAppWithLemAndInputs lemYath mailRuntimeInputs "lem-yath-notmuch-test"
                 "notmuch-test.sh";
+            salta-test = mkTestAppWithLem lemYath "lem-yath-salta-test" "salta-test.sh";
             vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
@@ -725,6 +726,7 @@
             devdocs = mkCheckWithLem lemYath "devdocs" "devdocs-test.sh";
             elfeed = mkCheckWithLem lemYath "elfeed" "elfeed-test.sh";
             notmuch = mkCheckWithLemAndInputs lemYath mailRuntimeInputs "notmuch" "notmuch-test.sh";
+            salta = mkCheckWithLem lemYath "salta" "salta-test.sh";
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";

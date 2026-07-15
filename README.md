@@ -437,6 +437,7 @@ nix run .#citar-test
 nix run .#devdocs-test
 nix run .#elfeed-test
 nix run .#notmuch-test
+nix run .#salta-test
 nix run .#notes-test
 nix run .#roam-test
 nix run .#roam-backlink-test

@@ -23,6 +23,13 @@ Falls back to $SALTA_SUPABASE_KEY then the credentials file.")
 (defvar *salta-search-limit* 20
   "Maximum number of results for fuzzy property search.")
 
+(defparameter *salta-request-timeout* 15)
+(defparameter *salta-output-limit* (* 4 1024 1024))
+(defvar *salta-request-generation* 0
+  "Latest user-visible Salta request. Older async completions are discarded.")
+
+(declaim (special *project-process-timeout*))
+
 (defun salta-read-credentials ()
   "Parsed credentials hash-table from `*salta-credentials-file*', or NIL."
   (let ((path (and *salta-credentials-file*
@@ -67,28 +74,58 @@ Falls back to $SALTA_SUPABASE_KEY then the credentials file.")
         (format nil "~a~a?~a" base path (salta-encode-query params))
         (format nil "~a~a" base path))))
 
+(defun salta-curl-config-quote (string)
+  "Quote STRING for one double-quoted curl config value."
+  (with-output-to-string (stream)
+    (loop :for character :across string
+          :do (case character
+                (#\\ (write-string "\\\\" stream))
+                (#\" (write-string "\\\"" stream))
+                (#\Newline (write-string "\\n" stream))
+                (#\Return (write-string "\\r" stream))
+                (#\Tab (write-string "\\t" stream))
+                (otherwise (write-char character stream))))))
+
+(defun salta-curl-config (method key url body-string)
+  "Curl config supplied on stdin so KEY, URL, and BODY avoid process argv."
+  (with-output-to-string (stream)
+    (flet ((option (name value)
+             (format stream "~a = \"~a\"~%"
+                     name (salta-curl-config-quote value))))
+      (option "request" method)
+      (option "header" (format nil "apikey: ~a" key))
+      (option "header" (format nil "Authorization: Bearer ~a" key))
+      (option "header" "Content-Type: application/json")
+      (option "header" "Accept: application/json")
+      (when body-string
+        (option "data-binary" body-string))
+      (option "url" url))))
+
 (defun salta-request (method path &key body params)
   "Run a PostgREST request with curl and return the parsed JSON, or signal an
 error. METHOD is \"GET\" or \"POST\"; BODY is a hash-table encoded as JSON.
 This blocks; callers invoke it from a worker thread."
-  (let* ((key (salta-resolve-key))
+  (let* ((curl (or (executable-find "curl")
+                   (error "curl is unavailable")))
+         (key (salta-resolve-key))
          (url (salta-build-url path params))
          (body-string (when body
                         (with-output-to-string (s) (yason:encode body s))))
-         (args (append
-                (list "curl" "-s" "--max-time" "15" "-X" method
-                      "-H" (format nil "apikey: ~a" key)
-                      "-H" (format nil "Authorization: Bearer ~a" key)
-                      "-H" "Content-Type: application/json"
-                      "-H" "Accept: application/json")
-                (when body-string (list "--data-binary" body-string))
-                (list url))))
+         (config (salta-curl-config method key url body-string))
+         (args (list (uiop:native-namestring curl)
+                     "--silent" "--show-error" "--fail-with-body"
+                     "--max-time" (princ-to-string *salta-request-timeout*)
+                     "--config" "-"))
+         (*project-process-timeout* (+ *salta-request-timeout* 2)))
     (multiple-value-bind (out err code)
-        (uiop:run-program args :output :string :error-output :string
-                               :ignore-error-status t)
-      (declare (ignore err))
+        (run-project-program
+         args :input config :output-limit *salta-output-limit*)
       (unless (and (integerp code) (zerop code))
-        (error "curl failed (exit ~a) for ~a" code path))
+        (error "curl failed (exit ~a) for ~a: ~a"
+               code path
+               (salta-truncate
+                (string-trim '(#\Space #\Tab #\Newline #\Return) err)
+                240)))
       (let ((result (handler-case
                         (if (zerop (length (string-trim '(#\Space #\Newline) out)))
                             nil
@@ -134,11 +171,17 @@ This blocks; callers invoke it from a worker thread."
         ((eq val :null) 0d0)
         ((numberp val) (coerce val 'double-float))
         ((stringp val)
-         (let ((clean (remove #\, val)))
-           (if (zerop (length (string-trim " " clean)))
+         (let ((clean (string-trim '(#\Space #\Tab #\Newline #\Return)
+                                   (remove #\, val))))
+           (if (zerop (length clean))
                0d0
-               (or (ignore-errors
-                     (coerce (read-from-string clean nil 0) 'double-float))
+               (if (cl-ppcre:scan
+                    "^[+-]?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$"
+                    clean)
+                   (let ((*read-eval* nil))
+                     (or (ignore-errors
+                           (coerce (read-from-string clean) 'double-float))
+                         0d0))
                    0d0))))
         (t 0d0)))
 
@@ -158,9 +201,9 @@ This blocks; callers invoke it from a worker thread."
       ""
       (let* ((num (salta-number val))
              (neg (minusp num))
-             (abs-num (abs num))
-             (whole (truncate abs-num))
-             (frac (round (* 100 (- abs-num whole)))))
+             (cents (round (* 100 (abs num))))
+             (whole (floor cents 100))
+             (frac (mod cents 100)))
         (format nil "~:[~;-~]~a.~2,'0d" neg (salta-commify whole) frac))))
 
 (defun salta-pct (val)
@@ -182,15 +225,36 @@ This blocks; callers invoke it from a worker thread."
 
 ;;; --- list buffer mode -----------------------------------------------------
 
+(defvar *salta-list-mode-keymap*
+  (make-keymap :description '*salta-list-mode-keymap*))
+(defvar *salta-detail-mode-keymap*
+  (make-keymap :description '*salta-detail-mode-keymap*))
+
 (define-major-mode salta-list-mode nil
     (:name "salta-list" :keymap *salta-list-mode-keymap*)
   (setf (buffer-read-only-p (current-buffer)) t))
+
+(define-major-mode salta-detail-mode nil
+    (:name "salta-detail" :keymap *salta-detail-mode-keymap*)
+  (setf (buffer-read-only-p (current-buffer)) t))
+
+(defmethod lem-vi-mode/core:mode-specific-keymaps ((mode salta-list-mode))
+  (list *salta-list-mode-keymap*))
+
+(defmethod lem-vi-mode/core:mode-specific-keymaps ((mode salta-detail-mode))
+  (list *salta-detail-mode-keymap*))
 
 (define-key *salta-list-mode-keymap* "Return" 'salta-list-open)
 (define-key *salta-list-mode-keymap* "r" 'salta-list-reckoner)
 (define-key *salta-list-mode-keymap* "w" 'salta-list-copy-id)
 (define-key *salta-list-mode-keymap* "g" 'salta-list-refresh)
 (define-key *salta-list-mode-keymap* "q" 'quit-active-window)
+(define-key *salta-detail-mode-keymap* "w" 'salta-detail-copy-id)
+(define-key *salta-detail-mode-keymap* "r" 'salta-detail-reckoner)
+(define-key *salta-detail-mode-keymap* "c" 'salta-detail-claims)
+(define-key *salta-detail-mode-keymap* "p" 'salta-detail-payments)
+(define-key *salta-detail-mode-keymap* "g" 'salta-list-refresh)
+(define-key *salta-detail-mode-keymap* "q" 'quit-active-window)
 
 (defun salta-current-row-id ()
   "Application/row id stored for the current cursor line, or NIL.
@@ -213,11 +277,14 @@ The parallel id vector lives in the buffer-local :salta-ids."
     (if id (salta-property-reckoner-id id) (message "No row at point"))))
 
 (define-command salta-list-copy-id () ()
-  "Copy the row id at point to the kill ring/clipboard (w)."
-  (let ((id (salta-current-row-id)))
-    (if id
-        (progn (copy-to-clipboard-with-killring id)
-               (message "Copied: ~a" id))
+  "Copy the first visible column at point to the kill ring/clipboard (w)."
+  (let* ((values (buffer-value (current-buffer) :salta-copy-values))
+         (index (- (line-number-at-point (current-point)) 3))
+         (value (and values (<= 0 index) (< index (length values))
+                     (aref values index))))
+    (if value
+        (progn (copy-to-clipboard-with-killring value)
+               (message "Copied: ~a" value))
         (message "No row at point"))))
 
 (define-command salta-list-refresh () ()
@@ -249,27 +316,35 @@ The parallel id vector lives in the buffer-local :salta-ids."
     (dolist (row rows)
       (emit (mapcar (lambda (col) (salta-cell col row)) columns)))))
 
-(defun salta-show-list (name columns rows id-key refresh-fn &optional footer-fn)
+(defun salta-show-list
+    (name columns rows id-key refresh-fn &optional footer-fn selected-id)
   "Create read-only list BUFFER NAME from ROWS and display it.
 ID-KEY (key string or function) yields each row's id, stored line-parallel in
 the buffer-local :salta-ids vector. REFRESH-FN re-runs the originating query.
 FOOTER-FN, if given, is called with a point at end of buffer for extra lines."
   (let ((buffer (make-buffer name))
-        (ids (make-array (length rows))))
+        (ids (make-array (length rows)))
+        (copy-values (make-array (length rows))))
     (setf (buffer-read-only-p buffer) nil)
     (erase-buffer buffer)
     (loop :for row :in rows :for i :from 0
           :do (setf (aref ids i)
                     (salta-to-string (if (functionp id-key) (funcall id-key row)
-                                         (salta-aget id-key row)))))
+                                         (salta-aget id-key row)))
+                    (aref copy-values i)
+                    (salta-cell (first columns) row)))
     (salta-emit-table (buffer-point buffer) columns rows "")
     (when footer-fn (funcall footer-fn (buffer-end-point buffer)))
     (setf (buffer-value buffer :salta-ids) ids)
+    (setf (buffer-value buffer :salta-copy-values) copy-values)
     (change-buffer-mode buffer 'salta-list-mode)
     (setf (buffer-value buffer :salta-refresh) refresh-fn)
-    (move-to-line (buffer-point buffer) 3)
-    (pop-to-buffer buffer)
-    (redraw-display)))
+    (switch-to-window (pop-to-buffer buffer))
+    (move-to-line
+     (current-point)
+     (+ 3 (or (position selected-id ids :test #'string=) 0)))
+    (redraw-display)
+    buffer))
 
 (defun salta-insert-section (point title fields data)
   "Insert a key/value SECTION titled TITLE for DATA at POINT.
@@ -293,18 +368,23 @@ FIELDS is a list of (LABEL EXTRACTOR); EXTRACTOR is a key string or function."
       (progn (salta-emit-table point columns rows "  ")
              (insert-character point #\Newline))))
 
-(defun salta-show-detail (name fill-fn refresh-fn)
+(defun salta-show-detail
+    (name fill-fn refresh-fn &key application-id application-code)
   "Create read-only detail BUFFER NAME, populate it via FILL-FN (called with a
 point), and display it. Runs on the editor thread."
   (let ((buffer (make-buffer name)))
     (setf (buffer-read-only-p buffer) nil)
     (erase-buffer buffer)
     (funcall fill-fn (buffer-point buffer))
+    (change-buffer-mode buffer 'salta-detail-mode)
     (setf (buffer-read-only-p buffer) t)
     (setf (buffer-value buffer :salta-refresh) refresh-fn)
+    (setf (buffer-value buffer :salta-application-id) application-id)
+    (setf (buffer-value buffer :salta-application-code) application-code)
     (move-to-line (buffer-point buffer) 1)
-    (pop-to-buffer buffer)
-    (redraw-display)))
+    (switch-to-window (pop-to-buffer buffer))
+    (redraw-display)
+    buffer))
 
 ;;; --- async plumbing -------------------------------------------------------
 
@@ -323,45 +403,58 @@ point), and display it. Runs on the editor thread."
   "Run WORKER (returning JSON) on a background thread; on success call
 ON-SUCCESS with the result on the editor thread. Errors are reported."
   (when (salta-credentials-ok-p)
-    (bt2:make-thread
-     (lambda ()
-       (handler-case
-           (let ((result (funcall worker)))
-             (send-event (lambda () (funcall on-success result))))
-         (error (e)
-           (let ((msg (princ-to-string e)))
-             (send-event (lambda () (message "Salta: ~a" msg)))))))
-     :name "lem-yath/salta")))
+    (let ((generation (incf *salta-request-generation*)))
+      (bt2:make-thread
+       (lambda ()
+         (handler-case
+             (let ((result (funcall worker)))
+               (send-event
+                (lambda ()
+                  (when (= generation *salta-request-generation*)
+                    (funcall on-success result)))))
+           (error (e)
+             (let ((msg (princ-to-string e)))
+               (send-event
+                (lambda ()
+                  (when (= generation *salta-request-generation*)
+                    (message "Salta: ~a" msg))))))))
+       :name "lem-yath/salta"))))
 
 ;;; --- commands -------------------------------------------------------------
+
+(defun salta-find-property-query (query &optional selected-id)
+  "Run and render one fuzzy property QUERY without prompting."
+  (salta-async
+   (lambda ()
+     (salta-rpc "fuzzy_search_properties"
+                `(("query_text" . ,query)
+                  ("result_limit" . ,*salta-search-limit*))))
+   (lambda (results)
+     (if (null results)
+         (message "No properties found for ~s" query)
+         (salta-show-list
+          "*salta-properties*"
+          `(("Code" 14 "application_code")
+            ("Name" 22 "applicant_name")
+            ("Address" 30 "address_line_1")
+            ("Town" 16 "city_town")
+            ("County" 12 "county")
+            ("Eircode" 9 "eircode")
+            ("Status" 12 "application_status")
+            ("Sim" 5 ,(lambda (r)
+                        (let ((s (salta-aget "similarity" r)))
+                          (if (equal s "") "" (format nil "~,2f"
+                                                      (salta-number s)))))))
+          results "application_id"
+          (lambda ()
+            (salta-find-property-query query (salta-current-row-id)))
+          nil selected-id)))))
 
 (define-command lem-yath-salta-find-property () ()
   "Fuzzy-search properties via the fuzzy_search_properties RPC."
   (let ((query (prompt-for-string "Search properties: ")))
     (when (plusp (length (string-trim " " query)))
-      (salta-async
-       (lambda ()
-         (salta-rpc "fuzzy_search_properties"
-                    `(("query_text" . ,query)
-                      ("result_limit" . ,*salta-search-limit*))))
-       (lambda (results)
-         (if (null results)
-             (message "No properties found for ~s" query)
-             (salta-show-list
-              "*salta-properties*"
-              `(("Code" 14 "application_code")
-                ("Name" 22 "applicant_name")
-                ("Address" 30 "address_line_1")
-                ("Town" 16 "city_town")
-                ("County" 12 "county")
-                ("Eircode" 9 "eircode")
-                ("Status" 12 "application_status")
-                ("Sim" 5 ,(lambda (r)
-                            (let ((s (salta-aget "similarity" r)))
-                              (if (equal s "") "" (format nil "~,2f"
-                                                          (salta-number s)))))))
-              results "application_id"
-              (lambda () (lem-yath-salta-find-property)))))))))
+      (salta-find-property-query query))))
 
 (defun salta-property-detail-id (id)
   "Fetch and render full detail for application ID."
@@ -430,11 +523,14 @@ ON-SUCCESS with the result on the editor thread. Errors are reported."
                ("Run" 14 "payment_run_label")
                ("Date" 12 ,(lambda (r) (salta-date (salta-aget "created_at" r)))))
              payments))
-          (lambda () (salta-property-detail-id id))))))))
+          (lambda () (salta-property-detail-id id))
+          :application-id id
+          :application-code code))))))
 
 (define-command lem-yath-salta-property-detail () ()
   "Show full detail for a property (prompts for the application id)."
-  (let ((id (or (and (mode-active-p (current-buffer) 'salta-list-mode)
+  (let ((id (or (buffer-value (current-buffer) :salta-application-id)
+                (and (mode-active-p (current-buffer) 'salta-list-mode)
                      (salta-current-row-id))
                 (prompt-for-string "Application ID: "))))
     (when (plusp (length id))
@@ -480,7 +576,8 @@ ON-SUCCESS with the result on the editor thread. Errors are reported."
 
 (define-command lem-yath-salta-property-reckoner () ()
   "Show the reckoner (revenue/cost/profit) for a property."
-  (let ((id (or (and (mode-active-p (current-buffer) 'salta-list-mode)
+  (let ((id (or (buffer-value (current-buffer) :salta-application-id)
+                (and (mode-active-p (current-buffer) 'salta-list-mode)
                      (salta-current-row-id))
                 (prompt-for-string "Application ID: "))))
     (when (plusp (length id))
@@ -584,27 +681,103 @@ Loads (and caches) the contractor list on a background thread when needed."
               fin))
            (lambda () (lem-yath-salta-contractor-financials)))))))))
 
-(defun salta-payments-show (params buffer-name refresh-fn)
+(defun salta-payments-show
+    (params buffer-name refresh-fn &key application-id application-code)
   "Fetch rpt_payments with PARAMS and render the list in BUFFER-NAME."
   (salta-async
    (lambda () (salta-get "rpt_payments" params))
    (lambda (data)
      (if (null data)
          (message "No payments found")
-         (salta-show-list
-          buffer-name
-          `(("Contractor" 18 "contractor_name") ("App Code" 14 "application_code")
-            ("%" 6 ,(lambda (r) (salta-pct (salta-aget "percentage" r))))
-            ("Committed" 12 ,(lambda (r) (salta-money (salta-aget "total_committed_value" r))))
-            ("Pay Amt" 12 ,(lambda (r) (salta-money (salta-aget "pay_amount" r))))
-            ("Run" 14 "payment_run_label")
-            ("Date" 12 ,(lambda (r) (salta-date (salta-aget "created_at" r)))))
-          data "pay_commit_id" refresh-fn)))))
+         (let ((buffer
+                 (salta-show-list
+                  buffer-name
+                  `(("Contractor" 18 "contractor_name")
+                    ("App Code" 14 "application_code")
+                    ("%" 6 ,(lambda (r) (salta-pct (salta-aget "percentage" r))))
+                    ("Committed" 12 ,(lambda (r)
+                                       (salta-money
+                                        (salta-aget "total_committed_value" r))))
+                    ("Pay Amt" 12 ,(lambda (r)
+                                     (salta-money (salta-aget "pay_amount" r))))
+                    ("Run" 14 "payment_run_label")
+                    ("Date" 12 ,(lambda (r)
+                                  (salta-date (salta-aget "created_at" r)))))
+                  data "pay_commit_id" refresh-fn)))
+           (setf (buffer-value buffer :salta-application-id) application-id)
+           (setf (buffer-value buffer :salta-application-code) application-code))))))
 
-(define-command lem-yath-salta-payments () ()
-  "Browse recent payment runs. With a contractor filter when chosen."
+(define-command salta-detail-copy-id () ()
+  "Copy the current detail buffer's application code (w)."
+  (let ((code (buffer-value (current-buffer) :salta-application-code)))
+    (if (and code (plusp (length code)))
+        (progn
+          (copy-to-clipboard-with-killring code)
+          (message "Copied: ~a" code))
+        (message "No application code in this buffer"))))
+
+(define-command salta-detail-reckoner () ()
+  "Open the reckoner for the current detail buffer (r)."
+  (let ((id (buffer-value (current-buffer) :salta-application-id)))
+    (if id
+        (salta-property-reckoner-id id)
+        (message "No application in this buffer"))))
+
+(defun salta-property-claims-id (id code)
+  "Fetch and render claim lines for application ID and display CODE."
+  (salta-async
+   (lambda ()
+     (salta-get "rpt_claim_lines"
+                `(("application_id" . ,(format nil "eq.~a" id))
+                  ("order" . "measure_code"))))
+   (lambda (claims)
+     (if (null claims)
+         (message "No claim lines for ~a" code)
+         (let ((buffer
+                 (salta-show-list
+                  (format nil "*salta-claims: ~a*" code)
+                  `(("Contractor" 16 "contractor_name")
+                    ("Ref" 12 "reference_number")
+                    ("Measure" 10 "measure_code")
+                    ("Details" 24 "measure_details")
+                    ("Claimed" 10 "claimed_quantity")
+                    ("Approved" 10 "approved_quantity")
+                    ("Rate" 10 ,(lambda (row)
+                                  (salta-money (salta-aget "rate_amount" row))))
+                    ("Value" 12 ,(lambda (row)
+                                   (salta-money
+                                    (salta-aget "committed_value" row)))))
+                  claims "claim_item_id"
+                  (lambda () (salta-property-claims-id id code)))))
+           (setf (buffer-value buffer :salta-application-id) id)
+           (setf (buffer-value buffer :salta-application-code) code))))))
+
+(define-command salta-detail-claims () ()
+  "Open claim lines for the current detail buffer's property (c)."
+  (let ((id (buffer-value (current-buffer) :salta-application-id))
+        (code (buffer-value (current-buffer) :salta-application-code)))
+    (if id
+        (salta-property-claims-id id (or code id))
+        (message "No application in this buffer"))))
+
+(define-command salta-detail-payments () ()
+  "Open payments for the current detail buffer's property (p)."
+  (let ((id (buffer-value (current-buffer) :salta-application-id))
+        (code (buffer-value (current-buffer) :salta-application-code)))
+    (if id
+        (salta-payments-show
+         `(("application_id" . ,(format nil "eq.~a" id))
+           ("order" . "created_at.desc"))
+         (format nil "*salta-payments: ~a*" (or code id))
+         (lambda () (salta-detail-payments))
+         :application-id id
+         :application-code code)
+        (message "No application in this buffer"))))
+
+(defun salta-payments-command (filter-by-contractor-p)
+  "Browse payments, filtering by contractor when FILTER-BY-CONTRACTOR-P."
   (let ((params '(("order" . "created_at.desc") ("limit" . "100"))))
-    (if (prompt-for-y-or-n-p "Filter by contractor?")
+    (if filter-by-contractor-p
         (salta-read-contractor
          "Contractor: "
          (lambda (entry)
@@ -612,9 +785,13 @@ Loads (and caches) the contractor list on a background thread when needed."
              (salta-payments-show
               (append params `(("contractor_id" . ,(format nil "eq.~a" cid))))
               (format nil "*salta-payments: ~a*" name)
-              (lambda () (lem-yath-salta-payments))))))
+              (lambda () (salta-payments-command t))))))
         (salta-payments-show params "*salta-payments*"
-                             (lambda () (lem-yath-salta-payments))))))
+                             (lambda () (salta-payments-command nil))))))
+
+(define-command lem-yath-salta-payments (argument) (:universal-nil)
+  "Browse recent payments; with a prefix, filter by contractor."
+  (salta-payments-command (and argument t)))
 
 ;;; --- bindings (global keymap, mirroring salta.el's C-c s prefix) ----------
 
