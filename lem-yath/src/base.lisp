@@ -174,6 +174,8 @@ ON-EXIT, if given, is called on the editor thread with the exit code."
     (let ((boot-error (symbol-value (find-symbol "*LEM-YATH-BOOT-ERROR*" :lem-user))))
       (format s "boot-error: ~a~%" (or boot-error "none"))
       (format s "boot-ok: ~a~%" (boot-ok-p))
+      (format s "aot-root: ~a~%"
+              (or (uiop:getenv "LEM_YATH_AOT_FASL_ROOT") "none"))
       (format s "vi-mode: ~a~%" (typep (current-global-mode) 'lem-vi-mode:vi-mode))
       (format s "leader: ~a~%" (variable-value 'lem-vi-mode/leader:leader-key :global))
       (format s "leader-bindings: ~a~%"

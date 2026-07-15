@@ -38,9 +38,11 @@ nix develop
 lem -q --eval '(load #P"lem-yath/init.lisp")'
 ```
 
-The wrapper starts Lem without the user's normal init file, loads
-`lem-yath/init.lisp`, and keeps ASDF build outputs under the user cache instead
-of writing `.fasl` files into the source tree.
+The wrapper starts Lem without the user's normal init file and loads
+`lem-yath/init.lisp`. Nix compiles every configuration component ahead of time;
+the installed editor loads immutable `.fasl` files without compiling into the
+user cache. A direct development load still redirects ASDF output under
+`XDG_CACHE_HOME` instead of writing beside the sources.
 
 The installed package also provides `lemclient`. A configured Lem running in
 tmux publishes an owner-only local socket and its pane, so shell and Git edit
@@ -228,8 +230,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   current-line highlight or startup tab header, `C-x t 2` tabs on demand, and
   six Modus-matched delimiter depths in Common Lisp buffers
 - quiet no-file startup into the configured empty Org `*scratch*` buffer, with
-  logs and runtime ASDF outputs kept below `XDG_CACHE_HOME`; an installed-wrapper
-  gate covers cold configuration readiness and a 10-second cached-start budget
+  logs below `XDG_CACHE_HOME` and all installed configuration FASLs prebuilt by
+  Nix; an installed-wrapper gate covers cold AOT readiness and a 10-second
+  repeated-start budget
 - `C-x C-b` grouped like the effective Ibuffer setup: ordered, first-match
   org/tramp/emacs/ediff/dired/terminal/help headings, hidden empty groups, and a
   Default tail. Return collapses or expands a heading, while live filtering,

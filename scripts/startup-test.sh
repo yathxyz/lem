@@ -44,16 +44,18 @@ lisp_string() {
 
 start_editor() { # start_editor SESSION TRANSCRIPT [LEM-ARGS...]
   local session=$1 transcript=$2 gate editor_command launcher sink
+  local editor_bin="${STARTUP_EDITOR_BIN:-$LEM_BIN}"
+  local editor_cache="${STARTUP_CACHE_HOME:-$cache}"
   shift 2
   gate="$root/$session.go"
   rm -f "$gate" "$transcript"
 
   printf -v editor_command '%q ' env \
     "HOME=$home" \
-    "XDG_CACHE_HOME=$cache" \
+    "XDG_CACHE_HOME=$editor_cache" \
     "TERM=xterm-256color" \
     "LC_ALL=C.UTF-8" \
-    "$LEM_BIN" "$@"
+    "$editor_bin" "$@"
   printf -v launcher \
     'while [ ! -e %q ]; do sleep 0.01; done; exec %s' \
     "$gate" "$editor_command"
@@ -135,11 +137,51 @@ else
   fail cached-log 'the wrapper did not create its default cached debug log'
 fi
 
-if find "$cache/lem-yath/asdf" -type f -name '*.fasl' -print -quit |
-   grep -q .; then
-  pass cached-fasl 'runtime configuration artifacts stayed in the cache'
+aot_root=$(sed -n 's/^aot-root: //p' "$report" 2>/dev/null)
+aot_count=0
+if [ -n "$aot_root" ] && [ "$aot_root" != none ] && [ -d "$aot_root" ]; then
+  aot_count=$(find "$aot_root" -type f -name '*.fasl' | wc -l)
+fi
+if [ "$aot_count" -eq 84 ]; then
+  pass aot-fasl 'all 84 configuration components were compiled by Nix'
 else
-  fail cached-fasl 'the cold launch did not populate the ASDF cache'
+  fail aot-fasl "the installed AOT output contains $aot_count of 84 FASLs"
+fi
+
+if ! find "$cache" -type f -name '*.fasl' -print -quit | grep -q .; then
+  pass no-runtime-fasl 'cold startup wrote no configuration FASLs at runtime'
+else
+  fail no-runtime-fasl 'cold startup compiled configuration into the user cache'
+fi
+
+direct_source="$root/direct-source"
+direct_cache="$root/direct-cache"
+direct_report="$root/direct-report"
+source_root="${LEM_YATH_SOURCE:-$PWD/lem-yath}"
+cp -R "$source_root" "$direct_source"
+chmod -R u+w "$direct_source"
+mkdir -p "$direct_cache"
+direct_init=$(lisp_string "$direct_source/init.lisp")
+direct_form="(progn (load #P$direct_init) (uiop:symbol-call :lem-yath :write-boot-report $(lisp_string "$direct_report")))"
+direct_session="lem-yath-startup-direct-$id"
+direct_transcript="$root/direct.transcript"
+STARTUP_EDITOR_BIN="$LEM_UPSTREAM_BIN" \
+STARTUP_CACHE_HOME="$direct_cache" \
+  start_editor "$direct_session" "$direct_transcript" --eval "$direct_form"
+if wait_for_file "$direct_report" "$cold_budget_ms"; then
+  stop_editor "$direct_session"
+  direct_count=$(find "$direct_cache" -type f -name '*.fasl' | wc -l)
+  if grep -q '^boot-error: none$' "$direct_report" &&
+     grep -q '^boot-ok: T$' "$direct_report" &&
+     [ "$direct_count" -eq 84 ] &&
+     ! find "$direct_source" -type f -name '*.fasl' -print -quit | grep -q .; then
+    pass direct-cache 'a raw development load cached all FASLs outside its source tree'
+  else
+    fail direct-cache "development load failed, cached $direct_count of 84 FASLs, or polluted its source"
+  fi
+else
+  fail direct-cache 'the raw development load did not produce a boot report' "$direct_session"
+  stop_editor "$direct_session"
 fi
 
 if transcript_is_quiet "$cold_transcript"; then
@@ -154,9 +196,9 @@ warm_session="lem-yath-startup-warm-$id"
 warm_transcript="$root/warm.transcript"
 start_editor "$warm_session" "$warm_transcript"
 if wait_for_scratch "$warm_session" "$warm_budget_ms"; then
-  pass warm-ready "cached Org scratch appeared in ${startup_elapsed_ms}ms"
+  pass warm-ready "AOT-backed Org scratch appeared in ${startup_elapsed_ms}ms"
 else
-  fail warm-ready "cached startup exceeded ${warm_budget_ms}ms" "$warm_session"
+  fail warm-ready "AOT-backed startup exceeded ${warm_budget_ms}ms" "$warm_session"
 fi
 
 warm_screen=$(tmux -L "$socket" capture-pane -t "$warm_session" -p 2>/dev/null || true)
@@ -170,9 +212,9 @@ fi
 
 stop_editor "$warm_session"
 if transcript_is_quiet "$warm_transcript"; then
-  pass warm-quiet 'cached startup emitted no error or compilation chatter'
+  pass warm-quiet 'repeated startup emitted no error or compilation chatter'
 else
-  fail warm-quiet 'cached startup leaked error or compilation text'
+  fail warm-quiet 'repeated startup leaked error or compilation text'
 fi
 
 override_session="lem-yath-startup-log-$id"

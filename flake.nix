@@ -375,6 +375,79 @@
             text = builtins.readFile ./scripts/lemclient.sh;
           };
 
+          lemYathAotScript = pkgs.writeText "compile-lem-yath-aot.lisp" ''
+            (in-package :cl-user)
+
+            (labels ((finish (text status)
+                       (with-open-file
+                           (stream (uiop:getenv "LEM_YATH_AOT_REPORT")
+                                   :direction :output
+                                   :if-exists :supersede
+                                   :if-does-not-exist :create)
+                         (write-line text stream))
+                       (uiop:quit status)))
+              (handler-case
+                  (progn
+                    (asdf:load-asd #P"${self}/lem-yath/lem-yath.asd")
+                    (asdf:load-system "lem-yath")
+                    (finish "AOT OK" 0))
+                (error (condition)
+                  (finish (format nil "AOT ERROR: ~A" condition) 1))))
+          '';
+
+          lemYathAot =
+            pkgs.runCommand "lem-yath-aot-fasls"
+              {
+                nativeBuildInputs = [
+                  lemNcurses
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.tmux
+                ]
+                ++ defaultRuntimeInputs;
+              }
+              ''
+                mkdir -p "$out" "$TMPDIR/home" "$TMPDIR/cache"
+                export HOME="$TMPDIR/home"
+                export XDG_CACHE_HOME="$TMPDIR/cache"
+                export TERM=xterm-256color
+                export LEM_YATH_AOT_REPORT="$TMPDIR/aot-report"
+                export LEM_YATH_CLIENT=${lemClient}/bin/lemclient
+                export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
+                export LEM_YATH_GUARDIAN_PYTHON=${lib.getExe' pkgs.python3 "python3"}
+                export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
+                export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
+                export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-yath:$out:/nix/store:/nix/store"
+
+                socket="lem-yath-aot-$$"
+                form='(load #P"${lemYathAotScript}")'
+                printf -v command '%q ' \
+                  ${lemNcurses}/bin/lem -q \
+                  --log-filename "$TMPDIR/lem.log" \
+                  --eval "$form"
+                tmux -L "$socket" new-session -d -s build -x 160 -y 45 "$command"
+
+                for _ in $(seq 1 600); do
+                  [ -f "$LEM_YATH_AOT_REPORT" ] && break
+                  tmux -L "$socket" has-session -t build 2>/dev/null || break
+                  sleep 0.1
+                done
+                tmux -L "$socket" kill-server 2>/dev/null || true
+
+                if ! grep -Fxq 'AOT OK' "$LEM_YATH_AOT_REPORT" 2>/dev/null; then
+                  cat "$LEM_YATH_AOT_REPORT" 2>/dev/null || true
+                  cat "$TMPDIR/lem.log" 2>/dev/null || true
+                  exit 1
+                fi
+
+                expected=$(find ${self}/lem-yath/src -type f -name '*.lisp' | wc -l)
+                actual=$(find "$out" -type f -name '*.fasl' | wc -l)
+                if [ "$actual" -ne "$expected" ]; then
+                  echo "expected $expected lem-yath FASLs, built $actual" >&2
+                  exit 1
+                fi
+              '';
+
           lemYathEditor = pkgs.writeShellApplication {
             name = "lem";
             runtimeInputs = defaultRuntimeInputs;
@@ -384,13 +457,10 @@
               export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
               export LEM_YATH_GUARDIAN_PYTHON=${lib.getExe' pkgs.python3 "python3"}
               export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
+              export LEM_YATH_AOT_FASL_ROOT=${lemYathAot}
 
               cache_home="''${XDG_CACHE_HOME:-''${HOME:-/tmp}/.cache}"
-              source_key="$(printf '%s' '${self}/lem-yath' | sha256sum | cut -c1-16)"
-              asdf_cache="$cache_home/lem-yath/asdf/$source_key"
-              mkdir -p "$asdf_cache"
-
-              export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-yath:$asdf_cache:/nix/store:/nix/store''${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
+              export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-yath:${lemYathAot}:/nix/store:/nix/store''${ASDF_OUTPUT_TRANSLATIONS:+:$ASDF_OUTPUT_TRANSLATIONS}"
               export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
 
               # Lem loads its init file before command-line filenames, but
@@ -494,6 +564,7 @@
                 text = ''
                   export TERM=''${TERM:-xterm-256color}
                   export LEM_BIN=${lemPackage}/bin/lem
+                  export LEM_UPSTREAM_BIN=${lemNcurses}/bin/lem
                   export LEM_YATH_LEM_SOURCE=${lemPatchedSrc}
                   export LEM_YATH_SOURCE=${self}/lem-yath
                   export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
@@ -537,6 +608,7 @@
                 export HOME=$TMPDIR/home
                 export XDG_CACHE_HOME=$TMPDIR/cache
                 export LEM_BIN=${lemPackage}/bin/lem
+                export LEM_UPSTREAM_BIN=${lemNcurses}/bin/lem
                 export LEM_YATH_CHECK_ID=nix-${name}
                 export LEM_YATH_LEM_SOURCE=${lemPatchedSrc}
                 export LEM_YATH_SNIPPET_DIRS="$PWD/source/lem-yath/snippets:${yasnippet-snippets}/snippets"
