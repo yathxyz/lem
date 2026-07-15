@@ -94,6 +94,36 @@
                     (lem-yath::inactive-org-timestamp))
                    "inactive-timestamp-has-weekday-and-time")
 
+            (let* ((time (encode-universal-time 0 30 9 10 7 2026))
+                   (expected
+                     (merge-pathnames "roam/journal/20260710.org"
+                                      (lem-yath::workdir)))
+                   (first (lem-yath::open-journal-entry time))
+                   (buffer (lem:current-buffer)))
+              (check (uiop:pathname-equal first expected)
+                     "journal-uses-compact-date-path")
+              (check (uiop:pathname-equal (lem:buffer-filename buffer) expected)
+                     "journal-visits-configured-file")
+              (check (search "#+TITLE: Fri, 2026-07-10"
+                             (lem:buffer-text buffer))
+                     "journal-title-matches-configured-format")
+              (check (= 1 (cl-ppcre:count-matches
+                           "(?m)^\\* 09:30$" (lem:buffer-text buffer)))
+                     "journal-appends-time-heading")
+              (lem-yath::open-journal-entry time)
+              (check (= 1 (cl-ppcre:count-matches
+                           "(?m)^#\\+TITLE:" (lem:buffer-text buffer)))
+                     "journal-reuse-does-not-duplicate-title")
+              (check (= 2 (cl-ppcre:count-matches
+                           "(?m)^\\* 09:30$" (lem:buffer-text buffer)))
+                     "journal-reuse-appends-another-entry"))
+
+            (dolist (keymap (list lem-vi-mode:*normal-keymap*
+                                  lem-vi-mode:*visual-keymap*))
+              (check (eq 'lem-yath::lem-yath-journal-new-entry
+                         (lem-yath::leader-binding-command keymap "n j j"))
+                     "journal-leader-binding"))
+
             (let ((inbox (merge-pathnames "inbox.org" (lem-yath::workdir))))
               (alexandria:write-string-into-file
                (format nil "#+title: existing~%* Inbox~%intro~%** Existing child~%body~%* Later~%later body~%")

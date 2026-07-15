@@ -161,23 +161,29 @@ Signal an error before constructing a pathname unless DATE is valid YYYY-MM-DD."
       ((valid-iso-date-p date) (open-daily-note date))
       (t (message "Invalid date; use a real calendar date in YYYY-MM-DD form")))))
 
-(define-command lem-yath-journal-new-entry () ()
-  "New org-journal entry in $WORKDIR/roam/journal/%Y%m%d.org."
-  (multiple-value-bind (iso compact dow) (decoded-date-strings)
+(defun open-journal-entry (&optional (time (get-universal-time)))
+  "Open TIME's journal file and append its configured time heading."
+  (multiple-value-bind (iso compact dow) (decoded-date-strings time)
     (let ((path (merge-pathnames (format nil "journal/~a.org" compact)
                                  (roam-directory))))
       (ensure-directories-exist path)
-      (let ((new (not (uiop:probe-file* path))))
+      (let ((new (and (not (uiop:probe-file* path))
+                      (not (get-file-buffer path)))))
         (find-file path)
         (let ((buffer (current-buffer)))
           (when new
             (insert-string (current-point)
                            (format nil "#+TITLE: ~a, ~a~%" dow iso)))
-          (multiple-value-bind (sec min hour) (decode-universal-time (get-universal-time))
+          (multiple-value-bind (sec min hour) (decode-universal-time time)
             (declare (ignore sec))
             (move-point (buffer-point buffer) (buffer-end-point buffer))
             (insert-string (buffer-point buffer)
-                           (format nil "~%* ~2,'0d:~2,'0d~%" hour min))))))))
+                           (format nil "~%* ~2,'0d:~2,'0d~%" hour min))))
+        path))))
+
+(define-command lem-yath-journal-new-entry () ()
+  "New org-journal entry in $WORKDIR/roam/journal/%Y%m%d.org."
+  (open-journal-entry))
 
 ;;; --- capture (org-capture templates i/t/p/r) -------------------------------
 
