@@ -409,6 +409,7 @@
               # in command-line order without changing their normal timing.
               caller_form=
               have_eval=0
+              have_log_filename=0
               lem_args=()
               while (( "$#" )); do
                 case "$1" in
@@ -425,6 +426,15 @@
                     fi
                     shift 2
                     ;;
+                  --log-filename)
+                    have_log_filename=1
+                    lem_args+=("$1")
+                    shift
+                    if (( "$#" )); then
+                      lem_args+=("$1")
+                      shift
+                    fi
+                    ;;
                   -q|--without-init-file)
                     # This is the configured wrapper, so its immutable init
                     # file is mandatory even if callers pass upstream's -q.
@@ -439,6 +449,10 @@
 
               if (( have_eval )); then
                 lem_args+=(--eval "$caller_form")
+              fi
+
+              if (( ! have_log_filename )); then
+                lem_args+=(--log-filename "$cache_home/lem-yath/debug.log")
               fi
 
               exec ${lemNcurses}/bin/lem "''${lem_args[@]}"
@@ -584,6 +598,7 @@
               pkgs.util-linux
             ] "lem-yath-server-test" "server-test.sh";
             boot-test = mkTestApp "lem-yath-boot-test" "boot-test.sh";
+            startup-test = mkTestAppWithLem lemYath "lem-yath-startup-test" "startup-test.sh";
             completion-test = mkTestApp "lem-yath-completion-test" "completion-test.sh";
             completion-lifecycle-test = mkTestApp "lem-yath-completion-lifecycle-test" "completion-lifecycle-test.sh";
             auto-completion-test = mkTestApp "lem-yath-auto-completion-test" "auto-completion-test.sh";
@@ -676,6 +691,7 @@
             terminal = mkCheckWithLem lemYath "terminal" "terminal-test.sh";
             server = mkCheckWithLemAndInputs lemYath [ pkgs.socat pkgs.util-linux ] "server" "server-test.sh";
             boot = mkCheck "boot" "boot-test.sh";
+            startup = mkCheckWithLem lemYath "startup" "startup-test.sh";
             completion = mkCheck "completion" "completion-test.sh";
             completion-lifecycle = mkCheck "completion-lifecycle" "completion-lifecycle-test.sh";
             auto-completion = mkCheck "auto-completion" "auto-completion-test.sh";

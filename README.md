@@ -227,6 +227,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 - the current Modus Vivendi Tinted palette, truncated long lines, no global
   current-line highlight or startup tab header, `C-x t 2` tabs on demand, and
   six Modus-matched delimiter depths in Common Lisp buffers
+- quiet no-file startup into the configured empty Org `*scratch*` buffer, with
+  logs and runtime ASDF outputs kept below `XDG_CACHE_HOME`; an installed-wrapper
+  gate covers cold configuration readiness and a 10-second cached-start budget
 - `C-x C-b` grouped like the effective Ibuffer setup: ordered, first-match
   org/tramp/emacs/ediff/dired/terminal/help headings, hidden empty groups, and a
   Default tail. Return collapses or expands a heading, while live filtering,
@@ -398,6 +401,7 @@ nix run .#compilation-test
 nix run .#terminal-test
 nix run .#server-test
 nix run .#boot-test
+nix run .#startup-test
 nix run .#completion-test
 nix run .#prompt-completion-test
 nix run .#completion-lifecycle-test

@@ -2554,7 +2554,8 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
 - **Dashboard / welcome**: `extensions/lem-dashboard/` sets `lem:*splash-function*`
   (`lem-dashboard.lisp:146`) — the startup splash when no file is opened
   (`command-line-arguments.lisp:87-89`). `extensions/welcome/`, `extensions/lem-tutor/`
-  (interactive tutorial).
+  (interactive tutorial). Lem-yath deliberately overrides the splash with an
+  empty Org `*scratch*` buffer to match the configured Emacs startup.
 - **bookmark**: `extensions/bookmark/` (`lem-bookmark`).
 - **living-canvas / pixel-demo / call-graph**: experimental visual features
   (`#+sbcl lem-living-canvas`; call-graph providers for go/python via tree-sitter).

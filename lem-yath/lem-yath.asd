@@ -94,4 +94,5 @@
                (:static-file "compilation-guardian.py")
                (:file "compilation")
                (:file "prefix-help")
-               (:file "keybindings")))
+               (:file "keybindings")
+               (:file "startup")))
