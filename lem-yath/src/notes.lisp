@@ -100,39 +100,6 @@
             (elt #("Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun") day-of-week)
             hour min)))
 
-(defun leap-year-p (year)
-  (and (zerop (mod year 4))
-       (or (not (zerop (mod year 100)))
-           (zerop (mod year 400)))))
-
-(defun days-in-month (month year)
-  (case month
-    ((1 3 5 7 8 10 12) 31)
-    ((4 6 9 11) 30)
-    (2 (if (leap-year-p year) 29 28))
-    (otherwise 0)))
-
-(defun ascii-digits-p (text start end)
-  (loop :for index :from start :below end
-        :for character := (char text index)
-        :always (char<= #\0 character #\9)))
-
-(defun valid-iso-date-p (text)
-  "Whether TEXT is exactly YYYY-MM-DD and denotes a real calendar date."
-  (and (stringp text)
-       (= (length text) 10)
-       (char= (char text 4) #\-)
-       (char= (char text 7) #\-)
-       (ascii-digits-p text 0 4)
-       (ascii-digits-p text 5 7)
-       (ascii-digits-p text 8 10)
-       (let ((year (parse-integer text :start 0 :end 4))
-             (month (parse-integer text :start 5 :end 7))
-             (day (parse-integer text :start 8 :end 10)))
-         (and (plusp year)
-              (<= 1 month 12)
-              (<= 1 day (days-in-month month year))))))
-
 (defun daily-note-path (date)
   "Return DATE's daily path directly under the roam root.
 Signal an error before constructing a pathname unless DATE is valid YYYY-MM-DD."

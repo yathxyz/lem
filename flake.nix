@@ -577,10 +577,13 @@
             notes-test = mkTestApp "lem-yath-notes-test" "notes-test.sh";
             roam-test = mkTestApp "lem-yath-roam-test" "roam-test.sh";
             org-test = mkTestAppWithLem lemYath "lem-yath-org-test" "org-test.sh";
-            org-babel-test = mkTestAppWithLemAndInputs lemYath [ pkgs.postgresql ] "lem-yath-org-babel-test" "org-babel-test.sh";
-            org-publish-test =
-              mkTestAppWithLemAndInputs lemYath [ pkgs.pandoc ] "lem-yath-org-publish-test"
-                "org-publish-test.sh";
+            org-planning-test = mkTestAppWithLem lemYath "lem-yath-org-planning-test" "org-planning-test.sh";
+            org-babel-test = mkTestAppWithLemAndInputs lemYath [
+              pkgs.postgresql
+            ] "lem-yath-org-babel-test" "org-babel-test.sh";
+            org-publish-test = mkTestAppWithLemAndInputs lemYath [
+              pkgs.pandoc
+            ] "lem-yath-org-publish-test" "org-publish-test.sh";
             org-operator-test = mkTestAppWithLem lemYath "lem-yath-org-operator-test" "org-operator-test.sh";
             agenda-test = mkTestAppWithLem lemYath "lem-yath-agenda-test" "agenda-test.sh";
             agenda-clock-test = mkTestAppWithLem lemYath "lem-yath-agenda-clock-test" "agenda-clock-test.sh";
@@ -647,10 +650,9 @@
             notes = mkCheck "notes" "notes-test.sh";
             roam = mkCheck "roam" "roam-test.sh";
             org = mkCheckWithLem lemYath "org" "org-test.sh";
+            org-planning = mkCheckWithLem lemYath "org-planning" "org-planning-test.sh";
             org-babel = mkCheckWithLemAndInputs lemYath [ pkgs.postgresql ] "org-babel" "org-babel-test.sh";
-            org-publish =
-              mkCheckWithLemAndInputs lemYath [ pkgs.pandoc ] "org-publish"
-                "org-publish-test.sh";
+            org-publish = mkCheckWithLemAndInputs lemYath [ pkgs.pandoc ] "org-publish" "org-publish-test.sh";
             org-operator = mkCheckWithLem lemYath "org-operator" "org-operator-test.sh";
             agenda = mkCheckWithLem lemYath "agenda" "agenda-test.sh";
             agenda-clock = mkCheckWithLem lemYath "agenda-clock" "agenda-clock-test.sh";

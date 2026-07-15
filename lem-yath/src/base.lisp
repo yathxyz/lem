@@ -39,6 +39,92 @@ Returns the containing directory pathname, or NIL."
                              (merge-pathnames name (uiop:ensure-directory-pathname dir))))))
                 (when path (return path)))))
 
+;;; --- calendar dates ------------------------------------------------------
+
+(defun leap-year-p (year)
+  (and (zerop (mod year 4))
+       (or (not (zerop (mod year 100)))
+           (zerop (mod year 400)))))
+
+(defun days-in-month (month year)
+  (case month
+    ((1 3 5 7 8 10 12) 31)
+    ((4 6 9 11) 30)
+    (2 (if (leap-year-p year) 29 28))
+    (otherwise 0)))
+
+(defun ascii-digits-p (text start end)
+  (loop :for index :from start :below end
+        :for character := (char text index)
+        :always (char<= #\0 character #\9)))
+
+(defun valid-iso-date-p (text)
+  "Whether TEXT is exactly YYYY-MM-DD and denotes a real calendar date."
+  (and (stringp text)
+       (= (length text) 10)
+       (char= (char text 4) #\-)
+       (char= (char text 7) #\-)
+       (ascii-digits-p text 0 4)
+       (ascii-digits-p text 5 7)
+       (ascii-digits-p text 8 10)
+       (let ((year (parse-integer text :start 0 :end 4))
+             (month (parse-integer text :start 5 :end 7))
+             (day (parse-integer text :start 8 :end 10)))
+         (and (plusp year)
+              (<= 1 month 12)
+              (<= 1 day (days-in-month month year))))))
+
+(defun iso-date-components (date)
+  (unless (valid-iso-date-p date)
+    (error "Invalid ISO date: ~s" date))
+  (values (parse-integer date :start 0 :end 4)
+          (parse-integer date :start 5 :end 7)
+          (parse-integer date :start 8 :end 10)))
+
+(defun iso-date-for-time (time)
+  "Return local calendar date at TIME as YYYY-MM-DD."
+  (multiple-value-bind (second minute hour day month year)
+      (decode-universal-time time)
+    (declare (ignore second minute hour))
+    (format nil "~4,'0d-~2,'0d-~2,'0d" year month day)))
+
+(defun iso-date-add-calendar (date amount unit)
+  "Add signed AMOUNT of UNIT (d, w, m, or y) to ISO DATE."
+  (multiple-value-bind (year month day) (iso-date-components date)
+    (let ((result
+            (ecase (char-downcase unit)
+              ((#\d #\w)
+               (multiple-value-bind
+                     (second minute hour new-day new-month new-year)
+                   (decode-universal-time
+                    (+ (encode-universal-time 0 0 12 day month year 0)
+                       (* amount
+                          (if (char-equal unit #\w) 7 1)
+                          86400))
+                    0)
+                 (declare (ignore second minute hour))
+                 (format nil "~4,'0d-~2,'0d-~2,'0d"
+                         new-year new-month new-day)))
+              (#\m
+               (let* ((zero-month (+ (* year 12) (1- month) amount))
+                      (new-year (floor zero-month 12))
+                      (new-month (1+ (mod zero-month 12)))
+                      (new-day (and (plusp new-year)
+                                    (min day
+                                         (days-in-month new-month new-year)))))
+                 (and new-day
+                      (format nil "~4,'0d-~2,'0d-~2,'0d"
+                              new-year new-month new-day))))
+              (#\y
+               (let* ((new-year (+ year amount))
+                      (new-day (and (plusp new-year)
+                                    (min day
+                                         (days-in-month month new-year)))))
+                 (and new-day
+                      (format nil "~4,'0d-~2,'0d-~2,'0d"
+                              new-year month new-day)))))))
+      (and (valid-iso-date-p result) result))))
+
 ;;; --- async processes -> buffers -------------------------------------------
 
 (defun append-text (buffer string)

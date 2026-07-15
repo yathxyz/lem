@@ -1919,6 +1919,21 @@ change. Normal one-character `x/X` inserts replacement table padding like
 `org-delete-char`; counted and Visual deletion deliberately retain ordinary Evil
 semantics.
 
+`src/org/planning.lisp` provides GNU Org's in-buffer `C-c C-s` scheduling and
+`C-c C-d` deadline chords. The date prompt displays the existing field—or
+today—as a bracketed default, accepts an empty submission for that default,
+and supports exact `YYYY-MM-DD`, `.`, and signed day/week/month/year offsets.
+A doubled sign such as `++1m` is relative to the existing field; a single sign
+is relative to today. Insertion creates the structural line immediately below
+the current heading, replacement preserves the other planning field and its
+order, and one universal prefix removes only the requested field (including
+the complete line when it becomes empty). Ordinary Org-buffer edits remain
+modified but unsaved, matching the current Emacs configuration; agenda
+mutations retain their separate immediate-save policy. Cancellation and
+read-only refusal occur before mutation, and each successful command is one
+undo step. `scripts/org-planning-test.sh` drives both physical chords through
+the packaged ncurses editor and proves those boundaries.
+
 The pinned Evil-Org `<`/`>` range operators are available in Normal and Visual
 states. Heading ranges promote or demote only selected heading lines by one
 level. Safe list-item ranges move by the surrounding list's indentation step
@@ -2002,8 +2017,9 @@ footnote, nested-special, and malformed text-object contexts; structural
 repairs beyond the bounded `d/x/X/< />` behavior; region-aware Meta operations,
 generic Org-element
 movement, shift-control commands, and richer list/table semantics; timestamp,
-scheduling, and deadline
-workflows; source-block editing, variables/sessions and the rest of Babel's
+time-of-day/named-date/calendar planning input, warning and delay cookies,
+region-wide planning, and wider timestamp workflows; source-block editing,
+variables/sessions and the rest of Babel's
 backend/header/result matrix; in-editor LaTeX preview, non-HTML export
 backends, and exact `ox-html` output; org-modern
 glyph composition in the terminal; and an initial Org

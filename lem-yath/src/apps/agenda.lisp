@@ -323,27 +323,14 @@ Ordinary active timestamps belong to their containing visible heading."
 
 (defun today-iso (&optional (now (funcall *agenda-now-function*)))
   "Today as a YYYY-MM-DD string."
-  (multiple-value-bind (sec min hour day month year)
-      (decode-universal-time now)
-    (declare (ignore sec min hour))
-    (format nil "~4,'0d-~2,'0d-~2,'0d" year month day)))
+  (iso-date-for-time now))
 
 (defun iso-plus-days (days &optional (now (funcall *agenda-now-function*)))
   "Today + DAYS as YYYY-MM-DD, anchored at noon across DST transitions."
-  (multiple-value-bind (sec min hour day month year)
-      (decode-universal-time now)
-    (declare (ignore sec min hour))
-    (multiple-value-bind (new-sec new-min new-hour new-day new-month new-year)
-        (decode-universal-time
-         (+ (encode-universal-time 0 0 12 day month year)
-            (* days 24 60 60)))
-      (declare (ignore new-sec new-min new-hour))
-      (format nil "~4,'0d-~2,'0d-~2,'0d" new-year new-month new-day))))
+  (iso-date-add-calendar (today-iso now) days #\d))
 
 (defun agenda-date-components (date)
-  (values (parse-integer date :start 0 :end 4)
-          (parse-integer date :start 5 :end 7)
-          (parse-integer date :start 8 :end 10)))
+  (iso-date-components date))
 
 (defun agenda-date-ordinal (date)
   "Return a timezone-independent day ordinal for DATE."
@@ -352,28 +339,8 @@ Ordinary active timestamps belong to their containing visible heading."
 
 (defun agenda-add-calendar (date amount unit)
   "Add AMOUNT units UNIT (d, w, m, or y) to DATE."
-  (multiple-value-bind (year month day) (agenda-date-components date)
-    (ecase unit
-      ((#\d #\w)
-       (multiple-value-bind (second minute hour new-day new-month new-year)
-           (decode-universal-time
-            (+ (encode-universal-time 0 0 12 day month year 0)
-               (* amount (if (char= unit #\w) 7 1) 86400))
-            0)
-         (declare (ignore second minute hour))
-         (format nil "~4,'0d-~2,'0d-~2,'0d" new-year new-month new-day)))
-      (#\m
-       (let* ((zero-month (+ (* year 12) (1- month) amount))
-              (new-year (floor zero-month 12))
-              (new-month (1+ (mod zero-month 12)))
-              (new-day (min day (days-in-month new-month new-year))))
-         (format nil "~4,'0d-~2,'0d-~2,'0d"
-                 new-year new-month new-day)))
-      (#\y
-       (let* ((new-year (+ year amount))
-              (new-day (min day (days-in-month month new-year))))
-         (format nil "~4,'0d-~2,'0d-~2,'0d"
-                 new-year month new-day))))))
+  (or (iso-date-add-calendar date amount unit)
+      (error "Calendar offset leaves the supported ISO date range")))
 
 (defun agenda-repeater-parts (repeater)
   (when repeater
@@ -836,24 +803,6 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
       (save-buffer buffer)))
   state)
 
-(defparameter *agenda-weekday-names*
-  #("Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun"))
-
-(defun agenda-date-with-weekday (date)
-  "Return DATE as an active Org timestamp with its computed weekday."
-  (unless (valid-iso-date-p date)
-    (error "Invalid Org date: ~s" date))
-  (let ((year (parse-integer date :start 0 :end 4))
-        (month (parse-integer date :start 5 :end 7))
-        (day (parse-integer date :start 8 :end 10)))
-    (multiple-value-bind (second minute hour decoded-day decoded-month
-                          decoded-year weekday)
-        (decode-universal-time
-         (encode-universal-time 0 0 12 day month year))
-      (declare (ignore second minute hour decoded-day decoded-month
-                       decoded-year))
-      (format nil "<~a ~a>" date (aref *agenda-weekday-names* weekday)))))
-
 (defun agenda-read-date (label)
   "Read a bounded Org date for LABEL, returning DATE and true on success."
   (loop
@@ -863,44 +812,14 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
                                         label)))
     :do (cond
           ((zerop (length input)) (return (values nil nil)))
-          ((valid-iso-date-p input) (return (values input t)))
           (t
-           (multiple-value-bind (start end registers register-ends)
-               (ppcre:scan "^\\+([0-9]+)([dDwW])$" input)
-             (declare (ignore end))
-             (if start
-                 (let* ((amount
-                          (parse-integer input
-                                         :start (aref registers 0)
-                                         :end (aref register-ends 0)))
-                        (unit (char-downcase (aref input (aref registers 1))))
-                        (days (* amount (if (char= unit #\w) 7 1))))
-                   (return (values (iso-plus-days days) t)))
-                 (message "Invalid date; use YYYY-MM-DD, +Nd, or +Nw")))))))
-
-(defun agenda-set-planning-field (heading kind date)
-  "Set KIND to DATE on HEADING's immediate Org planning line."
-  (let* ((timestamp (agenda-date-with-weekday date))
-         (field (format nil "~a: ~a" kind timestamp))
-         (scanner (ppcre:create-scanner
-                   (format nil "~a:\\s*<[^>]+>" kind))))
-    (with-point ((planning heading))
-      (if (and (line-offset planning 1)
-               (ppcre:scan *planning-line-scanner* (line-string planning)))
-          (let ((line (line-string planning)))
-            (multiple-value-bind (start end) (ppcre:scan scanner line)
-              (line-start planning)
-              (if start
-                  (progn
-                    (character-offset planning start)
-                    (delete-character planning (- end start))
-                    (insert-string planning field))
-                  (insert-string planning (concatenate 'string field " ")))))
-          (progn
-            (move-point planning heading)
-            (line-end planning)
-            (insert-string planning (format nil "~%~a" field)))))
-    timestamp))
+           (alexandria:if-let
+               ((date
+                  (org-parse-planning-date-input
+                   input :now (funcall *agenda-now-function*))))
+             (return (values date t))
+             (message
+              "Invalid date; use YYYY-MM-DD, ., or +/-N[d/w/m/y]"))))))
 
 (defun agenda-set-source-planning (file line expected-heading kind date)
   "Set one exact agenda source planning KIND to DATE and save immediately."
@@ -916,7 +835,7 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
           (error "Agenda source line no longer exists; refresh the agenda"))
         (unless (string= expected-heading (line-string heading))
           (error "Agenda source changed; refresh before editing"))
-        (setf timestamp (agenda-set-planning-field heading kind date)))
+        (setf timestamp (org-set-planning-field heading kind date)))
       (save-buffer buffer))
     timestamp))
 

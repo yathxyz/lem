@@ -256,6 +256,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   or Markdown note and any deferred link, while `C-c C-k` aborts without a
   file. Root-level roam dailies, journal, and i/t/r capture operate over
   `$WORKDIR`, with public TODO capture over `$PUBLIC_ORG_DIR`
+- in-buffer Org scheduling and deadlines on GNU Org's `C-c C-s` and
+  `C-c C-d`. The prompt shows the existing date or today as its default,
+  accepts absolute dates plus signed day/week/month/year offsets, and uses a
+  doubled sign relative to the existing field. A universal prefix removes the
+  selected field; edits remain unsaved like the current Emacs Org-buffer path
 - configured Org Babel execution on `C-c C-c` for Bash/Shell, Python, C/C++,
   Nix, SQLite, and PostgreSQL SQL blocks. Shell, Python, C, Nix, and SQL ask
   before running; SQLite follows the Emacs configuration's trusted-note

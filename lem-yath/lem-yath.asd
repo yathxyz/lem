@@ -49,6 +49,7 @@
                              (:file "folding")
                              (:file "mode")
                              (:file "babel")
+                             (:file "planning")
                              (:file "commands")
                              (:file "structure")
                              (:file "element-navigation")

@@ -8,7 +8,8 @@
       (decode-universal-time time)
     (declare (ignore second))
     (format nil "~4,'0d-~2,'0d-~2,'0d ~a ~2,'0d:~2,'0d"
-            year month day (aref *agenda-weekday-names* weekday) hour minute)))
+            year month day
+            (aref *org-planning-weekday-names* weekday) hour minute)))
 
 (defun agenda-default-archive-pathname (source)
   "Return GNU Org's default `%s_archive::' destination for SOURCE."
