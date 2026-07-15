@@ -2240,6 +2240,26 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   `scripts/llm-backend-test.sh` drives these transports through real ncurses
   Lem with fake executables and no credentials.
 
+  `SPC g l` and `SPC g L` open the compact preset/handoff menu used by the
+  Emacs configuration. It loads or saves named presets, selects a model, and
+  hands the active region (otherwise the complete buffer) to Claude web or
+  ChatGPT normal, search, research, or model-hint URLs. Context includes
+  buffer, mode, file, and non-prompting project metadata; it is capped at
+  13,000 characters while retaining the newest text. ChatGPT also receives
+  the exact handoff prompt in Lem's kill ring. Brave is preferred and
+  `xdg-open` is the final fallback; every launch uses an argument vector rather
+  than a shell.
+
+  The built-in `quick-lookup` and `grok-build` presets reproduce the usable
+  Emacs presets whose transports exist here. User presets persist backend,
+  model, system message, temperature, and token cap in
+  `$XDG_CONFIG_HOME/lem-yath/llm-presets.json`; creation, locking, and atomic
+  replacement enforce user ownership and private `0700`/`0600` modes on SBCL.
+  `scripts/llm-workflow-test.sh` verifies the menu through physical keys,
+  private save and fresh-process reload, visual-region Claude handoff, bounded
+  ChatGPT search handoff, kill-ring copy, and decoded URL parameters without
+  opening a real browser.
+
   - **Copilot** — `extensions/copilot/` (`lem-copilot`): `copilot-mode` minor mode,
     `copilot-install-server`, `copilot-signin`, `copilot-complete`,
     `copilot-accept-suggestion`, `copilot-next/previous-suggestion`

@@ -1,0 +1,532 @@
+;;;; lem-yath apps/llm-presets -- gptel-style presets and web handoff.
+
+(in-package :lem-yath)
+
+(defparameter *llm-preset-file-size-limit* (* 1024 1024))
+(defparameter *llm-preset-count-limit* 100)
+(defparameter *llm-preset-name-limit* 80)
+(defparameter *llm-preset-string-limit* (* 64 1024))
+
+(defparameter *llm-builtin-presets*
+  `(("quick-lookup"
+     :backend :openrouter
+     :model "openrouter/auto"
+     :system "Short, direct answers. Skip extra context unless it changes correctness."
+     :temperature 0.2
+     :max-tokens 800)
+    ("grok-build"
+     :backend :grok
+     :model "grok-build"
+     :system "You are a coding assistant. Answer directly; inspect the project only when needed."
+     :temperature 0.2
+     :max-tokens nil))
+  "Built-in presets whose required transport exists in Lem-yath.")
+
+(defvar *llm-current-preset* "quick-lookup")
+
+(defvar *llm-handoff-max-chars* 13000)
+(defvar *llm-claude-handoff-web-url* "https://claude.ai/new")
+(defvar *llm-chatgpt-handoff-url* "https://chatgpt.com/")
+(defvar *llm-chatgpt-handoff-model* nil)
+(defvar *llm-handoff-browser-commands*
+  '("/home/yanni/.nix-profile/bin/brave"
+    "/run/current-system/sw/bin/brave"
+    "brave"
+    "brave-browser"
+    "xdg-open"))
+(defvar *llm-handoff-browser-arguments* '("--new-window"))
+
+(defun llm-preset-file-override ()
+  (uiop:getenv "LEM_YATH_LLM_PRESET_FILE"))
+
+(defun llm-preset-pathname ()
+  "Return the private user-preset JSON file."
+  (alexandria:if-let ((override (llm-preset-file-override)))
+    (uiop:parse-native-namestring override)
+    (let ((configuration-home
+            (alexandria:if-let ((xdg (uiop:getenv "XDG_CONFIG_HOME")))
+              (uiop:ensure-directory-pathname
+               (uiop:parse-native-namestring xdg))
+              (merge-pathnames ".config/" (user-homedir-pathname)))))
+      (merge-pathnames "lem-yath/llm-presets.json" configuration-home))))
+
+(defun llm-preset-lock-pathname ()
+  (uiop:parse-native-namestring
+   (concatenate 'string (uiop:native-namestring (llm-preset-pathname))
+                ".lock")))
+
+(defun llm-preset-temporary-pathname (pathname)
+  (uiop:parse-native-namestring
+   (format nil "~a.tmp.~d.~16,'0x"
+           (uiop:native-namestring pathname)
+           #+sbcl (sb-posix:getpid)
+           #-sbcl 0
+           (random (ash 1 60)))))
+
+(defun llm-preset-prepare-private-directory ()
+  "Create or validate the preset directory without weakening an override."
+  (let* ((pathname (llm-preset-pathname))
+         (directory (uiop:pathname-directory-pathname pathname))
+         (existed (uiop:directory-exists-p directory)))
+    (ensure-directories-exist pathname)
+    #+sbcl
+    (if (and (llm-preset-file-override) existed)
+        (let ((stat (sb-posix:stat (uiop:native-namestring directory))))
+          (unless (and (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+                       (zerop (logand (sb-posix:stat-mode stat) #o077)))
+            (error "LLM preset override directory must be private and user-owned")))
+        (sb-posix:chmod (uiop:native-namestring directory) #o700))
+    #-sbcl
+    (error "Safe LLM preset persistence requires SBCL")
+    directory))
+
+(defun llm-preset-validate-existing-file (pathname)
+  (when (uiop:file-exists-p pathname)
+    #+sbcl
+    (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
+      (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
+                      sb-posix:s-ifreg)
+                   (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
+        (error "LLM preset file must be a regular user-owned file")))
+    #-sbcl
+    (error "Safe LLM preset persistence requires SBCL")))
+
+(defun call-with-llm-preset-lock (function)
+  "Call FUNCTION while holding the private cross-process preset lock."
+  (llm-preset-prepare-private-directory)
+  (llm-preset-validate-existing-file (llm-preset-pathname))
+  #+sbcl
+  (let ((descriptor
+          (sb-posix:open
+           (uiop:native-namestring (llm-preset-lock-pathname))
+           (logior sb-posix:o-creat sb-posix:o-rdwr sb-posix:o-nofollow)
+           #o600)))
+    (unwind-protect
+         (progn
+           (sb-posix:fchmod descriptor #o600)
+           (let ((stat (sb-posix:fstat descriptor)))
+             (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
+                             sb-posix:s-ifreg)
+                          (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
+               (error "LLM preset lock must be a regular user-owned file")))
+           (sb-posix:lockf descriptor sb-posix:f-lock 0)
+           (funcall function))
+      (ignore-errors (sb-posix:lockf descriptor sb-posix:f-ulock 0))
+      (ignore-errors (sb-posix:close descriptor))))
+  #-sbcl
+  (error "Safe LLM preset persistence requires SBCL"))
+
+(defun llm-preset-read-text (pathname)
+  (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+    (let ((length (file-length stream)))
+      (when (> length *llm-preset-file-size-limit*)
+        (error "LLM preset file exceeds the size limit"))
+      (let ((octets (make-array length :element-type '(unsigned-byte 8))))
+        (unless (= length (read-sequence octets stream))
+          (error "Could not read the complete LLM preset file"))
+        #+sbcl (sb-ext:octets-to-string octets :external-format :utf-8)
+        #-sbcl (error "UTF-8 preset decoding requires SBCL")))))
+
+(defun llm-preset-backend (value)
+  (and (stringp value)
+       (cdr (assoc value
+                   '(("openrouter" . :openrouter)
+                     ("claude-code" . :claude-code)
+                     ("codex" . :codex)
+                     ("grok" . :grok))
+                   :test #'string=))))
+
+(defun llm-preset-backend-name (backend)
+  (string-downcase (symbol-name backend)))
+
+(defun llm-preset-name-valid-p (name)
+  (and (stringp name)
+       (plusp (length name))
+       (<= (length name) *llm-preset-name-limit*)
+       (every (lambda (character)
+                (and (graphic-char-p character)
+                     (not (member character '(#\Newline #\Return #\Tab)))))
+              name)))
+
+(defun llm-preset-valid-p (name preset)
+  (and (llm-preset-name-valid-p name)
+       (member (getf preset :backend) '(:openrouter :claude-code :codex :grok))
+       (stringp (getf preset :model))
+       (<= (length (getf preset :model)) *llm-preset-string-limit*)
+       (stringp (getf preset :system))
+       (<= (length (getf preset :system)) *llm-preset-string-limit*)
+       (realp (getf preset :temperature))
+       (<= 0 (getf preset :temperature) 2)
+       (let ((maximum (getf preset :max-tokens)))
+         (or (null maximum)
+             (and (integerp maximum) (<= 1 maximum 1000000))))))
+
+(defun llm-preset-from-json (object)
+  (when (hash-table-p object)
+    (let* ((name (gethash "name" object))
+           (preset
+             (list :backend (llm-preset-backend (gethash "backend" object))
+                   :model (gethash "model" object)
+                   :system (gethash "system" object)
+                   :temperature (gethash "temperature" object)
+                   :max-tokens (gethash "max_tokens" object))))
+      (and (llm-preset-valid-p name preset) (cons name preset)))))
+
+(defun llm-read-user-presets ()
+  "Read and validate user presets; malformed state yields no presets."
+  (let ((pathname (llm-preset-pathname)))
+    (if (uiop:file-exists-p pathname)
+        (handler-case
+            (progn
+              (llm-preset-validate-existing-file pathname)
+              (let* ((root (yason:parse (llm-preset-read-text pathname)
+                                        :json-arrays-as-vectors t))
+                     (version (and (hash-table-p root)
+                                   (gethash "version" root)))
+                     (objects (and (= version 1)
+                                   (gethash "presets" root)))
+                     (entries
+                       (loop :for object :across
+                               (if (vectorp objects) objects #())
+                             :for entry := (llm-preset-from-json object)
+                             :when entry :collect entry)))
+                (subseq entries 0 (min (length entries)
+                                       *llm-preset-count-limit*))))
+          (error () nil))
+        nil)))
+
+(defun llm-preset-json-object (name preset)
+  (alexandria:alist-hash-table
+   `(("name" . ,name)
+     ("backend" . ,(llm-preset-backend-name (getf preset :backend)))
+     ("model" . ,(getf preset :model))
+     ("system" . ,(getf preset :system))
+     ("temperature" . ,(getf preset :temperature))
+     ("max_tokens" . ,(getf preset :max-tokens)))
+   :test #'equal))
+
+(defun llm-preset-json-text (presets)
+  (with-output-to-string (stream)
+    (yason:encode
+     (alexandria:alist-hash-table
+      `(("version" . 1)
+        ("presets" . ,(coerce
+                        (mapcar (lambda (entry)
+                                  (llm-preset-json-object
+                                   (car entry) (cdr entry)))
+                                presets)
+                        'vector)))
+      :test #'equal)
+     stream)))
+
+(defun llm-write-user-presets (presets)
+  "Atomically write validated PRESETS with private permissions."
+  (let* ((pathname (llm-preset-pathname))
+         (temporary (llm-preset-temporary-pathname pathname))
+         (text (llm-preset-json-text presets))
+         (octets #+sbcl (sb-ext:string-to-octets text :external-format :utf-8)
+                 #-sbcl (error "UTF-8 preset encoding requires SBCL"))
+         (descriptor nil)
+         (stream nil))
+    (when (> (length octets) *llm-preset-file-size-limit*)
+      (error "Refusing an oversized LLM preset file"))
+    (unwind-protect
+         (progn
+           #+sbcl
+           (progn
+             (setf descriptor
+                   (sb-posix:open
+                    (uiop:native-namestring temporary)
+                    (logior sb-posix:o-creat sb-posix:o-excl
+                            sb-posix:o-wronly sb-posix:o-nofollow)
+                    #o600))
+             (sb-posix:fchmod descriptor #o600)
+             (setf stream
+                   (sb-sys:make-fd-stream
+                    descriptor :output t :element-type '(unsigned-byte 8)
+                    :buffering :full
+                    :name (uiop:native-namestring temporary)))
+             (write-sequence octets stream)
+             (finish-output stream)
+             (sb-posix:fsync descriptor)
+             (close stream)
+             (setf stream nil descriptor nil))
+           #-sbcl
+           (error "Safe LLM preset persistence requires SBCL")
+           (uiop:rename-file-overwriting-target temporary pathname)
+           #+sbcl (sb-posix:chmod (uiop:native-namestring pathname) #o600))
+      (when stream
+        (ignore-errors (close stream :abort t))
+        (setf descriptor nil))
+      (when descriptor (ignore-errors (sb-posix:close descriptor)))
+      (when (uiop:file-exists-p temporary)
+        (ignore-errors (delete-file temporary))))))
+
+(defun llm-all-presets ()
+  "Return user and built-in presets, with user definitions taking precedence."
+  (remove-duplicates (append (llm-read-user-presets) *llm-builtin-presets*)
+                     :key #'car :test #'string= :from-end t))
+
+(defun llm-current-settings ()
+  (list :backend *llm-backend*
+        :model *llm-model*
+        :system *llm-system-message*
+        :temperature *llm-temperature*
+        :max-tokens *llm-max-tokens*))
+
+(defun llm-apply-preset (name preset)
+  "Apply validated PRESET named NAME to the live LLM settings."
+  (unless (llm-preset-valid-p name preset)
+    (error "Invalid LLM preset ~s" name))
+  (setf *llm-backend* (getf preset :backend)
+        *llm-model* (getf preset :model)
+        *llm-system-message* (getf preset :system)
+        *llm-temperature* (getf preset :temperature)
+        *llm-max-tokens* (getf preset :max-tokens)
+        *llm-current-preset* name)
+  preset)
+
+(defun llm-load-preset (name)
+  "Load the named preset NAME, returning it or NIL."
+  (alexandria:when-let ((entry (assoc name (llm-all-presets) :test #'string=)))
+    (llm-apply-preset (car entry) (cdr entry))))
+
+(defun llm-save-preset (name)
+  "Persist the current settings under NAME, merging under a cross-process lock."
+  (unless (llm-preset-name-valid-p name)
+    (error "Invalid LLM preset name"))
+  (let ((preset (llm-current-settings)))
+    (unless (llm-preset-valid-p name preset)
+      (error "Current LLM settings cannot be saved as a preset"))
+    (call-with-llm-preset-lock
+     (lambda ()
+       (let ((presets (remove name (llm-read-user-presets)
+                              :key #'car :test #'string=)))
+         (push (cons name preset) presets)
+         (setf presets (subseq presets 0 (min (length presets)
+                                              *llm-preset-count-limit*)))
+         (llm-write-user-presets presets))))
+    (setf *llm-current-preset* name)
+    preset))
+
+(define-command lem-yath-llm-load-preset () ()
+  "Load a built-in or saved LLM preset."
+  (let* ((presets (llm-all-presets))
+         (names (mapcar #'car presets))
+         (choice (prompt-for-string
+                  "LLM preset: "
+                  :completion-function (lambda (input)
+                                         (prescient-filter input names))
+                  :initial-value *llm-current-preset*
+                  :history-symbol 'lem-yath-llm-preset)))
+    (if (llm-load-preset choice)
+        (message "Loaded LLM preset: ~a" choice)
+        (message "Unknown LLM preset: ~a" choice))))
+
+(define-command lem-yath-llm-save-preset () ()
+  "Save the current LLM settings as a named preset."
+  (let ((name (prompt-for-string "Save LLM preset: "
+                                 :initial-value *llm-current-preset*
+                                 :history-symbol 'lem-yath-llm-preset)))
+    (handler-case
+        (progn
+          (llm-save-preset name)
+          (message "Saved LLM preset: ~a" name))
+      (error () (message "Could not save LLM preset")))))
+
+(defun llm-handoff-region-text (buffer)
+  (if (buffer-mark-p buffer)
+      (let ((global-mode (current-global-mode)))
+        (points-to-string
+         (region-beginning-using-global-mode global-mode buffer)
+         (region-end-using-global-mode global-mode buffer)))
+      (points-to-string (buffer-start-point buffer) (buffer-end-point buffer))))
+
+(defun llm-handoff-abbreviate-path (pathname)
+  (let ((path (uiop:native-namestring pathname))
+        (home (uiop:native-namestring (user-homedir-pathname))))
+    (if (and (<= (length home) (length path))
+             (string= home path :end2 (length home)))
+        (concatenate 'string "~/" (subseq path (length home)))
+        path)))
+
+(defun llm-handoff-context-header (target buffer)
+  (with-output-to-string (stream)
+    (format stream "I was working in gptel. Continue from this context in ~a.~%~%"
+            target)
+    (format stream "Buffer: ~a~%" (buffer-name buffer))
+    (format stream "Mode: ~a~%" (buffer-major-mode buffer))
+    (when (buffer-filename buffer)
+      (format stream "File: ~a~%"
+              (llm-handoff-abbreviate-path (buffer-filename buffer))))
+    (alexandria:when-let
+        ((root (lem-yath-project-root-for-directory (buffer-directory buffer))))
+      (format stream "Project: ~a~%" (llm-handoff-abbreviate-path root)))))
+
+(defun llm-handoff-truncate (text &optional (limit *llm-handoff-max-chars*))
+  "Cap TEXT to LIMIT, retaining the most recent context like the Emacs setup."
+  (if (or (null limit) (zerop limit) (<= (length text) limit))
+      text
+      (let* ((notice (format nil "[Truncated by Lem from ~d to ~d characters.]~%~%"
+                             (length text) limit))
+             (notice (if (> (length notice) limit)
+                         (subseq notice 0 limit)
+                         notice))
+             (body-limit (- limit (length notice))))
+        (concatenate 'string notice (subseq text (- (length text) body-limit))))))
+
+(defun llm-handoff-prompt (target &optional (buffer (current-buffer)))
+  (llm-handoff-truncate
+   (format nil "~a~%Context:~%~%~a"
+           (llm-handoff-context-header target buffer)
+           (string-trim '(#\Space #\Tab #\Newline #\Return)
+                        (llm-handoff-region-text buffer)))))
+
+(defun llm-url-query (parameters)
+  (format nil "~{~a~^&~}"
+          (mapcar (lambda (entry)
+                    (format nil "~a=~a"
+                            (quri:url-encode (car entry))
+                            (quri:url-encode (cdr entry))))
+                  parameters)))
+
+(defun llm-url-add-query (base parameters)
+  (format nil "~a~a~a" base (if (find #\? base) "&" "?")
+          (llm-url-query parameters)))
+
+(defun llm-handoff-executable (command)
+  (if (uiop:absolute-pathname-p (uiop:parse-native-namestring command))
+      (let ((pathname (uiop:probe-file* command)))
+        #+sbcl
+        (and pathname
+             (zerop (sb-posix:access (uiop:native-namestring pathname)
+                                    sb-posix:x-ok))
+             pathname)
+        #-sbcl pathname)
+      (executable-find command)))
+
+(defun llm-handoff-browser ()
+  (loop :for command :in *llm-handoff-browser-commands*
+        :for executable := (ignore-errors (llm-handoff-executable command))
+        :when executable :return executable))
+
+(defun llm-handoff-open-url (url)
+  "Open URL as argv in the configured browser; return its executable."
+  (alexandria:if-let ((browser (llm-handoff-browser)))
+    (handler-case
+        (progn
+          (uiop:launch-program
+           (append (list (uiop:native-namestring browser))
+                   (unless (string= (file-namestring browser) "xdg-open")
+                     *llm-handoff-browser-arguments*)
+                   (list url))
+           :input nil :output nil :error-output nil)
+          browser)
+      (error () (message "Could not launch the LLM handoff browser") nil))
+    (progn (message "No LLM handoff browser is available") nil)))
+
+(define-command lem-yath-llm-handoff-claude () ()
+  "Open Claude web with the active region or current buffer as context."
+  (let* ((prompt (llm-handoff-prompt "Claude"))
+         (url (llm-url-add-query *llm-claude-handoff-web-url*
+                                 `(("q" . ,prompt)))))
+    (when (llm-handoff-open-url url)
+      (message "Opened Claude handoff with ~d characters" (length prompt)))))
+
+(defun llm-chatgpt-handoff (mode)
+  (let* ((prompt (llm-handoff-prompt "ChatGPT"))
+         (prompt (if (eq mode :research)
+                     (concatenate 'string "/Deepresearch\n\n" prompt)
+                     prompt))
+         (parameters `(("q" . ,prompt)))
+         (parameters
+           (if (member mode '(:temporary :search :research :model))
+               (append parameters '(("temporary-chat" . "true")))
+               parameters))
+         (parameters (if (eq mode :search)
+                         (append parameters '(("hints" . "search")))
+                         parameters))
+         (parameters
+           (if (and (eq mode :model)
+                    (stringp *llm-chatgpt-handoff-model*)
+                    (plusp (length *llm-chatgpt-handoff-model*)))
+               (append parameters `(("model" . ,*llm-chatgpt-handoff-model*)))
+               parameters))
+         (url (llm-url-add-query *llm-chatgpt-handoff-url* parameters)))
+    (copy-to-clipboard-with-killring prompt)
+    (when (llm-handoff-open-url url)
+      (message "Opened ChatGPT ~(~a~) handoff with ~d characters"
+               mode (length prompt)))))
+
+(define-command lem-yath-llm-handoff-chatgpt () ()
+  (llm-chatgpt-handoff :normal))
+
+(define-command lem-yath-llm-handoff-chatgpt-temporary () ()
+  (llm-chatgpt-handoff :temporary))
+
+(define-command lem-yath-llm-handoff-chatgpt-search () ()
+  (llm-chatgpt-handoff :search))
+
+(define-command lem-yath-llm-handoff-chatgpt-research () ()
+  (llm-chatgpt-handoff :research))
+
+(define-command lem-yath-llm-handoff-chatgpt-model () ()
+  (unless (and (stringp *llm-chatgpt-handoff-model*)
+               (plusp (length *llm-chatgpt-handoff-model*)))
+    (setf *llm-chatgpt-handoff-model*
+          (prompt-for-string "ChatGPT model hint: "
+                             :history-symbol 'lem-yath-llm-model)))
+  (llm-chatgpt-handoff :model))
+
+(defun llm-menu-keymap ()
+  (let ((keymap (make-keymap :description
+                             (format nil "LLM preset: ~a"
+                                     *llm-current-preset*))))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist (entry '(("l" "load preset")
+                     ("s" "save preset")
+                     ("c" "open in Claude")
+                     ("g" "open in ChatGPT")
+                     ("r" "open ChatGPT research")
+                     ("w" "open ChatGPT search")
+                     ("G" "open ChatGPT model")
+                     ("m" "select model")
+                     ("q" "cancel")))
+      (destructuring-bind (key description) entry
+        (define-key keymap key 'nop-command)
+        (setf (lem-core::prefix-description
+               (lem-core::keymap-find keymap
+                                      (lem-core::parse-keyspec key)))
+              description)))
+    keymap))
+
+(defun llm-menu-command (key)
+  (cdr (assoc key
+              '(("l" . lem-yath-llm-load-preset)
+                ("s" . lem-yath-llm-save-preset)
+                ("c" . lem-yath-llm-handoff-claude)
+                ("g" . lem-yath-llm-handoff-chatgpt)
+                ("r" . lem-yath-llm-handoff-chatgpt-research)
+                ("w" . lem-yath-llm-handoff-chatgpt-search)
+                ("G" . lem-yath-llm-handoff-chatgpt-model)
+                ("m" . lem-yath-llm-set-model))
+              :test #'string=)))
+
+(define-command lem-yath-llm-menu () ()
+  "Show the gptel-style preset and handoff menu and dispatch one action."
+  (unwind-protect
+       (loop
+         (let ((lem/transient:*transient-popup-delay* 0))
+           (keymap-activate (llm-menu-keymap)))
+         (redraw-display)
+         (let* ((key (read-key))
+                (name (lem-core::keyseq-to-string (list key))))
+           (lem/transient::hide-transient)
+           (cond
+             ((or (string= name "q") (string= name "Escape")) (return))
+             ((llm-menu-command name)
+              (call-command (llm-menu-command name) nil)
+              (return))
+             (t (message "No LLM action is bound to ~a" name)))))
+    (lem/transient::hide-transient)))

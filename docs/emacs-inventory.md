@@ -552,7 +552,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **dape** debugging (Python/Go/Rust/C) — likely partial/gap in Lem.
 - **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — Lem now has bounded native Org editing, metadata-aware Org/Markdown roam-node selection, the configured five roam capture templates with finalize/abort and deferred insertion, daily, journal, general Org capture, and agenda implementations. Org-roam database/backlink/autosync semantics and the full general capture/journal interfaces remain gaps.
 - **vundo, pulsar (recenter-on-jump), indent-bars, dirvish** UI niceties.
-- **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`) — Lem has OpenRouter streaming and CLI backend ports, while gptel presets, handoff/tool loops, OAuth backends, tracing, and generic MCP-client semantics remain gaps.
+- **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`) — Lem has OpenRouter streaming, resumable native CLI backend ports, private named presets, and bounded Claude/ChatGPT web handoff. Agentic gptel tool loops, OAuth HTTP backends, tracing, and generic MCP-client semantics remain gaps.
 
 ### Tier 3 — apps / bespoke integrations with likely no Lem equivalent (document as gaps)
 - **notmuch mail** (+ Proton Bridge/mbsync pipeline, PDF preview) — a CLI-backed Lem reader covers search/read/refresh; composition, sending, and attachment/PDF workflows remain gaps.
@@ -562,7 +562,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **salta.el** (Supabase/PostgREST property/contractor/payments client; tabulated-list UIs; `C-c s` prefix; notmuch payment-email bridge) — bespoke business tool; would need a full reimplementation in CL (REST client + list UI) if desired. Document its commands (§ below).
 - **business-visual / business-document modes** (office presentation profile, host-gated to `workwin`) — niche; gap/optional.
 - **nodes-org-sync** (PostgreSQL graph sync of org headings, host-gated to `nova`) remains external; a narrower psql-backed table/query viewer now covers the pgmacs entry workflow.
-- The **gptel CLI backends** have bounded Claude/Codex/Grok process adapters; rich agent-event rendering, backend-specific conversation semantics, and ChatGPT Codex OAuth remain gaps.
+- The **gptel CLI backends** have bounded Claude/Codex/Grok process adapters with native event rendering and resumable per-backend sessions. Org-tree conversation forking, per-request backend controls, and ChatGPT Codex OAuth remain gaps.
 
 ### salta.el commands (reference for any port)
 - `salta-find-property` (fuzzy property search -> tabulated list), `salta-property-detail`, `salta-property-reckoner` (revenue/cost/profit + totals/margin), `salta-contractor-rates`, `salta-contractor-financials`, `salta-payments`, plus list/detail navigation (`RET` open, `w` copy, `r` reckoner, `g` refresh; detail: `c` claims, `p` payments) and `salta-open-payment-email-from-notmuch`. Talks to a Supabase PostgREST API (`/rest/v1/...`, RPCs `fuzzy_search_properties`, `get_reckoner_data`); creds via `salta-base-url`/`salta-api-key`/env/`~/.config/salta/credentials.json`.

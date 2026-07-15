@@ -552,6 +552,7 @@
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
             llm-backend-test = mkTestAppWithLem lemYath "lem-yath-llm-backend-test" "llm-backend-test.sh";
+            llm-workflow-test = mkTestAppWithLem lemYath "lem-yath-llm-workflow-test" "llm-workflow-test.sh";
             lisp-eval-test = mkTestApp "lem-yath-lisp-eval-test" "lisp-eval-test.sh";
             cursor-state-test = mkTestApp "lem-yath-cursor-state-test" "cursor-state-test.sh";
             snipe-test = mkTestApp "lem-yath-snipe-test" "snipe-test.sh";
@@ -610,6 +611,7 @@
             actions = mkCheck "actions" "actions-test.sh";
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";
             llm-backend = mkCheckWithLem lemYath "llm-backend" "llm-backend-test.sh";
+            llm-workflow = mkCheckWithLem lemYath "llm-workflow" "llm-workflow-test.sh";
             lisp-eval = mkCheck "lisp-eval" "lisp-eval-test.sh";
             cursor-state = mkCheck "cursor-state" "cursor-state-test.sh";
             snipe = mkCheck "snipe" "snipe-test.sh";

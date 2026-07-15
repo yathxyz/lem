@@ -13,8 +13,15 @@
 (defvar *llm-curl-executable* "curl"
   "curl executable used for OpenRouter transport.")
 
-(defvar *llm-system-message* "Very short answers. Be helpful."
-  "Same system message as the Emacs gptel setup.")
+(defvar *llm-system-message*
+  "Short, direct answers. Skip extra context unless it changes correctness."
+  "System message from the Emacs quick-lookup startup preset.")
+
+(defvar *llm-temperature* 0.2
+  "Sampling temperature from the active Lem LLM preset.")
+
+(defvar *llm-max-tokens* 800
+  "Response token cap from the active Lem LLM preset, or NIL.")
 
 (defvar *llm-buffer-name* "*lem-yath-llm*")
 
@@ -38,6 +45,8 @@
      (alexandria:alist-hash-table
       `(("model" . ,*llm-model*)
         ("stream" . t)
+        ("temperature" . ,*llm-temperature*)
+        ,@(when *llm-max-tokens* `(("max_tokens" . ,*llm-max-tokens*)))
         ("messages" . ,(vector
                         (alexandria:alist-hash-table
                          `(("role" . "system")

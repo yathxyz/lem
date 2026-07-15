@@ -243,8 +243,18 @@ of writing `.fasl` files into the source tree.
 - streaming OpenRouter LLM client plus native Claude/Codex/Grok JSON event
   backends, with per-backend session resume, rendered agent activity, guarded
   single-request lifecycle, abort (`SPC g a`), and fresh-session (`SPC g n`)
+- gptel-style `SPC g l`/`SPC g L` menu with private named presets and
+  region-or-buffer handoff to Claude or ChatGPT; the built-in `quick-lookup`
+  preset matches the Emacs startup model, system prompt, temperature, and
+  token cap, while `grok-build` selects the native Grok CLI backend
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
-  (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli
+  (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli, llm-presets
+
+Saved LLM presets live in `$XDG_CONFIG_HOME/lem-yath/llm-presets.json` (or
+`~/.config/lem-yath/llm-presets.json`) with private directory and file modes.
+The handoff menu preserves the Emacs 13,000-character context cap and prefers
+the active region; ChatGPT handoffs also copy the exact prompt to the kill
+ring. `SPC g i` retains the separate ad-hoc instruction prompt.
 
 ### DAP quick start
 
@@ -276,8 +286,9 @@ language-server handshakes, tree-sitter highlighting, real DAP adapter
 workflows, daily-workflows, Direnv environment switching,
 electric-editing, grouped-buffer-list, UI parity, project navigation and outline, VCS,
 persistence, bookmarks,
-retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch and
-credential-free backend streaming/resume,
+retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
+credential-free backend streaming/resume, private preset persistence and web
+handoff,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
 roam, native Org, agenda, agenda-clock, and parity-ledger checks. The ledger can also be
 validated directly, and the
@@ -296,6 +307,7 @@ nix run .#auto-completion-test
 nix run .#actions-test
 nix run .#llm-keybinding-test
 nix run .#llm-backend-test
+nix run .#llm-workflow-test
 nix run .#cursor-state-test
 nix run .#snipe-test
 nix run .#avy-test
@@ -341,7 +353,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 
 Pass `check`, `compile`, `compilation`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
-`daily-workflows`, `direnv`, `llm-keybinding`, `llm-backend`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
+`daily-workflows`, `direnv`, `llm-keybinding`, `llm-backend`, `llm-workflow`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`,
 `interactive`, `structural`, `roam`, or

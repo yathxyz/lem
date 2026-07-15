@@ -189,8 +189,8 @@ if ! wait_state 'active=no .*grok2=yes .*grok-id=grok-session-1'; then
 fi
 pass grok-stream 'Grok events rendered and the second request resumed'
 
-system='Very short answers. Be helpful.'
-composed_prefix=$'System instructions:\nVery short answers. Be helpful.\n\nUser message:\n'
+system='Short, direct answers. Skip extra context unless it changes correctness.'
+composed_prefix=$'System instructions:\nShort, direct answers. Skip extra context unless it changes correctness.\n\nUser message:\n'
 
 assert_argv claude-first-argv "$LEM_YATH_LLM_FAKE_LOG/claude.1.argv" \
   -p 'claude prompt' --output-format stream-json --verbose \
@@ -230,8 +230,9 @@ assert args[4:6] == ["-H", "Authorization: Bearer test-key-not-a-credential"]
 assert args[6] == "-d"
 body = json.loads(args[7])
 assert body["model"] == "openrouter/auto" and body["stream"] is True
+assert body["temperature"] == 0.2 and body["max_tokens"] == 800
 assert body["messages"] == [
-    {"role": "system", "content": "Very short answers. Be helpful."},
+    {"role": "system", "content": "Short, direct answers. Skip extra context unless it changes correctness."},
     {"role": "user", "content": "openrouter prompt"},
 ]
 PY
