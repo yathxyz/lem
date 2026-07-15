@@ -464,7 +464,7 @@ to its top-level, non-hidden `.org` files. `initial-major-mode org-mode`.
 | **Mail** | `notmuch` | deferred. SMTP via local Proton Bridge: `smtpmail` to `127.0.0.1:1025` STARTTLS. `mail-user-agent notmuch-user-agent`. Newest-first search. Custom PDF attachment preview (`yath/notmuch-save-or-view-part`, opens PDFs in pdf-view, else saves). `notmuch-outlook.el` loaded if present (WSL). | `M-x notmuch` / `notmuch-search` / `notmuch-hello`; `yath/fetchmail` = `mbsync -a && notmuch new`. Pipeline: Proton Bridge -> `mbsync` (isync) -> notmuch. |
 | **Feeds** | `elfeed` + `elfeed-protocol` | deferred. Fever protocol against `http://rss.wg:8070/fever/` (Miniflux), authinfo. `elfeed-use-curl t`, default filter `@2-years-ago`. Title widths tuned. Custom `elfeed-show-archive` (`A` key) -> archive.is in eww. | `M-x elfeed`. Pipeline: Miniflux -> elfeed-protocol (fever) -> elfeed. |
 | **PDF** | `pdf-tools` | deferred (`pdf-tools-install`, `pdf-view-mode`) | used by notmuch attachment preview; opens PDFs |
-| **EPUB** | `nov` | declared in nix; **no use-package config** (just in `yath/business-document-modes`). `nov-mode` for `.epub` (auto-mode by package default). | gap: confirm auto-mode mapping |
+| **EPUB** | `nov` | declared in nix; **no use-package config** (just in `yath/business-document-modes`). `nov-mode` for `.epub` is active through the package's default auto-mode association. | APP-004 gap: Lem has no EPUB renderer |
 | **Terminal** | `vterm` | deferred (`commands (vterm)`). Used as `claude-code-terminal-backend`. | `M-x vterm` |
 | **DevDocs** | `devdocs` | deferred | `SPC h d` = `devdocs-lookup`; `devdocs-install` |
 | **PostgreSQL UI** | `pgmacs` (+ `pg`) | declared in nix (custom build from `emarsden/pgmacs`); **no use-package config / no binding** | `M-x pgmacs` available; no elisp wiring |
@@ -579,3 +579,10 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 `tree-sitter-langs`/`tsc`, `cdlatex` (declared, no hook). `doom-modeline` is
 referenced in `custom.el` but is **not** in the package list and never loaded
 (dead reference).
+
+Assessment outcome: the language packages' active default associations and
+tooling are routed to the existing language/IDE rows; the declared-only Org
+packages add no hooks, bindings, or activation beyond separately tracked
+Babel, citation, publishing, and visual behavior; and `nov`/`pgmacs` are
+tracked by APP-004/APP-007 respectively. Package availability alone adds no
+further port target, so the declared-package ledger has no unassessed rows.
