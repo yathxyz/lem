@@ -20,6 +20,9 @@ Falls back to $SALTA_SUPABASE_KEY then the credentials file.")
   (merge-pathnames ".config/salta/credentials.json" (user-homedir-pathname))
   "JSON file {\"url\":..,\"key\":..} consulted after defvars and env vars.")
 
+(defvar *salta-web-base-url* "https://backup.ecolink.ie"
+  "Base URL for browser-bound Salta application links.")
+
 (defvar *salta-search-limit* 20
   "Maximum number of results for fuzzy property search.")
 
@@ -793,6 +796,39 @@ Loads (and caches) the contractor list on a background thread when needed."
   "Browse recent payments; with a prefix, filter by contractor."
   (salta-payments-command (and argument t)))
 
+;;; --- Notmuch payment-email bridge ----------------------------------------
+
+(defun salta-payment-email-url (message-id)
+  "Browser URL for bare MESSAGE-ID, or NIL when the web base is invalid."
+  (when (and (stringp *salta-web-base-url*)
+             (or (alexandria:starts-with-subseq "https://" *salta-web-base-url*)
+                 (alexandria:starts-with-subseq "http://" *salta-web-base-url*)))
+    (format nil "~a/payment-emails/by-message-id?id=~a"
+            (string-right-trim "/" *salta-web-base-url*)
+            (quri:url-encode message-id))))
+
+(define-command lem-yath-salta-open-payment-email-from-notmuch () ()
+  "Open Salta's payment-email page for the Notmuch message at point."
+  (cond
+    ((not (eq (buffer-major-mode (current-buffer)) 'notmuch-show-mode))
+     (message "Not in a Notmuch show buffer"))
+    ((null (notmuch-message-id-at-point))
+     (message "No Message-ID at point"))
+    ((null (salta-payment-email-url (notmuch-message-id-at-point)))
+     (message "Salta web base URL must be HTTP(S)"))
+    (t
+     (let ((url (salta-payment-email-url (notmuch-message-id-at-point))))
+       (alexandria:if-let ((opener (executable-find "xdg-open")))
+         (handler-case
+             (progn
+               (uiop:launch-program
+                (list (uiop:native-namestring opener) url)
+                :output nil :error-output nil)
+               (message "Opening Salta payment email"))
+           (error (e)
+             (message "Failed to open Salta payment email: ~a" e)))
+         (message "xdg-open not found; cannot open ~a" url))))))
+
 ;;; --- bindings (global keymap, mirroring salta.el's C-c s prefix) ----------
 
 (define-key *global-keymap* "C-c s s" 'lem-yath-salta-find-property)
@@ -801,3 +837,5 @@ Loads (and caches) the contractor list on a background thread when needed."
 (define-key *global-keymap* "C-c s c" 'lem-yath-salta-contractor-rates)
 (define-key *global-keymap* "C-c s f" 'lem-yath-salta-contractor-financials)
 (define-key *global-keymap* "C-c s p" 'lem-yath-salta-payments)
+(define-key *notmuch-show-mode-keymap* "C-c s e"
+  'lem-yath-salta-open-payment-email-from-notmuch)

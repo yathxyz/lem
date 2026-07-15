@@ -178,6 +178,12 @@ Defaults to \"tag:inbox\"; results are newest-first, one thread per line."
     (when (hash-table-p map)
       (gethash (line-number-at-point (current-point)) map))))
 
+(defun notmuch-message-id-at-point ()
+  "The bare Message-ID for the message at point in a Notmuch show buffer."
+  (let ((map (buffer-value (current-buffer) 'notmuch-line->message-id)))
+    (when (hash-table-p map)
+      (gethash (line-number-at-point (current-point)) map))))
+
 (defun notmuch-collect-text-parts (node acc)
   "Defensively walk a `notmuch show' NODE, pushing text/plain bodies onto ACC.
 NODE may be a list (forest / part list / [message replies] pair) or a part
@@ -256,15 +262,25 @@ A message is a hash-table carrying a \"headers\" key."
       (message "notmuch show failed for ~a" thread-id)
       (return-from notmuch-show))
     (let* ((messages (nreverse (notmuch-collect-messages tree '())))
-           (buffer (make-buffer (format nil "*lem-yath-mail: ~a*" thread-id))))
+           (buffer (make-buffer (format nil "*lem-yath-mail: ~a*" thread-id)))
+           (line->message-id (make-hash-table :test 'eql)))
       (with-buffer-read-only buffer nil
         (erase-buffer buffer)
         (let ((point (buffer-point buffer)))
           (if messages
               (dolist (message messages)
-                (notmuch-render-message point message))
+                (let ((start-line (line-number-at-point point))
+                      (message-id (notmuch-string (gethash "id" message))))
+                  (notmuch-render-message point message)
+                  (when (plusp (length message-id))
+                    (loop :for line :from start-line
+                          :to (line-number-at-point point)
+                          :do (setf (gethash line line->message-id)
+                                    message-id)))))
               (insert-string point (format nil "No messages in thread ~a~%" thread-id)))
           (setf (buffer-value buffer 'notmuch-thread-id) thread-id)
+          (setf (buffer-value buffer 'notmuch-line->message-id)
+                line->message-id)
           (buffer-start point)))
       (change-buffer-mode buffer 'notmuch-show-mode)
       (setf (buffer-read-only-p buffer) t)

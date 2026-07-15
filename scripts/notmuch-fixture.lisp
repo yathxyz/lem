@@ -27,6 +27,8 @@
        'quit-active-window)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "g")
        'lem-yath-notmuch-show-refresh)
+   (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "C-c s e")
+       'lem-yath-salta-open-payment-email-from-notmuch)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "q")
        'quit-active-window)))
 
@@ -41,7 +43,7 @@
          (list-p (eq mode 'notmuch-search-mode))
          (show-p (eq mode 'notmuch-show-mode)))
     (notmuch-test-log
-     "STATE mode=~a query=~a row=~a thread=~a read-only=~a keys=~a body=~a html-hidden=~a source-live=~a source-exact=~a"
+     "STATE mode=~a query=~a row=~a thread=~a message=~a read-only=~a keys=~a body=~a html-hidden=~a source-live=~a source-exact=~a"
      (cond (list-p "list") (show-p "show") (t "other"))
      (notmuch-test-yes-no
       (and list-p
@@ -49,6 +51,7 @@
                     (buffer-value buffer 'notmuch-query))))
      (if list-p (or (notmuch-thread-id-at-point) "none") "none")
      (if show-p (or (buffer-value buffer 'notmuch-thread-id) "none") "none")
+     (if show-p (or (notmuch-message-id-at-point) "none") "none")
      (notmuch-test-yes-no (buffer-read-only-p buffer))
      (notmuch-test-yes-no (notmuch-test-keys-p))
      (notmuch-test-yes-no
@@ -75,5 +78,7 @@
 (define-key *global-keymap* "F4" 'lem-yath-notmuch-test-empty)
 (define-key *global-keymap* "F5" 'lem-yath-fetchmail)
 
-(notmuch-test-log "EXEC ~a" (executable-find "notmuch"))
+(notmuch-test-log "EXEC notmuch=~a xdg-open=~a"
+                  (executable-find "notmuch")
+                  (executable-find "xdg-open"))
 (notmuch-test-log "READY")

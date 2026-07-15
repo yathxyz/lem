@@ -26,8 +26,9 @@ def save(value: dict[str, int]) -> None:
     STATE.write_text(json.dumps(value) + "\n")
 
 
-def message(sender: str, subject: str, body: list[dict]) -> dict:
+def message(message_id: str, sender: str, subject: str, body: list[dict]) -> dict:
     return {
+        "id": message_id,
         "headers": {
             "From": sender,
             "To": "Yanni <yanni@example.invalid>",
@@ -40,6 +41,7 @@ def message(sender: str, subject: str, body: list[dict]) -> dict:
 
 def show_tree(thread_id: str) -> list:
     original = message(
+        "payment+safe;touch PWNED@example.invalid",
         "Bob <bob@example.invalid>",
         "Second thread",
         [
@@ -53,6 +55,7 @@ def show_tree(thread_id: str) -> list:
         ],
     )
     reply = message(
+        "reply/second?value@example.invalid",
         "Yanni <yanni@example.invalid>",
         "Re: Second thread",
         [{"content-type": "text/plain", "content": "Reply plain body."}],
