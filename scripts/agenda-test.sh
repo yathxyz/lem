@@ -72,6 +72,15 @@ wait_file_pattern() {
   return 1
 }
 
+wait_file_without_pattern() {
+  local pattern="$1" file="$2" i
+  for i in $(seq 1 100); do
+    [ -f "$file" ] && ! grep -qE "$pattern" "$file" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 wait_file_last_line() {
   local pattern="$1" file="$2" i
   for i in $(seq 1 100); do
@@ -267,6 +276,8 @@ fi
 tmux_cmd send-keys -t "$session" d A
 archive_ok=1
 wait_file_pattern '^\* TODO Archive action sentinel' "$archive_file" || archive_ok=0
+wait_file_without_pattern 'Archive action sentinel|Archive child sentinel' \
+  "$work_file" || archive_ok=0
 if grep -q 'Archive action sentinel\|Archive child sentinel' "$work_file"; then
   archive_ok=0
 fi
