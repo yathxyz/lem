@@ -1868,10 +1868,12 @@ The second value is the length of SECOND in its new leading position."
             t)))))
 
 (define-command lem-yath-org-context-action () ()
-  "Align a table; execution of source blocks remains a later safe tranche."
-  (if (org-table-line-p (current-point))
-      (org-table-align)
-      (message "No supported Org context action at point")))
+  "Align a table or execute the source block at point."
+  (cond
+    ((org-table-line-p (current-point)) (org-table-align))
+    ((org-babel-block-at-point (current-point))
+     (lem-yath-org-babel-execute))
+    (t (message "No supported Org context action at point"))))
 
 ;;; --- Evil-Org range shifting --------------------------------------------
 

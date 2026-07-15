@@ -1933,14 +1933,39 @@ Normal, and successful mutations form one undo step. Promotion of a level-one
 heading, partial child-list outdents, continuation/tab-structured list ranges,
 and formula-owning table-column moves abort before mutation.
 
+`C-c C-c` now context-dispatches source blocks through
+`src/org/babel.lisp`. The configured Bash/Shell, Python, C/C++, Nix, SQLite,
+and PostgreSQL SQL paths run with direct argument vectors, the active
+Direnv-derived process environment, a 600-second timeout, and independent
+16-MiB source/stdout/stderr bounds. Shell shebangs, Python's configured
+interpreter override, relative `:dir`, SQLite `:db`, and the PostgreSQL
+engine/user/password/host/port/database headers are supported. Passwords enter
+only the subprocess environment, never argv or diagnostics assembled by Lem.
+Preamble `header-args` properties use the configured file-wide form; local
+block headers win.
+
+The confirmation predicate matches the active Emacs policy: only SQLite and
+Emacs Lisp are exempt inside an existing file below startup-cached `$WORKDIR`.
+Emacs Lisp remains deliberately non-executable because Common Lisp is not a
+compatible evaluator; outside trusted notes it still reaches the ordinary
+confirmation boundary first. Successful output replaces an adjacent
+`#+RESULTS:` as one undoable edit, database rows become finite Org tables, and
+`:results none` executes without buffer mutation. Cancellation, subprocess
+failure, unsupported languages, SOPS plaintext, `:var`, live `:session`,
+`:async`, and unsupported append/raw/file/drawer result modes fail before
+result mutation. `scripts/org-babel-test.sh` drives the physical chord through
+confirmation, cancellation, undo, Python and C execution, directory and
+no-result headers, trusted SQLite, and a real private PostgreSQL server.
+
 This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
 footnote, nested-special, and malformed text-object contexts; structural
 repairs beyond the bounded `d/x/X/< />` behavior; region-aware Meta operations,
 generic Org-element
 movement, shift-control commands, and richer list/table semantics; timestamp,
 scheduling, and deadline
-workflows; source-block editing or execution; Babel, LaTeX preview, export and
-publishing; org-modern glyph composition in the terminal; and an initial Org
+workflows; source-block editing, variables/sessions and the rest of Babel's
+backend/header/result matrix; LaTeX preview, export and publishing; org-modern
+glyph composition in the terminal; and an initial Org
 scratch buffer remain explicit gaps. Agenda scanning and capture/roam workflows
 are separate bounded implementations rather than services of this major mode.
 

@@ -256,6 +256,14 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   or Markdown note and any deferred link, while `C-c C-k` aborts without a
   file. Root-level roam dailies, journal, and i/t/r capture operate over
   `$WORKDIR`, with public TODO capture over `$PUBLIC_ORG_DIR`
+- configured Org Babel execution on `C-c C-c` for Bash/Shell, Python, C/C++,
+  Nix, SQLite, and PostgreSQL SQL blocks. Shell, Python, C, Nix, and SQL ask
+  before running; SQLite follows the Emacs configuration's trusted-note
+  exemption. Results replace an adjacent `#+RESULTS:` atomically as colon
+  output or Org database tables, `:results none` stays buffer-silent, `:dir`
+  and preamble header properties are honored, and execution inherits the
+  active Direnv environment. Emacs Lisp blocks fail explicitly rather than
+  being mis-evaluated as Common Lisp
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope, ordinary and repeating active-timestamp events,
   modal Return/g/q navigation, and Evil-Org-style `t` fast TODO selection plus

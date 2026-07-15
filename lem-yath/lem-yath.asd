@@ -48,6 +48,7 @@
                 :components ((:file "parser")
                              (:file "folding")
                              (:file "mode")
+                             (:file "babel")
                              (:file "commands")
                              (:file "structure")
                              (:file "element-navigation")
