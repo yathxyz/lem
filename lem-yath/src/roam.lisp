@@ -757,23 +757,25 @@ Returns one unique ID, aliases, the next line index, and validity."
         :tags tags
         :modified-at modified-at)))))
 
+(defun roam-nodes-from-lines (pathname root lines)
+  "Parse bounded note LINES already read from PATHNAME below ROOT."
+  (let ((relative (enough-namestring pathname root))
+        (extension (pathname-type pathname))
+        (modified-at (or (ignore-errors (file-write-date pathname)) 0)))
+    (cond
+      ((and extension (string-equal extension "org"))
+       (roam-org-nodes pathname relative lines modified-at))
+      ((and extension (string-equal extension "md"))
+       (roam-markdown-nodes pathname relative lines modified-at))
+      (t nil))))
+
 (defun roam-nodes-from-pathname (pathname root)
   (multiple-value-bind (text bytes status) (roam-read-note pathname root)
     (if (not (eq status :ok))
         (values nil bytes status)
-        (let* ((relative (enough-namestring pathname root))
-               (lines (roam-text-lines text))
-               (extension (pathname-type pathname))
-               (modified-at (or (ignore-errors (file-write-date pathname)) 0)))
-          (values
-           (cond
-             ((and extension (string-equal extension "org"))
-              (roam-org-nodes pathname relative lines modified-at))
-             ((and extension (string-equal extension "md"))
-              (roam-markdown-nodes pathname relative lines modified-at))
-             (t nil))
-           bytes
-           :ok)))))
+        (values (roam-nodes-from-lines pathname root (roam-text-lines text))
+                bytes
+                :ok))))
 
 (defun note-nodes ()
   "Return a bounded immutable snapshot of current Org-roam/md-roam nodes."

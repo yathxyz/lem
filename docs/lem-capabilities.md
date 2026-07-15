@@ -1789,6 +1789,43 @@ Real structural editing: `paredit-slurp`, `paredit-barf`, `paredit-splice`(+fwd/
 (`markdown-eval-block`, `interactive.lisp:105`) and a `preview`/`preview-default` generic
 (`internal.lisp:6,29`) for rendering. (Aligns with Lem's "living canvas" vision.)
 
+### Native Org-roam graph — `lem-yath/src/roam.lisp`, `roam-backlinks.lisp` (verified approximation)
+
+The node and capture paths recursively index canonical `.org` and `.md` files
+below startup-cached `$WORKDIR/roam`. Org file and ID-bearing heading nodes plus
+pinned md-roam YAML IDs, titles, aliases, and tags share the completion surface
+used by find, insert, random, and the configured five-template capture flow.
+Individual files, aggregate bytes, scanner output, pathnames, files, nodes, and
+backlink occurrences all have explicit limits; reads verify the opened regular
+file descriptor and containment beneath the canonical roam root.
+
+`M-x org-roam-buffer-toggle` supplies the persistent `*org-roam*` view in the
+configured right-side window at 0.4 of the display width. One asynchronous
+immutable snapshot maps bracketed Org `id:` links and pinned md-roam
+`[[Title or Alias]]` links to their unique nodes. The panel follows the nearest
+file or ID-bearing heading from cheap span lookups, retains the last valid node
+through prompts and unrelated buffers, sorts every occurrence by source-node
+title like Org-roam, and renders the source title, complete outline, and a
+bounded direct-content preview. Duplicate target IDs and ambiguous wiki names
+fail closed rather than pointing at an arbitrary note.
+
+`Return` revalidates the source node and exact link literal before opening its
+line and column in the recorded main window. `g` coalesces asynchronous full
+snapshot rebuilds; `q` restores a main window before closing the side window.
+The panel refuses to delete a right-side window after another subsystem has
+replaced it, and configuration reload invalidates workers, closes the owned
+window, kills the private buffer, and removes its post-command hook.
+`scripts/roam-backlink-test.sh` proves ID and md-roam resolution, block/comment
+exclusion, outline/preview ownership, M-x display, automatic node switching,
+exact Return navigation, stale refusal, refresh, side-window ownership, close,
+and reload cleanup through the packaged ncurses editor.
+
+This remains an in-memory snapshot rather than claiming Org-roam's persistent
+SQLite database. Saved corpus changes require `g`; there is no incremental
+autosync, reflink/citation section, Markdown inline-file backlink extraction,
+or wiki-link-follow command yet. Unsaved note geometry is not applied to the
+disk-derived graph and is shown as requiring save plus refresh.
+
 ### Native Org mode — `lem-yath/src/org/` (verified approximation)
 
 Lem-yath adds a prose-class `.org` major mode; this is a local implementation,

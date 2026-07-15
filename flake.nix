@@ -576,6 +576,7 @@
             screen-line-test = mkTestAppWithLem lemYath "lem-yath-screen-line-test" "screen-line-test.sh";
             notes-test = mkTestApp "lem-yath-notes-test" "notes-test.sh";
             roam-test = mkTestApp "lem-yath-roam-test" "roam-test.sh";
+            roam-backlink-test = mkTestAppWithLem lemYath "lem-yath-roam-backlink-test" "roam-backlink-test.sh";
             org-test = mkTestAppWithLem lemYath "lem-yath-org-test" "org-test.sh";
             org-planning-test = mkTestAppWithLem lemYath "lem-yath-org-planning-test" "org-planning-test.sh";
             org-timestamp-test = mkTestAppWithLem lemYath "lem-yath-org-timestamp-test" "org-timestamp-test.sh";
@@ -651,6 +652,7 @@
             screen-line = mkCheckWithLem lemYath "screen-line" "screen-line-test.sh";
             notes = mkCheck "notes" "notes-test.sh";
             roam = mkCheck "roam" "roam-test.sh";
+            roam-backlinks = mkCheckWithLem lemYath "roam-backlinks" "roam-backlink-test.sh";
             org = mkCheckWithLem lemYath "org" "org-test.sh";
             org-planning = mkCheckWithLem lemYath "org-planning" "org-planning-test.sh";
             org-timestamp = mkCheckWithLem lemYath "org-timestamp" "org-timestamp-test.sh";
