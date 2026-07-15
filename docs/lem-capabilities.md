@@ -1638,6 +1638,14 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
   keys (`legit-rebase.lisp:49-77`).
 - Refresh `g`, navigate `n`/`p`/`M-n`/`M-p`, help `?`/`C-x ?`, quit `q`.
 
+Lem-yath registers the diff, commit, and rebase major-mode maps ahead of Vi's
+normal-state map, so these native porcelain keys are not interpreted as Vim
+motions or operators. It also repairs pinned Legit's hunk path: `s` and `u`
+construct a complete Git patch in a private temporary file, apply only the
+selected hunk to the index, and refresh status after success. Validating the
+transient commit buffer no longer asks whether to save or kill it after Git has
+already committed.
+
 ### Porcelain coverage vs magit — `legit/README.md`
 Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkout/
 create), push, pull/fetch, commits log with pagination, **stash push/pop**, interactive
@@ -1647,6 +1655,13 @@ no multi-file staging, limited switches/transient submenus, no blame/bisect/cher
 UI, no log graph filtering. Customize via `lem/porcelain:*git-base-arglist*`,
 `*commits-log-page-size*`, `*nb-latest-commits*`, `*branch-sort-by*`,
 `lem/legit:*vcs-existence-order*`.
+
+The installed-wrapper acceptance gate in `scripts/vcs-test.sh` uses real
+keystrokes and three isolated repositories. It verifies selective hunk
+stage/unstage, tracked and untracked file staging, commit editing and
+validation, push to a bare remote, branch creation and checkout, stash
+push/pop, and a pull from an independent peer clone. Interactive rebase is
+currently source-verified rather than exercised by that gate.
 
 ### Configured VCS dispatch and time travel — `lem-yath/src/git.lisp`, `src/apps/timemachine.lisp`
 

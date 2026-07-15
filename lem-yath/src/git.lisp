@@ -7,6 +7,104 @@
 (defvar *lem-yath-git-gutter-synced-mode-key*
   'lem-yath-git-gutter-synced-mode)
 
+;; Pinned Lem's Vi dispatcher places state maps ahead of ordinary major-mode
+;; maps.  Legit's status and log panes are minor modes and already win, but its
+;; diff, commit, and rebase buffers are major modes.  Register their native
+;; maps explicitly so the Magit-like porcelain keys are not mistaken for Vi
+;; motions and operators.
+(defmethod lem-vi-mode/core:mode-specific-keymaps
+    ((mode lem/legit::legit-diff-mode))
+  (list lem/legit::*legit-diff-mode-keymap*))
+
+(defmethod lem-vi-mode/core:mode-specific-keymaps
+    ((mode lem/legit::legit-commit-mode))
+  (list lem/legit::*legit-commit-mode-keymap*))
+
+(defmethod lem-vi-mode/core:mode-specific-keymaps
+    ((mode lem/legit::legit-rebase-mode))
+  (list lem/legit::*legit-rebase-mode-keymap*))
+
+(defun legit-git-hunk-patch ()
+  "Return a complete Git patch for the Legit hunk at point."
+  (save-excursion
+    (with-point ((start (copy-point (current-point)))
+                 (end (copy-point (current-point)))
+                 (header (copy-point (current-point))))
+      (setf start (lem/legit::%hunk-start-point start))
+      (unless start
+        (editor-error "No hunk at point"))
+      (move-point header start)
+      (unless (search-backward-regexp header "^diff --git ")
+        (editor-error "The current hunk has no Git patch header"))
+      (move-point end start)
+      (setf end (lem/legit::%hunk-end-point end))
+      (format nil "~a~a~%"
+              (points-to-string header start)
+              (points-to-string start end)))))
+
+(defun legit-git-diff-p ()
+  (with-point ((point (current-point)))
+    (not (null (search-backward-regexp point "^diff --git ")))))
+
+(defun apply-legit-git-hunk (reverse)
+  "Apply the current Legit hunk to Git's index, reversing when REVERSE."
+  (let ((patch (legit-git-hunk-patch)))
+    (uiop:with-temporary-file
+        (:pathname patch-path :stream patch-stream
+         :direction :output :element-type 'character)
+      (write-string patch patch-stream)
+      (finish-output patch-stream)
+      (close patch-stream)
+      (lem/legit::with-current-project (vcs)
+        (declare (ignore vcs))
+        (multiple-value-bind (output error-output status)
+            (run-project-program
+             (append
+              (list (uiop:native-namestring
+                     (or (executable-find "git")
+                         (editor-error "Git is unavailable")))
+                    "apply" "--ignore-space-change" "-C0"
+                    "--index" "--cached")
+              (when reverse (list "--reverse"))
+              (list (uiop:native-namestring patch-path)))
+             :directory (uiop:getcwd))
+          (if (zerop status)
+              (progn
+                (lem/legit::show-legit-status)
+                (message (if reverse "Unstaged hunk" "Staged hunk")))
+              (lem/legit::pop-up-message
+               (if (plusp (length error-output))
+                   error-output
+                   output))))))))
+
+(define-command lem-yath-legit-stage-hunk () ()
+  (if (legit-git-diff-p)
+      (apply-legit-git-hunk nil)
+      (lem/legit::legit-stage-hunk)))
+
+(define-command lem-yath-legit-unstage-hunk () ()
+  (if (legit-git-diff-p)
+      (apply-legit-git-hunk t)
+      (lem/legit::legit-unstage-hunk)))
+
+(define-command lem-yath-legit-commit-continue () ()
+  ;; This is a transient message buffer, not a file that needs saving.  Pinned
+  ;; Legit otherwise commits successfully and then prompts before killing it.
+  (unless (str:blankp
+           (lem/legit::clean-commit-message
+            (buffer-text (current-buffer))))
+    (buffer-unmark (current-buffer)))
+  (lem/legit::commit-continue))
+
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "s" 'lem-yath-legit-stage-hunk)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "u" 'lem-yath-legit-unstage-hunk)
+(define-key lem/legit::*legit-commit-mode-keymap*
+  "C-c C-c" 'lem-yath-legit-commit-continue)
+(define-key lem/legit::*legit-commit-mode-keymap*
+  "C-Return" 'lem-yath-legit-commit-continue)
+
 ;; Defined later in the serial system, in ui.lisp.  Git state can be prepared
 ;; before the UI module loads, but rendering only happens after startup.
 (declaim (ftype function join-left-display-content))

@@ -215,7 +215,9 @@ of writing `.fasl` files into the source tree.
   the Jujutsu side is a read-only status/log view, while programming buffers get
   buffer-local Git markers, Git status includes navigable tracked-file
   TODO/FIXME rows, and `SPC g t` supplies the audited git-timemachine
-  revision-navigation workflow
+  revision-navigation workflow. Legit's Vi-normal file/hunk staging, commit,
+  push/pull, branch, and stash workflows are driven end-to-end against isolated
+  real remotes by the VCS acceptance gate
 - metadata-aware Org file/heading and pinned md-roam node completion with
   find/insert/random workflows. A typed missing title opens the configured
   one-key `n/c/p/s/m` roam capture templates; `C-c C-c` finalizes the new Org

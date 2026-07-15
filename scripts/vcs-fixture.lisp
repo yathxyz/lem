@@ -504,6 +504,62 @@
              (search "TODO tracked implementation task"
                      (buffer-text source-buffer))))))))
 
+(defun vcs-test-position-legit-file (filename &key focus-diff section)
+  "Position Legit's status row for FILENAME, optionally focusing its diff."
+  (let* ((active (lem/legit::legit-status-active-p))
+         (status-buffer
+           (and active (window-buffer lem/legit::*peek-window*)))
+         (row (and status-buffer (buffer-start-point status-buffer))))
+    (when row
+      (when section
+        (unless (search-forward row section)
+          (setf row nil)))
+      (when row
+        (unless (search-forward row filename)
+          (setf row nil)))
+      (when row
+        (line-start row)
+        (setf (current-window) lem/legit::*peek-window*)
+        (move-point (buffer-point status-buffer) row)
+        (lem/legit::show-matched-line)))
+    (let* ((diff-buffer
+             (and row (window-buffer lem/legit::*source-window*)))
+           (diff-point
+             (and diff-buffer (buffer-start-point diff-buffer))))
+      (when diff-point
+        (unless (search-forward diff-point "@@ ")
+          (setf diff-point nil))
+        (when diff-point
+          (line-start diff-point)))
+      (when (and focus-diff diff-point)
+        (setf (current-window) lem/legit::*source-window*)
+        (move-point (buffer-point diff-buffer) diff-point))
+      (vcs-test-log
+       "PORCELAIN-POSITION file=~a row=~a diff=~a mode=~a focused=~a"
+       (vcs-test-encode filename)
+       (vcs-test-yes-no row)
+       (vcs-test-yes-no diff-point)
+       (vcs-test-yes-no
+        (and diff-buffer
+             (eq (buffer-major-mode diff-buffer)
+                 'lem/legit::legit-diff-mode)))
+       (vcs-test-yes-no
+        (and focus-diff
+             (eq (current-window) lem/legit::*source-window*)))))))
+
+(define-command lem-yath-test-vcs-porcelain-diff () ()
+  (vcs-test-position-legit-file "porcelain.txt" :focus-diff t))
+
+(define-command lem-yath-test-vcs-porcelain-staged-diff () ()
+  (vcs-test-position-legit-file
+   "porcelain.txt" :focus-diff t :section (format nil "~%Staged changes (")))
+
+(define-command lem-yath-test-vcs-porcelain-tracked () ()
+  (vcs-test-position-legit-file "porcelain.txt"))
+
+(define-command lem-yath-test-vcs-porcelain-untracked () ()
+  (vcs-test-position-legit-file "untracked.txt"))
+
 (defun vcs-test-restore-source-point ()
   (let ((point (buffer-point *vcs-test-source-buffer*)))
     (buffer-start point)
@@ -747,8 +803,28 @@
 (define-key *global-keymap* "F12" 'lem-yath-test-vcs-debounce-state)
 (define-key *global-keymap* "C-c u" 'lem-yath-test-vcs-untracked-state)
 (define-key *global-keymap* "C-c t" 'lem-yath-test-vcs-todo-preview)
+(define-key *global-keymap* "C-c d" 'lem-yath-test-vcs-porcelain-diff)
+(define-key *global-keymap* "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)
+(define-key *global-keymap* "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
+(define-key *global-keymap* "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c t" 'lem-yath-test-vcs-todo-preview)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c d" 'lem-yath-test-vcs-porcelain-diff)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "C-c d" 'lem-yath-test-vcs-porcelain-diff)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
 
 (vcs-test-log "READY phase=~a file=~a"
               *vcs-test-phase*

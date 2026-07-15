@@ -33,13 +33,18 @@ export LEM_YATH_VCS_GIT_ROOT="$root/repos/git worktree;safe/"
 export LEM_YATH_VCS_CODE_FILE="${LEM_YATH_VCS_GIT_ROOT}nested/deeper/history.lisp"
 export LEM_YATH_VCS_MARKDOWN_FILE="${LEM_YATH_VCS_GIT_ROOT}nested/docs/notes.md"
 export LEM_YATH_VCS_UNTRACKED_FILE="${LEM_YATH_VCS_GIT_ROOT}nested/deeper/retired.lisp"
+export LEM_YATH_VCS_PORCELAIN_ROOT="$root/repos/porcelain worktree;safe/"
+export LEM_YATH_VCS_PORCELAIN_FILE="${LEM_YATH_VCS_PORCELAIN_ROOT}porcelain.txt"
+export LEM_YATH_VCS_PORCELAIN_REMOTE="$root/repos/porcelain-remote.git"
+export LEM_YATH_VCS_PORCELAIN_PEER="$root/repos/porcelain-peer"
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR" "$LEM_HOME" \
   "$LEM_YATH_VCS_COLOCATED_ROOT/nested/deeper" \
   "$LEM_YATH_VCS_COLOCATED_ROOT/nested/deeper/raw directory;sentinel" \
   "$LEM_YATH_VCS_GIT_MAIN/nested/deeper" \
   "$LEM_YATH_VCS_GIT_MAIN/nested/deeper/raw directory;sentinel" \
-  "$LEM_YATH_VCS_GIT_MAIN/nested/docs"
+  "$LEM_YATH_VCS_GIT_MAIN/nested/docs" \
+  "$LEM_YATH_VCS_PORCELAIN_ROOT/raw directory;sentinel"
 : >"$LEM_YATH_VCS_REPORT"
 printf '%s\n' \
   'user.name = "Lem Yath Test"' \
@@ -180,6 +185,47 @@ printf '# VCS notes\n\nchanged prose\n' >"$LEM_YATH_VCS_MARKDOWN_FILE"
 printf '(defparameter vcs-retired :recreated-untracked)\n' \
   >"$LEM_YATH_VCS_UNTRACKED_FILE"
 
+# A separate repository exercises Legit's mutating Magit-like porcelain
+# without changing the gutter and Timemachine history fixtures above.
+if ! "$git_bin" init --bare -q "$LEM_YATH_VCS_PORCELAIN_REMOTE" ||
+   ! git_init "$LEM_YATH_VCS_PORCELAIN_ROOT"; then
+  echo "Could not initialize the porcelain Git fixtures" >&2
+  rm -rf -- "$root"
+  exit 1
+fi
+{
+  for line in $(seq 1 40); do
+    printf 'porcelain-line-%02d\n' "$line"
+  done
+} >"$LEM_YATH_VCS_PORCELAIN_FILE"
+printf 'tracked auxiliary file\n' \
+  >"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+  porcelain.txt auxiliary.txt
+if ! git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" porcelain-initial \
+     '2001-01-04T00:00:00+0000' ||
+   ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" remote add origin \
+     "$LEM_YATH_VCS_PORCELAIN_REMOTE" ||
+   ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" push -qu origin main ||
+   ! "$git_bin" --git-dir="$LEM_YATH_VCS_PORCELAIN_REMOTE" symbolic-ref \
+     HEAD refs/heads/main ||
+   ! "$git_bin" clone -q "$LEM_YATH_VCS_PORCELAIN_REMOTE" \
+     "$LEM_YATH_VCS_PORCELAIN_PEER"; then
+  echo "Could not create the porcelain remote topology" >&2
+  rm -rf -- "$root"
+  exit 1
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" config \
+  user.name 'Lem Yath Peer Test'
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" config \
+  user.email 'lem-yath-peer@example.invalid'
+sed -i '2s/.*/porcelain-line-02 changed-first-hunk/' \
+  "$LEM_YATH_VCS_PORCELAIN_FILE"
+sed -i '35s/.*/porcelain-line-35 changed-second-hunk/' \
+  "$LEM_YATH_VCS_PORCELAIN_FILE"
+printf 'porcelain untracked file\n' \
+  >"$LEM_YATH_VCS_PORCELAIN_ROOT/untracked.txt"
+
 if [ ! -d "$LEM_YATH_VCS_COLOCATED_ROOT/.git" ] ||
    [ ! -d "$LEM_YATH_VCS_COLOCATED_ROOT/.jj" ] ||
    [ ! -f "$LEM_YATH_VCS_GIT_ROOT/.git" ] ||
@@ -251,6 +297,71 @@ wait_report_count() {
     index=$((index + 1))
   done
   return 1
+}
+
+wait_until() {
+  local timeout=$1 index=0
+  shift
+  while ((index < timeout * 4)); do
+    if "$@"; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+porcelain_first_hunk_only() {
+  local diff
+  diff=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    diff --cached --unified=0 -- porcelain.txt) || return 1
+  grep -q 'changed-first-hunk' <<<"$diff" &&
+    ! grep -q 'changed-second-hunk' <<<"$diff"
+}
+
+porcelain_index_empty() {
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_all_staged() {
+  local names
+  names=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    diff --cached --name-only) || return 1
+  [ "$names" = $'porcelain.txt\nuntracked.txt' ]
+}
+
+porcelain_subject_is() {
+  [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    log -1 --format=%s 2>/dev/null)" = "$1" ]
+}
+
+porcelain_remote_matches_head() {
+  [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" = \
+    "$("$git_bin" --git-dir="$LEM_YATH_VCS_PORCELAIN_REMOTE" \
+      rev-parse refs/heads/main)" ]
+}
+
+porcelain_branch_is() {
+  [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    branch --show-current)" = "$1" ]
+}
+
+porcelain_stashed() {
+  [ -n "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash list)" ] &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet
+}
+
+porcelain_stash_restored() {
+  [ -z "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash list)" ] &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet
+}
+
+porcelain_peer_pulled() {
+  [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" rev-parse HEAD)" ] &&
+    grep -q 'peer-pull-probe' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
 }
 
 send_keys() {
@@ -638,6 +749,175 @@ else
   fail timemachine-untracked 'SPC g t did not report the exact untracked-file rejection' \
     "$git_session"
 fi
+lem_stop "$git_session"
+
+porcelain_session="lem-yath-vcs-porcelain-$id"
+if start_phase porcelain "$LEM_YATH_VCS_PORCELAIN_FILE" \
+  "$porcelain_session"; then
+  pass porcelain-boot 'configured wrapper opened the isolated porcelain repository'
+else
+  fail porcelain-boot 'porcelain fixture did not become ready' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" Space g g
+if wait_legit "$porcelain_session" porcelain; then
+  pass porcelain-status 'Legit opened the real mutating Git fixture'
+else
+  fail porcelain-status 'Legit did not open the porcelain fixture' \
+    "$porcelain_session"
+fi
+
+position_before=$(report_count '^PORCELAIN-POSITION ')
+hunk_staged=0
+send_keys "$porcelain_session" C-c d
+if wait_report_count '^PORCELAIN-POSITION ' "$((position_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-POSITION ') == \
+      'PORCELAIN-POSITION file=porcelain.txt row=yes diff=yes mode=yes focused=yes' ]]; then
+  lem_keys "$porcelain_session" s
+  if wait_until "$WAIT_TIMEOUT" porcelain_first_hunk_only; then
+    pass legit-stage-hunk 's in a Vi-normal Legit diff staged only the selected hunk'
+    hunk_staged=1
+  else
+    fail legit-stage-hunk 'diff-mode s did not stage exactly the selected hunk' \
+      "$porcelain_session"
+  fi
+else
+  fail legit-stage-hunk 'could not focus the first real Legit diff hunk' \
+    "$porcelain_session"
+fi
+
+position_before=$(report_count '^PORCELAIN-POSITION ')
+if [ "$hunk_staged" = 1 ]; then
+  send_keys "$porcelain_session" C-c e
+fi
+if [ "$hunk_staged" = 1 ] &&
+   wait_report_count '^PORCELAIN-POSITION ' "$((position_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-POSITION ') == \
+      'PORCELAIN-POSITION file=porcelain.txt row=yes diff=yes mode=yes focused=yes' ]]; then
+  lem_keys "$porcelain_session" u
+fi
+if [ "$hunk_staged" = 1 ] &&
+   wait_until "$WAIT_TIMEOUT" porcelain_index_empty; then
+  pass legit-unstage-hunk 'u in a staged Vi-normal diff unstaged the selected hunk'
+else
+  fail legit-unstage-hunk 'could not focus and unstage the selected cached hunk' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" C-c m s C-c a s
+if wait_until "$WAIT_TIMEOUT" porcelain_all_staged; then
+  pass legit-stage-files 'status-pane s staged tracked and untracked files'
+else
+  fail legit-stage-files 'status-pane staging did not produce the expected index' \
+    "$porcelain_session"
+fi
+
+lem_keys "$porcelain_session" c
+if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  lem_keys "$porcelain_session" i
+  tmux_cmd send-keys -t "$porcelain_session" -l -- \
+    'porcelain commit from Lem'
+  send_keys "$porcelain_session" Escape C-c C-c
+  if wait_until "$WAIT_TIMEOUT" porcelain_subject_is \
+       'porcelain commit from Lem'; then
+    pass legit-commit 'c and C-c C-c created the staged commit from Vi state'
+  else
+    fail legit-commit 'the commit buffer did not create the expected commit' \
+      "$porcelain_session"
+  fi
+else
+  fail legit-commit "c did not open Legit's commit-message buffer" \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" P p
+if wait_until "$WAIT_TIMEOUT" porcelain_remote_matches_head; then
+  pass legit-push 'P p pushed the current tracked branch to origin'
+else
+  fail legit-push 'P p did not update the bare remote' "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" b c
+if lem_wait_for "$porcelain_session" 'New branch name:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- vcs-feature
+  send_keys "$porcelain_session" Enter
+  if lem_wait_for "$porcelain_session" 'Base branch:' \
+       "$WAIT_TIMEOUT" >/dev/null; then
+    tmux_cmd send-keys -t "$porcelain_session" -l -- main
+    send_keys "$porcelain_session" Enter
+  fi
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_is vcs-feature; then
+  pass legit-branch-create 'b c created and checked out a branch from main'
+else
+  fail legit-branch-create 'b c did not create the requested branch' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" b b
+if lem_wait_for "$porcelain_session" 'Branch:' "$WAIT_TIMEOUT" >/dev/null; then
+  for _ in $(seq 1 11); do
+    lem_keys "$porcelain_session" BSpace
+  done
+  tmux_cmd send-keys -t "$porcelain_session" -l -- main
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_is main; then
+  pass legit-branch-checkout 'b b checked out the selected existing branch'
+else
+  fail legit-branch-checkout 'b b did not return to main' "$porcelain_session"
+fi
+
+printf 'stash-probe\n' >>"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+send_keys "$porcelain_session" g z z
+if lem_wait_for "$porcelain_session" 'Stash message:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-stash
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stashed; then
+  pass legit-stash-push 'z z stashed tracked worktree changes with a message'
+else
+  fail legit-stash-push 'z z did not create a clean stash' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" z p
+if lem_wait_for "$porcelain_session" 'Pop the latest stash' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  lem_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_restored; then
+  pass legit-stash-pop 'z p restored and removed the latest stash'
+else
+  fail legit-stash-pop 'z p did not restore the latest stash' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" restore -- auxiliary.txt
+send_keys "$porcelain_session" g
+if "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" pull -q --ff-only &&
+   printf 'peer-pull-probe\n' \
+     >>"$LEM_YATH_VCS_PORCELAIN_PEER/auxiliary.txt" &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" add -- auxiliary.txt &&
+   git_commit "$LEM_YATH_VCS_PORCELAIN_PEER" porcelain-peer \
+     '2001-01-05T00:00:00+0000' &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" push -q; then
+  send_keys "$porcelain_session" F p
+  if wait_until "$WAIT_TIMEOUT" porcelain_peer_pulled; then
+    pass legit-pull 'F p fast-forwarded to a real peer commit from origin'
+  else
+    fail legit-pull 'F p did not integrate the peer commit' \
+      "$porcelain_session"
+  fi
+else
+  fail legit-pull 'could not prepare the independent peer commit' \
+    "$porcelain_session"
+fi
+lem_stop "$porcelain_session"
 
 printf '\n'
 cat "$LEM_YATH_VCS_REPORT" 2>/dev/null || true
