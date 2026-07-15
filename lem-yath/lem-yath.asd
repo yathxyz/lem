@@ -37,6 +37,7 @@
                (:file "project")
                (:file "lint")
                (:file "dap")
+               (:file "jump-feedback")
                (:file "project-picker")
                (:file "workspace-symbol")
                (:file "project-outline")

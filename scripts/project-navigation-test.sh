@@ -912,10 +912,10 @@ if reset_picker_origin "$verify_session" &&
     picker_state=$(capture_picker_state "$verify_session")
     if grep -q 'prompt=yes .*group="Project Buffer" .*source=duplicate' \
          <<<"$preview_state" &&
-       grep -q 'prompt=no .*source=duplicate .*hooks=0 kill-hooks=0' \
+       grep -q 'prompt=no .*source=duplicate .*hooks=0 kill-hooks=0 .*pulse=yes pulse-source=duplicate' \
          <<<"$picker_state"; then
       pass project-picker-buffer-identity \
-        'b Space accepted and closed on the non-file duplicate-label buffer'
+        'b Space accepted the exact buffer and applied destination feedback'
     else
       fail project-picker-buffer-identity \
         "buffer identity or prompt closure diverged: $preview_state / $picker_state" \
@@ -956,10 +956,10 @@ if reset_picker_origin "$verify_session" &&
   picker_state=$(capture_picker_state "$verify_session")
   if grep -q 'prompt=yes .*group="Project File" .*source=temporary temp=yes temp-listed=no .*hooks=0 kill-hooks=0 history-same=yes' \
        <<<"$preview_state" &&
-     grep -q 'prompt=no .*source=normal-file temp=no .*preview-deleted=yes hooks=1 kill-hooks=0' \
+     grep -q 'prompt=no .*source=normal-file temp=no .*preview-deleted=yes hooks=1 kill-hooks=0 .*pulse=yes pulse-source=normal-file' \
        <<<"$picker_state"; then
     pass project-picker-file-identity \
-      'the file source previewed temporarily, then accepted the duplicate-label file normally'
+      'the temporary preview became a normal file with destination feedback'
   else
     fail project-picker-file-identity \
       "file preview/action identity diverged: $preview_state / $picker_state" \
@@ -996,9 +996,10 @@ if reset_picker_origin "$verify_session" &&
       if wait_report_count '^CURRENT label=spc-p-f ' "$((before + 1))" &&
          grep -q '^CURRENT label=spc-p-f root=beta name=beta-main\.txt file=beta-main\.txt directory=\.$' \
            "$LEM_YATH_PROJECT_NAVIGATION_REPORT" &&
-         grep -q 'prompt=no .*hooks=2 kill-hooks=0' <<<"$picker_state"; then
+         grep -q 'prompt=no .*hooks=2 kill-hooks=0 .*pulse=yes pulse-source=other' \
+           <<<"$picker_state"; then
         pass project-picker-root-action \
-          'r Space restored origin, then opened an ordinary root-local Find File prompt'
+          'r Space completed its rooted Find File action before destination feedback'
       else
         fail project-picker-root-action \
           "root action opened the wrong identity: $picker_state" "$verify_session"

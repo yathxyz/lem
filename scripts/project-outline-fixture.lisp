@@ -24,6 +24,13 @@
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_READER_MARKER")))
 
+(defvar *project-outline-test-default-jump-delay*
+  *jump-feedback-delay-ms*)
+
+;; Keep the pulse observable across a tmux key round-trip.  The separate
+;; configuration assertion below still records the production 30 ms value.
+(setf *jump-feedback-delay-ms* 200)
+
 (defun project-outline-test-log (control &rest arguments)
   (with-open-file (stream *project-outline-test-report*
                           :direction :output
@@ -65,6 +72,29 @@
             :key #'window-buffer :test #'eq)
       (current-window)))
 
+(defun project-outline-test-pulse-state (buffer)
+  (let* ((pulse *jump-feedback-current-pulse*)
+         (overlay (and pulse (jump-feedback-pulse-overlay pulse)))
+         (attribute (and overlay (overlay-attribute overlay))))
+    (values
+     (and pulse (jump-feedback-pulse-active-p pulse))
+     (and pulse (jump-feedback-pulse-stage pulse))
+     (and overlay
+          (eq buffer (overlay-buffer overlay))
+          (line-number-at-point (overlay-start overlay)))
+     (and attribute
+          (find attribute *jump-feedback-stage-attributes*
+                :key #'ensure-attribute :test #'attribute-equal)
+          (symbol-name
+           (find attribute *jump-feedback-stage-attributes*
+                 :key #'ensure-attribute :test #'attribute-equal)))
+     (count-if
+      (lambda (candidate)
+        (find (overlay-attribute candidate)
+              *jump-feedback-stage-attributes*
+              :key #'ensure-attribute :test #'attribute-equal))
+      (lem-core::buffer-overlays buffer)))))
+
 (define-command lem-yath-test-project-outline-report () ()
   (let* ((session (and *project-outline-session*
                        (project-outline-session-active-p
@@ -74,39 +104,49 @@
          (window (project-outline-test-source-window buffer)))
     (with-current-buffer buffer
       (let ((point (buffer-point buffer)))
-        (project-outline-test-log
-         (concatenate
-          'string
-          "STATE file=~a line=~d column=~d view=~a minor=~a regexp=~s "
-          "normal=~a emacs=~a insert=~a visual=~a "
-          "preview=~s input=~s "
-          "reader-marker=~a")
-         (project-outline-test-file-label buffer)
-         (line-number-at-point point)
-         (point-column point)
-         (if (and window
-                  (not (deleted-window-p window))
-                  (eq (window-buffer window) buffer))
-             (line-number-at-point (window-view-point window))
-             "none")
-         (if (mode-active-p buffer 'lem-yath-project-outline-mode)
-             "yes" "no")
-         (buffer-value buffer 'lem-yath-project-outline-regexp)
-         (project-outline-test-command-name
-          (lem-vi-mode/core:ensure-state 'lem-vi-mode/states:normal))
-         (project-outline-test-command-name *lem-yath-emacs-state*)
-         (project-outline-test-command-name
-          (lem-vi-mode/core:ensure-state 'lem-vi-mode/states:insert))
-         (project-outline-test-command-name
-          (lem-vi-mode/core:ensure-state 'lem-vi-mode/visual::visual-char))
-         (and session
-              (alexandria:when-let
-                  ((candidate
-                     (project-outline-session-preview-candidate session)))
-                (project-outline-candidate-label candidate)))
-         (and session (project-outline-current-input))
-         (if (uiop:file-exists-p *project-outline-test-reader-marker*)
-             "yes" "no"))))))
+        (multiple-value-bind
+            (pulse stage pulse-line pulse-attribute pulse-overlays)
+            (project-outline-test-pulse-state buffer)
+          (project-outline-test-log
+           (concatenate
+            'string
+            "STATE file=~a line=~d column=~d view=~a minor=~a regexp=~s "
+            "normal=~a emacs=~a insert=~a visual=~a "
+            "preview=~s input=~s pulse=~a pulse-stage=~a "
+            "pulse-line=~a pulse-attribute=~a pulse-overlays=~d "
+            "reader-marker=~a")
+           (project-outline-test-file-label buffer)
+           (line-number-at-point point)
+           (point-column point)
+           (if (and window
+                    (not (deleted-window-p window))
+                    (eq (window-buffer window) buffer))
+               (line-number-at-point (window-view-point window))
+               "none")
+           (if (mode-active-p buffer 'lem-yath-project-outline-mode)
+               "yes" "no")
+           (buffer-value buffer 'lem-yath-project-outline-regexp)
+           (project-outline-test-command-name
+            (lem-vi-mode/core:ensure-state 'lem-vi-mode/states:normal))
+           (project-outline-test-command-name *lem-yath-emacs-state*)
+           (project-outline-test-command-name
+            (lem-vi-mode/core:ensure-state 'lem-vi-mode/states:insert))
+           (project-outline-test-command-name
+            (lem-vi-mode/core:ensure-state
+             'lem-vi-mode/visual::visual-char))
+           (and session
+                (alexandria:when-let
+                    ((candidate
+                       (project-outline-session-preview-candidate session)))
+                  (project-outline-candidate-label candidate)))
+           (and session (project-outline-current-input))
+           (if pulse "yes" "no")
+           (or stage "none")
+           (or pulse-line "none")
+           (or pulse-attribute "none")
+           pulse-overlays
+           (if (uiop:file-exists-p *project-outline-test-reader-marker*)
+               "yes" "no")))))))
 
 (define-command lem-yath-test-project-outline-candidates () ()
   (let* ((buffer (current-buffer))
@@ -160,4 +200,11 @@
   (define-key keymap "C-c z 3" 'lem-yath-test-project-outline-malicious)
   (define-key keymap "C-c z 4" 'lem-yath-test-project-outline-empty))
 
+(project-outline-test-log
+ "JUMP-CONFIG delay=~d stages=~d colors=~{~a~^,~}"
+ *project-outline-test-default-jump-delay*
+ (length *jump-feedback-stage-attributes*)
+ (mapcar (lambda (name)
+           (or (attribute-background (ensure-attribute name)) "none"))
+         *jump-feedback-stage-attributes*))
 (project-outline-test-log "READY")

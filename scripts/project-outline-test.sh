@@ -93,6 +93,13 @@ if ! lem_wait_for "$session" 'Alpha section' 30 >/dev/null ||
   exit 1
 fi
 
+if grep -q '^JUMP-CONFIG delay=30 stages=4 colors=#ff0000,#b90019,#71001a,#350717$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass jump-config 'the production delay, iteration count, and TTY fade match Pulsar'
+else
+  fail jump-config 'the configured Pulsar timing or Modus fade palette differed'
+fi
+
 send_chord C-c z r
 wait_report_count '^STATE file=main ' 1 || true
 activation="$(grep '^STATE file=main ' "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
@@ -147,6 +154,7 @@ if lem_wait_for "$session" 'Go to heading:' 10 >/dev/null; then
   preview="$(grep '^STATE file=main line=40 column=4 ' "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
   preview_view="$(sed -n 's/^.* view=\([^ ]*\) minor=.*$/\1/p' <<<"$preview")"
   if grep -q 'preview=";;; Second target section" input="Second"' <<<"$preview" &&
+     grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' <<<"$preview" &&
      [ -n "$origin_view" ] && [ -n "$preview_view" ] &&
      [ "$origin_view" != "$preview_view" ]; then
     pass preview 'filter focus moves to the literal match and recenters the source window'
@@ -161,7 +169,8 @@ if lem_wait_for "$session" 'Go to heading:' 10 >/dev/null; then
   restored="$(grep '^STATE file=main line=80 ' "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
   restored_view="$(sed -n 's/^.* view=\([^ ]*\) minor=.*$/\1/p' <<<"$restored")"
   if [ "$restored_view" = "$origin_view" ] &&
-     grep -q 'preview=NIL input=NIL' <<<"$restored"; then
+     grep -q 'preview=NIL input=NIL pulse=no pulse-stage=none .*pulse-overlays=0' \
+       <<<"$restored"; then
     pass cancel 'C-g restores exact source point and viewport'
   else
     fail cancel 'prompt cancellation leaked its preview point or viewport'
@@ -179,6 +188,12 @@ if lem_wait_for "$session" 'Go to heading:' 10 >/dev/null; then
   send_chord C-c z r
   wait_report_count '^STATE file=main line=40 column=4 ' 2 || true
   final="$(grep '^STATE file=main line=40 column=4 ' "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  if grep -q 'pulse=yes pulse-stage=[0-3] pulse-line=40 pulse-attribute=LEM-YATH-JUMP-PULSE-[1-4]-ATTRIBUTE pulse-overlays=1' \
+       <<<"$final"; then
+    pass jump-pulse 'accepted outline navigation recenters and pulses only its destination line'
+  else
+    fail jump-pulse "accepted outline navigation lacked live Pulsar feedback: $final"
+  fi
   send_chord C-o
   sleep 0.3
   send_chord C-c z r
@@ -188,6 +203,17 @@ if lem_wait_for "$session" 'Go to heading:' 10 >/dev/null; then
     pass final-jump 'one Return commits the match-position jump and C-o returns to origin'
   else
     fail final-jump 'final selection or Vi jumplist behavior differed'
+  fi
+
+  sleep 0.8
+  send_chord C-c z r
+  wait_report_count '^STATE file=main line=80 ' 4 || true
+  expired="$(grep '^STATE file=main line=80 ' "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  if grep -q 'pulse=no pulse-stage=none pulse-line=none pulse-attribute=none pulse-overlays=0' \
+       <<<"$expired"; then
+    pass jump-expiry 'the fourth fade removes its timer and overlay cleanly'
+  else
+    fail jump-expiry "jump feedback leaked after its configured fade: $expired"
   fi
 else
   fail final-jump 'the second outline prompt did not open'

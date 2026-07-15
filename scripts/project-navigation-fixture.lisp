@@ -1,5 +1,9 @@
 (in-package :lem-yath)
 
+;; Keep accepted Consult-project-buffer feedback observable across the tmux
+;; report round-trip.  Production retains the audited 30 ms delay.
+(setf *jump-feedback-delay-ms* 300)
+
 (defvar *project-navigation-test-report*
   (uiop:getenv "LEM_YATH_PROJECT_NAVIGATION_REPORT"))
 
@@ -847,7 +851,12 @@
                 (= view-position
                    *project-navigation-test-picker-view-position*)
                 (eql horizontal
-                     *project-navigation-test-picker-horizontal-scroll*))))
+                     *project-navigation-test-picker-horizontal-scroll*)))
+         (pulse *jump-feedback-current-pulse*)
+         (pulse-overlay
+           (and pulse
+                (jump-feedback-pulse-active-p pulse)
+                (jump-feedback-pulse-overlay pulse))))
     (when temporary
       (setf *project-navigation-test-picker-last-preview-buffer* buffer)
       (pushnew buffer *project-navigation-test-picker-preview-buffers*
@@ -858,6 +867,7 @@
       "PICKER-STATE sample=~d prompt=~a input=~s focus=~s group=~s calls=~d reads=~d "
       "source=~a temp=~a temp-listed=~a "
       "preview-deleted=~a hooks=~d kill-hooks=~d history-same=~a exact=~a "
+      "pulse=~a pulse-source=~a pulse-line=~a "
       "mru-same=~a point=~a view=~a horizontal=~a")
      *project-navigation-test-picker-state-sample*
      (project-navigation-test-yes-no prompt)
@@ -880,6 +890,12 @@
       (equal *project-navigation-test-picker-history-snapshot*
              (lem-core/commands/file:recent-files)))
      (project-navigation-test-yes-no exact)
+     (project-navigation-test-yes-no pulse-overlay)
+     (project-navigation-test-picker-source-label
+      (and pulse-overlay (overlay-buffer pulse-overlay)))
+     (or (and pulse-overlay
+              (line-number-at-point (overlay-start pulse-overlay)))
+         "none")
      (project-navigation-test-yes-no
       (equal *project-navigation-test-picker-buffer-list-snapshot*
              (buffer-list)))

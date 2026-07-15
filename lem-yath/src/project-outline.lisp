@@ -421,7 +421,8 @@
       (lem-vi-mode/jumplist:with-jumplist
         (project-outline-move-to-candidate
          session candidate
-         (or (project-outline-session-selected-input session) ""))))))
+         (or (project-outline-session-selected-input session) "")))
+      (jump-feedback-after-jump))))
 
 (defun project-outline-make-session ()
   (let* ((buffer (current-buffer))

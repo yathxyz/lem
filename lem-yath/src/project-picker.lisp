@@ -631,6 +631,7 @@ state, so unopened-file previews intentionally remain isolated raw text."
              (setf (project-picker-session-active-p session) nil))
         (project-picker-delete-origin-points session)))
     (when selected
-      (project-picker-perform-action selected))))
+      (project-picker-perform-action selected)
+      (jump-feedback-after-jump))))
 
 (define-key *global-keymap* "C-x p b" 'lem-yath-project-buffers)

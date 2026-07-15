@@ -594,8 +594,7 @@
       (lem/language-mode::push-location-stack (current-point))
       (lem-vi-mode/jumplist:with-jumplist
         (lem/language-mode:go-to-location xref #'switch-to-buffer))
-      (window-recenter (current-window))
-      (lem/peek-source:highlight-matched-line (current-point)))))
+      (jump-feedback-after-jump))))
 
 (defun workspace-symbol-make-session (workspace)
   (let ((window (current-window))

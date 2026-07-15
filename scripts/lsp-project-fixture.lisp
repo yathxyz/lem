@@ -1,5 +1,9 @@
 (in-package :lem-yath)
 
+;; Keep the four-stage workspace-symbol pulse visible until the physical F12
+;; report key arrives.  The production delay remains 30 ms.
+(setf *jump-feedback-delay-ms* 300)
+
 (defvar *lsp-project-test-lisp-v2-preloaded-p* nil)
 (defvar *lsp-project-test-lisp-v2-immutable-p* nil)
 (defvar *lsp-project-test-lisp-v2-load-no-op-p* nil)
@@ -393,11 +397,20 @@
   (lsp-project-test-record-workspaces "manual"))
 
 (define-command lem-yath-test-lsp-record-location () ()
-  (lsp-project-test-report
-   "LOCATION file=~a line=~d column=~d"
-   (or (buffer-filename (current-buffer)) "none")
-   (line-number-at-point (current-point))
-   (point-charpos (current-point))))
+  (let* ((pulse *jump-feedback-current-pulse*)
+         (overlay
+           (and pulse
+                (jump-feedback-pulse-active-p pulse)
+                (jump-feedback-pulse-overlay pulse))))
+    (lsp-project-test-report
+     "LOCATION file=~a line=~d column=~d pulse=~a pulse-line=~a pulse-buffer=~a"
+     (or (buffer-filename (current-buffer)) "none")
+     (line-number-at-point (current-point))
+     (point-charpos (current-point))
+     (lsp-project-test-yes-no overlay)
+     (or (and overlay (line-number-at-point (overlay-start overlay))) "none")
+     (lsp-project-test-yes-no
+      (and overlay (eq (current-buffer) (overlay-buffer overlay)))))))
 
 (define-command lem-yath-test-lsp-record-workspace-symbol-source () ()
   (let* ((session *workspace-symbol-session*)

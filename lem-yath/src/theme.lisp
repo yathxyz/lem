@@ -79,6 +79,12 @@
   (dap-stopped-line-attribute :background "#1d3b2a")
   (dap-info-heading-attribute :foreground "#2fafff" :bold t)
   (dap-info-error-attribute :foreground "#ff5f59" :bold t)
+  ;; Pulsar uses a red TTY start color.  Four 30 ms stages fade it toward the
+  ;; Modus Vivendi Tinted background without changing the line's foreground.
+  (lem-yath-jump-pulse-1-attribute :background "#ff0000")
+  (lem-yath-jump-pulse-2-attribute :background "#b90019")
+  (lem-yath-jump-pulse-3-attribute :background "#71001a")
+  (lem-yath-jump-pulse-4-attribute :background "#350717")
   (lem-yath-indent-guide-1-attribute :foreground "#6f7390")
   (lem-yath-indent-guide-2-attribute :foreground "#657f86")
   (lem-yath-indent-guide-3-attribute :foreground "#7f7185")

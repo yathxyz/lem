@@ -417,9 +417,9 @@ if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
     if wait_report_count '^LOCATION ' "$((before + 1))"; then
       location=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
       if [[ "$location" == \
-           *'/project-a/symbols.fixture line=3 column=4' ]]; then
+           *'/project-a/symbols.fixture line=3 column=4 pulse=yes pulse-line=3 pulse-buffer=yes' ]]; then
         pass workspace-symbol-jump \
-          'one Return commits the exact project-A LSP location'
+          'one Return commits the exact LSP location and pulses its line'
       else
         fail workspace-symbol-jump "unexpected selection location: $location"
       fi
