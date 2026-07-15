@@ -70,7 +70,7 @@
         (llm-json-object "role" "user" "content" prompt)))
 
 (defun llm-request-body-for-messages
-    (messages model temperature max-tokens tools-p)
+    (messages model temperature max-tokens tools)
   (with-output-to-string (s)
     (let ((body (llm-json-object
                  "model" model
@@ -79,8 +79,9 @@
                  "messages" (coerce messages 'vector))))
       (when max-tokens
         (setf (gethash "max_tokens" body) max-tokens))
-      (when tools-p
-        (setf (gethash "tools" body) (llm-tool-definitions)))
+      (when tools
+        (setf (gethash "tools" body)
+              (if (eq tools t) (llm-tool-definitions) tools)))
       (yason:encode body s))))
 
 (defun llm-request-body (prompt)
@@ -355,6 +356,10 @@ end of the current word or punctuation run."
                            (project-request
                              (llm-tool-context-project-request context)))
       (cancel-project-request project-request))
+    (alexandria:when-let* ((context (llm-request-tool-context request))
+                           (server-names
+                             (llm-tool-context-mcp-server-names context)))
+      (llm-mcp-abort-server-names server-names))
     process))
 
 (defun llm-request-finish-text (request code failure-label)
@@ -453,7 +458,7 @@ end of the current word or punctuation run."
                       (list (llm-stream-tool-result-message call result))))))))
 
 (defun llm-openrouter-loop
-    (request key messages model temperature max-tokens tools-p)
+    (request key messages model temperature max-tokens tools)
   "Run the bounded OpenRouter response/tool/response loop for REQUEST."
   (let ((tool-rounds 0)
         (tool-calls 0))
@@ -461,7 +466,7 @@ end of the current word or punctuation run."
         (loop
           (when (llm-request-aborted-now-p request) (return))
           (let ((body (llm-request-body-for-messages
-                       messages model temperature max-tokens tools-p)))
+                       messages model temperature max-tokens tools)))
             (multiple-value-bind (round code)
                 (llm-openrouter-round request key body)
               (when (llm-request-aborted-now-p request) (return))
@@ -480,7 +485,7 @@ end of the current word or punctuation run."
                 (when (null calls)
                   (llm-request-finish request (string #\Newline))
                   (return))
-                (unless tools-p
+                (unless tools
                   (error "OpenRouter requested tools from a tool-free preset"))
                 (when (>= tool-rounds *llm-max-tool-rounds*)
                   (error "LLM tool round limit reached"))
@@ -509,7 +514,8 @@ end of the current word or punctuation run."
         (system *llm-system-message*)
         (temperature *llm-temperature*)
         (max-tokens *llm-max-tokens*)
-        (tools-p *llm-use-tools*))
+        (tools-p *llm-use-tools*)
+        (mcp-server-names (copy-list *llm-mcp-server-names*)))
     (unless key
       (message "Set OPENROUTER_API_KEY (or OPENAI_API_KEY) first")
       (return-from llm-stream))
@@ -519,7 +525,8 @@ end of the current word or punctuation run."
         (return-from llm-stream))
       (let ((tool-context
               (when tools-p
-                (handler-case (llm-capture-tool-context)
+                (handler-case
+                    (llm-capture-tool-context mcp-server-names)
                   (error ()
                     (message "Could not capture the LLM project context")
                     (return-from llm-stream))))))
@@ -536,9 +543,26 @@ end of the current word or punctuation run."
               (bt2:make-thread
                (lambda ()
                  (unwind-protect
-                      (llm-openrouter-loop
-                       request key (llm-initial-messages prompt system)
-                       model temperature max-tokens tools-p)
+                      (handler-case
+                          (let* ((sessions
+                                   (and mcp-server-names
+                                        (llm-mcp-ensure-servers
+                                         mcp-server-names)))
+                                 (tools
+                                   (and tools-p
+                                        (llm-tool-definitions sessions))))
+                            (when tool-context
+                              (setf (llm-tool-context-mcp-sessions tool-context)
+                                    sessions))
+                            (llm-openrouter-loop
+                             request key (llm-initial-messages prompt system)
+                             model temperature max-tokens tools))
+                        (error (condition)
+                          (unless (llm-request-aborted-now-p request)
+                            (llm-request-finish
+                             request
+                             (format nil "~%[MCP connection error: ~a]~%"
+                                     condition)))))
                    (when tool-context
                      (cancel-project-request
                       (llm-tool-context-project-request tool-context)))))

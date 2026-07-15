@@ -330,6 +330,8 @@
             ++ rustRuntimeInputs
             ++ vcsRuntimeInputs
             ++ (with pkgs; [
+              docker-client
+              uv
               pandoc
               postgresql
               sqlite
@@ -415,6 +417,8 @@
                 export LEM_YATH_CLIENT=${lemClient}/bin/lemclient
                 export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
                 export LEM_YATH_GUARDIAN_PYTHON=${lib.getExe' pkgs.python3 "python3"}
+                export LEM_YATH_MCP_FETCH_PROGRAM=${lib.getExe' pkgs.uv "uvx"}
+                export LEM_YATH_MCP_DOCKER_PROGRAM=${lib.getExe pkgs.docker-client}
                 export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
                 export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
                 export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-yath:$out:/nix/store:/nix/store"
@@ -456,6 +460,8 @@
               export LEM_YATH_ALTERNATE_EDITOR="$0"
               export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
               export LEM_YATH_GUARDIAN_PYTHON=${lib.getExe' pkgs.python3 "python3"}
+              export LEM_YATH_MCP_FETCH_PROGRAM="''${LEM_YATH_MCP_FETCH_PROGRAM:-${lib.getExe' pkgs.uv "uvx"}}"
+              export LEM_YATH_MCP_DOCKER_PROGRAM="''${LEM_YATH_MCP_DOCKER_PROGRAM:-${lib.getExe pkgs.docker-client}}"
               export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
               export LEM_YATH_AOT_FASL_ROOT=${lemYathAot}
 
@@ -744,6 +750,7 @@
             llm-backend-test = mkTestAppWithLem lemYath "lem-yath-llm-backend-test" "llm-backend-test.sh";
             llm-workflow-test = mkTestAppWithLem lemYath "lem-yath-llm-workflow-test" "llm-workflow-test.sh";
             llm-tools-test = mkTestAppWithLem lemYath "lem-yath-llm-tools-test" "llm-tools-test.sh";
+            llm-mcp-test = mkTestAppWithLem lemYath "lem-yath-llm-mcp-test" "llm-mcp-test.sh";
             claude-code-test = mkTestAppWithLem lemYath "lem-yath-claude-code-test" "claude-code-test.sh";
             claude-bridge-test = mkTestAppWithLem lemYath "lem-yath-claude-bridge-test" "claude-bridge-test.sh";
             lisp-eval-test = mkTestApp "lem-yath-lisp-eval-test" "lisp-eval-test.sh";
@@ -826,6 +833,7 @@
             llm-backend = mkCheckWithLem lemYath "llm-backend" "llm-backend-test.sh";
             llm-workflow = mkCheckWithLem lemYath "llm-workflow" "llm-workflow-test.sh";
             llm-tools = mkCheckWithLem lemYath "llm-tools" "llm-tools-test.sh";
+            llm-mcp = mkCheckWithLem lemYath "llm-mcp" "llm-mcp-test.sh";
             claude-code = mkCheckWithLem lemYath "claude-code" "claude-code-test.sh";
             claude-bridge = mkCheckWithLem lemYath "claude-bridge" "claude-bridge-test.sh";
             lisp-eval = mkCheck "lisp-eval" "lisp-eval-test.sh";

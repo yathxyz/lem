@@ -11,7 +11,9 @@
 
 (defstruct llm-tool-context
   root
-  project-request)
+  project-request
+  mcp-server-names
+  mcp-sessions)
 
 (defun llm-json-object (&rest entries)
   "Return an equal-keyed JSON object from alternating key/value ENTRIES."
@@ -38,50 +40,55 @@
      "properties" properties
      "required" (coerce required 'vector)))))
 
-(defun llm-tool-definitions ()
+(defun llm-tool-definitions (&optional mcp-sessions)
   "Return OpenAI-compatible schemas for the configured read-only tools."
-  (vector
-   (llm-tool-schema
-    "project_root"
-    "Return the active project root for the originating buffer. Use this before reading or searching project files."
-    (llm-json-object)
-    '())
-   (llm-tool-schema
-    "list_project_files"
-    "List files in the active project. Optionally pass a glob like *.lisp or *.org to narrow the result."
-    (llm-json-object
-     "glob" (llm-tool-parameter
-             "string" "Optional glob used to limit the file list, for example *.lisp"))
-    '())
-   (llm-tool-schema
-    "search_project"
-    "Search the active project with ripgrep and return matching lines. Prefer this for discovery before reading whole files."
-    (llm-json-object
-     "pattern" (llm-tool-parameter
-                "string" "Search pattern to look for in project files")
-     "glob" (llm-tool-parameter
-             "string" "Optional glob used to limit the search, for example *.lisp"))
-    '("pattern"))
-   (llm-tool-schema
-    "read_project_file"
-    "Read a UTF-8 text file from the active project. The path must stay inside the project root. Optionally request a line range."
-    (llm-json-object
-     "path" (llm-tool-parameter
-             "string" "Path relative to the current project root")
-     "start_line" (llm-tool-parameter
-                   "integer" "Optional 1-based starting line number")
-     "end_line" (llm-tool-parameter
-                 "integer" "Optional 1-based ending line number"))
-    '("path"))
-   (llm-tool-schema
-    "read_emacs_symbol"
-    "Return function or variable documentation for the equivalent Lem/Common Lisp symbol. Package-qualified names are supported."
-    (llm-json-object
-     "name" (llm-tool-parameter
-             "string" "Name of the function or variable to inspect"))
-    '("name"))))
+  (concatenate
+   'vector
+   (vector
+    (llm-tool-schema
+     "project_root"
+     "Return the active project root for the originating buffer. Use this before reading or searching project files."
+     (llm-json-object)
+     '())
+    (llm-tool-schema
+     "list_project_files"
+     "List files in the active project. Optionally pass a glob like *.lisp or *.org to narrow the result."
+     (llm-json-object
+      "glob" (llm-tool-parameter
+              "string" "Optional glob used to limit the file list, for example *.lisp"))
+     '())
+    (llm-tool-schema
+     "search_project"
+     "Search the active project with ripgrep and return matching lines. Prefer this for discovery before reading whole files."
+     (llm-json-object
+      "pattern" (llm-tool-parameter
+                 "string" "Search pattern to look for in project files")
+      "glob" (llm-tool-parameter
+              "string" "Optional glob used to limit the search, for example *.lisp"))
+     '("pattern"))
+    (llm-tool-schema
+     "read_project_file"
+     "Read a UTF-8 text file from the active project. The path must stay inside the project root. Optionally request a line range."
+     (llm-json-object
+      "path" (llm-tool-parameter
+              "string" "Path relative to the current project root")
+      "start_line" (llm-tool-parameter
+                    "integer" "Optional 1-based starting line number")
+      "end_line" (llm-tool-parameter
+                  "integer" "Optional 1-based ending line number"))
+     '("path"))
+    (llm-tool-schema
+     "read_emacs_symbol"
+     "Return function or variable documentation for the equivalent Lem/Common Lisp symbol. Package-qualified names are supported."
+     (llm-json-object
+      "name" (llm-tool-parameter
+              "string" "Name of the function or variable to inspect"))
+     '("name")))
+   (if mcp-sessions
+       (llm-mcp-tool-definitions mcp-sessions)
+       #())))
 
-(defun llm-capture-tool-context ()
+(defun llm-capture-tool-context (&optional mcp-server-names)
   "Capture the originating buffer's root and a cancellable project request."
   (let* ((directory (or (buffer-directory (current-buffer)) (uiop:getcwd)))
          (root (or (lem-yath-project-root-for-directory directory)
@@ -89,7 +96,8 @@
     (make-llm-tool-context
      :root root
      :project-request
-     (make-live-project-request 0 (capture-project-request-origin)))))
+     (make-live-project-request 0 (capture-project-request-origin))
+     :mcp-server-names (copy-list mcp-server-names))))
 
 (defun llm-tool-root-name (context)
   (project-native-directory (llm-tool-context-root context)))
@@ -380,6 +388,9 @@
               (llm-tool-read-project-file context arguments))
              ((string= name "read_emacs_symbol")
               (llm-tool-read-emacs-symbol context arguments))
+             ((llm-mcp-find-tool (llm-tool-context-mcp-sessions context) name)
+              (llm-mcp-invoke-tool
+               (llm-tool-context-mcp-sessions context) name arguments))
              (t (error "Unknown tool: ~a" name))))))
     (project-request-cancelled () "Tool error: request cancelled")
     (error (condition) (format nil "Tool error: ~a" condition))))

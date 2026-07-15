@@ -14,21 +14,42 @@
      :system "Short, direct answers. Skip extra context unless it changes correctness."
      :temperature 0.2
      :max-tokens 800
-     :use-tools nil)
+     :use-tools nil
+     :mcp-servers nil)
     ("project-readonly"
      :backend :openrouter
      :model "openrouter/auto"
      :system "Use the provided project and Lem tools for discovery before answering. Prefer narrow searches and narrow file reads over guessing. Stay read-only."
      :temperature 0.2
      :max-tokens 4000
-     :use-tools t)
+     :use-tools t
+     :mcp-servers nil)
+    ,@(when (llm-mcp-server-available-p "fetch")
+        `(("web-readonly"
+           :backend :openrouter
+           :model "openrouter/auto"
+           :system "When the task needs current external information, use the connected fetch MCP tool instead of relying on stale model knowledge. Use the provided project and Lem tools for local discovery. Stay read-only."
+           :temperature 0.2
+           :max-tokens 4000
+           :use-tools t
+           :mcp-servers ("fetch"))))
+    ,@(when (llm-mcp-server-available-p "github")
+        `(("github-readonly"
+           :backend :openrouter
+           :model "openrouter/auto"
+           :system "When the task concerns repositories, pull requests, issues, or CI, use the connected read-only GitHub MCP tools. Use the provided project and Lem tools for local discovery. Stay read-only."
+           :temperature 0.2
+           :max-tokens 4000
+           :use-tools t
+           :mcp-servers ("github"))))
     ("grok-build"
      :backend :grok
      :model "grok-build"
      :system "You are a coding assistant. Answer directly; inspect the project only when needed."
      :temperature 0.2
      :max-tokens nil
-     :use-tools nil))
+     :use-tools nil
+     :mcp-servers nil))
   "Built-in presets whose required transport exists in Lem-yath.")
 
 (defvar *llm-current-preset* "quick-lookup")
@@ -169,7 +190,24 @@
        (let ((maximum (getf preset :max-tokens)))
          (or (null maximum)
              (and (integerp maximum) (<= 1 maximum 1000000))))
-       (member (getf preset :use-tools) '(nil t))))
+       (member (getf preset :use-tools) '(nil t))
+       (let ((servers (getf preset :mcp-servers)))
+         (and (listp servers)
+              (= (length servers)
+                 (length (remove-duplicates servers :test #'string=)))
+              (every (lambda (server)
+                       (member server '("fetch" "github") :test #'string=))
+                     servers)
+              (or (null servers)
+                  (and (eq (getf preset :backend) :openrouter)
+                       (getf preset :use-tools)))))))
+
+(defun llm-preset-mcp-servers-from-json (value)
+  (let ((values (cond ((null value) nil)
+                      ((vectorp value) (coerce value 'list))
+                      ((listp value) value)
+                      (t :invalid))))
+    values))
 
 (defun llm-preset-from-json (object)
   (when (hash-table-p object)
@@ -180,7 +218,10 @@
                    :system (gethash "system" object)
                    :temperature (gethash "temperature" object)
                    :max-tokens (gethash "max_tokens" object)
-                   :use-tools (gethash "use_tools" object))))
+                   :use-tools (gethash "use_tools" object)
+                   :mcp-servers
+                   (llm-preset-mcp-servers-from-json
+                    (gethash "mcp_servers" object)))))
       (and (llm-preset-valid-p name preset) (cons name preset)))))
 
 (defun llm-read-user-presets ()
@@ -214,7 +255,8 @@
      ("system" . ,(getf preset :system))
      ("temperature" . ,(getf preset :temperature))
      ("max_tokens" . ,(getf preset :max-tokens))
-     ("use_tools" . ,(getf preset :use-tools)))
+     ("use_tools" . ,(getf preset :use-tools))
+     ("mcp_servers" . ,(coerce (getf preset :mcp-servers) 'vector)))
    :test #'equal))
 
 (defun llm-preset-json-text (presets)
@@ -285,7 +327,8 @@
         :system *llm-system-message*
         :temperature *llm-temperature*
         :max-tokens *llm-max-tokens*
-        :use-tools *llm-use-tools*))
+        :use-tools *llm-use-tools*
+        :mcp-servers (copy-list *llm-mcp-server-names*)))
 
 (defun llm-apply-preset (name preset)
   "Apply validated PRESET named NAME to the live LLM settings."
@@ -297,6 +340,7 @@
         *llm-temperature* (getf preset :temperature)
         *llm-max-tokens* (getf preset :max-tokens)
         *llm-use-tools* (getf preset :use-tools)
+        *llm-mcp-server-names* (copy-list (getf preset :mcp-servers))
         *llm-current-preset* name)
   preset)
 

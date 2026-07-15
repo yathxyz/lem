@@ -2539,8 +2539,9 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   `xdg-open` is the final fallback; every launch uses an argument vector rather
   than a shell.
 
-  The built-in `quick-lookup`, `project-readonly`, and `grok-build` presets
-  reproduce the usable Emacs policies whose transports exist here. Quick
+  The built-in `quick-lookup`, `project-readonly`, conditional `web-readonly`
+  and `github-readonly`, and `grok-build` presets reproduce the usable Emacs
+  policies whose transports exist here. Quick
   lookup is explicitly tool-free. Project-readonly exposes the configured
   `project_root`, `list_project_files`, `search_project`, `read_project_file`,
   and `read_emacs_symbol` names through OpenRouter's function-call protocol;
@@ -2551,10 +2552,24 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   mutation, arbitrary command, or shell tool. Fragmented SSE calls are
   assembled under per-line, argument, call, and four-round limits; tool
   results remain visible in the transcript and feed the next model round.
-  Abort covers both curl and active project subprocesses.
+  Abort covers curl, active project subprocesses, and a blocked MCP tool call.
+
+  Web-readonly starts or reuses the pinned `uvx mcp-server-fetch` stdio server.
+  GitHub-readonly appears when a GitHub token exists and starts the official
+  container through direct Docker argv with `GITHUB_READ_ONLY=1` and only the
+  configured `context,repos,issues,pull_requests,users` toolsets. The token is
+  confined to the Docker child environment and named `-e` handoff; it is never
+  placed in argv or persisted. The bounded MCP client negotiates current or
+  supported older revisions, handles server ping, paginated tool discovery,
+  namespaced OpenRouter schemas, structured/text/resource results, persistent
+  session reuse, process cleanup, and response/time/size/tool limits. The M-x
+  connect-one, connect-all, status, and stop-all commands cover the configured
+  hub lifecycle. Arbitrary user server definitions, a rich hub buffer, idle
+  asynchronous list-change handling, sampling, elicitation, and experimental
+  tasks are intentionally not implemented.
 
   User presets persist backend, model, system message, temperature, token cap,
-  and tool opt-in in
+  local-tool opt-in, and configured MCP server names in
   `$XDG_CONFIG_HOME/lem-yath/llm-presets.json`; creation, locking, and atomic
   replacement enforce user ownership and private `0700`/`0600` modes on SBCL.
   `scripts/llm-workflow-test.sh` verifies the menu through physical keys,
@@ -2566,6 +2581,11 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   validates exact schemas and follow-up messages, round-trips a tool-enabled
   private preset, and proves path traversal, escaping symlinks, binary files,
   malformed SSE/arguments, oversized fragments, and unknown tools fail closed.
+  `scripts/llm-mcp-test.sh` drives both fake stdio servers through current and
+  older-version negotiation, server ping, pagination, local plus MCP model
+  tools, structured results, persistent reuse, GitHub read-only argv and token
+  confinement, private preset round-trip, cancellation, and exact second-round
+  OpenRouter messages without network access or real credentials.
 
   - **Copilot** — `extensions/copilot/` (`lem-copilot`): `copilot-mode` minor mode,
     `copilot-install-server`, `copilot-signin`, `copilot-complete`,

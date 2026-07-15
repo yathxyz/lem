@@ -343,7 +343,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   region-or-buffer handoff to Claude or ChatGPT; the built-in `quick-lookup`
   preset matches the Emacs startup model, system prompt, temperature, and
   token cap, `project-readonly` opts OpenRouter into the configured five-tool
-  project inspection loop, and `grok-build` selects the native Grok CLI backend
+  project inspection loop, `web-readonly` adds the fetch MCP server,
+  `github-readonly` adds the configured read-only GitHub MCP toolsets when a
+  token is available, and `grok-build` selects the native Grok CLI backend
 - project-aware `C-c c` Claude Code buffer that opens ready for input, prefers
   the configured `ccr code` argv with a `claude` fallback, renders native text
   and tool events, and resumes the same session on later prompts. It starts an
@@ -361,13 +363,24 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 
 Saved LLM presets live in `$XDG_CONFIG_HOME/lem-yath/llm-presets.json` (or
 `~/.config/lem-yath/llm-presets.json`) with private directory and file modes.
-They retain the tool opt-in as well as backend, model, system message,
-temperature, and token cap. `project-readonly` captures the originating
+They retain the local-tool opt-in and configured MCP server names as well as
+backend, model, system message, temperature, and token cap.
+`project-readonly` captures the originating
 project before opening the shared output buffer and exposes only
 `project_root`, `list_project_files`, `search_project`, `read_project_file`,
 and the Lem/Common Lisp translation of `read_emacs_symbol`. Calls are bounded,
 file reads require canonical in-project regular UTF-8 text, and no write,
 arbitrary-command, or shell tool exists.
+`web-readonly` and `github-readonly` reuse that bounded model loop while
+starting persistent newline-delimited stdio MCP sessions. The fetch path uses
+the pinned `uvx mcp-server-fetch`; GitHub uses direct Docker argv, normalizes
+the token only in its restricted child environment, passes only the configured
+`context,repos,issues,pull_requests,users` toolsets to a read-only container,
+and never places the token in argv. MCP tools are namespaced as
+`mcp__SERVER__TOOL`, results remain visible, and LLM abort also interrupts a
+blocked server call. `M-x lem-yath-llm-mcp-connect-server`,
+`lem-yath-llm-mcp-connect-default`, `lem-yath-llm-mcp-status`, and
+`lem-yath-llm-mcp-stop-all` provide the configured hub lifecycle.
 The handoff menu preserves the Emacs 13,000-character context cap and prefers
 the active region; ChatGPT handoffs also copy the exact prompt to the kill
 ring. `SPC g i` retains the separate ad-hoc instruction prompt.
@@ -406,7 +419,8 @@ electric-editing, grouped-buffer-list, UI parity, project navigation and outline
 persistence, bookmarks,
 retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
 credential-free backend streaming/resume, private preset persistence, web
-handoff, integrated Claude Code interaction, and authenticated MCP diff review,
+handoff, read-only fetch/GitHub MCP client sessions, integrated Claude Code
+interaction, and authenticated MCP diff review,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
 roam, roam backlinks, native Org, Org planning/timestamps, agenda, agenda-clock, and
 parity-ledger checks. The ledger can also be
