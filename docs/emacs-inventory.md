@@ -552,7 +552,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **dape** debugging (Python/Go/Rust/C) — likely partial/gap in Lem.
 - **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — Lem now has bounded native Org editing, metadata-aware Org/Markdown roam-node selection, the configured five roam capture templates with finalize/abort and deferred insertion, daily, journal, general Org capture, and agenda implementations. Org-roam database/backlink/autosync semantics and the full general capture/journal interfaces remain gaps.
 - **vundo, pulsar (recenter-on-jump), indent-bars, dirvish** UI niceties.
-- **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`) — Lem has OpenRouter streaming, resumable native CLI backend ports, private named presets, and bounded Claude/ChatGPT web handoff. Agentic gptel tool loops, OAuth HTTP backends, tracing, and generic MCP-client semantics remain gaps.
+- **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`) — Lem has OpenRouter streaming, resumable native CLI backend ports, private named presets, bounded Claude/ChatGPT web handoff, and a tested project-aware interactive Claude Code buffer. Emacs's Claude transient/vterm and Monet diff bridge, agentic gptel tool loops, OAuth HTTP backends, tracing, and generic MCP-client semantics remain gaps.
 
 ### Tier 3 — apps / bespoke integrations with likely no Lem equivalent (document as gaps)
 - **notmuch mail** (+ Proton Bridge/mbsync pipeline, PDF preview) — a CLI-backed Lem reader covers search/read/refresh; composition, sending, and attachment/PDF workflows remain gaps.

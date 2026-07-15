@@ -187,8 +187,8 @@
 (define-key lem-vi-mode:*insert-keymap* "C-n" 'next-line)
 (define-key lem-vi-mode:*insert-keymap* "C-p" 'previous-line)
 
-;; normal state: C-c c opens Claude Code (claude-code-transient)
-(define-key lem-vi-mode:*normal-keymap* "C-c c" 'lem-claude-code::claude-code)
+;; normal state: C-c c opens the project-aware Claude Code query buffer
+(define-key lem-vi-mode:*normal-keymap* "C-c c" 'lem-yath-claude-code)
 
 ;; globals from the `use-package emacs` block
 (define-key *global-keymap* "M-o" 'next-window)        ; other-window

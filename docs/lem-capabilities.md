@@ -2264,9 +2264,15 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
     `copilot-install-server`, `copilot-signin`, `copilot-complete`,
     `copilot-accept-suggestion`, `copilot-next/previous-suggestion`
     (`copilot.lisp:134-408`). Talks to the GitHub Copilot LSP.
-  - **Claude Code** — `extensions/claude-code/` (`lem-claude-code`): `M-x claude-code`
-    (`claude-code.lisp:194`), button interactions, an SDK wrapper
-    (`claude-code-sdk.lisp`).
+  - **Claude Code** — `extensions/claude-code/` (`lem-claude-code`) supplies the
+    interactive query/output UI and collapsible tool rows. Lem-yath binds
+    normal-state `C-c c` to a project-aware wrapper which opens immediately in
+    insert state, prefers direct `ccr code` argv with `claude` fallback, parses
+    bounded fragmented or coalesced JSONL, and resumes the per-buffer session.
+    `scripts/claude-code-test.sh` verifies physical-key launch, exact argv and
+    cwd, rendered text/tool activity, and resume without credentials. This is
+    still an approximation of Emacs's transient plus vterm and Monet diff/MCP
+    bridge.
   - **MCP server** — `extensions/mcp-server/` (`lem-mcp-server`): Lem can expose an MCP
     server.
   - **deepl / google-translate**: `src/ext/deepl.lisp` (core) and

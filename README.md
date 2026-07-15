@@ -247,8 +247,12 @@ of writing `.fasl` files into the source tree.
   region-or-buffer handoff to Claude or ChatGPT; the built-in `quick-lookup`
   preset matches the Emacs startup model, system prompt, temperature, and
   token cap, while `grok-build` selects the native Grok CLI backend
+- project-aware `C-c c` Claude Code buffer that opens ready for input, prefers
+  the configured `ccr code` argv with a `claude` fallback, renders native text
+  and tool events, and resumes the same session on later prompts
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
-  (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli, llm-presets
+  (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli, llm-presets,
+  claude-code
 
 Saved LLM presets live in `$XDG_CONFIG_HOME/lem-yath/llm-presets.json` (or
 `~/.config/lem-yath/llm-presets.json`) with private directory and file modes.
@@ -287,8 +291,8 @@ workflows, daily-workflows, Direnv environment switching,
 electric-editing, grouped-buffer-list, UI parity, project navigation and outline, VCS,
 persistence, bookmarks,
 retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
-credential-free backend streaming/resume, private preset persistence and web
-handoff,
+credential-free backend streaming/resume, private preset persistence, web
+handoff, and integrated Claude Code interaction,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
 roam, native Org, agenda, agenda-clock, and parity-ledger checks. The ledger can also be
 validated directly, and the
@@ -308,6 +312,7 @@ nix run .#actions-test
 nix run .#llm-keybinding-test
 nix run .#llm-backend-test
 nix run .#llm-workflow-test
+nix run .#claude-code-test
 nix run .#cursor-state-test
 nix run .#snipe-test
 nix run .#avy-test
@@ -353,7 +358,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 
 Pass `check`, `compile`, `compilation`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
-`daily-workflows`, `direnv`, `llm-keybinding`, `llm-backend`, `llm-workflow`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
+`daily-workflows`, `direnv`, `llm-keybinding`, `llm-backend`, `llm-workflow`, `claude-code`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`,
 `interactive`, `structural`, `roam`, or
