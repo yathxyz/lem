@@ -1516,7 +1516,7 @@ keymaps and therefore execute the non-jumping repeat motions directly."
 (defparameter *expand-region-tree-sitter-modes*
   '((("LEM-PYTHON-MODE" . "PYTHON-MODE") "python")
     (("LEM-JSON-MODE" . "JSON-MODE") "json"))
-  "Exact file modes with parser-backed Expreg coverage.")
+  "Bootstrap modes used before automatic tree-sitter setup has run.")
 
 (defstruct expand-region-parser-cache
   tick
@@ -1539,9 +1539,14 @@ keymaps and therefore execute the non-jumping repeat motions directly."
       (eq symbol (buffer-major-mode buffer)))))
 
 (defun expand-region-tree-sitter-language (&optional (buffer (current-buffer)))
-  (loop :for (mode-class language) :in *expand-region-tree-sitter-modes*
-        :when (expand-region-exact-major-mode-p buffer mode-class)
-          :return language))
+  ;; tree-sitter.lisp records the grammar actually installed for every
+  ;; supported buffer, including the extension-sensitive TSX/TypeScript pair.
+  ;; Keep the small bootstrap table for partial source reloads and fixtures
+  ;; which load vi.lisp before automatic parser setup.
+  (or (buffer-value buffer 'lem-yath-tree-sitter-language)
+      (loop :for (mode-class language) :in *expand-region-tree-sitter-modes*
+            :when (expand-region-exact-major-mode-p buffer mode-class)
+              :return language)))
 
 (defun expand-region-basic-word-character-p (character)
   (and character (alphanumericp character)))

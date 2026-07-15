@@ -137,6 +137,7 @@ export LEM_YATH_EXPREG_PYTHON_DECOY="$root/decoy.py"
 export LEM_YATH_EXPREG_PYTHON_MALFORMED="$root/malformed.py"
 export LEM_YATH_EXPREG_JSON="$root/data.json"
 export LEM_YATH_EXPREG_JSON_STRING="$root/string.json"
+export LEM_YATH_EXPREG_RUST="$root/expression.rs"
 export LEM_YATH_EXPREG_FALLBACK="$root/fallback.txt"
 
 printf '%s\n' \
@@ -154,6 +155,8 @@ printf '%s\n' \
   >"$LEM_YATH_EXPREG_JSON"
 printf '%s\n' '{"text": "fake [ item ] tail"}' \
   >"$LEM_YATH_EXPREG_JSON_STRING"
+printf '%s\n' 'fn main() { let result = outer(inner(value + 1)); }' \
+  >"$LEM_YATH_EXPREG_RUST"
 printf '%s\n\n%s\n' 'one < ((alpha beta)) > three' 'next' \
   >"$LEM_YATH_EXPREG_FALLBACK"
 
@@ -396,6 +399,23 @@ if open_case lem-yath-test-expreg-open-json-string-list json-string-list; then
     '"fake [ item ] tail"'
 else
   fail json-string-list-open 'JSON string-list fixture did not open'
+fi
+
+if open_case lem-yath-test-expreg-open-rust rust; then
+  expand_once
+  assert_selection rust-word rust 'value'
+  expand_once
+  assert_selection rust-binary rust 'value + 1'
+  expand_once
+  assert_selection rust-inner-arguments rust '(value + 1)'
+  expand_once
+  assert_selection rust-inner-call rust 'inner(value + 1)'
+  expand_once
+  assert_selection rust-outer-arguments rust '(inner(value + 1))'
+  expand_once
+  assert_selection rust-outer-call rust 'outer(inner(value + 1))'
+else
+  fail rust-open 'Rust fixture did not open with parser-backed expansion'
 fi
 
 if open_case lem-yath-test-expreg-open-python-malformed python-malformed; then

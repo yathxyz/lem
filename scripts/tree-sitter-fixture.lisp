@@ -133,6 +133,40 @@
            *tree-sitter-test-grammar-successes*
            (length *tree-sitter-specs*))))
 
+(defun tree-sitter-test-spec-buffer-name (spec)
+  (format nil "tree-sitter-expreg.~a"
+          (or (first (tree-sitter-spec-extensions spec))
+              (tree-sitter-spec-language spec))))
+
+(defun tree-sitter-test-check-expreg-registry ()
+  "Prove every installed mode exposes its exact grammar to SPC v."
+  (dolist (spec *tree-sitter-specs*)
+    (let ((buffer nil))
+      (unwind-protect
+           (handler-case
+               (progn
+                 (setf buffer
+                       (make-buffer
+                        (tree-sitter-test-spec-buffer-name spec)))
+                 (with-current-buffer buffer
+                   (let ((lem-lsp-mode::*disable* t))
+                     (funcall (tree-sitter-spec-mode spec))))
+                 (tree-sitter-test-disable-lint buffer)
+                 (tree-sitter-test-check
+                  (and (tree-sitter-test-active-p buffer)
+                       (string=
+                        (tree-sitter-spec-language spec)
+                        (expand-region-tree-sitter-language buffer)))
+                  (format nil "expreg-uses-installed-~a-grammar"
+                          (tree-sitter-spec-language spec))))
+             (error (condition)
+               (tree-sitter-test-check
+                nil
+                (format nil "expreg-uses-installed-~a-grammar"
+                        (tree-sitter-spec-language spec))
+                condition)))
+        (tree-sitter-test-delete-buffer buffer)))))
+
 (defun tree-sitter-test-check-current-python (buffer)
   (tree-sitter-test-disable-lint buffer)
   (tree-sitter-test-check
@@ -306,6 +340,7 @@
     (tree-sitter-test-check-hooks)
     (tree-sitter-test-check-current-python buffer)
     (tree-sitter-test-check-grammar-compilation buffer)
+    (tree-sitter-test-check-expreg-registry)
     (tree-sitter-test-check-eligibility)
     (tree-sitter-test-check-buffer-isolation)
     (tree-sitter-test-check-full-reparse buffer)))

@@ -72,6 +72,9 @@
   (expreg-test-open "LEM_YATH_EXPREG_JSON_STRING"
                     "json-string-list" "item"))
 
+(define-command lem-yath-test-expreg-open-rust () ()
+  (expreg-test-open "LEM_YATH_EXPREG_RUST" "rust" "value"))
+
 (define-command lem-yath-test-expreg-open-fallback () ()
   (expreg-test-open "LEM_YATH_EXPREG_FALLBACK" "fallback" "alpha"))
 

@@ -122,10 +122,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   Cleanup rejects stale output, terminates validated same-group descendants,
   joins its reader, and reaps the broker; terminal status does not wait for a
   descendant that merely retains inherited stdout
-- Expreg-style `SPC v` region growth through lexical and Python/JSON syntax
-  tiers, including balanced list interiors inside ordinary and block strings;
-  arbitrary Visual selections use their active endpoint and retain contained
-  generated tiers for contraction.  The configured unbound
+- Expreg-style `SPC v` region growth through lexical tiers and syntax nodes
+  from every one of the 19 packaged tree-sitter modes, including balanced list
+  interiors inside ordinary and block strings; arbitrary Visual selections use
+  their active endpoint and retain contained generated tiers for contraction.
+  The configured unbound
   `M-x expreg-contract` walks backward through the generated selection sequence
   and expansion can then move forward again
 - configured Avy jumps on `SPC l/a/s` use balanced `a/s/d/f/g/h/j/k/l`
