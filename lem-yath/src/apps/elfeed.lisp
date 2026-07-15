@@ -14,6 +14,9 @@
 
 (in-package :lem-yath)
 
+(declaim (ftype function run-project-program))
+(declaim (special *project-process-timeout*))
+
 ;;; --- knobs -----------------------------------------------------------------
 
 (defparameter *elfeed-endpoint* "http://rss.wg:8070/fever/"
@@ -25,11 +28,14 @@
 (defparameter *elfeed-curl-timeout* 10
   "Seconds passed to curl --max-time for every Fever request.")
 
+(defparameter *elfeed-output-limit* (* 4 1024 1024)
+  "Maximum stdout or stderr accepted from one Fever request.")
+
 (defparameter *elfeed-batch-size* 50
   "Maximum item ids requested per ?api&items&with_ids call.")
 
-(defparameter *elfeed-archive-url* "https://archive.ph/newest/"
-  "Prefix for the archive.ph view (ports elfeed-show-archive).")
+(defparameter *elfeed-archive-url* "https://archive.is/newest/"
+  "Prefix for the configured archive.is view.")
 
 (defparameter *elfeed-list-buffer-name* "*lem-yath-feeds*")
 (defparameter *elfeed-entry-buffer-name* "*lem-yath-feed-entry*")
@@ -41,6 +47,7 @@
 
 (defvar *elfeed-line-entries-key* 'elfeed-line-entries)
 (defvar *elfeed-entry-key* 'elfeed-entry)
+(defvar *elfeed-generation-key* 'elfeed-generation)
 
 ;;; --- credential discovery --------------------------------------------------
 
@@ -91,50 +98,69 @@ binary (no md5 library is in the image)."
     (unless md5
       (return-from elfeed-api-key nil))
     (handler-case
-        (let ((out (uiop:run-program
-                    (list (namestring md5))
-                    :input (make-string-input-stream
-                            (format nil "~a:~a" user password))
-                    :output :string
-                    :ignore-error-status t)))
-          ;; md5sum prints "<hex>  -"; take the leading hex token.
-          (let ((token (first (uiop:split-string (string-trim '(#\Space #\Newline) out)
-                                                 :separator '(#\Space)))))
-            (and token (plusp (length token)) token)))
+        (let ((*project-process-timeout* 5))
+          (multiple-value-bind (out err code)
+              (run-project-program
+               (list (uiop:native-namestring md5))
+               :directory (uiop:getcwd)
+               :input (format nil "~a:~a" user password)
+               :output-limit 4096)
+            (declare (ignore err))
+            (when (eql code 0)
+              ;; md5sum prints "<hex>  -"; take the leading hex token.
+              (let ((token
+                      (first
+                       (uiop:split-string
+                        (string-trim '(#\Space #\Newline) out)
+                        :separator '(#\Space)))))
+                (and token (plusp (length token)) token)))))
       (error () nil))))
 
 ;;; --- Fever HTTP (background thread only) ------------------------------------
 
 (defun elfeed-curl (api-key query)
   "POST api_key to <endpoint>?api&QUERY with curl --max-time and return the
-parsed JSON hash-table, or NIL on any failure. Runs on a worker thread."
+parsed JSON hash-table and true, or NIL/NIL on failure.  The key is supplied
+on stdin rather than argv.  Runs on a worker thread."
   (handler-case
-      (let* ((url (format nil "~a?api&~a" *elfeed-endpoint* query))
-             (body (uiop:run-program
-                    (list "curl" "-s" "--max-time"
-                          (princ-to-string *elfeed-curl-timeout*)
-                          "--data-urlencode" (format nil "api_key=~a" api-key)
-                          url)
-                    :output :string
-                    :ignore-error-status t)))
-        (when (and body (plusp (length body)))
-          (yason:parse body)))
-    (error () nil)))
+      (let ((curl (executable-find "curl"))
+            (url (format nil "~a?api&~a" *elfeed-endpoint* query))
+            (*project-process-timeout* (+ *elfeed-curl-timeout* 2)))
+        (unless curl (return-from elfeed-curl (values nil nil)))
+        (multiple-value-bind (body err code)
+            (run-project-program
+             (list (uiop:native-namestring curl)
+                   "-fsS"
+                   "--max-time" (princ-to-string *elfeed-curl-timeout*)
+                   "--data-urlencode" "api_key@-"
+                   url)
+             :directory (uiop:getcwd)
+             :input api-key
+             :output-limit *elfeed-output-limit*)
+          (declare (ignore err))
+          (if (and (eql code 0) (plusp (length body)))
+              (values (yason:parse body) t)
+              (values nil nil))))
+    (error () (values nil nil))))
 
 (defun elfeed-unread-ids (api-key)
   "List of unread item id strings (newest-first as returned by the server)."
-  (let ((json (elfeed-curl api-key "unread_item_ids")))
-    (when (hash-table-p json)
-      (let ((ids (gethash "unread_item_ids" json)))
-        (when (stringp ids)
-          (remove-if (lambda (s) (zerop (length s)))
-                     (uiop:split-string ids :separator '(#\,))))))))
+  (multiple-value-bind (json success-p)
+      (elfeed-curl api-key "unread_item_ids")
+    (let ((ids (and (hash-table-p json) (gethash "unread_item_ids" json))))
+      (if (and success-p (stringp ids))
+          (values
+           (remove-if (lambda (s) (zerop (length s)))
+                      (uiop:split-string ids :separator '(#\,)))
+           t)
+          (values nil nil)))))
 
 (defun elfeed-feed-titles (api-key)
   "Hash-table mapping feed id (as a number) -> feed title string."
-  (let ((table (make-hash-table :test #'eql))
-        (json (elfeed-curl api-key "feeds")))
-    (when (hash-table-p json)
+  (let ((table (make-hash-table :test #'eql)))
+    (multiple-value-bind (json success-p) (elfeed-curl api-key "feeds")
+      (unless (and success-p (hash-table-p json))
+        (return-from elfeed-feed-titles (values nil nil)))
       (let ((feeds (gethash "feeds" json)))
         (when (listp feeds)
           (dolist (feed feeds)
@@ -142,23 +168,25 @@ parsed JSON hash-table, or NIL on any failure. Runs on a worker thread."
               (let ((id (gethash "id" feed))
                     (title (gethash "title" feed)))
                 (when (and (numberp id) (stringp title))
-                  (setf (gethash id table) title))))))))
-    table))
+                  (setf (gethash id table) title)))))))
+    (values table t))))
 
 (defun elfeed-fetch-items (api-key ids)
   "Fetch the items for IDS (a list of id strings) in batches of
-*elfeed-batch-size*. Returns a list of item hash-tables, server order."
+*elfeed-batch-size*. Returns the item list and true, or NIL/NIL on failure."
   (let ((items '()))
     (loop :for rest := ids :then (nthcdr *elfeed-batch-size* rest)
           :while rest
           :for batch := (subseq rest 0 (min *elfeed-batch-size* (length rest)))
-          :for json := (elfeed-curl api-key
-                                    (format nil "items&with_ids=~{~a~^,~}" batch))
-          :do (when (hash-table-p json)
-                (let ((batch-items (gethash "items" json)))
-                  (when (listp batch-items)
-                    (setf items (append items batch-items))))))
-    items))
+          :do (multiple-value-bind (json success-p)
+                  (elfeed-curl api-key
+                               (format nil "items&with_ids=~{~a~^,~}" batch))
+                (let ((batch-items
+                        (and (hash-table-p json) (gethash "items" json))))
+                  (unless (and success-p (listp batch-items))
+                    (return-from elfeed-fetch-items (values nil nil)))
+                  (setf items (append items batch-items)))))
+    (values items t)))
 
 ;;; --- rendering helpers ------------------------------------------------------
 
@@ -176,7 +204,8 @@ parsed JSON hash-table, or NIL on any failure. Runs on a worker thread."
 (defun elfeed-item->entry (item feed-titles)
   "Build an entry plist (date, feed, title, url, html) from a Fever item."
   (let ((feed-id (gethash "feed_id" item)))
-    (list :date (elfeed-item-date item)
+    (list :id (princ-to-string (or (gethash "id" item) ""))
+          :date (elfeed-item-date item)
           :feed (or (and (numberp feed-id) (gethash feed-id feed-titles)) "")
           :title (or (gethash "title" item) "(untitled)")
           :url (or (gethash "url" item) "")
@@ -219,29 +248,42 @@ decode common entities, collapse runs of blank lines."
 
 ;;; --- list buffer (editor thread) -------------------------------------------
 
-(defun elfeed-fill-list (buffer entries feed-titles)
-  "Fill BUFFER with ENTRIES (a list of item hash-tables) as a read-only list,
-recording the per-line entry plists. Runs on the editor thread."
-  (declare (ignore feed-titles))
+(defun elfeed-fill-list (buffer entries &optional selected-id)
+  "Fill BUFFER with entry plists as a read-only list on the editor thread.
+Restore SELECTED-ID when it remains present after a refresh."
   (with-buffer-read-only buffer nil
     (erase-buffer buffer)
-    (let* ((plists (mapcar (lambda (item)
-                             (getf item :%entry))
-                           entries))
-           (line-vector (make-array (length plists) :initial-contents plists))
-           (point (buffer-point buffer)))
+    (let ((line-vector (make-array (length entries) :initial-contents entries))
+          (point (buffer-point buffer))
+          (selected-line nil))
       (move-point point (buffer-start-point buffer))
-      (loop :for plist :in plists
-            :do (insert-string point
+      (if (null entries)
+          (insert-string point (format nil "No unread feed items.~%"))
+          (loop :for plist :in entries
+                :for line :from 1
+                :do (when (and selected-id
+                               (string= selected-id (getf plist :id)))
+                      (setf selected-line line))
+                    (insert-string point
                                (format nil "~a  ~25a  ~a~%"
                                        (getf plist :date)
                                        (let ((feed (getf plist :feed)))
                                          (if (> (length feed) 25)
                                              (subseq feed 0 25)
                                              feed))
-                                       (getf plist :title))))
+                                       (getf plist :title)))))
       (setf (buffer-value buffer *elfeed-line-entries-key*) line-vector)
-      (move-point (buffer-point buffer) (buffer-start-point buffer))))
+      (move-point point (buffer-start-point buffer))
+      (when selected-line (move-to-line point selected-line))))
+  (setf (buffer-read-only-p buffer) t))
+
+(defun elfeed-fill-status (buffer text)
+  "Replace BUFFER with read-only TEXT and clear its entry map."
+  (with-buffer-read-only buffer nil
+    (erase-buffer buffer)
+    (insert-string (buffer-point buffer) text)
+    (setf (buffer-value buffer *elfeed-line-entries-key*) #())
+    (move-point (buffer-point buffer) (buffer-start-point buffer)))
   (setf (buffer-read-only-p buffer) t))
 
 (defun elfeed-entry-at-point ()
@@ -283,7 +325,6 @@ url is empty or xdg-open is unavailable."
   (let ((buffer (make-buffer *elfeed-entry-buffer-name*)))
     (with-buffer-read-only buffer nil
       (erase-buffer buffer)
-      (change-buffer-mode buffer 'lem-yath-feed-entry-mode)
       (let ((point (buffer-point buffer)))
         (insert-string point
                        (format nil "~a~%~a   ~a~%~a~%~%~a~%"
@@ -294,8 +335,9 @@ url is empty or xdg-open is unavailable."
                                (elfeed-html->text (getf plist :html))))
         (setf (buffer-value buffer *elfeed-entry-key*) plist)
         (move-point (buffer-point buffer) (buffer-start-point buffer))))
+    (change-buffer-mode buffer 'lem-yath-feed-entry-mode)
     (setf (buffer-read-only-p buffer) t)
-    (pop-to-buffer buffer)))
+    (switch-to-window (pop-to-buffer buffer))))
 
 ;;; --- modes & keymaps --------------------------------------------------------
 ;;; Single-letter keys (b/A/g/q) would otherwise be shadowed by vi-mode's
@@ -329,7 +371,7 @@ url is empty or xdg-open is unavailable."
   (elfeed-open-external (elfeed-current-url)))
 
 (define-command lem-yath-elfeed-archive () ()
-  "Open the current entry via archive.ph (ports elfeed-show-archive)."
+  "Open the current entry via archive.is (ports elfeed-show-archive)."
   (let ((url (elfeed-current-url)))
     (if (and url (plusp (length url)))
         (elfeed-open-external (concatenate 'string *elfeed-archive-url* url))
@@ -353,33 +395,55 @@ url is empty or xdg-open is unavailable."
 
 ;;; --- the command ------------------------------------------------------------
 
-(defun elfeed-load-async (api-key buffer)
+(defun elfeed-request-current-p (buffer generation)
+  "Whether BUFFER still owns the async request identified by GENERATION."
+  (and (not (deleted-buffer-p buffer))
+       (eql generation (buffer-value buffer *elfeed-generation-key*))))
+
+(defun elfeed-deliver-list (buffer generation entries selected-id)
+  "Render ENTRIES only when GENERATION is still BUFFER's latest request."
+  (when (elfeed-request-current-p buffer generation)
+    (elfeed-fill-list buffer entries selected-id)
+    (message (if entries
+                 (format nil "~d unread item~:p" (length entries))
+                 "No unread feed items"))))
+
+(defun elfeed-deliver-error (buffer generation text)
+  "Render a bounded failure message for the latest request only."
+  (when (elfeed-request-current-p buffer generation)
+    (elfeed-fill-status buffer (format nil "Feed refresh failed.~%"))
+    (message "Feeds error: ~a" text)))
+
+(defun elfeed-load-async (api-key buffer generation selected-id)
   "Fetch feeds + unread items off the editor thread, then fill BUFFER.
-Every step degrades gracefully to a (message ...) on the editor thread."
+Only the latest live BUFFER generation may update editor state."
   (bt2:make-thread
    (lambda ()
      (handler-case
-         (let* ((feed-titles (elfeed-feed-titles api-key))
-                (ids (elfeed-unread-ids api-key)))
-           (cond
-             ((null ids)
-              (send-event (lambda () (message "No unread feed items (or server unreachable)"))))
-             (t
-              (let* ((items (elfeed-fetch-items api-key ids))
-                     ;; Pre-compute entry plists off-thread; the editor thread
-                     ;; just inserts them.
-                     (entries (mapcar (lambda (item)
-                                        (list :%entry (elfeed-item->entry item feed-titles)))
-                                      items)))
-                (if (null entries)
-                    (send-event (lambda () (message "Fetched no feed items")))
-                    (send-event
-                     (lambda ()
-                       (elfeed-fill-list buffer entries feed-titles)
-                       (message "~a unread item~:p" (length entries)))))))))
+         (multiple-value-bind (feed-titles feeds-ok-p)
+             (elfeed-feed-titles api-key)
+           (unless feeds-ok-p (error "feed metadata request failed"))
+           (multiple-value-bind (ids unread-ok-p) (elfeed-unread-ids api-key)
+             (unless unread-ok-p (error "unread-items request failed"))
+             (if (null ids)
+                 (send-event
+                  (lambda ()
+                    (elfeed-deliver-list buffer generation nil selected-id)))
+                 (multiple-value-bind (items items-ok-p)
+                     (elfeed-fetch-items api-key ids)
+                   (unless items-ok-p (error "item request failed"))
+                   (let ((entries
+                           (mapcar (lambda (item)
+                                     (elfeed-item->entry item feed-titles))
+                                   items)))
+                     (send-event
+                      (lambda ()
+                        (elfeed-deliver-list
+                         buffer generation entries selected-id))))))))
        (error (e)
          (let ((msg (princ-to-string e)))
-           (send-event (lambda () (message "Feeds error: ~a" msg)))))))
+           (send-event
+            (lambda () (elfeed-deliver-error buffer generation msg)))))))
    :name "lem-yath/elfeed")
   (values))
 
@@ -395,11 +459,14 @@ fetches unread items on a background thread; returns immediately."
       (unless api-key
         (message "Could not compute Fever api_key (md5sum missing?)")
         (return-from lem-yath-elfeed))
-      (let ((buffer (make-buffer *elfeed-list-buffer-name*)))
+      (let* ((buffer (make-buffer *elfeed-list-buffer-name*))
+             (selected-id
+               (and (eq buffer (current-buffer))
+                    (getf (elfeed-entry-at-point) :id)))
+             (generation
+               (1+ (or (buffer-value buffer *elfeed-generation-key*) 0))))
+        (setf (buffer-value buffer *elfeed-generation-key*) generation)
         (change-buffer-mode buffer 'lem-yath-feeds-mode)
-        (with-buffer-read-only buffer nil
-          (erase-buffer buffer)
-          (insert-string (buffer-point buffer) "Fetching unread feeds..."))
-        (setf (buffer-read-only-p buffer) t)
-        (pop-to-buffer buffer)
-        (elfeed-load-async api-key buffer)))))
+        (elfeed-fill-status buffer (format nil "Fetching unread feeds...~%"))
+        (switch-to-window (pop-to-buffer buffer))
+        (elfeed-load-async api-key buffer generation selected-id)))))

@@ -642,6 +642,7 @@
             forge-test =
               mkTestAppWithLemAndInputs lemYath vcsRuntimeInputs "lem-yath-forge-test"
                 "forge-test.sh";
+            elfeed-test = mkTestAppWithLem lemYath "lem-yath-elfeed-test" "elfeed-test.sh";
             notmuch-test =
               mkTestAppWithLemAndInputs lemYath mailRuntimeInputs "lem-yath-notmuch-test"
                 "notmuch-test.sh";
@@ -718,6 +719,7 @@
               mkCheckWithLemAndInputs lemYath vcsRuntimeInputs "jj-porcelain"
                 "jj-porcelain-test.sh";
             forge = mkCheckWithLemAndInputs lemYath vcsRuntimeInputs "forge" "forge-test.sh";
+            elfeed = mkCheckWithLem lemYath "elfeed" "elfeed-test.sh";
             notmuch = mkCheckWithLemAndInputs lemYath mailRuntimeInputs "notmuch" "notmuch-test.sh";
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
