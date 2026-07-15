@@ -240,7 +240,9 @@ of writing `.fasl` files into the source tree.
   marked clocks—or every open clock across agenda files when nothing is
   marked. Evil/base mark keys render `>` prefixes and keep live source points
   across clock insertions and agenda refreshes.
-- streaming OpenRouter LLM client + claude/codex/grok CLI backends
+- streaming OpenRouter LLM client plus native Claude/Codex/Grok JSON event
+  backends, with per-backend session resume, rendered agent activity, guarded
+  single-request lifecycle, abort (`SPC g a`), and fresh-session (`SPC g n`)
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
   (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli
 
@@ -274,7 +276,8 @@ language-server handshakes, tree-sitter highlighting, real DAP adapter
 workflows, daily-workflows, Direnv environment switching,
 electric-editing, grouped-buffer-list, UI parity, project navigation and outline, VCS,
 persistence, bookmarks,
-retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
+retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch and
+credential-free backend streaming/resume,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
 roam, native Org, agenda, agenda-clock, and parity-ledger checks. The ledger can also be
 validated directly, and the
@@ -292,6 +295,7 @@ nix run .#completion-lifecycle-test
 nix run .#auto-completion-test
 nix run .#actions-test
 nix run .#llm-keybinding-test
+nix run .#llm-backend-test
 nix run .#cursor-state-test
 nix run .#snipe-test
 nix run .#avy-test
@@ -337,7 +341,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 
 Pass `check`, `compile`, `compilation`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
-`daily-workflows`, `direnv`, `llm-keybinding`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
+`daily-workflows`, `direnv`, `llm-keybinding`, `llm-backend`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`,
 `interactive`, `structural`, `roam`, or

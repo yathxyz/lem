@@ -10,10 +10,23 @@
 
 (defvar *llm-endpoint* "https://openrouter.ai/api/v1/chat/completions")
 
+(defvar *llm-curl-executable* "curl"
+  "curl executable used for OpenRouter transport.")
+
 (defvar *llm-system-message* "Very short answers. Be helpful."
   "Same system message as the Emacs gptel setup.")
 
 (defvar *llm-buffer-name* "*lem-yath-llm*")
+
+(defstruct (llm-request
+            (:constructor make-llm-request (buffer process backend)))
+  "One asynchronous LLM request owned by BUFFER."
+  buffer
+  process
+  backend
+  (aborted-p nil))
+
+(defparameter *llm-active-request-key* 'lem-yath-llm-active-request)
 
 (defun llm-api-key ()
   (or (uiop:getenv "OPENROUTER_API_KEY")
@@ -93,35 +106,115 @@ end of the current word or punctuation run."
       (error () nil))
     buffer))
 
+(defun llm-buffer-live-p (buffer)
+  (and buffer (not (deleted-buffer-p buffer))))
+
+(defun llm-active-request (buffer)
+  (and (llm-buffer-live-p buffer)
+       (buffer-value buffer *llm-active-request-key*)))
+
+(defun llm-buffer-append-now (buffer string)
+  "Append STRING when BUFFER is still live.  Must run on the editor thread."
+  (when (llm-buffer-live-p buffer)
+    (insert-string (buffer-end-point buffer) string)
+    (redraw-display)))
+
+(defun llm-request-current-p (request)
+  (let ((buffer (llm-request-buffer request)))
+    (and (llm-buffer-live-p buffer)
+         (eq request (llm-active-request buffer)))))
+
+(defun llm-request-append (request string)
+  "Append STRING for REQUEST via the editor queue when it is still current."
+  (send-event
+   (lambda ()
+     (when (llm-request-current-p request)
+       (llm-buffer-append-now (llm-request-buffer request) string)))))
+
+(defun llm-request-finish (request final-text)
+  "Finish REQUEST on the editor thread, appending FINAL-TEXT when non-NIL."
+  (send-event
+   (lambda ()
+     (when (llm-request-current-p request)
+       (when final-text
+         (llm-buffer-append-now (llm-request-buffer request) final-text))
+       (setf (buffer-value (llm-request-buffer request)
+                           *llm-active-request-key*)
+             nil)))))
+
+(defun llm-register-request (buffer process backend)
+  "Register and return an asynchronous request for BUFFER."
+  (let ((request (make-llm-request buffer process backend)))
+    (setf (buffer-value buffer *llm-active-request-key*) request)
+    request))
+
+(defun llm-request-finish-text (request code failure-label)
+  (cond
+    ((llm-request-aborted-p request) "\n[request aborted]\n")
+    ((and code (zerop code)) (string #\Newline))
+    (t (format nil "~%[~a, exit ~a]~%" failure-label code))))
+
+(define-command lem-yath-llm-abort () ()
+  "Abort the active request in the shared LLM buffer."
+  (let* ((buffer (llm-output-buffer))
+         (request (llm-active-request buffer)))
+    (if (null request)
+        (message "No active LLM request")
+        (handler-case
+            (progn
+              (setf (llm-request-aborted-p request) t)
+              (uiop:terminate-process (llm-request-process request) :urgent t)
+              (ignore-errors
+                (uiop:close-streams (llm-request-process request)))
+              (llm-buffer-append-now buffer "\n[request aborted]\n")
+              (setf (buffer-value buffer *llm-active-request-key*) nil)
+              (message "Aborting ~(~a~) request" (llm-request-backend request)))
+          (error ()
+            (setf (llm-request-aborted-p request) nil)
+            (message "Could not abort LLM request"))))))
+
 (defun llm-stream (prompt)
   (let ((key (llm-api-key)))
     (unless key
       (message "Set OPENROUTER_API_KEY (or OPENAI_API_KEY) first")
       (return-from llm-stream))
     (let ((buffer (llm-output-buffer)))
+      (when (llm-active-request buffer)
+        (message "An LLM request is already running; use M-x lem-yath-llm-abort")
+        (return-from llm-stream))
       (pop-to-buffer buffer)
-      (append-text buffer (format nil "~%## User (~a)~%~%~a~%~%## Assistant~%~%"
-                                  *llm-model* prompt))
-      (let ((process (uiop:launch-program
-                      (list "curl" "-sN" *llm-endpoint*
-                            "-H" "Content-Type: application/json"
-                            "-H" (format nil "Authorization: Bearer ~a" key)
-                            "-d" (llm-request-body prompt))
-                      :output :stream
-                      :error-output :stream)))
-        (bt2:make-thread
-         (lambda ()
-           (unwind-protect
-                (with-open-stream (out (uiop:process-info-output process))
-                  (loop :for line := (read-line out nil)
-                        :while line
-                        :do (alexandria:when-let ((chunk (llm-delta-content line)))
-                              (append-text buffer chunk))))
-             (let ((code (ignore-errors (uiop:wait-process process))))
-               (if (and code (zerop code))
-                   (append-text buffer (string #\Newline))
-                   (append-line buffer (format nil "~%[llm request failed, curl exit ~a]" code))))))
-         :name "lem-yath/llm")))))
+      (llm-buffer-append-now
+       buffer
+       (format nil "~%## User (~a)~%~%~a~%~%## Assistant~%~%"
+               *llm-model* prompt))
+      (handler-case
+          (let* ((process
+                   (uiop:launch-program
+                    (list *llm-curl-executable* "-sN" *llm-endpoint*
+                          "-H" "Content-Type: application/json"
+                          "-H" (format nil "Authorization: Bearer ~a" key)
+                          "-d" (llm-request-body prompt))
+                    :output :stream
+                    :error-output :output))
+                 (request (llm-register-request buffer process :openrouter)))
+            (bt2:make-thread
+             (lambda ()
+               (unwind-protect
+                    (with-open-stream (out (uiop:process-info-output process))
+                      (loop :for line := (read-line out nil)
+                            :while line
+                            :do (alexandria:when-let
+                                    ((chunk (llm-delta-content line)))
+                                  (llm-request-append request chunk))))
+                 (let ((code (ignore-errors (uiop:wait-process process))))
+                   (llm-request-finish
+                    request
+                    (llm-request-finish-text
+                     request code "OpenRouter request failed")))))
+             :name "lem-yath/llm-openrouter"))
+        (error ()
+          (llm-buffer-append-now
+           buffer "\n[failed to launch curl]\n"))))))
 
 (defvar *llm-backend* :openrouter
   "Active backend. CLI-agent backends (apps/llm-cli.lisp) add more.")

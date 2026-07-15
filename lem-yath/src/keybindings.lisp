@@ -79,6 +79,8 @@
   ("g l" 'lem-yath-llm-ask)                 ; SPC g l
   ("g L" 'lem-yath-llm-set-model)           ; SPC g L
   ("g b" 'lem-yath-llm-set-backend)         ; SPC g b
+  ("g n" 'lem-yath-llm-new-session)          ; SPC g n
+  ("g a" 'lem-yath-llm-abort)                ; SPC g a
 
   ;; notes (org-roam / org-journal / org-capture)
   ("n r f" 'lem-yath-roam-find)              ; SPC n r f

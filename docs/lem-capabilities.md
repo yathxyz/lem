@@ -2229,6 +2229,17 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
 - **Markdown preview**: yes, `preview` generic in markdown-mode (§8), plus literate
   eval-block.
 - **AI / shipped in-tree (all in the image):**
+  Lem-yath adds a shared Markdown conversation buffer for OpenRouter and the
+  Claude Code, Codex, and Grok CLIs. The CLI adapters consume their native
+  JSON event streams, retain a separate session ID for each backend for the
+  lifetime of that buffer, render text/thinking/tool/command/file activity,
+  and pass the native resume argument on later prompts. `SPC g b` selects a
+  backend, `SPC g j` or Insert/Visual `C-c i` sends, `SPC g n` starts a fresh
+  CLI conversation, and `SPC g a` aborts the one allowed in-flight request.
+  Codex and Grok deliberately use read-only sandboxes. The hermetic
+  `scripts/llm-backend-test.sh` drives these transports through real ncurses
+  Lem with fake executables and no credentials.
+
   - **Copilot** — `extensions/copilot/` (`lem-copilot`): `copilot-mode` minor mode,
     `copilot-install-server`, `copilot-signin`, `copilot-complete`,
     `copilot-accept-suggestion`, `copilot-next/previous-suggestion`
