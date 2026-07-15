@@ -35,9 +35,10 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$root/bin" "$root/project"
 : >"$LEM_YATH_CLAUDE_CODE_REPORT"
 printf 'Claude project context\n' >"$source_file"
 git -C "$root/project" init -q
+bash_bin=$(command -v bash)
 
 printf '%s\n' \
-  '#!/usr/bin/env bash' \
+  "#!$bash_bin" \
   'set -euo pipefail' \
   ': "${LEM_YATH_CLAUDE_CODE_LOG:?}"' \
   'count_file="$LEM_YATH_CLAUDE_CODE_LOG.count"' \
@@ -151,18 +152,36 @@ def fields(path):
 first = fields(sys.argv[1])
 second = fields(sys.argv[2])
 project = str(pathlib.Path(sys.argv[3]))
+allowed = (
+    "mcp__lem__buffer_list,mcp__lem__buffer_get_content,"
+    "mcp__lem__buffer_info,mcp__lem__editor_get_screen,"
+    "mcp__lem__openDiff,mcp__lem__checkDiff"
+)
+prompt = (
+    "Use the connected Lem MCP tools to inspect the live editor. "
+    "Do not mutate files directly. Present proposed whole-buffer "
+    "changes with openDiff, wait for the user's decision, and check "
+    "it with checkDiff before continuing."
+)
+config = first[8]
+assert pathlib.Path(config).is_file()
 assert first == [
     project,
     "code", "--output-format", "stream-json", "--verbose", "--print",
-    "first IDE prompt", "--permission-mode", "acceptEdits",
+    "first IDE prompt", "--mcp-config", config,
+    "--allowedTools", allowed, "--disallowedTools", "Edit,Write,NotebookEdit",
+    "--append-system-prompt", prompt,
+    "--permission-mode", "acceptEdits",
 ]
 assert second == [
     project,
     "code", "--output-format", "stream-json", "--verbose", "--print",
-    "second IDE prompt", "--permission-mode", "acceptEdits", "--resume",
-    "ide-session-1",
+    "second IDE prompt", "--mcp-config", config,
+    "--allowedTools", allowed, "--disallowedTools", "Edit,Write,NotebookEdit",
+    "--append-system-prompt", prompt,
+    "--permission-mode", "acceptEdits", "--resume", "ide-session-1",
 ]
 PY
-pass native-argv 'both launches used exact direct argv, project cwd, and resume ID'
+pass native-argv 'both launches used the private MCP config, allowlist, project cwd, and resume ID'
 
 printf 'All Claude Code integration tests passed.\n'

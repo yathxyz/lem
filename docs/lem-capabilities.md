@@ -2544,11 +2544,21 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
     insert state, prefers direct `ccr code` argv with `claude` fallback, parses
     bounded fragmented or coalesced JSONL, and resumes the per-buffer session.
     `scripts/claude-code-test.sh` verifies physical-key launch, exact argv and
-    cwd, rendered text/tool activity, and resume without credentials. This is
-    still an approximation of Emacs's transient plus vterm and Monet diff/MCP
-    bridge.
+    cwd, rendered text/tool activity, resume, and injection of the private MCP
+    config and explicit tool allowlist without credentials. The UI remains an
+    approximation of Emacs's transient plus vterm.
   - **MCP server** — `extensions/mcp-server/` (`lem-mcp-server`): Lem can expose an MCP
-    server.
+    server. Lem-yath's Claude bridge patches it to require a bearer token,
+    hides arbitrary evaluation and command tools, and disables arbitrary
+    `file://` resources. `C-c c` starts a loopback endpoint and writes a private
+    mode-0600 Claude HTTP config; its allowlist is inspection plus
+    `openDiff`/`checkDiff`. Proposed whole-buffer edits open as focused,
+    read-only unified diffs where `y` performs one retained undo transaction
+    and `q` rejects without mutation. `scripts/claude-bridge-test.sh` exercises
+    the installed editor, real HTTP session protocol, physical review keys,
+    undo, authentication, capability policy, and cleanup. Unlike Monet, this
+    path uses Streamable HTTP and polling rather than websocket IDE
+    notifications, deferred responses, and Ediff.
   - **deepl / google-translate**: `src/ext/deepl.lisp` (core) and
     `contrib/google-translate` (contrib).
 - **Dashboard / welcome**: `extensions/lem-dashboard/` sets `lem:*splash-function*`

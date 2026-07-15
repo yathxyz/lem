@@ -341,7 +341,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   token cap, while `grok-build` selects the native Grok CLI backend
 - project-aware `C-c c` Claude Code buffer that opens ready for input, prefers
   the configured `ccr code` argv with a `claude` fallback, renders native text
-  and tool events, and resumes the same session on later prompts
+  and tool events, and resumes the same session on later prompts. It starts an
+  authenticated loopback MCP bridge through a private mode-0600 config so
+  Claude can inspect the live editor and submit whole-buffer `openDiff`
+  proposals; focused `y` accepts one undoable edit and `q` rejects it. The
+  Claude allowlist excludes direct mutation, arbitrary editor commands, Lisp
+  evaluation, and unrestricted `file://` resources
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
   (Miniflux fever), notmuch, pg, salta, timemachine, llm-cli, llm-presets,
   claude-code
@@ -389,7 +394,7 @@ electric-editing, grouped-buffer-list, UI parity, project navigation and outline
 persistence, bookmarks,
 retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
 credential-free backend streaming/resume, private preset persistence, web
-handoff, and integrated Claude Code interaction,
+handoff, integrated Claude Code interaction, and authenticated MCP diff review,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
 roam, roam backlinks, native Org, Org planning/timestamps, agenda, agenda-clock, and
 parity-ledger checks. The ledger can also be
@@ -414,6 +419,7 @@ nix run .#llm-keybinding-test
 nix run .#llm-backend-test
 nix run .#llm-workflow-test
 nix run .#claude-code-test
+nix run .#claude-bridge-test
 nix run .#cursor-state-test
 nix run .#snipe-test
 nix run .#avy-test

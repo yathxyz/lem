@@ -43,13 +43,29 @@
           (list "--output-format" "stream-json"
                 "--verbose"
                 "--print" input
+                "--mcp-config"
+                (uiop:native-namestring (claude-bridge-start))
+                "--allowedTools" (claude-bridge-allowed-tools)
+                "--disallowedTools" "Edit,Write,NotebookEdit"
+                "--append-system-prompt"
+                (concatenate
+                 'string
+                 "Use the connected Lem MCP tools to inspect the live editor. "
+                 "Do not mutate files directly. Present proposed whole-buffer "
+                 "changes with openDiff, wait for the user's decision, and check "
+                 "it with checkDiff before continuing.")
                 "--permission-mode" "acceptEdits")
           (when session-id (list "--resume" session-id))))
 
 (defun claude-code-dispatch-line (line callback)
   (let ((line (string-right-trim '(#\Return) line)))
     (unless (alexandria:emptyp line)
-      (let ((value (yason:parse line)))
+      (let ((value
+              (handler-case (yason:parse line)
+                (error (condition)
+                  (error "Malformed Claude Code event ~S: ~A"
+                         (subseq line 0 (min 200 (length line)))
+                         condition)))))
         (funcall callback value)
         (string= "result" (gethash "type" value))))))
 

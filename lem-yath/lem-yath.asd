@@ -87,6 +87,7 @@
                              (:file "timemachine")
                              (:file "llm-cli")
                              (:file "llm-presets")
+                             (:file "claude-bridge")
                              (:file "claude-code")))
                (:file "bookmarks")
                (:file "persistence")
