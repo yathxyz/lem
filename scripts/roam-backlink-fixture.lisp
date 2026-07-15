@@ -159,6 +159,19 @@
      (if point (line-string point) "")))
   (message "Backlink origin reported"))
 
+(define-command lem-yath-test-backlink-edit-and-save () ()
+  (roam-backlink-test-switch-to-origin)
+  (find-file (merge-pathnames "markdown.md" (roam-directory)))
+  (let* ((literal "[[Target Alias]]")
+         (replacement "[[Child Target]]")
+         (start (roam-backlink-test-find-text literal))
+         (end (copy-point start :temporary)))
+    (character-offset start (- (length literal)))
+    (delete-between-points start end)
+    (insert-string start replacement)
+    (save-buffer (current-buffer)))
+  (message "Backlink source changed and saved"))
+
 (define-command lem-yath-test-backlink-foreign-ownership () ()
   (let ((panel (roam-backlink-test-panel))
         (foreign (make-buffer "*backlink-foreign-side*" :enable-undo-p nil)))
@@ -194,12 +207,15 @@
 (define-command lem-yath-test-backlink-reload-cleanup () ()
   (roam-backlink-reload-cleanup)
   (roam-backlink-test-log
-   "RELOAD side=~a panel-live=~a hook=~a"
+   "RELOAD side=~a panel-live=~a post-hook=~a save-hook=~a"
    (roam-backlink-test-yes-no (roam-backlink-test-side-window))
    (roam-backlink-test-yes-no
     (roam-backlink-buffer-live-p (roam-backlink-test-panel)))
    (roam-backlink-test-yes-no
-    (member 'roam-backlink-post-command *post-command-hook*)))
+    (member 'roam-backlink-post-command *post-command-hook*))
+   (roam-backlink-test-yes-no
+    (member 'roam-backlink-after-save
+            (variable-value 'after-save-hook :global t))))
   (message "Backlink reload cleanup reported"))
 
 (dolist (keymap (list *global-keymap*
@@ -209,6 +225,7 @@
                       *lem-yath-roam-backlink-mode-keymap*
                       *lem-yath-roam-backlink-vi-keymap*))
   (define-key keymap "F5" 'lem-yath-test-backlink-report-panel)
+  (define-key keymap "F4" 'lem-yath-test-backlink-edit-and-save)
   (define-key keymap "F6" 'lem-yath-test-backlink-goto-child)
   (define-key keymap "F7" 'lem-yath-test-backlink-goto-target)
   (define-key keymap "F8" 'lem-yath-test-backlink-select-first)

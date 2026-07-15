@@ -1810,8 +1810,11 @@ bounded direct-content preview. Duplicate target IDs and ambiguous wiki names
 fail closed rather than pointing at an arbitrary note.
 
 `Return` revalidates the source node and exact link literal before opening its
-line and column in the recorded main window. `g` coalesces asynchronous full
-snapshot rebuilds; `q` restores a main window before closing the side window.
+line and column in the recorded main window. Saving a canonical Org or Markdown
+note while the panel is visible coalesces an asynchronous full-snapshot rebuild;
+`g` provides the same refresh for out-of-band changes, and `q` restores a main
+window before closing the side window. The save hook does no indexing while the
+panel is hidden, avoiding permanent background work on the laptop.
 The panel refuses to delete a right-side window after another subsystem has
 replaced it, and configuration reload invalidates workers, closes the owned
 window, kills the private buffer, and removes its post-command hook.
@@ -1821,10 +1824,10 @@ exact Return navigation, stale refusal, refresh, side-window ownership, close,
 and reload cleanup through the packaged ncurses editor.
 
 This remains an in-memory snapshot rather than claiming Org-roam's persistent
-SQLite database. Saved corpus changes require `g`; there is no incremental
+SQLite database. External changes require `g`; there is no always-on incremental
 autosync, reflink/citation section, Markdown inline-file backlink extraction,
 or wiki-link-follow command yet. Unsaved note geometry is not applied to the
-disk-derived graph and is shown as requiring save plus refresh.
+disk-derived graph and is shown as requiring a save.
 
 ### Native Org mode — `lem-yath/src/org/` (verified approximation)
 

@@ -262,9 +262,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   nearest file or ID-bearing heading without rescanning on cursor movement,
   includes every Org ID-link occurrence plus resolved md-roam title/alias wiki
   links, and shows source title, outline, and bounded preview. `Return` visits
-  the exact source link in the main window, `g` asynchronously rebuilds the
-  bounded snapshot, and `q` closes the panel without stealing or deleting a
-  side window that another feature has replaced
+  the exact source link in the main window. Saving a roam note while the panel
+  is visible asynchronously refreshes its bounded snapshot, `g` remains the
+  manual refresh for out-of-band changes, and `q` closes the panel without
+  stealing or deleting a side window that another feature has replaced
 - in-buffer Org scheduling and deadlines on GNU Org's `C-c C-s` and
   `C-c C-d`. The prompt shows the existing date or today as its default,
   accepts absolute dates plus signed day/week/month/year offsets, and uses a

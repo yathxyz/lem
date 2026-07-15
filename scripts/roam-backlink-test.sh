@@ -185,6 +185,14 @@ else
   fail refresh 'refreshed occurrence count remained stale'
 fi
 
+tmux_cmd send-keys -t "$session" F4
+tmux_cmd send-keys -t "$session" F7
+if wait_panel_occurrences 2; then
+  pass save-refresh 'saving a visible roam note refreshed the panel without g'
+else
+  fail save-refresh 'the visible panel did not refresh after a roam note save'
+fi
+
 tmux_cmd send-keys -t "$session" F10
 sleep 0.4
 if report_has '^FOREIGN retained=yes$' &&
@@ -211,8 +219,8 @@ if lem_wait_for "$session" 'Backlinks:' 20 >/dev/null; then
   tmux_cmd send-keys -t "$session" F12
   sleep 0.5
 fi
-if report_has '^RELOAD side=no panel-live=no hook=no$'; then
-  pass reload-cleanup 'reload cleanup removed the panel, worker generation, and hook'
+if report_has '^RELOAD side=no panel-live=no post-hook=no save-hook=no$'; then
+  pass reload-cleanup 'reload cleanup removed the panel, worker generation, and hooks'
 else
   fail reload-cleanup 'reload left panel or hook state behind'
 fi

@@ -655,7 +655,7 @@
              (roam-backlink-render-message
               panel
               (format nil
-                      "Backlinks~%~%Save this note, then press g to refresh its backlink snapshot.~%")
+                      "Backlinks~%~%Save this note to refresh its backlink snapshot.~%")
               key))))
         (t
          (alexandria:when-let
@@ -891,8 +891,35 @@
                 (current-window))
           (roam-backlink-render-for-origin panel origin))))))
 
+(defun roam-backlink-after-save (&optional (buffer (current-buffer)))
+  "Refresh a visible backlink panel after saving a note in the roam root."
+  (let ((panel (get-buffer *roam-backlink-buffer-name*)))
+    (when (and panel
+               (roam-backlink-panel-visible-p panel)
+               (roam-backlink-buffer-live-p buffer))
+      (alexandria:when-let*
+          ((filename (ignore-errors (buffer-filename buffer)))
+           (pathname (ignore-errors (truename filename)))
+           (root (ignore-errors (truename (roam-directory)))))
+        (when (and (roam-backlink-path-kind pathname)
+                   (roam-path-in-root-p pathname root))
+          (let* ((display-window
+                   (find buffer (window-list)
+                         :key #'window-buffer :test #'eq))
+                 (origin
+                   (or (and display-window buffer)
+                       (buffer-value
+                        panel 'lem-yath-roam-backlink-origin-buffer)))
+                 (origin-window
+                   (or display-window
+                       (roam-backlink-live-origin-window panel))))
+            (when (roam-backlink-buffer-live-p origin)
+              (roam-backlink-start-scan panel origin origin-window))))))))
+
 (defun roam-backlink-reload-cleanup ()
   (remove-hook *post-command-hook* 'roam-backlink-post-command)
+  (remove-hook (variable-value 'after-save-hook :global t)
+               'roam-backlink-after-save)
   (alexandria:when-let ((buffer (get-buffer *roam-backlink-buffer-name*)))
     (when (roam-backlink-panel-visible-p buffer)
       (ignore-errors (roam-backlink-close-panel buffer)))
@@ -902,3 +929,5 @@
 
 (roam-backlink-reload-cleanup)
 (add-hook *post-command-hook* 'roam-backlink-post-command -350)
+(add-hook (variable-value 'after-save-hook :global t)
+          'roam-backlink-after-save)
