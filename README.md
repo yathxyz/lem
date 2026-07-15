@@ -71,6 +71,24 @@ of writing `.fasl` files into the source tree.
 - `SPC m e e` evaluates exactly the preceding Common Lisp form through Lem's
   native self-connected SLIME environment in Normal or Visual state; an active
   Visual selection is preserved rather than being evaluated as a region
+- Emacs 31-style asynchronous compilation on `SPC c c`, seeded with its exact
+  `make -k -jN` default and launched in the originating buffer's directory and
+  Direnv-aware environment; the save prompt includes the configured `d` diff,
+  output streams live with stateful ANSI styling and navigable diagnostics, and
+  Evil Collection's `gj`/`gk`, `[[`/`]]`, Return, `go`, and global `M-g n/p`
+  behavior is retained; `go` preserves the log even if the remembered origin
+  window was deleted. `gr` recompiles exactly and `C-c C-k` interrupts the
+  validated process group. A pinned, minimal-environment guardian broker
+  receives the command and captured environment over a private pipe, keeps
+  project values out of its argv, and controls a separately anchored command
+  group—Lem stores and signals no command PGID. An out-of-group watchdog
+  parents and pins the anchor, killing the command group if the broker dies;
+  the broker remains responsive if a command stops its parent or whole group.
+  A gated exec queues readiness before project startup code can run and drops
+  unrelated inherited descriptors before Bash starts.
+  Cleanup rejects stale output, terminates validated same-group descendants,
+  joins its reader, and reaps the broker; terminal status does not wait for a
+  descendant that merely retains inherited stdout
 - Expreg-style `SPC v` region growth through lexical and Python/JSON syntax
   tiers, including balanced list interiors inside ordinary and block strings;
   arbitrary Visual selections use their active endpoint and retain contained
@@ -246,8 +264,9 @@ Use `docs/parity-ledger.tsv` for behavior-level planning: its dispositions are
 
 ## Testing
 
-`nix flake check` runs the package, compile, boot, prompt and in-buffer
-completion, completion-lifecycle, automatic-completion, Embark-style actions,
+`nix flake check` runs the package, compile, boot, asynchronous compilation,
+prompt and in-buffer completion, completion-lifecycle, automatic-completion,
+Embark-style actions,
 editing, formatting, Orderless completion, snippets, LSP snippets, real installed
 language-server handshakes, tree-sitter highlighting, real DAP adapter
 workflows, daily-workflows, Direnv environment switching,
@@ -263,6 +282,7 @@ interactive TUI checks are exposed as flake apps:
 nix flake check
 python3 scripts/check-parity-ledger.py
 nix run .#compile-check
+nix run .#compilation-test
 nix run .#boot-test
 nix run .#completion-test
 nix run .#prompt-completion-test
@@ -313,7 +333,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 ./scripts/test-on-ex44.sh
 ```
 
-Pass `check`, `compile`, `boot`, `completion`, `prompt-completion`,
+Pass `check`, `compile`, `compilation`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
 `daily-workflows`, `direnv`, `llm-keybinding`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,

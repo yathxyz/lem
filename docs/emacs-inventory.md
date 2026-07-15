@@ -291,6 +291,44 @@ Diagnostics policy (`yath/eglot-managed-diagnostics`): when an Eglot-managed buf
 
 **dape** = DAP debugging: `dape-breakpoint-global-mode`, deferred, default adapter config. (Python debug via `debugpy`/`debugpy-adapter`, Go via `dlv`/`dlv-dap`, Rust/C via `lldb-dap`.)
 
+### Compilation workflow
+
+The configuration does not replace `compile.el`: `SPC c c` invokes the stock
+`compile` command, and the only `use-package compile` customization adds
+`ansi-color-compilation-filter` to `compilation-filter-hook`.  In the pinned
+Emacs 31 build, `compilation-read-command` is therefore still `t`, so every
+invocation prompts with the current buffer's `compile-command`.  Its untouched
+default is `make -k -jN `, where `N = ceil(num-processors / 1.5)` (equivalently
+`ceil(2 * num-processors / 3)`), including the trailing space.
+
+Before starting, `compile` calls `save-some-buffers` for modified file-visiting
+buffers.  This configuration prepends a `d` action which displays the live
+buffer-versus-file diff and then returns to the save question.  The pinned
+stock prompt also supports save, skip, save-all, save-this-and-finish, cancel,
+view-buffer, visit-and-quit, mark-unmodified, and help actions.  The command
+then runs asynchronously through a shell from the originating buffer's
+`default-directory`, streams stdout/stderr into read-only `*compilation*`, and
+leaves point at the beginning because `compilation-scroll-output` remains
+`nil`.  The configured filter renders ANSI colour before the ordinary
+`compile.el` diagnostic machinery drives source navigation.
+
+The installed Evil Collection puts `compilation-mode` in Normal state and
+supplies these effective modal bindings (stock `compile.el` supplies
+`C-c C-k`, while the global next-error map supplies `M-g n/p`):
+
+| Key | Effective command | Behavior |
+|---|---|---|
+| `RET` | `compile-goto-error` | Visit the diagnostic on the current log line |
+| `go`, `M-RET`, `S-RET` | `compilation-display-error` | Display its source while retaining the compilation log as the selected window |
+| `TAB`, `gj`, `C-j` | `compilation-next-error` | Move to the next diagnostic inside the log without selecting its source |
+| `S-TAB`, `gk`, `C-k` | `compilation-previous-error` | Move to the previous diagnostic inside the log |
+| `[[`, `]]` | `compilation-previous-file`, `compilation-next-file` | Move to a diagnostic for the previous or next source file |
+| `gr` | `recompile` | Repeat the prior compilation context |
+| `C-c C-k` | `kill-compilation` | Interrupt the running compilation process |
+| `q`, `ZZ` | `quit-window` | Quit the read-only result window |
+| `ZQ` | `evil-quit` | Use Evil's quit behavior |
+| global `M-g n`, `M-g p` | `next-error`, `previous-error` | Visit the next or previous source diagnostic |
+
 ### Per-language
 
 | Language | Major mode | LSP server (binary) | Formatter (apheleia) | Linter | Debug | Notes |

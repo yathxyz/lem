@@ -127,8 +127,8 @@
                    (,*lint-command-keymap* "n" lem-yath-next-diagnostic)
                    (,*lint-command-keymap* "p" lem-yath-previous-diagnostic)
                    (,*lint-command-keymap* "l" lem-yath-list-diagnostics)
-                   (,*global-keymap* "M-g n" lem-yath-next-diagnostic)
-                   (,*global-keymap* "M-g p" lem-yath-previous-diagnostic)))
+                   (,*global-keymap* "M-g n" lem-yath-next-error)
+                   (,*global-keymap* "M-g p" lem-yath-previous-error)))
     (destructuring-bind (keymap keys command) entry
       (lint-test-check (eq command (lint-test-binding keymap keys))
                        (format nil "binding-~a" keys))))
@@ -153,6 +153,27 @@
   (lint-test-check
    (and *lint-idle-timer* (not (timer-expired-p *lint-idle-timer*)))
    "idle-change-timer-is-running"))
+
+(defun lint-test-empty-navigation-preserves-provider ()
+  (let ((buffer (make-buffer " *lint-empty-navigation*" :temporary t))
+        (original-source *lem-yath-next-error-source*)
+        (editor-error-p nil))
+    (unwind-protect
+         (progn
+           (setf *lem-yath-next-error-source* :compilation)
+           (with-current-buffer buffer
+             (handler-case
+                 (lint-move-to-diagnostic 1)
+               (editor-error ()
+                 (setf editor-error-p t))))
+           (lint-test-check editor-error-p
+                            "empty-navigation-reports-no-diagnostics")
+           (lint-test-check
+            (eq :compilation *lem-yath-next-error-source*)
+            "empty-navigation-preserves-compilation-provider"))
+      (setf *lem-yath-next-error-source* original-source)
+      (unless (deleted-buffer-p buffer)
+        (delete-buffer buffer)))))
 
 (defun lint-test-check-automatic-python (buffer)
   (let ((diagnostics
@@ -352,6 +373,7 @@
              (cond
                ((eq status :finished)
                 (lint-test-static-contract)
+                (lint-test-empty-navigation-preserves-provider)
                 (lint-test-check-automatic-python
                  *lint-test-python-buffer*)
                 (lint-test-run-real-checkers)

@@ -9,6 +9,8 @@
 
 (in-package :lem-yath)
 
+(defvar *lem-yath-next-error-source* :diagnostic)
+
 (defparameter *lint-idle-change-delay-ms* 500)
 (defparameter *lint-idle-poll-ms* 100)
 (defparameter *lint-input-limit* (* 16 1024 1024))
@@ -1240,6 +1242,7 @@
       (lem/language-mode:move-to-xref-location-position
        (current-point)
        (lem-lsp-mode::diagnostic-position diagnostic))
+      (setf *lem-yath-next-error-source* :diagnostic)
       (message "~a" (lem-lsp-mode::diagnostic-message diagnostic))
       diagnostic)))
 

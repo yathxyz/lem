@@ -1,4 +1,4 @@
-;;;; Project tools: compile (SPC c c) and duplicate-dwim (M-j).
+;;;; Small editing tools: duplicate-dwim (M-j) and buffer killing.
 
 (in-package :lem-yath)
 
@@ -21,20 +21,6 @@
     (setf (fill-pointer data) limit
           (lem/common/history::history-index history) limit)
     (lem/common/history:save-file history)))
-
-(define-command lem-yath-compile () ()
-  "Prompt for a shell command and stream its output into *compilation*.
-Runs from the project root; the worker runs on a background thread."
-  (let* ((buffer-dir (or (ignore-errors (buffer-directory (current-buffer)))
-                         (user-homedir-pathname)))
-         (dir (or (ignore-errors
-                    (lem-yath-project-root-for-directory buffer-dir))
-                  buffer-dir))
-         (command (prompt-for-string (format nil "Compile [~a]: " dir)
-                                     :history-symbol 'lem-yath-compile)))
-    (when (plusp (length command))
-      (stream-to-buffer (list "sh" "-c" command) "*compilation*"
-                        :directory dir))))
 
 (define-command lem-yath-kill-current-buffer () ()
   "Kill the current buffer, confirming first when it has unsaved changes."

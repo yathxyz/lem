@@ -1249,6 +1249,112 @@ directory changes, denied files without auto-allow, explicit allow and manual
 refresh, hard timeout retention, malformed-output prevalidation, and recovery.
 The static production probe also covers successful empty export output.
 
+### Emacs-style asynchronous compilation — `lem-yath/src/compilation.lisp` (verified approximation)
+
+`SPC c c` prompts for a shell command and starts it asynchronously in the
+originating buffer's exact directory with the process environment captured
+there. The command is buffer-local to that origin, so returning to the same
+source buffer recalls its last value. A buffer without a prior value starts
+with the pinned Emacs 31 default `make -k -jN `, including its trailing space,
+where `N` is `ceiling(2 * nproc / 3)` (equivalent to Emacs's
+`ceiling(num-processors / 1.5)`). Processor discovery is affinity-aware through
+`nproc`, with one processor as the fail-safe fallback.
+
+Before launch, every modified file buffer receives the configured
+`save-some-buffers` query. `y` saves the current buffer, `n` skips it, `!` saves
+all remaining buffers, `.` saves the current buffer and stops asking, and `q`
+cancels compilation. `d` opens a read-only unified disk-versus-buffer diff and
+then repeats the same query; both inputs are limited to 16 MiB of characters.
+The originating buffer and window are restored after the preflight.
+
+The one fixed `*compilation*` buffer is read-only, has undo disabled, and
+receives merged stdout and stderr while the process is still running. ANSI
+state survives arbitrary read boundaries: basic and bright foreground and
+background colors, xterm 256-color and RGB forms, bold, underline, and reverse
+SGR are rendered, while CSI/OSC control bytes are consumed instead of shown.
+The raw stream is capped at 8 MiB of bytes and an unfinished control tail
+at 4,096 characters. These are deliberate safety bounds, not Emacs's
+effectively open-ended process-buffer behavior.
+
+The finite location parser covers the representative configured tool output:
+GCC/Clang and ordinary `path:line:column` rows, Rust/Cargo arrows, Go/vet rows,
+Python tracebacks and pytest/Ruff locations, and Nix-style messages containing
+a source location. Relative paths resolve against the captured compilation
+directory. In the log, Evil Collection's effective `gj`/`gk`, `C-j`/`C-k`, and
+`Tab`/`S-Tab` move between diagnostics without selecting source; `[[`/`]]` move
+between source files. `Return` visits the exact line and column, while `go`,
+`M-Return`, and `S-Return` display it but retain the compilation window as the
+selected window. If the remembered origin window was deleted, `go` displays
+the source in another window while preserving the log and keeping it selected.
+`q`, `ZZ`, and `ZQ` retain the expected result-window exit paths.
+
+Global `M-g n` and `M-g p` route through the most recently selected error
+provider. Starting or navigating a compilation selects its result sequence;
+using linter/LSP diagnostic navigation selects the current buffer's diagnostic
+sequence instead. `gr` reruns without prompting for a command and preserves the
+exact command, directory, and captured environment. `C-c C-k` asks the live
+guardian broker to signal its separately anchored command group with SIGINT
+and applies a bounded SIGKILL fallback to members that remain in that group.
+
+There is deliberately only one active, fixed-name compilation session.
+Replacing it requires confirmation while its process is live. `C-c C-k`
+requests group SIGINT; the reader asynchronously applies bounded SIGKILL
+escalation, reports completion, and reaps the broker. Replacement,
+compilation-buffer kill, source reload, and editor exit synchronously terminate
+validated same-group descendants, join the reader, and reap the directly
+launched broker. The pinned Python broker starts with a fixed environment;
+Lem sends the command and captured environment over private framed stdin, so
+project values never enter its argv or environment and a project `PATH` cannot
+replace the pinned Python or Bash executables. Interrupt, kill, and release are
+serialized over that same private capability. The broker and watchdog stay
+outside the command group. The watchdog parents its unreaped anchor, and that
+anchor directly parents Bash, so stopping Bash's parent or the whole command
+group cannot stop control handling. The anchor pins the numeric group identity
+until an authorized release; Lem retains the broker pipe plus a locked
+armed-state Boolean, but never stores or signals the command PGID. The broker
+signals the pinned group, while the watchdog kills it if the broker dies. Control EOF
+disarms Lem's capability and fails the session closed. A gated fork cannot exec
+Bash until the anchor has queued `STARTED`, so even hostile project startup code
+cannot freeze Lem's synchronous launch handshake. Before exec it restores
+ordinary shell signal dispositions and drops every inherited descriptor except
+standard I/O and the anonymous script; the script's first line closes that last
+transport descriptor before the requested command launches descendants.
+Session identity plus buffer ownership prevent late events from an old process
+altering the reused buffer. Normal terminal status reaps the broker after its
+inner Bash command exits without waiting for a still-running descendant that
+merely retains inherited stdout. After the ordered `EXIT` status, an underfull
+read (possibly empty) establishes the bounded drain point; the continuously
+writing regression also proves the live reader takes the positive-underfull
+path. An out-of-group descendant therefore cannot deadlock normal completion
+or synchronous teardown, and Lem does not signal that descendant.
+`scripts/compilation-test.sh` drives all of this through real ncurses input,
+including the installed default Make, live split-SGR output, six diagnostic
+forms, navigation, deleted-origin `go`, exact recompile context,
+hostile Bash and Python startup variables, project `PATH` shadows, a strict
+broker-environment whitelist, secret-free broker argv, command-transport
+descriptor closure, stdout-retaining and continuously writing descendants,
+empty and positive underfull drain boundaries, complete and incomplete UTF-8,
+default SIGINT and SIGPIPE dispositions, broker-only death, an immediate-parent stop, and a
+SIGSTOPped command group,
+leader-only PGID reservation, resistant same-group descendants, stale
+callbacks, and synchronous buffer-kill/reload/exit cleanup.
+
+This is a bounded reproduction of the configured daily workflow, not all of
+`compile.el`: commands run through non-login, non-interactive Bash and streams
+are decoded as UTF-8; the diagnostic grammar and SGR repertoire are finite;
+the captured environment is limited to 16 MiB and commands to 1 MiB; there is
+no Comint input, prefix-argument surface, custom compilation-buffer name, or
+concurrent named compilation sessions. The private command transport requires
+Linux `memfd_create` and `/proc/self/fd`, matching the flake's Linux-only target.
+The guardian is lifecycle isolation, not a same-UID security sandbox:
+`BASH_ENV` startup code can inspect the anonymous script descriptor before its
+first line closes it. Normal successful release deliberately preserves
+background jobs, including jobs that remain in the command group, while
+abnormal cleanup signals only the anchored group and cannot reach a descendant
+that escaped it. As with ordinary process supervision, an uninterruptible
+kernel sleep can also prevent a nominally bounded kill-and-reap operation from
+finishing.
+
 ### Flycheck-style diagnostics — `lem-yath/src/lint.lisp` (verified subset)
 
 Programming buffers enable `lem-yath-lint-mode` unless Lem LSP owns the
@@ -1273,9 +1379,10 @@ never submitted to a checker.
 Diagnostics use Lem LSP's existing severity overlays, point popup, navigable
 list, and next/previous location representation. The modeline shows `FlyC`
 state and error/warning counts. Flycheck's effective `C-c ! c/n/p/l` prefix is
-available while the linter mode is active; global `M-g n` and `M-g p` navigate
-either linter or LSP diagnostics. Explicit LSP attach clears and disables the
-linter, while detach restores it only when it was expected before management.
+available while the linter mode is active; global `M-g n` and `M-g p` route
+between the most recently selected compilation result and the current buffer's
+linter/LSP diagnostics. Explicit LSP attach clears and disables the linter,
+while detach restores it only when it was expected before management.
 Python is the deliberate exception to language-spec auto-start: Pyright stays
 registered for manual `M-x lsp-mode`, matching the Emacs configuration's lack
 of a Python Eglot hook, so Ruff/Mypy own Python by default.

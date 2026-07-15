@@ -36,6 +36,9 @@ case "$test_name" in
   compile)
     remote_command='nix run path:$PWD#compile-check'
     ;;
+  compilation)
+    remote_command='nix run path:$PWD#compilation-test --option max-jobs 2'
+    ;;
   boot)
     remote_command='nix run path:$PWD#boot-test'
     ;;
@@ -136,7 +139,7 @@ case "$test_name" in
     remote_command='nix run path:$PWD#avy-test --option max-jobs 2'
     ;;
   *)
-    echo "Usage: $0 [all|check|compile|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|lisp-eval|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|tree-sitter|dap|project-navigation|project-outline|prompt-completion|daily-workflows|direnv|electric-editing|ui-parity|cursor-state|snipe|avy|interactive|structural|notes|roam|org|agenda|editing]" >&2
+    echo "Usage: $0 [all|check|compile|compilation|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|lisp-eval|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|tree-sitter|dap|project-navigation|project-outline|prompt-completion|daily-workflows|direnv|electric-editing|ui-parity|cursor-state|snipe|avy|interactive|structural|notes|roam|org|agenda|editing]" >&2
     exit 2
     ;;
 esac

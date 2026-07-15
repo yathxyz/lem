@@ -233,6 +233,7 @@
               fd
               findutils
               gitMinimal
+              gnumake
               go
               google-java-format
               gnugrep
@@ -317,6 +318,7 @@
             runtimeInputs = defaultRuntimeInputs;
             text = ''
               export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
+              export LEM_YATH_GUARDIAN_PYTHON=${lib.getExe' pkgs.python3 "python3"}
               export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
 
               cache_home="''${XDG_CACHE_HOME:-''${HOME:-/tmp}/.cache}"
@@ -504,6 +506,7 @@
             lem-yath = apps.default;
             lem-upstream = mkApp "${lemNcurses}/bin/lem" "Run upstream Lem ncurses without config";
             compile-check = mkTestApp "lem-yath-compile-check" "compile-check.sh";
+            compilation-test = mkTestAppWithLem lemYath "lem-yath-compilation-test" "compilation-test.sh";
             boot-test = mkTestApp "lem-yath-boot-test" "boot-test.sh";
             completion-test = mkTestApp "lem-yath-completion-test" "completion-test.sh";
             completion-lifecycle-test = mkTestApp "lem-yath-completion-lifecycle-test" "completion-lifecycle-test.sh";
@@ -564,6 +567,7 @@
           checks = {
             package = lemYath;
             compile = mkCheck "compile" "compile-check.sh";
+            compilation = mkCheckWithLem lemYath "compilation" "compilation-test.sh";
             boot = mkCheck "boot" "boot-test.sh";
             completion = mkCheck "completion" "completion-test.sh";
             completion-lifecycle = mkCheck "completion-lifecycle" "completion-lifecycle-test.sh";
