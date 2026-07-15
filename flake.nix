@@ -579,6 +579,7 @@
             org-test = mkTestAppWithLem lemYath "lem-yath-org-test" "org-test.sh";
             org-planning-test = mkTestAppWithLem lemYath "lem-yath-org-planning-test" "org-planning-test.sh";
             org-timestamp-test = mkTestAppWithLem lemYath "lem-yath-org-timestamp-test" "org-timestamp-test.sh";
+            org-source-edit-test = mkTestAppWithLem lemYath "lem-yath-org-source-edit-test" "org-source-edit-test.sh";
             org-babel-test = mkTestAppWithLemAndInputs lemYath [
               pkgs.postgresql
             ] "lem-yath-org-babel-test" "org-babel-test.sh";
@@ -653,6 +654,7 @@
             org = mkCheckWithLem lemYath "org" "org-test.sh";
             org-planning = mkCheckWithLem lemYath "org-planning" "org-planning-test.sh";
             org-timestamp = mkCheckWithLem lemYath "org-timestamp" "org-timestamp-test.sh";
+            org-source-edit = mkCheckWithLem lemYath "org-source-edit" "org-source-edit-test.sh";
             org-babel = mkCheckWithLemAndInputs lemYath [ pkgs.postgresql ] "org-babel" "org-babel-test.sh";
             org-publish = mkCheckWithLemAndInputs lemYath [ pkgs.pandoc ] "org-publish" "org-publish-test.sh";
             org-operator = mkCheckWithLem lemYath "org-operator" "org-operator-test.sh";

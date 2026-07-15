@@ -1953,6 +1953,30 @@ and drives insertion, replacement, conversion, shifting, prefix behavior,
 cancellation, read-only refusal, undo, persistence boundaries, and TODO
 dispatch through packaged ncurses Lem.
 
+`src/org/source-editing.lisp` supplies GNU Org's source-edit workflow on
+`C-c '`. A bounded source body opens without block delimiters in a dedicated
+buffer using the configured Bash, Python, C/C++, Nix, or SQL mode when
+available, with Fundamental mode as the explicit fallback. The configured
+`org-src-preserve-indentation` behavior is retained exactly: body indentation
+is not rebased, and Org's leading protection comma before `*` and `#+` lines
+is removed for editing and restored on writeback. Point uses GNU Org's
+end-relative line coordinates, so that comma conversion retains the same
+logical character.
+
+Inside the edit buffer, `C-c '` writes back and exits, `C-c C-k` aborts, and
+`C-x C-s` writes back, saves the source Org file, and continues editing.
+Ordinary exit leaves the Org buffer modified but unsaved and replaces the
+complete body as one undo step. A session validates its original delimiters,
+language, body, and live markers before every writeback; concurrent source
+edits and read-only sources therefore fail without discarding the temporary
+edit. Source/edit buffer killing and configuration reload release the paired
+markers and edit buffers. `scripts/org-source-edit-test.sh` drives the physical
+production chords and proves language-mode selection, local bindings,
+indentation and comma conversion, point mapping, commit, abort, save-without-
+exit, persistence boundaries, one-step undo, stale-source retention, and
+read-only/outside-block refusal plus reload cleanup. GNU Org's prefixed live Babel-session buffer
+route remains unsupported and fails explicitly.
+
 The pinned Evil-Org `<`/`>` range operators are available in Normal and Visual
 states. Heading ranges promote or demote only selected heading lines by one
 level. Safe list-item ranges move by the surrounding list's indentation step
@@ -2037,8 +2061,8 @@ repairs beyond the bounded `d/x/X/< />` behavior; region-aware Meta operations,
 generic Org-element movement, unimplemented list/table Shift-control contexts,
 and richer list/table semantics; named-date/calendar prompt input,
 consecutive-command timestamp-range creation, warning and delay cookies,
-region-wide planning, and wider timestamp variants; source-block editing,
-variables/sessions and the rest of Babel's
+region-wide planning, and wider timestamp variants; prefixed live Babel-session
+source editing, variables/sessions and the rest of Babel's
 backend/header/result matrix; in-editor LaTeX preview, non-HTML export
 backends, and exact `ox-html` output; org-modern
 glyph composition in the terminal; and an initial Org

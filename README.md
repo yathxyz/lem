@@ -269,6 +269,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   double universal prefix. `Shift-Left`/`Shift-Right` and the terminal-safe
   `C-c Left`/`C-c Right` move a timestamp by days or cycle a heading's TODO
   state according to context
+- GNU Org source-block editing on `C-c '`. The block body opens without its
+  delimiters in the configured language mode while preserving indentation and
+  Org's protective-comma convention. `C-c '` writes back and exits, `C-c C-k`
+  aborts, and `C-x C-s` writes back, saves the Org file, and keeps editing;
+  ordinary exit remains an unsaved one-step Org-buffer edit
 - configured Org Babel execution on `C-c C-c` for Bash/Shell, Python, C/C++,
   Nix, SQLite, and PostgreSQL SQL blocks. Shell, Python, C, Nix, and SQL ask
   before running; SQLite follows the Emacs configuration's trusted-note
@@ -407,6 +412,7 @@ nix run .#roam-test
 nix run .#org-test
 nix run .#org-planning-test
 nix run .#org-timestamp-test
+nix run .#org-source-edit-test
 nix run .#agenda-test
 nix run .#agenda-clock-test
 nix run .#interactive-test

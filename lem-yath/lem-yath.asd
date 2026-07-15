@@ -49,6 +49,7 @@
                              (:file "folding")
                              (:file "mode")
                              (:file "babel")
+                             (:file "source-editing")
                              (:file "planning")
                              (:file "commands")
                              (:file "structure")
