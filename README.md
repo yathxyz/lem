@@ -342,7 +342,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 - gptel-style `SPC g l`/`SPC g L` menu with private named presets and
   region-or-buffer handoff to Claude or ChatGPT; the built-in `quick-lookup`
   preset matches the Emacs startup model, system prompt, temperature, and
-  token cap, while `grok-build` selects the native Grok CLI backend
+  token cap, `project-readonly` opts OpenRouter into the configured five-tool
+  project inspection loop, and `grok-build` selects the native Grok CLI backend
 - project-aware `C-c c` Claude Code buffer that opens ready for input, prefers
   the configured `ccr code` argv with a `claude` fallback, renders native text
   and tool events, and resumes the same session on later prompts. It starts an
@@ -360,6 +361,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 
 Saved LLM presets live in `$XDG_CONFIG_HOME/lem-yath/llm-presets.json` (or
 `~/.config/lem-yath/llm-presets.json`) with private directory and file modes.
+They retain the tool opt-in as well as backend, model, system message,
+temperature, and token cap. `project-readonly` captures the originating
+project before opening the shared output buffer and exposes only
+`project_root`, `list_project_files`, `search_project`, `read_project_file`,
+and the Lem/Common Lisp translation of `read_emacs_symbol`. Calls are bounded,
+file reads require canonical in-project regular UTF-8 text, and no write,
+arbitrary-command, or shell tool exists.
 The handoff menu preserves the Emacs 13,000-character context cap and prefers
 the active region; ChatGPT handoffs also copy the exact prompt to the kill
 ring. `SPC g i` retains the separate ad-hoc instruction prompt.
@@ -422,6 +430,7 @@ nix run .#actions-test
 nix run .#llm-keybinding-test
 nix run .#llm-backend-test
 nix run .#llm-workflow-test
+nix run .#llm-tools-test
 nix run .#claude-code-test
 nix run .#claude-bridge-test
 nix run .#cursor-state-test
@@ -482,7 +491,7 @@ worktree to the dedicated cache directory on `ex44` and run the full gate there:
 
 Pass `check`, `compile`, `compilation`, `terminal`, `server`, `boot`, `completion`, `prompt-completion`,
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
-`daily-workflows`, `direnv`, `llm-keybinding`, `llm-backend`, `llm-workflow`, `claude-code`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
+`daily-workflows`, `direnv`, `llm-keybinding`, `llm-backend`, `llm-workflow`, `llm-tools`, `claude-code`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`,
 `interactive`, `structural`, `roam`, `roam-backlinks`, or

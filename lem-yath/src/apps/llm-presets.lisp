@@ -13,13 +13,22 @@
      :model "openrouter/auto"
      :system "Short, direct answers. Skip extra context unless it changes correctness."
      :temperature 0.2
-     :max-tokens 800)
+     :max-tokens 800
+     :use-tools nil)
+    ("project-readonly"
+     :backend :openrouter
+     :model "openrouter/auto"
+     :system "Use the provided project and Lem tools for discovery before answering. Prefer narrow searches and narrow file reads over guessing. Stay read-only."
+     :temperature 0.2
+     :max-tokens 4000
+     :use-tools t)
     ("grok-build"
      :backend :grok
      :model "grok-build"
      :system "You are a coding assistant. Answer directly; inspect the project only when needed."
      :temperature 0.2
-     :max-tokens nil))
+     :max-tokens nil
+     :use-tools nil))
   "Built-in presets whose required transport exists in Lem-yath.")
 
 (defvar *llm-current-preset* "quick-lookup")
@@ -159,7 +168,8 @@
        (<= 0 (getf preset :temperature) 2)
        (let ((maximum (getf preset :max-tokens)))
          (or (null maximum)
-             (and (integerp maximum) (<= 1 maximum 1000000))))))
+             (and (integerp maximum) (<= 1 maximum 1000000))))
+       (member (getf preset :use-tools) '(nil t))))
 
 (defun llm-preset-from-json (object)
   (when (hash-table-p object)
@@ -169,7 +179,8 @@
                    :model (gethash "model" object)
                    :system (gethash "system" object)
                    :temperature (gethash "temperature" object)
-                   :max-tokens (gethash "max_tokens" object))))
+                   :max-tokens (gethash "max_tokens" object)
+                   :use-tools (gethash "use_tools" object))))
       (and (llm-preset-valid-p name preset) (cons name preset)))))
 
 (defun llm-read-user-presets ()
@@ -202,7 +213,8 @@
      ("model" . ,(getf preset :model))
      ("system" . ,(getf preset :system))
      ("temperature" . ,(getf preset :temperature))
-     ("max_tokens" . ,(getf preset :max-tokens)))
+     ("max_tokens" . ,(getf preset :max-tokens))
+     ("use_tools" . ,(getf preset :use-tools)))
    :test #'equal))
 
 (defun llm-preset-json-text (presets)
@@ -272,7 +284,8 @@
         :model *llm-model*
         :system *llm-system-message*
         :temperature *llm-temperature*
-        :max-tokens *llm-max-tokens*))
+        :max-tokens *llm-max-tokens*
+        :use-tools *llm-use-tools*))
 
 (defun llm-apply-preset (name preset)
   "Apply validated PRESET named NAME to the live LLM settings."
@@ -283,6 +296,7 @@
         *llm-system-message* (getf preset :system)
         *llm-temperature* (getf preset :temperature)
         *llm-max-tokens* (getf preset :max-tokens)
+        *llm-use-tools* (getf preset :use-tools)
         *llm-current-preset* name)
   preset)
 

@@ -2539,15 +2539,33 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   `xdg-open` is the final fallback; every launch uses an argument vector rather
   than a shell.
 
-  The built-in `quick-lookup` and `grok-build` presets reproduce the usable
-  Emacs presets whose transports exist here. User presets persist backend,
-  model, system message, temperature, and token cap in
+  The built-in `quick-lookup`, `project-readonly`, and `grok-build` presets
+  reproduce the usable Emacs policies whose transports exist here. Quick
+  lookup is explicitly tool-free. Project-readonly exposes the configured
+  `project_root`, `list_project_files`, `search_project`, `read_project_file`,
+  and `read_emacs_symbol` names through OpenRouter's function-call protocol;
+  the last tool inspects the equivalent Lem/Common Lisp symbol space. The
+  originating root is captured before the output-buffer switch. Listing and
+  regexp search use bounded direct-argv ripgrep, file reads resolve symlinks
+  canonically and accept only in-root regular UTF-8 text, and there is no
+  mutation, arbitrary command, or shell tool. Fragmented SSE calls are
+  assembled under per-line, argument, call, and four-round limits; tool
+  results remain visible in the transcript and feed the next model round.
+  Abort covers both curl and active project subprocesses.
+
+  User presets persist backend, model, system message, temperature, token cap,
+  and tool opt-in in
   `$XDG_CONFIG_HOME/lem-yath/llm-presets.json`; creation, locking, and atomic
   replacement enforce user ownership and private `0700`/`0600` modes on SBCL.
   `scripts/llm-workflow-test.sh` verifies the menu through physical keys,
   private save and fresh-process reload, visual-region Claude handoff, bounded
   ChatGPT search handoff, kill-ring copy, and decoded URL parameters without
   opening a real browser.
+  `scripts/llm-tools-test.sh` additionally drives a credential-free real
+  ncurses request through five fragmented calls and a second HTTP round,
+  validates exact schemas and follow-up messages, round-trips a tool-enabled
+  private preset, and proves path traversal, escaping symlinks, binary files,
+  malformed SSE/arguments, oversized fragments, and unknown tools fail closed.
 
   - **Copilot** — `extensions/copilot/` (`lem-copilot`): `copilot-mode` minor mode,
     `copilot-install-server`, `copilot-signin`, `copilot-complete`,

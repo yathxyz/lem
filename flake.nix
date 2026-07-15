@@ -743,6 +743,7 @@
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
             llm-backend-test = mkTestAppWithLem lemYath "lem-yath-llm-backend-test" "llm-backend-test.sh";
             llm-workflow-test = mkTestAppWithLem lemYath "lem-yath-llm-workflow-test" "llm-workflow-test.sh";
+            llm-tools-test = mkTestAppWithLem lemYath "lem-yath-llm-tools-test" "llm-tools-test.sh";
             claude-code-test = mkTestAppWithLem lemYath "lem-yath-claude-code-test" "claude-code-test.sh";
             claude-bridge-test = mkTestAppWithLem lemYath "lem-yath-claude-bridge-test" "claude-bridge-test.sh";
             lisp-eval-test = mkTestApp "lem-yath-lisp-eval-test" "lisp-eval-test.sh";
@@ -824,6 +825,7 @@
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";
             llm-backend = mkCheckWithLem lemYath "llm-backend" "llm-backend-test.sh";
             llm-workflow = mkCheckWithLem lemYath "llm-workflow" "llm-workflow-test.sh";
+            llm-tools = mkCheckWithLem lemYath "llm-tools" "llm-tools-test.sh";
             claude-code = mkCheckWithLem lemYath "claude-code" "claude-code-test.sh";
             claude-bridge = mkCheckWithLem lemYath "claude-bridge" "claude-bridge-test.sh";
             lisp-eval = mkCheck "lisp-eval" "lisp-eval-test.sh";

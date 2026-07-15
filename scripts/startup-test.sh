@@ -10,6 +10,7 @@ work="$root/work"
 socket="lem-yath-startup-$id"
 cold_budget_ms="${LEM_YATH_COLD_STARTUP_BUDGET_MS:-30000}"
 warm_budget_ms="${LEM_YATH_STARTUP_BUDGET_MS:-10000}"
+expected_fasl_count=85
 mkdir -p "$home" "$cache" "$work"
 export WORKDIR="$work"
 unset LEM_HOME
@@ -142,10 +143,10 @@ aot_count=0
 if [ -n "$aot_root" ] && [ "$aot_root" != none ] && [ -d "$aot_root" ]; then
   aot_count=$(find "$aot_root" -type f -name '*.fasl' | wc -l)
 fi
-if [ "$aot_count" -eq 84 ]; then
-  pass aot-fasl 'all 84 configuration components were compiled by Nix'
+if [ "$aot_count" -eq "$expected_fasl_count" ]; then
+  pass aot-fasl "all $expected_fasl_count configuration components were compiled by Nix"
 else
-  fail aot-fasl "the installed AOT output contains $aot_count of 84 FASLs"
+  fail aot-fasl "the installed AOT output contains $aot_count of $expected_fasl_count FASLs"
 fi
 
 if ! find "$cache" -type f -name '*.fasl' -print -quit | grep -q .; then
@@ -173,11 +174,11 @@ if wait_for_file "$direct_report" "$cold_budget_ms"; then
   direct_count=$(find "$direct_cache" -type f -name '*.fasl' | wc -l)
   if grep -q '^boot-error: none$' "$direct_report" &&
      grep -q '^boot-ok: T$' "$direct_report" &&
-     [ "$direct_count" -eq 84 ] &&
+     [ "$direct_count" -eq "$expected_fasl_count" ] &&
      ! find "$direct_source" -type f -name '*.fasl' -print -quit | grep -q .; then
     pass direct-cache 'a raw development load cached all FASLs outside its source tree'
   else
-    fail direct-cache "development load failed, cached $direct_count of 84 FASLs, or polluted its source"
+    fail direct-cache "development load failed, cached $direct_count of $expected_fasl_count FASLs, or polluted its source"
   fi
 else
   fail direct-cache 'the raw development load did not produce a boot report' "$direct_session"

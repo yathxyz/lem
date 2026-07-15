@@ -23,15 +23,41 @@
 (defvar *llm-max-tokens* 800
   "Response token cap from the active Lem LLM preset, or NIL.")
 
+(defvar *llm-use-tools* nil
+  "Whether the active preset exposes the bounded read-only tool registry.")
+
 (defvar *llm-buffer-name* "*lem-yath-llm*")
 
+(defparameter *llm-max-tool-rounds* 4)
+(defparameter *llm-max-tool-calls-per-round* 8)
+(defparameter *llm-max-tool-calls-per-request* 24)
+(defparameter *llm-stream-line-limit* (* 256 1024))
+(defparameter *llm-response-character-limit* (* 4 1024 1024))
+(defparameter *llm-tool-argument-character-limit* (* 64 1024))
+
+(defstruct (llm-stream-tool-call
+            (:constructor make-llm-stream-tool-call (index)))
+  index
+  (id "")
+  (name "")
+  (arguments ""))
+
+(defstruct llm-stream-round
+  (content "")
+  (tool-calls '())
+  finish-reason)
+
 (defstruct (llm-request
-            (:constructor make-llm-request (buffer process backend)))
+            (:constructor make-llm-request
+                (buffer process backend &key tool-context tools-p)))
   "One asynchronous LLM request owned by BUFFER."
   buffer
   process
   backend
-  (aborted-p nil))
+  tool-context
+  tools-p
+  (aborted-p nil)
+  (lock (bt2:make-lock :name "lem-yath/llm-request")))
 
 (defparameter *llm-active-request-key* 'lem-yath-llm-active-request)
 
@@ -39,40 +65,181 @@
   (or (uiop:getenv "OPENROUTER_API_KEY")
       (uiop:getenv "OPENAI_API_KEY")))
 
-(defun llm-request-body (prompt)
+(defun llm-initial-messages (prompt &optional (system *llm-system-message*))
+  (list (llm-json-object "role" "system" "content" system)
+        (llm-json-object "role" "user" "content" prompt)))
+
+(defun llm-request-body-for-messages
+    (messages model temperature max-tokens tools-p)
   (with-output-to-string (s)
-    (yason:encode
-     (alexandria:alist-hash-table
-      `(("model" . ,*llm-model*)
-        ("stream" . t)
-        ("temperature" . ,*llm-temperature*)
-        ,@(when *llm-max-tokens* `(("max_tokens" . ,*llm-max-tokens*)))
-        ("messages" . ,(vector
-                        (alexandria:alist-hash-table
-                         `(("role" . "system")
-                           ("content" . ,*llm-system-message*))
-                         :test #'equal)
-                        (alexandria:alist-hash-table
-                         `(("role" . "user") ("content" . ,prompt))
-                         :test #'equal))))
-      :test #'equal)
-     s)))
+    (let ((body (llm-json-object
+                 "model" model
+                 "stream" t
+                 "temperature" temperature
+                 "messages" (coerce messages 'vector))))
+      (when max-tokens
+        (setf (gethash "max_tokens" body) max-tokens))
+      (when tools-p
+        (setf (gethash "tools" body) (llm-tool-definitions)))
+      (yason:encode body s))))
+
+(defun llm-request-body (prompt)
+  "Encode one request using the active preset; retained as a testable API."
+  (llm-request-body-for-messages
+   (llm-initial-messages prompt) *llm-model* *llm-temperature*
+   *llm-max-tokens* *llm-use-tools*))
+
+(defun llm-json-elements (value)
+  (cond
+    ((vectorp value) (coerce value 'list))
+    ((listp value) value)
+    (t nil)))
+
+(defun llm-sse-payload (line)
+  "Return an SSE data payload and whether LINE was a data record."
+  (when (> (length line) *llm-stream-line-limit*)
+    (error "OpenRouter emitted an oversized SSE line"))
+  (if (and (>= (length line) 5)
+           (string= "data:" line :end2 5))
+      (values (string-left-trim '(#\Space #\Tab) (subseq line 5)) t)
+      (values nil nil)))
+
+(defun llm-sse-json (line)
+  "Return parsed SSE JSON and flags for a data record and [DONE]."
+  (multiple-value-bind (payload data-p) (llm-sse-payload line)
+    (cond
+      ((not data-p) (values nil nil nil))
+      ((string= payload "[DONE]") (values nil t t))
+      (t
+       (handler-case
+           (values (yason:parse payload) t nil)
+         (error () (error "OpenRouter emitted malformed SSE JSON")))))))
 
 (defun llm-delta-content (line)
   "Extract the streamed content delta from one SSE LINE, or NIL."
-  (when (and (> (length line) 6)
-             (string= "data: " (subseq line 0 6)))
-    (let ((payload (subseq line 6)))
-      (unless (string= payload "[DONE]")
-        (handler-case
-            (let* ((json (yason:parse payload))
-                   (choices (gethash "choices" json)))
-              (when (and choices (plusp (length choices)))
-                (let ((delta (gethash "delta" (elt choices 0))))
-                  (when delta
-                    (let ((content (gethash "content" delta)))
-                      (and (stringp content) content))))))
-          (error () nil))))))
+  (handler-case
+      (multiple-value-bind (json data-p done-p) (llm-sse-json line)
+        (declare (ignore data-p))
+        (unless done-p
+          (let ((choice (first (llm-json-elements
+                                (and (hash-table-p json)
+                                     (gethash "choices" json))))))
+            (when (hash-table-p choice)
+              (let* ((delta (gethash "delta" choice))
+                     (content (and (hash-table-p delta)
+                                   (gethash "content" delta))))
+                (and (stringp content) content))))))
+    (error () nil)))
+
+(defun llm-bounded-fragment (current fragment maximum label)
+  (unless (or (null fragment) (stringp fragment))
+    (error "OpenRouter emitted a non-string ~a fragment" label))
+  (let ((combined (concatenate 'string current (or fragment ""))))
+    (when (> (length combined) maximum)
+      (error "OpenRouter emitted oversized ~a data" label))
+    combined))
+
+(defun llm-stream-tool-call-chunk (table chunk)
+  (unless (hash-table-p chunk)
+    (error "OpenRouter emitted a malformed tool-call chunk"))
+  (let ((index (gethash "index" chunk)))
+    (unless (and (integerp index)
+                 (<= 0 index)
+                 (< index *llm-max-tool-calls-per-round*))
+      (error "OpenRouter emitted an invalid tool-call index"))
+    (let ((call (or (gethash index table)
+                    (setf (gethash index table)
+                          (make-llm-stream-tool-call index)))))
+      (multiple-value-bind (id id-p) (gethash "id" chunk)
+        (when id-p
+          (setf (llm-stream-tool-call-id call)
+                (llm-bounded-fragment
+                 (llm-stream-tool-call-id call) id 256 "tool-call id"))))
+      (multiple-value-bind (type type-p) (gethash "type" chunk)
+        (when (and type-p type (not (string= type "function")))
+          (error "OpenRouter requested a non-function tool call")))
+      (let ((function (gethash "function" chunk)))
+        (when function
+          (unless (hash-table-p function)
+            (error "OpenRouter emitted malformed function-call data"))
+          (multiple-value-bind (name name-p) (gethash "name" function)
+            (when name-p
+              (setf (llm-stream-tool-call-name call)
+                    (llm-bounded-fragment
+                     (llm-stream-tool-call-name call) name 128
+                     "tool name"))))
+          (multiple-value-bind (arguments arguments-p)
+              (gethash "arguments" function)
+            (when arguments-p
+              (setf (llm-stream-tool-call-arguments call)
+                    (llm-bounded-fragment
+                     (llm-stream-tool-call-arguments call) arguments
+                     *llm-tool-argument-character-limit* "tool arguments"))))))
+      call)))
+
+(defun llm-tool-name-valid-p (name)
+  (and (plusp (length name))
+       (every (lambda (character)
+                (or (alphanumericp character)
+                    (member character '(#\_ #\-))))
+              name)))
+
+(defun llm-finalize-stream-tool-calls (table)
+  (let ((calls (sort (loop :for call :being :each :hash-value :of table
+                             :collect call)
+                     #'< :key #'llm-stream-tool-call-index)))
+    (dolist (call calls)
+      (unless (and (plusp (length (llm-stream-tool-call-id call)))
+                   (llm-tool-name-valid-p
+                    (llm-stream-tool-call-name call)))
+        (error "OpenRouter emitted an incomplete tool call")))
+    calls))
+
+(defun llm-apply-openrouter-choice
+    (request choice content calls content-count)
+  "Apply one streamed CHOICE and return its new count and finish reason."
+  (let ((delta (gethash "delta" choice)))
+    (when (hash-table-p delta)
+      (let ((chunk (gethash "content" delta)))
+        (when (stringp chunk)
+          (incf content-count (length chunk))
+          (when (> content-count *llm-response-character-limit*)
+            (error "OpenRouter response exceeded the size limit"))
+          (write-string chunk content)
+          (llm-request-append request chunk)))
+      (dolist (chunk (llm-json-elements (gethash "tool_calls" delta)))
+        (llm-stream-tool-call-chunk calls chunk)))
+    (let ((reason (gethash "finish_reason" choice)))
+      (values content-count (and (stringp reason) reason)))))
+
+(defun llm-read-openrouter-round (request process)
+  "Read one bounded OpenRouter SSE response from PROCESS."
+  (let ((content (make-string-output-stream))
+        (content-count 0)
+        (calls (make-hash-table))
+        (finish-reason nil))
+    (with-open-stream (out (uiop:process-info-output process))
+      (loop :for line := (read-line out nil)
+            :while line
+            :do
+               (multiple-value-bind (json data-p done-p) (llm-sse-json line)
+                 (when done-p (return))
+                 (when (and data-p (hash-table-p json))
+                   (when (gethash "error" json)
+                     (error "OpenRouter returned an API error"))
+                   (let ((choice
+                           (first (llm-json-elements
+                                   (gethash "choices" json)))))
+                     (when (hash-table-p choice)
+                       (multiple-value-bind (count reason)
+                           (llm-apply-openrouter-choice
+                            request choice content calls content-count)
+                         (setf content-count count)
+                         (when reason (setf finish-reason reason)))))))))
+    (make-llm-stream-round
+     :content (get-output-stream-string content)
+     :tool-calls (llm-finalize-stream-tool-calls calls)
+     :finish-reason finish-reason)))
 
 (defun llm-word-or-punctuation-char-p (character)
   "Whether CHARACTER has gptel's `w' (word) or `.' (punctuation) syntax."
@@ -151,11 +318,44 @@ end of the current word or punctuation run."
                            *llm-active-request-key*)
              nil)))))
 
-(defun llm-register-request (buffer process backend)
+(defun llm-register-request
+    (buffer process backend &key tool-context tools-p)
   "Register and return an asynchronous request for BUFFER."
-  (let ((request (make-llm-request buffer process backend)))
+  (let ((request (make-llm-request buffer process backend
+                                   :tool-context tool-context
+                                   :tools-p tools-p)))
     (setf (buffer-value buffer *llm-active-request-key*) request)
     request))
+
+(defun llm-request-aborted-now-p (request)
+  (bt2:with-lock-held ((llm-request-lock request))
+    (llm-request-aborted-p request)))
+
+(defun llm-request-install-process (request process)
+  "Assign PROCESS unless REQUEST has already been aborted."
+  (bt2:with-lock-held ((llm-request-lock request))
+    (if (llm-request-aborted-p request)
+        nil
+        (progn (setf (llm-request-process request) process) t))))
+
+(defun llm-request-release-process (request process)
+  (bt2:with-lock-held ((llm-request-lock request))
+    (when (eq process (llm-request-process request))
+      (setf (llm-request-process request) nil))))
+
+(defun llm-request-abort-now (request)
+  "Atomically abort REQUEST and return its currently owned process."
+  (let ((process nil))
+    (bt2:with-lock-held ((llm-request-lock request))
+      (unless (llm-request-aborted-p request)
+        (setf (llm-request-aborted-p request) t
+              process (llm-request-process request)
+              (llm-request-process request) nil)))
+    (alexandria:when-let* ((context (llm-request-tool-context request))
+                           (project-request
+                             (llm-tool-context-project-request context)))
+      (cancel-project-request project-request))
+    process))
 
 (defun llm-request-finish-text (request code failure-label)
   (cond
@@ -169,21 +369,147 @@ end of the current word or punctuation run."
          (request (llm-active-request buffer)))
     (if (null request)
         (message "No active LLM request")
-        (handler-case
-            (progn
-              (setf (llm-request-aborted-p request) t)
-              (uiop:terminate-process (llm-request-process request) :urgent t)
-              (ignore-errors
-                (uiop:close-streams (llm-request-process request)))
-              (llm-buffer-append-now buffer "\n[request aborted]\n")
-              (setf (buffer-value buffer *llm-active-request-key*) nil)
-              (message "Aborting ~(~a~) request" (llm-request-backend request)))
-          (error ()
-            (setf (llm-request-aborted-p request) nil)
-            (message "Could not abort LLM request"))))))
+        (let ((process (llm-request-abort-now request)))
+          (when process
+            (ignore-errors (uiop:terminate-process process :urgent t))
+            (ignore-errors (uiop:close-streams process)))
+          (llm-buffer-append-now buffer "\n[request aborted]\n")
+          (setf (buffer-value buffer *llm-active-request-key*) nil)
+          (message "Aborting ~(~a~) request"
+                   (llm-request-backend request))))))
+
+(defun llm-launch-openrouter-process (key body)
+  (uiop:launch-program
+   (list *llm-curl-executable* "-sN" *llm-endpoint*
+         "-H" "Content-Type: application/json"
+         "-H" (format nil "Authorization: Bearer ~a" key)
+         "-d" body)
+   :output :stream
+   :error-output :output))
+
+(defun llm-openrouter-round (request key body)
+  "Run one HTTP/SSE round, returning its parsed response and exit status."
+  (let ((process (llm-launch-openrouter-process key body))
+        (finished-p nil))
+    (unless (llm-request-install-process request process)
+      (ignore-errors (uiop:terminate-process process :urgent t))
+      (ignore-errors (uiop:wait-process process))
+      (return-from llm-openrouter-round (values nil nil)))
+    (unwind-protect
+         (let ((round (llm-read-openrouter-round request process))
+               (code (uiop:wait-process process)))
+           (setf finished-p t)
+           (values round code))
+      (unless finished-p
+        (ignore-errors (uiop:terminate-process process :urgent t))
+        (ignore-errors (uiop:wait-process process)))
+      (llm-request-release-process request process))))
+
+(defun llm-stream-tool-call-object (call)
+  (llm-json-object
+   "id" (llm-stream-tool-call-id call)
+   "type" "function"
+   "function"
+   (llm-json-object
+    "name" (llm-stream-tool-call-name call)
+    "arguments" (llm-stream-tool-call-arguments call))))
+
+(defun llm-stream-assistant-tool-message (round)
+  (llm-json-object
+   "role" "assistant"
+   "content" (let ((content (llm-stream-round-content round)))
+               (and (plusp (length content)) content))
+   "tool_calls"
+   (coerce (mapcar #'llm-stream-tool-call-object
+                   (llm-stream-round-tool-calls round))
+           'vector)))
+
+(defun llm-stream-tool-result-message (call result)
+  (llm-json-object
+   "role" "tool"
+   "tool_call_id" (llm-stream-tool-call-id call)
+   "content" result))
+
+(defun llm-render-tool-result (request call result)
+  (llm-request-append
+   request
+   (format nil "~2%### Tool result: ~a~2%~a~%"
+           (llm-stream-tool-call-name call) result)))
+
+(defun llm-execute-stream-tool-calls (request round)
+  "Execute ROUND's calls and return assistant/tool messages for the next turn."
+  (let ((messages (list (llm-stream-assistant-tool-message round))))
+    (dolist (call (llm-stream-round-tool-calls round) messages)
+      (when (llm-request-aborted-now-p request)
+        (return-from llm-execute-stream-tool-calls nil))
+      (let ((result
+              (llm-invoke-tool
+               (llm-request-tool-context request)
+               (llm-stream-tool-call-name call)
+               (llm-stream-tool-call-arguments call))))
+        (llm-render-tool-result request call result)
+        (setf messages
+              (append messages
+                      (list (llm-stream-tool-result-message call result))))))))
+
+(defun llm-openrouter-loop
+    (request key messages model temperature max-tokens tools-p)
+  "Run the bounded OpenRouter response/tool/response loop for REQUEST."
+  (let ((tool-rounds 0)
+        (tool-calls 0))
+    (handler-case
+        (loop
+          (when (llm-request-aborted-now-p request) (return))
+          (let ((body (llm-request-body-for-messages
+                       messages model temperature max-tokens tools-p)))
+            (multiple-value-bind (round code)
+                (llm-openrouter-round request key body)
+              (when (llm-request-aborted-now-p request) (return))
+              (unless (and round (integerp code) (zerop code))
+                (llm-request-finish
+                 request
+                 (llm-request-finish-text
+                  request code "OpenRouter request failed"))
+                (return))
+              (let ((calls (llm-stream-round-tool-calls round)))
+                (when (and (string= (or (llm-stream-round-finish-reason round)
+                                        "")
+                                    "tool_calls")
+                           (null calls))
+                  (error "OpenRouter ended for tool calls without providing one"))
+                (when (null calls)
+                  (llm-request-finish request (string #\Newline))
+                  (return))
+                (unless tools-p
+                  (error "OpenRouter requested tools from a tool-free preset"))
+                (when (>= tool-rounds *llm-max-tool-rounds*)
+                  (error "LLM tool round limit reached"))
+                (when (> (+ tool-calls (length calls))
+                         *llm-max-tool-calls-per-request*)
+                  (error "LLM tool call limit reached"))
+                (incf tool-rounds)
+                (incf tool-calls (length calls))
+                (let ((tool-messages
+                        (llm-execute-stream-tool-calls request round)))
+                  (when (llm-request-aborted-now-p request) (return))
+                  (setf messages (append messages tool-messages))
+                  (llm-request-append
+                   request
+                   (format nil "~%### Assistant (continued)~2%")))))))
+      (error (condition)
+        (unless (llm-request-aborted-now-p request)
+          (llm-request-finish
+           request
+           (format nil "~%[OpenRouter protocol error: ~a]~%"
+                   condition)))))))
 
 (defun llm-stream (prompt)
-  (let ((key (llm-api-key)))
+  (let ((key (llm-api-key))
+        (model *llm-model*)
+        (system *llm-system-message*)
+        (temperature *llm-temperature*)
+        (max-tokens *llm-max-tokens*)
+        (tools-p *llm-use-tools*))
     (unless key
       (message "Set OPENROUTER_API_KEY (or OPENAI_API_KEY) first")
       (return-from llm-stream))
@@ -191,39 +517,36 @@ end of the current word or punctuation run."
       (when (llm-active-request buffer)
         (message "An LLM request is already running; use M-x lem-yath-llm-abort")
         (return-from llm-stream))
-      (pop-to-buffer buffer)
-      (llm-buffer-append-now
-       buffer
-       (format nil "~%## User (~a)~%~%~a~%~%## Assistant~%~%"
-               *llm-model* prompt))
-      (handler-case
-          (let* ((process
-                   (uiop:launch-program
-                    (list *llm-curl-executable* "-sN" *llm-endpoint*
-                          "-H" "Content-Type: application/json"
-                          "-H" (format nil "Authorization: Bearer ~a" key)
-                          "-d" (llm-request-body prompt))
-                    :output :stream
-                    :error-output :output))
-                 (request (llm-register-request buffer process :openrouter)))
-            (bt2:make-thread
-             (lambda ()
-               (unwind-protect
-                    (with-open-stream (out (uiop:process-info-output process))
-                      (loop :for line := (read-line out nil)
-                            :while line
-                            :do (alexandria:when-let
-                                    ((chunk (llm-delta-content line)))
-                                  (llm-request-append request chunk))))
-                 (let ((code (ignore-errors (uiop:wait-process process))))
-                   (llm-request-finish
-                    request
-                    (llm-request-finish-text
-                     request code "OpenRouter request failed")))))
-             :name "lem-yath/llm-openrouter"))
-        (error ()
-          (llm-buffer-append-now
-           buffer "\n[failed to launch curl]\n"))))))
+      (let ((tool-context
+              (when tools-p
+                (handler-case (llm-capture-tool-context)
+                  (error ()
+                    (message "Could not capture the LLM project context")
+                    (return-from llm-stream))))))
+        (pop-to-buffer buffer)
+        (llm-buffer-append-now
+         buffer
+         (format nil "~%## User (~a)~%~%~a~%~%## Assistant~%~%"
+                 model prompt))
+        (handler-case
+            (let ((request
+                    (llm-register-request
+                     buffer nil :openrouter
+                     :tool-context tool-context :tools-p tools-p)))
+              (bt2:make-thread
+               (lambda ()
+                 (unwind-protect
+                      (llm-openrouter-loop
+                       request key (llm-initial-messages prompt system)
+                       model temperature max-tokens tools-p)
+                   (when tool-context
+                     (cancel-project-request
+                      (llm-tool-context-project-request tool-context)))))
+               :name "lem-yath/llm-openrouter"))
+          (error ()
+            (setf (buffer-value buffer *llm-active-request-key*) nil)
+            (llm-buffer-append-now
+             buffer "\n[failed to launch curl]\n")))))))
 
 (defvar *llm-backend* :openrouter
   "Active backend. CLI-agent backends (apps/llm-cli.lisp) add more.")

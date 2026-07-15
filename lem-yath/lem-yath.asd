@@ -67,6 +67,7 @@
                (:file "buffer-list")
                (:file "tools")
                (:file "lisp-eval")
+               (:file "llm-tools")
                (:file "llm")
                (:file "indent-guides")
                (:file "theme")
