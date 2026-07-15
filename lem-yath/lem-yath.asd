@@ -54,6 +54,7 @@
                              (:file "element-navigation")
                              (:file "text-objects")))
                (:file "roam")
+               (:file "org/publish")
                (:file "notes")
                (:file "roam-capture")
                (:file "dirvish")

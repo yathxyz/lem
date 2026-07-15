@@ -264,6 +264,15 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   and preamble header properties are honored, and execution inherits the
   active Direnv environment. Emacs Lisp blocks fail explicitly rather than
   being mis-evaluated as Common Lisp
+- configured Org HTML export and publishing through `C-c C-e`: `h h` exports
+  the live buffer beside its source, while the publishing branch and
+  `lem-yath-org-publish` reproduce the recursive `org-roam-notes`, `static`,
+  and composite projects. Publishing is incremental, forceable, cancellable,
+  and backgrounded; Org ID and `.org` file links become relative HTML links,
+  assets retain the configured `$WORKDIR` layout, and every output is an
+  atomic bounded write. Pandoc supplies the broad Org-to-HTML conversion, so
+  the result is deliberately not claimed to be byte- or CSS-compatible with
+  GNU Org's `ox-html`
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope, ordinary and repeating active-timestamp events,
   modal Return/g/q navigation, and Evil-Org-style `t` fast TODO selection plus

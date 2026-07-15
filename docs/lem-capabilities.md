@@ -1957,6 +1957,46 @@ result mutation. `scripts/org-babel-test.sh` drives the physical chord through
 confirmation, cancellation, undo, Python and C execution, directory and
 no-result headers, trusted SQLite, and a real private PostgreSQL server.
 
+`src/org/publish.lisp` supplies the configured HTML export and publishing
+layer without depending on a headless Emacs process. `C-c C-e` opens a
+GNU-Org-shaped two-key dispatcher: `h h` exports the live buffer, including
+unsaved text, to a sibling `.html` file; `h o` additionally opens it; and the
+`P f`/`P p`/`P a`/`P x` branch publishes the current file, composite project,
+all projects, or a selected configured project. The same workflows are
+available as `lem-yath-org-export-html`, `lem-yath-org-publish`,
+`lem-yath-org-publish-force`, and the narrower project commands.
+
+The project definitions retain the active configuration's shape:
+`org-roam-notes` recursively converts lowercase `.org` files below
+`$WORKDIR/roam`, `static` recursively copies lowercase CSS, text, JPEG, GIF,
+and PNG files below `$WORKDIR`, and `org-roam` composes both into
+`~/proj/web/org-publishing`. A bounded fresh ID index rewrites `id:` links to
+relative HTML files and heading anchors without modifying source notes;
+`.org` file links become `.html`, including ID-backed or Pandoc-derived
+heading anchors. Missing or duplicate IDs remain visible and are counted
+rather than silently targeting the wrong note. MathJax is enabled for HTML
+math.
+
+Project preparation scans canonical regular files without following directory
+symlinks. Per-file and aggregate inputs, scanner output, Pandoc output, and
+process duration are bounded. HTML and binary assets are written through
+same-directory temporary files, existing non-regular or unowned outputs are
+rejected, and canonical parent checks prevent an output-directory symlink
+from redirecting publication. Normal publication skips outputs at least as
+new as their sources; force publication replaces all outputs. Full projects
+run away from the editor thread in a progress buffer and can be cancelled,
+including the active Pandoc process. `scripts/org-publish-test.sh` proves the
+physical live-buffer dispatcher, unsaved export, ID and file-link resolution,
+MathJax, note and asset placement, incremental and forced replacement,
+cancellation convergence, and symlink-escape refusal through the packaged
+Lem image.
+
+Pandoc intentionally provides broad Org reading rather than GNU Org's exact
+`ox-html` DOM, generated references, CSS classes, or exporter hooks. The
+configured project has no custom exporter hooks or existing downstream HTML
+contract, so this is the smaller independent replacement; exact `ox-html`
+consumers would still require a different backend.
+
 This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
 footnote, nested-special, and malformed text-object contexts; structural
 repairs beyond the bounded `d/x/X/< />` behavior; region-aware Meta operations,
@@ -1964,7 +2004,8 @@ generic Org-element
 movement, shift-control commands, and richer list/table semantics; timestamp,
 scheduling, and deadline
 workflows; source-block editing, variables/sessions and the rest of Babel's
-backend/header/result matrix; LaTeX preview, export and publishing; org-modern
+backend/header/result matrix; in-editor LaTeX preview, non-HTML export
+backends, and exact `ox-html` output; org-modern
 glyph composition in the terminal; and an initial Org
 scratch buffer remain explicit gaps. Agenda scanning and capture/roam workflows
 are separate bounded implementations rather than services of this major mode.
