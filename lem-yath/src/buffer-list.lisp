@@ -2228,6 +2228,124 @@ through later selected buffers without wrapping."
             *buffer-list-query-replace-after* after)
       (values before after))))
 
+(defun buffer-list-query-replace-no-upper-case-p (string regexp-p)
+  (let ((quoted-p nil))
+    (loop :for character :across string
+          :do (cond
+                ((and regexp-p (char= character #\\))
+                 (setf quoted-p (not quoted-p)))
+                (t
+                 (when (and (not quoted-p) (upper-case-p character))
+                   (return-from
+                     buffer-list-query-replace-no-upper-case-p nil))
+                 (setf quoted-p nil)))))
+  (not (and regexp-p
+            (or (search "[:upper:]" string)
+                (search "[:lower:]" string)))))
+
+(defun buffer-list-query-replace-compile-replacement (replacement)
+  (let ((pieces nil)
+        (start 0)
+        (length (length replacement)))
+    (loop :for index :from 0 :below length
+          :when (char= (aref replacement index) #\\)
+            :do (when (< start index)
+                  (push (subseq replacement start index) pieces))
+                (incf index)
+                (when (= index length)
+                  (editor-error
+                   "Invalid trailing backslash in Ibuffer regexp replacement"))
+                (let ((directive (aref replacement index)))
+                  (cond
+                    ((char= directive #\\)
+                     (push "\\" pieces))
+                    ((char= directive #\&)
+                     (push :whole-match pieces))
+                    ((and (char<= #\1 directive)
+                          (char<= directive #\9))
+                     (push (cons :group (digit-char-p directive)) pieces))
+                    ((char= directive #\#)
+                     (push :replacement-count pieces))
+                    ((or (char= directive #\,)
+                         (char= directive #\?))
+                     (editor-error
+                      "Unsupported Ibuffer regexp replacement directive: ~c~c"
+                      #\\ directive))
+                    (t
+                     (editor-error
+                      "Invalid Ibuffer regexp replacement directive: ~c~c"
+                      #\\ directive))))
+                (setf start (1+ index)))
+    (when (< start length)
+      (push (subseq replacement start) pieces))
+    (nreverse pieces)))
+
+(defun buffer-list-query-replace-expand-replacement
+    (program matched-text captures replacement-count)
+  (with-output-to-string (output)
+    (dolist (piece program)
+      (cond
+        ((stringp piece)
+         (write-string piece output))
+        ((eq piece :whole-match)
+         (write-string matched-text output))
+        ((eq piece :replacement-count)
+         (princ replacement-count output))
+        ((and (consp piece) (eq (car piece) :group))
+         (let ((capture (nth (1- (cdr piece)) captures)))
+           (when capture
+             (write-string capture output))))))))
+
+(defun buffer-list-query-replace-case-action (matched-text)
+  (let ((previous-word-p nil)
+        (some-multiletter-word-p nil)
+        (some-lowercase-p nil)
+        (some-uppercase-p nil)
+        (some-nonuppercase-initial-p nil))
+    (loop :for character :across matched-text
+          :do (cond
+                ((lower-case-p character)
+                 (setf some-lowercase-p t)
+                 (if previous-word-p
+                     (setf some-multiletter-word-p t)
+                     (setf some-nonuppercase-initial-p t)))
+                ((upper-case-p character)
+                 (setf some-uppercase-p t)
+                 (when previous-word-p
+                   (setf some-multiletter-word-p t)))
+                ((not previous-word-p)
+                 (setf some-nonuppercase-initial-p t)))
+              (setf previous-word-p (syntax-word-char-p character)))
+    (cond
+      ((and (not some-lowercase-p) some-multiletter-word-p)
+       :all-caps)
+      ((and (not some-nonuppercase-initial-p) some-multiletter-word-p)
+       :initial-caps)
+      ((and (not some-nonuppercase-initial-p) some-uppercase-p)
+       :all-caps)
+      (t nil))))
+
+(defun buffer-list-query-replace-upcase-initials (string)
+  (let ((result (copy-seq string))
+        (previous-word-p nil))
+    (loop :for index :from 0 :below (length result)
+          :for character := (aref result index)
+          :for word-p := (syntax-word-char-p character)
+          :do (when (and word-p (not previous-word-p))
+                (setf (aref result index) (char-upcase character)))
+              (setf previous-word-p word-p))
+    result))
+
+(defun buffer-list-query-replace-transfer-case
+    (replacement matched-text case-fold-p)
+  (if (not case-fold-p)
+      replacement
+      (case (buffer-list-query-replace-case-action matched-text)
+        (:all-caps (string-upcase replacement))
+        (:initial-caps
+         (buffer-list-query-replace-upcase-initials replacement))
+        (otherwise replacement))))
+
 (defun buffer-list-query-replace-preflight (buffers)
   (unless buffers
     (editor-error "No buffer on this Ibuffer row"))
@@ -2268,10 +2386,12 @@ through later selected buffers without wrapping."
           (return)))))
   nil)
 
-(defun buffer-list-query-replace-regexp-scanner (pattern buffers)
+(defun buffer-list-query-replace-regexp-scanner
+    (pattern buffers case-fold-p)
   (let ((scanner
           (handler-case
-              (cl-ppcre:create-scanner pattern :case-insensitive-mode t)
+              (cl-ppcre:create-scanner
+               pattern :case-insensitive-mode case-fold-p)
             (error () nil))))
     (unless scanner
       (editor-error "Invalid Ibuffer query-replace regexp"))
@@ -2310,7 +2430,8 @@ through later selected buffers without wrapping."
           (message "Unsupported query-replace response: ~s" response)))))
 
 (defun buffer-list-query-replace-buffer
-    (buffer before after forward-function backward-function)
+    (buffer before after forward-function backward-function case-fold-p
+     replacement-program)
   (with-current-buffer buffer
     (let ((lem/isearch::*isearch-search-forward-function* forward-function)
           (lem/isearch::*isearch-search-backward-function* backward-function)
@@ -2322,39 +2443,54 @@ through later selected buffers without wrapping."
                        (goal (buffer-end-point buffer) :right-inserting))
             (lem/isearch::highlight-region cursor goal before)
             (loop
-              (unless (funcall forward-function cursor before)
-                (return replacement-count))
-              (when (point< goal cursor)
-                (return replacement-count))
-              (with-point ((end cursor :right-inserting))
-                (unless (funcall backward-function cursor before)
-                  (error "Ibuffer query-replace could not recover match start"))
-                (with-point ((start cursor :right-inserting))
-                  (when (point= start end)
-                    (editor-error
-                     "Ibuffer query-replace encountered an empty match"))
-                  (let ((response
-                          (if replace-rest-p
-                              :replace
-                              (save-excursion
-                                (move-point (current-point) cursor)
-                                (lem/isearch::activate-current-highlight cursor)
-                                (redraw-display)
-                                (buffer-list-query-replace-response
-                                 before after)))))
-                    (case response
-                      (:skip
-                       (move-point cursor end))
-                      (:exit
-                       (return replacement-count))
-                      ((:replace :replace-rest :replace-and-exit)
-                       (when (eq response :replace-rest)
-                         (setf replace-rest-p t))
-                       (delete-between-points start end)
-                       (insert-string cursor after)
-                       (incf replacement-count)
-                       (when (eq response :replace-and-exit)
-                         (return replacement-count)))))))))
+              (let ((search-values
+                      (multiple-value-list
+                       (funcall forward-function cursor before))))
+                (unless (first search-values)
+                  (return replacement-count))
+                (when (point< goal cursor)
+                  (return replacement-count))
+                (with-point ((end cursor :right-inserting))
+                  (unless (funcall backward-function cursor before)
+                    (error
+                     "Ibuffer query-replace could not recover match start"))
+                  (with-point ((start cursor :right-inserting))
+                    (when (point= start end)
+                      (editor-error
+                       "Ibuffer query-replace encountered an empty match"))
+                    (let* ((matched-text (points-to-string start end))
+                           (expanded-replacement
+                             (if replacement-program
+                                 (buffer-list-query-replace-expand-replacement
+                                  replacement-program matched-text
+                                  (rest search-values) replacement-count)
+                                 after))
+                           (replacement
+                             (buffer-list-query-replace-transfer-case
+                              expanded-replacement matched-text case-fold-p))
+                           (response
+                             (if replace-rest-p
+                                 :replace
+                                 (save-excursion
+                                   (move-point (current-point) cursor)
+                                   (lem/isearch::activate-current-highlight
+                                    cursor)
+                                   (redraw-display)
+                                   (buffer-list-query-replace-response
+                                    before replacement)))))
+                      (case response
+                        (:skip
+                         (move-point cursor end))
+                        (:exit
+                         (return replacement-count))
+                        ((:replace :replace-rest :replace-and-exit)
+                         (when (eq response :replace-rest)
+                           (setf replace-rest-p t))
+                         (delete-between-points start end)
+                         (insert-string cursor replacement)
+                         (incf replacement-count)
+                         (when (eq response :replace-and-exit)
+                           (return replacement-count))))))))))
         (lem/isearch::isearch-reset-overlays buffer)
         (buffer-undo-boundary buffer)))))
 
@@ -2394,10 +2530,15 @@ through later selected buffers without wrapping."
     (buffer-list-query-replace-preflight buffers)
     (multiple-value-bind (before after)
         (buffer-list-query-replace-read-args regexp-p)
-      (let ((scanner
-              (and regexp-p
-                   (buffer-list-query-replace-regexp-scanner
-                    before buffers)))
+      (let* ((case-fold-p
+               (buffer-list-query-replace-no-upper-case-p before regexp-p))
+             (scanner
+               (and regexp-p
+                    (buffer-list-query-replace-regexp-scanner
+                     before buffers case-fold-p)))
+             (replacement-program
+               (and regexp-p
+                    (buffer-list-query-replace-compile-replacement after)))
             (replacement-count 0)
             (processed-count 0))
         ;; Hide the floating chooser while matches are displayed.  The same
@@ -2419,11 +2560,14 @@ through later selected buffers without wrapping."
                                    (declare (ignore _pattern))
                                    (search-backward-regexp point scanner limit)))
                             (buffer-list-query-replace-buffer
-                             buffer before after #'forward #'backward))
-                          (let ((lem/buffer/internal::*case-fold-search* nil))
+                             buffer before after #'forward #'backward
+                             case-fold-p replacement-program))
+                          (let ((lem/buffer/internal::*case-fold-search*
+                                  (not case-fold-p)))
                             (buffer-list-query-replace-buffer
                              buffer before after
-                             #'search-forward #'search-backward))))
+                             #'search-forward #'search-backward
+                             case-fold-p nil))))
                 (incf processed-count)))
           (buffer-list-query-replace-restore-picker
            component source-window source-buffer source-point source-view-point

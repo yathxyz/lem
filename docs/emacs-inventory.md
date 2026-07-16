@@ -200,13 +200,17 @@ fallback. The chooser is hidden while each live buffer is queried from its
 beginning, then rebuilt with its source window, point, focus, filters, and marks
 intact. `y`/Space replaces, `n`/Backspace skips, `!` replaces the rest of the
 current buffer only, `q`/Return advances to the next buffer, and `.` replaces
-once before advancing. Literal and regexp matching are case-insensitive, each
-affected buffer receives one undo unit, and the entire target set is checked
-for read-only buffers before any prompt can mutate an earlier source. Invalid
-and empty-matching regexps are refused before mutation. Unlike GNU
-`query-replace-regexp`, replacement text is literal: backreferences, automatic
-case transfer, zero-width matches, and the advanced `^`, `u/U`, `e/E`, and
-recursive-edit actions remain gaps.
+once before advancing. Each affected buffer receives one undo unit, and the
+entire target set is checked for read-only buffers before any prompt can mutate
+an earlier source. Matching
+uses the configured GNU smart-case rule: lowercase searches fold case and
+transfer lower, all-caps, or initial-cap patterns to replacements, while an
+unescaped uppercase search is case-sensitive and keeps exact replacement case.
+Regexp replacement expands `\&`, `\1`–`\9`, `\\`, and the per-buffer `\#`
+count. Invalid regexps, invalid or unsupported replacement directives, and
+empty-matching regexps are refused before mutation. GNU Lisp-evaluated `\,`,
+per-match `\?` editing, zero-width matches, and the advanced `^`, `u/U`,
+`e/E`, and recursive-edit actions remain gaps.
 Like GNU Ibuffer, ordinary bulk operations implicitly mark the current row when
 there are no ordinary marks and exclude `D` deletion marks. Revert failures are
 isolated per buffer so a missing file does not prevent later buffers from being

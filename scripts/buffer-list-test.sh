@@ -1861,7 +1861,7 @@ fi
 if lem_wait_for "$session" 'Query replace finished; 1 replacement in 1 buffer' 10 >/dev/null; then
   query_regexp=$(report_query_state || true)
   if [[ "$query_regexp" == *'beta=modified:writable:foo beta one\nnum\nBAR 99\n'* ]]; then
-    pass query-regexp-result "I matched case-insensitively and q retained the later match"
+    pass query-regexp-result "lowercase I matched case-insensitively and q retained the later match"
   else
     fail query-regexp-result "regexp query result diverged: $query_regexp"
   fi
@@ -1878,6 +1878,155 @@ if [[ "$beta_regexp_undo" == *'text=foo beta one\nbar 42\nBAR 99\n'* ]]; then
   pass query-regexp-undo "one undo restored the regexp query replacement"
 else
   fail query-regexp-undo "regexp query replacement was not one undo unit: $beta_regexp_undo"
+fi
+
+# GNU regexp replacement expands the whole match, groups, the per-command
+# replacement count, and a quoted backslash.  Lisp evaluation and per-match
+# replacement editing are deliberately rejected before the picker is hidden.
+lem_keys "$session" C-x C-b U o a
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-expand'
+lem_keys "$session" Enter I
+if lem_wait_for "$session" 'Query replace regexp' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '([a-z]+)-([a-z]+)'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l '\,x'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Unsupported Ibuffer regexp replacement directive' 10 >/dev/null; then
+  unsupported_replacement=$(report_query_state || true)
+  if [[ "$unsupported_replacement" == *'expand=clean:writable:foo-one\nFOO-TWO\nFoo-Three\n'* ]]; then
+    pass query-replacement-preflight "I rejected an evaluated replacement before mutation or picker teardown"
+  else
+    fail query-replacement-preflight "unsupported replacement changed its target: $unsupported_replacement"
+  fi
+else
+  fail query-replacement-preflight "I did not reject an unsupported evaluated replacement"
+fi
+
+lem_keys "$session" I
+if lem_wait_for "$session" 'Query replace regexp' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '([a-z]+)-([a-z]+)'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l '\2-\1-\&-\#-\\-tail'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'foo-one' 10 >/dev/null &&
+   lem_wait_for "$session" 'Replace' 10 >/dev/null; then
+  lem_keys "$session" '!'
+fi
+if lem_wait_for "$session" 'Query replace finished; 3 replacements in 1 buffer' 10 >/dev/null; then
+  expanded_replacement=$(report_query_state || true)
+  if [[ "$expanded_replacement" == *'expand=modified:writable:one-foo-foo-one-0-\\-tail\nTWO-FOO-FOO-TWO-1-\\-TAIL\nThree-Foo-Foo-Three-2-\\-Tail\n'* ]]; then
+    pass query-regexp-expansion "I expanded groups, whole matches, counts, quoting, and GNU case patterns"
+  else
+    fail query-regexp-expansion "regexp replacement expansion diverged: $expanded_replacement"
+  fi
+else
+  fail query-regexp-expansion "expanded regexp query did not replace all three case patterns"
+fi
+lem_keys "$session" Enter u
+expand_undo=$(report_current || true)
+if [[ "$expand_undo" == *'text=foo-one\nFOO-TWO\nFoo-Three\n'* ]]; then
+  pass query-regexp-expansion-undo "one undo restored the expanded regexp replacements"
+else
+  fail query-regexp-expansion-undo "expanded regexp replacements escaped their undo unit: $expand_undo"
+fi
+
+# An uppercase search disables case folding and replacement case transfer,
+# matching GNU search-upper-case behavior in the pinned configuration.
+lem_keys "$session" C-x C-b U o a
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-expand'
+lem_keys "$session" Enter I
+if lem_wait_for "$session" 'Query replace regexp' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'FOO-([A-Z]+)'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'exact-\1'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'FOO-TWO' 10 >/dev/null; then
+  lem_keys "$session" y
+fi
+if lem_wait_for "$session" 'Query replace finished; 1 replacement in 1 buffer' 10 >/dev/null; then
+  smartcase_replacement=$(report_query_state || true)
+  if [[ "$smartcase_replacement" == *'expand=modified:writable:foo-one\nexact-TWO\nFoo-Three\n'* ]]; then
+    pass query-regexp-smartcase "uppercase I matched case-sensitively and retained exact replacement case"
+  else
+    fail query-regexp-smartcase "uppercase regexp smart-case diverged: $smartcase_replacement"
+  fi
+else
+  fail query-regexp-smartcase "uppercase I did not finish after its sole exact-case match"
+fi
+lem_keys "$session" Enter u
+smartcase_undo=$(report_current || true)
+if [[ "$smartcase_undo" == *'text=foo-one\nFOO-TWO\nFoo-Three\n'* ]]; then
+  pass query-regexp-smartcase-undo "one undo restored the smart-case regexp replacement"
+else
+  fail query-regexp-smartcase-undo "smart-case regexp replacement escaped its undo unit: $smartcase_undo"
+fi
+
+# Literal Q uses the same case-pattern transfer for lowercase searches.
+lem_keys "$session" C-x C-b U o a
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-expand'
+lem_keys "$session" Enter Q
+if lem_wait_for "$session" 'Query replace' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'foo'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'bar'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'foo-one' 10 >/dev/null; then
+  lem_keys "$session" '!'
+fi
+if lem_wait_for "$session" 'Query replace finished; 3 replacements in 1 buffer' 10 >/dev/null; then
+  literal_case_replacement=$(report_query_state || true)
+  if [[ "$literal_case_replacement" == *'expand=modified:writable:bar-one\nBAR-TWO\nBar-Three\n'* ]]; then
+    pass query-literal-case-transfer "lowercase Q preserved lower, all-caps, and initial-cap patterns"
+  else
+    fail query-literal-case-transfer "literal case transfer diverged: $literal_case_replacement"
+  fi
+else
+  fail query-literal-case-transfer "literal case-transfer query did not replace all matches"
+fi
+lem_keys "$session" Enter u
+literal_case_undo=$(report_current || true)
+if [[ "$literal_case_undo" == *'text=foo-one\nFOO-TWO\nFoo-Three\n'* ]]; then
+  pass query-literal-case-transfer-undo "one undo restored literal case-transfer replacements"
+else
+  fail query-literal-case-transfer-undo "literal case-transfer replacement escaped its undo unit: $literal_case_undo"
+fi
+
+lem_keys "$session" C-x C-b U o a
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-expand'
+lem_keys "$session" Enter Q
+if lem_wait_for "$session" 'Query replace' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'FOO'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'exact'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'FOO-TWO' 10 >/dev/null; then
+  lem_keys "$session" y
+fi
+if lem_wait_for "$session" 'Query replace finished; 1 replacement in 1 buffer' 10 >/dev/null; then
+  literal_smartcase=$(report_query_state || true)
+  if [[ "$literal_smartcase" == *'expand=modified:writable:foo-one\nexact-TWO\nFoo-Three\n'* ]]; then
+    pass query-literal-smartcase "uppercase Q matched case-sensitively without transferring case"
+  else
+    fail query-literal-smartcase "uppercase literal smart-case diverged: $literal_smartcase"
+  fi
+else
+  fail query-literal-smartcase "uppercase Q did not finish after its sole exact-case match"
+fi
+lem_keys "$session" Enter u
+literal_smartcase_undo=$(report_current || true)
+if [[ "$literal_smartcase_undo" == *'text=foo-one\nFOO-TWO\nFoo-Three\n'* ]]; then
+  pass query-literal-smartcase-undo "one undo restored the uppercase literal replacement"
+else
+  fail query-literal-smartcase-undo "uppercase literal replacement escaped its undo unit: $literal_smartcase_undo"
 fi
 
 # Restore the pre-query source-buffer context expected by the Occur window

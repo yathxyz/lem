@@ -20,6 +20,7 @@
 (defvar *buffer-list-test-query-beta* nil)
 (defvar *buffer-list-test-query-delete* nil)
 (defvar *buffer-list-test-query-read-only* nil)
+(defvar *buffer-list-test-query-expand* nil)
 
 (define-major-mode buffer-list-test-long-mode ()
     (:name "Long Fixture Mode Name"))
@@ -475,13 +476,14 @@
   (let* ((component (lem/multi-column-list::current-multi-column-list))
          (source-window (buffer-list-source-window component)))
     (buffer-list-test-log
-     "QUERY source=~a alpha=~a beta=~a delete=~a readonly=~a"
+     "QUERY source=~a alpha=~a beta=~a delete=~a readonly=~a expand=~a"
      (completion-path-display-string
       (buffer-name (window-buffer source-window)))
      (buffer-list-test-query-buffer-state *buffer-list-test-query-alpha*)
      (buffer-list-test-query-buffer-state *buffer-list-test-query-beta*)
      (buffer-list-test-query-buffer-state *buffer-list-test-query-delete*)
-     (buffer-list-test-query-buffer-state *buffer-list-test-query-read-only*))))
+     (buffer-list-test-query-buffer-state *buffer-list-test-query-read-only*)
+     (buffer-list-test-query-buffer-state *buffer-list-test-query-expand*))))
 
 (define-command lem-yath-test-buffer-list-multi-isearch-lifecycle () ()
   (buffer-list-test-log
@@ -766,6 +768,12 @@
    *buffer-list-test-query-read-only*
    (format nil "foo read only~%") t)
   (setf (buffer-read-only-p *buffer-list-test-query-read-only*) t)
+  (setf *buffer-list-test-query-expand*
+        (buffer-list-test-make-buffer
+         'query-expand "buffer-list-query-expand"))
+  (buffer-list-test-set-content
+   *buffer-list-test-query-expand*
+   (format nil "foo-one~%FOO-TWO~%Foo-Three~%") t)
   (buffer-list-test-log "QUERY-PREPARED"))
 
 (define-key lem-vi-mode:*normal-keymap* "F5"
