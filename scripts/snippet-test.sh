@@ -61,7 +61,7 @@ write_snippet "$fixture_snippet_root/fundamental-mode/active-popup" \
 write_snippet "$fixture_snippet_root/fundamental-mode/escape" \
   'escape retention' 'esc' '${1:value}-$0'
 write_snippet "$fixture_snippet_root/fundamental-mode/undo" \
-  'undo expansion' 'und' '${1:value}-$0'
+  'undo expansion' 'und' '${1:value}:$1-$0'
 write_snippet "$fixture_snippet_root/fundamental-mode/zero-default" \
   'zero default replacement' 'zerobody' '${1:lang}-${0:content}'
 write_snippet "$fixture_snippet_root/fundamental-mode/middle-insert" \
@@ -736,12 +736,14 @@ else
   fail paredit-setup "could not prepare the Lisp snippet"
 fi
 
-# Expansion is one undo unit.  Restoring the pre-expansion trigger must also
-# remove every live field marker so no stale session captures a later Tab.
+# Expansion is one undo unit.  Undo removes every live field marker; redoing
+# that exact expansion revives its selected field and edit hooks, as Yasnippet
+# does when `yas-snippet-revival' retains its configured default.
 if run_mx lem-yath-test-snippet-undo-setup && enter_insert_after; then
   lem_keys "$session" Tab
   if record_state undo; then
-    assert_state undo-expanded undo $'value-\n' 'active=yes' 'field=1'
+    assert_state undo-expanded undo $'value:value-\n' \
+      'active=yes' 'field=1'
   else
     fail undo-expanded "expanded-state probe did not run"
   fi
@@ -753,6 +755,40 @@ if run_mx lem-yath-test-snippet-undo-setup && enter_insert_after; then
       'active=no' 'field=none' 'completion=no' 'vi=normal'
   else
     fail undo-session-cleanup "post-undo probe did not run"
+  fi
+  lem_keys "$session" C-r
+  if record_state undo; then
+    assert_state redo-session-revival undo $'value:value-\n' \
+      'active=yes' 'field=1' 'completion=no' 'vi=normal' \
+      'before-hook=yes' 'after-hook=yes'
+  else
+    fail redo-session-revival "post-redo probe did not run"
+  fi
+  lem_keys "$session" u
+  if record_state undo; then
+    assert_state repeated-undo-session-cleanup undo und \
+      'active=no' 'field=none' 'completion=no' 'vi=normal'
+  else
+    fail repeated-undo-session-cleanup "second undo probe did not run"
+  fi
+  lem_keys "$session" C-r
+  if record_state undo; then
+    assert_state repeated-redo-session-revival undo $'value:value-\n' \
+      'active=yes' 'field=1' 'completion=no' 'vi=normal' \
+      'before-hook=yes' 'after-hook=yes'
+  else
+    fail repeated-redo-session-revival "second redo probe did not run"
+  fi
+  if enter_insert; then
+    send_literal again
+    if record_state undo; then
+      assert_state redo-revived-field-edit undo $'again:again-\n' \
+        'active=yes' 'field=1' 'completion=no' 'vi=insert'
+    else
+      fail redo-revived-field-edit "revived-field edit probe did not run"
+    fi
+  else
+    fail redo-revived-field-edit "could not re-enter insert state"
   fi
 else
   fail undo-setup "could not prepare expansion undo"

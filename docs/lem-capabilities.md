@@ -779,6 +779,14 @@ insert state retains the session for later resumption, and edits inside fields
 continue through Paredit and electric-pair behavior. With no trigger or session,
 the original mode-specific `Tab` binding runs unchanged.
 
+Each field session records the stable undo-tree node that introduced its
+expansion. Undoing that exact node removes the live overlays before replay;
+redoing it restores the captured root, fields, mirrors, selection, and edit
+hooks only when both the node identity and resulting text match. The restored
+field remains editable in Vi Normal/Insert transitions and mirrors continue to
+update. This reproduces the configured `yas-snippet-revival t` path without
+placing mutable editor objects in undo history.
+
 `M-x lem-yath-insert-snippet` exposes the active portable templates without
 requiring a trigger. Its Prescient-filtered labels include the template name,
 trigger, and source table; choosing one inserts it at point and starts the same
@@ -867,14 +875,16 @@ calls.
 This is not full Yasnippet parity. The remaining 69 definitions comprise 18
 DIX-specific conditions, five unsupported or malformed backquote cases, and 46
 choice, side-effecting, embedded, or mode-specific field transforms. The pinned
-corpus contains no command snippets. Active sessions do not stack, direct snippet
-key bindings are not installed, undo/redo does not revive a field session on
-redo, and strict TextMate snippet grammar is not implemented. The file-snippet TUI gate
+corpus contains no command snippets. Active sessions do not stack because the
+profile retains Yasnippet's `yas-triggers-in-field nil` default, and direct
+snippet key bindings are not installed because the profile configures none.
+Strict TextMate snippet grammar is not implemented. The file-snippet TUI gate
 is `nix run .#snippet-test`; it drives the private snippet, portable field
 grammar, bounded dynamic forms, exact corpus audit, the Prescient selector,
 navigation and editing keys,
 completion/Vi/Paredit precedence,
-indentation, lifecycle cleanup, undo, and a real pinned Python community snippet
+indentation, lifecycle cleanup, expansion undo/redo revival, and a real pinned
+Python community snippet
 through the ncurses editor.
 
 ### consult-like commands (verified)

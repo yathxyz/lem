@@ -173,8 +173,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   numbered, anonymous, and nested fields, defaults, mirrors, escapes, safe
   indentation directives, safe date/filename/comment backquotes, common pure
   field transforms, six context conditions, forward/reverse field navigation,
-  and a Prescient `M-x` insertion prompt are supported for 2,318 definitions;
-  69 definitions remain unavailable, and arbitrary embedded Elisp is never evaluated
+  expansion-node undo/redo field revival, and a Prescient `M-x` insertion
+  prompt are supported for 2,318 definitions; 69 definitions remain
+  unavailable, and arbitrary embedded Elisp is never evaluated
 - LSP `insertTextFormat=Snippet` candidates enter the same field-session UI
   after `insertText`, `TextEdit`, or `InsertReplaceEdit` acceptance; direct and
   lazily resolved `additionalTextEdits` share the acceptance undo step,

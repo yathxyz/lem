@@ -111,6 +111,36 @@
   exit-overlay
   current-index
   pending-field-edit-p
+  defer-zero-exit-p
+  undo-node)
+
+(defstruct snippet-mirror-revival
+  start
+  end
+  transform-kind)
+
+(defstruct snippet-field-revival
+  id
+  number
+  parent-id
+  container-ids
+  sequence
+  start
+  end
+  mirrors
+  modified-p
+  disabled-p)
+
+(defstruct snippet-revival
+  buffer
+  template
+  undo-node
+  root-start
+  root-text
+  fields
+  exit-start
+  exit-end
+  current-index
   defer-zero-exit-p)
 
 (defun snippet-root-directories ()
@@ -1448,6 +1478,79 @@ Only trusted file templates may use the bounded Yasnippet translation layer."
   (dolist (mirror (snippet-field-mirrors field))
     (delete-overlay mirror)))
 
+(defun snippet-current-undo-node (&optional (buffer (current-buffer)))
+  (ignore-errors (buffer-undo-tree-current buffer)))
+
+(defun snippet-same-undo-node-p (left right)
+  (and left
+       right
+       (ignore-errors
+         (= (buffer-undo-tree-node-id left)
+            (buffer-undo-tree-node-id right)))))
+
+(defun snippet-overlay-relative-bounds (overlay root-position)
+  (values (- (position-at-point (overlay-start overlay)) root-position)
+          (- (position-at-point (overlay-end overlay)) root-position)))
+
+(defun snippet-capture-field-revival (field root-position)
+  (multiple-value-bind (start end)
+      (snippet-overlay-relative-bounds
+       (snippet-field-overlay field) root-position)
+    (make-snippet-field-revival
+     :id (snippet-field-id field)
+     :number (snippet-field-number field)
+     :parent-id (snippet-field-parent-id field)
+     :container-ids (copy-list (snippet-field-container-ids field))
+     :sequence (snippet-field-sequence field)
+     :start start
+     :end end
+     :mirrors
+     (loop :for mirror :in (snippet-field-mirrors field)
+           :collect
+           (multiple-value-bind (mirror-start mirror-end)
+               (snippet-overlay-relative-bounds mirror root-position)
+             (make-snippet-mirror-revival
+              :start mirror-start
+              :end mirror-end
+              :transform-kind
+              (cdr (assoc mirror
+                          (snippet-field-mirror-transforms field)
+                          :test #'eq)))))
+     :modified-p (snippet-field-modified-p field)
+     :disabled-p (snippet-field-disabled-p field))))
+
+(defun snippet-capture-revival (session)
+  "Capture SESSION's overlay geometry for its exact expansion undo node."
+  (let* ((root (snippet-session-root-overlay session))
+         (root-position (position-at-point (overlay-start root)))
+         (exit (snippet-session-exit-overlay session)))
+    (multiple-value-bind (exit-start exit-end)
+        (snippet-overlay-relative-bounds exit root-position)
+      (make-snippet-revival
+       :buffer (snippet-session-buffer session)
+       :template (snippet-session-template session)
+       :undo-node (snippet-session-undo-node session)
+       :root-start root-position
+       :root-text (snippet-overlay-string root)
+       :fields
+       (mapcar (lambda (field)
+                 (snippet-capture-field-revival field root-position))
+               (snippet-session-fields session))
+       :exit-start exit-start
+       :exit-end exit-end
+       :current-index (snippet-session-current-index session)
+       :defer-zero-exit-p
+       (snippet-session-defer-zero-exit-p session)))))
+
+(defun snippet-save-revival-before-undo (session)
+  (let ((buffer (snippet-session-buffer session)))
+    (if (snippet-same-undo-node-p
+         (snippet-session-undo-node session)
+         (snippet-current-undo-node buffer))
+        (setf (buffer-value buffer :lem-yath-snippet-revival)
+              (snippet-capture-revival session))
+        (setf (buffer-value buffer :lem-yath-snippet-revival) nil))))
+
 (defun snippet-end-session (&optional (buffer (current-buffer)))
   "End BUFFER's live field session while retaining inserted text."
   (alexandria:when-let ((session (snippet-active-session buffer)))
@@ -1704,9 +1807,12 @@ original text and return NIL."
                                :exit-overlay exit-overlay
                                :current-index nil
                                :pending-field-edit-p nil
-                               :defer-zero-exit-p nil)))
+                               :defer-zero-exit-p nil
+                               :undo-node nil)))
                         (setf (buffer-value buffer :lem-yath-snippet-session)
                               session)
+                        (setf (buffer-value buffer :lem-yath-snippet-revival)
+                              nil)
                         (add-hook
                          (variable-value 'before-change-functions
                                          :buffer buffer)
@@ -1992,6 +2098,143 @@ Tab reports the failure without also invoking its fallback indentation."
           '("UNDO" "REDO" "VI-UNDO" "VI-REDO")
           :test #'string=))
 
+(defun snippet-redo-command-p ()
+  (member (symbol-name (command-name (this-command)))
+          '("REDO" "VI-REDO")
+          :test #'string=))
+
+(defun snippet-revival-offset-valid-p (start end root-length)
+  (and (integerp start)
+       (integerp end)
+       (<= 0 start end root-length)))
+
+(defun snippet-revival-valid-p (revival buffer)
+  (and (eq buffer (snippet-revival-buffer revival))
+       (snippet-same-undo-node-p
+        (snippet-revival-undo-node revival)
+        (snippet-current-undo-node buffer))
+       (let ((root-length (length (snippet-revival-root-text revival))))
+         (and
+          (snippet-revival-offset-valid-p
+           (snippet-revival-exit-start revival)
+           (snippet-revival-exit-end revival)
+           root-length)
+          (every
+           (lambda (field)
+             (and
+              (snippet-revival-offset-valid-p
+               (snippet-field-revival-start field)
+               (snippet-field-revival-end field)
+               root-length)
+              (every
+               (lambda (mirror)
+                 (snippet-revival-offset-valid-p
+                  (snippet-mirror-revival-start mirror)
+                  (snippet-mirror-revival-end mirror)
+                  root-length))
+               (snippet-field-revival-mirrors field))))
+           (snippet-revival-fields revival))))))
+
+(defun snippet-revival-overlay (root-start start end)
+  (make-overlay (snippet-point-at-offset root-start start)
+                (snippet-point-at-offset root-start end)
+                'snippet-inactive-field))
+
+(defun snippet-revive-field (revival root-start)
+  (let* ((overlay
+           (snippet-revival-overlay
+            root-start
+            (snippet-field-revival-start revival)
+            (snippet-field-revival-end revival)))
+         (mirror-revivals (snippet-field-revival-mirrors revival))
+         (mirrors
+           (mapcar
+            (lambda (mirror)
+              (snippet-revival-overlay
+               root-start
+               (snippet-mirror-revival-start mirror)
+               (snippet-mirror-revival-end mirror)))
+            mirror-revivals)))
+    (make-snippet-field
+     :id (snippet-field-revival-id revival)
+     :number (snippet-field-revival-number revival)
+     :parent-id (snippet-field-revival-parent-id revival)
+     :container-ids (copy-list (snippet-field-revival-container-ids revival))
+     :sequence (snippet-field-revival-sequence revival)
+     :overlay overlay
+     :mirrors mirrors
+     :mirror-transforms
+     (loop :for mirror-revival :in mirror-revivals
+           :for mirror :in mirrors
+           :when (snippet-mirror-revival-transform-kind mirror-revival)
+             :collect
+             (cons mirror
+                   (snippet-mirror-revival-transform-kind mirror-revival)))
+     :modified-p (snippet-field-revival-modified-p revival)
+     :disabled-p (snippet-field-revival-disabled-p revival))))
+
+(defun snippet-revival-root-points (revival buffer)
+  (let ((start (copy-point (buffer-start-point buffer) :temporary)))
+    (when (move-to-position start (snippet-revival-root-start revival))
+      (let ((end (copy-point start :temporary)))
+        (when (character-offset end (length (snippet-revival-root-text revival)))
+          (values start end))))))
+
+(defun snippet-restore-revival (revival buffer)
+  "Restore REVIVAL's field overlays without changing BUFFER's text or history."
+  (multiple-value-bind (root-start root-end)
+      (snippet-revival-root-points revival buffer)
+    (when (and root-start
+               root-end
+               (string= (points-to-string root-start root-end)
+                        (snippet-revival-root-text revival)))
+      (let* ((root-overlay
+               (make-overlay root-start root-end 'snippet-inactive-field))
+             (fields
+               (mapcar (lambda (field)
+                         (snippet-revive-field field root-start))
+                       (snippet-revival-fields revival)))
+             (exit-overlay
+               (snippet-revival-overlay
+                root-start
+                (snippet-revival-exit-start revival)
+                (snippet-revival-exit-end revival)))
+             (session
+               (make-snippet-session
+                :buffer buffer
+                :template (snippet-revival-template revival)
+                :root-overlay root-overlay
+                :fields fields
+                :exit-overlay exit-overlay
+                :current-index nil
+                :pending-field-edit-p nil
+                :defer-zero-exit-p
+                (snippet-revival-defer-zero-exit-p revival)
+                :undo-node (snippet-revival-undo-node revival))))
+        (setf (buffer-value buffer :lem-yath-snippet-session) session)
+        (add-hook (variable-value 'before-change-functions :buffer buffer)
+                  'snippet-before-change)
+        (add-hook (variable-value 'after-change-functions :buffer buffer)
+                  'snippet-after-change)
+        (snippet-activate-index session
+                                (snippet-revival-current-index revival))
+        t))))
+
+(defun snippet-restore-after-redo (&optional (buffer (current-buffer)))
+  (alexandria:when-let
+      ((revival (buffer-value buffer :lem-yath-snippet-revival)))
+    (when (snippet-revival-valid-p revival buffer)
+      ;; A restored live session can capture a fresh descriptor if the user
+      ;; undoes it again; do not retain a duplicate copy of its root text.
+      (snippet-restore-revival revival buffer)
+      (setf (buffer-value buffer :lem-yath-snippet-revival) nil))))
+
+(defun snippet-note-session-undo-node (&optional (buffer (current-buffer)))
+  (alexandria:when-let ((session (snippet-active-session buffer)))
+    (unless (snippet-session-undo-node session)
+      (setf (snippet-session-undo-node session)
+            (snippet-current-undo-node buffer)))))
+
 (defun snippet-major-mode-command-p ()
   (member (command-name (this-command)) (major-modes)))
 
@@ -2002,6 +2245,9 @@ Tab reports the failure without also invoking its fallback indentation."
   (when (and (snippet-active-session-p)
              (or (snippet-undo-command-p)
                  (snippet-major-mode-command-p)))
+    (when (and (snippet-undo-command-p)
+               (not (snippet-redo-command-p)))
+      (snippet-save-revival-before-undo (snippet-active-session)))
     (snippet-end-session)))
 
 (defun snippet-post-command ()
@@ -2030,7 +2276,11 @@ Tab reports the failure without also invoking its fallback indentation."
         (progn
           (snippet-end-session buffer)
           (when (snippet-mode-present-p buffer)
-            (lem-yath-snippet-mode nil))))))
+            (lem-yath-snippet-mode nil))))
+    (when (and (snippet-redo-command-p)
+               (not (snippet-active-session-p buffer)))
+      (snippet-restore-after-redo buffer))
+    (snippet-note-session-undo-node buffer)))
 
 (add-hook *find-file-hook* 'snippet-enable-buffer)
 (add-hook *switch-to-buffer-hook* 'snippet-enable-buffer)
