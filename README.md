@@ -327,6 +327,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   atomic bounded write. Pandoc supplies the broad Org-to-HTML conversion, so
   the result is deliberately not claimed to be byte- or CSS-compatible with
   GNU Org's `ox-html`
+- host-gated Org-to-nodes projection in the separate `org/nodes-sync.lisp`
+  module. On allowed hosts (default `nova`), saving a canonical `.org` file
+  below startup-cached `$WORKDIR` asynchronously runs the existing
+  `nodes-org-sync --quiet --file FILE` projector. Syncthing conflict files and
+  symlink escapes are inert. Automatic actionable-heading IDs remain off by
+  default; `M-x lem-yath-org-nodes-ensure-actionable-heading-ids` is the
+  explicit opt-in path, and failures stay in `*nodes-org-sync*`
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope, ordinary and repeating active-timestamp events,
   modal Return/g/q navigation, and Evil-Org-style `t` fast TODO selection plus
@@ -470,6 +477,7 @@ nix run .#llm-http-test
 nix run .#llm-oauth-test
 nix run .#llm-workflow-test
 nix run .#llm-tools-test
+nix run .#org-nodes-sync-test
 nix run .#claude-code-test
 nix run .#claude-bridge-test
 nix run .#cursor-state-test

@@ -1910,6 +1910,35 @@ Markdown inline-file backlink extraction, or wiki-link-follow command yet.
 Unsaved note geometry is not applied to the disk-derived graph and is shown as
 requiring a save.
 
+### Host-gated Org nodes projection — `lem-yath/src/org/nodes-sync.lisp` (verified approximation)
+
+The configured external PostgreSQL projection is installed as two local Org
+save hooks without embedding database logic in Lem. The default allowed host is
+`nova`; `YATH_NODES_SYNC_HOSTS` retains the configured colon-separated override.
+On an allowed host, an existing canonical `.org` file beneath the
+startup-cached `$WORKDIR` runs the separately packaged
+`nodes-org-sync --quiet --file FILE` command after save. The command and file
+are distinct argv elements. Syncthing conflict names, files outside the root,
+and in-root symlinks resolving outside it do nothing. Successful background
+runs never switch buffers; failures are bounded, reported, and retained in
+`*nodes-org-sync*`.
+
+Automatic IDs remain disabled, matching the active Emacs preference. Enabling
+`*org-nodes-auto-id-enabled*` adds IDs before the file is written only to
+recognized TODO, scheduled, deadline, `reading`/`readlist` tag, and configured
+reading-file headings. Source-block lookalikes and ordinary headings are
+excluded. `M-x lem-yath-org-nodes-ensure-actionable-heading-ids` provides the
+same manual promotion while automatic IDs remain off, and
+`M-x lem-yath-org-nodes-sync-current-file` supplies the explicit sync entry.
+The hooks survive source reload exactly once per Org buffer.
+
+`scripts/org-nodes-sync-test.sh` physically saves files through packaged
+ncurses Lem and proves the host/root/conflict policy, default and opt-in ID
+behavior, exact canonical argv with metacharacters, asynchronous success and
+failure, source-buffer preservation, symlink refusal, and reload idempotence.
+Each Lem-launched projector is additionally bounded to five minutes and 1 MiB
+per output stream; acceptance against the live `nova` database remains external.
+
 ### Native Org mode — `lem-yath/src/org/` (verified approximation)
 
 Lem-yath adds a prose-class `.org` major mode; this is a local implementation,

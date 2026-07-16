@@ -56,28 +56,40 @@
       (unless (line-offset point 1)
         (return nil)))))
 
+(defun org-id-get-create-at-heading (heading)
+  "Return HEADING's Org ID, creating its property or drawer when absent.
+The second value is true only when this call changed the buffer."
+  (unless (and heading (org-heading-line-p heading))
+    (error "No Org heading at point"))
+  (with-point ((drawer heading))
+    (unless (line-offset drawer 1)
+      (line-end drawer)
+      (insert-character drawer #\Newline))
+    (line-start drawer)
+    (cond
+      ((string= (line-string drawer) ":PROPERTIES:")
+       (let ((existing (org-property-id drawer)))
+         (if (and existing (plusp (length existing)))
+             (values existing nil)
+             (alexandria:if-let ((end (org-property-drawer-end drawer)))
+               (let ((id (uuid-v4)))
+                 (insert-string end (format nil ":ID: ~a~%" id))
+                 (values id t))
+               (error "Malformed Org property drawer: missing :END:")))))
+      (t
+       (let ((id (uuid-v4)))
+         (insert-string drawer
+                        (format nil ":PROPERTIES:~%:ID: ~a~%:END:~%" id))
+         (values id t))))))
+
 (define-command lem-yath-org-id-get-create () ()
   "Return or create an :ID: property on the current Org heading."
   (alexandria:if-let ((heading (org-heading-point)))
-    (with-point ((drawer heading))
-      (unless (line-offset drawer 1)
-        (line-end drawer)
-        (insert-character drawer #\Newline))
-      (line-start drawer)
-      (cond
-        ((string= (line-string drawer) ":PROPERTIES:")
-         (alexandria:if-let ((existing (org-property-id drawer)))
-           (message "Org ID: ~a" existing)
-           (alexandria:if-let ((end (org-property-drawer-end drawer)))
-             (let ((id (uuid-v4)))
-               (insert-string end (format nil ":ID: ~a~%" id))
-               (message "Created Org ID: ~a" id))
-             (message "Malformed Org property drawer: missing :END:"))))
-        (t
-         (let ((id (uuid-v4)))
-           (insert-string drawer
-                          (format nil ":PROPERTIES:~%:ID: ~a~%:END:~%" id))
-           (message "Created Org ID: ~a" id)))))
+    (handler-case
+        (multiple-value-bind (id created-p)
+            (org-id-get-create-at-heading heading)
+          (message (if created-p "Created Org ID: ~a" "Org ID: ~a") id))
+      (error (condition) (message "~a" condition)))
     (message "No Org heading at point")))
 
 ;;; --- dailies & journal ------------------------------------------------------

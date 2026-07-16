@@ -705,6 +705,9 @@
             org-publish-test = mkTestAppWithLemAndInputs lemYath [
               pkgs.pandoc
             ] "lem-yath-org-publish-test" "org-publish-test.sh";
+            org-nodes-sync-test =
+              mkTestAppWithLem lemYath "lem-yath-org-nodes-sync-test"
+                "org-nodes-sync-test.sh";
             org-operator-test = mkTestAppWithLem lemYath "lem-yath-org-operator-test" "org-operator-test.sh";
             agenda-test = mkTestAppWithLem lemYath "lem-yath-agenda-test" "agenda-test.sh";
             agenda-clock-test = mkTestAppWithLem lemYath "lem-yath-agenda-clock-test" "agenda-clock-test.sh";
@@ -805,6 +808,7 @@
             org-source-edit = mkCheckWithLem lemYath "org-source-edit" "org-source-edit-test.sh";
             org-babel = mkCheckWithLemAndInputs lemYath [ pkgs.postgresql ] "org-babel" "org-babel-test.sh";
             org-publish = mkCheckWithLemAndInputs lemYath [ pkgs.pandoc ] "org-publish" "org-publish-test.sh";
+            org-nodes-sync = mkCheckWithLem lemYath "org-nodes-sync" "org-nodes-sync-test.sh";
             org-operator = mkCheckWithLem lemYath "org-operator" "org-operator-test.sh";
             agenda = mkCheckWithLem lemYath "agenda" "agenda-test.sh";
             agenda-clock = mkCheckWithLem lemYath "agenda-clock" "agenda-clock-test.sh";

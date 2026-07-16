@@ -453,7 +453,7 @@ to its top-level, non-hidden `.org` files. `initial-major-mode org-mode`.
 - **cdlatex** declared (deferred), no hooks set.
 
 ### Nodes graph sync (custom, host-gated)
-- On save, actionable org headings (TODO/scheduled/deadline/reading tags) under `$WORKDIR` are (optionally) given stable Org IDs and synced via external `nodes-org-sync` CLI. Enabled only on hosts in `yath/org-nodes-sync-hosts` (default `("nova")`). Auto-ID off by default. Skips Syncthing conflict files. This is a bespoke external integration — T3 for porting.
+- On save, actionable org headings (TODO/scheduled/deadline/reading tags) under `$WORKDIR` are (optionally) given stable Org IDs and synced via external `nodes-org-sync` CLI. Enabled only on hosts in `yath/org-nodes-sync-hosts` (default `("nova")`). Auto-ID is off by default. Lem now reproduces the separate host/path/conflict save-hook policy, exact external argv, optional/manual actionable ID promotion, asynchronous failure buffer, and reload lifecycle in `src/org/nodes-sync.lisp`; the owner-operated live `nova`/PostgreSQL graph remains outside hermetic validation.
 
 ---
 
@@ -561,7 +561,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **citar/ebib/reftex/org-ref bibliography**, **org publishing**, **org-modern/super-agenda** — Citar-like lookup and a bounded grouped agenda are ported; the wider bibliography, publishing, org-modern, and arbitrary agenda interfaces remain gaps.
 - **salta.el** (Supabase/PostgREST property/contractor/payments client; tabulated-list UIs; `C-c s` prefix; notmuch payment-email bridge) — the six primary REST/list/detail workflows are ported and covered against a hermetic fake API; `C-c s e` also tracks the current rendered Notmuch message and opens its URL-encoded payment-email page through a direct desktop argv. The owner-operated live API and web application remain outside hermetic validation.
 - **business-visual / business-document modes** (office presentation profile, host-gated to `workwin`) — ported as a reversible ncurses analogue with a light semantic palette, compact modeline, shape-only cursors, disabled jump pulse, and 88-column centered/wrapped Org, Markdown/EPUB, text, Notmuch-message, feed-entry, and DevDocs buffers. `M-x business-visual-mode` permits an explicit trial on other hosts. Proportional/fixed-pitch font mixing, fractional line spacing, hollow cursors, fringes, GUI chrome, and unavailable message/EWW/Helpful/Info modes remain terminal divergences.
-- **nodes-org-sync** (PostgreSQL graph sync of org headings, host-gated to `nova`) remains external; a narrower psql-backed table/query viewer now covers the pgmacs entry workflow.
+- **nodes-org-sync** (PostgreSQL graph sync of Org headings, host-gated to `nova`) is wired through Lem's native Org save lifecycle while retaining the external projector and database; the psql-backed viewer separately covers the pgmacs entry workflow.
 - The **gptel backends** include bounded Claude/Codex/Grok process adapters with native event rendering and resumable per-backend sessions plus credential-safe Perplexity, GitHub Copilot Chat, ChatGPT Codex Responses, and Grok OAuth HTTP adapters. The latter two retain per-buffer history and execute the configured project tools. Org-tree conversation forking, per-request backend controls, richer Copilot request families, and Codex startup model probing/cache remain gaps.
 
 ### salta.el commands (reference for any port)
