@@ -139,13 +139,20 @@
 
 ;; Vi's stock mark hooks enter VISUAL on mark activation and NORMAL on mark
 ;; cancellation.  Replace them with state-aware delegates so EMACS retains
-;; ordinary Emacs regions while every other Vi state keeps upstream behavior.
+;; ordinary Emacs regions.  Prompt buffers use the same region semantics:
+;; changing their editable input must not turn Vi's MODELINE state into NORMAL.
+(defun lem-yath-emacs-region-buffer-p (buffer)
+  (or (lem-yath-emacs-state-p buffer)
+      (alexandria:when-let ((prompt
+                             (lem/prompt-window:current-prompt-window)))
+        (eq buffer (window-buffer prompt)))))
+
 (defun lem-yath-emacs-mark-activate (buffer)
-  (unless (lem-yath-emacs-state-p buffer)
+  (unless (lem-yath-emacs-region-buffer-p buffer)
     (lem-vi-mode/visual::enable-visual-from-hook buffer)))
 
 (defun lem-yath-emacs-mark-deactivate (buffer)
-  (unless (lem-yath-emacs-state-p buffer)
+  (unless (lem-yath-emacs-region-buffer-p buffer)
     (lem-vi-mode/visual::disable-visual-from-hook buffer)))
 
 (defun install-lem-yath-emacs-mark-hooks ()
@@ -174,7 +181,7 @@
 
 (defmethod check-marked-using-global-mode :around
     ((global-mode lem-vi-mode/core:vi-mode) buffer)
-  (if (lem-yath-emacs-state-p buffer)
+  (if (lem-yath-emacs-region-buffer-p buffer)
       (check-marked-using-global-mode (emacs-region-mode) buffer)
       (call-next-method)))
 

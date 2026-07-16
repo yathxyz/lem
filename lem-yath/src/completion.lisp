@@ -811,10 +811,74 @@ provider's source-defined order."
   (call-command 'delete-word argument)
   (lem/completion-mode:completion-refresh))
 
+(defparameter +completion-prompt-last-command-key+
+  'lem-yath-completion-prompt-last-command)
+(defparameter +completion-prompt-yank-range-key+
+  'lem-yath-completion-prompt-yank-range)
+
+(defun completion-release-prompt-yank-range (&optional (buffer (current-buffer)))
+  "Release BUFFER's tracked prompt-yank points."
+  (alexandria:when-let ((range (buffer-value
+                                buffer +completion-prompt-yank-range-key+)))
+    (delete-point (car range))
+    (delete-point (cdr range))
+    (setf (buffer-value buffer +completion-prompt-yank-range-key+) nil)))
+
+(defun completion-record-prompt-yank-from (buffer start)
+  "Own START through BUFFER's point as its latest prompt yank."
+  (completion-release-prompt-yank-range buffer)
+  (setf (buffer-value buffer +completion-prompt-yank-range-key+)
+        (cons start (copy-point (buffer-point buffer) :left-inserting))))
+
 (define-command lem-yath-prompt-yank (argument) (:universal-nil)
   "Yank into the prompt and refresh visible completion."
-  (call-command 'yank argument)
-  (lem/completion-mode:completion-refresh))
+  (completion-clamp-point-to-prompt-input)
+  (let ((buffer (current-buffer))
+        (start (copy-point (current-point) :right-inserting))
+        (recorded-p nil))
+    (unwind-protect
+         (progn
+           (let ((lem/buffer/internal:*inhibit-read-only* t))
+             (call-command 'yank argument))
+           (completion-record-prompt-yank-from buffer start)
+           (setf recorded-p t))
+      (unless recorded-p
+        (delete-point start))))
+  (completion-refresh-or-open-prompt))
+
+(define-command lem-yath-prompt-yank-pop (&optional (argument 1))
+    (:universal)
+  "Replace the preceding prompt yank from the kill ring and refresh."
+  (let* ((buffer (current-buffer))
+         (point (buffer-point buffer))
+         (range (buffer-value buffer
+                             +completion-prompt-yank-range-key+)))
+    (if (and range
+             (member
+              (buffer-value buffer
+                            +completion-prompt-last-command-key+)
+              '(lem-core/commands/edit:yank
+                lem-core/commands/edit:yank-pop
+                lem-yath-prompt-yank
+                lem-yath-completion-prompt-yank-pop)))
+        (let ((start (car range))
+              (end (cdr range)))
+          (delete-between-points start end)
+          (move-point point start)
+          (completion-release-prompt-yank-range buffer)
+          (lem/common/killring:rotate-killring (current-killring))
+          (let ((new-start (copy-point point :right-inserting))
+                (recorded-p nil))
+            (unwind-protect
+                 (progn
+                   (let ((lem/buffer/internal:*inhibit-read-only* t))
+                     (lem-core/commands/edit::yank-1 argument))
+                   (completion-record-prompt-yank-from buffer new-start)
+                   (setf recorded-p t))
+              (unless recorded-p
+                (delete-point new-start)))))
+        (message "Previous command was not a prompt yank")))
+  (completion-refresh-or-open-prompt))
 
 (define-command lem-yath-prompt-transpose-characters () ()
   "Transpose input characters without touching the prompt label."
@@ -855,12 +919,121 @@ provider's source-defined order."
                          (lem/prompt-window:current-prompt-window)))
     (eq (current-buffer) (window-buffer prompt))))
 
+(defun completion-refresh-or-open-prompt ()
+  "Refresh prompt completion, reopening it after a zero-result edit."
+  (when (completion-prompt-active-p)
+    (if lem/completion-mode::*completion-context*
+        (lem/completion-mode:completion-refresh)
+        (lem/prompt-window::open-prompt-completion))))
+
+(defun completion-record-prompt-command ()
+  "Record the most recently completed prompt command for yank-pop continuity."
+  (when (completion-prompt-active-p)
+    (setf (buffer-value (current-buffer)
+                        +completion-prompt-last-command-key+)
+          (command-name (this-command)))))
+
+(remove-hook *post-command-hook* 'completion-record-prompt-command)
+(add-hook *post-command-hook* 'completion-record-prompt-command
+          most-negative-fixnum)
+
+(defun completion-prompt-region-or-error ()
+  "Return the active prompt region after enforcing its editable boundary."
+  (let* ((point (current-point))
+         (mark (cursor-mark point))
+         (mark-point (and (mark-active-p mark) (mark-point mark)))
+         (input-start (lem/prompt-window::current-prompt-start-point)))
+    (unless (and mark-point
+                 (eq (point-buffer point) (point-buffer mark-point))
+                 (not (point< point input-start))
+                 (not (point< mark-point input-start)))
+      (editor-error "No protected prompt region"))
+    (values point mark-point)))
+
+(define-command lem-yath-prompt-set-mark (argument) (:universal-nil)
+  "Set the prompt mark without exposing the cross-buffer mark ring."
+  (when argument
+    (editor-error "Prompt mark-ring traversal is unavailable"))
+  ;; SET-CURSOR-MARK runs the Vi buffer-mark hook and changes a prompt to
+  ;; Visual state.  Own the minibuffer-style mark directly so C-w returns to
+  ;; the prompt's editing state instead of Vi Normal state.
+  (mark-set-point (cursor-mark (current-point)) (current-point))
+  (message "Mark set"))
+
+(define-command lem-yath-prompt-exchange-point-mark () ()
+  "Exchange point and mark inside the prompt's editable field."
+  (multiple-value-bind (point mark-point)
+      (completion-prompt-region-or-error)
+    (with-point ((old-point point :temporary))
+      (move-point point mark-point)
+      (mark-set-point (cursor-mark point) old-point))))
+
+(define-command lem-yath-prompt-kill-region () ()
+  "Kill an active prompt region and refresh visible completion."
+  (completion-prompt-region-or-error)
+  (call-command 'kill-region nil)
+  (completion-refresh-or-open-prompt))
+
+(define-command lem-yath-prompt-copy-region () ()
+  "Copy an active prompt region and retain visible completion."
+  (completion-prompt-region-or-error)
+  (call-command 'copy-region nil)
+  (completion-refresh-or-open-prompt))
+
+(defun completion-replay-key-after-completion ()
+  "Close ordinary completion and replay its current physical key."
+  (let ((keys (last-read-key-sequence)))
+    (lem/completion-mode:completion-end)
+    (unread-key-sequence keys)))
+
+(define-command lem-yath-completion-prompt-set-mark (argument)
+    (:universal-nil)
+  (if (completion-prompt-active-p)
+      (call-command 'lem-yath-prompt-set-mark argument)
+      (completion-replay-key-after-completion)))
+
+(define-command lem-yath-completion-prompt-exchange-point-mark () ()
+  (if (completion-prompt-active-p)
+      (call-command 'lem-yath-prompt-exchange-point-mark nil)
+      (completion-replay-key-after-completion)))
+
+(define-command lem-yath-completion-prompt-kill-region () ()
+  (if (completion-prompt-active-p)
+      (call-command 'lem-yath-prompt-kill-region nil)
+      (completion-replay-key-after-completion)))
+
+(define-command lem-yath-completion-prompt-copy-region () ()
+  (if (completion-prompt-active-p)
+      (call-command 'lem-yath-prompt-copy-region nil)
+      (completion-replay-key-after-completion)))
+
+(define-command lem-yath-completion-prompt-yank-pop
+    (&optional (argument 1))
+    (:universal)
+  (if (completion-prompt-active-p)
+      (call-command 'lem-yath-prompt-yank-pop argument)
+      (completion-replay-key-after-completion)))
+
+(dolist (keymap (list lem/prompt-window::*prompt-mode-keymap*
+                      lem/completion-mode::*completion-mode-keymap*))
+  (define-key keymap "C-Space" 'lem-yath-completion-prompt-set-mark)
+  (define-key keymap "C-@" 'lem-yath-completion-prompt-set-mark)
+  (define-key keymap "C-x C-x"
+    'lem-yath-completion-prompt-exchange-point-mark)
+  (define-key keymap "C-w" 'lem-yath-completion-prompt-kill-region)
+  (define-key keymap "M-w" 'lem-yath-completion-prompt-copy-region)
+  (define-key keymap "M-y" 'lem-yath-completion-prompt-yank-pop))
+
 (defun completion-reset-prompt-undo-history ()
   "Keep prompt construction outside the user's editable undo history."
   (when (completion-prompt-active-p)
     (let ((buffer (current-buffer)))
       (buffer-disable-undo buffer)
-      (buffer-enable-undo buffer))))
+      (buffer-enable-undo buffer)
+      ;; Prompt marks deliberately bypass Vi's state-changing mark hooks.
+      (mark-cancel (cursor-mark (buffer-point buffer)))
+      (completion-release-prompt-yank-range buffer)
+      (setf (buffer-value buffer +completion-prompt-last-command-key+) nil))))
 
 (remove-hook *prompt-after-activate-hook*
              'completion-reset-prompt-undo-history)
@@ -876,7 +1049,7 @@ provider's source-defined order."
   (dotimes (_ argument)
     (unless (buffer-undo (current-point))
       (editor-error "No prompt edit to undo")))
-  (lem/completion-mode:completion-refresh))
+  (completion-refresh-or-open-prompt))
 
 (define-command lem-yath-completion-prompt-undo
     (&optional (argument 1))
@@ -884,9 +1057,7 @@ provider's source-defined order."
   "Undo a prompt, or replay the key after leaving ordinary completion."
   (if (completion-prompt-active-p)
       (call-command 'lem-yath-prompt-undo argument)
-      (let ((keys (last-read-key-sequence)))
-        (lem/completion-mode:completion-end)
-        (unread-key-sequence keys))))
+      (completion-replay-key-after-completion)))
 
 (dolist (keymap (list lem/prompt-window::*prompt-mode-keymap*
                       lem/completion-mode::*completion-mode-keymap*))
@@ -1054,18 +1225,16 @@ provider's source-defined order."
   "Accept the focused prompt candidate and submit it with one Return."
   (cond
     ((completion-prompt-active-p)
-     (alexandria:when-let* ((prompt
-                             (lem/prompt-window:current-prompt-window))
-                            (context (completion-prompt-context))
-                            (popup
-                             (lem/completion-mode::context-popup-menu
-                              context)))
-       (lem:popup-menu-select popup)
-       ;; Acceptance normally closes CONTEXT.  Do not submit stale input if a
-       ;; callback refused the selection or deliberately opened a replacement.
-       (when (and (eq prompt
-                      (lem/prompt-window:current-prompt-window))
-                  (null lem/completion-mode::*completion-context*))
+     (let ((prompt (lem/prompt-window:current-prompt-window)))
+       (alexandria:if-let ((context (completion-prompt-context)))
+         (let ((popup (lem/completion-mode::context-popup-menu context)))
+           (lem:popup-menu-select popup)
+           ;; Acceptance normally closes CONTEXT.  Do not submit stale input
+           ;; if a callback refused selection or opened a replacement.
+           (when (and (eq prompt
+                          (lem/prompt-window:current-prompt-window))
+                      (null lem/completion-mode::*completion-context*))
+             (lem-yath-prompt-execute)))
          (lem-yath-prompt-execute))))
     ((and (fboundp 'auto-completion-session-owned-p)
           (funcall 'auto-completion-session-owned-p))

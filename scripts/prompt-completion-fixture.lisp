@@ -188,12 +188,11 @@
                      :test #'string=)))))
     (prompt-completion-fixture-log "PRESCIENT-SELECT value=~a" choice)))
 
-(define-command lem-yath-test-prompt-line-editing () ()
-  "Open a nonempty prompt for physical Emacs line-editing coverage."
+(defun prompt-completion-fixture-read-edit (initial-value)
   (let ((choice
           (prompt-for-string
            "Prompt edit: "
-           :initial-value "quick-lookup"
+           :initial-value initial-value
            :completion-function
            (lambda (input)
              (prescient-filter input *prompt-completion-edit-candidates*
@@ -203,6 +202,18 @@
              (member input *prompt-completion-edit-candidates*
                      :test #'string=)))))
     (prompt-completion-fixture-log "PROMPT-EDIT-SELECT value=~a" choice)))
+
+(define-command lem-yath-test-prompt-line-editing () ()
+  "Open a nonempty prompt for physical Emacs line-editing coverage."
+  (prompt-completion-fixture-read-edit "quick-lookup"))
+
+(define-command lem-yath-test-prompt-kill-ring () ()
+  "Open an empty prompt with two deterministic kill-ring entries."
+  (lem/common/killring:push-killring-item
+   (current-killring) "quick-lookup")
+  (lem/common/killring:push-killring-item
+   (current-killring) "fixture-preset")
+  (prompt-completion-fixture-read-edit ""))
 
 (prompt-completion-fixture-check-wrapper-installation)
 (prompt-completion-fixture-check-size-cache)

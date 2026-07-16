@@ -115,9 +115,116 @@ else
 fi
 sleep 0.8
 
+# Preserve the everyday Emacs yank-pop workflow over deterministic kill-ring
+# entries, including insertion at the empty read-only field boundary.
+prompt_edit_before=$(grep -c '^PROMPT-EDIT-SELECT value=quick-lookup$' \
+  "$LEM_YATH_PROMPT_COMPLETION_REPORT" 2>/dev/null || true)
+if invoke_prompt_command lem-yath-test-prompt-kill-ring 'Prompt edit:'; then
+  lem_keys "$session" C-y
+  sleep 0.4
+  screen=$(lem_capture "$session")
+  if ! grep -Fq 'Prompt edit: fixture-preset' <<<"$screen"; then
+    fail prompt-emacs-kill-ring-yank \
+      'C-y did not restore the most recently killed prompt input' "$session"
+    close_prompt
+  else
+    lem_keys "$session" M-y
+    sleep 0.8
+    screen=$(lem_capture "$session")
+  fi
+  if grep -Fq 'Prompt edit: quick-lookup' <<<"$screen" &&
+     grep -Fq 'quick-lookup' <<<"$screen"; then
+    lem_keys "$session" Enter
+    if wait_report_count '^PROMPT-EDIT-SELECT value=quick-lookup$' \
+         $((prompt_edit_before + 1)); then
+      pass prompt-emacs-kill-ring \
+        'mark exchange, region kill, yank, and yank-pop retained completion'
+    else
+      fail prompt-emacs-kill-ring \
+        'Return did not accept the yank-pop result' "$session"
+    fi
+  else
+    fail prompt-emacs-kill-ring \
+      'mark or kill-ring editing damaged the prompt boundary' "$session"
+    close_prompt
+  fi
+else
+  fail prompt-emacs-kill-ring 'the kill-ring prompt did not open' "$session"
+fi
+
+# Mark/exchange the full editable field, kill it without entering the label,
+# and yank it back at the zero-width boundary.
+prompt_edit_before=$(grep -c '^PROMPT-EDIT-SELECT value=quick-lookup$' \
+  "$LEM_YATH_PROMPT_COMPLETION_REPORT" 2>/dev/null || true)
+if invoke_prompt_command lem-yath-test-prompt-line-editing \
+     'Prompt edit: quick-lookup'; then
+  lem_keys "$session" C-a
+  lem_keys "$session" C-Space
+  lem_keys "$session" C-e
+  lem_keys "$session" C-x C-x
+  lem_keys "$session" C-w
+  lem_keys "$session" C-y
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Fq 'Prompt edit: quick-lookup' <<<"$screen" &&
+     grep -Fq 'quick-lookup' <<<"$screen"; then
+    lem_keys "$session" Enter
+    if wait_report_count '^PROMPT-EDIT-SELECT value=quick-lookup$' \
+         $((prompt_edit_before + 1)); then
+      pass prompt-emacs-region-kill \
+        'C-SPC, C-x C-x, C-w, and C-y preserved the prompt boundary'
+    else
+      fail prompt-emacs-region-kill \
+        'Return did not accept the restored killed region' "$session"
+    fi
+  else
+    fail prompt-emacs-region-kill \
+      'region kill/yank did not restore the protected prompt input' "$session"
+    close_prompt
+  fi
+else
+  fail prompt-emacs-region-kill 'the region-kill prompt did not open' \
+    "$session"
+fi
+
+prompt_edit_before=$(grep -c '^PROMPT-EDIT-SELECT value=quick-lookup$' \
+  "$LEM_YATH_PROMPT_COMPLETION_REPORT" 2>/dev/null || true)
+if invoke_prompt_command lem-yath-test-prompt-line-editing \
+     'Prompt edit: quick-lookup'; then
+  lem_keys "$session" C-a
+  lem_keys "$session" C-Space
+  lem_keys "$session" M-f
+  lem_keys "$session" M-w
+  lem_keys "$session" C-e
+  lem_keys "$session" C-y
+  lem_keys "$session" C-/
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Fq 'Prompt edit: quick-lookup' <<<"$screen" &&
+     grep -Fq 'quick-lookup' <<<"$screen"; then
+    lem_keys "$session" Enter
+    if wait_report_count '^PROMPT-EDIT-SELECT value=quick-lookup$' \
+         $((prompt_edit_before + 1)); then
+      pass prompt-emacs-copy-region \
+        'M-w copied the protected region and prompt undo restored its yank'
+    else
+      fail prompt-emacs-copy-region \
+        'Return did not accept the post-copy undo result' "$session"
+    fi
+  else
+    fail prompt-emacs-copy-region \
+      'copy/yank/undo did not preserve the prompt input' "$session"
+    close_prompt
+  fi
+else
+  fail prompt-emacs-copy-region 'the copy-region prompt did not open' "$session"
+fi
+
 # GNU minibuffers put C-/, C-_, and C-x u on undo.  The initial undo must not
 # enter the protected label; later undos restore the prior query and repaint
 # completion without dismissing the prompt.
+prompt_edit_before=$(grep -c '^PROMPT-EDIT-SELECT value=quick-lookup$' \
+  "$LEM_YATH_PROMPT_COMPLETION_REPORT" 2>/dev/null || true)
 if invoke_prompt_command lem-yath-test-prompt-line-editing \
      'Prompt edit: quick-lookup'; then
   lem_keys "$session" C-/
@@ -130,7 +237,8 @@ if invoke_prompt_command lem-yath-test-prompt-line-editing \
   if grep -Fq 'Prompt edit: quick-lookup' <<<"$screen" &&
      grep -Fq 'quick-lookup' <<<"$screen"; then
     lem_keys "$session" Enter
-    if wait_report_count '^PROMPT-EDIT-SELECT value=quick-lookup$' 1; then
+    if wait_report_count '^PROMPT-EDIT-SELECT value=quick-lookup$' \
+         $((prompt_edit_before + 1)); then
       pass prompt-emacs-undo \
         'C-/ and C-x u restored input without crossing the prompt boundary'
     else

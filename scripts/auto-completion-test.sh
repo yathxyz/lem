@@ -504,6 +504,21 @@ else
 fi
 
 if setup_corfu_popup; then
+  lem_keys "$session" M-y
+  sleep 0.2
+  corfu_meta_y=$(report_corfu_state || true)
+  if grep -q 'context=NIL buffer="pre"' <<<"$corfu_meta_y"; then
+    pass corfu-meta-y-fallthrough \
+      "prompt-local M-y replayed ordinary yank-pop without source mutation"
+  else
+    fail corfu-meta-y-fallthrough \
+      "prompt-local yank-pop leaked into ordinary completion: $corfu_meta_y"
+  fi
+else
+  fail corfu-meta-y-setup "could not prepare the M-y scenario"
+fi
+
+if setup_corfu_popup; then
   accept_before=$(grep -c '^CORFU ACCEPT ' "$LEM_YATH_AUTO_COMPLETION_REPORT" 2>/dev/null || true)
   lem_keys "$session" C-n
   lem_keys "$session" Space
