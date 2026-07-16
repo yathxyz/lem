@@ -896,8 +896,9 @@ through the ncurses editor.
   sorting with `o a/v/s/f/m`, reverse with `o i`, traverse the lexical sorter cycle with
   comma, and switch between the detailed and compact name/file formats with
   backtick. Sorting preserves group order, headings, marks, and narrowing.
-  `s n` enters literal name filtering, Return accepts its query, and Escape
-  cancels it. The modal operation core uses `m/u/U/t/~` for ordinary marks,
+  `s m/n/f/b/.` enter live case-insensitive regexp filters for used mode, name,
+  full filename, basename, or extension; Return pushes the pending filter and
+  Escape cancels it. The modal operation core uses `m/u/U/t/~` for ordinary marks,
   distinct `d` deletion marks followed by `x`, and `S` for marked saves;
   `gj/gk`, Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide row movement, group
   movement, and quit. `s i/v` push modified and visiting-file filters onto an
@@ -905,13 +906,13 @@ through the ncurses editor.
   disable all filters. Control-character-safe display remains available.
   The real TUI verifies classification, ordering, every bound sorter, reversal,
   cycling, both formats, empty-group omission, heading collapse/expansion and
-  safety, literal filtering across modal command letters, stock field widths
+  safety, regexp filter input across modal command letters, stock field widths
   including wide characters, selection, every modal movement above, ordinary
-  and deletion mark rendering, no-prompt filter composition/negation/pop/disable,
+  and deletion mark rendering, filter composition/negation/pop/disable,
   marked save/deletion, and reload. Lem has no visited-file locking state;
-  Ibuffer's input-bearing mode/file/size/content/predicate filters,
-  compound/saved filter operations, and specialized bulk mark/operation
-  catalogs are not reproduced.
+  Ibuffer's process/starred/derived/directory/size/content/predicate filters,
+  compound/saved filter operations, and specialized bulk mark/operation catalogs
+  are not reproduced. CL-PPCRE regexp syntax can differ from Emacs regexp syntax.
 - Recent files: `M-g r` opens an annotated Lem persistent-MRU prompt after
   lem-yath sets the loaded
   history's 300-entry limit and normalizes oversized persisted histories to their

@@ -139,12 +139,13 @@ rotates to the second stock name/file format; `s` remains its filter prefix.
 The Lem chooser implements those controls within each configured group. Its
 effective modal core also matches `m/u/U/t/~`, deletion marking and execution
 with `d` then `x`, marked save with `S`, row movement with `gj/gk`, group
-movement with Tab/backtab, `C-j/C-k`, and `]]/[[`, and quit with `q`. `s n`
-enters literal name-filter input so modal command letters remain searchable;
-Return accepts the filter and Escape cancels it. Filtering temporarily presents
-only matching selectable buffer rows. `s i` and `s v` push GNU Ibuffer's
-modified and visiting-file filters, multiple filters compose by AND, `s !`
-negates the top filter, `s p` removes it, and `s /` disables the stack
+movement with Tab/backtab, `C-j/C-k`, and `]]/[[`, and quit with `q`.
+`s m/n/f/b/.` enter live case-insensitive regexp filters for used mode, buffer
+name, full filename, basename, or extension; modal command letters remain
+literal while entering a filter, Return pushes it onto the stack, and Escape
+cancels only the pending input. `s i` and `s v` push GNU Ibuffer's modified and
+visiting-file filters, multiple filters compose by AND, `s !` negates the top
+filter, `s p` removes it, and `s /` disables the stack
 (`src/buffer-list.lisp`, `scripts/buffer-list-test.sh`).
 
 ### 1.4 Mode-local bindings

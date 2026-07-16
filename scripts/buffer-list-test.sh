@@ -440,6 +440,62 @@ if [[ "$filter" == FILTER\ stack=\ visible=* ]] &&
 else
   fail filter-disable "unexpected disabled filter state: $filter"
 fi
+
+lem_keys "$session" s m
+tmux_cmd send-keys -t "$session" -l 'buffer-list-test-sort-m-mode'
+sleep 0.3
+lem_keys "$session" Enter
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=mode=buffer-list-test-sort-m-mode* ]] &&
+   [[ "$filter" == *'buffer-list-sort-zeta'* ]] &&
+   [[ "$filter" != *'buffer-list-sort-alpha'* ]]; then
+  pass filter-mode "s m committed a case-insensitive used-mode filter"
+else
+  fail filter-mode "unexpected mode filter state: $filter"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" s f
+tmux_cmd send-keys -t "$session" -l 'b-file\.txt$'
+sleep 0.3
+lem_keys "$session" Enter
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=filename=* ]] &&
+   [[ "$filter" == *'buffer-list-sort-zeta'* ]] &&
+   [[ "$filter" != *'buffer-list-sort-alpha'* ]]; then
+  pass filter-filename "s f committed a full-filename regexp filter"
+else
+  fail filter-filename "unexpected filename filter state: $filter"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" s b
+tmux_cmd send-keys -t "$session" -l 'b-file.txt'
+sleep 0.3
+lem_keys "$session" Enter
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=basename=b-file.txt* ]] &&
+   [[ "$filter" == *'buffer-list-sort-zeta'* ]] &&
+   [[ "$filter" != *'buffer-list-sort-alpha'* ]]; then
+  pass filter-basename "s b committed a basename regexp filter"
+else
+  fail filter-basename "unexpected basename filter state: $filter"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" s .
+tmux_cmd send-keys -t "$session" -l 'txt'
+sleep 0.3
+lem_keys "$session" Enter
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=extension=txt* ]] &&
+   [[ "$filter" == *'buffer-list-zz-target.txt'* ]] &&
+   [[ "$filter" != *'buffer-list-name-that-is-long'* ]]; then
+  pass filter-extension "s . committed an extension regexp filter"
+else
+  fail filter-extension "unexpected extension filter state: $filter"
+fi
+lem_keys "$session" s /
 lem_keys "$session" q
 
 lem_keys "$session" C-x C-b
@@ -447,6 +503,12 @@ lem_keys "$session" s n
 tmux_cmd send-keys -t "$session" -l 'sort-'
 if lem_wait_for "$session" 'sort-[[:space:]]' 15 >/dev/null; then
   lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=name=sort-* ]]; then
+    pass filter-name-stack "accepted s n became a poppable name filter"
+  else
+    fail filter-name-stack "accepted s n was not on the filter stack: $filter"
+  fi
   lem_keys "$session" m
   lem_keys "$session" d
   nav=$(report_nav || true)
@@ -501,13 +563,15 @@ if lem_wait_for "$session" 'sort-[[:space:]]' 15 >/dev/null; then
     fail modal-filter-cancel "s n did not re-enter literal filter input"
   lem_keys "$session" Escape
   sleep 0.3
-  screen=$(lem_capture "$session")
-  if grep -Eq 'Buffer[[:space:]]+Size[[:space:]]+Mode[[:space:]]+File' <<<"$screen" &&
-     grep -Fq '[ org ]' <<<"$screen"; then
-    pass modal-filter-cancel "Escape cancelled s n input and restored grouped rows"
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=name=sort-* ]] &&
+     [[ "$filter" == *'buffer-list-sort-zeta'* ]] &&
+     [[ "$filter" != *'buffer-list-zz-target.txt'* ]]; then
+    pass modal-filter-cancel "Escape cancelled pending input without erasing the accepted stack"
   else
-    fail modal-filter-cancel "Escape retained the name filter"
+    fail modal-filter-cancel "Escape changed the accepted filter stack: $filter"
   fi
+  lem_keys "$session" s /
 else
   fail modal-marks "could not narrow to modal mark fixtures"
   lem_keys "$session" Escape

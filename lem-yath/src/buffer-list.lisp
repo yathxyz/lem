@@ -137,7 +137,10 @@ Each nonempty group begins with a distinct heading entry."
     :reader buffer-list-component-deletion-items)
    (filters
     :initform nil
-    :accessor buffer-list-component-filters)))
+    :accessor buffer-list-component-filters)
+   (pending-filter-kind
+    :initform nil
+    :accessor buffer-list-component-pending-filter-kind)))
 
 (defparameter *buffer-list-sort-mode-cycle*
   '(:alphabetic :filename :major-mode :mode-name :recency :size)
@@ -208,10 +211,34 @@ Each nonempty group begins with a distinct heading entry."
           (buffer-list-component-hidden-groups component)
           :test #'string=))
 
+(defun buffer-list-regexp-match-p (pattern value)
+  (and value
+       (handler-case
+           (not (null (cl-ppcre:scan
+                       (cl-ppcre:create-scanner
+                        pattern :case-insensitive-mode t)
+                       value)))
+         (error () nil))))
+
 (defun buffer-list-filter-match-p (filter buffer)
   (ecase (first filter)
     (:modified (buffer-modified-p buffer))
     (:visiting-file (buffer-filename buffer))
+    (:mode
+     (buffer-list-regexp-match-p
+      (second filter) (symbol-name (buffer-major-mode buffer))))
+    (:name
+     (buffer-list-regexp-match-p (second filter) (buffer-name buffer)))
+    (:filename
+     (buffer-list-regexp-match-p (second filter) (buffer-filename buffer)))
+    (:basename
+     (alexandria:when-let ((filename (buffer-filename buffer)))
+       (buffer-list-regexp-match-p
+        (second filter) (file-namestring filename))))
+    (:extension
+     (alexandria:when-let ((filename (buffer-filename buffer)))
+       (buffer-list-regexp-match-p
+        (second filter) (or (pathname-type filename) ""))))
     (:not (not (buffer-list-filter-match-p (second filter) buffer)))))
 
 (defun buffer-list-active-filters-match-p (component buffer)
@@ -264,11 +291,19 @@ Each nonempty group begins with a distinct heading entry."
     (let ((by-buffer (make-hash-table :test #'eq)))
       (dolist (entry buffer-entries)
         (setf (gethash (buffer-list-entry-buffer entry) by-buffer) entry))
-      (dolist (buffer
-               (completion-buffer
-                query (mapcar #'buffer-list-entry-buffer buffer-entries)))
-        (when (gethash buffer by-buffer)
-          (setf (gethash buffer by-buffer) :matching)))
+      (if (buffer-list-component-pending-filter-kind component)
+          (dolist (entry buffer-entries)
+            (let ((buffer (buffer-list-entry-buffer entry)))
+              (when (buffer-list-filter-match-p
+                     (list (buffer-list-component-pending-filter-kind component)
+                           query)
+                     buffer)
+                (setf (gethash buffer by-buffer) :matching))))
+          (dolist (buffer
+                   (completion-buffer
+                    query (mapcar #'buffer-list-entry-buffer buffer-entries)))
+            (when (gethash buffer by-buffer)
+              (setf (gethash buffer by-buffer) :matching))))
       ;; Manual Ibuffer sorting remains authoritative while narrowing.  The
       ;; completion matcher decides membership, but does not reorder matches.
       (dolist (entry buffer-entries)
@@ -565,22 +600,45 @@ Each nonempty group begins with a distinct heading entry."
   (buffer-list-toggle-all-marks
    (lem/multi-column-list::current-multi-column-list)))
 
-(define-command lem-yath-buffer-list-start-name-filter () ()
-  "Enter literal name-filter input, matching Evil-Collection Ibuffer's s n."
+(defun buffer-list-start-input-filter (kind description)
   (let ((component (lem/multi-column-list::current-multi-column-list)))
-    (setf (lem/multi-column-list::multi-column-list-search-string component) "")
+    (setf (buffer-list-component-pending-filter-kind component) kind
+          (lem/multi-column-list::multi-column-list-search-string component) "")
     (lem/multi-column-list:update component)
     (buffer-list-filter-input-mode t)
-    (message "Ibuffer name filter (Return accepts, Escape cancels)")))
+    (message "Ibuffer ~a filter (Return accepts, Escape cancels)" description)))
 
-(define-command lem-yath-buffer-list-accept-name-filter () ()
-  "Keep the current name filter and return to modal buffer-list commands."
-  (buffer-list-filter-input-mode nil))
+(define-command lem-yath-buffer-list-start-name-filter () ()
+  (buffer-list-start-input-filter :name "buffer name"))
 
-(define-command lem-yath-buffer-list-cancel-name-filter () ()
-  "Clear the current name filter and return to modal buffer-list commands."
+(define-command lem-yath-buffer-list-start-mode-filter () ()
+  (buffer-list-start-input-filter :mode "major mode in use"))
+
+(define-command lem-yath-buffer-list-start-filename-filter () ()
+  (buffer-list-start-input-filter :filename "full file name"))
+
+(define-command lem-yath-buffer-list-start-basename-filter () ()
+  (buffer-list-start-input-filter :basename "file basename"))
+
+(define-command lem-yath-buffer-list-start-extension-filter () ()
+  (buffer-list-start-input-filter :extension "filename extension"))
+
+(define-command lem-yath-buffer-list-accept-input-filter () ()
+  "Commit the pending input filter and return to modal buffer-list commands."
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (kind (buffer-list-component-pending-filter-kind component))
+         (query (lem/multi-column-list::multi-column-list-search-string
+                 component)))
+    (buffer-list-filter-input-mode nil)
+    (setf (buffer-list-component-pending-filter-kind component) nil)
+    (when (and kind (plusp (length query)))
+      (buffer-list-push-filter component (list kind query)))))
+
+(define-command lem-yath-buffer-list-cancel-input-filter () ()
+  "Clear the pending input filter and return to modal buffer-list commands."
   (let ((component (lem/multi-column-list::current-multi-column-list)))
-    (setf (lem/multi-column-list::multi-column-list-search-string component) "")
+    (setf (buffer-list-component-pending-filter-kind component) nil
+          (lem/multi-column-list::multi-column-list-search-string component) "")
     (buffer-list-filter-input-mode nil)
     (lem/multi-column-list:update component)))
 
@@ -588,13 +646,24 @@ Each nonempty group begins with a distinct heading entry."
   (ecase (first filter)
     (:modified "modified")
     (:visiting-file "visiting-file")
+    (:mode (format nil "mode=~a" (second filter)))
+    (:name (format nil "name=~a" (second filter)))
+    (:filename (format nil "filename=~a" (second filter)))
+    (:basename (format nil "basename=~a" (second filter)))
+    (:extension (format nil "extension=~a" (second filter)))
     (:not (format nil "not(~a)"
                   (buffer-list-filter-description (second filter))))))
+
+(defun buffer-list-move-focus-off-heading (component)
+  (alexandria:when-let ((entry (buffer-list-current-entry component)))
+    (when (buffer-list-entry-heading-p entry)
+      (lem/multi-column-list::multi-column-list/down))))
 
 (defun buffer-list-refresh-filters (component)
   (setf (lem/multi-column-list::multi-column-list-search-string component) "")
   (buffer-list-reset-visible-items component)
   (lem/multi-column-list:update component)
+  (buffer-list-move-focus-off-heading component)
   (let ((descriptions
           (mapcar #'buffer-list-filter-description
                   (buffer-list-component-filters component))))
@@ -692,9 +761,12 @@ Each nonempty group begins with a distinct heading entry."
    (buffer-list-component-all-items component)))
 
 (defun buffer-list-save-action-items (component)
-  (dolist (item (buffer-list-action-items component))
-    (buffer-list-save component (buffer-list-item-entry item)))
-  (lem/multi-column-list:update component))
+  (let ((items (buffer-list-action-items component)))
+    (dolist (item items)
+      (buffer-list-save component (buffer-list-item-entry item)))
+    (lem/multi-column-list:update component)
+    (when items
+      (buffer-list-move-focus-off-heading component))))
 
 (define-command lem-yath-buffer-list-delete-items () ()
   (buffer-list-delete-action-items
@@ -843,11 +915,11 @@ Each nonempty group begins with a distinct heading entry."
 (define-key *buffer-list-filter-input-mode-keymap* "C-h"
   'lem/multi-column-list::multi-column-list/delete-previous-char)
 (define-key *buffer-list-filter-input-mode-keymap* "Return"
-  'lem-yath-buffer-list-accept-name-filter)
+  'lem-yath-buffer-list-accept-input-filter)
 (define-key *buffer-list-filter-input-mode-keymap* "Escape"
-  'lem-yath-buffer-list-cancel-name-filter)
+  'lem-yath-buffer-list-cancel-input-filter)
 (define-key *buffer-list-filter-input-mode-keymap* "C-g"
-  'lem-yath-buffer-list-cancel-name-filter)
+  'lem-yath-buffer-list-cancel-input-filter)
 
 (define-key *buffer-list-picker-mode-keymap* "Space"
   'lem-yath-buffer-list-check-and-down)
@@ -891,6 +963,14 @@ Each nonempty group begins with a distinct heading entry."
   'lem/multi-column-list::multi-column-list/quit)
 (define-key *buffer-list-picker-mode-keymap* "s n"
   'lem-yath-buffer-list-start-name-filter)
+(define-key *buffer-list-picker-mode-keymap* "s m"
+  'lem-yath-buffer-list-start-mode-filter)
+(define-key *buffer-list-picker-mode-keymap* "s f"
+  'lem-yath-buffer-list-start-filename-filter)
+(define-key *buffer-list-picker-mode-keymap* "s b"
+  'lem-yath-buffer-list-start-basename-filter)
+(define-key *buffer-list-picker-mode-keymap* "s ."
+  'lem-yath-buffer-list-start-extension-filter)
 (define-key *buffer-list-picker-mode-keymap* "s i"
   'lem-yath-buffer-list-filter-modified)
 (define-key *buffer-list-picker-mode-keymap* "s v"

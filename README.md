@@ -256,12 +256,14 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   right-aligned size, fixed-width elided mode, and file columns. Return collapses
   or expands a heading. The effective Evil-Collection `o a/v/s/f/m`, `o i`, and comma sort controls
   work inside every group, while backtick rotates between the detailed and
-  compact name/file formats. Evil-Collection-style `s n` enters literal name
-  filtering; Return accepts the filter and Escape cancels it. `m/u/U/t/~`
+  compact name/file formats. Evil-Collection-style `s m/n/f/b/.` enter live,
+  case-insensitive regexp filters for mode, name, full filename, basename, or
+  extension; Return pushes the filter and Escape cancels pending input.
+  `m/u/U/t/~`
   manage ordinary `>` marks, `d` assigns distinct `D` deletion marks, `x`
   executes those deletions, and `S` saves marked buffers. `gj/gk`,
   Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide the corresponding modal row,
-  group, and quit navigation. The no-prompt filter stack supports modified and
+  group, and quit navigation. The filter stack also supports modified and
   visiting-file filters on `s i/v`, top-filter negation and removal on `s !/p`,
   and complete disable on `s /`
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup

@@ -624,8 +624,9 @@ if start_fixture_session "$recent_session" verify &&
     lem_keys "$recent_session" Escape
   fi
 
-  # Existing list-buffers remains a multi-column, live-filtered chooser whose
-  # Return action switches to the focused buffer.
+  # The modal list-buffers chooser enters its name filter through the effective
+  # Evil-Collection s n prefix; one Return commits the filter and the next
+  # visits the focused buffer.
   if invoke_test_command "$recent_session" lem-yath-test-setup-buffer-list '^BUFFER-LIST READY '; then
     send_chord "$recent_session" C-x C-b
     if lem_wait_for "$recent_session" \
@@ -638,6 +639,7 @@ if start_fixture_session "$recent_session" verify &&
       else
         fail buffer-list-columns "the expected file-backed rows were absent" "$recent_session"
       fi
+      send_chord "$recent_session" s n
       tmux_cmd send-keys -t "$recent_session" -l zz-target
       sleep 0.6
       screen=$(lem_capture "$recent_session")
@@ -647,7 +649,7 @@ if start_fixture_session "$recent_session" verify &&
       else
         fail buffer-list-filter "the filter did not isolate zz-target" "$recent_session"
       fi
-      lem_keys "$recent_session" Enter
+      lem_keys "$recent_session" Enter Enter
       if lem_wait_for "$recent_session" 'DAILY BETA BUFFER TARGET' "$WAIT_TIMEOUT" >/dev/null; then
         current_before=$(report_count '^CURRENT ')
         lem_keys "$recent_session" F10
