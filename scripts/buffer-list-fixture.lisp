@@ -126,6 +126,35 @@
      (buffer-list-format-columns component)
      names)))
 
+(define-command lem-yath-test-buffer-list-nav-state () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (focus (buffer-list-current-item component))
+         (focus-entry (and focus (buffer-list-item-entry focus)))
+         (focus-label
+           (cond
+             ((null focus-entry) "none")
+             ((buffer-list-entry-heading-p focus-entry)
+              (format nil "heading:~a" (buffer-list-entry-group focus-entry)))
+             (t
+              (format nil "buffer:~a"
+                      (completion-path-display-string
+                       (buffer-name (buffer-list-entry-buffer focus-entry)))))))
+         (marks
+           (loop :for item :in (buffer-list-component-all-items component)
+                 :for entry := (buffer-list-item-entry item)
+                 :when (and
+                        (not (buffer-list-entry-heading-p entry))
+                        (lem/multi-column-list::multi-column-list-item-checked-p
+                         item))
+                   :collect
+                   (format nil "~a:~c"
+                           (completion-path-display-string
+                           (buffer-name (buffer-list-entry-buffer entry)))
+                           (char (buffer-list-item-mark-string component item)
+                                 0)))))
+    (buffer-list-test-log
+     "NAV focus=~a marks=~{~a~^,~}" focus-label marks)))
+
 (define-command lem-yath-test-buffer-list-reload () ()
   (load (merge-pathnames "src/buffer-list.lisp"
                          (asdf:system-source-directory "lem-yath"))))
@@ -191,6 +220,8 @@
   'lem-yath-test-buffer-list-lifecycle)
 (define-key *buffer-list-picker-mode-keymap* "F8"
   'lem-yath-test-buffer-list-ui-state)
+(define-key *buffer-list-picker-mode-keymap* "F11"
+  'lem-yath-test-buffer-list-nav-state)
 (define-key lem-vi-mode:*normal-keymap* "F10"
   'lem-yath-test-buffer-list-reload)
 

@@ -131,7 +131,10 @@ Each nonempty group begins with a distinct heading entry."
     :accessor buffer-list-component-format-index)
    (recency-ranks
     :initform (make-hash-table :test #'eq)
-    :reader buffer-list-component-recency-ranks)))
+    :reader buffer-list-component-recency-ranks)
+   (deletion-items
+    :initform (make-hash-table :test #'eq)
+    :reader buffer-list-component-deletion-items)))
 
 (defparameter *buffer-list-sort-mode-cycle*
   '(:alphabetic :filename :major-mode :mode-name :recency :size)
@@ -151,6 +154,15 @@ Each nonempty group begins with a distinct heading entry."
      :keymap *buffer-list-picker-mode-keymap*
      :hide-from-modeline t))
 
+(defvar *buffer-list-filter-input-mode-keymap*
+  (make-keymap :description '*buffer-list-filter-input-mode-keymap*)
+  "Literal input map used after starting an Ibuffer name filter.")
+
+(define-minor-mode buffer-list-filter-input-mode
+    (:name "buffer-list-filter-input"
+     :keymap *buffer-list-filter-input-mode-keymap*
+     :hide-from-modeline t))
+
 (defmethod initialize-instance :after
     ((component buffer-list-component) &key &allow-other-keys)
   (let ((items
@@ -168,6 +180,21 @@ Each nonempty group begins with a distinct heading entry."
 
 (defun buffer-list-item-entry (item)
   (lem/multi-column-list::unwrap item))
+
+(defun buffer-list-item-mark-string (component item)
+  (let ((entry (buffer-list-item-entry item)))
+    (cond
+      ((buffer-list-entry-heading-p entry) "  ")
+      ((gethash item (buffer-list-component-deletion-items component)) "D ")
+      ((lem/multi-column-list::multi-column-list-item-checked-p item) "> ")
+      (t "  "))))
+
+(defmethod lem/multi-column-list:map-columns :around
+    ((component buffer-list-component) item)
+  (let ((columns (call-next-method)))
+    (if (lem/multi-column-list::multi-column-list-use-check-p component)
+        (cons (buffer-list-item-mark-string component item) (rest columns))
+        columns)))
 
 (defun buffer-list-component-entries (component)
   (mapcar #'buffer-list-item-entry
@@ -409,10 +436,66 @@ Each nonempty group begins with a distinct heading entry."
   (alexandria:when-let ((item (buffer-list-current-item component)))
     (buffer-list-item-entry item)))
 
+(defun buffer-list-set-item-mark (component item mark)
+  (let ((entry (and item (buffer-list-item-entry item))))
+    (when (and entry (not (buffer-list-entry-heading-p entry)))
+      (ecase mark
+        (:none
+         (setf (lem/multi-column-list::multi-column-list-item-checked-p item)
+               nil)
+         (remhash item (buffer-list-component-deletion-items component)))
+        (:marked
+         (setf (lem/multi-column-list::multi-column-list-item-checked-p item)
+               t)
+         (remhash item (buffer-list-component-deletion-items component)))
+        (:deletion
+         (setf (lem/multi-column-list::multi-column-list-item-checked-p item)
+               t
+               (gethash item
+                        (buffer-list-component-deletion-items component))
+               t)))
+      t)))
+
 (defun buffer-list-toggle-current-check (component)
   (alexandria:when-let ((entry (buffer-list-current-entry component)))
     (unless (buffer-list-entry-heading-p entry)
-      (lem/multi-column-list::check-current-item component))))
+      (let ((item (buffer-list-current-item component)))
+        (buffer-list-set-item-mark
+         component item
+         (if (lem/multi-column-list::multi-column-list-item-checked-p item)
+             :none
+             :marked))
+        (lem/multi-column-list:update component)))))
+
+(defun buffer-list-mark-current-and-down (component mark)
+  (when (buffer-list-set-item-mark
+         component (buffer-list-current-item component) mark)
+    (lem/multi-column-list:update component))
+  (lem/multi-column-list::multi-column-list/down))
+
+(defun buffer-list-unmark-all (component)
+  (dolist (item (buffer-list-component-all-items component))
+    (buffer-list-set-item-mark component item :none))
+  (clrhash (buffer-list-component-deletion-items component))
+  (lem/multi-column-list:update component))
+
+(defun buffer-list-current-view-items (component)
+  (if (plusp
+       (length
+        (lem/multi-column-list::multi-column-list-search-string component)))
+      (lem/multi-column-list::filtered-items component)
+      (lem/multi-column-list::multi-column-list-items component)))
+
+(defun buffer-list-toggle-all-marks (component)
+  (dolist (item (buffer-list-current-view-items component))
+    (let ((entry (buffer-list-item-entry item)))
+      (unless (buffer-list-entry-heading-p entry)
+        (buffer-list-set-item-mark
+         component item
+         (if (lem/multi-column-list::multi-column-list-item-checked-p item)
+             :none
+             :marked)))))
+  (lem/multi-column-list:update component))
 
 (define-command lem-yath-buffer-list-check-and-down () ()
   (let ((component (lem/multi-column-list::current-multi-column-list)))
@@ -423,6 +506,45 @@ Each nonempty group begins with a distinct heading entry."
   (let ((component (lem/multi-column-list::current-multi-column-list)))
     (lem/multi-column-list::multi-column-list/up)
     (buffer-list-toggle-current-check component)))
+
+(define-command lem-yath-buffer-list-mark-forward () ()
+  (buffer-list-mark-current-and-down
+   (lem/multi-column-list::current-multi-column-list) :marked))
+
+(define-command lem-yath-buffer-list-unmark-forward () ()
+  (buffer-list-mark-current-and-down
+   (lem/multi-column-list::current-multi-column-list) :none))
+
+(define-command lem-yath-buffer-list-mark-deletion () ()
+  (buffer-list-mark-current-and-down
+   (lem/multi-column-list::current-multi-column-list) :deletion))
+
+(define-command lem-yath-buffer-list-unmark-all () ()
+  (buffer-list-unmark-all
+   (lem/multi-column-list::current-multi-column-list)))
+
+(define-command lem-yath-buffer-list-toggle-marks () ()
+  (buffer-list-toggle-all-marks
+   (lem/multi-column-list::current-multi-column-list)))
+
+(define-command lem-yath-buffer-list-start-name-filter () ()
+  "Enter literal name-filter input, matching Evil-Collection Ibuffer's s n."
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (setf (lem/multi-column-list::multi-column-list-search-string component) "")
+    (lem/multi-column-list:update component)
+    (buffer-list-filter-input-mode t)
+    (message "Ibuffer name filter (Return accepts, Escape cancels)")))
+
+(define-command lem-yath-buffer-list-accept-name-filter () ()
+  "Keep the current name filter and return to modal buffer-list commands."
+  (buffer-list-filter-input-mode nil))
+
+(define-command lem-yath-buffer-list-cancel-name-filter () ()
+  "Clear the current name filter and return to modal buffer-list commands."
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (setf (lem/multi-column-list::multi-column-list-search-string component) "")
+    (buffer-list-filter-input-mode nil)
+    (lem/multi-column-list:update component)))
 
 (defun buffer-list-action-items (component)
   (or (remove-if
@@ -451,19 +573,29 @@ Each nonempty group begins with a distinct heading entry."
                                  live-groups :test #'string=)))))
            items))))
 
+(defun buffer-list-delete-items-now (component items)
+  (dolist (item items)
+    (let ((entry (buffer-list-item-entry item)))
+      (buffer-list-delete component entry)
+      (remhash item (buffer-list-component-deletion-items component))
+      (setf (buffer-list-component-all-items component)
+            (delete item
+                    (buffer-list-component-all-items component)
+                    :test #'eq))))
+  (when items
+    (buffer-list-prune-empty-groups component)
+    (buffer-list-reset-visible-items component)
+    (lem/multi-column-list:update component)))
+
 (defun buffer-list-delete-action-items (component)
-  (let ((items (buffer-list-action-items component)))
-    (dolist (item items)
-      (let ((entry (buffer-list-item-entry item)))
-        (buffer-list-delete component entry)
-        (setf (buffer-list-component-all-items component)
-              (delete item
-                      (buffer-list-component-all-items component)
-                      :test #'eq))))
-    (when items
-      (buffer-list-prune-empty-groups component)
-      (buffer-list-reset-visible-items component)
-      (lem/multi-column-list:update component))))
+  (buffer-list-delete-items-now
+   component (buffer-list-action-items component)))
+
+(defun buffer-list-deletion-action-items (component)
+  (remove-if-not
+   (lambda (item)
+     (gethash item (buffer-list-component-deletion-items component)))
+   (buffer-list-component-all-items component)))
 
 (defun buffer-list-save-action-items (component)
   (dolist (item (buffer-list-action-items component))
@@ -473,6 +605,11 @@ Each nonempty group begins with a distinct heading entry."
 (define-command lem-yath-buffer-list-delete-items () ()
   (buffer-list-delete-action-items
    (lem/multi-column-list::current-multi-column-list)))
+
+(define-command lem-yath-buffer-list-execute-deletions () ()
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (buffer-list-delete-items-now
+     component (buffer-list-deletion-action-items component))))
 
 (define-command lem-yath-buffer-list-save-items () ()
   (buffer-list-save-action-items
@@ -522,6 +659,29 @@ Each nonempty group begins with a distinct heading entry."
     (message "Buffer-list format ~d of 2"
              (1+ (buffer-list-component-format-index component)))))
 
+(defun buffer-list-move-to-group (component direction)
+  (let* ((start (buffer-list-current-item component))
+         (move (ecase direction
+                 (:forward #'lem/multi-column-list::multi-column-list/down)
+                 (:backward #'lem/multi-column-list::multi-column-list/up))))
+    (loop :repeat (length
+                   (lem/multi-column-list::multi-column-list-items component))
+          :do (funcall move)
+              (let ((item (buffer-list-current-item component)))
+                (when (and item
+                           (not (eq item start))
+                           (buffer-list-entry-heading-p
+                            (buffer-list-item-entry item)))
+                  (return item))))))
+
+(define-command lem-yath-buffer-list-next-group () ()
+  (buffer-list-move-to-group
+   (lem/multi-column-list::current-multi-column-list) :forward))
+
+(define-command lem-yath-buffer-list-previous-group () ()
+  (buffer-list-move-to-group
+   (lem/multi-column-list::current-multi-column-list) :backward))
+
 (defun buffer-list-kill-selected (window)
   (buffer-list-delete-action-items
    (lem/multi-column-list:multi-column-list-of-window window)))
@@ -559,16 +719,84 @@ Each nonempty group begins with a distinct heading entry."
            :use-check t
            :context-menu (make-buffer-list-context-menu)))
     (lem/multi-column-list:display component)
+    (buffer-list-filter-input-mode nil)
     (buffer-list-picker-mode t)))
+
+;; While entering an `s n` filter, printable keys must remain literal even when
+;; they are modal commands in the surrounding picker (for example the `o`
+;; sorting prefix and `t` mark toggle in a query such as "sort-").
+(loop :for code :from (char-code #\a) :to (char-code #\z)
+      :for key := (string (code-char code))
+      :do (define-key *buffer-list-filter-input-mode-keymap* key
+            'lem/multi-column-list::multi-column-list/default))
+(loop :for code :from (char-code #\A) :to (char-code #\Z)
+      :for key := (string (code-char code))
+      :do (define-key *buffer-list-filter-input-mode-keymap* key
+            'lem/multi-column-list::multi-column-list/default))
+(loop :for code :from (char-code #\0) :to (char-code #\9)
+      :for key := (string (code-char code))
+      :do (define-key *buffer-list-filter-input-mode-keymap* key
+            'lem/multi-column-list::multi-column-list/default))
+(dolist (key '("-" "." "," "[" "]" "/" "'" "\"" ";" ":" "_" "*"
+               "+" "=" "!" "@" "#" "$" "%" "^" "&" "(" ")" "{"
+               "}" "<" ">" "?" "\\" "|" "`" "~"))
+  (define-key *buffer-list-filter-input-mode-keymap* key
+    'lem/multi-column-list::multi-column-list/default))
+(define-key *buffer-list-filter-input-mode-keymap* "Space"
+  'lem/multi-column-list::multi-column-list/default)
+(define-key *buffer-list-filter-input-mode-keymap* "Backspace"
+  'lem/multi-column-list::multi-column-list/delete-previous-char)
+(define-key *buffer-list-filter-input-mode-keymap* "C-h"
+  'lem/multi-column-list::multi-column-list/delete-previous-char)
+(define-key *buffer-list-filter-input-mode-keymap* "Return"
+  'lem-yath-buffer-list-accept-name-filter)
+(define-key *buffer-list-filter-input-mode-keymap* "Escape"
+  'lem-yath-buffer-list-cancel-name-filter)
+(define-key *buffer-list-filter-input-mode-keymap* "C-g"
+  'lem-yath-buffer-list-cancel-name-filter)
 
 (define-key *buffer-list-picker-mode-keymap* "Space"
   'lem-yath-buffer-list-check-and-down)
 (define-key *buffer-list-picker-mode-keymap* "M-Space"
   'lem-yath-buffer-list-up-and-check)
 (define-key *buffer-list-picker-mode-keymap* "C-k"
-  'lem-yath-buffer-list-delete-items)
+  'lem-yath-buffer-list-previous-group)
 (define-key *buffer-list-picker-mode-keymap* "C-s"
   'lem-yath-buffer-list-save-items)
+(define-key *buffer-list-picker-mode-keymap* "m"
+  'lem-yath-buffer-list-mark-forward)
+(define-key *buffer-list-picker-mode-keymap* "u"
+  'lem-yath-buffer-list-unmark-forward)
+(define-key *buffer-list-picker-mode-keymap* "U"
+  'lem-yath-buffer-list-unmark-all)
+(define-key *buffer-list-picker-mode-keymap* "t"
+  'lem-yath-buffer-list-toggle-marks)
+(define-key *buffer-list-picker-mode-keymap* "~"
+  'lem-yath-buffer-list-toggle-marks)
+(define-key *buffer-list-picker-mode-keymap* "d"
+  'lem-yath-buffer-list-mark-deletion)
+(define-key *buffer-list-picker-mode-keymap* "x"
+  'lem-yath-buffer-list-execute-deletions)
+(define-key *buffer-list-picker-mode-keymap* "S"
+  'lem-yath-buffer-list-save-items)
+(define-key *buffer-list-picker-mode-keymap* "g j"
+  'lem/multi-column-list::multi-column-list/down)
+(define-key *buffer-list-picker-mode-keymap* "g k"
+  'lem/multi-column-list::multi-column-list/up)
+(define-key *buffer-list-picker-mode-keymap* "Tab"
+  'lem-yath-buffer-list-next-group)
+(define-key *buffer-list-picker-mode-keymap* "Shift-Tab"
+  'lem-yath-buffer-list-previous-group)
+(define-key *buffer-list-picker-mode-keymap* "C-j"
+  'lem-yath-buffer-list-next-group)
+(define-key *buffer-list-picker-mode-keymap* "] ]"
+  'lem-yath-buffer-list-next-group)
+(define-key *buffer-list-picker-mode-keymap* "[ ["
+  'lem-yath-buffer-list-previous-group)
+(define-key *buffer-list-picker-mode-keymap* "q"
+  'lem/multi-column-list::multi-column-list/quit)
+(define-key *buffer-list-picker-mode-keymap* "s n"
+  'lem-yath-buffer-list-start-name-filter)
 (define-key *buffer-list-picker-mode-keymap* "o a"
   'lem-yath-buffer-list-sort-alphabetic)
 (define-key *buffer-list-picker-mode-keymap* "o v"

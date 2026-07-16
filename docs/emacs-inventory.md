@@ -136,9 +136,14 @@ The active Emacs defaults sort by recency. Evil-Collection remaps the stock sort
 prefix: `o a/v/s/f/m` select name, recency, size, filename, or major-mode
 sorting, `o i` reverses it, comma cycles the available sorters, and backtick
 rotates to the second stock name/file format; `s` remains its filter prefix.
-The Lem chooser implements those controls within each configured group.
-Live name filtering temporarily presents only matching selectable buffer rows
-(`src/buffer-list.lisp`, `scripts/buffer-list-test.sh`).
+The Lem chooser implements those controls within each configured group. Its
+effective modal core also matches `m/u/U/t/~`, deletion marking and execution
+with `d` then `x`, marked save with `S`, row movement with `gj/gk`, group
+movement with Tab/backtab, `C-j/C-k`, and `]]/[[`, and quit with `q`. `s n`
+enters literal name-filter input so modal command letters remain searchable;
+Return accepts the filter and Escape cancels it. Filtering temporarily presents
+only matching selectable buffer rows (`src/buffer-list.lisp`,
+`scripts/buffer-list-test.sh`).
 
 ### 1.4 Mode-local bindings
 

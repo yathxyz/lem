@@ -896,13 +896,18 @@ through the ncurses editor.
   sorting with `o a/v/s/f/m`, reverse with `o i`, traverse the lexical sorter cycle with
   comma, and switch between the detailed and compact name/file formats with
   backtick. Sorting preserves group order, headings, marks, and narrowing.
-  Return, mark/save/kill, and control-character-safe display remain available.
+  `s n` enters literal name filtering, Return accepts its query, and Escape
+  cancels it. The modal operation core uses `m/u/U/t/~` for ordinary marks,
+  distinct `d` deletion marks followed by `x`, and `S` for marked saves;
+  `gj/gk`, Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide row movement, group
+  movement, and quit. Control-character-safe display remains available.
   The real TUI verifies classification, ordering, every bound sorter, reversal,
   cycling, both formats, empty-group omission, heading collapse/expansion and
-  safety, filtering, stock field widths including wide characters, selection,
-  marked actions, and reload. Lem has no visited-file locking state, and
-  Ibuffer's wider filter stack, marking, and operation commands are not
-  reproduced.
+  safety, literal filtering across modal command letters, stock field widths
+  including wide characters, selection, every modal movement above, ordinary
+  and deletion mark rendering, marked save/deletion, and reload. Lem has no
+  visited-file locking state, and Ibuffer's wider filter stack and specialized
+  bulk mark/operation catalogs are not reproduced.
 - Recent files: `M-g r` opens an annotated Lem persistent-MRU prompt after
   lem-yath sets the loaded
   history's 300-entry limit and normalizes oversized persisted histories to their

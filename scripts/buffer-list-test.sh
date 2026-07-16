@@ -81,6 +81,21 @@ report_ui() {
   return 1
 }
 
+report_nav() {
+  local before attempts=0
+  before=$(grep -c '^NAV ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F11
+  while ((attempts < 40)); do
+    if (( $(grep -c '^NAV ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^NAV ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
 fixture="$(lem-yath_lisp_string "$here/scripts/buffer-list-fixture.lisp")"
 lem_start "$session" "$source_file" --eval "(load #P$fixture)"
 
@@ -138,19 +153,18 @@ else
 fi
 
 # Heading rows are presentation/control rows, never buffer-operation targets.
-lem_keys "$session" C-k
-lem_keys "$session" C-s
-lem_keys "$session" Space
+lem_keys "$session" x
+lem_keys "$session" S
+lem_keys "$session" U
 sleep 0.3
 screen=$(lem_capture "$session")
 if grep -Fq '[ org ]' <<<"$screen" &&
    grep -Fq '*Org Src buffer...' <<<"$screen" &&
-   ! grep -Eq 'x[[:space:]]+\[ org \]' <<<"$screen"; then
+   ! grep -Eq '[>D][[:space:]]+\[ org \]' <<<"$screen"; then
   pass heading-safety "kill, save, and mark cannot target a group heading"
 else
   fail heading-safety "a buffer action mutated or marked a group heading"
 fi
-lem_keys "$session" BTab
 
 # The first row is the first nonempty group heading.  Return follows Ibuffer:
 # hide its rows, retain an ellipsis heading, and expand it again in place.
@@ -176,6 +190,7 @@ else
   fail grouped-expand "the focused heading did not expand safely"
 fi
 
+lem_keys "$session" s n
 tmux_cmd send-keys -t "$session" -l 'zz-target'
 sleep 0.6
 screen=$(lem_capture "$session")
@@ -187,6 +202,8 @@ else
   fail grouped-filter "filtering retained headings or unrelated rows"
 fi
 
+# Accept the name filter, then use modal Return to visit the focused row.
+lem_keys "$session" Enter
 lem_keys "$session" Enter
 if lem_wait_for "$session" 'BUFFER LIST SELECTED TARGET' 15 >/dev/null; then
   before=$(grep -c '^CURRENT ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
@@ -295,19 +312,150 @@ if lem_wait_for "$session" 'Buffer[[:space:]]+Size[[:space:]]+Mode[[:space:]]+Fi
   else
     fail primary-format "primary format did not return: $ui"
   fi
+
+  lem_keys "$session" Tab
+  nav=$(report_nav || true)
+  if [[ "$nav" == 'NAV focus=heading:tramp marks=' ]]; then
+    pass group-next-tab "Tab moved to the next configured filter group"
+  else
+    fail group-next-tab "unexpected Tab destination: $nav"
+  fi
+
+  lem_keys "$session" BTab
+  nav=$(report_nav || true)
+  if [[ "$nav" == 'NAV focus=heading:org marks=' ]]; then
+    pass group-previous-tab "backtab returned to the previous filter group"
+  else
+    fail group-previous-tab "unexpected backtab destination: $nav"
+  fi
+
+  lem_keys "$session" ']' ']'
+  nav=$(report_nav || true)
+  if [[ "$nav" == 'NAV focus=heading:tramp marks=' ]]; then
+    pass group-next-bracket "]] moved to the next filter group"
+  else
+    fail group-next-bracket "unexpected ]] destination: $nav"
+  fi
+
+  lem_keys "$session" '[' '['
+  lem_keys "$session" C-j
+  nav=$(report_nav || true)
+  if [[ "$nav" == 'NAV focus=heading:tramp marks=' ]]; then
+    pass group-next-control "C-j moved to the next filter group"
+  else
+    fail group-next-control "unexpected C-j destination: $nav"
+  fi
+
+  lem_keys "$session" C-k
+  nav=$(report_nav || true)
+  if [[ "$nav" == 'NAV focus=heading:org marks=' ]]; then
+    pass group-previous-control "C-k returned to the previous filter group"
+  else
+    fail group-previous-control "unexpected C-k destination: $nav"
+  fi
+
+  lem_keys "$session" g j
+  nav=$(report_nav || true)
+  if [[ "$nav" == NAV\ focus=buffer:\*Org\ Src* ]]; then
+    pass modal-row-motion "gj moved one row without invoking global screen motion"
+  else
+    fail modal-row-motion "unexpected gj destination: $nav"
+  fi
+
+  lem_keys "$session" g k
+  nav=$(report_nav || true)
+  if [[ "$nav" == 'NAV focus=heading:org marks=' ]]; then
+    pass modal-row-return "gk returned to the group heading"
+  else
+    fail modal-row-return "unexpected gk destination: $nav"
+  fi
 else
   fail sorting-ui "could not reopen the grouped chooser for sorting"
 fi
-lem_keys "$session" Escape
+lem_keys "$session" q
 
 lem_keys "$session" C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'sort-'
+if lem_wait_for "$session" 'sort-[[:space:]]' 15 >/dev/null; then
+  lem_keys "$session" Enter
+  lem_keys "$session" m
+  lem_keys "$session" d
+  nav=$(report_nav || true)
+  screen=$(lem_capture "$session")
+  if [[ "$nav" == *'buffer-list-sort-zeta:>,buffer-list-sort-middle:D'* ]] &&
+     grep -Eq '>[[:space:]]+.*buffer-list-sor' <<<"$screen" &&
+     grep -Eq 'D[[:space:]]+.*buffer-list-sor' <<<"$screen"; then
+    pass modal-marks "m and d rendered distinct Evil-Collection > and D marks"
+  else
+    fail modal-marks "ordinary/deletion marks diverged: $nav"
+  fi
+
+  lem_keys "$session" U
+  nav=$(report_nav || true)
+  if [[ "$nav" == *'marks=' ]]; then
+    pass modal-unmark-all "U cleared ordinary and deletion marks"
+  else
+    fail modal-unmark-all "U retained marks: $nav"
+  fi
+
+  lem_keys "$session" g k
+  lem_keys "$session" g k
+  lem_keys "$session" m
+  lem_keys "$session" g k
+  lem_keys "$session" u
+  nav=$(report_nav || true)
+  if [[ "$nav" == *'marks=' ]]; then
+    pass modal-unmark-forward "u cleared the current ordinary mark and advanced"
+  else
+    fail modal-unmark-forward "u retained the current ordinary mark: $nav"
+  fi
+
+  lem_keys "$session" t
+  nav=$(report_nav || true)
+  if [[ "$nav" == *'buffer-list-sort-zeta:>,buffer-list-sort-middle:>,buffer-list-sort-alpha:>'* ]]; then
+    pass modal-toggle-marks "t marked every visible buffer"
+  else
+    fail modal-toggle-marks "t did not toggle all visible rows: $nav"
+  fi
+
+  lem_keys "$session" '~'
+  nav=$(report_nav || true)
+  if [[ "$nav" == *'marks=' ]]; then
+    pass modal-toggle-clear "~ inverted the marked set back to empty"
+  else
+    fail modal-toggle-clear "~ retained marks: $nav"
+  fi
+
+  lem_keys "$session" s n
+  tmux_cmd send-keys -t "$session" -l 'sort-'
+  lem_wait_for "$session" 'sort-[[:space:]]' 15 >/dev/null ||
+    fail modal-filter-cancel "s n did not re-enter literal filter input"
+  lem_keys "$session" Escape
+  sleep 0.3
+  screen=$(lem_capture "$session")
+  if grep -Eq 'Buffer[[:space:]]+Size[[:space:]]+Mode[[:space:]]+File' <<<"$screen" &&
+     grep -Fq '[ org ]' <<<"$screen"; then
+    pass modal-filter-cancel "Escape cancelled s n input and restored grouped rows"
+  else
+    fail modal-filter-cancel "Escape retained the name filter"
+  fi
+else
+  fail modal-marks "could not narrow to modal mark fixtures"
+  lem_keys "$session" Escape
+fi
+lem_keys "$session" q
+
+lem_keys "$session" C-x C-b
+lem_keys "$session" s n
 tmux_cmd send-keys -t "$session" -l 'save-target'
 if lem_wait_for "$session" 'buffer-list-save-target\.txt' 15 >/dev/null; then
-  lem_keys "$session" Space
-  lem_keys "$session" C-s
+  lem_keys "$session" Enter
+  lem_keys "$session" m
+  lem_keys "$session" S
   sleep 0.5
   if cmp -s "$LEM_YATH_BUFFER_LIST_SAVE_TARGET" <(printf 'SAVE ORIGINAL\nSAVE LOCAL\n'); then
-    pass marked-save "Space plus C-s saved the marked grouped entry"
+    pass marked-save "m plus S saved the marked grouped entry"
   else
     fail marked-save "the marked file buffer was not saved exactly"
     od -An -tx1 "$LEM_YATH_BUFFER_LIST_SAVE_TARGET" 2>/dev/null || true
@@ -320,13 +468,15 @@ lem_wait_for "$session" 'SAVE LOCAL' 15 >/dev/null ||
   fail marked-save-select "Return did not close the chooser on the saved buffer"
 
 lem_keys "$session" C-x C-b
+lem_keys "$session" s n
 tmux_cmd send-keys -t "$session" -l 'kill-target'
 sleep 0.6
 screen=$(lem_capture "$session")
 if (( $(grep -Fc 'buffer-list-kil...' <<<"$screen") >= 2 )); then
-  lem_keys "$session" Space
-  lem_keys "$session" Space
-  lem_keys "$session" C-k
+  lem_keys "$session" Enter
+  lem_keys "$session" d
+  lem_keys "$session" d
+  lem_keys "$session" x
   sleep 0.5
   before=$(grep -c '^LIFECYCLE ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
   lem_keys "$session" F7
@@ -337,7 +487,7 @@ if (( $(grep -Fc 'buffer-list-kil...' <<<"$screen") >= 2 )); then
     attempts=$((attempts + 1))
   done
   if grep -q '^LIFECYCLE save-modified=no kill-a=dead kill-b=dead$' "$LEM_YATH_BUFFER_LIST_REPORT"; then
-    pass marked-kill "Space plus C-k removed both marked entries and the stale filter snapshot"
+    pass marked-kill "d plus x removed both deletion-marked entries and the stale filter snapshot"
   else
     fail marked-kill "marked entry deletion did not cleanly update the chooser snapshot"
   fi
