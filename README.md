@@ -396,6 +396,15 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   checkboxes, tables and rules, block/keyword markers, timestamps, and targets
   render without changing source bytes or cursor cells. Source-block bodies
   remain literal, and `M-x org-modern-mode` toggles the presentation per buffer
+- the configured `M-x org-download-yank` and `M-x org-download-clipboard`
+  workflows. URL or local `file:` images receive org-download's timestamped
+  names under startup-cached `$WORKDIR/media/`, a seconds-precise
+  `#+DOWNLOADED:` annotation, and a source-relative Org link. Linux clipboard
+  capture selects `wl-paste` on Wayland or `xclip` otherwise and creates the
+  current heading ID. Transfers use direct argument vectors, time and size
+  bounds, signature validation, private temporary files, and an atomic
+  one-step buffer edit; undo removes the ID/annotation/link but retains the
+  captured file, matching org-download's cross-resource boundary
 - GNU Org source-block editing on `C-c '`. The block body opens without its
   delimiters in the configured language mode while preserving indentation and
   Org's protective-comma convention. `C-c '` writes back and exits, `C-c C-k`
@@ -543,8 +552,8 @@ credential-free backend streaming/resume, private preset persistence, web
 handoff, read-only fetch/GitHub MCP client sessions, integrated Claude Code
 interaction, and authenticated MCP diff review,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
-roam, roam backlinks, native Org and Org-modern projection, Org
-planning/timestamps, agenda, agenda-clock, and
+roam, roam backlinks, native Org, Org-modern projection, Org image
+capture/download, planning/timestamps, agenda, agenda-clock, and
 parity-ledger checks. The ledger can also be
 validated directly, and the
 interactive TUI checks are exposed as flake apps:
@@ -611,6 +620,7 @@ nix run .#roam-test
 nix run .#roam-backlink-test
 nix run .#org-test
 nix run .#org-modern-test
+nix run .#org-download-test
 nix run .#org-planning-test
 nix run .#org-timestamp-test
 nix run .#org-source-edit-test
@@ -637,6 +647,6 @@ Pass `check`, `compile`, `compilation`, `terminal`, `server`, `boot`, `completio
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `business-visual`, `cursor-state`, `snipe`, `avy`,
 `documents`, `notmuch`, `interactive`, `structural`, `roam`, `roam-backlinks`,
-`org-modern`, or `notes` to run only that gate.
+`org-modern`, `org-download`, or `notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

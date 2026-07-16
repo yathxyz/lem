@@ -2153,6 +2153,30 @@ disk bytes. Graphical font scaling, pixel spacing, fringe markers, dynamic
 progress-cookie sizing, and exact `org-modern-agenda` decoration are outside
 the ncurses/custom-agenda presentation model.
 
+`src/org/download.lisp` supplies the two configured org-download entry points.
+`M-x org-download-yank` reads an HTTP(S) or local `file:` URL from the kill
+ring; `M-x org-download-clipboard` captures PNG data with `wl-paste` when
+`XDG_SESSION_TYPE=wayland` and `xclip` otherwise. Both write org-download's
+timestamped basename directly below startup-cached `$WORKDIR/media/`, insert a
+seconds-precise `#+DOWNLOADED:` annotation and source-relative `file:` link,
+and leave the Org buffer unsaved. Clipboard capture also creates or reuses the
+current heading's Org ID. One Normal-state undo removes the complete buffer
+edit but deliberately does not delete the already captured file, matching the
+package's ordinary filesystem/undo boundary.
+
+Network and clipboard readers use direct argument vectors behind a hard
+timeout and 64-MiB stream bound. URL text enters curl through stdin config
+rather than process argv; HTTP redirects remain restricted to HTTP(S). Secure
+same-directory temporary files, regular-file checks, image/PDF signatures,
+sanitized names, collision refusal, and retained buffer change groups prevent
+partial links or files on failure. `scripts/org-download-test.sh` drives both
+exact commands through physical M-x input and proves Wayland/X11 selection,
+URL secrecy, relative links, local file URLs, timestamps, modes, one-step undo,
+invalid/oversize cleanup, invalid-URL refusal, and read-only preflight. Unlike
+the pinned Emacs package, URL retrieval is synchronous and images are not
+rendered inline in the ncurses buffer; non-Linux clipboard backends are outside
+the configured deployment.
+
 The bounded editing layer supplies visible-row `j/k`, GNU-style
 `gh/gl/gk/gj/gH` element-tree navigation, Org-aware `o/O`, heading insertion,
 and context-dispatched Meta editing. `M-h/l` changes one heading or list item
@@ -2442,7 +2466,8 @@ source editing, variables/sessions and the rest of Babel's
 backend/header/result matrix; in-editor LaTeX preview, non-HTML export
 backends, and exact `ox-html` output remain explicit gaps. The display-only
 org-modern terminal subset and initial empty Org scratch are implemented;
-exact graphical org-modern and agenda presentation remain limitations. Agenda
+exact graphical org-modern, inline image rendering, and agenda presentation
+remain limitations. Agenda
 scanning and capture/roam workflows are separate bounded implementations
 rather than services of this major mode.
 

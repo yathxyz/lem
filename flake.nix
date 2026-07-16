@@ -293,7 +293,11 @@
               sops
               which
             ]
-            ++ lib.optionals pkgs.stdenv.isLinux [ xdg-utils ];
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              wl-clipboard
+              xclip
+              xdg-utils
+            ];
 
           dapRuntimeInputs = with pkgs; [
             delve
@@ -708,6 +712,9 @@
             org-modern-test =
               mkTestAppWithLem lemYath "lem-yath-org-modern-test"
                 "org-modern-test.sh";
+            org-download-test =
+              mkTestAppWithLem lemYath "lem-yath-org-download-test"
+                "org-download-test.sh";
             org-planning-test = mkTestAppWithLem lemYath "lem-yath-org-planning-test" "org-planning-test.sh";
             org-timestamp-test = mkTestAppWithLem lemYath "lem-yath-org-timestamp-test" "org-timestamp-test.sh";
             org-source-edit-test =
@@ -818,6 +825,7 @@
             roam-backlinks = mkCheckWithLem lemYath "roam-backlinks" "roam-backlink-test.sh";
             org = mkCheckWithLem lemYath "org" "org-test.sh";
             org-modern = mkCheckWithLem lemYath "org-modern" "org-modern-test.sh";
+            org-download = mkCheckWithLem lemYath "org-download" "org-download-test.sh";
             org-planning = mkCheckWithLem lemYath "org-planning" "org-planning-test.sh";
             org-timestamp = mkCheckWithLem lemYath "org-timestamp" "org-timestamp-test.sh";
             org-source-edit = mkCheckWithLem lemYath "org-source-edit" "org-source-edit-test.sh";

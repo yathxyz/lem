@@ -168,13 +168,32 @@ start_org() {
 }
 
 mx() {
-  local session="$1" command="$2"
-  tmux_cmd send-keys -t "$session" Escape Escape M-x
+  local session="$1" command="$2" index
+  tmux_cmd send-keys -t "$session" Escape Escape
+  sleep 0.5
+  wait_screen_absent "$session" 'Command:' 5 || return 1
+  tmux_cmd send-keys -t "$session" M-x
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
-  tmux_cmd send-keys -t "$session" -l "$command"
-  sleep 0.5
+  for ((index = 0; index < ${#command}; index++)); do
+    tmux_cmd send-keys -t "$session" -l -- "${command:index:1}"
+    sleep 0.03
+  done
+  lem_wait_for "$session" "Command: ${command}" 10 >/dev/null || return 1
   tmux_cmd send-keys -t "$session" Enter
-  sleep 0.5
+  wait_screen_absent "$session" 'Command:' 10 || return 1
+  sleep 0.25
+}
+
+wait_screen_absent() {
+  local session="$1" pattern="$2" timeout="${3:-10}" attempts=0
+  while ((attempts < timeout * 4)); do
+    if ! lem_capture "$session" | grep -qE "$pattern"; then
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
 }
 
 wait_report() {

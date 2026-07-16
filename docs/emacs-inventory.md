@@ -539,7 +539,7 @@ to its top-level, non-hidden `.org` files. `initial-major-mode org-mode`.
 
 ### Visuals & babel
 - **org-modern**: `org-modern-mode` on org buffers + `org-modern-agenda` on agenda finalize.
-- **org-download** (deferred): `org-download-clipboard`/`org-download-yank`. Image dir = `$WORKDIR/media/`, `org-download-heading-lvl nil`.
+- **org-download** (deferred command loading in Emacs): `org-download-clipboard`/`org-download-yank`. Image dir = `$WORKDIR/media/`, `org-download-heading-lvl nil`. The Lem port exposes the same command names and destination policy in `src/org/download.lisp`.
 - **Babel**: loaded langs = shell, sqlite, emacs-lisp, C, sql, python. `org-confirm-babel-evaluate` = custom `yath/org-confirm-babel-evaluate` (no prompt for `emacs-lisp`/`sqlite` inside trusted `$WORKDIR` notes). Python results = output; export = code. Custom `org-babel-execute:my/nix` (nix-build blocks). `ob-dsq` (datasette query), `ob-async` declared. LaTeX preview scale 2.
 - **Publishing**: `org-publish-project-alist` — `org-roam-notes` (org->html) + `static` (assets) from `~/work/roam/` & `~/work/` to `~/proj/web/org-publishing/`.
 
