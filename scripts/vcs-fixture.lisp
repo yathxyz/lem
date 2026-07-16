@@ -124,6 +124,22 @@
              "timemachine-gtg-nth")
       (check (vcs-test-key-command *lem-yath-timemachine-keymap* "g t t")
              "timemachine-gtt-fuzzy")
+      (check (eq 'lem-yath-timemachine-copy-abbreviated-revision
+                 (vcs-test-key-command *lem-yath-timemachine-keymap*
+                                       "g t y"))
+             "timemachine-gty-copy-short")
+      (check (eq 'lem-yath-timemachine-copy-revision
+                 (vcs-test-key-command *lem-yath-timemachine-keymap*
+                                       "g t Y"))
+             "timemachine-gtY-copy-full")
+      (check (eq 'lem-yath-timemachine-blame
+                 (vcs-test-key-command *lem-yath-timemachine-keymap*
+                                       "g t b"))
+             "timemachine-gtb-blame")
+      (check (eq 'lem-yath-timemachine-blame-quit
+                 (vcs-test-key-command
+                  *lem-yath-timemachine-blame-keymap* "q"))
+             "timemachine-blame-q")
       (check (typep (vcs-test-key-command *lem-yath-jj-view-keymap* "g")
                     'lem-core::keymap)
              "jj-g-is-prefix")
@@ -613,6 +629,37 @@
          "TIMEMACHINE active=no current=~a"
          (vcs-test-encode (buffer-name buffer))))))
 
+(defun vcs-test-killring-head ()
+  (or (lem/common/killring:peek-killring-item (current-killring) 0) ""))
+
+(define-command lem-yath-test-vcs-timemachine-extra-state () ()
+  (let* ((buffer (current-buffer))
+         (history (tm-buffer-p buffer))
+         (blame (tm-blame-buffer-p buffer))
+         (parent (and blame (buffer-value buffer *tm-blame-parent-key*)))
+         (revision (tm-current-revision (if history buffer parent)))
+         (hash (and revision (tm-revision-hash revision)))
+         (short (and hash
+                     (subseq hash 0 (min *tm-abbreviation-length*
+                                         (length hash)))))
+         (head (vcs-test-killring-head))
+         (text (buffer-text buffer)))
+    (vcs-test-log
+     (concatenate
+      'string
+      "TIMEMACHINE-EXTRA history=~a blame=~a parent=~a short=~a full=~a "
+      "read-only=~a author=~a date=~a content=~a blame-live=~d")
+     (vcs-test-yes-no history)
+     (vcs-test-yes-no blame)
+     (vcs-test-yes-no (and parent (tm-buffer-p parent)))
+     (vcs-test-yes-no (and short (string= head short)))
+     (vcs-test-yes-no (and hash (string= head hash)))
+     (vcs-test-yes-no (buffer-read-only-p buffer))
+     (vcs-test-yes-no (search "Lem Yath Test" text))
+     (vcs-test-yes-no (search "2001-01-02" text))
+     (vcs-test-yes-no (search "vcs-history :old" text))
+     (count-if #'tm-blame-buffer-p (buffer-list)))))
+
 (define-command lem-yath-test-vcs-source-state () ()
   (let ((buffer *vcs-test-source-buffer*))
     (vcs-test-log
@@ -732,6 +779,11 @@
    :newer (vcs-test-key-command *lem-yath-timemachine-keymap* "C-j")
    :nth (vcs-test-key-command *lem-yath-timemachine-keymap* "g t g")
    :fuzzy (vcs-test-key-command *lem-yath-timemachine-keymap* "g t t")
+   :short (vcs-test-key-command *lem-yath-timemachine-keymap* "g t y")
+   :full (vcs-test-key-command *lem-yath-timemachine-keymap* "g t Y")
+   :blame (vcs-test-key-command *lem-yath-timemachine-keymap* "g t b")
+   :blame-quit (vcs-test-key-command
+                *lem-yath-timemachine-blame-keymap* "q")
    :p (vcs-test-key-command *lem-yath-timemachine-keymap* "p")
    :n (vcs-test-key-command *lem-yath-timemachine-keymap* "n")
    :t (vcs-test-key-command *lem-yath-timemachine-keymap* "t")
@@ -752,8 +804,8 @@
             "RELOAD same=~a find=~d post=~d save=~d change=~d kill=~d "
             "global=~d source=~d directory=~d root-marker=~d todo-hook=~d "
             "smart=~a git=~a jj=~a time=~a jj-refresh=~a jj-quit=~a "
-            "older=~a newer=~a nth=~a "
-            "fuzzy=~a p=~a n=~a t=~a quit=~a")
+            "older=~a newer=~a nth=~a fuzzy=~a short=~a full=~a blame=~a "
+            "blame-quit=~a p=~a n=~a t=~a quit=~a")
            (vcs-test-yes-no (equal before after))
            (getf after :find)
            (getf after :post)
@@ -780,6 +832,10 @@
             (eq (getf after :newer) 'lem-yath-timemachine-newer))
            (vcs-test-yes-no (getf after :nth))
            (vcs-test-yes-no (getf after :fuzzy))
+           (vcs-test-yes-no (getf after :short))
+           (vcs-test-yes-no (getf after :full))
+           (vcs-test-yes-no (getf after :blame))
+           (vcs-test-yes-no (getf after :blame-quit))
            (vcs-test-yes-no (null (getf after :p)))
            (vcs-test-yes-no (null (getf after :n)))
            (vcs-test-yes-no (null (getf after :t)))
@@ -802,6 +858,8 @@
 (define-key *global-keymap* "F11" 'lem-yath-test-vcs-detour-timemachine)
 (define-key *global-keymap* "F12" 'lem-yath-test-vcs-debounce-state)
 (define-key *global-keymap* "C-c u" 'lem-yath-test-vcs-untracked-state)
+(define-key *global-keymap* "C-c h"
+  'lem-yath-test-vcs-timemachine-extra-state)
 (define-key *global-keymap* "C-c t" 'lem-yath-test-vcs-todo-preview)
 (define-key *global-keymap* "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key *global-keymap* "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)

@@ -30,6 +30,11 @@
   "Buffer variable holding the window that invoked timemachine.")
 (defvar *tm-origin-point-key* 'timemachine-origin-point
   "Buffer variable holding a live point in the invoking buffer.")
+(defvar *tm-blame-parent-key* 'timemachine-blame-parent
+  "Blame-buffer variable holding the history view that opened it.")
+
+(defparameter *tm-abbreviation-length* 12
+  "Pinned git-timemachine commit-hash abbreviation length.")
 
 ;;; --- git plumbing ---------------------------------------------------------
 
@@ -232,11 +237,26 @@ reverse blame maps an older line forward to its newer destination."
      :keymap *lem-yath-timemachine-keymap*)
   "Navigation mode for read-only git-timemachine history buffers.")
 
+(defparameter *lem-yath-timemachine-blame-keymap* (make-keymap))
+
+(define-minor-mode lem-yath-timemachine-blame-mode
+    (:name "timemachine-blame"
+     :keymap *lem-yath-timemachine-blame-keymap*)
+  "Read-only blame view for one git-timemachine revision.")
+
 (defun tm-buffer-p (buffer)
   "True when BUFFER is a live git-timemachine history buffer."
   (and (bufferp buffer)
        (not (deleted-buffer-p buffer))
        (buffer-value buffer *tm-revisions-key*)))
+
+(defun tm-current-revision (&optional (buffer (current-buffer)))
+  "Return BUFFER's displayed TM-REVISION, or NIL outside a history view."
+  (when (tm-buffer-p buffer)
+    (let ((revisions (buffer-value buffer *tm-revisions-key*))
+          (index (buffer-value buffer *tm-index-key*)))
+      (when (and (integerp index) (<= 0 index) (< index (length revisions)))
+        (aref revisions index)))))
 
 (defun tm-render (buffer index &key message location)
   "Replace BUFFER with revision INDEX and restore LOCATION when supplied."
@@ -338,6 +358,89 @@ reverse blame maps an older line forward to its newer destination."
       (if index
           (tm-goto-index buffer index)
           (message "No such revision")))))
+
+(defun tm-copy-revision (abbreviated-p)
+  "Copy the current revision hash, shortening it when ABBREVIATED-P."
+  (alexandria:when-let ((revision (tm-current-revision)))
+    (let* ((hash (tm-revision-hash revision))
+           (text (if abbreviated-p
+                     (subseq hash 0 (min *tm-abbreviation-length*
+                                         (length hash)))
+                     hash)))
+      (copy-to-clipboard-with-killring text)
+      (message text)
+      text)))
+
+(define-command lem-yath-timemachine-copy-abbreviated-revision () ()
+  "Copy the displayed revision's first 12 hash characters."
+  (tm-copy-revision t))
+
+(define-command lem-yath-timemachine-copy-revision () ()
+  "Copy the displayed revision's full commit hash."
+  (tm-copy-revision nil))
+
+(defun tm-blame-buffer-name (root revision)
+  (format nil "*timemachine blame: ~A@~A*"
+          (namestring (merge-pathnames (tm-revision-path revision) root))
+          (subseq (tm-revision-hash revision)
+                  0 (min *tm-abbreviation-length*
+                         (length (tm-revision-hash revision))))))
+
+(defun tm-blame-output (root revision)
+  "Return Git's readable blame for REVISION's historical path."
+  (tm-run-git
+   (list "blame" "--date=short"
+         (format nil "--abbrev=~D" *tm-abbreviation-length*)
+         (tm-revision-hash revision) "--" (tm-revision-path revision))
+   :directory root))
+
+(defun tm-blame-buffer-p (buffer)
+  (and (bufferp buffer)
+       (not (deleted-buffer-p buffer))
+       (lem-core::mode-active-p buffer 'lem-yath-timemachine-blame-mode)
+       (buffer-value buffer *tm-blame-parent-key*)))
+
+(define-command lem-yath-timemachine-blame () ()
+  "Show blame for the displayed revision without changing its history view."
+  (let* ((parent (current-buffer))
+         (revision (tm-current-revision parent)))
+    (when revision
+      (let* ((root (buffer-value parent *tm-root-key*))
+             (output (tm-blame-output root revision)))
+        (if (null output)
+            (message "timemachine: could not blame ~A@~A"
+                     (tm-revision-path revision)
+                     (tm-revision-hash revision))
+            (let ((buffer (make-buffer (tm-blame-buffer-name root revision)
+                                       :directory (namestring root)
+                                       :enable-undo-p nil)))
+              (change-buffer-mode
+               buffer 'lem/buffer/fundamental-mode:fundamental-mode)
+              (save-excursion
+                (setf (current-buffer) buffer)
+                (enable-minor-mode 'lem-yath-timemachine-blame-mode))
+              (with-buffer-read-only buffer nil
+                (erase-buffer buffer)
+                (insert-string (buffer-point buffer) output)
+                (buffer-start (buffer-point buffer)))
+              (buffer-unmark buffer)
+              (setf (buffer-value buffer *tm-blame-parent-key*) parent
+                    (buffer-read-only-p buffer) t)
+              (switch-to-buffer buffer)))))))
+
+(define-command lem-yath-timemachine-blame-quit () ()
+  "Close a blame child view and return to its live history parent."
+  (let* ((buffer (current-buffer))
+         (parent (buffer-value buffer *tm-blame-parent-key*)))
+    (cond
+      ((not (tm-blame-buffer-p buffer))
+       (quit-active-window))
+      ((tm-buffer-p parent)
+       (switch-to-buffer parent)
+       (delete-buffer buffer))
+      (t
+       (setf (buffer-read-only-p buffer) nil)
+       (kill-buffer buffer)))))
 
 (defun tm-release-origin-point (buffer)
   "Release BUFFER's saved origin point exactly once."
@@ -461,6 +564,7 @@ reverse blame maps an older line forward to its newer destination."
 ;; evaluating this file over an older session is deterministic and idempotent.
 (dolist (key '("p" "n" "t" "g" "C-k" "C-j" "q"))
   (undefine-key *lem-yath-timemachine-keymap* key))
+(undefine-key *lem-yath-timemachine-blame-keymap* "q")
 
 (defparameter *lem-yath-timemachine-g-keymap*
   (make-keymap :description '*lem-yath-timemachine-g-keymap*
@@ -472,6 +576,12 @@ reverse blame maps an older line forward to its newer destination."
   "g" 'lem-yath-timemachine-nth)
 (define-key *lem-yath-timemachine-gt-keymap*
   "t" 'lem-yath-timemachine-jump)
+(define-key *lem-yath-timemachine-gt-keymap*
+  "y" 'lem-yath-timemachine-copy-abbreviated-revision)
+(define-key *lem-yath-timemachine-gt-keymap*
+  "Y" 'lem-yath-timemachine-copy-revision)
+(define-key *lem-yath-timemachine-gt-keymap*
+  "b" 'lem-yath-timemachine-blame)
 (define-key *lem-yath-timemachine-g-keymap*
   "t" *lem-yath-timemachine-gt-keymap*)
 (define-key *lem-yath-timemachine-keymap*
@@ -482,6 +592,8 @@ reverse blame maps an older line forward to its newer destination."
   "C-j" 'lem-yath-timemachine-newer)
 (define-key *lem-yath-timemachine-keymap*
   "q" 'lem-yath-timemachine-quit)
+(define-key *lem-yath-timemachine-blame-keymap*
+  "q" 'lem-yath-timemachine-blame-quit)
 
 (remove-hook (variable-value 'kill-buffer-hook :global t)
              'tm-kill-buffer-hook)

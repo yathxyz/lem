@@ -1947,13 +1947,18 @@ persistent offline database are not implemented.
 
 `SPC g t` opens a read-only history buffer at the source point. `C-k` selects
 the older revision, `C-j` the newer revision, `g t g` an oldest-numbered
-revision, `g t t` a revision by commit subject, and `q` returns to the exact
-live source buffer and point while removing the history view. History follows
-renames, translates the anchor across changed line counts, and rejects a
-currently untracked path even when that path has older Git history; ordinary
-Evil `p`, `n`, and `t` remain unshadowed. This tested target matches the configured
-git-timemachine navigation, but the optional Evil-collection `g t y`/`g t Y`
-hash-copy and `g t b` blame commands are absent.
+revision, and `g t t` a revision by commit subject. `g t y` copies the pinned
+12-character hash, `g t Y` copies the full hash, and `g t b` runs Git blame
+against that revision's historical path in a focused read-only child buffer;
+blame `q` removes the child and restores the unchanged history view. History
+`q` returns to the exact live source buffer and point while removing the
+history view. History follows renames, translates the anchor across changed
+line counts, and rejects a currently untracked path even when that path has
+older Git history; ordinary Evil `p`, `n`, and `t` remain unshadowed. Blame is
+a separate text view rather than Magit's inline overlays. The installed TUI
+gate drives every configured history key, verifies exact short/full kill-ring
+values and revision-specific blame content, and checks nested cleanup and
+reload idempotence.
 
 ### Also: git-gutter — `extensions/git-gutter/` (`lem-git-gutter`), in the image. Shows
 add/modify/delete marks in the gutter. Lem-yath replaces the upstream global mode

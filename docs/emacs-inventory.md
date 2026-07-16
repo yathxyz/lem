@@ -480,6 +480,10 @@ next (newer) revision, `g t g` to numeric revision selection, `g t t` to fuzzy
 revision selection, `g t y`/`g t Y` to short/full hash copying, `g t b` to
 blame, and `q` to quit.
 
+Lem now implements that complete configured map. Its blame command uses a
+focused read-only child buffer rather than Magit's overlays and returns to the
+unchanged history view with `q`.
+
 `vc-handled-backends '(Git)` only. `magit`/`magit-todos`/`forge`/`git-gutter`/`git-timemachine` all loaded via `init-evil`.
 
 ---

@@ -347,8 +347,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   new, edit, undo/redo, confirmed abandon, diff, refresh, and navigation keys,
   while programming buffers get buffer-local Git markers and Git status includes
   navigable tracked-file
-  TODO/FIXME rows, and `SPC g t` supplies the audited git-timemachine
-  revision-navigation workflow. Legit's Vi-normal file/hunk staging, commit,
+  TODO/FIXME rows, and `SPC g t` supplies the complete configured
+  Evil-collection git-timemachine map, including revision selection, hash copy,
+  and blame. Legit's Vi-normal file/hunk staging, commit,
   push/pull, branch, and stash workflows are driven end-to-end against isolated
   real remotes by the VCS acceptance gate. Packaged `gh` also backs
   command-accessible GitHub Forge lists, detail views, multiline creation and

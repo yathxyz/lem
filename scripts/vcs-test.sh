@@ -528,7 +528,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -708,6 +708,56 @@ if lem_wait_for "$git_session" 'Commit message:' "$WAIT_TIMEOUT" >/dev/null; the
   fi
 else
   fail timemachine-fuzzy 'gtt did not open the commit-message completion prompt' \
+    "$git_session"
+fi
+
+extra_before=$(report_count '^TIMEMACHINE-EXTRA ')
+send_keys "$git_session" g t y C-c h
+if wait_report_count '^TIMEMACHINE-EXTRA ' "$((extra_before + 1))" &&
+   [[ $(latest_report '^TIMEMACHINE-EXTRA ') == \
+      'TIMEMACHINE-EXTRA history=yes blame=no parent=no short=yes full=no read-only=yes author=no date=no content=yes blame-live=0' ]]; then
+  pass timemachine-copy-short 'gty copied the pinned 12-character revision hash'
+else
+  fail timemachine-copy-short 'gty did not copy the displayed abbreviated hash' \
+    "$git_session"
+fi
+
+extra_before=$(report_count '^TIMEMACHINE-EXTRA ')
+send_keys "$git_session" g t Y C-c h
+if wait_report_count '^TIMEMACHINE-EXTRA ' "$((extra_before + 1))" &&
+   [[ $(latest_report '^TIMEMACHINE-EXTRA ') == \
+      'TIMEMACHINE-EXTRA history=yes blame=no parent=no short=no full=yes read-only=yes author=no date=no content=yes blame-live=0' ]]; then
+  pass timemachine-copy-full 'gtY copied the complete displayed revision hash'
+else
+  fail timemachine-copy-full 'gtY did not copy the displayed full hash' \
+    "$git_session"
+fi
+
+send_keys "$git_session" g t b
+if lem_wait_for "$git_session" 'Lem Yath Test' "$WAIT_TIMEOUT" >/dev/null; then
+  extra_before=$(report_count '^TIMEMACHINE-EXTRA ')
+  send_keys "$git_session" C-c h
+  if wait_report_count '^TIMEMACHINE-EXTRA ' "$((extra_before + 1))" &&
+     [[ $(latest_report '^TIMEMACHINE-EXTRA ') == \
+        'TIMEMACHINE-EXTRA history=no blame=yes parent=yes short=no full=yes read-only=yes author=yes date=yes content=yes blame-live=1' ]]; then
+    pass timemachine-blame 'gtb opened revision-specific read-only blame'
+  else
+    fail timemachine-blame 'the blame view lost its revision, parent, or content' \
+      "$git_session"
+  fi
+else
+  fail timemachine-blame 'gtb did not render the selected revision blame' \
+    "$git_session"
+fi
+
+extra_before=$(report_count '^TIMEMACHINE-EXTRA ')
+send_keys "$git_session" q C-c h
+if wait_report_count '^TIMEMACHINE-EXTRA ' "$((extra_before + 1))" &&
+   [[ $(latest_report '^TIMEMACHINE-EXTRA ') == \
+      'TIMEMACHINE-EXTRA history=yes blame=no parent=no short=no full=yes read-only=yes author=no date=no content=yes blame-live=0' ]]; then
+  pass timemachine-blame-quit 'blame q restored the unchanged history view and cleaned up'
+else
+  fail timemachine-blame-quit 'blame q did not restore and clean the history view' \
     "$git_session"
 fi
 
