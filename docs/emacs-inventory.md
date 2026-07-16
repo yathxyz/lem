@@ -147,6 +147,13 @@ unique renaming with `M/T/R`, one-confirmation marked-or-current reversion with
 `V`, focused-buffer burying with `X`, row movement
 with `gj/gk`, group
 movement with Tab/backtab, `C-j/C-k`, and `]]/[[`, and quit with `q`.
+Picker-local `M-j` completes over the currently displayed group headings and
+moves to the exact heading without changing its collapsed state. `C-o`
+displays the focused buffer in another ordinary window while retaining chooser
+focus, and `M-o` visits it after deleting the other ordinary windows. `A` and
+`gv` replace the chooser with balanced stacked windows for the ordinary-marked
+buffers, while `gV` lays them out side by side; with no ordinary marks these
+view commands use the current row, and `D` marks are excluded.
 `gR` redisplays the existing snapshot, `gr` rebuilds it from live buffers while
 preserving applicable marks and filters, `yb/yf` copy the focused buffer name or
 visiting filename, and `go` visits the focused buffer in another window. `J`

@@ -277,7 +277,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   buries the focused buffer. Deletion-marked buffers are excluded from those
   ordinary-mark operations. `gj/gk`,
   Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide the corresponding modal row,
-  group, and quit navigation. `gR` redisplays the captured snapshot, `gr`
+  group, and quit navigation. `M-j` completes over the displayed group headings
+  without changing collapse state. `C-o` displays the focused buffer in another
+  ordinary window while retaining chooser focus, and `M-o` visits it in a sole
+  ordinary window. `A`/`gv` stack ordinary-marked buffers in balanced windows;
+  `gV` places them side by side. Those view commands exclude `D` and fall back
+  to the unmarked current row. `gR` redisplays the captured snapshot, `gr`
   rebuilds it from live buffers without losing marks or filters, `yb/yf` copy
   the focused buffer name or visiting filename, and `go` visits it in another
   window. `J` and `M-g` complete over the snapshot, reveal collapsed target

@@ -906,7 +906,13 @@ through the ncurses editor.
   `{`/`}` cycle ordinary marks, `M/T/R` change marked modified/read-only/name
   state, and `X` buries the focused buffer while retaining its row;
   `gj/gk`, Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide row movement, group
-  movement, and quit. `gR` redisplays the existing snapshot, `gr` rebuilds it
+  movement, and quit. `M-j` completes over the displayed group headings and
+  focuses one without changing its collapsed state. `C-o` displays the focused
+  buffer in another ordinary window while the chooser remains selected; `M-o`
+  visits it and removes other ordinary windows. `A`/`gv` display ordinary marks
+  in balanced stacked windows and `gV` displays them side by side, excluding
+  `D` and using the current row when nothing is ordinarily marked. `gR`
+  redisplays the existing snapshot, `gr` rebuilds it
   from live buffers while preserving applicable marks and filters, `yb/yf`
   copy exact buffer/file names, and `go` visits in another ordinary window.
   `s RET` selects one or more exact registered major modes, `s M` includes
@@ -929,8 +935,10 @@ through the ncurses editor.
   or the implicitly marked current row, deletion-mark exclusion, safe
   continuation after a per-buffer revert failure, focused burying, snapshot redisplay/update,
   exact name/path copying,
-  alternate-window visits, exact snapshot completion and collapsed-group
-  reveal on `J`/`M-g`, focused bounded `=` diffs for ordinary marks or the
+  selected and no-select alternate-window visits, one-window visits, group-name
+  completion, stacked and side-by-side marked-buffer layouts with current-row
+  fallback, exact snapshot completion and collapsed-group reveal on `J`/`M-g`,
+  focused bounded `=` diffs for ordinary marks or the
   unmarked current row, and reload. Diff selection excludes `D` and non-file
   buffers; missing files fail before replacing the prior read-only patch view.
   Lem has no visited-file locking state;

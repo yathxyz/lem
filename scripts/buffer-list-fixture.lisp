@@ -201,15 +201,36 @@
    (completion-path-display-string
     (or (lem/common/killring:peek-killring-item (current-killring) 0) ""))))
 
+(defun buffer-list-test-window-axis (windows)
+  (cond
+    ((< (length windows) 2) "single")
+    ((and (apply #'= (mapcar #'window-x windows))
+          (apply #'= (mapcar #'window-width windows)))
+     "stacked")
+    ((and (apply #'= (mapcar #'window-y windows))
+          (apply #'= (mapcar #'window-height windows)))
+     "side-by-side")
+    (t "mixed")))
+
 (define-command lem-yath-test-buffer-list-window-state () ()
-  (buffer-list-test-log
-   "WINDOW count=~d current=~a buffers=~{~a~^,~}"
-   (length (window-list))
-   (completion-path-display-string (buffer-name (current-buffer)))
-   (mapcar (lambda (window)
-             (completion-path-display-string
-              (buffer-name (window-buffer window))))
-           (window-list))))
+  (let ((windows (window-list)))
+    (buffer-list-test-log
+     "WINDOW count=~d current=~a buffers=~{~a~^,~} axis=~a layout=~{~a~^;~}"
+     (length windows)
+     (completion-path-display-string (buffer-name (current-buffer)))
+     (mapcar (lambda (window)
+               (completion-path-display-string
+                (buffer-name (window-buffer window))))
+             windows)
+     (buffer-list-test-window-axis windows)
+     (mapcar
+      (lambda (window)
+        (format nil "~a@~d,~d,~dx~d"
+                (completion-path-display-string
+                 (buffer-name (window-buffer window)))
+                (window-x window) (window-y window)
+                (window-width window) (window-height window)))
+      windows))))
 
 (define-command lem-yath-test-buffer-list-operation-state () ()
   (buffer-list-test-log
@@ -229,20 +250,33 @@
    (buffer-name (car (last (buffer-list))))))
 
 (define-command lem-yath-test-buffer-list-picker-bindings () ()
-  (buffer-list-test-log
-   "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a mode=~a derived=~a starred=~a size-lt=~a size-gt=~a content=~a"
-   (buffer-list-test-binding "Backspace")
-   (buffer-list-test-binding "C-h")
-   (buffer-list-test-binding "Delete")
-   (buffer-list-test-binding "=")
-   (buffer-list-test-binding "J")
-   (buffer-list-test-binding "M-g")
-   (buffer-list-test-binding "s Return")
-   (buffer-list-test-binding "s M")
-   (buffer-list-test-binding "s *")
-   (buffer-list-test-binding "s <")
-   (buffer-list-test-binding "s >")
-   (buffer-list-test-binding "s c")))
+  (let ((windows (window-list)))
+    (buffer-list-test-log
+     "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a group-jump=~a other-noselect=~a one-window=~a view=~a view-g=~a view-horizontal=~a mode=~a derived=~a starred=~a size-lt=~a size-gt=~a content=~a current-popup=~a ordinary-count=~d ordinary-buffers=~{~a~^,~}"
+     (buffer-list-test-binding "Backspace")
+     (buffer-list-test-binding "C-h")
+     (buffer-list-test-binding "Delete")
+     (buffer-list-test-binding "=")
+     (buffer-list-test-binding "J")
+     (buffer-list-test-binding "M-g")
+     (buffer-list-test-binding "M-j")
+     (buffer-list-test-binding "C-o")
+     (buffer-list-test-binding "M-o")
+     (buffer-list-test-binding "A")
+     (buffer-list-test-binding "g v")
+     (buffer-list-test-binding "g V")
+     (buffer-list-test-binding "s Return")
+     (buffer-list-test-binding "s M")
+     (buffer-list-test-binding "s *")
+     (buffer-list-test-binding "s <")
+     (buffer-list-test-binding "s >")
+     (buffer-list-test-binding "s c")
+     (if (floating-window-p (current-window)) "yes" "no")
+     (length windows)
+     (mapcar (lambda (window)
+               (completion-path-display-string
+                (buffer-name (window-buffer window))))
+             windows))))
 
 (define-command lem-yath-test-buffer-list-diff-state () ()
   (let ((buffer (get-buffer *buffer-list-diff-buffer-name*)))
@@ -421,6 +455,10 @@
   (make-sort-buffer
    'sort-zeta "buffer-list-sort-zeta" 'buffer-list-test-sort-m-mode 10
    (uiop:getenv "LEM_YATH_BUFFER_LIST_SORT_B")))
+
+(buffer-list-test-make-buffer 'view-alpha "buffer-list-view-alpha")
+(buffer-list-test-make-buffer 'view-beta "buffer-list-view-beta")
+(buffer-list-test-make-buffer 'view-delete "buffer-list-view-delete")
 
 (define-key lem-vi-mode:*normal-keymap* "F5"
   'lem-yath-test-buffer-list-report)

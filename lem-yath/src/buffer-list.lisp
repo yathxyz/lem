@@ -1107,6 +1107,85 @@ Each nonempty group begins with a distinct heading entry."
     (lem/multi-column-list:quit component)
     (switch-to-window (pop-to-buffer buffer))))
 
+(defun buffer-list-source-window (component)
+  (let* ((popup-menu
+           (lem/multi-column-list::multi-column-list-popup-menu component))
+         (popup-window
+           (lem/popup-menu::popup-menu-window popup-menu))
+         (source-window (window-parent popup-window)))
+    (unless (and source-window (not (deleted-window-p source-window)))
+      (editor-error "Ibuffer source window is no longer available"))
+    source-window))
+
+(define-command lem-yath-buffer-list-visit-other-window-noselect () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (buffer (buffer-list-require-current-buffer component))
+         (source-window (buffer-list-source-window component)))
+    ;; GNU Ibuffer's C-o leaves Ibuffer selected.  Lem's Ibuffer is a floating
+    ;; chooser, so display through its ordinary source window and let
+    ;; WITH-CURRENT-WINDOW restore focus to the chooser.
+    (with-current-window source-window
+      (pop-to-buffer buffer))))
+
+(define-command lem-yath-buffer-list-visit-one-window () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (buffer (buffer-list-require-current-buffer component)))
+    (lem/multi-column-list:quit component)
+    (switch-to-buffer buffer)
+    (delete-other-windows)))
+
+(defun buffer-list-view-buffers (component)
+  "Return GNU Ibuffer's ordinary marked buffers, or the current buffer.
+
+The lookup uses the filtered snapshot rather than only expanded groups, so a
+mark inside a collapsed group still participates.  Deletion marks never do."
+  (or (loop :for item :in (buffer-list-component-all-items component)
+            :for entry := (buffer-list-item-entry item)
+            :for buffer := (unless (buffer-list-entry-heading-p entry)
+                             (buffer-list-entry-buffer entry))
+            :when (and buffer
+                       (buffer-list-ordinary-marked-item-p component item)
+                       (buffer-list-active-filters-match-p component buffer)
+                       (eq buffer (get-buffer (buffer-name buffer))))
+              :collect buffer)
+      (list (buffer-list-require-current-buffer component))))
+
+(defun buffer-list-view-frame-dimension (orientation)
+  (ecase orientation
+    (:vertically (lem-core::max-window-height (current-frame)))
+    (:horizontally (lem-core::max-window-width (current-frame)))))
+
+(defun buffer-list-check-view-capacity (orientation count)
+  (let ((dimension (buffer-list-view-frame-dimension orientation)))
+    (when (< dimension (* 2 count))
+      (editor-error "Cannot view ~d buffers in ~d terminal cells"
+                    count dimension))
+    (floor dimension count)))
+
+(defun buffer-list-view (component orientation)
+  (let* ((buffers (buffer-list-view-buffers component))
+         (size (buffer-list-check-view-capacity
+                orientation (length buffers))))
+    (lem/multi-column-list:quit component)
+    (delete-other-windows)
+    (switch-to-buffer (first buffers))
+    (dolist (buffer (rest buffers))
+      (let ((window (current-window)))
+        (ecase orientation
+          (:vertically (split-window-vertically window :height size))
+          (:horizontally (split-window-horizontally window :width size)))
+        (switch-to-window (get-next-window window))
+        (switch-to-buffer buffer)))
+    (balance-windows)))
+
+(define-command lem-yath-buffer-list-view () ()
+  (buffer-list-view
+   (lem/multi-column-list::current-multi-column-list) :vertically))
+
+(define-command lem-yath-buffer-list-view-horizontally () ()
+  (buffer-list-view
+   (lem/multi-column-list::current-multi-column-list) :horizontally))
+
 (defun buffer-list-record-marks (component)
   (let ((marks (make-hash-table :test #'eq)))
     (dolist (item (buffer-list-component-all-items component) marks)
@@ -1513,6 +1592,39 @@ Each nonempty group begins with a distinct heading entry."
   (buffer-list-move-to-group
    (lem/multi-column-list::current-multi-column-list) :backward))
 
+(defun buffer-list-visible-group-names (component)
+  (loop :for item :in (lem/multi-column-list::multi-column-list-items component)
+        :for entry := (buffer-list-item-entry item)
+        :when (buffer-list-entry-heading-p entry)
+          :collect (buffer-list-entry-group entry)))
+
+(defun buffer-list-focus-group (component name)
+  (let* ((items (lem/multi-column-list::multi-column-list-items component))
+         (index
+           (position name items
+                     :key (lambda (item)
+                            (let ((entry (buffer-list-item-entry item)))
+                              (and (buffer-list-entry-heading-p entry)
+                                   (buffer-list-entry-group entry))))
+                     :test #'string=)))
+    (unless index
+      (editor-error "No filter group with name ~a" name))
+    (buffer-list-focus-index component index)))
+
+(define-command lem-yath-buffer-list-jump-to-group () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (names (buffer-list-visible-group-names component)))
+    (unless names
+      (editor-error "No Ibuffer filter groups are visible"))
+    (let ((name
+            (prompt-for-string
+             "Jump to filter group: "
+             :completion-function
+             (lambda (input) (prescient-filter input names))
+             :test-function
+             (lambda (input) (member input names :test #'string=)))))
+      (buffer-list-focus-group component name))))
+
 (defun buffer-list-kill-selected (window)
   (buffer-list-delete-action-items
    (lem/multi-column-list:multi-column-list-of-window window)))
@@ -1642,6 +1754,8 @@ Each nonempty group begins with a distinct heading entry."
   'lem-yath-buffer-list-jump-to-buffer)
 (define-key *buffer-list-picker-mode-keymap* "M-g"
   'lem-yath-buffer-list-jump-to-buffer)
+(define-key *buffer-list-picker-mode-keymap* "M-j"
+  'lem-yath-buffer-list-jump-to-group)
 (define-key *buffer-list-picker-mode-keymap* "g j"
   'lem/multi-column-list::multi-column-list/down)
 (define-key *buffer-list-picker-mode-keymap* "g k"
@@ -1652,6 +1766,16 @@ Each nonempty group begins with a distinct heading entry."
   'lem-yath-buffer-list-redisplay)
 (define-key *buffer-list-picker-mode-keymap* "g o"
   'lem-yath-buffer-list-visit-other-window)
+(define-key *buffer-list-picker-mode-keymap* "C-o"
+  'lem-yath-buffer-list-visit-other-window-noselect)
+(define-key *buffer-list-picker-mode-keymap* "M-o"
+  'lem-yath-buffer-list-visit-one-window)
+(define-key *buffer-list-picker-mode-keymap* "A"
+  'lem-yath-buffer-list-view)
+(define-key *buffer-list-picker-mode-keymap* "g v"
+  'lem-yath-buffer-list-view)
+(define-key *buffer-list-picker-mode-keymap* "g V"
+  'lem-yath-buffer-list-view-horizontally)
 (define-key *buffer-list-picker-mode-keymap* "y b"
   'lem-yath-buffer-list-copy-buffer-name)
 (define-key *buffer-list-picker-mode-keymap* "y f"

@@ -231,6 +231,21 @@ check_star_mark() {
   fi
 }
 
+prepare_view_marks() {
+  local name
+  lem_keys "$session" C-x C-b
+  lem_keys "$session" s n
+  tmux_cmd send-keys -t "$session" -l 'buffer-list-view-'
+  lem_keys "$session" Enter m m d
+  view_nav=$(report_nav || true)
+  view_deleted=''
+  for name in buffer-list-view-alpha buffer-list-view-beta buffer-list-view-delete; do
+    if [[ "$view_nav" == *"$name:D"* ]]; then
+      view_deleted=$name
+    fi
+  done
+}
+
 fixture="$(lem-yath_lisp_string "$here/scripts/buffer-list-fixture.lisp")"
 lem_start "$session" "$source_file" --eval "(load #P$fixture)"
 
@@ -488,6 +503,37 @@ if lem_wait_for "$session" 'Buffer[[:space:]]+Size[[:space:]]+Mode[[:space:]]+Fi
   else
     fail group-previous-control "unexpected C-k destination: $nav"
   fi
+
+  lem_keys "$session" Enter M-j
+  if lem_wait_for "$session" 'Jump to filter group:' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l 'help'
+    lem_keys "$session" Enter
+    nav=$(report_nav || true)
+    screen=$(lem_capture "$session")
+    if [[ "$nav" == 'NAV focus=heading:help marks=' ]] &&
+       grep -Fq '[ org ... ]' <<<"$screen"; then
+      pass group-jump "M-j completed over visible headings without changing collapsed state"
+    else
+      fail group-jump "M-j changed group state or focused the wrong heading: $nav"
+    fi
+  else
+    fail group-jump "M-j did not open exact filter-group completion"
+  fi
+
+  lem_keys "$session" M-j
+  if lem_wait_for "$session" 'Jump to filter group:' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l 'org'
+    lem_keys "$session" Enter
+    nav=$(report_nav || true)
+    if [[ "$nav" == 'NAV focus=heading:org marks=' ]]; then
+      pass group-jump-return "M-j returned to the collapsed org heading"
+    else
+      fail group-jump-return "M-j returned to an unexpected row: $nav"
+    fi
+  else
+    fail group-jump-return "the second M-j prompt did not open"
+  fi
+  lem_keys "$session" Enter
 
   lem_keys "$session" g j
   nav=$(report_nav || true)
@@ -1147,6 +1193,15 @@ else
   fail backward-binding "the active Backspace binding diverged: $picker_bindings"
 fi
 
+if [[ "$picker_bindings" == *'group-jump=LEM-YATH-BUFFER-LIST-JUMP-TO-GROUP'* ]] &&
+   [[ "$picker_bindings" == *'other-noselect=LEM-YATH-BUFFER-LIST-VISIT-OTHER-WINDOW-NOSELECT'* ]] &&
+   [[ "$picker_bindings" == *'one-window=LEM-YATH-BUFFER-LIST-VISIT-ONE-WINDOW'* ]] &&
+   [[ "$picker_bindings" == *'view=LEM-YATH-BUFFER-LIST-VIEW view-g=LEM-YATH-BUFFER-LIST-VIEW view-horizontal=LEM-YATH-BUFFER-LIST-VIEW-HORIZONTALLY'* ]]; then
+  pass visit-view-bindings "M-j, C-o, M-o, A, gv, and gV resolve in the focused picker map"
+else
+  fail visit-view-bindings "one or more visit/view bindings diverged: $picker_bindings"
+fi
+
 lem_keys "$session" BSpace
 nav=$(report_nav || true)
 if [[ "$nav" == *'focus=buffer:buffer-list-op-beta'* ]] &&
@@ -1254,17 +1309,102 @@ else
   fail copy-file-name "yf copied an unexpected value: $copied"
 fi
 
-lem_keys "$session" g o
-if lem_wait_for "$session" 'BUFFER LIST SELECTED TARGET' 15 >/dev/null; then
+lem_keys "$session" q C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-view-alpha'
+lem_keys "$session" Enter C-o
+picker_state=$(report_picker_bindings || true)
+if [[ "$picker_state" == *'current-popup=yes ordinary-count=2'* ]] &&
+   [[ "$picker_state" == *'ordinary-buffers='*'buffer-list-view-alpha'* ]]; then
+  pass visit-other-noselect "C-o displayed the target in an ordinary window while retaining picker focus"
+else
+  fail visit-other-noselect "C-o changed focus or produced an unexpected layout: $picker_state"
+fi
+
+lem_keys "$session" q C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-view-beta'
+lem_keys "$session" Enter g o
+window=$(report_window || true)
+if [[ "$window" == WINDOW\ count=2\ current=buffer-list-view-beta\ buffers=* ]] &&
+   [[ "$window" == *'buffer-list-view-beta'* ]]; then
+  pass visit-other-window "go selected the focused buffer in the other ordinary window"
+else
+  fail visit-other-window "go produced an unexpected window layout: $window"
+fi
+
+lem_keys "$session" C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-view-alpha'
+lem_keys "$session" Enter M-o
+window=$(report_window || true)
+if [[ "$window" == 'WINDOW count=1 current=buffer-list-view-alpha buffers=buffer-list-view-alpha axis=single'* ]]; then
+  pass visit-one-window "M-o selected the focused buffer and removed every other ordinary window"
+else
+  fail visit-one-window "M-o produced an unexpected one-window layout: $window"
+fi
+
+prepare_view_marks
+if [[ $(grep -o ':>' <<<"$view_nav" | wc -l) -eq 2 ]] &&
+   [[ -n "$view_deleted" ]]; then
+  lem_keys "$session" A
   window=$(report_window || true)
-  if [[ "$window" == WINDOW\ count=2\ current=buffer-list-zz-target.txt\ buffers=* ]] &&
-     [[ "$window" == *'buffer-list-zz-target.txt'* ]]; then
-    pass visit-other-window "go visited the focused buffer in a second ordinary window"
+  if [[ "$window" == WINDOW\ count=2* ]] &&
+     [[ "$window" == *' axis=stacked '* ]] &&
+     [[ "$window" == *'buffer-list-view-'* ]] &&
+     [[ "$window" != *"$view_deleted"* ]]; then
+    pass view-stacked-A "A stacked the two ordinary marks and excluded the deletion mark"
   else
-    fail visit-other-window "go produced an unexpected window layout: $window"
+    fail view-stacked-A "A produced an unexpected marked-buffer layout: $window / $view_nav"
   fi
 else
-  fail visit-other-window "go did not visit the focused target"
+  fail view-stacked-A "the A fixture did not establish two ordinary marks and one deletion mark: $view_nav"
+  lem_keys "$session" q
+fi
+
+prepare_view_marks
+if [[ $(grep -o ':>' <<<"$view_nav" | wc -l) -eq 2 ]] &&
+   [[ -n "$view_deleted" ]]; then
+  lem_keys "$session" g v
+  window=$(report_window || true)
+  if [[ "$window" == WINDOW\ count=2* ]] &&
+     [[ "$window" == *' axis=stacked '* ]] &&
+     [[ "$window" != *"$view_deleted"* ]]; then
+    pass view-stacked-gv "gv uses the same marked-buffer stacked view as A"
+  else
+    fail view-stacked-gv "gv produced an unexpected marked-buffer layout: $window / $view_nav"
+  fi
+else
+  fail view-stacked-gv "the gv fixture did not establish its expected marks: $view_nav"
+  lem_keys "$session" q
+fi
+
+prepare_view_marks
+if [[ $(grep -o ':>' <<<"$view_nav" | wc -l) -eq 2 ]] &&
+   [[ -n "$view_deleted" ]]; then
+  lem_keys "$session" g V
+  window=$(report_window || true)
+  if [[ "$window" == WINDOW\ count=2* ]] &&
+     [[ "$window" == *' axis=side-by-side '* ]] &&
+     [[ "$window" != *"$view_deleted"* ]]; then
+    pass view-side-by-side "gV displayed ordinary marks side by side and excluded D"
+  else
+    fail view-side-by-side "gV produced an unexpected marked-buffer layout: $window / $view_nav"
+  fi
+else
+  fail view-side-by-side "the gV fixture did not establish its expected marks: $view_nav"
+  lem_keys "$session" q
+fi
+
+lem_keys "$session" C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-view-alpha'
+lem_keys "$session" Enter g v
+window=$(report_window || true)
+if [[ "$window" == 'WINDOW count=1 current=buffer-list-view-alpha buffers=buffer-list-view-alpha axis=single'* ]]; then
+  pass view-current-fallback "unmarked gv viewed only the current row in one ordinary window"
+else
+  fail view-current-fallback "unmarked gv did not use the current-row fallback: $window"
 fi
 
 if ((failed)); then
