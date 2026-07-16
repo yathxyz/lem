@@ -90,6 +90,23 @@ wait_file_last_line() {
   return 1
 }
 
+wait_file_line() {
+  local pattern="$1" file="$2" line="$3" i
+  for i in $(seq 1 100); do
+    [ -f "$file" ] && sed -n "${line}p" "$file" | grep -qE "$pattern" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+type_slow() {
+  local text="$1" index
+  for ((index = 0; index < ${#text}; index++)); do
+    tmux_cmd send-keys -t "$session" -l "${text:index:1}"
+    sleep 0.05
+  done
+}
+
 wait_screen_absent() {
   local pattern="$1" i
   for i in $(seq 1 100); do
@@ -585,6 +602,66 @@ if lem_wait_for "$session" 'Schedule date' 10 >/dev/null; then
   fi
 else
   fail reschedule-prompt "C-c C-s did not reopen for an existing field"
+fi
+
+# GNU Org's double prefix edits warning/delay cookies relative to the existing
+# field.  A single prefix removes the field, saves, refreshes, and follows the
+# same logical heading to its remaining planning row or unscheduled TODO row.
+tmux_cmd send-keys -t "$session" C-z
+sleep 0.3
+tmux_cmd send-keys -t "$session" C-u C-u C-c C-s
+if lem_wait_for "$session" 'Delay until \[2026-07-15\]' 10 >/dev/null; then
+  type_slow 2026-07-18
+  tmux_cmd send-keys -t "$session" Enter
+  if wait_file_line '^DEADLINE: <2026-07-16 Thu> SCHEDULED: <2026-07-15 Wed -3d>$' "$work_file" 2 &&
+     wait_screen_absent 'Delay until' &&
+     lem_wait_for "$session" 'SCHEDULED 2026-07-15' 40 >/dev/null; then
+    pass agenda-delay "double prefix adds a persisted scheduled-delay cookie"
+  else
+    fail agenda-delay "agenda scheduled-delay update did not save or refresh"
+  fi
+else
+  fail agenda-delay-prompt "double prefix did not open the scheduled-delay prompt"
+fi
+
+tmux_cmd send-keys -t "$session" C-u C-u C-c C-d
+if lem_wait_for "$session" 'Warn starting from \[2026-07-16\]' 10 >/dev/null; then
+  type_slow 2026-07-14
+  tmux_cmd send-keys -t "$session" Enter
+  if wait_file_line '^DEADLINE: <2026-07-16 Thu -2d> SCHEDULED: <2026-07-15 Wed -3d>$' "$work_file" 2 &&
+     wait_screen_absent 'Warn starting from' &&
+     lem_wait_for "$session" 'DEADLINE 2026-07-16' 40 >/dev/null; then
+    pass agenda-warning "double prefix adds a persisted deadline warning cookie"
+  else
+    fail agenda-warning "agenda deadline-warning update did not save or refresh"
+  fi
+else
+  fail agenda-warning-prompt "double prefix did not open the deadline-warning prompt"
+fi
+
+tmux_cmd send-keys -t "$session" C-u C-c C-d
+if wait_file_line '^SCHEDULED: <2026-07-15 Wed -3d>$' "$work_file" 2 &&
+   lem_wait_for "$session" 'SCHEDULED 2026-07-15' 40 >/dev/null; then
+  pass agenda-remove-deadline "one prefix removes only the deadline and follows the schedule row"
+else
+  fail agenda-remove-deadline "agenda deadline removal damaged or lost the remaining row"
+fi
+
+tmux_cmd send-keys -t "$session" C-u C-c C-s
+if wait_file_line '^\* TODO Overdue work sentinel$' "$work_file" 2 &&
+   lem_wait_for "$session" 'NEXT[[:space:]]+Work unscheduled sentinel' 40 >/dev/null; then
+  tmux_cmd send-keys -t "$session" C-z
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" F6
+  if wait_report "^POINT mode=LEM-YATH-AGENDA-MODE file=$work_file line=1 .*NEXT.*Work unscheduled sentinel"; then
+    pass agenda-remove-schedule "removing the final field follows the unscheduled TODO row"
+  else
+    fail agenda-remove-schedule "final planning removal lost the logical heading"
+  fi
+else
+  fail agenda-remove-schedule "final planning field was not removed and refreshed"
+  tmux_cmd send-keys -t "$session" C-z
+  sleep 0.3
 fi
 
 # If a live source buffer has shifted since the scan, the stored line must not

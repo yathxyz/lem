@@ -803,21 +803,56 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
       (save-buffer buffer)))
   state)
 
-(defun agenda-read-date (label)
+(defun agenda-read-date (label &optional default-date)
   "Read an Org-style date for LABEL, returning DATE and true on success."
   (values
    (org-read-date-prompt
-    (format nil "~a date" label)
-    :default-date (org-date-today (funcall *agenda-now-function*))
+    label
+    :default-date (or default-date
+                      (org-date-today (funcall *agenda-now-function*)))
     :now (funcall *agenda-now-function*))
    t))
 
-(defun agenda-set-source-planning (file line expected-heading kind date)
-  "Set one exact agenda source planning KIND to DATE and save immediately."
+(defun agenda-source-planning-components
+    (file line expected-heading kind)
+  "Return KIND's date and extra syntax after validating an agenda source row."
+  (unless (and file (integerp line) (plusp line) expected-heading)
+    (error "No mutable agenda heading on this line"))
+  (let ((buffer (find-file-buffer file)))
+    (with-current-buffer buffer
+      (with-point ((heading (buffer-start-point buffer)))
+        (unless (or (= line 1) (line-offset heading (1- line)))
+          (error "Agenda source line no longer exists; refresh the agenda"))
+        (unless (string= expected-heading (line-string heading))
+          (error "Agenda source changed; refresh before editing"))
+        (org-planning-field-components heading kind)))))
+
+(defun agenda-planning-restore-key (file line heading preferred-kind)
+  "Choose the best post-refresh row for a just-edited planning field."
+  (let* ((preferred-date
+           (org-planning-field-date heading preferred-kind))
+         (other-kind (if (string= preferred-kind "DEADLINE")
+                         "SCHEDULED"
+                         "DEADLINE"))
+         (other-date (and (null preferred-date)
+                          (org-planning-field-date heading other-kind))))
+    (cond
+      (preferred-date
+       (list file line preferred-kind preferred-date nil nil))
+      (other-date
+       (list file line other-kind other-date nil nil))
+      (t
+       (list file line nil nil nil nil)))))
+
+(defun agenda-apply-source-planning
+    (file line expected-heading kind expected-date expected-extra
+     operation &key date extra)
+  "Apply one validated planning OPERATION and save its source immediately."
   (unless (and file (integerp line) (plusp line) expected-heading)
     (error "No mutable agenda heading on this line"))
   (let ((buffer (find-file-buffer file))
-        (timestamp nil))
+        (result nil)
+        (restore-key nil))
     (with-current-buffer buffer
       (when (buffer-read-only-p buffer)
         (error "Agenda source is read-only: ~a" file))
@@ -826,39 +861,86 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
           (error "Agenda source line no longer exists; refresh the agenda"))
         (unless (string= expected-heading (line-string heading))
           (error "Agenda source changed; refresh before editing"))
-        (setf timestamp (org-set-planning-field heading kind date)))
+        (multiple-value-bind (current-date current-extra)
+            (org-planning-field-components heading kind)
+          (unless (and (equal expected-date current-date)
+                       (equal expected-extra current-extra))
+            (error "Agenda source planning changed; refresh before editing")))
+        (setf result
+              (ecase operation
+                (:set (org-set-planning-field heading kind date))
+                (:delay (org-set-planning-field
+                         heading kind date :extra extra))
+                (:remove (org-remove-planning-field heading kind))))
+        (setf restore-key
+              (agenda-planning-restore-key file line heading kind)))
       (save-buffer buffer))
-    timestamp))
+    (values result restore-key)))
 
-(defun agenda-change-planning (kind label)
+(defun agenda-change-planning (kind label argument)
   "Prompt for and persist planning KIND on the current agenda entry."
   (let ((agenda-buffer (current-buffer))
         (file (text-property-at (current-point) :agenda-file))
         (line (text-property-at (current-point) :agenda-line))
-        (heading (text-property-at (current-point) :agenda-heading)))
+        (heading (text-property-at (current-point) :agenda-heading))
+        (magnitude (org-prefix-magnitude argument)))
     (if (null file)
         (message "No agenda entry on this line.")
-        (multiple-value-bind (date selected-p) (agenda-read-date label)
-          (when selected-p
-            (handler-case
-                (let ((timestamp
-                        (agenda-set-source-planning
-                         file line heading kind date)))
-                  (setf (buffer-value agenda-buffer
-                                      'lem-yath-agenda-restore-entry)
-                        (list file line kind date nil nil))
-                  (agenda-start-scan agenda-buffer)
-                  (message "~a" timestamp))
-              (error (condition)
-                (message "Agenda ~a failed: ~a" label condition))))))))
+        (handler-case
+            (multiple-value-bind (old-date old-extra)
+                (agenda-source-planning-components file line heading kind)
+              (multiple-value-bind (operation date extra selected-p)
+                  (cond
+                    ((= magnitude 4)
+                     (values :remove nil nil t))
+                    ((= magnitude 16)
+                     (if old-date
+                         (multiple-value-bind (target chosen-p)
+                             (agenda-read-date
+                              (if (string= kind "DEADLINE")
+                                  "Warn starting from"
+                                  "Delay until")
+                              old-date)
+                           (values
+                            :delay old-date
+                            (and chosen-p
+                                 (org-planning-extra-with-delay
+                                  old-extra
+                                  (abs (- (org-date-day-number target)
+                                          (org-date-day-number old-date)))))
+                            chosen-p))
+                         (progn
+                           (message "No ~a information to update"
+                                    (string-downcase label))
+                           (values nil nil nil nil))))
+                    (t
+                     (multiple-value-bind (new-date chosen-p)
+                         (agenda-read-date (format nil "~a date" label)
+                                           old-date)
+                       (values :set new-date nil chosen-p))))
+                (when (and operation selected-p)
+                  (multiple-value-bind (result restore-key)
+                      (agenda-apply-source-planning
+                       file line heading kind old-date old-extra operation
+                       :date date :extra extra)
+                    (setf (buffer-value agenda-buffer
+                                        'lem-yath-agenda-restore-entry)
+                          restore-key)
+                    (agenda-start-scan agenda-buffer)
+                    (message (if (eq operation :remove)
+                                 (if result "Removed ~a" "No ~a to remove")
+                                 "~a")
+                             (if (eq operation :remove) kind result))))))
+          (error (condition)
+            (message "Agenda ~a failed: ~a" label condition))))))
 
-(define-command lem-yath-agenda-schedule () ()
+(define-command lem-yath-agenda-schedule (argument) (:universal-nil)
   "Set the current agenda heading's SCHEDULED date and save its source."
-  (agenda-change-planning "SCHEDULED" "Schedule"))
+  (agenda-change-planning "SCHEDULED" "Schedule" argument))
 
-(define-command lem-yath-agenda-deadline () ()
+(define-command lem-yath-agenda-deadline (argument) (:universal-nil)
   "Set the current agenda heading's DEADLINE date and save its source."
-  (agenda-change-planning "DEADLINE" "Deadline"))
+  (agenda-change-planning "DEADLINE" "Deadline" argument))
 
 (defvar *agenda-last-priority-direction* nil)
 (defvar *agenda-last-priority-target* nil)

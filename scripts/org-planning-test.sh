@@ -16,6 +16,8 @@ fixture="$root/planning.org"
 cat >"$fixture" <<'EOF'
 * TODO Planned task
 Body remains here.
+* TODO Cookie task
+DEADLINE: <2026-07-22 Wed +1w -3d> SCHEDULED: <2026-07-17 Fri +1w --2d>
 EOF
 cp "$fixture" "$root/original.org"
 
@@ -130,7 +132,7 @@ fi
 if snapshot 3 &&
    grep -q '^DEADLINE: <2026-07-22 Wed> SCHEDULED: <2026-08-17 Mon>$' \
      "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-3" &&
-   test "$(grep -o 'SCHEDULED:' "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-3" | wc -l)" -eq 1; then
+   test "$(sed -n '2p' "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-3" | grep -o 'SCHEDULED:' | wc -l)" -eq 1; then
   pass reschedule 'calendar month motion replaces the existing field once'
 else
   fail reschedule 'existing scheduling was duplicated or miscomputed'
@@ -182,11 +184,58 @@ fi
 
 tmux_cmd send-keys -t "$session" C-z
 sleep 0.3
+mx lem-yath-test-org-planning-goto-cookie
+tmux_cmd send-keys -t "$session" C-c C-d
+if lem_wait_for "$session" 'Deadline date \[2026-07-22\]' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '++1d'
+  tmux_cmd send-keys -t "$session" Enter
+else
+  fail preserve-prompt 'cookie deadline did not offer its existing date'
+fi
+if snapshot 7 &&
+   grep -q '^DEADLINE: <2026-07-23 Thu +1w -3d> SCHEDULED: <2026-07-17 Fri +1w --2d>$' \
+     "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-7"; then
+  pass preserve-cookies 'ordinary rescheduling preserves repeater and warning syntax'
+else
+  fail preserve-cookies 'rescheduling discarded or changed planning cookies'
+fi
+
+tmux_cmd send-keys -t "$session" C-u C-u C-c C-d
+if lem_wait_for "$session" 'Warn starting from \[2026-07-23\]' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '2026-07-18'
+  tmux_cmd send-keys -t "$session" Enter
+else
+  fail warning-prompt 'double prefix did not open the deadline warning prompt'
+fi
+if snapshot 8 &&
+   grep -q '^DEADLINE: <2026-07-23 Thu +1w -5d> SCHEDULED: <2026-07-17 Fri +1w --2d>$' \
+     "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-8"; then
+  pass warning-cookie 'double prefix replaces only the deadline warning cookie'
+else
+  fail warning-cookie 'deadline warning update damaged its repeater or schedule'
+fi
+
+tmux_cmd send-keys -t "$session" C-u C-u C-c C-s
+if lem_wait_for "$session" 'Delay until \[2026-07-17\]' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '2026-07-20'
+  tmux_cmd send-keys -t "$session" Enter
+else
+  fail delay-prompt 'double prefix did not open the scheduled-delay prompt'
+fi
+if snapshot 9 &&
+   grep -q '^DEADLINE: <2026-07-23 Thu +1w -5d> SCHEDULED: <2026-07-17 Fri +1w -3d>$' \
+     "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-9"; then
+  pass delay-cookie 'double prefix replaces --delay syntax and preserves its repeater'
+else
+  fail delay-cookie 'scheduled-delay update damaged the planning line'
+fi
+
+mx lem-yath-test-org-planning-goto-planned
 tmux_cmd send-keys -t "$session" C-u C-c C-d
 sleep 0.5
-if snapshot 7 &&
-   ! grep -q 'DEADLINE:' "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-7" &&
-   grep -q '^SCHEDULED: <2026-07-17 Fri>$' "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-7"; then
+if snapshot 10 &&
+   ! sed -n '1,3p' "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-10" | grep -q 'DEADLINE:' &&
+   grep -q '^SCHEDULED: <2026-07-17 Fri>$' "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-10"; then
   pass remove-one 'a universal prefix removes only the requested field'
 else
   fail remove-one 'prefixed deadline removal damaged the planning line'
@@ -194,11 +243,25 @@ fi
 
 tmux_cmd send-keys -t "$session" C-u C-c C-s
 sleep 0.5
-if snapshot 8 &&
-   cmp -s "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-8" "$root/original.org"; then
+if snapshot 11 &&
+   [ "$(sed -n '1,3p' "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-11")" = \
+     $'* TODO Planned task\nBody remains here.\n* TODO Cookie task' ] &&
+   grep -q '^DEADLINE: <2026-07-23 Thu +1w -5d> SCHEDULED: <2026-07-17 Fri +1w -3d>$' \
+     "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-11"; then
   pass remove-line 'removing the final field deletes the complete planning line'
 else
   fail remove-line 'final-field removal left whitespace or a blank line'
+fi
+
+tmux_cmd send-keys -t "$session" C-u C-u C-c C-s
+sleep 0.5
+if lem_capture "$session" | grep -q 'No schedule information to update' &&
+   snapshot 12 &&
+   cmp -s "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-12" \
+          "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-11"; then
+  pass missing-cookie 'double prefix refuses a missing planning field without prompting'
+else
+  fail missing-cookie 'missing-field cookie update prompted or mutated the buffer'
 fi
 
 mx lem-yath-test-org-planning-read-only

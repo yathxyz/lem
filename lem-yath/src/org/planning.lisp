@@ -42,26 +42,47 @@
                              (now (funcall *org-planning-now-function*)))
   (iso-date-for-time now))
 
-(defun org-planning-field-scanner (kind &optional capture-date-p)
+(defun org-planning-field-scanner
+    (kind &optional capture-date-p capture-extra-p)
   (ppcre:create-scanner
-   (if capture-date-p
-       (format nil
-               "~a:\\s*<([0-9]{4}-[0-9]{2}-[0-9]{2})(?:\\s+[^>\\r\\n]*)?>"
-               kind)
-       (format nil "~a:\\s*<[^>\\r\\n]+>" kind))))
+   (cond
+     (capture-extra-p
+      (format nil
+              "~a:\\s*<([0-9]{4}-[0-9]{2}-[0-9]{2})(?:\\s+[A-Za-z]{3})?((?:\\s+[^>\\r\\n]+)?)>"
+              kind))
+     (capture-date-p
+      (format nil
+              "~a:\\s*<([0-9]{4}-[0-9]{2}-[0-9]{2})(?:\\s+[^>\\r\\n]*)?>"
+              kind))
+     (t
+      (format nil "~a:\\s*<[^>\\r\\n]+>" kind)))))
 
-(defun org-planning-field-date (heading kind)
-  "Return KIND's ISO date from HEADING's immediate planning line."
+(defun org-planning-field-components (heading kind)
+  "Return KIND's ISO date and post-weekday contents below HEADING."
   (with-point ((planning heading))
     (when (and (line-offset planning 1)
                (ppcre:scan *org-planning-line-scanner*
                            (line-string planning)))
       (let ((line (line-string planning)))
         (multiple-value-bind (start end registers register-ends)
-            (ppcre:scan (org-planning-field-scanner kind t) line)
+            (ppcre:scan (org-planning-field-scanner kind nil t) line)
           (declare (ignore start end))
           (when (and registers (aref registers 0))
-            (subseq line (aref registers 0) (aref register-ends 0))))))))
+            (let* ((date (subseq line (aref registers 0)
+                                 (aref register-ends 0)))
+                   (extra-start (aref registers 1))
+                   (extra
+                     (and extra-start
+                          (string-trim
+                           '(#\Space #\Tab)
+                           (subseq line extra-start
+                                   (aref register-ends 1))))))
+              (values date
+                      (and extra (plusp (length extra)) extra)))))))))
+
+(defun org-planning-field-date (heading kind)
+  "Return KIND's ISO date from HEADING's immediate planning line."
+  (org-planning-field-components heading kind))
 
 (defun org-read-planning-date (heading kind label)
   "Prompt for LABEL's date, defaulting to KIND's existing date or today."
@@ -72,9 +93,17 @@
      :default-date default
      :now (funcall *org-planning-now-function*))))
 
-(defun org-set-planning-field (heading kind date)
+(defun org-planning-timestamp (date &optional extra)
+  (format nil "<~a ~a~@[ ~a~]>"
+          date (org-date-weekday-name date)
+          (and extra (plusp (length extra)) extra)))
+
+(defun org-set-planning-field
+    (heading kind date &key (extra nil extra-supplied-p))
   "Set KIND to DATE on HEADING's immediate Org planning line."
-  (let* ((timestamp (org-date-with-weekday date))
+  (unless extra-supplied-p
+    (setf extra (nth-value 1 (org-planning-field-components heading kind))))
+  (let* ((timestamp (org-planning-timestamp date extra))
          (field (format nil "~a: ~a" kind timestamp))
          (scanner (org-planning-field-scanner kind)))
     (with-point ((planning heading))
@@ -95,6 +124,53 @@
             (line-end planning)
             (insert-string planning (format nil "~%~a" field)))))
     timestamp))
+
+(defun org-prefix-magnitude (argument)
+  (typecase argument
+    (integer (abs argument))
+    (null 0)
+    (t 4)))
+
+(defun org-planning-delay-cookie-p (token)
+  (not (null (ppcre:scan "^-{1,2}[0-9]+[hdwmy]$" token))))
+
+(defun org-planning-extra-with-delay (extra days)
+  "Replace EXTRA's final warning/delay cookie with -DAYSd."
+  (let* ((tokens (if (and extra (plusp (length extra)))
+                     (ppcre:split "\\s+" extra)
+                     nil))
+         (position (position-if #'org-planning-delay-cookie-p
+                                tokens :from-end t))
+         (kept
+           (loop :for token :in tokens
+                 :for index :from 0
+                 :unless (and position (= index position))
+                   :collect token)))
+    (format nil "~{~a~^ ~}"
+            (append kept (list (format nil "-~dd" days))))))
+
+(defun org-date-day-number (date)
+  (multiple-value-bind (year month day) (iso-date-components date)
+    (floor (encode-universal-time 0 0 12 day month year 0) 86400)))
+
+(defun org-update-planning-delay (heading kind label)
+  "Prompt for and update KIND's warning or delay cookie below HEADING."
+  (multiple-value-bind (date extra)
+      (org-planning-field-components heading kind)
+    (unless date
+      (message "No ~a information to update" (string-downcase label))
+      (return-from org-update-planning-delay nil))
+    (let* ((target
+             (org-read-date-prompt
+              (if (string= kind "DEADLINE")
+                  "Warn starting from"
+                  "Delay until")
+              :default-date date
+              :now (funcall *org-planning-now-function*)))
+           (days (abs (- (org-date-day-number target)
+                         (org-date-day-number date))))
+           (updated-extra (org-planning-extra-with-delay extra days)))
+      (org-set-planning-field heading kind date :extra updated-extra))))
 
 (defun org-delete-complete-line (point)
   (with-point ((start point)
@@ -136,20 +212,27 @@
               (insert-string planning (concatenate 'string indent body))))
         t))))
 
-(defun org-change-planning (kind label remove-p)
+(defun org-change-planning (kind label argument)
   (alexandria:if-let ((heading (org-current-heading-point)))
-    (cond
-      ((buffer-read-only-p (current-buffer))
-       (editor-error "Org buffer is read-only"))
-      (remove-p
-       (org-clear-folds (current-buffer))
-       (message (if (org-remove-planning-field heading kind)
-                    "Removed ~a" "No ~a to remove")
-                kind))
-      (t
-       (let ((date (org-read-planning-date heading kind label)))
+    (let ((magnitude (org-prefix-magnitude argument)))
+      (cond
+        ((buffer-read-only-p (current-buffer))
+         (editor-error "Org buffer is read-only"))
+        ((= magnitude 4)
          (org-clear-folds (current-buffer))
-         (message "~a" (org-set-planning-field heading kind date)))))
+         (message (if (org-remove-planning-field heading kind)
+                      "Removed ~a" "No ~a to remove")
+                  kind))
+        ((= magnitude 16)
+         (alexandria:when-let ((timestamp
+                                (org-update-planning-delay
+                                 heading kind label)))
+           (org-clear-folds (current-buffer))
+           (message "~a" timestamp)))
+        (t
+         (let ((date (org-read-planning-date heading kind label)))
+           (org-clear-folds (current-buffer))
+           (message "~a" (org-set-planning-field heading kind date))))))
     (message "No Org heading at point")))
 
 (define-command lem-yath-org-schedule (argument) (:universal-nil)
@@ -306,12 +389,6 @@
       (if clock-p
           (format nil "~a ~a" date candidate)
           date))))
-
-(defun org-prefix-magnitude (argument)
-  (typecase argument
-    (integer (abs argument))
-    (null 0)
-    (t 4)))
 
 (defun org-read-timestamp-values (token label now force-time-p)
   (let* ((default-input

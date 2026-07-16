@@ -2141,13 +2141,18 @@ explicit prompted years are constrained to 1970–2037. `Shift` arrows move by
 day/week, `M-Shift` arrows and `</>` move by month, `C-v`/`M-v` by quarter, and
 `C-.` returns to today. Insertion creates the structural line immediately below
 the current heading, replacement preserves the other planning field and its
-order, and one universal prefix removes only the requested field (including
-the complete line when it becomes empty). Ordinary Org-buffer edits remain
-modified but unsaved, matching the current Emacs configuration; agenda
-mutations retain their separate immediate-save policy. Cancellation and
-read-only refusal occur before mutation, and each successful command is one
-undo step. `scripts/org-planning-test.sh` drives both physical chords through
-the packaged ncurses editor and proves those boundaries.
+order. Rescheduling also retains the field's post-weekday time, repeater, and
+warning/delay syntax. One universal prefix removes only the requested field
+(including the complete line when it becomes empty); two universal prefixes
+prompt for `Warn starting from` or `Delay until`, compute the absolute day
+distance from the planning date, and replace the final `-Nd`/`--Nd` cookie
+without changing an earlier repeater. A missing field refuses the double-prefix
+operation before prompting. Ordinary Org-buffer edits remain modified but
+unsaved, matching the current Emacs configuration; agenda mutations retain
+their separate immediate-save policy. Cancellation and read-only refusal occur
+before mutation, and each successful command is one undo step.
+`scripts/org-planning-test.sh` drives both physical chords through the packaged
+ncurses editor and proves those boundaries.
 
 The same reader supplies GNU Org's ordinary timestamp workflow. `C-c .` and
 `C-c !` insert or replace active `<...>` and inactive `[...]` timestamps at
@@ -2280,8 +2285,7 @@ footnote, nested-special, and malformed text-object contexts; structural
 repairs beyond the bounded `d/x/X/< />` behavior; region-aware Meta operations,
 generic Org-element movement, unimplemented list/table Shift-control contexts,
 and richer list/table semantics; mouse calendar selection and Org's exact live
-echo overlay, warning and delay cookies, region-wide planning, and wider
-timestamp variants; prefixed live Babel-session
+echo overlay, region-wide planning, and wider timestamp variants; prefixed live Babel-session
 source editing, variables/sessions and the rest of Babel's
 backend/header/result matrix; in-editor LaTeX preview, non-HTML export
 backends, and exact `ox-html` output remain explicit gaps. The display-only
@@ -2319,7 +2323,12 @@ heading starts at B, while repeated movement wraps through no priority to the
 opposite bound. GNU Org's `C-c C-s` and `C-c C-d` chords set SCHEDULED and
 DEADLINE fields from validated `YYYY-MM-DD`, `+Nd`, or `+Nw` input, compute the
 weekday, prepend a newly added field as Org does, and replace an existing field
-in place. Evil-Org's `ct` and GNU Org's `C-c C-q` both replace the current
+in place while preserving its time/repeater/warning suffix. From C-z Emacs
+state, one prefix removes the requested agenda planning field and two prefixes
+choose the warning/delay start date; both save immediately, revalidate the
+unchanged source field, refresh, and follow the heading to its remaining
+planning row or unscheduled TODO row. Evil-Org's `ct` and GNU Org's `C-c C-q`
+both replace the current
 heading's local tags. The prompt starts from the existing suffix, completes
 canonical colon-delimited expressions from tags found across the configured
 agenda sources, removes duplicates, offers an explicit clear row for empty
@@ -2352,7 +2361,8 @@ transaction signals, refreshes the agenda, and restores the logical row at its
 new source line. A stale agenda row fails before opening target completion.
 `scripts/agenda-test.sh` drives the production entry keys in the installed
 ncurses wrapper and also verifies source scope, grouping, duplicate basenames,
-active-event contexts/ranges/repeaters, TODO, priority, planning and tag
+active-event contexts/ranges/repeaters, TODO, priority, planning insertion,
+suffix preservation, warning/delay cookies, prefix removal, and tag
 persistence, completion, replacement, clearing, alignment, archive
 confirmation/subtree shape/context/durability, custom-route refusal,
 same-file refile completion/cancellation/hierarchy/persistence/row restoration,
@@ -2385,7 +2395,7 @@ and stale unmarked rows in ncurses Lem.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
-presentation, planning removal and warning/delay-cookie forms,
+presentation, exact scheduled-delay and deadline-prewarning reminder rendering,
 configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive
 sibling/tag commands, the arbitrary `x`/`B` bulk-action dispatcher, clock

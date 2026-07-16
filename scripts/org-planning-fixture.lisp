@@ -5,6 +5,19 @@
 
 (defvar *org-planning-test-snapshot* 0)
 
+(defun org-planning-test-find (text)
+  (let ((point (current-point)))
+    (buffer-start point)
+    (unless (search-forward-regexp point (ppcre:quote-meta-chars text))
+      (error "Planning test text not found: ~s" text))
+    point))
+
+(define-command lem-yath-test-org-planning-goto-cookie () ()
+  (move-point (current-point) (org-planning-test-find "Cookie task")))
+
+(define-command lem-yath-test-org-planning-goto-planned () ()
+  (move-point (current-point) (org-planning-test-find "Planned task")))
+
 (defun org-planning-test-directory ()
   (uiop:ensure-directory-pathname
    (or (uiop:getenv "LEM_YATH_ORG_PLANNING_SNAPSHOTS")
