@@ -88,6 +88,14 @@ expect_contains() {
   fi
 }
 
+expect_matches() {
+  local actual="$1" pattern="$2" description="$3"
+  if ! grep -qE "$pattern" <<<"$actual"; then
+    CASE_OK=0
+    printf '  expected %s to match /%s/\n' "$description" "$pattern" >&2
+  fi
+}
+
 finish_case() {
   local name="$1" message="$2"
   if [ "$CASE_OK" = 1 ]; then
@@ -184,6 +192,7 @@ if start_case policy no; then
   keys "$CASE_SESSION" F6
   STATIC=$(wait_report STATIC "$before")
   expect_contains "$STATIC" 'respect=yes' policy
+  expect_contains "$STATIC" 'wordwrap=yes' word-boundary-policy
   expect_contains "$STATIC" 'j=LEM-YATH-NEXT-LINE' j-binding
   expect_contains "$STATIC" 'gj=LEM-YATH-NEXT-G-LINE' gj-binding
   expect_contains "$STATIC" 'visual=LEM-YATH-VISUAL-LINE' V-binding
@@ -737,6 +746,36 @@ if start_case logical-empty no; then
   expect_eq "$(field "$STATE" reglen)" 4 unterminated-cc-register-length
   expect_eq "$(field "$STATE" text)" 'X\n' unterminated-cc-text
   finish_case 26-logical-empty "wrap-off empty and unterminated yy/dd/cc retain Evil line semantics"
+fi
+
+# 27: prose wraps before a whole word, with navigation matching the drawing.
+if start_case word-boundary no word; then
+  CASE_OK=1
+  before=$(report_count WORD)
+  keys "$CASE_SESSION" F12
+  WORD=$(wait_report WORD "$before")
+  WORD_BOUNDARY=$(field "$WORD" boundary)
+  WORD_HARD=$(field "$WORD" hard)
+  WORD_PREFIX=$(field "$WORD" prefix)
+  WORD_SPACES=$(( $(field "$WORD" row) - WORD_PREFIX ))
+  printf -v WORD_EDGE_PATTERN 'a{%d} {%d}\\\\$' \
+    "$WORD_PREFIX" "$WORD_SPACES"
+  SCREEN=$(lem_capture "$CASE_SESSION")
+  expect_contains "$SCREEN" 'bbbbbbbbbbbb' rendered-whole-word
+  expect_matches "$SCREEN" "$WORD_EDGE_PATTERN" continuation-marker-at-edge
+  keys "$CASE_SESSION" j
+  record_state
+  expect_eq "$(field "$STATE" point)" "$WORD_BOUNDARY" word-navigation-boundary
+  expect_eq "$(field "$STATE" vcol)" 0 word-navigation-column
+  if [ "$WORD_BOUNDARY" = "$WORD_HARD" ]; then
+    CASE_OK=0
+    printf '  expected word boundary %s to differ from hard boundary %s\n' \
+      "$WORD_BOUNDARY" "$WORD_HARD" >&2
+  fi
+  keys "$CASE_SESSION" k
+  record_state
+  expect_eq "$(field "$STATE" point)" 1 word-navigation-roundtrip
+  finish_case 27-word-boundary "renderer and screen motions share the Emacs-style prose boundary"
 fi
 
 if [ "$FAILED" = 0 ]; then

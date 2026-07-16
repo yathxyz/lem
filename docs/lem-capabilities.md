@@ -2442,9 +2442,11 @@ global default to false so long lines truncate like the current Emacs config;
 Visual state, displayed-row motions, native line-register normalization,
 separate logical/display goal columns, and tab/CJK-aware virtual-column
 movement. `lem-yath/src/vi.lisp` applies the configured conditional motions
-and operators, and `scripts/screen-line-test.sh` verifies them in a 40-column
-ncurses session. Lem still breaks wrapped rows at display width rather than
-Emacs's word boundaries, so row geometry remains approximate.
+and operators. `patches/lem-word-boundary-wrap.patch` makes rendering, cursor
+geometry, and virtual-line motion prefer the same space/tab boundary, while
+long tokens retain display-width fallback. `scripts/screen-line-test.sh`
+verifies the combined behavior in a 27-case, 40-column ncurses session,
+including an assertion over the rendered continuation row.
 
 ### Show-paren — `src/ext/showparen.lisp`. `M-x toggle-show-paren` (line 69); enabled by
 default via `lem/show-paren:enable`. Highlights matching paren.

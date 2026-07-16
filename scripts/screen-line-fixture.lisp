@@ -174,6 +174,36 @@
      (position-at-point (current-point))
      (length text))))
 
+(define-command screen-line-fixture-prepare-word-wrap () ()
+  "Create a row whose exact-width and word-boundary breaks differ."
+  (let* ((row-width (screen-line-fixture-row-width))
+         (prefix-length (- row-width 8))
+         (word-length 12)
+         (text
+           (concatenate 'string
+                        (make-string prefix-length :initial-element #\a)
+                        " "
+                        (make-string word-length :initial-element #\b)
+                        (string #\Newline)
+                        "tail"
+                        (string #\Newline))))
+    (screen-line-fixture-replace-buffer text)
+    (setf (variable-value 'line-wrap :buffer (current-buffer)) t)
+    (screen-line-fixture-log
+     "WORD row=~d prefix=~d boundary=~d hard=~d baseline=~d"
+     row-width
+     prefix-length
+     (+ prefix-length 2)
+     (1+ row-width)
+     (length text))))
+
+(define-command screen-line-fixture-prepare-context () ()
+  (let ((filename (buffer-filename (current-buffer))))
+    (if (and filename
+             (string-equal (or (pathname-type filename) "") "word"))
+        (screen-line-fixture-prepare-word-wrap)
+        (screen-line-fixture-prepare-empty))))
+
 (define-command screen-line-fixture-prepare-empty-eof () ()
   "Create a sole empty displayed row at EOF."
   (screen-line-fixture-replace-buffer "")
@@ -276,11 +306,12 @@
     (screen-line-fixture-log
      (concatenate
       'string
-      "STATIC respect=~a j=~a k=~a gj=~a gk=~a zero=~a gzero=~a "
+      "STATIC respect=~a wordwrap=~a j=~a k=~a gj=~a gk=~a zero=~a gzero=~a "
       "end=~a gend=~a visual=~a leader=~a leader-ok=~a")
      (if (variable-value
           'lem-vi-mode/visual:respect-visual-line-mode :global)
          "yes" "no")
+     (if (variable-value 'line-wrap-at-word-boundary :global) "yes" "no")
      (binding "j") (binding "k") (binding "g j") (binding "g k")
      (binding "0") (binding "g 0") (binding "$") (binding "g $")
      (binding "V")
@@ -302,6 +333,6 @@
   (define-key keymap "F9" 'screen-line-fixture-place-width-tab)
   (define-key keymap "F10" 'screen-line-fixture-prepare-special)
   (define-key keymap "F11" 'screen-line-fixture-place-second-bol)
-  (define-key keymap "F12" 'screen-line-fixture-prepare-empty))
+  (define-key keymap "F12" 'screen-line-fixture-prepare-context))
 
 (screen-line-fixture-log "READY")

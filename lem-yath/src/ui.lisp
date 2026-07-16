@@ -6,6 +6,7 @@
 (in-package :lem-yath)
 
 (setf (variable-value 'line-wrap :global) nil)
+(setf (variable-value 'line-wrap-at-word-boundary :global) t)
 (setf (variable-value 'highlight-line :global) nil)
 
 (setf lem/line-numbers:*relative-line* t)

@@ -102,8 +102,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   restored proportions adapt to terminal resizes
 - Evil's visual-line policy on `SPC y v`: wrapped buffers swap screen/logical
   `j/k`, `gj/gk`, endpoints, insert/append, operators, registers, paste, and
-  `V`, with a focused ncurses gate; Lem hard-wraps at display width rather than
-  preferring Emacs word boundaries
+  `V`; a patched shared geometry layer prefers Emacs-style space/tab boundaries
+  with exact-width fallback for long tokens, covered by a focused ncurses gate
 - evil-surround defaults (`ys`/`ds`/`cs`/Visual `S`, row-wise Visual Block
   surrounds, padded and compact pairs, XML tags, call and prefix forms) /
   exact configured evil-snipe 2.1.3 /

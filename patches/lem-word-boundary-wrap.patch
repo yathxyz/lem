@@ -1,0 +1,243 @@
+diff --git a/src/internal-packages.lisp b/src/internal-packages.lisp
+index 6dfa60c..d68409e 100644
+--- a/src/internal-packages.lisp
++++ b/src/internal-packages.lisp
+@@ -274,6 +274,7 @@
+   ;; window.lisp
+   (:export
+    :line-wrap
++   :line-wrap-at-word-boundary
+    :*window-sufficient-width*
+    :*scroll-recenter-p*
+    :*window-scroll-functions*
+diff --git a/src/window/window.lisp b/src/window/window.lisp
+index 9080fca..91f6da8 100644
+--- a/src/window/window.lisp
++++ b/src/window/window.lisp
+@@ -1,6 +1,7 @@
+ (in-package :lem-core)
+
+ (define-editor-variable line-wrap t)
++(define-editor-variable line-wrap-at-word-boundary nil)
+
+ (defparameter *window-sufficient-width* 150)
+ (defparameter *scroll-recenter-p* t)
+diff --git a/src/window/virtual-line.lisp b/src/window/virtual-line.lisp
+index b2397a4..c081f0a 100644
+--- a/src/window/virtual-line.lisp
++++ b/src/window/virtual-line.lisp
+@@ -35,24 +35,78 @@ If FROM-BOTTOM is T, start counting from the bottom."
+       (window-scroll window n)
+       n)))
+
++(declaim (inline line-wrap-whitespace-p))
++(defun line-wrap-whitespace-p (character)
++  (or (char= character #\Space)
++      (char= character #\Tab)))
++
++(defun wrapping-line-break-index (string width
++                                  &key
++                                    (start 0)
++                                    (tab-size +default-tab-size+)
++                                    word-boundary-p)
++  "Return the next display-row boundary in STRING after START.
++When WORD-BOUNDARY-P is true, prefer the end of the last complete space or
++tab run that fits.  A word wider than WIDTH still uses the exact display-width
++boundary.  The second value is true only when a word boundary was selected."
++  (let ((hard-boundary
++          (wide-index string width :start start :tab-size tab-size)))
++    (unless (and hard-boundary word-boundary-p)
++      (return-from wrapping-line-break-index hard-boundary))
++    (let ((seen-content-p nil)
++          (in-whitespace-p nil)
++          (word-boundary nil))
++      (loop :for index :from start :below hard-boundary
++            :for character := (schar string index)
++            :do (cond ((line-wrap-whitespace-p character)
++                       (when seen-content-p
++                         (setf in-whitespace-p t)))
++                      (t
++                       (when in-whitespace-p
++                         (setf word-boundary index
++                               in-whitespace-p nil))
++                       (setf seen-content-p t))))
++      (when in-whitespace-p
++        (setf word-boundary hard-boundary))
++      (if word-boundary
++          (values word-boundary t)
++          hard-boundary))))
++
++(defun wrapping-line-start-index (window string charpos)
++  (let ((tab-size (variable-value 'tab-width :default (window-buffer window)))
++        (word-boundary-p
++          (variable-value 'line-wrap-at-word-boundary
++                          :default (window-buffer window)))
++        (width (1- (window-body-width window))))
++    (loop :with start := 0
++          :for next := (wrapping-line-break-index
++                        string width
++                        :start start
++                        :tab-size tab-size
++                        :word-boundary-p word-boundary-p)
++          :while (and next (<= next charpos))
++          :do (setf start next)
++          :finally (return start))))
++
+ (defun %calc-window-cursor-x (point window)
+   "Return (values cur-x next). the 'next' is a flag if the cursor goes to
+ next line because it is at the end of width."
+   (unless (variable-value 'line-wrap :default (window-buffer window))
+     (return-from %calc-window-cursor-x (values (point-column point) nil)))
+   (let* ((tab-size (variable-value 'tab-width :default (window-buffer window)))
+          (charpos (point-charpos point))
+          (line    (line-string point))
+          (width   (1- (window-body-width window)))
+-         (cur-x   0)
+-         (add-x   (if (< charpos (length line))
+-                      (char-width (schar line charpos) 0 :tab-size tab-size)
+-                      1)))
+-    (loop :for i :from 0 :below charpos
+-          :for c := (schar line i)
+-          :do (setf cur-x (char-width c cur-x :tab-size tab-size))
+-              (when (< width cur-x)
+-                (setf cur-x (char-width c 0 :tab-size tab-size))))
+-    (if (< width (+ cur-x add-x))
++         (start   (wrapping-line-start-index window line charpos))
++         (cur-x   (string-width line
++                                :start start
++                                :end charpos
++                                :tab-size tab-size))
++         (next-x  (if (< charpos (length line))
++                      (char-width (schar line charpos)
++                                  cur-x
++                                  :tab-size tab-size)
++                      (1+ cur-x))))
++    (if (< width next-x)
+         (values 0     t)
+         (values cur-x nil))))
+@@ -71,10 +125,17 @@ next line because it is at the end of width."
+     next))
+
+ (defun map-wrapping-line (window string fn)
+-  (let ((tab-size (variable-value 'tab-width :default (window-buffer window))))
++  (let ((tab-size (variable-value 'tab-width :default (window-buffer window)))
++        (word-boundary-p
++          (variable-value 'line-wrap-at-word-boundary
++                          :default (window-buffer window))))
+     (loop :with start := 0
+           :and width := (1- (window-body-width window))
+-          :for i := (wide-index string width :start start :tab-size tab-size)
++          :for i := (wrapping-line-break-index
++                     string width
++                     :start start
++                     :tab-size tab-size
++                     :word-boundary-p word-boundary-p)
+           :while i
+           :do (funcall fn i)
+               (setq start i))))
+diff --git a/src/display/physical-line.lisp b/src/display/physical-line.lisp
+index add39e7..f331d19 100644
+--- a/src/display/physical-line.lisp
++++ b/src/display/physical-line.lisp
+@@ -298,33 +298,98 @@
+                          attribute
+                          (char-type character)))
+
++(defun word-wrappable-objects-string (objects)
++  "Return the displayed text represented by OBJECTS, or NIL when an object
++cannot safely participate in character-based word wrapping."
++  (block invalid
++    (with-output-to-string (stream)
++      (dolist (object objects)
++        (cond ((typep object 'line-end-object)
++               (return-from invalid nil))
++              ((typep object 'text-object)
++               (write-string (text-object-string object) stream))
++              ((typep object '(or void-object
++                                  eol-cursor-object
++                                  extend-to-eol-object)))
++              (t
++               (return-from invalid nil)))))))
++
++(defun word-boundary-view-width (objects view-width buffer)
++  "Reduce VIEW-WIDTH so the physical row ends at the same word boundary used
++by virtual-line navigation.  The ordinary width splitter remains the fallback
++for long words and drawing objects without a text mapping."
++  (unless (variable-value 'line-wrap-at-word-boundary :default buffer)
++    (return-from word-boundary-view-width view-width))
++  (let* ((character-width (lem-if:get-char-width (implementation)))
++         (view-columns (floor view-width character-width)))
++    (when (<= view-columns 1)
++      (return-from word-boundary-view-width view-width))
++    (alexandria:when-let ((string (word-wrappable-objects-string objects)))
++      (multiple-value-bind (boundary word-boundary-p)
++          (wrapping-line-break-index
++           string
++           (1- view-columns)
++           :tab-size (variable-value 'tab-width :default buffer)
++           :word-boundary-p t)
++        (when (and boundary word-boundary-p)
++          (let* ((content-columns
++                   (string-width string
++                                 :end boundary
++                                 :tab-size (variable-value 'tab-width
++                                                           :default buffer)))
++                 (word-view-width
++                   (* (1+ content-columns) character-width)))
++            (min view-width word-view-width)))))))
++
+ (defun separate-objects-by-width (objects view-width buffer)
+-  (flet ((explode-object (text-object)
++  (flet ((wrap-padding-object (width)
++           (let ((columns
++                   (floor width
++                          (lem-if:get-char-width (implementation)))))
++             (when (plusp columns)
++               (make-object-with-type
++                (make-string columns :initial-element #\Space)
++                nil
++                (char-type #\Space)))))
++         (explode-object (text-object)
+            (check-type text-object text-object)
+            (let* ((string (text-object-string text-object))
+                   (char-type (char-type (char string 0)))
+                   (n (floor (length string) 2)))
+              (loop :for part-string :in (list (subseq string 0 n)
+                                               (subseq string n))
+                    :unless (alexandria:emptyp part-string)
+                    :collect (make-object-with-type
+                              part-string
+                              (text-object-attribute text-object) char-type)))))
+-    (let ((wrap-line-character (variable-value 'wrap-line-character :default buffer))
++    (let* ((original-view-width view-width)
++           (word-view-width
++             (word-boundary-view-width objects view-width buffer))
++           (view-width (or word-view-width view-width))
++           (wrap-padding-width
++             (if word-view-width
++                 (- original-view-width word-view-width)
++                 0))
++           (wrap-line-character
++             (variable-value 'wrap-line-character :default buffer))
+-          (wrap-line-attribute (variable-value 'wrap-line-attribute :default buffer)))
++           (wrap-line-attribute
++             (variable-value 'wrap-line-attribute :default buffer)))
+       (loop :with total-width := 0
+             :and physical-line-objects := '()
+             :for object := (pop objects)
+             :while object
+             :do (cond ((and (typep object 'text-object)
+                             (<= view-width (+ total-width (object-width object))))
+                        (cond ((< 1 (length (text-object-string object)))
+                               (setf objects (nconc (explode-object object) objects)))
+                              (t
+                               (push object objects)
++                              (alexandria:when-let
++                                  ((padding (wrap-padding-object wrap-padding-width)))
++                                (push padding physical-line-objects))
+                               (push (make-letter-object wrap-line-character
+                                                         wrap-line-attribute)
+                                     physical-line-objects)
+                               (return (values (nreverse physical-line-objects) objects)))))
+                       (t
+                        (incf total-width (object-width object))
