@@ -28,6 +28,14 @@
   tags
   modified-at)
 
+(defvar *lem-yath-md-roam-mode-keymap* (make-keymap))
+
+(define-minor-mode lem-yath-md-roam-mode
+    (:name "md-roam"
+     :description "Follow pinned md-roam wiki links"
+     :keymap *lem-yath-md-roam-mode-keymap*
+     :hide-from-modeline t))
+
 (defun roam-directory ()
   (uiop:ensure-directory-pathname (merge-pathnames "roam/" (workdir))))
 
@@ -37,6 +45,25 @@
        (uiop:native-namestring (truename root))
        (uiop:native-namestring (truename pathname)))
     (error () nil)))
+
+(defun lem-yath-md-roam-file-p (&optional (buffer (current-buffer)))
+  "Whether BUFFER visits a canonical Markdown file below the roam root."
+  (let* ((filename (ignore-errors (buffer-filename buffer)))
+         (pathname (and filename (pathname filename)))
+         (extension (and pathname (pathname-type pathname)))
+         (root (ignore-errors (truename (roam-directory)))))
+    (and pathname extension root
+         (string-equal extension "md")
+         (roam-path-in-root-p pathname root))))
+
+(defun lem-yath-enable-md-roam-mode ()
+  (lem-yath-md-roam-mode
+   (if (lem-yath-md-roam-file-p (current-buffer)) t nil)))
+
+(remove-hook lem-markdown-mode:*markdown-mode-hook*
+             'lem-yath-enable-md-roam-mode)
+(add-hook lem-markdown-mode:*markdown-mode-hook*
+          'lem-yath-enable-md-roam-mode)
 
 (defun roam-file-command (root)
   (cond
@@ -971,10 +998,102 @@ Returns one unique ID, aliases, the next line index, and validity."
            (editor-error "The selected roam node ID is ambiguous in its file."))
           (t (first matches)))))))
 
-(defun roam-visit-node (node)
+(defun roam-visit-node (node &optional other-window-p)
   (let ((current (roam-resolve-node node)))
-    (find-file (roam-node-pathname current))
+    (if other-window-p
+        (switch-to-window
+         (pop-to-buffer (find-file-buffer (roam-node-pathname current))))
+        (find-file (roam-node-pathname current)))
     (goto-line (roam-node-line current))))
+
+(defun roam-markdown-code-block-p (&optional (point (current-point)))
+  "Whether POINT is on or inside a fenced block recognized by Lem Markdown."
+  (let ((target-line (line-number-at-point point))
+        (inside nil))
+    (with-point ((line (buffer-start-point (point-buffer point))))
+      (loop :for line-number :from 1
+            :for text := (line-string line)
+            :for fence-p := (alexandria:starts-with-subseq "```" text)
+            :do
+               (when (= line-number target-line)
+                 (return (or inside fence-p)))
+               (when fence-p
+                 (if inside
+                     (when (string= text "```") (setf inside nil))
+                     (setf inside t)))
+            :while (line-offset line 1)))))
+
+(defun roam-markdown-wiki-name-at-point (&optional (point (current-point)))
+  "Return the md-roam target name for the wiki link containing POINT."
+  (unless (roam-markdown-code-block-p point)
+    (let ((line (line-string point))
+          (column (point-charpos point))
+          (offset 0))
+      (loop
+        (let ((start (search "[[" line :start2 offset)))
+          (unless start (return nil))
+          (let ((end (search "]]" line :start2 (+ start 2))))
+            (unless end (return nil))
+            (when (and (or (zerop start)
+                           (not (char= (char line (1- start)) #\\)))
+                       (<= start column (+ end 2)))
+              (let* ((content (subseq line (+ start 2) end))
+                     (separator (position #\| content))
+                     (name (if separator
+                               (subseq content (1+ separator))
+                               content)))
+                (when (plusp (length name))
+                  (return name))))
+            (setf offset (+ end 2))))))))
+
+(defun roam-normalize-wiki-name (name)
+  "Unescape and collapse whitespace in one bounded md-roam link target."
+  (let ((unescaped
+          (with-output-to-string (output)
+            (loop :with escaped := nil
+                  :for character :across name
+                  :do (cond
+                        (escaped
+                         (write-char character output)
+                         (setf escaped nil))
+                        ((char= character #\\)
+                         (setf escaped t))
+                        (t (write-char character output)))
+                  :finally (when escaped (write-char #\\ output))))))
+    (with-output-to-string (output)
+      (loop :with pending-space := nil
+            :for character :across unescaped
+            :do (if (member character '(#\Space #\Tab #\Newline #\Return))
+                    (setf pending-space t)
+                    (progn
+                      (when (and pending-space (plusp (file-position output)))
+                        (write-char #\Space output))
+                      (setf pending-space nil)
+                      (write-char character output)))))))
+
+(defun roam-wiki-node-candidates (name nodes)
+  (let ((matches
+          (remove-if-not
+           (lambda (node)
+             (or (string= name (roam-node-title node))
+                 (member name (roam-node-aliases node) :test #'string=)))
+           nodes)))
+    (unless matches
+      (setf matches
+            (remove-if-not
+             (lambda (node) (string= name (roam-node-id node)))
+             nodes)))
+    (remove-duplicates matches :test #'eq)))
+
+(defun roam-resolve-wiki-node (name)
+  "Resolve NAME to one fresh title, alias, or ID node, refusing ambiguity."
+  (let* ((name (roam-normalize-wiki-name name))
+         (matches (roam-wiki-node-candidates name (note-nodes))))
+    (cond
+      ((null matches) (values nil name))
+      ((cdr matches)
+       (editor-error "The md-roam wiki target ~s is ambiguous." name))
+      (t (values (first matches) name)))))
 
 (defun roam-escape-link-text (text characters)
   (with-output-to-string (output)

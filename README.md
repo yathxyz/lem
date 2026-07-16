@@ -282,7 +282,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   find/insert/random workflows. A typed missing title opens the configured
   one-key `n/c/p/s/m` roam capture templates; `C-c C-c` finalizes the new Org
   or Markdown note and any deferred link, while `C-c C-k` aborts without a
-  file. Root-level roam dailies, journal, and i/t/r capture operate over
+  file. In Markdown notes below the roam root, `C-c C-o` follows a unique
+  `[[Title]]`, `[[label|Alias]]`, or `[[ID]]` and opens the same non-inserting
+  capture flow for a missing target; ambiguous, escaped, and fenced targets
+  fail closed. From Normal state, `C-z C-u C-c C-o` supplies the source
+  package's other-window prefix behavior. Root-level roam dailies, journal,
+  and i/t/r capture operate over
   `$WORKDIR`, with public TODO capture over `$PUBLIC_ORG_DIR`
 - `M-x org-roam-buffer-toggle` opens the familiar persistent `*org-roam*`
   backlink view in the configured 0.4-width right-side window. It follows the

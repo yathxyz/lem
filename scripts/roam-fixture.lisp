@@ -4,6 +4,8 @@
 (defvar *roam-test-origin* (pathname (uiop:getenv "LEM_YATH_ROAM_ORIGIN")))
 (defvar *roam-test-markdown-origin*
   (pathname (uiop:getenv "LEM_YATH_ROAM_MARKDOWN_ORIGIN")))
+(defvar *roam-test-follow-origin*
+  (pathname (uiop:getenv "LEM_YATH_ROAM_FOLLOW_ORIGIN")))
 (defvar *roam-test-text-origin*
   (pathname (uiop:getenv "LEM_YATH_ROAM_TEXT_ORIGIN")))
 (defvar *roam-test-race-outside*
@@ -302,10 +304,14 @@
       (let* ((text (points-to-string (buffer-start-point buffer)
                                      (buffer-end-point buffer)))
              (link "[[Markdown Node]]"))
-        (roam-test-report "MARKDOWN link=~a count=~d modified=~a"
+        (roam-test-report "MARKDOWN link=~a count=~d modified=~a mode=~a"
                           (roam-test-yes-no (search link text))
                           (roam-test-count-substring link text)
-                          (roam-test-yes-no (buffer-modified-p buffer)))))))
+                          (roam-test-yes-no (buffer-modified-p buffer))
+                          (roam-test-yes-no
+                           (mode-active-p buffer
+                                          'lem-yath-md-roam-mode))))))
+  (roam-test-report-follow-state))
 
 (define-command lem-yath-test-roam-dirty-target () ()
   (let ((target (merge-pathnames "file-node.org" (roam-directory))))
@@ -325,6 +331,66 @@
   (buffer-end (current-point))
   (roam-test-report "TEXT-RESET line=~d"
                     (line-number-at-point (current-point))))
+
+(defun roam-test-goto-follow-link (needle)
+  (find-file *roam-test-follow-origin*)
+  (buffer-start (current-point))
+  (unless (search-forward-regexp
+           (current-point) (cl-ppcre:quote-meta-chars needle))
+    (error "Follow fixture link not found: ~s" needle))
+  (search-backward (current-point) needle)
+  (character-offset (current-point) 2)
+  (roam-test-report "FOLLOW-GOTO needle=~s line=~d mode=~a"
+                    needle (line-number-at-point (current-point))
+                    (roam-test-yes-no
+                     (mode-active-p (current-buffer)
+                                    'lem-yath-md-roam-mode))))
+
+(defun roam-test-goto-escaped-follow-link ()
+  (find-file *roam-test-follow-origin*)
+  (buffer-start (current-point))
+  (search-forward-regexp (current-point) "Escaped")
+  (search-forward-regexp (current-point) "\\[\\[")
+  (roam-test-report "FOLLOW-GOTO needle=escaped line=~d mode=~a"
+                    (line-number-at-point (current-point))
+                    (roam-test-yes-no
+                     (mode-active-p (current-buffer)
+                                    'lem-yath-md-roam-mode))))
+
+(defvar *roam-test-follow-index* 0)
+(defparameter *roam-test-follow-needles*
+  '("[[Markdown Node]]"
+    "[[shown|Mark Alias]]"
+    "[[markdown-id]]"
+    "[[Fresh Follow]]"
+    "[[Same Title]]"
+    "[[Block Markdown]]"
+    :escaped))
+
+(define-command lem-yath-test-roam-follow-next () ()
+  (let ((needle (nth *roam-test-follow-index* *roam-test-follow-needles*)))
+    (unless needle
+      (error "No remaining follow fixture case."))
+    (incf *roam-test-follow-index*)
+    (if (eq needle :escaped)
+        (roam-test-goto-escaped-follow-link)
+        (roam-test-goto-follow-link needle))))
+
+(defun roam-test-report-follow-state ()
+  (let ((buffer (find-file-buffer *roam-test-follow-origin*)))
+    (roam-test-report
+     "FOLLOW-STATE current=~a line=~d windows=~d mode=~a modified=~a hook=~d"
+     (if (buffer-filename (current-buffer))
+         (file-namestring (buffer-filename (current-buffer)))
+         "none")
+     (line-number-at-point (current-point))
+     (length (window-list))
+     (roam-test-yes-no
+      (mode-active-p buffer 'lem-yath-md-roam-mode))
+     (roam-test-yes-no (buffer-modified-p buffer))
+     (count 'lem-yath-enable-md-roam-mode
+            lem-markdown-mode:*markdown-mode-hook* :test #'eq
+            :key (lambda (entry) (if (consp entry) (car entry) entry))))))
 
 (defvar *roam-test-capture-id-counter* 0)
 
@@ -388,6 +454,7 @@
 (define-key *global-keymap* "F9" 'lem-yath-test-roam-markdown-state)
 (define-key *global-keymap* "F10" 'lem-yath-test-roam-dirty-target)
 (define-key *global-keymap* "F11" 'lem-yath-test-roam-reset-text-origin)
+(define-key *global-keymap* "F12" 'lem-yath-test-roam-follow-next)
 
 (with-open-file (stream *roam-test-report-path*
                         :direction :output

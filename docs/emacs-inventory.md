@@ -424,7 +424,7 @@ to its top-level, non-hidden `.org` files. `initial-major-mode org-mode`.
 - Display template: `${file:30} :: ${title} ${tags:10}`.
 - `org-roam-completion-everywhere t`. `org-roam-file-extensions '("org" "md")`. `org-roam-list-files-commands '(fd fdfind rg find)`.
 - `org-roam-db-autosync-mode 1`. Excludes Syncthing `*.sync-conflict-*.org` files from indexing.
-- **md-roam** (`nobiot/md-roam` at `1113a568`, custom build): `md-roam-mode 1`, `md-roam-file-extension "md"` — Markdown notes participate through front-matter `id:`/`title:`, flow `ROAM_ALIASES`, and Zettlr `#tag`/`@tag` tokens. The configured default insertion form is `[[Title]]`.
+- **md-roam** (`nobiot/md-roam` at `1113a568`, custom build): `md-roam-mode 1`, `md-roam-file-extension "md"` — Markdown notes participate through front-matter `id:`/`title:`, flow `ROAM_ALIASES`, and Zettlr `#tag`/`@tag` tokens. The configured default insertion form is `[[Title]]`; the global mode advises Markdown's `C-c C-o` so an existing title/alias/ID target opens, a missing target starts roam capture, and a universal prefix uses another window.
 - Roam capture templates: `n` note, `c` concept (`:concept:`), `p` project (`:project:`), `s` source (under `references/`, `:source:`), `m` markdown note (`.md` with YAML front-matter).
 - **org-roam-dailies**: template `d` daily -> `%Y-%m-%d.org`. Bound via `SPC n r d t` / `SPC n r d d`.
 

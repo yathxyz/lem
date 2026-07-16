@@ -644,6 +644,23 @@
     (cond (node (roam-insert-node-link node))
           (new-title (roam-capture-begin-request new-title :insert-p t)))))
 
+(define-command lem-yath-md-roam-follow-wiki-link (&optional other-window-p)
+    (:universal-nil)
+  "Follow the Markdown wiki link at point through the configured roam graph."
+  (unless (mode-active-p (current-buffer) 'lem-yath-md-roam-mode)
+    (editor-error "This Markdown file is not inside the configured roam root."))
+  (let ((name (roam-markdown-wiki-name-at-point)))
+    (unless name
+      (editor-error "Point is not at a Markdown wiki link."))
+    (multiple-value-bind (node normalized-name)
+        (roam-resolve-wiki-node name)
+      (if node
+          (roam-visit-node node other-window-p)
+          (roam-capture-begin-request normalized-name)))))
+
+(define-key *lem-yath-md-roam-mode-keymap* "C-c C-o"
+  'lem-yath-md-roam-follow-wiki-link)
+
 (define-key *roam-capture-mode-keymap* "C-c C-c"
   'lem-yath-roam-capture-finalize)
 (define-key *roam-capture-mode-keymap* "C-c C-k"

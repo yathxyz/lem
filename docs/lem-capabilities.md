@@ -1878,6 +1878,17 @@ reference declarations, and combined backlink/reflink occurrences all have
 explicit limits; reads verify the opened regular file descriptor and
 containment beneath the canonical roam root.
 
+Canonical Markdown files below that roam root receive a buffer-local md-roam
+minor mode. Its `C-c C-o` follows a unique `[[Title]]`, alias-first
+`[[label|Alias]]`, or ID target. A missing target enters the same non-inserting
+capture flow without changing the source buffer; duplicate names are refused.
+The universal prefix opens an existing target in another window. Because Evil
+Normal state retains `C-u`, that prefixed route is `C-z C-u C-c C-o` from
+Normal state. Escaped link syntax and links inside Lem-recognized fenced code
+blocks remain literal. Ordinary Markdown files outside the roam root do not
+receive the binding. `scripts/roam-test.sh` exercises these paths with physical
+terminal keys and also proves one reload-stable Markdown hook.
+
 `M-x org-roam-buffer-toggle` supplies the persistent `*org-roam*` view in the
 configured right-side window at 0.4 of the display width. One asynchronous
 immutable snapshot maps bracketed Org `id:` links and pinned md-roam
@@ -1910,9 +1921,8 @@ and reload cleanup through the packaged ncurses editor.
 This remains an in-memory snapshot rather than claiming Org-roam's persistent
 SQLite database. External changes require `g`; there is no always-on incremental
 autosync, arbitrary non-HTTP(S) third-party reference-scheme extraction,
-Markdown inline-file backlink extraction, or wiki-link-follow command yet.
-Unsaved note geometry is not applied to the disk-derived graph and is shown as
-requiring a save.
+or Markdown inline-file backlink extraction. Unsaved note geometry is not
+applied to the disk-derived graph and is shown as requiring a save.
 
 ### Host-gated Org nodes projection — `lem-yath/src/org/nodes-sync.lisp` (verified approximation)
 

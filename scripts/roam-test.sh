@@ -24,6 +24,7 @@ export LEM_YATH_COMPLETION_STATE_FILE="$root/completion-ranking.sexp"
 export LEM_YATH_ROAM_REPORT="$root/report"
 export LEM_YATH_ROAM_ORIGIN="$WORKDIR/origin.org"
 export LEM_YATH_ROAM_MARKDOWN_ORIGIN="$WORKDIR/origin.md"
+export LEM_YATH_ROAM_FOLLOW_ORIGIN="$WORKDIR/roam/follow-origin.md"
 export LEM_YATH_ROAM_TEXT_ORIGIN="$WORKDIR/origin.txt"
 export LEM_YATH_ROAM_RACE_OUTSIDE="$root/outside-race"
 roam="$WORKDIR/roam"
@@ -42,6 +43,19 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$LEM_HOME" "$roam/sub" \
 printf '%s\n' '* Origin' 'ORIGIN-END' >"$LEM_YATH_ROAM_ORIGIN"
 printf '%s\n' '# Markdown Origin' 'MARKDOWN-END' \
   >"$LEM_YATH_ROAM_MARKDOWN_ORIGIN"
+printf '%s\n' \
+  '# Follow Origin' \
+  'Title [[Markdown Node]]' \
+  'Alias [[shown|Mark Alias]]' \
+  'ID [[markdown-id]]' \
+  'Missing [[Fresh Follow]]' \
+  'Ambiguous [[Same Title]]' \
+  'Escaped \[[File Node]]' \
+  '```text' \
+  'Fenced [[Block Markdown]]' \
+  '```' \
+  'FOLLOW-END' \
+  >"$LEM_YATH_ROAM_FOLLOW_ORIGIN"
 printf '%s\n' 'Text Origin' 'TEXT-END' >"$LEM_YATH_ROAM_TEXT_ORIGIN"
 
 printf '%s\n' \
@@ -217,6 +231,10 @@ reset_text_origin() {
   record_key F11 '^TEXT-RESET '
 }
 
+goto_follow_link() {
+  record_key F12 '^FOLLOW-GOTO '
+}
+
 open_roam_prompt() {
   local action=$1
   lem_keys "$session" C-g
@@ -322,17 +340,17 @@ if open_roam_prompt i; then
     lem_keys "$session" Enter
     if lem_wait_for "$session" '\[\[Markdown Node\]\]' \
          "$WAIT_TIMEOUT" >/dev/null &&
-       record_key F9 '^MARKDOWN ' &&
-       report_is '^MARKDOWN ' \
-         'MARKDOWN link=yes count=1 modified=yes'; then
+     record_key F9 '^MARKDOWN ' &&
+     report_is '^MARKDOWN ' \
+         'MARKDOWN link=yes count=1 modified=yes mode=no'; then
       pass markdown-wiki-insert 'Markdown insertion matched pinned md-roam [[Title]]'
     else
       fail markdown-wiki-insert 'Markdown insertion did not produce [[Title]]'
     fi
     lem_keys "$session" u
     sleep 0.3
-    if record_key F9 '^MARKDOWN ' &&
-       report_is '^MARKDOWN ' 'MARKDOWN link=no count=0 modified=no'; then
+  if record_key F9 '^MARKDOWN ' &&
+       report_is '^MARKDOWN ' 'MARKDOWN link=no count=0 modified=no mode=no'; then
       pass markdown-wiki-insert-undo 'one undo removed the complete wiki link'
     else
       fail markdown-wiki-insert-undo 'wiki link insertion was not one undo step'
@@ -343,6 +361,94 @@ if open_roam_prompt i; then
 else
   fail markdown-wiki-insert 'could not open the Markdown insertion prompt'
 fi
+
+if goto_follow_link; then
+  lem_keys "$session" C-c C-o
+  if lem_wait_for "$session" 'MARKDOWN TARGET' "$WAIT_TIMEOUT" >/dev/null &&
+     record_key F6 '^CURRENT ' &&
+     report_is '^CURRENT ' 'CURRENT file=markdown.md line=1'; then
+    pass markdown-wiki-follow-title 'C-c C-o followed a pinned title link'
+  else
+    fail markdown-wiki-follow-title 'title link did not visit its md-roam node'
+  fi
+else
+  fail markdown-wiki-follow-title 'could not position on the title link'
+fi
+
+if goto_follow_link; then
+  lem_keys "$session" C-c C-o
+  if lem_wait_for "$session" 'MARKDOWN TARGET' "$WAIT_TIMEOUT" >/dev/null &&
+     record_key F6 '^CURRENT ' &&
+     report_is '^CURRENT ' 'CURRENT file=markdown.md line=1'; then
+    pass markdown-wiki-follow-alias 'alias-first [[label|alias]] resolution matched md-roam'
+  else
+    fail markdown-wiki-follow-alias 'alias link did not resolve the unique node'
+  fi
+else
+  fail markdown-wiki-follow-alias 'could not position on the alias link'
+fi
+
+if goto_follow_link; then
+  # Evil normal state owns C-u, just as it does in the source Emacs setup.
+  # Enter Lem's Emacs state before exercising md-roam's universal prefix.
+  lem_keys "$session" C-z C-u C-c C-o
+  if lem_wait_for "$session" 'MARKDOWN TARGET' "$WAIT_TIMEOUT" >/dev/null &&
+     record_key F9 '^FOLLOW-STATE ' &&
+     report_is '^FOLLOW-STATE ' \
+       'FOLLOW-STATE current=markdown.md line=1 windows=2 mode=yes modified=no hook=1'; then
+    pass markdown-wiki-follow-other-window 'ID fallback and the prefix opened another window'
+  else
+    fail markdown-wiki-follow-other-window 'ID or other-window semantics diverged'
+  fi
+  lem_keys "$session" C-x 1
+else
+  fail markdown-wiki-follow-other-window 'could not position on the ID link'
+fi
+
+if goto_follow_link; then
+  lem_keys "$session" C-c C-o
+  if lem_wait_for "$session" 'Roam template:' "$WAIT_TIMEOUT" >/dev/null &&
+     record_key F4 '^REQUEST ' &&
+     report_is '^REQUEST ' \
+       'REQUEST active=yes title="Fresh Follow" insert=no' &&
+     record_key F9 '^FOLLOW-STATE ' &&
+     report_is '^FOLLOW-STATE ' \
+       'FOLLOW-STATE current=follow-origin.md line=5 windows=1 mode=yes modified=no hook=1'; then
+    pass markdown-wiki-follow-capture 'a missing target entered non-inserting roam capture'
+  else
+    fail markdown-wiki-follow-capture 'missing-target capture changed source or request state'
+  fi
+  lem_keys "$session" C-g
+else
+  fail markdown-wiki-follow-capture 'could not position on the missing link'
+fi
+
+if goto_follow_link; then
+  lem_keys "$session" C-c C-o
+  if lem_wait_for "$session" 'wiki target.*ambiguous' "$WAIT_TIMEOUT" >/dev/null &&
+     record_key F9 '^FOLLOW-STATE ' &&
+     report_is '^FOLLOW-STATE ' \
+       'FOLLOW-STATE current=follow-origin.md line=6 windows=1 mode=yes modified=no hook=1'; then
+    pass markdown-wiki-follow-ambiguous 'duplicate titles failed closed at the source link'
+  else
+    fail markdown-wiki-follow-ambiguous 'an ambiguous wiki target was visited or mutated'
+  fi
+else
+  fail markdown-wiki-follow-ambiguous 'could not position on the ambiguous link'
+fi
+
+for label in fenced escaped; do
+  if goto_follow_link; then
+    lem_keys "$session" C-c C-o
+    if lem_wait_for "$session" 'not at a Markdown wiki link' "$WAIT_TIMEOUT" >/dev/null; then
+      pass "markdown-wiki-follow-$label" "$label wiki syntax remained inert"
+    else
+      fail "markdown-wiki-follow-$label" "$label wiki syntax was treated as a link"
+    fi
+  else
+    fail "markdown-wiki-follow-$label" "could not position on the $label decoy"
+  fi
+done
 
 reset_origin || fail origin-reset-global-id 'could not restore duplicate-ID origin'
 if open_roam_prompt i; then
@@ -569,10 +675,10 @@ if start_roam_capture f 'Abort Concept' c; then
   else
     screen=''
   fi
-  if grep -Fq '#+filetags: :concept:' <<<"$screen" &&
-     grep -Fq '* Claim' <<<"$screen" &&
-     grep -Fq '* Context' <<<"$screen" &&
-     grep -Fq '* Links' <<<"$screen"; then
+  if grep -Fq 'filetags:  concept' <<<"$screen" &&
+     grep -Fq '▿ Claim' <<<"$screen" &&
+     grep -Fq '▿ Context' <<<"$screen" &&
+     grep -Fq '▿ Links' <<<"$screen"; then
     pass capture-template-ui 'missing title opened the selected concept template at %?'
   else
     fail capture-template-ui 'concept capture layout or session identity was wrong'
