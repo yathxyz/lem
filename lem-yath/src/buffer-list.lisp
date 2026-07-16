@@ -134,7 +134,10 @@ Each nonempty group begins with a distinct heading entry."
     :reader buffer-list-component-recency-ranks)
    (deletion-items
     :initform (make-hash-table :test #'eq)
-    :reader buffer-list-component-deletion-items)))
+    :reader buffer-list-component-deletion-items)
+   (filters
+    :initform nil
+    :accessor buffer-list-component-filters)))
 
 (defparameter *buffer-list-sort-mode-cycle*
   '(:alphabetic :filename :major-mode :mode-name :recency :size)
@@ -205,23 +208,58 @@ Each nonempty group begins with a distinct heading entry."
           (buffer-list-component-hidden-groups component)
           :test #'string=))
 
-(defun buffer-list-visible-item-p (component item)
-  (let ((entry (buffer-list-item-entry item)))
-    (or (buffer-list-entry-heading-p entry)
-        (not (buffer-list-group-hidden-p
-              component (buffer-list-entry-group entry))))))
+(defun buffer-list-filter-match-p (filter buffer)
+  (ecase (first filter)
+    (:modified (buffer-modified-p buffer))
+    (:visiting-file (buffer-filename buffer))
+    (:not (not (buffer-list-filter-match-p (second filter) buffer)))))
+
+(defun buffer-list-active-filters-match-p (component buffer)
+  (every (lambda (filter) (buffer-list-filter-match-p filter buffer))
+         (buffer-list-component-filters component)))
 
 (defun buffer-list-reset-visible-items (component)
-  (setf (lem/multi-column-list::multi-column-list-items component)
-        (remove-if-not
-         (lambda (item) (buffer-list-visible-item-p component item))
-         (buffer-list-component-all-items component))))
+  "Rebuild grouped rows after active filters or collapsed groups change."
+  (let ((remaining (copy-list (buffer-list-component-all-items component)))
+        result)
+    (loop :while remaining
+          :for heading := (pop remaining)
+          :for heading-entry := (buffer-list-item-entry heading)
+          :for members :=
+            (loop :while (and remaining
+                              (not (buffer-list-entry-heading-p
+                                    (buffer-list-item-entry
+                                     (first remaining)))))
+                  :collect (pop remaining))
+          :for matching :=
+            (remove-if-not
+             (lambda (item)
+               (buffer-list-active-filters-match-p
+                component
+                (buffer-list-entry-buffer (buffer-list-item-entry item))))
+             members)
+          :do
+             (unless (buffer-list-entry-heading-p heading-entry)
+               (error "Buffer-list group is missing its heading"))
+             (when matching
+               (push heading result)
+               (unless (buffer-list-group-hidden-p
+                        component (buffer-list-entry-group heading-entry))
+                 (dolist (item matching)
+                   (push item result)))))
+    (setf (lem/multi-column-list::multi-column-list-items component)
+          (nreverse result))))
 
 (defun buffer-list-filter-entries (component query)
   "Filter COMPONENT's entries through the established buffer matcher."
   (let* ((entries (buffer-list-component-entries component))
          (buffer-entries
-           (remove-if #'buffer-list-entry-heading-p entries))
+           (remove-if-not
+            (lambda (entry)
+              (and (not (buffer-list-entry-heading-p entry))
+                   (buffer-list-active-filters-match-p
+                    component (buffer-list-entry-buffer entry))))
+            entries))
          matching)
     (let ((by-buffer (make-hash-table :test #'eq)))
       (dolist (entry buffer-entries)
@@ -546,6 +584,62 @@ Each nonempty group begins with a distinct heading entry."
     (buffer-list-filter-input-mode nil)
     (lem/multi-column-list:update component)))
 
+(defun buffer-list-filter-description (filter)
+  (ecase (first filter)
+    (:modified "modified")
+    (:visiting-file "visiting-file")
+    (:not (format nil "not(~a)"
+                  (buffer-list-filter-description (second filter))))))
+
+(defun buffer-list-refresh-filters (component)
+  (setf (lem/multi-column-list::multi-column-list-search-string component) "")
+  (buffer-list-reset-visible-items component)
+  (lem/multi-column-list:update component)
+  (let ((descriptions
+          (mapcar #'buffer-list-filter-description
+                  (buffer-list-component-filters component))))
+    (message "Ibuffer filters: ~a"
+             (if descriptions
+                 (format nil "~{~a~^ + ~}" descriptions)
+                 "none"))))
+
+(defun buffer-list-push-filter (component filter)
+  (unless (member filter (buffer-list-component-filters component) :test #'equal)
+    (push filter (buffer-list-component-filters component)))
+  (buffer-list-refresh-filters component))
+
+(define-command lem-yath-buffer-list-filter-modified () ()
+  (buffer-list-push-filter
+   (lem/multi-column-list::current-multi-column-list) '(:modified)))
+
+(define-command lem-yath-buffer-list-filter-visiting-file () ()
+  (buffer-list-push-filter
+   (lem/multi-column-list::current-multi-column-list) '(:visiting-file)))
+
+(define-command lem-yath-buffer-list-pop-filter () ()
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (if (buffer-list-component-filters component)
+        (progn
+          (pop (buffer-list-component-filters component))
+          (buffer-list-refresh-filters component))
+        (message "No Ibuffer filters in effect"))))
+
+(define-command lem-yath-buffer-list-negate-filter () ()
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (if (buffer-list-component-filters component)
+        (let ((filter (pop (buffer-list-component-filters component))))
+          (push (if (eq :not (first filter))
+                    (second filter)
+                    (list :not filter))
+                (buffer-list-component-filters component))
+          (buffer-list-refresh-filters component))
+        (message "No Ibuffer filters in effect"))))
+
+(define-command lem-yath-buffer-list-disable-filters () ()
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (setf (buffer-list-component-filters component) nil)
+    (buffer-list-refresh-filters component)))
+
 (defun buffer-list-action-items (component)
   (or (remove-if
        (lambda (item)
@@ -797,6 +891,16 @@ Each nonempty group begins with a distinct heading entry."
   'lem/multi-column-list::multi-column-list/quit)
 (define-key *buffer-list-picker-mode-keymap* "s n"
   'lem-yath-buffer-list-start-name-filter)
+(define-key *buffer-list-picker-mode-keymap* "s i"
+  'lem-yath-buffer-list-filter-modified)
+(define-key *buffer-list-picker-mode-keymap* "s v"
+  'lem-yath-buffer-list-filter-visiting-file)
+(define-key *buffer-list-picker-mode-keymap* "s p"
+  'lem-yath-buffer-list-pop-filter)
+(define-key *buffer-list-picker-mode-keymap* "s !"
+  'lem-yath-buffer-list-negate-filter)
+(define-key *buffer-list-picker-mode-keymap* "s /"
+  'lem-yath-buffer-list-disable-filters)
 (define-key *buffer-list-picker-mode-keymap* "o a"
   'lem-yath-buffer-list-sort-alphabetic)
 (define-key *buffer-list-picker-mode-keymap* "o v"

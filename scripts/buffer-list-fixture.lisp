@@ -155,6 +155,22 @@
     (buffer-list-test-log
      "NAV focus=~a marks=~{~a~^,~}" focus-label marks)))
 
+(define-command lem-yath-test-buffer-list-filter-state () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (filters
+           (mapcar #'buffer-list-filter-description
+                   (buffer-list-component-filters component)))
+         (visible
+           (loop :for item :in
+                   (lem/multi-column-list::multi-column-list-items component)
+                 :for entry := (buffer-list-item-entry item)
+                 :unless (buffer-list-entry-heading-p entry)
+                   :collect
+                   (completion-path-display-string
+                    (buffer-name (buffer-list-entry-buffer entry))))))
+    (buffer-list-test-log
+     "FILTER stack=~{~a~^,+~} visible=~{~a~^,~}" filters visible)))
+
 (define-command lem-yath-test-buffer-list-reload () ()
   (load (merge-pathnames "src/buffer-list.lisp"
                          (asdf:system-source-directory "lem-yath"))))
@@ -222,6 +238,8 @@
   'lem-yath-test-buffer-list-ui-state)
 (define-key *buffer-list-picker-mode-keymap* "F11"
   'lem-yath-test-buffer-list-nav-state)
+(define-key *buffer-list-picker-mode-keymap* "F12"
+  'lem-yath-test-buffer-list-filter-state)
 (define-key lem-vi-mode:*normal-keymap* "F10"
   'lem-yath-test-buffer-list-reload)
 

@@ -142,8 +142,10 @@ with `d` then `x`, marked save with `S`, row movement with `gj/gk`, group
 movement with Tab/backtab, `C-j/C-k`, and `]]/[[`, and quit with `q`. `s n`
 enters literal name-filter input so modal command letters remain searchable;
 Return accepts the filter and Escape cancels it. Filtering temporarily presents
-only matching selectable buffer rows (`src/buffer-list.lisp`,
-`scripts/buffer-list-test.sh`).
+only matching selectable buffer rows. `s i` and `s v` push GNU Ibuffer's
+modified and visiting-file filters, multiple filters compose by AND, `s !`
+negates the top filter, `s p` removes it, and `s /` disables the stack
+(`src/buffer-list.lisp`, `scripts/buffer-list-test.sh`).
 
 ### 1.4 Mode-local bindings
 

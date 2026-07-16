@@ -900,14 +900,18 @@ through the ncurses editor.
   cancels it. The modal operation core uses `m/u/U/t/~` for ordinary marks,
   distinct `d` deletion marks followed by `x`, and `S` for marked saves;
   `gj/gk`, Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide row movement, group
-  movement, and quit. Control-character-safe display remains available.
+  movement, and quit. `s i/v` push modified and visiting-file filters onto an
+  AND stack, while `s !`, `s p`, and `s /` negate the top, pop the top, or
+  disable all filters. Control-character-safe display remains available.
   The real TUI verifies classification, ordering, every bound sorter, reversal,
   cycling, both formats, empty-group omission, heading collapse/expansion and
   safety, literal filtering across modal command letters, stock field widths
   including wide characters, selection, every modal movement above, ordinary
-  and deletion mark rendering, marked save/deletion, and reload. Lem has no
-  visited-file locking state, and Ibuffer's wider filter stack and specialized
-  bulk mark/operation catalogs are not reproduced.
+  and deletion mark rendering, no-prompt filter composition/negation/pop/disable,
+  marked save/deletion, and reload. Lem has no visited-file locking state;
+  Ibuffer's input-bearing mode/file/size/content/predicate filters,
+  compound/saved filter operations, and specialized bulk mark/operation
+  catalogs are not reproduced.
 - Recent files: `M-g r` opens an annotated Lem persistent-MRU prompt after
   lem-yath sets the loaded
   history's 300-entry limit and normalizes oversized persisted histories to their

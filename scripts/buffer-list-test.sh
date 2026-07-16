@@ -96,6 +96,21 @@ report_nav() {
   return 1
 }
 
+report_filter() {
+  local before attempts=0
+  before=$(grep -c '^FILTER ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F12
+  while ((attempts < 40)); do
+    if (( $(grep -c '^FILTER ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^FILTER ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
 fixture="$(lem-yath_lisp_string "$here/scripts/buffer-list-fixture.lisp")"
 lem_start "$session" "$source_file" --eval "(load #P$fixture)"
 
@@ -371,6 +386,59 @@ if lem_wait_for "$session" 'Buffer[[:space:]]+Size[[:space:]]+Mode[[:space:]]+Fi
   fi
 else
   fail sorting-ui "could not reopen the grouped chooser for sorting"
+fi
+lem_keys "$session" q
+
+lem_keys "$session" C-x C-b
+lem_keys "$session" s i
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=modified* ]] &&
+   [[ "$filter" == *'buffer-list-sort-zeta'* ]] &&
+   [[ "$filter" == *'buffer-list-save-target.txt'* ]] &&
+   [[ "$filter" != *'buffer-list-zz-target.txt'* ]]; then
+  pass filter-modified "s i retained only modified buffers"
+else
+  fail filter-modified "unexpected modified filter state: $filter"
+fi
+
+lem_keys "$session" s v
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=visiting-file,+modified* ]] &&
+   [[ "$filter" == *'buffer-list-sort-zeta'* ]] &&
+   [[ "$filter" != *'buffer-list-name-that-is-long'* ]]; then
+  pass filter-visiting-file "s v composed visiting-file with the modified filter"
+else
+  fail filter-visiting-file "unexpected visiting-file filter state: $filter"
+fi
+
+lem_keys "$session" s '!'
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=not\(visiting-file\),+modified* ]] &&
+   [[ "$filter" == *'buffer-list-name-that-is-long'* ]] &&
+   [[ "$filter" != *'buffer-list-sort-zeta'* ]]; then
+  pass filter-negate "s ! negated only the top filter"
+else
+  fail filter-negate "unexpected negated filter state: $filter"
+fi
+
+lem_keys "$session" s '!'
+lem_keys "$session" s p
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=modified* ]] &&
+   [[ "$filter" == *'buffer-list-name-that-is-long'* ]] &&
+   [[ "$filter" != *'buffer-list-zz-target.txt'* ]]; then
+  pass filter-pop "s p removed only the top filter"
+else
+  fail filter-pop "unexpected popped filter state: $filter"
+fi
+
+lem_keys "$session" s /
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=\ visible=* ]] &&
+   [[ "$filter" == *'buffer-list-zz-target.txt'* ]]; then
+  pass filter-disable "s / disabled the complete filter stack"
+else
+  fail filter-disable "unexpected disabled filter state: $filter"
 fi
 lem_keys "$session" q
 
