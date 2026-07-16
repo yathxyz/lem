@@ -2156,8 +2156,12 @@ accepts the shared date forms, a start time, or a start/end time range.
 Replacement recomputes the weekday and preserves repeater and warning suffixes;
 one universal prefix supplies the current time when none is entered, and a
 double universal prefix inserts the current active or inactive timestamp
-without prompting. Ordinary-buffer mutations remain unsaved and each is one
-undo step.
+without prompting. Two successive active or inactive timestamp commands append
+`--` and a second timestamp, including mixed-delimiter ranges; updating an
+existing timestamp leaves point after it so the same succession works there.
+An unrelated or cancelled command breaks the succession, and only the range
+start retains an existing repeater or warning suffix. Ordinary-buffer mutations
+remain unsaved and each command is one undo step.
 
 At a timestamp, `Shift-Left`/`Shift-Right` and terminal-safe `C-c Left`/
 `C-c Right` move its date while preserving delimiter type, time range, and
@@ -2165,8 +2169,9 @@ suffix. At a heading the same keys cycle the configured TODO sequence in the
 corresponding direction and retain the profile's immediate-save behavior.
 The focused `scripts/org-timestamp-test.sh` resolves all six production keys
 and drives insertion, replacement, conversion, shifting, prefix behavior,
-cancellation, read-only refusal, undo, persistence boundaries, and TODO
-dispatch through packaged ncurses Lem.
+cancellation, read-only refusal, undo, persistence boundaries, successive
+active/mixed ranges, existing-timestamp ranges, interruption, and TODO dispatch
+through packaged ncurses Lem.
 
 `src/org/source-editing.lisp` supplies GNU Org's source-edit workflow on
 `C-c '`. A bounded source body opens without block delimiters in a dedicated
@@ -2275,8 +2280,8 @@ footnote, nested-special, and malformed text-object contexts; structural
 repairs beyond the bounded `d/x/X/< />` behavior; region-aware Meta operations,
 generic Org-element movement, unimplemented list/table Shift-control contexts,
 and richer list/table semantics; mouse calendar selection and Org's exact live
-echo overlay, consecutive-command timestamp-range creation, warning and delay cookies,
-region-wide planning, and wider timestamp variants; prefixed live Babel-session
+echo overlay, warning and delay cookies, region-wide planning, and wider
+timestamp variants; prefixed live Babel-session
 source editing, variables/sessions and the rest of Babel's
 backend/header/result matrix; in-editor LaTeX preview, non-HTML export
 backends, and exact `ox-html` output remain explicit gaps. The display-only

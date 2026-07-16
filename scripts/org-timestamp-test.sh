@@ -24,6 +24,11 @@ Shift me: [2026-07-15 Wed 08:00-09:00 +1m]
 Forced time:
 Immediate:
 Cancelled:
+Range active:
+Range mixed:
+Range existing: <2026-07-10 Fri +1w>
+Range interrupted:
+Range cancelled:
 EOF
 cp "$fixture" "$root/original.org"
 
@@ -235,6 +240,126 @@ if snapshot 11 &&
   pass todo-context 'horizontal shift cycles heading TODO and saves like the profile'
 else
   fail todo-context 'heading-context shift did not cycle and persist TODO state'
+fi
+
+goto_marker range-active
+tmux_cmd send-keys -t "$session" C-c .
+if lem_wait_for "$session" 'Timestamp \[2026-07-15\]' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '+2d'
+  tmux_cmd send-keys -t "$session" Enter
+  lem_wait_for "$session" 'Inserted <2026-07-17 Fri>' 10 >/dev/null
+  tmux_cmd send-keys -t "$session" C-c .
+  if lem_wait_for "$session" 'Timestamp \[2026-07-17\]' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l '+4d'
+    tmux_cmd send-keys -t "$session" Enter
+  else
+    fail range-active-second 'second C-c . did not default from the first timestamp'
+  fi
+else
+  fail range-active-first 'first C-c . did not open the timestamp prompt'
+fi
+if snapshot 12 &&
+   grep -q '^Range active:<2026-07-17 Fri>--<2026-07-19 Sun>$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-12"; then
+  pass range-active 'successive C-c . commands insert an active date range'
+else
+  fail range-active 'successive active timestamps did not form the expected range'
+fi
+
+goto_marker range-mixed
+tmux_cmd send-keys -t "$session" C-c '!'
+if lem_wait_for "$session" 'Inactive timestamp \[2026-07-15\]' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" Enter
+  lem_wait_for "$session" 'Inserted \[2026-07-15 Wed\]' 10 >/dev/null
+  tmux_cmd send-keys -t "$session" C-c .
+  if lem_wait_for "$session" 'Timestamp \[2026-07-15\]' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l '+1d'
+    tmux_cmd send-keys -t "$session" Enter
+  else
+    fail range-mixed-second 'active range end did not follow an inactive timestamp'
+  fi
+else
+  fail range-mixed-first 'inactive range start did not open its prompt'
+fi
+if snapshot 13 &&
+   grep -q '^Range mixed:\[2026-07-15 Wed\]--<2026-07-16 Thu>$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-13"; then
+  pass range-mixed 'active and inactive timestamp commands share succession'
+else
+  fail range-mixed 'mixed timestamp commands did not form the expected range'
+fi
+
+goto_marker range-existing
+tmux_cmd send-keys -t "$session" C-c .
+if lem_wait_for "$session" 'Timestamp \[2026-07-10\]' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '++1d'
+  tmux_cmd send-keys -t "$session" Enter
+  lem_wait_for "$session" 'Updated <2026-07-11 Sat +1w>' 10 >/dev/null
+  tmux_cmd send-keys -t "$session" C-c .
+  if lem_wait_for "$session" 'Timestamp \[2026-07-11\]' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l '++2d'
+    tmux_cmd send-keys -t "$session" Enter
+  else
+    fail range-existing-second 'replacement did not leave point after the timestamp'
+  fi
+else
+  fail range-existing-first 'existing timestamp did not open its prompt'
+fi
+if snapshot 14 &&
+   grep -q '^Range existing: <2026-07-11 Sat +1w>--<2026-07-13 Mon>$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-14"; then
+  pass range-existing 'replacement preserves the start suffix and appends a clean end'
+else
+  fail range-existing 'existing timestamp range creation differed'
+fi
+
+goto_marker range-interrupted
+tmux_cmd send-keys -t "$session" C-c .
+if lem_wait_for "$session" 'Timestamp \[2026-07-15\]' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" Enter
+  lem_wait_for "$session" 'Inserted <2026-07-15 Wed>' 10 >/dev/null
+  tmux_cmd send-keys -t "$session" Left Right
+  tmux_cmd send-keys -t "$session" C-c .
+  if lem_wait_for "$session" 'Timestamp \[2026-07-15\]' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l '+3d'
+    tmux_cmd send-keys -t "$session" Enter
+  else
+    fail range-interrupted-second 'timestamp replacement prompt did not reopen'
+  fi
+else
+  fail range-interrupted-first 'interruption case did not insert its first timestamp'
+fi
+if snapshot 15 &&
+   grep -q '^Range interrupted:<2026-07-18 Sat>$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-15"; then
+  pass range-interrupted 'ordinary movement breaks timestamp succession'
+else
+  fail range-interrupted 'an intervening command incorrectly created a range'
+fi
+
+goto_marker range-cancelled
+tmux_cmd send-keys -t "$session" C-c .
+if lem_wait_for "$session" 'Timestamp \[2026-07-15\]' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" Enter
+  lem_wait_for "$session" 'Inserted <2026-07-15 Wed>' 10 >/dev/null
+  tmux_cmd send-keys -t "$session" C-c .
+  if lem_wait_for "$session" 'Timestamp \[2026-07-15\]' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" C-g
+    sleep 0.3
+    tmux_cmd send-keys -t "$session" C-c .
+    if lem_wait_for "$session" 'Timestamp \[2026-07-15\]' 10 >/dev/null; then
+      tmux_cmd send-keys -t "$session" -l '+1d'
+      tmux_cmd send-keys -t "$session" Enter
+    else
+      fail range-cancelled-third 'timestamp prompt did not recover after cancellation'
+    fi
+  else
+    fail range-cancelled-second 'range-end prompt did not open before cancellation'
+  fi
+else
+  fail range-cancelled-first 'cancellation case did not insert its first timestamp'
+fi
+if snapshot 16 &&
+   grep -q '^Range cancelled:<2026-07-16 Thu>$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-16"; then
+  pass range-cancelled 'cancelled timestamp command breaks succession'
+else
+  fail range-cancelled 'cancellation left a stale range continuation'
 fi
 
 if [ "$failed" -ne 0 ]; then

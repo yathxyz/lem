@@ -162,6 +162,22 @@
 
 ;;; --- ordinary timestamps ------------------------------------------------
 
+(defparameter *org-timestamp-command-names*
+  '(lem-yath-org-timestamp lem-yath-org-timestamp-inactive)
+  "Commands which can form a timestamp range when used successively.")
+
+(defvar *org-last-command-was-timestamp-p* nil
+  "Whether the preceding completed editor command inserted a timestamp.")
+
+(defun org-timestamp-command-p (&optional (command (this-command)))
+  (and (typep command 'lem/common/command:primary-command)
+       (member (command-name command) *org-timestamp-command-names*)))
+
+(defun org-timestamp-post-command ()
+  "Break timestamp-range succession after any unrelated command."
+  (unless (org-timestamp-command-p)
+    (setf *org-last-command-was-timestamp-p* nil)))
+
 (defun org-timestamp-match-part (line starts ends index)
   (let ((start (and starts (aref starts index))))
     (and start (subseq line start (aref ends index)))))
@@ -335,7 +351,7 @@
          (message
           "Invalid timestamp; use DATE, DATE HH:MM, or DATE HH:MM-HH:MM"))))
 
-(defun org-replace-timestamp-token (token text)
+(defun org-replace-timestamp-token (token text &optional leave-after-p)
   (let* ((point (current-point))
          (relative (- (point-charpos point)
                       (%org-timestamp-token-start token))))
@@ -346,18 +362,33 @@
     (insert-string point text)
     (line-start point)
     (character-offset point
-                      (+ (%org-timestamp-token-start token)
-                         (min (max relative 0) (1- (length text))))))
+                      (if leave-after-p
+                          (+ (%org-timestamp-token-start token)
+                             (length text))
+                          (+ (%org-timestamp-token-start token)
+                             (min (max relative 0)
+                                  (1- (length text)))))))
+  text)
+
+(defun org-append-timestamp-range-end (token text)
+  "Insert TEXT as a range end immediately after TOKEN."
+  (let ((point (current-point)))
+    (line-start point)
+    (character-offset point (%org-timestamp-token-end token))
+    (insert-string point (concatenate 'string "--" text)))
   text)
 
 (defun org-insert-or-replace-timestamp (inactive-p argument)
-  (when (buffer-read-only-p (current-buffer))
-    (editor-error "Org buffer is read-only"))
   (let* ((token (org-timestamp-token-at-point))
+         (range-end-p (and token *org-last-command-was-timestamp-p*))
          (now (funcall *org-planning-now-function*))
          (magnitude (org-prefix-magnitude argument))
          (force-time-p (>= magnitude 4))
          (immediate-p (>= magnitude 16)))
+    ;; A failed or cancelled invocation must not leave a range continuation.
+    (setf *org-last-command-was-timestamp-p* nil)
+    (when (buffer-read-only-p (current-buffer))
+      (editor-error "Org buffer is read-only"))
     (multiple-value-bind (date time end-time)
         (if immediate-p
             (multiple-value-bind (second minute hour)
@@ -375,11 +406,19 @@
               (org-timestamp-text
                date (not inactive-p)
                :time time :end-time end-time
-               :extra (and token (%org-timestamp-token-extra token)))))
-        (if token
-            (org-replace-timestamp-token token text)
-            (insert-string (current-point) text))
-        (message "~:[Inserted~;Updated~] ~a" (not (null token)) text)
+               :extra (and token
+                           (not range-end-p)
+                           (%org-timestamp-token-extra token)))))
+        (cond
+          (range-end-p
+           (org-append-timestamp-range-end token text))
+          (token
+           (org-replace-timestamp-token token text t))
+          (t
+           (insert-string (current-point) text)))
+        (setf *org-last-command-was-timestamp-p* t)
+        (message "~[Inserted~;Updated~;Inserted range end~] ~a"
+                 (cond (range-end-p 2) (token 1) (t 0)) text)
         text))))
 
 (defun org-shift-timestamp-at-point (days)
@@ -412,3 +451,6 @@
 (define-key *org-mode-keymap* "C-c C-d" 'lem-yath-org-deadline)
 (define-key *org-mode-keymap* "C-c ." 'lem-yath-org-timestamp)
 (define-key *org-mode-keymap* "C-c !" 'lem-yath-org-timestamp-inactive)
+
+(remove-hook *post-command-hook* 'org-timestamp-post-command)
+(add-hook *post-command-hook* 'org-timestamp-post-command)

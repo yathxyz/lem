@@ -45,6 +45,18 @@
   "Immediate:")
 (define-org-timestamp-test-goto-line-end lem-yath-test-timestamp-goto-cancel
   "Cancelled:")
+(define-org-timestamp-test-goto-line-end lem-yath-test-timestamp-goto-range-active
+  "Range active:")
+(define-org-timestamp-test-goto-line-end lem-yath-test-timestamp-goto-range-mixed
+  "Range mixed:")
+(define-org-timestamp-test-goto lem-yath-test-timestamp-goto-range-existing
+  "2026-07-10 Fri +1w>")
+(define-org-timestamp-test-goto-line-end
+  lem-yath-test-timestamp-goto-range-interrupted
+  "Range interrupted:")
+(define-org-timestamp-test-goto-line-end
+  lem-yath-test-timestamp-goto-range-cancelled
+  "Range cancelled:")
 
 (define-command lem-yath-test-org-timestamp-bindings () ()
   (with-open-file (stream (merge-pathnames "bindings"
