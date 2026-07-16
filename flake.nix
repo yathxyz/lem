@@ -47,6 +47,7 @@
               ./patches/lem-undo-state-point.patch
               ./patches/lem-completion-presentation-focus.patch
               ./patches/lem-completion-groups.patch
+              ./patches/lem-completion-marginalia-layout.patch
               ./patches/lem-vi-screen-line.patch
               ./patches/lem-centered-content-width.patch
               ./patches/lem-word-boundary-wrap.patch

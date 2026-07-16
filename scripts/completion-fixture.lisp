@@ -20,11 +20,97 @@
 (pushnew 'lem-yath-test-report-prompt-focus
          *auto-completion-continue-commands*)
 
+(define-command lem-yath-test-report-marginalia-layout () ()
+  "Report the rendered popup rows and terminal-cell detail columns."
+  (alexandria:when-let* ((context lem/completion-mode::*completion-context*)
+                         (popup
+                           (lem/completion-mode::context-popup-menu context)))
+    (let* ((text
+             (buffer-text (lem/popup-menu::popup-menu-buffer popup)))
+           (lines (ppcre:split "\\n" text))
+           (columns
+             (loop :for line :in lines
+                   :for marker := (search "ABC" line)
+                   :when marker
+                     :collect
+                     (lem/common/character:string-width
+                      line :end marker))))
+      (with-open-file (stream (uiop:getenv "LEM_YATH_COMPLETION_REPORT")
+                              :direction :output
+                              :if-exists :append
+                              :if-does-not-exist :create)
+        (format stream "LAYOUT width=~d columns=~{~d~^,~} rows=~a~%"
+                (display-width)
+                columns
+                (completion-path-display-string text))))))
+
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "F9" 'lem-yath-test-report-marginalia-layout)
+(pushnew 'lem-yath-test-report-marginalia-layout
+         *auto-completion-continue-commands*)
+
 (define-command lem-yath-test-marginalia-command () ()
   "Zyzzyva-annotation-only-token proves command documentation is display-only."
   (message "Marginalia command fixture invoked"))
 
 (define-key *global-keymap* "F6" 'lem-yath-test-marginalia-command)
+
+(define-command lem-yath-test-marginalia-layout-prompt () ()
+  "Open a prompt with wide labels and directionally truncated fields."
+  (prompt-for-string
+   "Layout: "
+   :completion-function
+   (lambda (input)
+     (completion-annotated-prompt-choices
+      (prescient-filter
+       input
+       '(("layout-short" . "layout-short")
+         ("界界界界界界界界界界" . "界界界界界界界界界界"))
+       :key #'car :rank-p nil)
+      (lambda (ignored)
+        (declare (ignore ignored))
+        (completion-join-annotation-fields
+         (completion-field
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" :truncate 0.5)
+         (completion-field
+          "/prefix/that/should/disappear/useful-tail.txt"
+          :truncate -0.5)))))))
+
+(defun lem-yath-test-marginalia-layout-oracle ()
+  "Check the pinned cell-width, padding, and truncation contract."
+  (flet ((same (expected actual name)
+           (unless (equal expected actual)
+             (error "~a: expected ~s, got ~s" name expected actual))))
+    (let ((*completion-annotation-window-width-override* 24))
+      (same "abcde…"
+            (completion-format-annotation-field
+             (completion-field "abcdefghijkl" :truncate 0.5))
+            "right truncation")
+      (same "…hijkl"
+            (completion-format-annotation-field
+             (completion-field "abcdefghijkl" :truncate -0.5))
+            "left truncation")
+      (same "あい…"
+            (completion-truncate-display-width "あいうえ" 5)
+            "wide-character truncation")
+      (same "x   "
+            (completion-format-annotation-field
+             (completion-field "x" :width 4))
+            "left field padding")
+      (same "   x"
+            (completion-format-annotation-field
+             (completion-field "x" :width -4))
+            "right field padding"))
+    (same 20
+          (lem/completion-mode::compute-label-width
+           (list (lem/completion-mode:make-completion-item
+                  :label "short")))
+          "minimum alignment column")
+    (same 30
+          (lem/completion-mode::compute-label-width
+           (list (lem/completion-mode:make-completion-item
+                  :label "界界界界界界界界界界")))
+          "wide label rounded alignment")))
 
 (lem-core:define-color-theme "lem-yath-marginalia-child"
     ("modus-vivendi-tinted")
@@ -199,3 +285,4 @@
 
 (lem-yath-test-prescient-character-fold-oracle)
 (lem-yath-test-prescient-method-oracle)
+(lem-yath-test-marginalia-layout-oracle)

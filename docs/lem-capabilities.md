@@ -403,10 +403,18 @@ bookmark providers create correctly ranged items after ranking and retain the
 selected raw value separately from display metadata. The ncurses gates cover
 common local regular files and buffer states, exact library/theme/bookmark
 acceptance, loaded and active state, theme inheritance, bookmark context, and
-missing targets. Special file modes, conditional foreign ownership, and generic
-metadata-failure fallback remain source-inspected. Marginalia's unsupported face
-and package categories, dynamic alignment, category-aware truncation, and remote
-fields remain outside this approximation.
+missing targets. Candidate columns follow the pinned Marginalia default: a
+20-cell floor rounded upward in 10-cell steps. Labels are measured in terminal
+cells, so CJK and other wide text cannot shift the detail column. Supported
+documentation, signature, value, source, buffer-path, and bookmark fields use
+the pinned maximum of 80 cells reduced to half the active terminal width;
+documentation keeps its beginning, while paths keep their useful end. The real
+ncurses gate verifies identical detail columns for narrow and wide labels and
+reopens the same prompt at 64 and 120 columns to prove the field budget changes.
+Special file modes, conditional foreign ownership, and generic metadata-failure
+fallback remain source-inspected. Marginalia's unsupported face and package
+categories, per-field semantic faces, remote fields, and repainting an already
+open popup after a bare terminal resize remain outside this approximation.
 
 The active Helpful leader workflows are no longer routed through generic
 apropos. `SPC h k` indexes every currently fbound, package-qualified Lisp symbol
@@ -424,7 +432,9 @@ and richer cross-reference navigation remain gaps.
 Lem-yath carries `patches/lem-completion-lifecycle.patch`,
 `patches/lem-completion-detail-accessor.patch`, and
 `patches/lem-completion-observer-change-group.patch` plus
-`patches/lem-completion-presentation-focus.patch` against the pinned Lem
+`patches/lem-completion-presentation-focus.patch`,
+`patches/lem-completion-groups.patch`, and
+`patches/lem-completion-marginalia-layout.patch` against the pinned Lem
 revision. They separate display, filter, and insertion text, add a final-accept
 callback plus a distinct final-insertion callback, expose scoped presentation,
 focus, and teardown observation, make an inactive row non-actionable, and reject

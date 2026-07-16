@@ -1,0 +1,23 @@
+diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
+--- a/src/ext/completion-mode.lisp
++++ b/src/ext/completion-mode.lisp
+@@ -287,0 +288,3 @@
++(defparameter *completion-label-width-minimum* 20)
++(defparameter *completion-label-width-step* 10)
++
+@@ -288,3 +291,12 @@
+-(defun compute-label-width (items)
+-  (loop :for item :in items
+-        :maximize (1+ (length (completion-item-label item)))))
++(defun compute-label-width (items)
++  "Return Marginalia's left-alignment column for ITEMS.
++The leading popup cell is part of the candidate width.  Measure terminal
++cells rather than Lisp characters so wide labels cannot shift annotations."
++  (let ((width
++          (loop :for item :in items
++                :maximize
++                (1+ (lem/common/character:string-width
++                     (completion-item-label item))))))
++    (max *completion-label-width-minimum*
++         (* (ceiling width *completion-label-width-step*)
++            *completion-label-width-step*))))

@@ -3,9 +3,19 @@
 (in-package :lem-yath)
 
 (defparameter *completion-annotation-limit* 120)
+(defparameter *completion-annotation-field-width* 80)
 (defparameter *completion-annotation-max-relative-age* (* 14 24 60 60))
 (defparameter *completion-bookmark-context-byte-limit* (* 1024 1024))
 (defparameter *completion-library-metadata-byte-limit* (* 64 1024))
+(defvar *completion-annotation-window-width-override* nil)
+
+(defstruct (completion-annotation-field
+            (:constructor make-completion-annotation-field
+                (text &key truncate width)))
+  "One Marginalia-style annotation field before terminal layout."
+  (text "" :type string)
+  (truncate nil :type (or null integer float))
+  (width nil :type (or null integer)))
 
 (defun completion-annotation-one-line (text)
   "Return TEXT as one trimmed line without changing ordinary spacing."
@@ -32,6 +42,91 @@
        " +"
        (string-trim '(#\Space #\Tab) line)
        " "))))
+
+(defun completion-current-annotation-field-width ()
+  "Return Marginalia's window-relative maximum width for one field."
+  (min *completion-annotation-field-width*
+       (max 1
+            (floor (or *completion-annotation-window-width-override*
+                       (display-width))
+                   2))))
+
+(defun completion-display-prefix (text width)
+  "Return the longest prefix of TEXT occupying at most WIDTH cells."
+  (let ((end 0)
+        (column 0))
+    (loop :for index :from 0 :below (length text)
+          :for next :=
+            (lem/common/character:char-width (char text index) column)
+          :while (<= next width)
+          :do (setf column next
+                    end (1+ index)))
+    (subseq text 0 end)))
+
+(defun completion-display-suffix (text width)
+  "Return the longest suffix of TEXT occupying at most WIDTH cells."
+  (reverse (completion-display-prefix (reverse text) width)))
+
+(defun completion-truncate-display-width (text width &key from-left)
+  "Truncate one-line TEXT to WIDTH terminal cells with an ellipsis.
+When FROM-LEFT is true, preserve the useful end of paths and locations."
+  (let* ((text (or (completion-annotation-one-line text) ""))
+         (width (max 0 width))
+         (ellipsis "…")
+         (ellipsis-width
+           (lem/common/character:string-width ellipsis)))
+    (cond
+      ((<= (lem/common/character:string-width text) width) text)
+      ((zerop width) "")
+      ((<= width ellipsis-width)
+       (completion-display-prefix ellipsis width))
+      (from-left
+       (concatenate
+        'string ellipsis
+        (completion-display-suffix text (- width ellipsis-width))))
+      (t
+       (concatenate
+        'string
+        (completion-display-prefix text (- width ellipsis-width))
+        ellipsis)))))
+
+(defun completion-pad-annotation-field (text width)
+  "Pad TEXT to absolute WIDTH cells; positive widths align left."
+  (let* ((target (abs width))
+         (padding
+           (max 0 (- target
+                     (lem/common/character:string-width text))))
+         (spaces (make-string padding :initial-element #\Space)))
+    (if (minusp width)
+        (concatenate 'string spaces text)
+        (concatenate 'string text spaces))))
+
+(defun completion-resolve-field-truncation (truncate)
+  (if (floatp truncate)
+      (round (* truncate (completion-current-annotation-field-width)))
+      truncate))
+
+(defun completion-format-annotation-field (field)
+  "Render FIELD using Marginalia's width and directional truncation rules."
+  (let* ((text
+           (or (completion-annotation-one-line
+                (completion-annotation-field-text field))
+               ""))
+         (width (completion-annotation-field-width field))
+         (truncate
+           (completion-resolve-field-truncation
+            (completion-annotation-field-truncate field))))
+    (when width
+      (setf text (completion-pad-annotation-field text width)))
+    (if truncate
+        (completion-truncate-display-width
+         text (abs truncate) :from-left (minusp truncate))
+        text)))
+
+(defun completion-field (text &key truncate width)
+  "Describe a display field without truncating candidate identity."
+  (make-completion-annotation-field
+   (or text "") :truncate truncate :width width))
 
 (defun completion-path-display-string (string)
   "Escape control characters in STRING so it occupies one prompt row."
@@ -64,20 +159,25 @@
   (let ((text (completion-annotation-one-line text)))
     (cond
       ((or (null text) (zerop (length text))) "")
-      ((<= (length text) *completion-annotation-limit*) text)
+      ((<= (lem/common/character:string-width text)
+           *completion-annotation-limit*)
+       text)
       (t
-       (concatenate 'string
-                    (subseq text 0 (1- *completion-annotation-limit*))
-                    "…")))))
+       (completion-truncate-display-width
+        text *completion-annotation-limit*)))))
 
 (defun completion-join-annotation-fields (&rest fields)
   (completion-bounded-annotation
    (format nil "~{~a~^  ~}"
-           (remove-if (lambda (field)
-                        (or (null field)
-                            (and (stringp field)
-                                 (zerop (length field)))))
-                      fields))))
+           (loop :for field :in fields
+                 :for text :=
+                   (etypecase field
+                     (null "")
+                     (string field)
+                     (completion-annotation-field
+                      (completion-format-annotation-field field)))
+                 :unless (zerop (length text))
+                   :collect text))))
 
 (defun completion-human-readable-size (size)
   "Format nonnegative SIZE like Emacs' file-size-human-readable."
@@ -159,7 +259,7 @@
         (leader-binding (format nil "(~a)" leader-binding))
         ((and (stringp binding) (plusp (length binding)))
          (format nil "(~a)" binding)))
-      documentation))))
+      (completion-field documentation :truncate 1.0)))))
 
 ;;; Buffers ------------------------------------------------------------------
 
@@ -199,7 +299,7 @@
          (completion-buffer-status buffer)
          (format nil "~7@a" (completion-human-readable-size size))
          (format nil "~20a" mode)
-         location))
+         (completion-field location :truncate -0.5)))
     (error () "")))
 
 (defun completion-annotate-buffer-item (item)
@@ -429,12 +529,16 @@
           (completion-library-form-metadata pathname)
         (let ((system-name (pathname-name pathname)))
           (completion-join-annotation-fields
-           (when (member system-name (asdf:already-loaded-systems)
-                         :test #'string-equal)
-             "Loaded")
+           (completion-field
+            (when (member system-name (asdf:already-loaded-systems)
+                          :test #'string-equal)
+              "Loaded")
+            :width 8)
            version
-           description
-           (completion-library-source-directory pathname))))
+           (completion-field description :truncate 1.0)
+           (completion-field
+            (completion-library-source-directory pathname)
+            :truncate -0.5))))
     (error () "")))
 
 (defun completion-prompt-for-library (prompt &key history-symbol)
@@ -659,12 +763,12 @@
         (multiple-value-bind (line column context)
             (completion-bookmark-position-context text position)
           (completion-join-annotation-fields
-           kind
-           path
+           (completion-field kind :width 10)
+           (completion-field path :truncate -0.5)
            (cond
              (line (format nil "L~d:C~d" line column))
              (position (format nil "@~d" position)))
-           context)))
+           (completion-field context :truncate 0.5))))
     (error () "")))
 
 (defun completion-prompt-for-bookmark (prompt)

@@ -115,6 +115,70 @@ if start_session "$s1"; then
   fi
   close_prompt "$s1"
 
+  tmux_cmd resize-window -t "$s1" -x 64 -y 30
+  sleep 0.5
+  if open_command_prompt "$s1" lem-yath-test-marginalia-layout-prompt \
+       'Layout:'; then
+    before=$(grep -c '^LAYOUT ' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+    before=${before:-0}
+    lem_keys "$s1" F9
+    for _ in $(seq 1 40); do
+      after=$(grep -c '^LAYOUT ' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+      after=${after:-0}
+      [ "$after" -gt "$before" ] && break
+      sleep 0.1
+    done
+    layout=$(grep '^LAYOUT ' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null |
+      tail -n 1 || true)
+    if grep -Fq 'width=64 columns=32,32' <<<"$layout" &&
+       grep -Fq 'ABCDEFGHIJKLMNO…' <<<"$layout" &&
+       grep -Fq '…useful-tail.txt' <<<"$layout"; then
+      pass marginalia-narrow-layout \
+        'wide labels aligned by cells and narrow fields kept useful ends'
+    else
+      fail marginalia-narrow-layout \
+        "unexpected 64-column layout: $layout" "$s1"
+    fi
+  else
+    fail marginalia-narrow-layout \
+      'could not open the controlled layout prompt' "$s1"
+  fi
+  close_prompt "$s1"
+
+  tmux_cmd resize-window -t "$s1" -x 120 -y 35
+  sleep 0.5
+  if open_command_prompt "$s1" lem-yath-test-marginalia-layout-prompt \
+       'Layout:'; then
+    before=$(grep -c '^LAYOUT ' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+    before=${before:-0}
+    lem_keys "$s1" F9
+    for _ in $(seq 1 40); do
+      after=$(grep -c '^LAYOUT ' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+      after=${after:-0}
+      [ "$after" -gt "$before" ] && break
+      sleep 0.1
+    done
+    layout=$(grep '^LAYOUT ' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null |
+      tail -n 1 || true)
+    if grep -Fq 'width=120 columns=32,32' <<<"$layout" &&
+       grep -Fq 'ABCDEFGHIJKLMNOPQRSTUVWXYZ012…' <<<"$layout" &&
+       ! grep -Fq 'ABCDEFGHIJKLMNO…' <<<"$layout"; then
+      pass marginalia-wide-layout \
+        'a wider terminal recomputed the category field budget'
+    else
+      fail marginalia-wide-layout \
+        "unexpected 120-column layout: $layout" "$s1"
+    fi
+  else
+    fail marginalia-wide-layout \
+      'could not reopen the controlled layout prompt' "$s1"
+  fi
+  close_prompt "$s1"
+
+  tmux_cmd resize-window -t "$s1" -x "${LEM_TUI_WIDTH:-200}" \
+    -y "${LEM_TUI_HEIGHT:-50}"
+  sleep 0.5
+
   if open_query "$s1" find-file; then
     screen=$(lem_capture "$s1")
     if grep -Eq 'find-file[[:space:]]+\(SPC f f\).*Open the file\.' \

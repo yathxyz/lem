@@ -155,7 +155,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   path-aware matching and gain the same ranking
 - bounded, display-only Marginalia-style context for commands, Lisp symbols,
   buffers, files, loadable Lisp libraries, themes, and bookmarks; metadata
-  failures do not alter candidate identity or prevent ordinary selection
+  failures do not alter candidate identity or prevent ordinary selection.
+  Annotation columns use the pinned 20-column/10-cell Marginalia alignment
+  policy for wide and narrow labels, while documentation and path fields use
+  terminal-relative, direction-aware ellipsis
 - completion candidates keep display, filtering, and insertion text separate;
   final insertion and post-accept callbacks are explicit, tracked replacement
   ranges survive filtering, and stale asynchronous results are rejected

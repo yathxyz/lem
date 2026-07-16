@@ -278,6 +278,12 @@
    (namestring (daily-workflows-fixture-path "find-name-ops/")))
   (lem/prompt-window::prompt-execute))
 
+(define-command lem-yath-test-revisit-find-buffer () ()
+  "Switch directly to the persistent find result for lifecycle inspection."
+  (alexandria:if-let ((buffer (get-buffer *find-name-buffer-name*)))
+    (switch-to-buffer buffer)
+    (editor-error "The persistent find result no longer exists")))
+
 (define-command lem-yath-test-find-name-copy-to-target () ()
   (find-name-copy-to
    (namestring (daily-workflows-fixture-path "find-name-copy-target/")))
@@ -415,9 +421,15 @@
   (define-key keymap "F12" 'lem-yath-test-record-find-name-persistence)
   (define-key keymap "F2" 'lem-yath-test-record-find-name-marks))
 
+(define-key *global-keymap* "F4" 'lem-yath-test-revisit-find-buffer)
+
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F4" 'lem-yath-test-submit-find-name-root)
 (define-key lem/prompt-window::*prompt-mode-keymap*
+  "F1" 'lem-yath-test-submit-find-name-ops-root)
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "F4" 'lem-yath-test-submit-find-name-root)
+(define-key lem/completion-mode::*completion-mode-keymap*
   "F1" 'lem-yath-test-submit-find-name-ops-root)
 
 (let ((phase (or (uiop:getenv "LEM_YATH_DAILY_WORKFLOWS_PHASE") "editing")))

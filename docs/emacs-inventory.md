@@ -186,7 +186,7 @@ Live name filtering temporarily presents only matching selectable buffer rows
 |---|---|---|
 | **vertico** | active (`after-init`) | `vertico-count 20`, `vertico-cycle t`, `vertico-resize t`, `vertico-scroll-margin 0` |
 | **orderless** | active globally | `completion-styles '(orderless)` outside Vertico; files initially override this with `partial-completion` |
-| **marginalia** | active (`after-init`) | annotations, defaults |
+| **marginalia** | active (`after-init`) | annotations with defaults: left alignment, a 20-column initial candidate width rounded upward in 10-cell steps, an 80-column maximum field width reduced to half the active window, right truncation for documentation, and left truncation for path fields |
 | **corfu** | active | global, automatic in-buffer popup; live defaults use a 3-character prefix, 0.2-second delay, 10 rows, and no cycling |
 | **TTY Corfu rendering** | active | Emacs 31 native `tty-child-frames`; no `corfu-terminal` package or mode is installed |
 | **cape** | deferred providers | prepends `cape-file` and `cape-dabbrev` to `completion-at-point-functions`; no Cape snippet provider |

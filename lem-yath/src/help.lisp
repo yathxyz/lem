@@ -69,8 +69,10 @@
 (defun help-callable-detail (symbol)
   (completion-join-annotation-fields
    (help-callable-type symbol)
-   (help-callable-lambda-list symbol)
-   (help-symbol-documentation symbol 'function)))
+   (completion-field
+    (help-callable-lambda-list symbol) :truncate 0.5)
+   (completion-field
+    (help-symbol-documentation symbol 'function) :truncate 1.0)))
 
 (defun help-sensitive-variable-p (symbol)
   (let ((name (string-downcase (help-symbol-label symbol))))
@@ -103,8 +105,9 @@
 (defun help-variable-detail (symbol)
   (completion-join-annotation-fields
    (if (constantp symbol) "constant" "variable")
-   (help-variable-value symbol)
-   (help-symbol-documentation symbol 'variable)))
+   (completion-field (help-variable-value symbol) :truncate 0.5)
+   (completion-field
+    (help-symbol-documentation symbol 'variable) :truncate 1.0)))
 
 (defun help-prompt-symbol (prompt candidates detail-function category)
   (let ((choice

@@ -628,7 +628,9 @@ if start_fixture_session "$recent_session" verify &&
   # Return action switches to the focused buffer.
   if invoke_test_command "$recent_session" lem-yath-test-setup-buffer-list '^BUFFER-LIST READY '; then
     send_chord "$recent_session" C-x C-b
-    if lem_wait_for "$recent_session" 'Buffer[[:space:]]+File' "$WAIT_TIMEOUT" >/dev/null; then
+    if lem_wait_for "$recent_session" \
+         'Buffer[[:space:]]+Size[[:space:]]+Mode[[:space:]]+File' \
+         "$WAIT_TIMEOUT" >/dev/null; then
       screen=$(lem_capture "$recent_session")
       if grep -q 'daily-alpha-buffer\.txt' <<<"$screen" &&
          grep -q 'daily-zz-target-buffer\.txt' <<<"$screen"; then
@@ -835,12 +837,7 @@ test_find_name() {
     return
   fi
 
-  send_chord "$find_session" C-x C-b
-  if lem_wait_for "$find_session" 'Buffer[[:space:]]+File' "$WAIT_TIMEOUT" >/dev/null; then
-    tmux_cmd send-keys -t "$find_session" -l '*Find*'
-    sleep 0.5
-    lem_keys "$find_session" Enter
-  fi
+  lem_keys "$find_session" F4
   if lem_wait_for "$find_session" 'Find name results' "$WAIT_TIMEOUT" >/dev/null; then
     lem_keys "$find_session" q
     if lem_wait_for "$find_session" 'FIND OPEN TARGET' "$WAIT_TIMEOUT" >/dev/null; then
@@ -856,7 +853,9 @@ test_find_name() {
       fail find-name-quit "q did not return from *Find* to the opened file" "$find_session"
     fi
   else
-    fail find-name-revisit "C-x C-b could not revisit the persistent *Find* buffer" "$find_session"
+    fail find-name-revisit "the persistent *Find* buffer could not be revisited" "$find_session"
+    lem_keys "$find_session" Escape
+    sleep "$KEY_DELAY"
   fi
 
   # A shell-looking wildcard is one argv element. It must neither execute the
