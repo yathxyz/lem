@@ -788,15 +788,21 @@ Each nonempty group begins with a distinct heading entry."
     (buffer-list-refresh-filters component)))
 
 (defun buffer-list-action-items (component)
-  (or (remove-if
-       (lambda (item)
-         (or (not (lem/multi-column-list::multi-column-list-item-checked-p
-                   item))
-             (buffer-list-entry-heading-p (buffer-list-item-entry item))))
-       (lem/multi-column-list::multi-column-list-items component))
-      (alexandria:when-let ((item (buffer-list-current-item component)))
-        (unless (buffer-list-entry-heading-p (buffer-list-item-entry item))
-          (list item)))))
+  (let ((marked
+          (remove-if
+           (lambda (item)
+             (or (not (lem/multi-column-list::multi-column-list-item-checked-p
+                       item))
+                 (gethash item
+                          (buffer-list-component-deletion-items component))
+                 (buffer-list-entry-heading-p (buffer-list-item-entry item))))
+           (lem/multi-column-list::multi-column-list-items component))))
+    (or marked
+        (alexandria:when-let ((item (buffer-list-current-item component)))
+          (unless (buffer-list-entry-heading-p (buffer-list-item-entry item))
+            (buffer-list-set-item-mark component item :marked)
+            (lem/multi-column-list:update component)
+            (list item))))))
 
 (defun buffer-list-prune-empty-groups (component)
   (let* ((items (buffer-list-component-all-items component))
@@ -1081,6 +1087,53 @@ Each nonempty group begins with a distinct heading entry."
     (buffer-list-rebuild-snapshot
      component :preserve-focused-buffer-p nil :focus-index index)))
 
+(defun buffer-list-revert-buffer (buffer)
+  (with-current-buffer buffer
+    (alexandria:if-let
+        ((revert (lem-core/commands/file:revert-buffer-function buffer)))
+      (funcall revert buffer)
+      (if (buffer-filename buffer)
+          (lem-core/commands/file:sync-buffer-with-file-content buffer)
+          (error "Buffer ~a cannot be reverted" (buffer-name buffer)))))
+  (alexandria:when-let ((path (buffer-file-path-key buffer)))
+    (set-buffer-file-state
+     buffer path (stable-buffer-file-signature buffer path)))
+  t)
+
+(defun buffer-list-confirm-revert (buffers)
+  (prompt-for-y-or-n-p
+   (if (= 1 (length buffers))
+       (format nil "Really revert buffer ~a?" (buffer-name (first buffers)))
+       (format nil "Really revert ~d buffers?" (length buffers)))))
+
+(define-command lem-yath-buffer-list-revert () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (focused-buffer (buffer-list-current-buffer component))
+         (focused-index
+           (or (position (buffer-list-current-item component)
+                         (lem/multi-column-list::multi-column-list-items component)
+                         :test #'eq)
+               0))
+         (buffers (buffer-list-action-buffers component)))
+    (unless buffers
+      (editor-error "No buffers to revert"))
+    (if (not (buffer-list-confirm-revert buffers))
+        (message "Revert cancelled")
+        (let ((reverted 0)
+              failed)
+          (dolist (buffer buffers)
+            (handler-case
+                (progn
+                  (buffer-list-revert-buffer buffer)
+                  (incf reverted))
+              (error () (push (buffer-name buffer) failed))))
+          (buffer-list-refresh-after-buffer-mutation
+           component focused-buffer focused-index)
+          (if failed
+              (message "Reverted ~d buffers; failed: ~{~a~^, ~}"
+                       reverted (nreverse failed))
+              (message "Operation finished; reverted ~d buffers" reverted))))))
+
 (define-command lem-yath-buffer-list-delete-items () ()
   (buffer-list-delete-action-items
    (lem/multi-column-list::current-multi-column-list)))
@@ -1314,6 +1367,8 @@ Each nonempty group begins with a distinct heading entry."
   'lem-yath-buffer-list-rename-uniquely)
 (define-key *buffer-list-picker-mode-keymap* "X"
   'lem-yath-buffer-list-bury)
+(define-key *buffer-list-picker-mode-keymap* "V"
+  'lem-yath-buffer-list-revert)
 (define-key *buffer-list-picker-mode-keymap* "Tab"
   'lem-yath-buffer-list-next-group)
 (define-key *buffer-list-picker-mode-keymap* "Shift-Tab"

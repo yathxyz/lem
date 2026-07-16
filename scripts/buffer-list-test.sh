@@ -19,6 +19,9 @@ export LEM_YATH_BUFFER_LIST_MARK_DISSOCIATED_HIT="$root/buffer-list-mark-dissoci
 export LEM_YATH_BUFFER_LIST_MARK_DISSOCIATED_MISS="$root/buffer-list-mark-dissociated-miss.txt"
 export LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_HIT="$root/buffer-list-mark-compressed-hit.GZ"
 export LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_MISS="$root/buffer-list-mark-compressed-miss.txt"
+export LEM_YATH_BUFFER_LIST_REVERT_CLEAN="$root/buffer-list-mark-revert-clean.txt"
+export LEM_YATH_BUFFER_LIST_REVERT_DIRTY="$root/buffer-list-mark-revert-dirty.txt"
+export LEM_YATH_BUFFER_LIST_REVERT_MISSING="$root/buffer-list-mark-revert-missing.txt"
 export LEM_TUI_WIDTH=180
 export LEM_TUI_HEIGHT=60
 mkdir -p "$HOME" "$XDG_CACHE_HOME"
@@ -35,6 +38,8 @@ printf 'UNSAVED MISS\n' >"$LEM_YATH_BUFFER_LIST_MARK_UNSAVED_MISS"
 printf 'DISSOCIATED MISS\n' >"$LEM_YATH_BUFFER_LIST_MARK_DISSOCIATED_MISS"
 printf 'COMPRESSED HIT\n' >"$LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_HIT"
 printf 'COMPRESSED MISS\n' >"$LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_MISS"
+printf 'CLEAN DISK\n' >"$LEM_YATH_BUFFER_LIST_REVERT_CLEAN"
+printf 'DIRTY DISK\n' >"$LEM_YATH_BUFFER_LIST_REVERT_DIRTY"
 : >"$LEM_YATH_BUFFER_LIST_REPORT"
 
 source "$here/scripts/tui-driver.sh"
@@ -174,6 +179,21 @@ report_picker_bindings() {
   while ((attempts < 40)); do
     if (( $(grep -c '^PICKER-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
       grep '^PICKER-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+report_revert() {
+  local before attempts=0
+  before=$(grep -c '^REVERT ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F1
+  while ((attempts < 40)); do
+    if (( $(grep -c '^REVERT ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^REVERT ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
       return 0
     fi
     sleep 0.25
@@ -676,6 +696,95 @@ lem_keys "$session" s / U q
 
 lem_keys "$session" C-x C-b
 lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'mark-revert-clean'
+lem_keys "$session" Enter V
+if lem_wait_for "$session" 'Really revert buffer buffer-list-mark-revert-clean\.txt' 10 >/dev/null; then
+  lem_keys "$session" n
+  revert=$(report_revert || true)
+  nav=$(report_nav || true)
+  if [[ "$revert" == *'clean=CLEAN LOCAL\n:clean'* ]] &&
+     [[ "$nav" == *'marks=buffer-list-mark-revert-clean.txt:>'* ]]; then
+    pass revert-clean-refusal "V prompted for a clean current row and retained its implicit mark"
+  else
+    fail revert-clean-refusal "declining clean revert changed state: $revert / $nav"
+  fi
+else
+  fail revert-clean-prompt "V did not show the pinned one-buffer confirmation"
+fi
+
+lem_keys "$session" V
+if lem_wait_for "$session" 'Really revert buffer buffer-list-mark-revert-clean\.txt' 10 >/dev/null; then
+  lem_keys "$session" y
+  revert=$(report_revert || true)
+  if [[ "$revert" == *'clean=CLEAN DISK\n:clean'* ]]; then
+    pass revert-clean-accept "accepting V reloaded clean buffer content from disk"
+  else
+    fail revert-clean-accept "clean revert produced unexpected state: $revert"
+  fi
+else
+  fail revert-clean-accept "the accepted clean revert did not prompt"
+fi
+
+lem_keys "$session" F6 s / U
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'mark-revert-dirty'
+lem_keys "$session" Enter V
+if lem_wait_for "$session" 'Really revert buffer buffer-list-mark-revert-dirty\.txt' 10 >/dev/null; then
+  lem_keys "$session" n
+  revert=$(report_revert || true)
+  if [[ "$revert" == *'dirty=DIRTY LOCAL\n:modified'* ]]; then
+    pass revert-dirty-refusal "declining V preserved dirty buffer text"
+  else
+    fail revert-dirty-refusal "declining dirty revert changed state: $revert"
+  fi
+else
+  fail revert-dirty-prompt "V did not confirm dirty-buffer discard"
+fi
+
+lem_keys "$session" V
+if lem_wait_for "$session" 'Really revert buffer buffer-list-mark-revert-dirty\.txt' 10 >/dev/null; then
+  lem_keys "$session" y
+  revert=$(report_revert || true)
+  if [[ "$revert" == *'dirty=DIRTY DISK\n:clean'* ]]; then
+    pass revert-dirty-accept "accepting V discarded dirty text and reset modified state"
+  else
+    fail revert-dirty-accept "dirty revert produced unexpected state: $revert"
+  fi
+else
+  fail revert-dirty-accept "the accepted dirty revert did not prompt"
+fi
+
+lem_keys "$session" F6 s / U
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'mark-revert-clean'
+lem_keys "$session" Enter m s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'mark-revert-missing'
+lem_keys "$session" Enter m s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'mark-revert-dirty'
+lem_keys "$session" Enter d s / V
+if lem_wait_for "$session" 'Really revert 2 buffers' 10 >/dev/null; then
+  lem_keys "$session" y
+  revert=$(report_revert || true)
+  nav=$(report_nav || true)
+  if [[ "$revert" == *'clean=CLEAN DISK\n:clean'* ]] &&
+     [[ "$revert" == *'dirty=DIRTY LOCAL\n:modified'* ]] &&
+     [[ "$revert" == *'missing=MISSING LOCAL\n:modified'* ]] &&
+     [[ "$nav" == *'buffer-list-mark-revert-clean.txt:>'* ]] &&
+     [[ "$nav" == *'buffer-list-mark-revert-dirty.txt:D'* ]] &&
+     [[ "$nav" == *'buffer-list-mark-revert-missing.txt:>'* ]]; then
+    pass revert-mixed "V continued after a missing file and excluded the deletion-marked buffer"
+  else
+    fail revert-mixed "mixed revert changed the wrong buffers or marks: $revert / $nav"
+  fi
+else
+  fail revert-mixed "V did not confirm exactly the two ordinary-marked buffers"
+fi
+lem_keys "$session" U q
+
+lem_keys "$session" C-x C-b
+lem_keys "$session" s n
 tmux_cmd send-keys -t "$session" -l 'save-target'
 if lem_wait_for "$session" 'buffer-list-save-target\.txt' 15 >/dev/null; then
   lem_keys "$session" Enter
@@ -760,10 +869,15 @@ else
   fail unmark-backward "Backspace diverged from Ibuffer: $nav"
 fi
 
-lem_keys "$session" '}' M T R
+lem_keys "$session" d '}' M T R
 ops=$(report_operations || true)
+nav=$(report_nav || true)
 if [[ "$ops" == OPS\ alpha=buffer-list-op-alpha\<2\>:modified:readonly\ beta=buffer-list-op-beta:clean:writable* ]]; then
-  pass marked-state-operations "M, T, and R changed only the marked buffer with Emacs naming"
+  if [[ "$nav" == *'buffer-list-op-beta:D'* ]]; then
+    pass marked-state-operations "M, T, and R ignored D and changed only the ordinary mark"
+  else
+    fail marked-state-operations "the deletion mark was not retained: $nav"
+  fi
 else
   fail marked-state-operations "marked state operations diverged: $ops"
 fi
@@ -776,7 +890,7 @@ else
   fail repeated-unique-rename "repeated R diverged from rename-uniquely: $ops"
 fi
 
-lem_keys "$session" R
+lem_keys "$session" R U
 lem_keys "$session" g k X
 ops=$(report_operations || true)
 nav=$(report_nav || true)

@@ -10,6 +10,9 @@
 (defvar *buffer-list-test-late-buffer* nil)
 (defvar *buffer-list-test-op-alpha* nil)
 (defvar *buffer-list-test-op-beta* nil)
+(defvar *buffer-list-test-revert-clean* nil)
+(defvar *buffer-list-test-revert-dirty* nil)
+(defvar *buffer-list-test-revert-missing* nil)
 
 (define-major-mode buffer-list-test-long-mode ()
     (:name "Long Fixture Mode Name"))
@@ -225,6 +228,41 @@
    (buffer-list-test-binding "C-h")
    (buffer-list-test-binding "Delete")))
 
+(defun buffer-list-test-set-content (buffer content clean-p)
+  (with-buffer-read-only buffer nil
+    (erase-buffer buffer)
+    (insert-string (buffer-start-point buffer) content))
+  (when clean-p
+    (buffer-mark-saved buffer)))
+
+(define-command lem-yath-test-buffer-list-prepare-revert () ()
+  (buffer-list-test-set-content
+   *buffer-list-test-revert-clean* (format nil "CLEAN LOCAL~%") t)
+  (buffer-list-test-set-content
+   *buffer-list-test-revert-dirty* (format nil "DIRTY LOCAL~%") nil)
+  (buffer-list-test-set-content
+   *buffer-list-test-revert-missing* (format nil "MISSING LOCAL~%") nil)
+  (buffer-list-test-log "REVERT-PREPARED"))
+
+(define-command lem-yath-test-buffer-list-revert-state () ()
+  (buffer-list-test-log
+   "REVERT clean=~a:~a dirty=~a:~a missing=~a:~a"
+   (completion-path-display-string
+    (points-to-string (buffer-start-point *buffer-list-test-revert-clean*)
+                      (buffer-end-point *buffer-list-test-revert-clean*)))
+   (if (buffer-modified-p *buffer-list-test-revert-clean*)
+       "modified" "clean")
+   (completion-path-display-string
+    (points-to-string (buffer-start-point *buffer-list-test-revert-dirty*)
+                      (buffer-end-point *buffer-list-test-revert-dirty*)))
+   (if (buffer-modified-p *buffer-list-test-revert-dirty*)
+       "modified" "clean")
+   (completion-path-display-string
+    (points-to-string (buffer-start-point *buffer-list-test-revert-missing*)
+                      (buffer-end-point *buffer-list-test-revert-missing*)))
+   (if (buffer-modified-p *buffer-list-test-revert-missing*)
+       "modified" "clean")))
+
 (define-command lem-yath-test-buffer-list-reload () ()
   (load (merge-pathnames "src/buffer-list.lisp"
                          (asdf:system-source-directory "lem-yath"))))
@@ -260,6 +298,18 @@
       (buffer-list-test-make-buffer 'op-alpha "buffer-list-op-alpha"))
 (setf *buffer-list-test-op-beta*
       (buffer-list-test-make-buffer 'op-beta "buffer-list-op-beta"))
+(setf *buffer-list-test-revert-clean*
+      (buffer-list-test-find-file-buffer
+       'revert-clean "LEM_YATH_BUFFER_LIST_REVERT_CLEAN"))
+(setf *buffer-list-test-revert-dirty*
+      (buffer-list-test-find-file-buffer
+       'revert-dirty "LEM_YATH_BUFFER_LIST_REVERT_DIRTY"))
+(setf *buffer-list-test-revert-missing*
+      (buffer-list-test-make-buffer
+       'revert-missing "buffer-list-mark-revert-missing.txt"))
+(setf (buffer-filename *buffer-list-test-revert-missing*)
+      (uiop:getenv "LEM_YATH_BUFFER_LIST_REVERT_MISSING"))
+(lem-yath-test-buffer-list-prepare-revert)
 (let ((buffer
         (buffer-list-test-make-buffer
          'mark-modified-hit "buffer-list-mark-modified-hit")))
@@ -355,6 +405,10 @@
   'lem-yath-test-buffer-list-operation-state)
 (define-key *buffer-list-picker-mode-keymap* "F2"
   'lem-yath-test-buffer-list-picker-bindings)
+(define-key *buffer-list-picker-mode-keymap* "F1"
+  'lem-yath-test-buffer-list-revert-state)
+(define-key *buffer-list-picker-mode-keymap* "F6"
+  'lem-yath-test-buffer-list-prepare-revert)
 (define-key lem-vi-mode:*normal-keymap* "F4"
   'lem-yath-test-buffer-list-window-state)
 (define-key lem-vi-mode:*normal-keymap* "F10"

@@ -267,7 +267,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   help, or compressed-file buffers.
   `{`/`}` traverse
   ordinary marks; `M`, `T`, and `R` toggle modified/read-only state or rename
-  marked buffers uniquely, while `X` buries the focused buffer. `gj/gk`,
+  marked buffers uniquely, `V` confirms once before safely reverting the
+  ordinary-marked buffers (or implicitly marking the current row), and `X`
+  buries the focused buffer. Deletion-marked buffers are excluded from those
+  ordinary-mark operations. `gj/gk`,
   Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide the corresponding modal row,
   group, and quit navigation. `gR` redisplays the captured snapshot, `gr`
   rebuilds it from live buffers without losing marks or filters, `yb/yf` copy

@@ -919,13 +919,16 @@ through the ncurses editor.
   and deletion mark rendering, backward unmark and ordinary-mark traversal,
   all eight non-prompt starred mark predicates with hidden-row exclusion,
   filter composition/negation/pop/disable, marked save/deletion/state changes,
-  Emacs-style unique renaming, focused burying, snapshot redisplay/update,
+  Emacs-style unique renaming, one-confirmation `V` reversion of ordinary marks
+  or the implicitly marked current row, deletion-mark exclusion, safe
+  continuation after a per-buffer revert failure, focused burying, snapshot redisplay/update,
   exact name/path copying,
   alternate-window visits, and reload. Lem has no visited-file locking state;
   Ibuffer's process/starred/derived/directory/size/content/predicate filters,
   compound/saved filter operations, mode/age/regexp marking, and remaining
   specialized bulk operations are not reproduced. CL-PPCRE regexp syntax can
-  differ from Emacs regexp syntax.
+  differ from Emacs regexp syntax. Multi-buffer `V` uses GNU Ibuffer's exact
+  count prompt without its auxiliary confirmation-name window.
 - Recent files: `M-g r` opens an annotated Lem persistent-MRU prompt after
   lem-yath sets the loaded
   history's 300-entry limit and normalizes oversized persisted histories to their

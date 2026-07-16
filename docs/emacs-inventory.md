@@ -143,7 +143,8 @@ navigation with `{`/`}`, visible-snapshot starred marking for special,
 modified, unsaved, read-only, Dired, dissociated, help, and compressed-file
 buffers on `* *`/`* s`, `* m`, `* u`, `* r`, `* /`, `* e`, `* h`, and `* z`,
 marked modified/read-only toggles and Emacs-style
-unique renaming with `M/T/R`, focused-buffer burying with `X`, row movement
+unique renaming with `M/T/R`, one-confirmation marked-or-current reversion with
+`V`, focused-buffer burying with `X`, row movement
 with `gj/gk`, group
 movement with Tab/backtab, `C-j/C-k`, and `]]/[[`, and quit with `q`.
 `gR` redisplays the existing snapshot, `gr` rebuilds it from live buffers while
@@ -156,6 +157,12 @@ cancels only the pending input. `s i` and `s v` push GNU Ibuffer's modified and
 visiting-file filters, multiple filters compose by AND, `s !` negates the top
 filter, `s p` removes it, and `s /` disables the stack
 (`src/buffer-list.lisp`, `scripts/buffer-list-test.sh`).
+Like GNU Ibuffer, ordinary bulk operations implicitly mark the current row when
+there are no ordinary marks and exclude `D` deletion marks. Revert failures are
+isolated per buffer so a missing file does not prevent later buffers from being
+reverted. The terminal implementation uses the exact one/count confirmation
+prompt but omits GNU Ibuffer's auxiliary buffer-name window for a multi-buffer
+confirmation.
 
 ### 1.4 Mode-local bindings
 
