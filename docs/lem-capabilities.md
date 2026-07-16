@@ -2574,7 +2574,8 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   eval-block.
 - **AI / shipped in-tree (all in the image):**
   Lem-yath adds a shared Markdown conversation buffer for OpenRouter,
-  Perplexity, GitHub Copilot Chat, and the Claude Code, Codex, and Grok CLIs.
+  Perplexity, GitHub Copilot Chat, native ChatGPT Codex and Grok OAuth HTTP,
+  and the Claude Code, Codex, and Grok CLIs.
   The CLI adapters consume their native
   JSON event streams, retain a separate session ID for each backend for the
   lifetime of that buffer, render text/thinking/tool/command/file activity,
@@ -2601,6 +2602,34 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   without network access or real credentials. This is text-chat parity;
   Copilot Responses API models, media, tools, and model discovery remain open.
 
+  **ChatGPT Codex** is a distinct `chatgpt-codex` backend, separate from the
+  Codex CLI. It reads the Codex CLI-compatible `~/.codex/auth.json`, refreshes
+  JWTs within the configured five-minute window while preserving unknown CLI
+  fields, retries one 401 after forced renewal, and streams
+  `chatgpt.com/backend-api/codex/responses` with the configured originator,
+  account, session, reasoning, and prompt-cache contracts. The
+  `codex-agentic` preset uses model `gpt-5.4`, keeps conversation input plus
+  stable session/cache UUIDs in the shared buffer, translates the five local
+  tools to flattened Responses schemas, and feeds bounded function-call
+  outputs into subsequent rounds. `M-x lem-yath-chatgpt-codex-login` runs the
+  same OAuth2 PKCE authorization-code flow as the Emacs backend and atomically
+  writes a mode-0600 CLI-compatible file. A remote SSH login must forward the
+  registered localhost callback, normally with
+  `ssh -L 1455:127.0.0.1:1455 ex44`. Startup model probing and its Emacs cache
+  file are not reproduced.
+
+  **Grok OAuth** is a distinct `grok-oauth` backend, separate from the Grok
+  CLI agent. It reads the first usable credential in `~/.grok/auth.json`, asks
+  the official CLI's exact `grok models` argv to refresh an expiring session,
+  detects `grok version`, sends the required CLI-proxy headers, and streams
+  OpenAI-compatible chat completions. The `grok-build-oauth-agentic` preset
+  retains history and drives the same bounded five-tool loop. ex44 currently
+  has neither a Grok auth file nor the `grok` executable, so live use there
+  requires `grok login --oauth` or transferring that CLI state first.
+  `scripts/llm-oauth-test.sh` verifies both native transports, refresh and 401
+  behavior, a real loopback PKCE callback, exact payload/tool histories,
+  private persistence, reload, and secret-free argv in a Nix sandbox.
+
   `SPC g l` and `SPC g L` open the compact preset/handoff menu used by the
   Emacs configuration. It loads or saves named presets, selects a model, and
   hands the active region (otherwise the complete buffer) to Claude web or
@@ -2612,7 +2641,8 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   than a shell.
 
   The built-in `quick-lookup`, `project-readonly`, conditional `web-readonly`
-  and `github-readonly`, and `grok-build` presets reproduce the usable Emacs
+  and `github-readonly`, `codex-agentic`, `grok-build`, and
+  `grok-build-oauth-agentic` presets reproduce the usable Emacs
   policies whose transports exist here. Quick
   lookup is explicitly tool-free. Project-readonly exposes the configured
   `project_root`, `list_project_files`, `search_project`, `read_project_file`,

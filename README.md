@@ -346,13 +346,21 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 - streaming OpenRouter LLM client plus native Claude/Codex/Grok JSON event
   backends, with per-backend session resume, rendered agent activity, guarded
   single-request lifecycle, abort (`SPC g a`), and fresh-session (`SPC g n`)
+- native `chatgpt-codex` and `grok-oauth` HTTP backends with the configured
+  `codex-agentic` and `grok-build-oauth-agentic` five-tool presets. ChatGPT
+  Codex shares and safely refreshes `~/.codex/auth.json`, streams the Responses
+  API, and offers `M-x lem-yath-chatgpt-codex-login` for PKCE login. Grok reads
+  `~/.grok/auth.json` and asks the official `grok` CLI to refresh an expiring
+  session. On SSH, Codex login needs local forwarding for callback port 1455
 - gptel-style `SPC g l`/`SPC g L` menu with private named presets and
   region-or-buffer handoff to Claude or ChatGPT; the built-in `quick-lookup`
   preset matches the Emacs startup model, system prompt, temperature, and
   token cap, `project-readonly` opts OpenRouter into the configured five-tool
   project inspection loop, `web-readonly` adds the fetch MCP server,
   `github-readonly` adds the configured read-only GitHub MCP toolsets when a
-  token is available, and `grok-build` selects the native Grok CLI backend
+  token is available, `grok-build` selects the native Grok CLI backend,
+  `codex-agentic` selects native ChatGPT Codex, and
+  `grok-build-oauth-agentic` selects the Grok OAuth proxy
 - project-aware `C-c c` Claude Code buffer that opens ready for input, prefers
   the configured `ccr code` argv with a `claude` fallback, renders native text
   and tool events, and resumes the same session on later prompts. It starts an
@@ -363,7 +371,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   evaluation, and unrestricted `file://` resources
 - app ports under `lem-yath/src/apps/`: agenda, citar, devdocs, elfeed
   (Miniflux fever), notmuch, PDF/EPUB documents, pg, salta, timemachine,
-  llm-cli, llm-presets, claude-code
+  llm-cli, llm-http, llm-oauth, llm-presets, claude-code
 - ordinary `.pdf` and `.epub` opens stay inside Lem: PDFs expose bounded
   Poppler text one page at a time, while EPUBs become bounded Markdown with
   chapter navigation. Both are read-only, never visit or overwrite the binary
@@ -458,6 +466,8 @@ nix run .#auto-completion-test
 nix run .#actions-test
 nix run .#llm-keybinding-test
 nix run .#llm-backend-test
+nix run .#llm-http-test
+nix run .#llm-oauth-test
 nix run .#llm-workflow-test
 nix run .#llm-tools-test
 nix run .#claude-code-test

@@ -49,6 +49,22 @@
      :temperature 0.2
      :max-tokens nil
      :use-tools nil
+     :mcp-servers nil)
+    ("codex-agentic"
+     :backend :chatgpt-codex
+     :model "gpt-5.4"
+     :system "You are a coding agent. Use available tools first for project discovery, then answer with concrete, minimal steps or code edits."
+     :temperature 0.2
+     :max-tokens nil
+     :use-tools t
+     :mcp-servers nil)
+    ("grok-build-oauth-agentic"
+     :backend :grok-oauth
+     :model "grok-build"
+     :system "You are a coding assistant. Use available tools first for project discovery, then answer with concrete, minimal steps or code edits."
+     :temperature 0.2
+     :max-tokens nil
+     :use-tools t
      :mcp-servers nil))
   "Built-in presets whose required transport exists in Lem-yath.")
 
@@ -163,6 +179,8 @@
                    '(("openrouter" . :openrouter)
                      ("perplexity" . :perplexity)
                      ("copilot" . :copilot)
+                     ("chatgpt-codex" . :chatgpt-codex)
+                     ("grok-oauth" . :grok-oauth)
                      ("claude-code" . :claude-code)
                      ("codex" . :codex)
                      ("grok" . :grok))
@@ -183,7 +201,8 @@
 (defun llm-preset-valid-p (name preset)
   (and (llm-preset-name-valid-p name)
        (member (getf preset :backend)
-               '(:openrouter :perplexity :copilot :claude-code :codex :grok))
+               '(:openrouter :perplexity :copilot :chatgpt-codex :grok-oauth
+                 :claude-code :codex :grok))
        (stringp (getf preset :model))
        (<= (length (getf preset :model)) *llm-preset-string-limit*)
        (stringp (getf preset :system))
@@ -195,7 +214,8 @@
              (and (integerp maximum) (<= 1 maximum 1000000))))
        (member (getf preset :use-tools) '(nil t))
        (or (null (getf preset :use-tools))
-           (eq (getf preset :backend) :openrouter))
+           (member (getf preset :backend)
+                   '(:openrouter :chatgpt-codex :grok-oauth)))
        (let ((servers (getf preset :mcp-servers)))
          (and (listp servers)
               (= (length servers)

@@ -10,7 +10,7 @@ work="$root/work"
 socket="lem-yath-startup-$id"
 cold_budget_ms="${LEM_YATH_COLD_STARTUP_BUDGET_MS:-30000}"
 warm_budget_ms="${LEM_YATH_STARTUP_BUDGET_MS:-10000}"
-expected_fasl_count=89
+expected_fasl_count=90
 mkdir -p "$home" "$cache" "$work"
 export WORKDIR="$work"
 unset LEM_HOME

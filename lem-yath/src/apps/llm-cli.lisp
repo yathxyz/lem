@@ -23,6 +23,8 @@
   '((:openrouter . "openrouter/auto")
     (:perplexity . "sonar")
     (:copilot . "gpt-4.1")
+    (:chatgpt-codex . "gpt-5.4")
+    (:grok-oauth . "grok-build")
     (:claude-code . "claude-code")
     (:codex . "codex")
     (:grok . "grok-build")))
@@ -64,17 +66,21 @@
     (setf (buffer-value buffer (llm-cli-session-key backend)) session-id)))
 
 (define-command lem-yath-llm-new-session () ()
-  "Start a fresh conversation the next time the active CLI backend is used."
-  (if (not (llm-cli-spec *llm-backend*))
-      (message "~:(~a~) requests do not currently carry a session id"
-               *llm-backend*)
-      (let ((buffer (llm-output-buffer)))
-        (if (llm-active-request buffer)
-            (message "Wait for or abort the active LLM request first")
-            (progn
-              (setf (buffer-value buffer (llm-cli-session-key *llm-backend*)) nil)
-              (message "New ~(~a~) conversation will start with the next prompt"
-                       *llm-backend*))))))
+  "Start a fresh conversation for the active stateful LLM backend."
+  (let ((buffer (llm-output-buffer)))
+    (if (llm-active-request buffer)
+        (message "Wait for or abort the active LLM request first")
+        (cond
+          ((llm-cli-spec *llm-backend*)
+           (setf (buffer-value buffer (llm-cli-session-key *llm-backend*)) nil)
+           (message "New ~(~a~) conversation will start with the next prompt"
+                    *llm-backend*))
+          ((llm-oauth-clear-session *llm-backend* buffer)
+           (message "New ~(~a~) conversation will start with the next prompt"
+                    *llm-backend*))
+          (t
+           (message "~:(~a~) requests do not currently carry conversation state"
+                    *llm-backend*))))))
 
 (defun llm-cli-compose-prompt (prompt)
   (if (plusp (length *llm-system-message*))
@@ -323,7 +329,7 @@
 
 (defun llm-available-backends ()
   "Configured HTTP backends, plus agent CLIs found on PATH."
-  (append '(:openrouter :perplexity :copilot)
+  (append '(:openrouter :perplexity :copilot :chatgpt-codex :grok-oauth)
         (loop :for (backend . executable) :in *llm-cli-commands*
               :when (executable-find executable)
                 :collect backend)))

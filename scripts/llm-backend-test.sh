@@ -34,8 +34,10 @@ trap 'exit 130' INT TERM
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$LEM_YATH_LLM_FAKE_LOG" \
   "$LEM_YATH_LLM_FAKE_BIN"
 : >"$LEM_YATH_LLM_BACKEND_REPORT"
+bash_bin=$(command -v bash)
 for executable in curl claude codex grok; do
   cp "$here/scripts/llm-fake-backend.sh" "$LEM_YATH_LLM_FAKE_BIN$executable"
+  sed -i "1c#!$bash_bin" "$LEM_YATH_LLM_FAKE_BIN$executable"
   chmod +x "$LEM_YATH_LLM_FAKE_BIN$executable"
 done
 

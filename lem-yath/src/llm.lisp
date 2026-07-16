@@ -35,6 +35,9 @@
 (defparameter *llm-response-character-limit* (* 4 1024 1024))
 (defparameter *llm-tool-argument-character-limit* (* 64 1024))
 
+(defvar *llm-stream-provider-name* "OpenRouter"
+  "Provider label used by the shared chat-completions stream parser.")
+
 (defstruct (llm-stream-tool-call
             (:constructor make-llm-stream-tool-call (index)))
   index
@@ -134,20 +137,24 @@
 
 (defun llm-bounded-fragment (current fragment maximum label)
   (unless (or (null fragment) (stringp fragment))
-    (error "OpenRouter emitted a non-string ~a fragment" label))
+    (error "~a emitted a non-string ~a fragment"
+           *llm-stream-provider-name* label))
   (let ((combined (concatenate 'string current (or fragment ""))))
     (when (> (length combined) maximum)
-      (error "OpenRouter emitted oversized ~a data" label))
+      (error "~a emitted oversized ~a data"
+             *llm-stream-provider-name* label))
     combined))
 
 (defun llm-stream-tool-call-chunk (table chunk)
   (unless (hash-table-p chunk)
-    (error "OpenRouter emitted a malformed tool-call chunk"))
+    (error "~a emitted a malformed tool-call chunk"
+           *llm-stream-provider-name*))
   (let ((index (gethash "index" chunk)))
     (unless (and (integerp index)
                  (<= 0 index)
                  (< index *llm-max-tool-calls-per-round*))
-      (error "OpenRouter emitted an invalid tool-call index"))
+      (error "~a emitted an invalid tool-call index"
+             *llm-stream-provider-name*))
     (let ((call (or (gethash index table)
                     (setf (gethash index table)
                           (make-llm-stream-tool-call index)))))
@@ -158,11 +165,13 @@
                  (llm-stream-tool-call-id call) id 256 "tool-call id"))))
       (multiple-value-bind (type type-p) (gethash "type" chunk)
         (when (and type-p type (not (string= type "function")))
-          (error "OpenRouter requested a non-function tool call")))
+          (error "~a requested a non-function tool call"
+                 *llm-stream-provider-name*)))
       (let ((function (gethash "function" chunk)))
         (when function
           (unless (hash-table-p function)
-            (error "OpenRouter emitted malformed function-call data"))
+            (error "~a emitted malformed function-call data"
+                   *llm-stream-provider-name*))
           (multiple-value-bind (name name-p) (gethash "name" function)
             (when name-p
               (setf (llm-stream-tool-call-name call)
@@ -193,7 +202,8 @@
       (unless (and (plusp (length (llm-stream-tool-call-id call)))
                    (llm-tool-name-valid-p
                     (llm-stream-tool-call-name call)))
-        (error "OpenRouter emitted an incomplete tool call")))
+        (error "~a emitted an incomplete tool call"
+               *llm-stream-provider-name*)))
     calls))
 
 (defun llm-apply-openrouter-choice
@@ -205,7 +215,8 @@
         (when (stringp chunk)
           (incf content-count (length chunk))
           (when (> content-count *llm-response-character-limit*)
-            (error "OpenRouter response exceeded the size limit"))
+            (error "~a response exceeded the size limit"
+                   *llm-stream-provider-name*))
           (write-string chunk content)
           (llm-request-append request chunk)))
       (dolist (chunk (llm-json-elements (gethash "tool_calls" delta)))
@@ -213,34 +224,55 @@
     (let ((reason (gethash "finish_reason" choice)))
       (values content-count (and (stringp reason) reason)))))
 
-(defun llm-read-openrouter-round (request process)
-  "Read one bounded OpenRouter SSE response from PROCESS."
+(defun llm-read-chat-completions-round
+    (request process &optional (provider "OpenRouter"))
+  "Read one bounded OpenAI-compatible SSE response from PROCESS.
+Return the parsed round and an optional HTTP status marker."
   (let ((content (make-string-output-stream))
         (content-count 0)
         (calls (make-hash-table))
-        (finish-reason nil))
+        (finish-reason nil)
+        (http-status nil)
+        (done-p nil)
+        (*llm-stream-provider-name* provider))
     (with-open-stream (out (uiop:process-info-output process))
       (loop :for line := (read-line out nil)
             :while line
             :do
-               (multiple-value-bind (json data-p done-p) (llm-sse-json line)
-                 (when done-p (return))
-                 (when (and data-p (hash-table-p json))
-                   (when (gethash "error" json)
-                     (error "OpenRouter returned an API error"))
-                   (let ((choice
-                           (first (llm-json-elements
-                                   (gethash "choices" json)))))
-                     (when (hash-table-p choice)
-                       (multiple-value-bind (count reason)
-                           (llm-apply-openrouter-choice
-                            request choice content calls content-count)
-                         (setf content-count count)
-                         (when reason (setf finish-reason reason)))))))))
-    (make-llm-stream-round
-     :content (get-output-stream-string content)
-     :tool-calls (llm-finalize-stream-tool-calls calls)
-     :finish-reason finish-reason)))
+               (cond
+                 ((and (>= (length line) 25)
+                       (string= line "__LEM_YATH_HTTP_STATUS__:" :end1 25
+                                                                 :end2 25))
+                  (let ((value (subseq line 25)))
+                    (when (and (= (length value) 3)
+                               (every #'digit-char-p value))
+                      (setf http-status (parse-integer value)))))
+                 ((not done-p)
+                  (multiple-value-bind (json data-record-p stream-done-p)
+                      (llm-sse-json line)
+                    (when stream-done-p (setf done-p t))
+                    (when (and data-record-p (hash-table-p json))
+                      (when (gethash "error" json)
+                        (error "~a returned an API error" provider))
+                      (let ((choice
+                              (first (llm-json-elements
+                                      (gethash "choices" json)))))
+                        (when (hash-table-p choice)
+                          (multiple-value-bind (count reason)
+                              (llm-apply-openrouter-choice
+                               request choice content calls content-count)
+                            (setf content-count count)
+                            (when reason (setf finish-reason reason)))))))))))
+    (values
+     (make-llm-stream-round
+      :content (get-output-stream-string content)
+      :tool-calls (llm-finalize-stream-tool-calls calls)
+      :finish-reason finish-reason)
+     http-status)))
+
+(defun llm-read-openrouter-round (request process)
+  "Read one bounded OpenRouter SSE response from PROCESS."
+  (nth-value 0 (llm-read-chat-completions-round request process)))
 
 (defun llm-word-or-punctuation-char-p (character)
   "Whether CHARACTER has gptel's `w' (word) or `.' (punctuation) syntax."

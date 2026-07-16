@@ -39,8 +39,9 @@ chmod 700 "$root/private"
 printf 'initial context\n' >"$source_file"
 git -C "$root/project" init -q
 
+bash_bin=$(command -v bash)
 printf '%s\n' \
-  '#!/usr/bin/env bash' \
+  "#!$bash_bin" \
   'set -euo pipefail' \
   ': "${LEM_YATH_LLM_WORKFLOW_BROWSER_LOG:?}"' \
   'count_file="$LEM_YATH_LLM_WORKFLOW_BROWSER_LOG.count"' \

@@ -90,6 +90,7 @@
                              (:file "timemachine")
                              (:file "llm-cli")
                              (:file "llm-http")
+                             (:file "llm-oauth")
                              (:file "llm-presets")
                              (:file "claude-bridge")
                              (:file "claude-code")))

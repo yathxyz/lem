@@ -36,6 +36,7 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$LEM_YATH_LLM_TOOLS_LOG" \
   "$root/bin" "$LEM_YATH_LLM_TOOLS_PROJECT" "$root/outside"
 : >"$LEM_YATH_LLM_TOOLS_REPORT"
 cp "$here/scripts/llm-tools-fake-curl.sh" "$LEM_YATH_LLM_TOOLS_CURL"
+sed -i "1c#!$(command -v bash)" "$LEM_YATH_LLM_TOOLS_CURL"
 chmod +x "$LEM_YATH_LLM_TOOLS_CURL"
 
 git -C "$LEM_YATH_LLM_TOOLS_PROJECT" init -q

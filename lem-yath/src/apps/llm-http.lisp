@@ -76,10 +76,13 @@
         (executable-find *llm-curl-executable*)
         (error "curl is unavailable"))))
 
-(defun llm-http-curl-arguments (&key stream-p)
+(defun llm-http-curl-arguments (&key stream-p status-p)
   (append (list (uiop:native-namestring (llm-http-curl-executable))
                 "--silent" "--show-error" "--fail-with-body")
           (when stream-p (list "--no-buffer"))
+          (when status-p
+            (list "--write-out"
+                  "\\n__LEM_YATH_HTTP_STATUS__:%{http_code}\\n"))
           (list "--max-time"
                 (princ-to-string (if stream-p
                                      *llm-http-stream-timeout*
@@ -101,11 +104,11 @@
           (yason:parse output)
         (error () (error "HTTP service returned malformed JSON"))))))
 
-(defun llm-http-launch-stream (method url headers body)
+(defun llm-http-launch-stream (method url headers body &key status-p)
   "Launch curl for an SSE request; secrets and request data go through stdin."
   (let* ((process
            (uiop:launch-program
-            (llm-http-curl-arguments :stream-p t)
+            (llm-http-curl-arguments :stream-p t :status-p status-p)
             :input :stream :output :stream :error-output :output))
          (input (uiop:process-info-input process)))
     (handler-case
