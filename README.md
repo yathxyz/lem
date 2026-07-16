@@ -70,7 +70,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   feasible chord is preserved. Globally enabled Which-Key-style guidance
   composes the live global, mode, and Vi-state maps for every ordinary
   keymap-backed prefix, honors dispatcher shadowing, and shows sorted raw command or `+prefix`
-  labels in multi-column snapshots capped at one quarter of the frame height.
+  labels in width-bounded, cyclic multi-column pages capped at one quarter of
+  the frame height. Once a page is visible, `C-h n/p` changes pages, `C-h d`
+  toggles first-line command documentation, `C-h h` opens focused prefix help,
+  `C-h u` backs up one prefix, `C-h a` aborts, and `C-h 1..9` supplies an
+  argument; pre-popup `C-h` opens prefix help directly.
   Both the initial page and each nested page wait a fresh idle second, while
   native Lem transients keep their 500ms opening delay and immediate nesting
 - state-aware terminal cursors and a genuine buffer-local Evil-style Emacs

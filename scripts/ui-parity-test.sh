@@ -92,6 +92,14 @@ screen_has_c_x_prefix() {
   lem_capture "$session" | grep -q 'C-f find-file'
 }
 
+screen_has_page_one() {
+  lem_capture "$session" | grep -q 'a ui-page-dispatch'
+}
+
+screen_has_page_two() {
+  lem_capture "$session" | grep -q 'x ui-page-dispatch'
+}
+
 fixture="$(lem-yath_lisp_string "$here/scripts/ui-parity-fixture.lisp")"
 lem_start "$session" "$LEM_YATH_UI_CODE_FILE" --eval "(load #P$fixture)"
 
@@ -188,7 +196,7 @@ else
 fi
 
 if run_mx lem-yath-test-ui-reload-prefix-help &&
-   wait_report '^PREFIX-RELOAD pending-clean=yes stale-safe=yes visible-clean=yes mode=yes delay=321 limit=19$'; then
+   wait_report '^PREFIX-RELOAD pending-clean=yes stale-safe=yes visible-clean=yes mode=yes delay=321 limit=19 docs=yes input-bindings=1 cleanup-hooks=1$'; then
   pass prefix-help-reload "direct reload cancels pending/visible help and preserves preferences"
 else
   fail prefix-help-reload "prefix-help reload lifecycle contracts failed"
@@ -366,6 +374,149 @@ if wait_report '^PREFIX-DISPATCH shadow-local$' 10 &&
 else
   fail dynamic-shadow-dispatch "displayed shadowing and actual dispatch diverged"
 fi
+
+# The pinned Which-Key C-h map pages width-bounded snapshots while leaving
+# dispatch in the live prefix.  A 45x24 terminal makes F8 exactly two pages.
+tmux_cmd resize-window -t "$session" -x 45 -y 24
+lem_keys "$session" Escape
+sleep 0.3
+lem_keys "$session" F8
+sleep 0.7
+if screen_has_page_one; then
+  fail which-key-page-delay "the first page appeared before the configured delay"
+elif lem_wait_for "$session" 'a ui-page-dispatch' 2 >/dev/null; then
+  page_one=$(lem_capture "$session")
+  if printf '%s\n' "$page_one" | grep -q 'l ui-page-dispatch' &&
+     ! printf '%s\n' "$page_one" | grep -q 'm ui-page-dispatch'; then
+    pass which-key-page-one "the narrow popup showed only the first width-bounded page"
+  else
+    fail which-key-page-one "the first page overflowed or omitted its final entry"
+  fi
+else
+  fail which-key-page-delay "the first page did not appear after one second"
+fi
+
+lem_keys "$session" C-h n
+sleep 0.4
+page_two=$(lem_capture "$session")
+if printf '%s\n' "$page_two" | grep -q 'm ui-page-dispatch' &&
+   printf '%s\n' "$page_two" | grep -q 'x ui-page-dispatch' &&
+   ! printf '%s\n' "$page_two" | grep -q 'a ui-page-dispatch'; then
+  pass which-key-page-next "C-h n moved to page two without horizontal scrolling"
+else
+  fail which-key-page-next "C-h n did not replace page one with page two"
+fi
+
+lem_keys "$session" C-h p
+sleep 0.4
+if screen_has_page_one && ! screen_has_page_two; then
+  pass which-key-page-previous "C-h p returned to page one"
+else
+  fail which-key-page-previous "C-h p did not restore page one"
+fi
+
+lem_keys "$session" C-h p
+sleep 0.4
+if screen_has_page_two && ! screen_has_page_one; then
+  pass which-key-page-cycle "previous-page cycles from the first page to the last"
+else
+  fail which-key-page-cycle "previous-page did not wrap at the first page"
+fi
+
+lem_keys "$session" x
+if wait_report '^PAGE-DISPATCH arg=1 popup=no$' 10; then
+  pass which-key-page-dispatch "a continuation on the displayed page dispatched through the live map"
+else
+  fail which-key-page-dispatch "paging changed or blocked live continuation dispatch"
+fi
+
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" F8
+sleep 1.2
+lem_keys "$session" C-h 3 x
+if wait_report '^PAGE-DISPATCH arg=3 popup=no$' 10; then
+  pass which-key-digit-argument "C-h digit replayed the prefix with Lem's universal argument"
+else
+  fail which-key-digit-argument "the dispatcher lost the digit or replayed the wrong prefix"
+fi
+
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" F8
+sleep 1.2
+lem_keys "$session" C-h d
+sleep 0.4
+if lem_capture "$session" | grep -q 'Handle a'; then
+  pass which-key-docstrings "C-h d added the command's first docstring line"
+else
+  fail which-key-docstrings "C-h d did not rebuild descriptions from command documentation"
+fi
+lem_keys "$session" C-h d
+sleep 0.4
+if ! lem_capture "$session" | grep -q 'Handle a'; then
+  pass which-key-docstrings-restore "a second C-h d restored command-name descriptions"
+else
+  fail which-key-docstrings-restore "docstring display did not toggle back off"
+fi
+
+lem_keys "$session" C-h h
+sleep 0.4
+if lem_capture "$session" | grep -q 'F8 bindings' &&
+   lem_capture "$session" | grep -q 'ui-page-dispatch'; then
+  pass which-key-standard-help "C-h h opened focused live prefix bindings"
+else
+  fail which-key-standard-help "the standard-help branch omitted the active prefix"
+fi
+lem_keys "$session" q
+sleep 0.3
+
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" F8
+sleep 0.1
+lem_keys "$session" C-h
+sleep 0.4
+if lem_capture "$session" | grep -q 'F8 bindings'; then
+  pass which-key-early-help "C-h before the popup used standard prefix help"
+else
+  fail which-key-early-help "pre-popup C-h incorrectly entered the paging reader"
+fi
+lem_keys "$session" q
+sleep 0.3
+
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" F8
+sleep 1.2
+lem_keys "$session" C-h a
+sleep 0.4
+if ! screen_has_page_one && ! screen_has_page_two; then
+  pass which-key-abort "C-h a aborted the incomplete prefix and removed its page"
+else
+  fail which-key-abort "the abort branch left the prefix popup active"
+fi
+
+# Undoing from a nested prefix replays its parent and starts a fresh idle
+# interval, matching Which-Key's key-sequence reload rather than faking a page.
+tmux_cmd resize-window -t "$session" -x 100 -y 30
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" C-x
+sleep 1.2
+lem_keys "$session" t
+sleep 1.2
+lem_keys "$session" C-h u
+sleep 0.7
+if screen_has_c_x_prefix; then
+  fail which-key-undo-delay "nested undo redisplayed its parent too early"
+elif lem_wait_for "$session" 'C-f find-file' 2 >/dev/null; then
+  pass which-key-undo-prefix "C-h u replayed the parent prefix with a fresh delay"
+else
+  fail which-key-undo-prefix "nested undo did not restore the live parent prefix"
+fi
+lem_keys "$session" Escape
+sleep 0.3
 
 # Built-in global and Vi-state prefixes must participate too.
 lem_keys "$session" Escape

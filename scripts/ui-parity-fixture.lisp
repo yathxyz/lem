@@ -85,6 +85,20 @@
 (define-key *global-keymap* "F9 b" 'ui-prefix-global)
 (define-key *global-keymap* "F9 d" 'ui-prefix-shadow-global)
 
+;;; A deliberately wide ordinary prefix used to prove horizontal pagination.
+;;; At 45x24, six entries fit vertically and two columns fit horizontally, so
+;;; these 24 bindings form exactly two pages without relying on scroll state.
+(define-command ui-page-dispatch (n) (:universal)
+  "Handle a paging fixture continuation."
+  (ui-parity-log "PAGE-DISPATCH arg=~d popup=~a"
+                 n
+                 (if (lem/transient::transient-window-alive-p) "yes" "no")))
+
+(loop :for code :from (char-code #\a) :to (char-code #\x)
+      :do (define-key *global-keymap*
+             (format nil "F8 ~c" (code-char code))
+           'ui-page-dispatch))
+
 (define-minor-mode lem-yath-test-prefix-mode
     (:name "UI parity dynamic prefix"
      :keymap *ui-parity-prefix-mode-keymap*))
@@ -316,6 +330,8 @@
              "one-second-configured-delay")
       (check (= 27 *which-key-description-limit*)
              "default-description-limit")
+      (check (not *which-key-show-docstrings*)
+             "docstrings-disabled-by-default")
       (check (string= "abcdefghijklmnopqrstuvwxy.."
                       (which-key-truncate-description
                        "abcdefghijklmnopqrstuvwxyz-long"))
@@ -325,6 +341,27 @@
              "small-description-limit-bounded")
       (check (lem-core::mode-active-p (current-buffer) 'which-key-mode)
              "global-which-key-mode-enabled")
+      (check (let ((prefix
+                     (lem-core::first-prefix-match
+                      *which-key-input-keymap*
+                      (first (lem-core::parse-keyspec "C-h")))))
+               (and prefix
+                    (eq :drop (lem-core::prefix-behavior prefix))
+                    (= 1 (length
+                          (lem-core::keymap-prefixes
+                           *which-key-input-keymap*)))))
+             "one-drop-C-h-dispatch-binding")
+      (check (string= "Handle a paging fixture continuation."
+                      (which-key-command-docstring 'ui-page-dispatch))
+             "command-docstring-source")
+      (check (equal '(2 1)
+                    (mapcar #'length
+                            (which-key-pack-columns
+                             '(((nil "a" "123456" nil))
+                               ((nil "b" "123456" nil))
+                               ((nil "c" "123456" nil)))
+                             19)))
+             "width-packing-is-stable")
       (check (which-key-command-executing-p)
              "command-local-key-reads-inhibited")
       (check (= 500 lem/transient:*transient-popup-delay*)
@@ -475,6 +512,7 @@
 (define-command lem-yath-test-ui-reload-prefix-help () ()
   (let* ((*which-key-idle-delay* 321)
          (*which-key-description-limit* 19)
+         (*which-key-show-docstrings* t)
          (root (asdf:system-source-directory "lem-yath"))
          (source (merge-pathnames "src/prefix-help.lisp" root))
          (display-map
@@ -494,7 +532,7 @@
           (lem/transient::show-transient display-map)
           (load source)
           (ui-parity-log
-           "PREFIX-RELOAD pending-clean=~a stale-safe=~a visible-clean=~a mode=~a delay=~d limit=~d"
+           "PREFIX-RELOAD pending-clean=~a stale-safe=~a visible-clean=~a mode=~a delay=~d limit=~d docs=~a input-bindings=~d cleanup-hooks=~d"
            (if pending-clean "yes" "no")
            (if stale-safe "yes" "no")
            (if (not (lem/transient::transient-window-alive-p)) "yes" "no")
@@ -502,7 +540,11 @@
                "yes"
                "no")
            *which-key-idle-delay*
-           *which-key-description-limit*))))))
+           *which-key-description-limit*
+           (if *which-key-show-docstrings* "yes" "no")
+           (length (lem-core::keymap-prefixes *which-key-input-keymap*))
+           (ui-parity-hook-count *post-command-hook*
+                                 'which-key-post-command-cleanup)))))))
 
 (define-command lem-yath-test-ui-code-state () ()
   (alexandria:when-let ((path (uiop:getenv "LEM_YATH_UI_CODE_FILE")))
