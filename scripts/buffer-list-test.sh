@@ -111,6 +111,36 @@ report_filter() {
   return 1
 }
 
+report_copy() {
+  local before attempts=0
+  before=$(grep -c '^COPY ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F9
+  while ((attempts < 40)); do
+    if (( $(grep -c '^COPY ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^COPY ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+report_window() {
+  local before attempts=0
+  before=$(grep -c '^WINDOW ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F4
+  while ((attempts < 40)); do
+    if (( $(grep -c '^WINDOW ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^WINDOW ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
 fixture="$(lem-yath_lisp_string "$here/scripts/buffer-list-fixture.lisp")"
 lem_start "$session" "$source_file" --eval "(load #P$fixture)"
 
@@ -625,6 +655,84 @@ if (( $(grep -Fc 'buffer-list-kil...' <<<"$screen") >= 2 )); then
   fi
 else
   fail marked-kill "the kill fixtures did not survive grouped filtering"
+fi
+
+lem_keys "$session" s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'sort-'
+lem_keys "$session" Enter m d
+lem_keys "$session" s /
+lem_keys "$session" F4
+sleep 0.3
+if grep -q '^LATE created=yes$' "$LEM_YATH_BUFFER_LIST_REPORT"; then
+  lem_keys "$session" g R
+  redisplayed=$(report_filter || true)
+  if [[ "$redisplayed" != *'buffer-list-late-buffer'* ]]; then
+    pass redisplay-snapshot "gR recomputed the existing snapshot without adding buffers"
+  else
+    fail redisplay-snapshot "gR unexpectedly rebuilt the buffer snapshot: $redisplayed"
+  fi
+
+  lem_keys "$session" g r
+  updated=$(report_filter || true)
+  nav=$(report_nav || true)
+  if [[ "$updated" == *'buffer-list-late-buffer'* ]] &&
+     [[ "$nav" == *'buffer-list-sort-zeta:>,buffer-list-sort-middle:D'* ]]; then
+    pass update-snapshot "gr added a late buffer and preserved both mark classes"
+  else
+    fail update-snapshot "gr did not rebuild safely: $updated / $nav"
+  fi
+
+  lem_keys "$session" s n
+  tmux_cmd send-keys -t "$session" -l 'late-buffer'
+  lem_keys "$session" Enter
+  lem_keys "$session" g r
+  filtered_update=$(report_filter || true)
+  if [[ "$filtered_update" == FILTER\ stack=name=late-buffer* ]] &&
+     [[ "$filtered_update" == *'buffer-list-late-buffer'* ]]; then
+    pass update-filter "gr retained and reapplied the active filter stack"
+  else
+    fail update-filter "gr changed the active filter stack: $filtered_update"
+  fi
+  lem_keys "$session" s /
+else
+  fail update-snapshot "the late-buffer fixture command did not run"
+fi
+
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'sort-zeta'
+lem_keys "$session" Enter
+lem_keys "$session" y b
+copied=$(report_copy || true)
+if [[ "$copied" == 'COPY value=buffer-list-sort-zeta' ]]; then
+  pass copy-buffer-name "yb copied the exact focused buffer name"
+else
+  fail copy-buffer-name "yb copied an unexpected value: $copied"
+fi
+
+lem_keys "$session" s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'zz-target'
+lem_keys "$session" Enter
+lem_keys "$session" y f
+copied=$(report_copy || true)
+if [[ "$copied" == "COPY value=$LEM_YATH_BUFFER_LIST_TARGET" ]]; then
+  pass copy-file-name "yf copied the exact focused visiting filename"
+else
+  fail copy-file-name "yf copied an unexpected value: $copied"
+fi
+
+lem_keys "$session" g o
+if lem_wait_for "$session" 'BUFFER LIST SELECTED TARGET' 15 >/dev/null; then
+  window=$(report_window || true)
+  if [[ "$window" == WINDOW\ count=2\ current=buffer-list-zz-target.txt\ buffers=* ]] &&
+     [[ "$window" == *'buffer-list-zz-target.txt'* ]]; then
+    pass visit-other-window "go visited the focused buffer in a second ordinary window"
+  else
+    fail visit-other-window "go produced an unexpected window layout: $window"
+  fi
+else
+  fail visit-other-window "go did not visit the focused target"
 fi
 
 if ((failed)); then

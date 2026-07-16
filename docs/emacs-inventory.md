@@ -140,6 +140,9 @@ The Lem chooser implements those controls within each configured group. Its
 effective modal core also matches `m/u/U/t/~`, deletion marking and execution
 with `d` then `x`, marked save with `S`, row movement with `gj/gk`, group
 movement with Tab/backtab, `C-j/C-k`, and `]]/[[`, and quit with `q`.
+`gR` redisplays the existing snapshot, `gr` rebuilds it from live buffers while
+preserving applicable marks and filters, `yb/yf` copy the focused buffer name or
+visiting filename, and `go` visits the focused buffer in another window.
 `s m/n/f/b/.` enter live case-insensitive regexp filters for used mode, buffer
 name, full filename, basename, or extension; modal command letters remain
 literal while entering a filter, Return pushes it onto the stack, and Escape

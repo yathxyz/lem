@@ -162,7 +162,7 @@ Each nonempty group begins with a distinct heading entry."
 
 (defvar *buffer-list-filter-input-mode-keymap*
   (make-keymap :description '*buffer-list-filter-input-mode-keymap*)
-  "Literal input map used after starting an Ibuffer name filter.")
+  "Literal input map used while entering an Ibuffer regexp filter.")
 
 (define-minor-mode buffer-list-filter-input-mode
     (:name "buffer-list-filter-input"
@@ -768,6 +768,101 @@ Each nonempty group begins with a distinct heading entry."
     (when items
       (buffer-list-move-focus-off-heading component))))
 
+(defun buffer-list-current-buffer (component)
+  (alexandria:when-let ((entry (buffer-list-current-entry component)))
+    (unless (buffer-list-entry-heading-p entry)
+      (buffer-list-entry-buffer entry))))
+
+(defun buffer-list-require-current-buffer (component)
+  (or (buffer-list-current-buffer component)
+      (editor-error "No buffer on this Ibuffer row")))
+
+(defun buffer-list-copy-current (value description)
+  (copy-to-clipboard-with-killring value)
+  (message "Copied ~a: ~a" description value))
+
+(define-command lem-yath-buffer-list-copy-buffer-name () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (buffer (buffer-list-require-current-buffer component)))
+    (buffer-list-copy-current (buffer-name buffer) "buffer name")))
+
+(define-command lem-yath-buffer-list-copy-file-name () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (buffer (buffer-list-require-current-buffer component))
+         (filename (buffer-filename buffer)))
+    (unless filename
+      (editor-error "Buffer is not visiting a file"))
+    (buffer-list-copy-current (namestring filename) "file name")))
+
+(define-command lem-yath-buffer-list-visit-other-window () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (buffer (buffer-list-require-current-buffer component)))
+    (lem/multi-column-list:quit component)
+    (switch-to-window (pop-to-buffer buffer))))
+
+(defun buffer-list-record-marks (component)
+  (let ((marks (make-hash-table :test #'eq)))
+    (dolist (item (buffer-list-component-all-items component) marks)
+      (let ((entry (buffer-list-item-entry item)))
+        (unless (buffer-list-entry-heading-p entry)
+          (cond
+            ((gethash item (buffer-list-component-deletion-items component))
+             (setf (gethash (buffer-list-entry-buffer entry) marks) :deletion))
+            ((lem/multi-column-list::multi-column-list-item-checked-p item)
+             (setf (gethash (buffer-list-entry-buffer entry) marks) :marked))))))))
+
+(defun buffer-list-focus-buffer (component buffer)
+  (when buffer
+    (alexandria:when-let
+        ((index
+           (position buffer
+                     (lem/multi-column-list::multi-column-list-items component)
+                     :key (lambda (item)
+                            (let ((entry (buffer-list-item-entry item)))
+                              (unless (buffer-list-entry-heading-p entry)
+                                (buffer-list-entry-buffer entry))))
+                     :test #'eq)))
+      (lem/multi-column-list::multi-column-list/first)
+      (dotimes (_ index)
+        (lem/multi-column-list::multi-column-list/down)))))
+
+(defun buffer-list-rebuild-snapshot (component)
+  (let ((focused-buffer (buffer-list-current-buffer component))
+        (marks (buffer-list-record-marks component))
+        (items
+          (mapcar #'lem/multi-column-list::wrap
+                  (buffer-list-grouped-entries))))
+    (clrhash (buffer-list-component-recency-ranks component))
+    (clrhash (buffer-list-component-deletion-items component))
+    (setf (buffer-list-component-all-items component) items)
+    (loop :with rank := 0
+          :for item :in items
+          :for entry := (buffer-list-item-entry item)
+          :unless (buffer-list-entry-heading-p entry)
+            :do
+               (let* ((buffer (buffer-list-entry-buffer entry))
+                      (mark (gethash buffer marks)))
+                 (setf (gethash buffer
+                                (buffer-list-component-recency-ranks component))
+                       rank)
+                 (incf rank)
+                 (when mark
+                   (buffer-list-set-item-mark component item mark))))
+    (buffer-list-sort-all-items component)
+    (buffer-list-refresh component :recompute-columns t)
+    (buffer-list-focus-buffer component focused-buffer)
+    (message "Ibuffer updated")))
+
+(define-command lem-yath-buffer-list-update () ()
+  (buffer-list-rebuild-snapshot
+   (lem/multi-column-list::current-multi-column-list)))
+
+(define-command lem-yath-buffer-list-redisplay () ()
+  (buffer-list-refresh
+   (lem/multi-column-list::current-multi-column-list)
+   :recompute-columns t)
+  (message "Ibuffer redisplayed"))
+
 (define-command lem-yath-buffer-list-delete-items () ()
   (buffer-list-delete-action-items
    (lem/multi-column-list::current-multi-column-list)))
@@ -888,7 +983,7 @@ Each nonempty group begins with a distinct heading entry."
     (buffer-list-filter-input-mode nil)
     (buffer-list-picker-mode t)))
 
-;; While entering an `s n` filter, printable keys must remain literal even when
+;; While entering an `s` filter, printable keys must remain literal even when
 ;; they are modal commands in the surrounding picker (for example the `o`
 ;; sorting prefix and `t` mark toggle in a query such as "sort-").
 (loop :for code :from (char-code #\a) :to (char-code #\z)
@@ -949,6 +1044,16 @@ Each nonempty group begins with a distinct heading entry."
   'lem/multi-column-list::multi-column-list/down)
 (define-key *buffer-list-picker-mode-keymap* "g k"
   'lem/multi-column-list::multi-column-list/up)
+(define-key *buffer-list-picker-mode-keymap* "g r"
+  'lem-yath-buffer-list-update)
+(define-key *buffer-list-picker-mode-keymap* "g R"
+  'lem-yath-buffer-list-redisplay)
+(define-key *buffer-list-picker-mode-keymap* "g o"
+  'lem-yath-buffer-list-visit-other-window)
+(define-key *buffer-list-picker-mode-keymap* "y b"
+  'lem-yath-buffer-list-copy-buffer-name)
+(define-key *buffer-list-picker-mode-keymap* "y f"
+  'lem-yath-buffer-list-copy-file-name)
 (define-key *buffer-list-picker-mode-keymap* "Tab"
   'lem-yath-buffer-list-next-group)
 (define-key *buffer-list-picker-mode-keymap* "Shift-Tab"

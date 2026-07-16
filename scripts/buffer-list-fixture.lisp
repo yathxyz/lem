@@ -7,6 +7,7 @@
 (defvar *buffer-list-test-save-buffer* nil)
 (defvar *buffer-list-test-kill-a* nil)
 (defvar *buffer-list-test-kill-b* nil)
+(defvar *buffer-list-test-late-buffer* nil)
 
 (define-major-mode buffer-list-test-long-mode ()
     (:name "Long Fixture Mode Name"))
@@ -171,6 +172,28 @@
     (buffer-list-test-log
      "FILTER stack=~{~a~^,+~} visible=~{~a~^,~}" filters visible)))
 
+(define-command lem-yath-test-buffer-list-create-late-buffer () ()
+  (setf *buffer-list-test-late-buffer*
+        (or *buffer-list-test-late-buffer*
+            (make-buffer "buffer-list-late-buffer")))
+  (buffer-list-test-log "LATE created=yes"))
+
+(define-command lem-yath-test-buffer-list-killring () ()
+  (buffer-list-test-log
+   "COPY value=~a"
+   (completion-path-display-string
+    (or (lem/common/killring:peek-killring-item (current-killring) 0) ""))))
+
+(define-command lem-yath-test-buffer-list-window-state () ()
+  (buffer-list-test-log
+   "WINDOW count=~d current=~a buffers=~{~a~^,~}"
+   (length (window-list))
+   (completion-path-display-string (buffer-name (current-buffer)))
+   (mapcar (lambda (window)
+             (completion-path-display-string
+              (buffer-name (window-buffer window))))
+           (window-list))))
+
 (define-command lem-yath-test-buffer-list-reload () ()
   (load (merge-pathnames "src/buffer-list.lisp"
                          (asdf:system-source-directory "lem-yath"))))
@@ -240,6 +263,12 @@
   'lem-yath-test-buffer-list-nav-state)
 (define-key *buffer-list-picker-mode-keymap* "F12"
   'lem-yath-test-buffer-list-filter-state)
+(define-key *buffer-list-picker-mode-keymap* "F4"
+  'lem-yath-test-buffer-list-create-late-buffer)
+(define-key *buffer-list-picker-mode-keymap* "F9"
+  'lem-yath-test-buffer-list-killring)
+(define-key lem-vi-mode:*normal-keymap* "F4"
+  'lem-yath-test-buffer-list-window-state)
 (define-key lem-vi-mode:*normal-keymap* "F10"
   'lem-yath-test-buffer-list-reload)
 

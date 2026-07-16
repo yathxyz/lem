@@ -901,7 +901,10 @@ through the ncurses editor.
   Escape cancels it. The modal operation core uses `m/u/U/t/~` for ordinary marks,
   distinct `d` deletion marks followed by `x`, and `S` for marked saves;
   `gj/gk`, Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide row movement, group
-  movement, and quit. `s i/v` push modified and visiting-file filters onto an
+  movement, and quit. `gR` redisplays the existing snapshot, `gr` rebuilds it
+  from live buffers while preserving applicable marks and filters, `yb/yf`
+  copy exact buffer/file names, and `go` visits in another ordinary window.
+  `s i/v` push modified and visiting-file filters onto an
   AND stack, while `s !`, `s p`, and `s /` negate the top, pop the top, or
   disable all filters. Control-character-safe display remains available.
   The real TUI verifies classification, ordering, every bound sorter, reversal,
@@ -909,7 +912,8 @@ through the ncurses editor.
   safety, regexp filter input across modal command letters, stock field widths
   including wide characters, selection, every modal movement above, ordinary
   and deletion mark rendering, filter composition/negation/pop/disable,
-  marked save/deletion, and reload. Lem has no visited-file locking state;
+  marked save/deletion, snapshot redisplay/update, exact name/path copying,
+  alternate-window visits, and reload. Lem has no visited-file locking state;
   Ibuffer's process/starred/derived/directory/size/content/predicate filters,
   compound/saved filter operations, and specialized bulk mark/operation catalogs
   are not reproduced. CL-PPCRE regexp syntax can differ from Emacs regexp syntax.

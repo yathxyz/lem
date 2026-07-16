@@ -263,7 +263,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   manage ordinary `>` marks, `d` assigns distinct `D` deletion marks, `x`
   executes those deletions, and `S` saves marked buffers. `gj/gk`,
   Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide the corresponding modal row,
-  group, and quit navigation. The filter stack also supports modified and
+  group, and quit navigation. `gR` redisplays the captured snapshot, `gr`
+  rebuilds it from live buffers without losing marks or filters, `yb/yf` copy
+  the focused buffer name or visiting filename, and `go` visits it in another
+  window. The filter stack also supports modified and
   visiting-file filters on `s i/v`, top-filter negation and removal on `s !/p`,
   and complete disable on `s /`
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
