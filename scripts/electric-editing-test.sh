@@ -680,6 +680,35 @@ if start_session "$count_session" "$count_file"; then
     fail counted-adjacent-backspace "counted Backspace setup failed" "$count_session"
   fi
 
+  if invoke_setup "$count_session" lem-yath-test-electric-delete-count delete-count; then
+    lem_keys "$count_session" C-u - 2 BSpace
+    if record_result "$count_session" delete-count; then
+      assert_result negative-counted-backspace delete-count 'XW' 2 no "$count_session"
+    else
+      fail negative-counted-backspace "negative counted Backspace probe did not run" "$count_session"
+    fi
+    before=$(report_count '^KILL ')
+    lem_keys "$count_session" F9
+    if wait_report_count '^KILL ' "$((before + 1))"; then
+      line=$(grep '^KILL ' "$LEM_YATH_ELECTRIC_EDITING_REPORT" | tail -1)
+      if [ "$line" = 'KILL text-hex=295A' ]; then
+        pass negative-backspace-killring "negative prefix killed only the forward half"
+      else
+        fail negative-backspace-killring "unexpected negative kill-ring result: $line" "$count_session"
+      fi
+    else
+      fail negative-backspace-killring "negative kill-ring probe did not run" "$count_session"
+    fi
+    lem_keys "$count_session" "C-\\"
+    if record_result "$count_session" delete-count; then
+      assert_result negative-backspace-one-undo delete-count 'XY()ZW' 4 no "$count_session"
+    else
+      fail negative-backspace-one-undo "negative deletion undo probe did not run" "$count_session"
+    fi
+  else
+    fail negative-counted-backspace "negative counted Backspace setup failed" "$count_session"
+  fi
+
   if invoke_setup "$count_session" lem-yath-test-electric-delete-selected-opener delete-selected-opener; then
     lem_keys "$count_session" BSpace
     if record_result "$count_session" delete-selected-opener; then

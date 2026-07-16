@@ -1086,9 +1086,10 @@ completion refreshes in place.
 
 Physical Backspace immediately between a recognized pair preflights the complete
 range and removes both sides within one editor command, regardless of whether
-they were auto-inserted or escaped. A positive prefix removes that many
-characters on each side after checking both bounds, and its backward half enters
-the kill ring like Emacs.
+they were auto-inserted or escaped. A signed prefix removes its magnitude on
+each side after checking both bounds. A positive prefix puts the backward half
+in the kill ring; a negative prefix puts the forward half there, and both undo
+to the original between-pair point like Emacs.
 The syntax table keeps Python `''` paired while Fundamental mode treats it as
 ordinary text. The behavior is active in Emacs editing and Vi insert state,
 including completion prompts and active snippet fields with mirror updates.
@@ -1100,11 +1101,10 @@ The real ncurses suites cover completion refresh, prompt refresh after paired
 deletion, one-sided read-only preflight, Paredit protection for nonempty forms,
 and snippet mirrors as well as Fundamental, Python, and Lisp buffers.
 
-This remains an approximation of the complete Emacs mode: a negative prefix
-delegates to ordinary Backspace instead of symmetrically deleting around a pair.
-For an active selection wider than one delimiter, Lem deletes exactly the
-selection; Emacs can also consume an unselected adjacent delimiter depending on
-orientation, a destructive quirk Lem deliberately does not reproduce.
+The remaining intentional approximation is active-selection behavior wider
+than one delimiter: Lem deletes exactly the selection, while Emacs can also
+consume an unselected adjacent delimiter depending on orientation, a
+destructive quirk Lem deliberately does not reproduce.
 Pair deletion deliberately preflights the complete range instead of reproducing
 Emacs's partial mutation when a bound or one character's read-only property
 fails. The two removals remain separately visible to change hooks. For a

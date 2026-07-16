@@ -158,7 +158,7 @@ Live name filtering temporarily presents only matching selectable buffer rows
 - **evil-snipe**: `evil-snipe-mode 1` + `evil-snipe-override-mode 1`. `evil-snipe-scope 'visible`, `evil-snipe-repeat-scope 'whole-visible`. Overrides `f`/`t`/`s`/`S` with 1- and 2-char snipe motions.
 - **evil-nerd-commenter**: `gc` operator in normal + visual (see above).
 - **expreg**: `expreg-expand`/`expreg-contract` (deferred). Bound to `SPC v`. (Replaces expand-region.)
-- **lispy / lispyville** (Lisp structural editing): `lispy-mode` on `lisp-mode`, `emacs-lisp-mode`, `ielm-mode`, `scheme-mode`, `racket-mode`, `clojure-mode`. `lispyville-mode` follows lispy. `lispyville-key-theme`: `((operators normal) c-w (prettify insert) (atom-movement t) slurp/barf-lispy additional additional-insert)`. `lispy-close-quotes-at-end-p t`. Evil-escape is inhibited while in lispy insert state.
+- **lispy / lispyville** (Lisp structural editing): `lispy-mode` on `lisp-mode`, `emacs-lisp-mode`, `ielm-mode`, `scheme-mode`, `racket-mode`, `clojure-mode`. `lispyville-mode` follows lispy. `lispyville-key-theme`: `((operators normal) c-w (prettify insert) (atom-movement t) slurp/barf-lispy additional additional-insert)`. `lispy-close-quotes-at-end-p t`. The configuration registers an Evil-Escape inhibition hook for Lispy insert state, but does not declare or enable `evil-escape`; no escape chord is effective in the audited configuration.
 
 ---
 

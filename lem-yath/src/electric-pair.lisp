@@ -445,13 +445,14 @@ commands retain an outer selection and its original orientation."
              1))))
 
 (defun electric-delete-adjacent-pair (point count argument)
-  "Delete COUNT characters on each side of POINT as one safe command.
+  "Delete ABS(COUNT) characters on each side of POINT as one safe command.
 
 The immediate characters must form an electric pair.  Preflight the complete
 range so bounds and read-only properties cannot fail after half the pair has
-changed.  Record closer and opener separately so undo restores point between
-them, as in Emacs."
-  (let* ((mark (cursor-mark point))
+changed.  COUNT's sign controls which half enters the kill ring, matching
+Emacs.  Record both halves separately so undo restores point between them."
+  (let* ((magnitude (abs count))
+         (mark (cursor-mark point))
          (restore-mark-p (mark-active-p mark)))
     ;; Buffer modification normally consumes an active Lem mark.  Electric
     ;; Pair instead leaves a selected delimiter as a zero-width active mark.
@@ -460,18 +461,24 @@ them, as in Emacs."
     (unwind-protect
          (with-point ((start point)
                       (end point))
-           (unless (and (character-offset start (- count))
-                        (character-offset end count))
+           (unless (and (character-offset start (- magnitude))
+                        (character-offset end magnitude))
              (editor-error "Not enough characters around electric pair"))
            (unless lem/buffer/internal:*inhibit-read-only*
              (lem/buffer/internal::check-read-only-buffer
               (point-buffer point))
              (lem/buffer/internal::check-read-only-at-point
-              start (* 2 count)))
-           ;; Emacs removes the closer first.  Both edits share this command's
-           ;; undo boundary, while their order restores the between-pair point.
-           (delete-character point count)
-           (lem-core/commands/edit::delete-previous-char-1 argument))
+              start (* 2 magnitude)))
+           (if (plusp count)
+               (progn
+                 ;; The core Backspace half records the backward text.
+                 (delete-character point count)
+                 (lem-core/commands/edit::delete-previous-char-1 argument))
+               (progn
+                 ;; Seed retained undo at the original cursor before deleting
+                 ;; backward, then record Emacs's forward half in the kill ring.
+                 (lem-core/commands/edit:delete-next-char magnitude)
+                 (delete-character point (- magnitude)))))
       (when restore-mark-p
         (setf (mark-active-p mark) t)))))
 
@@ -486,7 +493,7 @@ them, as in Emacs."
       ((and (mark-active-p mark)
             (not (electric-pair-selection-p point)))
        (lem-core/commands/edit::delete-cursor-region point))
-      ((and (plusp count)
+      ((and (not (zerop count))
             (electric-adjacent-pair-p point))
        (electric-delete-adjacent-pair point count argument))
       ;; Lem's Paredit is the Lispy/Lispyville substitute.  It remains
