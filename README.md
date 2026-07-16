@@ -203,9 +203,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   literal and regexp search rings
 - retained branching undo with the configured raised payload budgets and a
   three-row Unicode Vundo UI on `SPC u`; live previews support branch, stem,
-  saved-node, mark/diff, save, rollback, and accept workflows with historical
-  source-point restoration while ordinary `u`/`C-r` continue along the
-  selected branch
+  counted and saved-node navigation, mark/diff, save, rollback, and accept
+  workflows with historical source-point restoration while ordinary `u`/`C-r`
+  continue along the selected branch
 - global syntax-aware delimiter/quote pairing and self-insert selection
   replacement, including region wrapping without taking keys away from Paredit or Vi
 - official-CLI EditorConfig resolution for steady-state local file buffers,

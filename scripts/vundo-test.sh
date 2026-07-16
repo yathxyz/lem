@@ -303,6 +303,20 @@ else
   fail preview-previous 'p did not return to sibling C'
 fi
 
+send_keys 9 n
+if press_report F2 '^ORIGIN ' &&
+   [[ "$(last_report '^ORIGIN ')" == *'line40=AB '*'focus=vundo' ]]; then
+  send_keys 9 p
+  if press_report F2 '^ORIGIN ' &&
+     [[ "$(last_report '^ORIGIN ')" == *'line40=AC '*'focus=vundo' ]]; then
+    pass counted-siblings '9n/9p clamped at the sibling edges'
+  else
+    fail counted-siblings '9p did not clamp back to the first sibling'
+  fi
+else
+  fail counted-siblings '9n did not clamp at the last sibling'
+fi
+
 # The ncurses decoder must deliver the arrow aliases to the Vundo keymap.
 send_keys Left
 if press_report F2 '^ORIGIN ' &&
@@ -667,6 +681,28 @@ else
   fail saved-sibling 'could not establish sibling C before saved navigation'
 fi
 
+# From unsaved C, 2l consumes B and reaches A.  An unavailable 2r must refuse
+# the whole jump, as upstream Vundo does, rather than stopping partway at B.
+send_keys p 2 l
+if press_report F2 '^ORIGIN ' &&
+   [[ "$(last_report '^ORIGIN ')" == *'line40=A '*'focus=vundo' ]]; then
+  send_keys 2 r
+  if press_report F2 '^ORIGIN ' &&
+     [[ "$(last_report '^ORIGIN ')" == *'line40=A '*'focus=vundo' ]]; then
+    send_keys r
+    if press_report F2 '^ORIGIN ' &&
+       [[ "$(last_report '^ORIGIN ')" == *'line40=AB '*'focus=vundo' ]]; then
+      pass counted-saved '2l moved two save events and unavailable 2r refused atomically'
+    else
+      fail counted-saved 'single r could not restore B after counted refusal'
+    fi
+  else
+    fail counted-saved 'unavailable 2r moved partially instead of refusing'
+  fi
+else
+  fail counted-saved '2l did not cross two saved events from unsaved C'
+fi
+
 # Vundo switches to save-event chronology when the selected node is itself
 # saved.  Re-saving the older A node must make l walk to the older B save event
 # even though B has the newer modification ID; r then returns to re-saved A.
@@ -720,7 +756,20 @@ if press_report F2 '^ORIGIN ' &&
 else
   fail stem-setup 'could not create D below C'
 fi
-send_keys Space u a
+send_keys Space u 3 b
+if press_report F2 '^ORIGIN ' &&
+   [[ "$(last_report '^ORIGIN ')" == *'line40=A '*'focus=vundo' ]]; then
+  send_keys 3 f
+  if press_report F2 '^ORIGIN ' &&
+     [[ "$(last_report '^ORIGIN ')" == *'line40=ACD '*'focus=vundo' ]]; then
+    pass counted-linear '3b/3f stopped at the reachable history edges'
+  else
+    fail counted-linear '3f did not stop at the D history edge'
+  fi
+else
+  fail counted-linear '3b did not stop at the root history edge'
+fi
+send_keys a
 if press_report F2 '^ORIGIN ' &&
    [[ "$(last_report '^ORIGIN ')" == *'line40=AC '*'focus=vundo' ]]; then
   pass stem-root 'a moved from D to the C stem root'

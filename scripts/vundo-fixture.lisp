@@ -188,6 +188,31 @@
                   (not (vundo-actually-saved-node-p node)))))
       (ignore-errors (delete-buffer buffer)))))
 
+(defun vundo-test-counted-navigation-p ()
+  (let* ((linear-nodes
+           '((:id 0 :parent nil :children (1))
+             (:id 1 :parent 0 :children (2))
+             (:id 2 :parent 1 :children nil)))
+         (linear-snapshot (list :nodes linear-nodes))
+         (session
+           (make-vundo-session
+            :selected-id 1
+            :snapshot linear-snapshot
+            :node-table (vundo-node-table linear-snapshot)))
+         (saved-snapshot
+           '(:nodes ((:id 0 :parent nil :children (1) :saved-sequence 1)
+                     (:id 1 :parent 0 :children (2) :saved-sequence 3)
+                     (:id 2 :parent 1 :children (3) :saved-sequence nil)
+                     (:id 3 :parent 2 :children (4) :saved-sequence 2)
+                     (:id 4 :parent 3 :children nil :saved-sequence nil)))))
+    (and (= 2 (vundo-linear-destination session 0 9))
+         (= 0 (vundo-linear-destination session 2 -9))
+         (= 1 (vundo-linear-destination session 1 0))
+         (= 0 (vundo-find-saved-by-count saved-snapshot 4 2))
+         (= 1 (vundo-find-saved-by-count saved-snapshot 0 -2))
+         (= 3 (vundo-find-saved-by-count saved-snapshot 4 0))
+         (null (vundo-find-saved-by-count saved-snapshot 0 -4)))))
+
 (define-command lem-yath-test-vundo-static () ()
   (let ((failures 0))
     (flet ((check (condition label)
@@ -239,6 +264,7 @@
              "public-snapshot-and-move-API")
       (check (vundo-test-private-temp-file-p) "private-diff-files")
       (check (vundo-test-clean-is-not-saved-p) "clean-is-not-saved")
+      (check (vundo-test-counted-navigation-p) "counted-navigation")
       (vundo-test-log "SUMMARY STATIC ~a failures=~d"
                       (if (zerop failures) "PASS" "FAIL") failures))))
 

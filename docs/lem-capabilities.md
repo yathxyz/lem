@@ -949,6 +949,8 @@ Normal- and visual-state `SPC u` open a three-row Unicode tree in a bottom pane.
 The source buffer previews the selected node live; `f`/Right and `b`/Left move
 to a child and parent, `n`/Down and `p`/Up move among siblings, `a`/`w`/`e`
 traverse stems, and `l`/`r` follow Vundo's saved-node chronology across branches.
+The linear, sibling, and saved-node motions accept Evil numeric counts with the
+same edge-clamping and unavailable-save refusal behavior as Vundo 2.4.
 `m`/`u`/`d`, `C-x C-s`, `q`/`C-g`, and Return cover marking/diffing, saving,
 rollback, and acceptance. A displaced bottom pane survives both delayed leader
 help and Vundo with its geometry, point, view, cursor, and horizontal scroll.
@@ -962,7 +964,7 @@ untracked-edit transformation, clean versus saved nodes, diff cleanup, save,
 reload, killed windows and buffers, wide-tree pruning, mutating hooks,
 stale-reference rejection, asymmetric route refusal, after-save descendants,
 direct and re-entrant teardown, prior bottom panes, and read-only failures.
-Vundo numeric prefixes and debug keys `i`/`D` are not implemented.
+Vundo's internal debug keys `i`/`D` are not implemented.
 Rectangle/Copilot-style speculative paths do not yet use the constrained
 retained-undo change-group API, so their intermediate transactions remain in
 history.

@@ -486,15 +486,35 @@
 (defun vundo-selected-node (session)
   (vundo-session-node session (vundo-session-selected-id session)))
 
-(define-command lem-yath-vundo-backward () ()
-  (let* ((session *vundo-session*)
-         (node (and session (vundo-selected-node session))))
-    (when node (vundo-move-to (getf node :parent)))))
+(defun vundo-linear-destination (session start-id count)
+  "Follow first children or parents COUNT steps, stopping at an edge."
+  (let ((id start-id)
+        (forward-p (plusp count)))
+    (dotimes (step (abs count) id)
+      (let* ((node (vundo-session-node session id))
+             (next (and node
+                        (if forward-p
+                            (first (getf node :children))
+                            (getf node :parent)))))
+        (unless next (return id))
+        (setf id next)))))
 
-(define-command lem-yath-vundo-forward () ()
+(defun vundo-move-linear (count)
   (let* ((session *vundo-session*)
-         (node (and session (vundo-selected-node session))))
-    (when node (vundo-move-to (first (getf node :children))))))
+         (selected (and session (vundo-session-selected-id session)))
+         (destination
+           (and selected
+                (vundo-linear-destination session selected count))))
+    (when (and destination (not (eql destination selected)))
+      (vundo-move-to destination))))
+
+(define-command lem-yath-vundo-backward (&optional (count 1)) (:universal)
+  (let* ((session *vundo-session*)
+         (selected (and session (vundo-session-selected-id session))))
+    (when selected (vundo-move-linear (- count)))))
+
+(define-command lem-yath-vundo-forward (&optional (count 1)) (:universal)
+  (vundo-move-linear count))
 
 (defun vundo-move-sibling (offset)
   (let* ((session *vundo-session*)
@@ -505,15 +525,16 @@
          (index (and siblings
                      (position (getf node :id) siblings :test #'eql))))
     (when index
-      (let ((destination (+ index offset)))
-        (when (<= 0 destination (1- (length siblings)))
+      (let ((destination
+              (max 0 (min (+ index offset) (1- (length siblings))))))
+        (unless (= destination index)
           (vundo-move-to (nth destination siblings)))))))
 
-(define-command lem-yath-vundo-next () ()
-  (vundo-move-sibling 1))
+(define-command lem-yath-vundo-next (&optional (count 1)) (:universal)
+  (vundo-move-sibling count))
 
-(define-command lem-yath-vundo-previous () ()
-  (vundo-move-sibling -1))
+(define-command lem-yath-vundo-previous (&optional (count 1)) (:universal)
+  (vundo-move-sibling (- count)))
 
 (defun vundo-stem-root-node-p (session node)
   (alexandria:when-let ((parent
@@ -615,28 +636,50 @@ clean marker is deliberately not an actual save."
                        :do (setf best id)
                      :finally (return best)))))))
 
-(define-command lem-yath-vundo-goto-last-saved () ()
+(defun vundo-find-saved-by-count (snapshot start-id count)
+  "Find the saved node COUNT events behind START-ID, matching Vundo 2.4."
+  (let* ((direction (if (minusp count) :forward :backward))
+         (remaining (abs count))
+         (start (find start-id (getf snapshot :nodes)
+                      :key (lambda (node) (getf node :id)) :test #'eql))
+         (current start-id))
+    ;; From an unsaved state, the closest saved node consumes the first step.
+    ;; Vundo also chooses that node for a zero prefix.
+    (unless (vundo-actually-saved-node-p start)
+      (setf current
+            (vundo-find-saved-by-history snapshot current direction))
+      (when (and current (plusp remaining))
+        (decf remaining)))
+    (loop :while (and current (plusp remaining))
+          :do (setf current
+                    (vundo-find-saved-by-history
+                     snapshot current direction))
+              (decf remaining))
+    current))
+
+(define-command lem-yath-vundo-goto-last-saved
+    (&optional (count 1)) (:universal)
   (let* ((session *vundo-session*)
          (snapshot (and session (vundo-session-snapshot session)))
          (selected (and session (vundo-session-selected-id session)))
          (destination
            (and snapshot
-                (vundo-find-saved-by-history
-                 snapshot selected :backward))))
+                (vundo-find-saved-by-count snapshot selected count))))
     (if destination
         (vundo-move-to destination)
-        (message "vundo: no previous saved node"))))
+        (message "vundo: no such saved node"))))
 
-(define-command lem-yath-vundo-goto-next-saved () ()
+(define-command lem-yath-vundo-goto-next-saved
+    (&optional (count 1)) (:universal)
   (let* ((session *vundo-session*)
          (snapshot (and session (vundo-session-snapshot session)))
          (destination
            (and snapshot
-                (vundo-find-saved-by-history
-                 snapshot (vundo-session-selected-id session) :forward))))
+                (vundo-find-saved-by-count
+                 snapshot (vundo-session-selected-id session) (- count)))))
     (if destination
         (vundo-move-to destination)
-        (message "vundo: no next saved node"))))
+        (message "vundo: no such saved node"))))
 
 (define-command lem-yath-vundo-save () ()
   "Save the live preview state without accepting or closing vundo."
