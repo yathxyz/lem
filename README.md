@@ -286,9 +286,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   `[[Title]]`, `[[label|Alias]]`, or `[[ID]]` and opens the same non-inserting
   capture flow for a missing target; ambiguous, escaped, and fenced targets
   fail closed. From Normal state, `C-z C-u C-c C-o` supplies the source
-  package's other-window prefix behavior. Root-level roam dailies, journal,
-  and i/t/r capture operate over
-  `$WORKDIR`, with public TODO capture over `$PUBLIC_ORG_DIR`
+  package's other-window prefix behavior. Root-level roam dailies and journal
+  entries operate over `$WORKDIR`
+- `SPC o` opens the configured one-key `i/t/p/r` Org capture selector and an
+  editable Org buffer at `%?`. Active Visual text and a local file/line source
+  link fill `%i` and `%a`; `C-c C-c` safely inserts and saves the selected
+  inbox, TODO, public TODO, or reading target, while `C-c C-k` aborts and
+  restores the exact origin state
 - `M-x org-roam-buffer-toggle` opens the familiar persistent `*org-roam*`
   backlink view in the configured 0.4-width right-side window. It follows the
   nearest file or ID-bearing heading without rescanning on cursor movement,

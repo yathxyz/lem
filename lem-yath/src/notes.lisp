@@ -282,20 +282,3 @@ without depending on the clock or UUID generator."
         (ensure-directories-exist path)
         (alexandria:write-string-into-file updated path :if-exists :supersede)
         path))))
-
-(define-command lem-yath-capture () ()
-  "Run the i/t/p/r capture workflow over work and public Org directories."
-  (let* ((labels (mapcar #'second *capture-templates*))
-         (choice (prompt-for-string
-                  "Capture to: "
-                  :completion-function (lambda (s) (prescient-filter s labels))
-                  :test-function (lambda (s) (member s labels :test #'string=))))
-         (template (find choice *capture-templates* :key #'second :test #'string=)))
-    (unless template
-      (return-from lem-yath-capture))
-    (destructuring-bind (key label root file prefix placement) template
-      (declare (ignore label root prefix placement))
-      (let ((text (prompt-for-string "Entry: ")))
-        (when (plusp (length text))
-          (write-capture key text)
-          (message "Captured to ~a" file))))))

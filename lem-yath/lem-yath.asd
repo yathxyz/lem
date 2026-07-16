@@ -62,6 +62,7 @@
                (:file "roam-backlinks")
                (:file "org/publish")
                (:file "notes")
+               (:file "org-capture")
                (:file "org/nodes-sync")
                (:file "roam-capture")
                (:file "dirvish")

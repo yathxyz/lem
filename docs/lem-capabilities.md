@@ -1867,6 +1867,34 @@ Real structural editing: `paredit-slurp`, `paredit-barf`, `paredit-splice`(+fwd/
 (`markdown-eval-block`, `interactive.lisp:105`) and a `preview`/`preview-default` generic
 (`internal.lisp:6,29`) for rendering. (Aligns with Lem's "living canvas" vision.)
 
+### Editable Org capture — `lem-yath/src/org-capture.lisp` (verified approximation)
+
+`SPC o` now follows the configured Org capture interaction rather than writing
+after a one-line prompt. A reload-stable minor map presents the one-key `i/t/p/r`
+selector, then opens a private Org buffer in Insert state with point at `%?`.
+The four audited templates retain their exact heading levels, TODO prefixes,
+CREATED timestamp, public UUID, and inbox-versus-file placement. An active
+contiguous Visual selection fills `%i`; for a local file, `%a` is a bounded
+file-and-line Org link.
+
+`C-c C-c` inserts the complete edited fragment into the current live target
+buffer and saves it, preserving pre-existing content and marker-tracked source
+points. `C-c C-k` discards it, and `C-x C-s` cannot bypass finalization. Template
+cancellation, finalization, abort, buffer death, and source reload remove their
+buffer-local hooks and restore the exact origin window, point, and Vi state.
+Only one session can exist; invoking `SPC o` again focuses it. The implementation
+is intentionally the configured four-template surface, not Org's general
+template tree, arbitrary expansion language, remote targets, or full stored-link
+provider ecosystem.
+
+`scripts/notes-test.sh` retains the pure filesystem placement suite and also
+drives the real ncurses editor through the production `SPC o`, `i/t/p/r`,
+`C-g`, `C-x C-s`, `C-c C-c`, and `C-c C-k` paths. It proves `%?`, `%i`, `%a`,
+metadata, public ID creation, single insertion, exact Normal and Visual origin
+restoration, hook ownership, reload cleanup, and post-reload reuse.
+It also proves that a pre-existing private buffer name is preserved and the
+capture request fails closed without leaking hooks or session state.
+
 ### Native Org-roam graph — `lem-yath/src/roam.lisp`, `roam-backlinks.lisp` (verified approximation)
 
 The node and capture paths recursively index canonical `.org` and `.md` files
