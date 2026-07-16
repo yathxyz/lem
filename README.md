@@ -291,7 +291,15 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   current row; it ignores non-file and deletion-marked buffers and fails
   without replacing the prior diff when an associated file is missing. The
   filter stack also supports modified and visiting-file filters on `s i/v`,
-  top-filter negation and removal on `s !/p`, and complete disable on `s /`
+  top-filter negation and removal on `s !/p`, and complete disable on `s /`.
+  `O` and the effective Evil-Collection chord `M-s a C-o` run a persistent,
+  smart-case Occur over ordinary marks in GNU's reverse display order, exclude
+  `D`, and visibly mark the current row when no ordinary marks exist. The
+  read-only `*Occur*` result supports multiline matches, numeric context,
+  same-line grouping, live source points, Return/`g o` visits,
+  `M-Return` no-select display, and `gj/gk` or `C-j/C-k` match navigation while
+  leaving the chooser selected when first displayed. Invalid regexps preserve
+  the previous result, zero matches remove it, and killed sources fail closed.
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
   deduplication and timeout, explicit buffer ownership with save-as migration,
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,

@@ -173,6 +173,76 @@ Each nonempty group begins with a distinct heading entry."
 (define-key *buffer-list-diff-mode-keymap* "Z Z" 'quit-active-window)
 (define-key *buffer-list-diff-mode-keymap* "Z Q" 'quit-active-window)
 
+(defparameter *buffer-list-occur-buffer-name* "*Occur*")
+(defconstant +buffer-list-occur-owner+ 'lem-yath-buffer-list-occur)
+(defparameter *buffer-list-occur-buffer-character-limit* (* 16 1024 1024))
+(defparameter *buffer-list-occur-total-character-limit* (* 64 1024 1024))
+(defparameter *buffer-list-occur-match-limit* 10000)
+(defparameter *buffer-list-occur-output-character-limit* (* 2 1024 1024))
+
+(defvar *buffer-list-occur-mode-keymap*
+  (make-keymap :description '*buffer-list-occur-mode-keymap*))
+
+(define-attribute buffer-list-occur-title-attribute
+  (t :foreground :base0D :bold t))
+
+(define-attribute buffer-list-occur-prefix-attribute
+  (t :foreground :base0C :bold t))
+
+(define-attribute buffer-list-occur-match-attribute
+  (t :foreground :base00 :background :base0D :bold t))
+
+(defstruct buffer-list-occur-match
+  start
+  end)
+
+(defstruct buffer-list-occur-block
+  first-line
+  last-line
+  matches)
+
+(defstruct buffer-list-occur-source
+  buffer
+  text
+  line-starts
+  blocks
+  match-count)
+
+(defstruct buffer-list-occur-row-spec
+  start
+  end
+  block)
+
+(defstruct buffer-list-occur-attribute-spec
+  start
+  end
+  attribute)
+
+(defstruct buffer-list-occur-render-state
+  (pieces nil)
+  (length 0)
+  (rows nil)
+  (attributes nil))
+
+(defstruct buffer-list-occur-target
+  buffer
+  start
+  end)
+
+(define-major-mode buffer-list-occur-mode nil
+    (:name "Occur"
+     :keymap *buffer-list-occur-mode-keymap*)
+  (setf (buffer-read-only-p (current-buffer)) t
+        (variable-value 'line-wrap :buffer (current-buffer)) nil
+        (variable-value 'highlight-line :buffer (current-buffer)) t
+        (variable-value 'lem/show-paren:enable :buffer (current-buffer)) nil))
+
+(defmethod lem-vi-mode/core:mode-specific-keymaps
+    ((mode buffer-list-occur-mode))
+  (list *buffer-list-occur-mode-keymap*))
+
+(declaim (ftype function add-search-history))
+
 (defvar *buffer-list-filter-input-mode-keymap*
   (make-keymap :description '*buffer-list-filter-input-mode-keymap*)
   "Literal input map used while entering an Ibuffer regexp filter.")
@@ -1265,6 +1335,622 @@ mark inside a collapsed group still participates.  Deletion marks never do."
        (not (gethash item (buffer-list-component-deletion-items component)))
        (not (buffer-list-entry-heading-p (buffer-list-item-entry item)))))
 
+(defun buffer-list-occur-owned-buffer-p (buffer)
+  (and buffer
+       (not (deleted-buffer-p buffer))
+       (eq (buffer-value buffer :lem-yath-buffer-list-occur-owner)
+           +buffer-list-occur-owner+)))
+
+(defun buffer-list-occur-case-fold-p (pattern)
+  "Return whether PATTERN has no unescaped uppercase character."
+  (loop :with escaped-p := nil
+        :for character :across pattern
+        :do
+           (cond
+             (escaped-p (setf escaped-p nil))
+             ((char= character #\\) (setf escaped-p t))
+             ((upper-case-p character) (return nil)))
+        :finally (return t)))
+
+(defun buffer-list-occur-scanner (pattern)
+  (handler-case
+      (cl-ppcre:create-scanner
+       pattern
+       :case-insensitive-mode (buffer-list-occur-case-fold-p pattern)
+       :multi-line-mode t)
+    (error ()
+      (editor-error "Invalid Ibuffer Occur regexp"))))
+
+(defun buffer-list-occur-line-starts (text)
+  (let ((starts
+          (make-array 16 :element-type 'fixnum
+                         :adjustable t :fill-pointer 0)))
+    (vector-push-extend 0 starts)
+    (loop :with cursor := 0
+          :for newline := (position #\Newline text :start cursor)
+          :while newline
+          :do (vector-push-extend (1+ newline) starts)
+              (setf cursor (1+ newline)))
+    starts))
+
+(defun buffer-list-occur-line-index (starts offset)
+  "Return the zero-based source line containing OFFSET."
+  (let ((low 0)
+        (high (1- (length starts)))
+        (answer 0))
+    (loop :while (<= low high)
+          :for middle := (floor (+ low high) 2)
+          :if (<= (aref starts middle) offset)
+            :do (setf answer middle
+                      low (1+ middle))
+          :else
+            :do (setf high (1- middle)))
+    answer))
+
+(defun buffer-list-occur-line-end-offset (text starts line)
+  "Return LINE's exclusive content end, excluding its newline."
+  (if (< (1+ line) (length starts))
+      (1- (aref starts (1+ line)))
+      (length text)))
+
+(defun buffer-list-occur-matches-in-range (scanner text start end)
+  "Return nonoverlapping matches wholly inside the half-open START..END range."
+  (let ((cursor start)
+        matches)
+    (loop :while (<= cursor end)
+          :do
+             (multiple-value-bind (match-start match-end)
+                 (cl-ppcre:scan scanner text :start cursor :end end)
+               (unless match-start
+                 (return))
+               (push (make-buffer-list-occur-match
+                      :start match-start :end match-end)
+                     matches)
+               (setf cursor
+                     (if (= match-start match-end)
+                         (1+ match-end)
+                         match-end))))
+    (nreverse matches)))
+
+(defun buffer-list-occur-source-data (buffer scanner remaining-matches)
+  "Snapshot and scan BUFFER, refusing to exceed REMAINING-MATCHES."
+  (let ((size (completion-buffer-size buffer)))
+    (when (> size *buffer-list-occur-buffer-character-limit*)
+      (editor-error "Ibuffer Occur input ~a exceeds ~d characters"
+                    (completion-path-display-string (buffer-name buffer))
+                    *buffer-list-occur-buffer-character-limit*)))
+  (let* ((text (points-to-string (buffer-start-point buffer)
+                                 (buffer-end-point buffer)))
+         (length (length text)))
+    (let ((starts (buffer-list-occur-line-starts text))
+          (cursor 0)
+          (match-count 0)
+          blocks)
+      (loop :while (<= cursor length)
+            :do
+               (multiple-value-bind (match-start match-end)
+                   (cl-ppcre:scan scanner text :start cursor :end length)
+                 (unless match-start
+                   (return))
+                 (let* ((first-line
+                          (buffer-list-occur-line-index starts match-start))
+                        (last-line
+                          (buffer-list-occur-line-index starts match-end))
+                        (region-start (aref starts first-line))
+                        (region-end
+                          (buffer-list-occur-line-end-offset
+                           text starts last-line))
+                        (matches
+                          (buffer-list-occur-matches-in-range
+                           scanner text region-start region-end)))
+                   ;; The outer match is necessarily in the range.  Retaining
+                   ;; it defensively also prevents scanner edge behavior at an
+                   ;; empty final line from manufacturing an empty block.
+                   (unless matches
+                     (setf matches
+                           (list (make-buffer-list-occur-match
+                                  :start match-start :end match-end))))
+                   (incf match-count (length matches))
+                   (when (> match-count remaining-matches)
+                     (editor-error "Ibuffer Occur exceeds ~d matches"
+                                   *buffer-list-occur-match-limit*))
+                   (push (make-buffer-list-occur-block
+                          :first-line first-line
+                          :last-line last-line
+                          :matches matches)
+                         blocks)
+                   (setf cursor
+                         (if (< (1+ last-line) (length starts))
+                             (aref starts (1+ last-line))
+                             (1+ length))))))
+      (make-buffer-list-occur-source
+       :buffer buffer :text text :line-starts starts
+       :blocks (nreverse blocks) :match-count match-count))))
+
+(defun buffer-list-occur-display-character (character)
+  (let ((code (char-code character)))
+    (case character
+      (#\\ "\\\\")
+      (#\Tab "\\t")
+      (#\Return "\\r")
+      (otherwise
+       (if (or (not (graphic-char-p character))
+               (member (sb-unicode:general-category character)
+                       '(:cc :cf :cs :zl :zp)))
+           (format nil "\\x~2,'0X;" code)
+           (string character))))))
+
+(defun buffer-list-occur-display-line (line)
+  "Return a control-safe LINE and a raw-boundary to display-offset map."
+  (let ((mapping (make-array (1+ (length line)) :element-type 'fixnum))
+        (offset 0)
+        (stream (make-string-output-stream)))
+    (loop :for character :across line
+          :for index :from 0
+          :for display := (buffer-list-occur-display-character character)
+          :do (setf (aref mapping index) offset)
+              (write-string display stream)
+              (incf offset (length display)))
+    (setf (aref mapping (length line)) offset)
+    (values (get-output-stream-string stream) mapping)))
+
+(defun buffer-list-occur-render-append (state text)
+  (let* ((start (buffer-list-occur-render-state-length state))
+         (end (+ start (length text))))
+    (when (> end *buffer-list-occur-output-character-limit*)
+      (editor-error "Ibuffer Occur output exceeds ~d characters"
+                    *buffer-list-occur-output-character-limit*))
+    (push text (buffer-list-occur-render-state-pieces state))
+    (setf (buffer-list-occur-render-state-length state) end)
+    (values start end)))
+
+(defun buffer-list-occur-render-attribute (state start end attribute)
+  (when (< start end)
+    (push (make-buffer-list-occur-attribute-spec
+           :start start :end end :attribute attribute)
+          (buffer-list-occur-render-state-attributes state))))
+
+(defun buffer-list-occur-render-title (state text)
+  (multiple-value-bind (start end)
+      (buffer-list-occur-render-append
+       state (concatenate 'string text (string #\Newline)))
+    (buffer-list-occur-render-attribute
+     state start (max start (1- end)) 'buffer-list-occur-title-attribute)))
+
+(defun buffer-list-occur-source-line-string (source line)
+  (let* ((text (buffer-list-occur-source-text source))
+         (starts (buffer-list-occur-source-line-starts source))
+         (start (aref starts line))
+         (end (buffer-list-occur-line-end-offset text starts line)))
+    (values (subseq text start end) start end)))
+
+(defun buffer-list-occur-render-line (state source line &optional block)
+  (multiple-value-bind (raw raw-start raw-end)
+      (buffer-list-occur-source-line-string source line)
+    (multiple-value-bind (display mapping)
+        (buffer-list-occur-display-line raw)
+      (let* ((prefix
+               (if (and block
+                        (= line (buffer-list-occur-block-first-line block)))
+                   (format nil "~7d:" (1+ line))
+                   "       :"))
+             (row-start (buffer-list-occur-render-state-length state)))
+        (multiple-value-bind (prefix-start prefix-end)
+            (buffer-list-occur-render-append state prefix)
+          (buffer-list-occur-render-attribute
+           state prefix-start prefix-end 'buffer-list-occur-prefix-attribute))
+        (let ((content-start (buffer-list-occur-render-state-length state)))
+          (buffer-list-occur-render-append state display)
+          (when block
+            (dolist (match (buffer-list-occur-block-matches block))
+              (let ((start (max raw-start
+                                (buffer-list-occur-match-start match)))
+                    (end (min raw-end
+                              (buffer-list-occur-match-end match))))
+                (when (< start end)
+                  (buffer-list-occur-render-attribute
+                   state
+                   (+ content-start (aref mapping (- start raw-start)))
+                   (+ content-start (aref mapping (- end raw-start)))
+                   'buffer-list-occur-match-attribute)))))
+          (buffer-list-occur-render-append state (string #\Newline))
+          (when block
+            (push (make-buffer-list-occur-row-spec
+                   :start row-start
+                   :end (buffer-list-occur-render-state-length state)
+                   :block block)
+                  (buffer-list-occur-render-state-rows state))))))))
+
+(defun buffer-list-occur-context-clusters (source context)
+  "Return merged context ranges with their ordered match blocks."
+  (let (clusters current)
+    (dolist (block (buffer-list-occur-source-blocks source))
+      (let* ((last-source-line
+               (1- (length (buffer-list-occur-source-line-starts source))))
+             (start (max 0 (- (buffer-list-occur-block-first-line block)
+                              context)))
+             (end (min last-source-line
+                       (+ (buffer-list-occur-block-last-line block) context))))
+        (if (and current (<= start (1+ (second current))))
+            (progn
+              (setf (second current) (max (second current) end))
+              (push block (third current)))
+            (progn
+              (when current
+                (setf (third current) (nreverse (third current)))
+                (push current clusters))
+              (setf current (list start end (list block)))))))
+    (when current
+      (setf (third current) (nreverse (third current)))
+      (push current clusters))
+    (nreverse clusters)))
+
+(defun buffer-list-occur-render-source (state source context)
+  (let ((clusters (buffer-list-occur-context-clusters source context)))
+    (loop :for cluster :in clusters
+          :for first-cluster-p := t :then nil
+          :unless first-cluster-p
+            :do (buffer-list-occur-render-append
+                 state (format nil "-------~%"))
+          :do
+             (let ((blocks (copy-list (third cluster))))
+               (loop :for line :from (first cluster) :to (second cluster)
+                     :do
+                        (loop :while
+                          (and blocks
+                               (< (buffer-list-occur-block-last-line
+                                   (first blocks))
+                                  line))
+                              :do (pop blocks))
+                        (let ((block
+                                (and blocks
+                                     (<= (buffer-list-occur-block-first-line
+                                          (first blocks))
+                                         line)
+                                     (<= line
+                                         (buffer-list-occur-block-last-line
+                                          (first blocks)))
+                                     (first blocks))))
+                          (buffer-list-occur-render-line
+                           state source line block)))))))
+
+(defun buffer-list-occur-count-words (matches lines)
+  (format nil "~d ~a~a"
+          matches
+          (if (= matches 1) "match" "matches")
+          (if (= matches lines)
+              ""
+              (format nil " in ~d ~a"
+                      lines (if (= lines 1) "line" "lines")))))
+
+(defun buffer-list-occur-render-output (sources pattern context)
+  (let* ((state (make-buffer-list-occur-render-state))
+         (matching (remove-if (lambda (source)
+                                (zerop (buffer-list-occur-source-match-count
+                                        source)))
+                              sources))
+         (total-matches
+           (reduce #'+ sources :key #'buffer-list-occur-source-match-count
+                               :initial-value 0))
+         (total-lines
+           (reduce #'+ sources
+                   :key (lambda (source)
+                          (length (buffer-list-occur-source-blocks source)))
+                   :initial-value 0))
+         (pattern-display (completion-path-display-string pattern))
+         (multiple-p (> (length sources) 1)))
+    (when (and multiple-p (plusp total-matches))
+      (buffer-list-occur-render-title
+       state
+       (format nil "~a total for \"~a\":"
+               (buffer-list-occur-count-words total-matches total-lines)
+               pattern-display)))
+    (dolist (source matching)
+      (let* ((matches (buffer-list-occur-source-match-count source))
+             (lines (length (buffer-list-occur-source-blocks source)))
+             (regexp-suffix
+               (if multiple-p ""
+                   (format nil " for \"~a\"" pattern-display))))
+        (buffer-list-occur-render-title
+         state
+         (format nil "~a~a in buffer: ~a"
+                 (buffer-list-occur-count-words matches lines)
+                 regexp-suffix
+                 (completion-path-display-string
+                  (buffer-name (buffer-list-occur-source-buffer source)))))
+        (buffer-list-occur-render-source state source context)))
+    (values
+     state
+     (with-output-to-string (stream)
+       (dolist (piece (nreverse
+                       (buffer-list-occur-render-state-pieces state)))
+         (write-string piece stream)))
+     total-matches)))
+
+(defun buffer-list-occur-point-at-offset (buffer offset)
+  (let ((point (copy-point (buffer-start-point buffer) :temporary)))
+    (unless (move-to-position point (1+ offset))
+      (error "Stale Occur source offset ~d in ~a" offset (buffer-name buffer)))
+    (copy-point point :right-inserting)))
+
+(defun buffer-list-occur-delete-targets (targets)
+  (dolist (target targets)
+    (ignore-errors (delete-point (buffer-list-occur-target-start target)))
+    (ignore-errors (delete-point (buffer-list-occur-target-end target)))))
+
+(defun buffer-list-occur-target-map (sources)
+  (let ((map (make-hash-table :test #'eq))
+        targets)
+    (handler-case
+        (progn
+          (dolist (source sources)
+            (let ((buffer (buffer-list-occur-source-buffer source)))
+              (unless (and (not (deleted-buffer-p buffer))
+                           (eq buffer (get-buffer (buffer-name buffer))))
+                (editor-error "Ibuffer Occur source was killed"))
+              (dolist (block (buffer-list-occur-source-blocks source))
+                (let ((block-targets
+                        (mapcar
+                         (lambda (match)
+                           (let ((target
+                                   (make-buffer-list-occur-target
+                                    :buffer buffer
+                                    :start
+                                    (buffer-list-occur-point-at-offset
+                                     buffer
+                                     (buffer-list-occur-match-start match))
+                                    :end
+                                    (buffer-list-occur-point-at-offset
+                                     buffer
+                                     (buffer-list-occur-match-end match)))))
+                             (push target targets)
+                             target))
+                         (buffer-list-occur-block-matches block))))
+                  (setf (gethash block map) block-targets)))))
+          (values map targets))
+      (error (condition)
+        (buffer-list-occur-delete-targets targets)
+        (error condition)))))
+
+(defun buffer-list-occur-cleanup-buffer (buffer)
+  (let ((targets (buffer-value buffer :lem-yath-buffer-list-occur-targets)))
+    (setf (buffer-value buffer :lem-yath-buffer-list-occur-targets) nil)
+    (buffer-list-occur-delete-targets targets)))
+
+(defun buffer-list-occur-put-property (buffer start end property value)
+  (let ((start-point (copy-point (buffer-start-point buffer) :temporary))
+        (end-point (copy-point (buffer-start-point buffer) :temporary)))
+    (unless (and (move-to-position start-point (1+ start))
+                 (move-to-position end-point (1+ end)))
+      (error "Invalid Ibuffer Occur output range ~d..~d" start end))
+    (put-text-property start-point end-point property value)))
+
+(defun buffer-list-occur-prepare-output-buffer (sources)
+  (let ((buffer (get-buffer *buffer-list-occur-buffer-name*)))
+    (when (and buffer
+               (member buffer sources
+                       :key #'buffer-list-occur-source-buffer :test #'eq))
+      (unless (buffer-list-occur-owned-buffer-p buffer)
+        (editor-error "Buffer ~a exists but is not a lem-yath Occur result"
+                      *buffer-list-occur-buffer-name*))
+      (buffer-rename buffer (unique-buffer-name *buffer-list-occur-buffer-name*))
+      (setf buffer nil))
+    buffer))
+
+(defun buffer-list-occur-clear-empty-output (sources)
+  "Remove a stale owned result without ever killing one of SOURCES."
+  (alexandria:when-let
+      ((buffer (get-buffer *buffer-list-occur-buffer-name*)))
+    (when (buffer-list-occur-owned-buffer-p buffer)
+      (if (member buffer sources
+                  :key #'buffer-list-occur-source-buffer :test #'eq)
+          (buffer-rename
+           buffer (unique-buffer-name *buffer-list-occur-buffer-name*))
+          (kill-buffer buffer)))))
+
+(defun buffer-list-occur-install-output
+    (sources state text pattern context target-map targets)
+  (let ((buffer (buffer-list-occur-prepare-output-buffer sources))
+        (installed-p nil))
+    (when (and buffer (not (buffer-list-occur-owned-buffer-p buffer)))
+      (buffer-list-occur-delete-targets targets)
+      (editor-error "Buffer ~a exists but is not a lem-yath Occur result"
+                    *buffer-list-occur-buffer-name*))
+    (unless buffer
+      (setf buffer
+            (make-buffer *buffer-list-occur-buffer-name* :enable-undo-p nil)))
+    (unwind-protect
+         (progn
+           (buffer-list-occur-cleanup-buffer buffer)
+           (buffer-disable-undo buffer)
+           (with-buffer-read-only buffer nil
+             (erase-buffer buffer)
+             (insert-string (buffer-start-point buffer) text))
+           (change-buffer-mode buffer 'buffer-list-occur-mode)
+           (dolist (attribute
+                    (buffer-list-occur-render-state-attributes state))
+             (buffer-list-occur-put-property
+              buffer
+              (buffer-list-occur-attribute-spec-start attribute)
+              (buffer-list-occur-attribute-spec-end attribute)
+              :attribute
+              (buffer-list-occur-attribute-spec-attribute attribute)))
+           (dolist (row (buffer-list-occur-render-state-rows state))
+             (buffer-list-occur-put-property
+              buffer
+              (buffer-list-occur-row-spec-start row)
+              (buffer-list-occur-row-spec-end row)
+              :buffer-list-occur-targets
+              (gethash (buffer-list-occur-row-spec-block row) target-map)))
+           (setf (buffer-value buffer :lem-yath-buffer-list-occur-owner)
+                 +buffer-list-occur-owner+
+                 (buffer-value buffer :lem-yath-buffer-list-occur-targets)
+                 targets
+                 (buffer-value buffer :lem-yath-buffer-list-occur-regexp)
+                 pattern
+                 (buffer-value buffer :lem-yath-buffer-list-occur-context)
+                 context
+                 (buffer-value buffer :lem-yath-buffer-list-occur-sources)
+                 (mapcar #'buffer-list-occur-source-buffer sources))
+           (buffer-start (buffer-point buffer))
+           (buffer-mark-saved buffer)
+           (setf (buffer-read-only-p buffer) t
+                 installed-p t)
+           buffer)
+      (unless installed-p
+        (buffer-list-occur-delete-targets targets)))))
+
+(defun buffer-list-occur-action-buffers (component)
+  "Return ordinary marked buffers in GNU Ibuffer's reverse display order."
+  (let ((marked
+          (loop :for item :in (buffer-list-component-all-items component)
+                :for entry := (buffer-list-item-entry item)
+                :for buffer := (unless (buffer-list-entry-heading-p entry)
+                                 (buffer-list-entry-buffer entry))
+                :when (and buffer
+                           (buffer-list-ordinary-marked-item-p component item)
+                           (buffer-list-active-filters-match-p component buffer)
+                           (not (deleted-buffer-p buffer))
+                           (eq buffer (get-buffer (buffer-name buffer))))
+                  :collect buffer)))
+    (if marked
+        (nreverse marked)
+        (let ((item (buffer-list-current-item component))
+              (buffer (buffer-list-require-current-buffer component)))
+          ;; GNU ibuffer-do-occur leaves this implicit ordinary mark behind.
+          (buffer-list-set-item-mark component item :marked)
+          (lem/multi-column-list:update component)
+          (list buffer)))))
+
+(defun buffer-list-occur-run (component buffers pattern context)
+  (let ((scanner (buffer-list-occur-scanner pattern))
+        (total-characters
+          (reduce #'+ buffers :key #'completion-buffer-size
+                              :initial-value 0))
+        (remaining-matches *buffer-list-occur-match-limit*)
+        sources)
+    (when (> total-characters *buffer-list-occur-total-character-limit*)
+      (editor-error "Ibuffer Occur input exceeds ~d total characters"
+                    *buffer-list-occur-total-character-limit*))
+    (dolist (buffer buffers)
+      (let ((source
+              (buffer-list-occur-source-data
+               buffer scanner remaining-matches)))
+        (decf remaining-matches
+              (buffer-list-occur-source-match-count source))
+        (push source sources)))
+    (setf sources (nreverse sources))
+    (multiple-value-bind (state text total-matches)
+        (buffer-list-occur-render-output sources pattern context)
+      (if (zerop total-matches)
+          (progn
+            (buffer-list-occur-clear-empty-output sources)
+            (message "Searched ~d ~a; no matches for \"~a\""
+                     (length buffers)
+                     (if (= (length buffers) 1) "buffer" "buffers")
+                     (completion-path-display-string pattern))
+            nil)
+          (multiple-value-bind (target-map targets)
+              (buffer-list-occur-target-map sources)
+            (let ((occur-buffer
+                    (buffer-list-occur-install-output
+                     sources state text pattern context target-map targets))
+                  (source-window (buffer-list-source-window component)))
+              (with-current-window source-window
+                (pop-to-buffer occur-buffer :split-action :sensibly))
+              (message "Searched ~d ~a; ~d ~a for \"~a\""
+                       (length buffers)
+                       (if (= (length buffers) 1) "buffer" "buffers")
+                       total-matches
+                       (if (= total-matches 1) "match" "matches")
+                       (completion-path-display-string pattern))
+              occur-buffer))))))
+
+(define-command lem-yath-buffer-list-occur (argument) (:universal-nil)
+  "Run GNU-style Occur over ordinary-marked Ibuffer rows."
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (pattern
+           (prompt-for-string
+            "List lines matching regexp: "
+            :initial-value
+            (and (boundp '*regexp-search-history*)
+                 (first (symbol-value '*regexp-search-history*)))
+            :history-symbol 'lem-yath-occur-regexp))
+         (buffers (buffer-list-occur-action-buffers component))
+         (context (if (and (integerp argument) (not (minusp argument)))
+                      argument
+                      0)))
+    (add-search-history pattern t)
+    (when (zerop (length pattern))
+      (editor-error "Occur does not accept an empty regexp"))
+    (buffer-list-occur-run component buffers pattern context)))
+
+(defun buffer-list-occur-current-targets ()
+  (unless (eq (buffer-major-mode (current-buffer)) 'buffer-list-occur-mode)
+    (editor-error "Not in an Occur buffer"))
+  (let ((point (copy-point (current-point) :temporary)))
+    (line-start point)
+    (or (text-property-at point :buffer-list-occur-targets)
+        (editor-error "No occurrence on this line"))))
+
+(defun buffer-list-occur-validate-target (target)
+  (let ((buffer (buffer-list-occur-target-buffer target))
+        (start (buffer-list-occur-target-start target)))
+    (unless (and buffer
+                 (not (deleted-buffer-p buffer))
+                 (alive-point-p start)
+                 (eq buffer (point-buffer start)))
+      (editor-error "Buffer for this occurrence was killed"))
+    target))
+
+(defun buffer-list-occur-show-target (target select-p)
+  (buffer-list-occur-validate-target target)
+  (let* ((occur-window (current-window))
+         (buffer (buffer-list-occur-target-buffer target))
+         (target-window (pop-to-buffer buffer :split-action :sensibly)))
+    (with-current-window target-window
+      (lem-vi-mode/jumplist:with-jumplist
+        (switch-to-buffer buffer)
+        (move-point (current-point) (buffer-list-occur-target-start target)))
+      (window-recenter target-window))
+    (switch-to-window (if select-p target-window occur-window))
+    target))
+
+(define-command lem-yath-buffer-list-occur-visit () ()
+  (buffer-list-occur-show-target
+   (first (buffer-list-occur-current-targets)) t))
+
+(define-command lem-yath-buffer-list-occur-display () ()
+  (buffer-list-occur-show-target
+   (first (buffer-list-occur-current-targets)) nil))
+
+(defun buffer-list-occur-move (direction)
+  (let ((point (copy-point (current-point) :temporary)))
+    (line-start point)
+    (let ((current-targets
+            (text-property-at point :buffer-list-occur-targets)))
+      (loop :while (line-offset point direction)
+          :for targets := (text-property-at point
+                                             :buffer-list-occur-targets)
+          :when (and targets (not (eq targets current-targets)))
+            :do (move-point (current-point) point)
+                (buffer-list-occur-show-target (first targets) nil)
+                (return targets)
+          :finally
+             (editor-error (if (plusp direction)
+                               "No more matches"
+                               "No earlier matches"))))))
+
+(define-command lem-yath-buffer-list-occur-next () ()
+  (buffer-list-occur-move 1))
+
+(define-command lem-yath-buffer-list-occur-previous () ()
+  (buffer-list-occur-move -1))
+
+(defun buffer-list-occur-kill-buffer-hook (buffer)
+  (when (buffer-list-occur-owned-buffer-p buffer)
+    (buffer-list-occur-cleanup-buffer buffer)))
+
 (defun buffer-list-move-to-marked (component direction)
   (let* ((items (lem/multi-column-list::multi-column-list-items component))
          (current (buffer-list-current-item component))
@@ -1776,6 +2462,10 @@ mark inside a collapsed group still participates.  Deletion marks never do."
   'lem-yath-buffer-list-view)
 (define-key *buffer-list-picker-mode-keymap* "g V"
   'lem-yath-buffer-list-view-horizontally)
+(define-key *buffer-list-picker-mode-keymap* "O"
+  'lem-yath-buffer-list-occur)
+(define-key *buffer-list-picker-mode-keymap* "M-s a C-o"
+  'lem-yath-buffer-list-occur)
 (define-key *buffer-list-picker-mode-keymap* "y b"
   'lem-yath-buffer-list-copy-buffer-name)
 (define-key *buffer-list-picker-mode-keymap* "y f"
@@ -1858,3 +2548,35 @@ mark inside a collapsed group still participates.  Deletion marks never do."
   'lem-yath-buffer-list-cycle-sorting)
 (define-key *buffer-list-picker-mode-keymap* "`"
   'lem-yath-buffer-list-switch-format)
+
+(define-key *buffer-list-occur-mode-keymap* "Return"
+  'lem-yath-buffer-list-occur-visit)
+(define-key *buffer-list-occur-mode-keymap* "C-c C-c"
+  'lem-yath-buffer-list-occur-visit)
+(define-key *buffer-list-occur-mode-keymap* "S-Return"
+  'lem-yath-buffer-list-occur-visit)
+(define-key *buffer-list-occur-mode-keymap* "g o"
+  'lem-yath-buffer-list-occur-visit)
+(define-key *buffer-list-occur-mode-keymap* "M-Return"
+  'lem-yath-buffer-list-occur-display)
+(define-key *buffer-list-occur-mode-keymap* "g j"
+  'lem-yath-buffer-list-occur-next)
+(define-key *buffer-list-occur-mode-keymap* "g k"
+  'lem-yath-buffer-list-occur-previous)
+(define-key *buffer-list-occur-mode-keymap* "C-j"
+  'lem-yath-buffer-list-occur-next)
+(define-key *buffer-list-occur-mode-keymap* "C-k"
+  'lem-yath-buffer-list-occur-previous)
+(define-key *buffer-list-occur-mode-keymap* "n"
+  'lem-yath-buffer-list-occur-next)
+(define-key *buffer-list-occur-mode-keymap* "p"
+  'lem-yath-buffer-list-occur-previous)
+(define-key *buffer-list-occur-mode-keymap* "q" 'quit-active-window)
+(define-key *buffer-list-occur-mode-keymap* "Z Z" 'quit-active-window)
+(define-key *buffer-list-occur-mode-keymap* "Z Q"
+  'lem-vi-mode/commands:vi-quit)
+
+(remove-hook (variable-value 'kill-buffer-hook :global t)
+             'buffer-list-occur-kill-buffer-hook)
+(add-hook (variable-value 'kill-buffer-hook :global t)
+          'buffer-list-occur-kill-buffer-hook)

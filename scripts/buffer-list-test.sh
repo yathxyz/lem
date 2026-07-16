@@ -217,6 +217,104 @@ report_diff() {
   return 1
 }
 
+report_occur() {
+  local before attempts=0
+  before=$(grep -c '^OCCUR ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F8
+  while ((attempts < 40)); do
+    if (( $(grep -c '^OCCUR ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^OCCUR ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+report_occur_global() {
+  local before attempts=0
+  before=$(grep -c '^OCCUR ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F3
+  while ((attempts < 40)); do
+    if (( $(grep -c '^OCCUR ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^OCCUR ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+report_occur_bounds() {
+  local before attempts=0
+  before=$(grep -c '^OCCUR-BOUNDS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F4
+  while ((attempts < 40)); do
+    if (( $(grep -c '^OCCUR-BOUNDS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^OCCUR-BOUNDS ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+report_occur_source_zero() {
+  local before attempts=0
+  before=$(grep -c '^OCCUR-SOURCE-ZERO ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F9
+  while ((attempts < 40)); do
+    if (( $(grep -c '^OCCUR-SOURCE-ZERO ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^OCCUR-SOURCE-ZERO ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+report_occur_bindings() {
+  local before attempts=0
+  before=$(grep -c '^OCCUR-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F1
+  while ((attempts < 40)); do
+    if (( $(grep -c '^OCCUR-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^OCCUR-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+visit_occur_source() {
+  local before attempts=0
+  before=$(grep -c '^OCCUR-VISIT ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" Enter
+  while ((attempts < 40)); do
+    if (( $(grep -c '^OCCUR-VISIT ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^OCCUR-VISIT ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+select_occur_buffer() {
+  # O leaves the floating picker selected over its ordinary source window.
+  # Close it, then let the fixture select the existing displayed result.  A
+  # fixed M-o count is not deterministic after earlier source previews have
+  # left more than two ordinary windows in the layout.
+  lem_keys "$session" q F2
+}
+
 check_star_mark() {
   local label=$1 query=$2 suffix=$3 expected=$4 nav
   lem_keys "$session" s / U
@@ -1196,8 +1294,9 @@ fi
 if [[ "$picker_bindings" == *'group-jump=LEM-YATH-BUFFER-LIST-JUMP-TO-GROUP'* ]] &&
    [[ "$picker_bindings" == *'other-noselect=LEM-YATH-BUFFER-LIST-VISIT-OTHER-WINDOW-NOSELECT'* ]] &&
    [[ "$picker_bindings" == *'one-window=LEM-YATH-BUFFER-LIST-VISIT-ONE-WINDOW'* ]] &&
-   [[ "$picker_bindings" == *'view=LEM-YATH-BUFFER-LIST-VIEW view-g=LEM-YATH-BUFFER-LIST-VIEW view-horizontal=LEM-YATH-BUFFER-LIST-VIEW-HORIZONTALLY'* ]]; then
-  pass visit-view-bindings "M-j, C-o, M-o, A, gv, and gV resolve in the focused picker map"
+   [[ "$picker_bindings" == *'view=LEM-YATH-BUFFER-LIST-VIEW view-g=LEM-YATH-BUFFER-LIST-VIEW view-horizontal=LEM-YATH-BUFFER-LIST-VIEW-HORIZONTALLY'* ]] &&
+   [[ "$picker_bindings" == *'occur=LEM-YATH-BUFFER-LIST-OCCUR occur-meta=LEM-YATH-BUFFER-LIST-OCCUR'* ]]; then
+  pass visit-view-bindings "M-j, visits, views, O, and M-s a C-o resolve in the focused picker map"
 else
   fail visit-view-bindings "one or more visit/view bindings diverged: $picker_bindings"
 fi
@@ -1405,6 +1504,269 @@ if [[ "$window" == 'WINDOW count=1 current=buffer-list-view-alpha buffers=buffer
   pass view-current-fallback "unmarked gv viewed only the current row in one ordinary window"
 else
   fail view-current-fallback "unmarked gv did not use the current-row fallback: $window"
+fi
+
+# GNU Ibuffer's O searches ordinary marks in reverse display order, excludes D,
+# displays *Occur* without selecting it, and retains the chooser and its marks.
+lem_keys "$session" C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-alpha'
+lem_keys "$session" Enter m
+lem_keys "$session" s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-beta'
+lem_keys "$session" Enter m
+lem_keys "$session" s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-delete'
+lem_keys "$session" Enter d
+lem_keys "$session" s /
+occur_nav=$(report_nav || true)
+ordinary_order=$(sed -n 's/.*marks=//p' <<<"$occur_nav" | tr ',' '\n' |
+  sed -n 's/:>$//p')
+expected_sources=$(tac <<<"$ordinary_order" | paste -sd, -)
+lem_keys "$session" M-1 O
+tmux_cmd send-keys -t "$session" -l 'needle'
+lem_keys "$session" Enter
+if lem_wait_for "$session" 'Searched 2 buffers; 6 matches for "needle"' 15 >/dev/null; then
+  picker_state=$(report_picker_bindings || true)
+  retained_nav=$(report_nav || true)
+  if [[ "$picker_state" == *'current-popup=yes ordinary-count=2'* ]] &&
+     [[ "$picker_state" == *'ordinary-buffers='*'*Occur*'* ]] &&
+     [[ "$retained_nav" == *'buffer-list-occur-alpha:>'* ]] &&
+     [[ "$retained_nav" == *'buffer-list-occur-beta:>'* ]] &&
+     [[ "$retained_nav" == *'buffer-list-occur-delete:D'* ]]; then
+    pass occur-display-noselect "O displayed *Occur* while retaining picker focus and both mark classes"
+  else
+    fail occur-display-noselect "O changed focus, windows, or marks: $picker_state / $retained_nav"
+  fi
+else
+  fail occur-display-noselect "O did not report the exact marked-buffer match count"
+fi
+
+select_occur_buffer
+if lem_wait_for "$session" '6 matches in 5 lines total for "needle"' 15 >/dev/null; then
+  occur=$(report_occur || true)
+  if [[ "$occur" == *'current=*Occur* mode=BUFFER-LIST-OCCUR-MODE readonly=yes modified=no'* ]] &&
+     [[ "$occur" == *"sources=$expected_sources"* ]] &&
+     [[ "$occur" == *'6 matches in 5 lines total for "needle":\n'* ]] &&
+     [[ "$occur" == *'4 matches in 3 lines in buffer: buffer-list-occur-alpha\n'* ]] &&
+     [[ "$occur" == *'2 matches in buffer: buffer-list-occur-beta\n'* ]] &&
+     [[ "$occur" == *'-------\n'* ]] &&
+     [[ "$occur" == *'control\\t\\x9B;\\x202E;needle'* ]] &&
+     [[ "$occur" != *'buffer-list-occur-delete'* ]] &&
+     [[ "$occur" != *'forbidden deletion'* ]]; then
+    pass occur-render "smart-case matches, reverse source order, context merging, escaping, and D exclusion match GNU Occur"
+  else
+    fail occur-render "the persistent Occur rendering diverged: $occur"
+  fi
+else
+  fail occur-render "the marked multi-buffer Occur result was not selectable"
+fi
+
+occur_bindings=$(report_occur_bindings || true)
+if [[ "$occur_bindings" == *'return=LEM-YATH-BUFFER-LIST-OCCUR-VISIT control-return=LEM-YATH-BUFFER-LIST-OCCUR-VISIT'* ]] &&
+   [[ "$occur_bindings" == *'shift-return=LEM-YATH-BUFFER-LIST-OCCUR-VISIT meta-return=LEM-YATH-BUFFER-LIST-OCCUR-DISPLAY other=LEM-YATH-BUFFER-LIST-OCCUR-VISIT'* ]] &&
+   [[ "$occur_bindings" == *'next=LEM-YATH-BUFFER-LIST-OCCUR-NEXT previous=LEM-YATH-BUFFER-LIST-OCCUR-PREVIOUS control-next=LEM-YATH-BUFFER-LIST-OCCUR-NEXT control-previous=LEM-YATH-BUFFER-LIST-OCCUR-PREVIOUS quit=QUIT-ACTIVE-WINDOW'* ]]; then
+  pass occur-bindings "the effective Evil-Collection Occur navigation chords resolve locally"
+else
+  fail occur-bindings "one or more Occur mode bindings diverged: $occur_bindings"
+fi
+
+lem_keys "$session" g j
+first_occur=$(report_occur || true)
+if [[ "$first_occur" == *'current=*Occur*'* ]] &&
+   [[ "$first_occur" == *'row-source=buffer-list-occur-alpha row-line=2 target-count=1'* ]] &&
+   [[ "$first_occur" == *'windows='*'buffer-list-occur-alpha'* ]]; then
+  pass occur-next-noselect "gj moved to and displayed the first source without leaving Occur"
+else
+  fail occur-next-noselect "gj selected or targeted the wrong occurrence: $first_occur"
+fi
+
+lem_keys "$session" M-Enter
+displayed_occur=$(report_occur || true)
+if [[ "$displayed_occur" == *'current=*Occur*'* ]] &&
+   [[ "$displayed_occur" == *'row-source=buffer-list-occur-alpha row-line=2'* ]] &&
+   [[ "$displayed_occur" == *'windows='*'buffer-list-occur-alpha'* ]]; then
+  pass occur-meta-display "M-Return displayed the current source while retaining Occur focus"
+else
+  fail occur-meta-display "M-Return changed selection or source: $displayed_occur"
+fi
+
+lem_keys "$session" g j
+second_occur=$(report_occur || true)
+if [[ "$second_occur" == *'row-source=buffer-list-occur-alpha row-line=5 target-count=2'* ]]; then
+  pass occur-grouped-line "gj treated two matches on one source line as one navigable Occur row"
+else
+  fail occur-grouped-line "same-line matches were not grouped: $second_occur"
+fi
+
+source=$(visit_occur_source || true)
+if [[ "$source" == 'OCCUR-VISIT current=buffer-list-occur-alpha line=5 column=0' ]]; then
+  pass occur-visit "Return selected the exact first match point in the source buffer"
+else
+  fail occur-visit "Return visited the wrong source position: $source"
+fi
+
+# An uppercase regexp is case-sensitive under Emacs smart-case rules.  With no
+# ordinary marks, O must manufacture and retain the current row's > mark.
+lem_keys "$session" C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-alpha'
+lem_keys "$session" Enter O C-a C-k
+tmux_cmd send-keys -t "$session" -l 'Needle'
+lem_keys "$session" Enter
+if lem_wait_for "$session" 'Searched 1 buffer; 1 match for "Needle"' 15 >/dev/null; then
+  implicit_nav=$(report_nav || true)
+  if [[ "$implicit_nav" == *'marks=buffer-list-occur-alpha:>'* ]]; then
+    pass occur-current-fallback "unmarked O searched and visibly marked only the current row"
+  else
+    fail occur-current-fallback "O did not retain GNU's implicit ordinary mark: $implicit_nav"
+  fi
+else
+  fail occur-current-fallback "the smart-case single-buffer Occur did not complete"
+fi
+
+select_occur_buffer
+upper_occur=$(report_occur || true)
+if [[ "$upper_occur" == *'1 match for "Needle" in buffer: buffer-list-occur-alpha\n'* ]] &&
+   [[ "$upper_occur" == *'      2:Needle alpha mixed\n'* ]] &&
+   [[ "$upper_occur" != *'needle alpha and needle again'* ]] &&
+   [[ "$upper_occur" != *'NEEDLE beta upper'* ]]; then
+  pass occur-smart-case "uppercase input matched case-sensitively"
+else
+  fail occur-smart-case "uppercase smart-case rendering diverged: $upper_occur"
+fi
+
+# CL-PPCRE's user-facing syntax supports a newline escape, and multi-line
+# matches should render every covered line while remaining one navigation item.
+lem_keys "$session" Enter C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-alpha'
+lem_keys "$session" Enter O C-a C-k
+tmux_cmd send-keys -t "$session" -l 'multi start\nfinish token'
+lem_keys "$session" Enter
+if lem_wait_for "$session" 'Searched 1 buffer; 1 match' 15 >/dev/null; then
+  select_occur_buffer
+  multiline=$(report_occur || true)
+  lem_keys "$session" g j
+  multiline_first=$(report_occur || true)
+  lem_keys "$session" g j
+  if lem_wait_for "$session" 'No more matches' 10 >/dev/null; then
+    multiline_after=$(report_occur || true)
+    if [[ "$multiline" == *'      7:multi start\n       :finish token\n'* ]] &&
+       [[ "$multiline_first" == *'row-source=buffer-list-occur-alpha row-line=7 target-count=1'* ]] &&
+       [[ "$multiline_after" == *'row-source=buffer-list-occur-alpha row-line=7 target-count=1'* ]]; then
+      pass occur-multiline "multi-line output retained one source target and next-error skipped its continuation row"
+    else
+      fail occur-multiline "multi-line rendering or navigation diverged: $multiline / $multiline_first / $multiline_after"
+    fi
+  else
+    fail occur-multiline "gj treated a multi-line continuation as another occurrence"
+  fi
+else
+  fail occur-multiline "the multi-line regexp did not produce an Occur result"
+fi
+
+# Occur source positions are live points, as GNU Occur markers are.  An edit
+# before a match must move its destination without requiring a rerender.
+lem_keys "$session" F7
+shifted_occur=$(report_occur || true)
+if [[ "$shifted_occur" == *'row-source=buffer-list-occur-alpha row-line=8 target-count=1'* ]]; then
+  pass occur-live-point "an insertion before the source match advanced the retained Occur target"
+else
+  fail occur-live-point "the Occur target did not track a source edit: $shifted_occur"
+fi
+
+# A malformed replacement search must not destroy the last useful result.
+lem_keys "$session" Enter C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-alpha'
+lem_keys "$session" Enter O C-a C-k
+tmux_cmd send-keys -t "$session" -l '['
+lem_keys "$session" Enter
+invalid_occur_nav=$(report_nav || true)
+select_occur_buffer
+invalid_occur=$(report_occur || true)
+if [[ "$invalid_occur_nav" == *'marks=buffer-list-occur-alpha:>'* ]] &&
+   [[ "$invalid_occur" == *'1 match for "multi start\\\\nfinish token"'* ]] &&
+   [[ "$invalid_occur" == *'row-source=buffer-list-occur-alpha row-line=8 target-count=1'* ]]; then
+  pass occur-invalid-preserves "an invalid regexp retained the previous result and implicit ordinary mark"
+else
+  fail occur-invalid-preserves "an invalid regexp damaged Occur state: $invalid_occur_nav / $invalid_occur"
+fi
+
+occur_bounds=$(report_occur_bounds || true)
+if [[ "$occur_bounds" == 'OCCUR-BOUNDS per=yes total=yes preserved=yes' ]]; then
+  pass occur-resource-bounds "per-buffer and aggregate limits refused before replacing the prior result"
+else
+  fail occur-resource-bounds "one or more Occur resource bounds failed: $occur_bounds"
+fi
+
+# A successful zero-match search removes the owned stale result, matching GNU
+# Occur rather than leaving misleading navigation behind.
+lem_keys "$session" q C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-alpha'
+lem_keys "$session" Enter M-s a C-o C-a C-k
+tmux_cmd send-keys -t "$session" -l 'definitely-no-occurrence'
+lem_keys "$session" Enter
+if lem_wait_for "$session" 'no matches for "definitely-no-occurrence"' 15 >/dev/null; then
+  lem_keys "$session" q
+  no_match_occur=$(report_occur_global || true)
+  if [[ "$no_match_occur" == *'live=no '* ]]; then
+    pass occur-no-match-cleanup "a zero-match search killed the owned stale Occur result"
+  else
+    fail occur-no-match-cleanup "the stale Occur buffer survived a zero-match search: $no_match_occur"
+  fi
+else
+  fail occur-no-match-cleanup "the zero-match search did not complete"
+fi
+
+# If the existing owned result is itself a source, a zero-match search must
+# rename and retain that source rather than mistaking it for stale output.
+lem_keys "$session" C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-alpha'
+lem_keys "$session" Enter O C-a C-k
+tmux_cmd send-keys -t "$session" -l 'Needle'
+lem_keys "$session" Enter
+if lem_wait_for "$session" 'Searched 1 buffer; 1 match for "Needle"' 15 >/dev/null; then
+  select_occur_buffer
+  source_zero=$(report_occur_source_zero || true)
+  if [[ "$source_zero" == 'OCCUR-SOURCE-ZERO source-live=yes canonical-live=no renamed=yes' ]]; then
+    pass occur-source-zero-match "a zero-match search retained and uniquely renamed its owned source"
+  else
+    fail occur-source-zero-match "the owned source was lost or retained the output name: $source_zero"
+  fi
+else
+  fail occur-source-zero-match "the source-safety fixture result was not created"
+fi
+
+# Recreate one result, kill its source, and prove navigation fails closed while
+# retaining the persistent result buffer for inspection.
+lem_keys "$session" C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-alpha'
+lem_keys "$session" Enter O C-a C-k
+tmux_cmd send-keys -t "$session" -l 'Needle'
+lem_keys "$session" Enter
+if lem_wait_for "$session" 'Searched 1 buffer; 1 match for "Needle"' 15 >/dev/null; then
+  select_occur_buffer
+  lem_keys "$session" g j F6 Enter
+  if lem_wait_for "$session" 'Buffer for this occurrence was killed' 15 >/dev/null; then
+    stale_occur=$(report_occur || true)
+    if [[ "$stale_occur" == *'current=*Occur*'* ]] &&
+       [[ "$stale_occur" == *'row-line=-1 target-count=1'* ]]; then
+      pass occur-killed-source "navigation refused a killed source without leaving the Occur result"
+    else
+      fail occur-killed-source "killed-source refusal left unexpected state: $stale_occur"
+    fi
+  else
+    fail occur-killed-source "Return did not reject the killed Occur source"
+  fi
+else
+  fail occur-killed-source "the stale-source fixture result was not created"
 fi
 
 if ((failed)); then

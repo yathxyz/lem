@@ -172,6 +172,18 @@ case-insensitive content regexp. `s i` and `s v` push GNU Ibuffer's modified
 and visiting-file filters, multiple filters compose by AND, `s !` negates the
 top filter, `s p` removes it, and `s /` disables the stack
 (`src/buffer-list.lisp`, `scripts/buffer-list-test.sh`).
+`O` and `M-s a C-o` reproduce `ibuffer-do-occur` over ordinary marks, in GNU's
+reverse display order, excluding `D`; with no ordinary marks the current row is
+visibly marked and searched. A nonnegative numeric argument supplies context,
+and the smart-case CL-PPCRE pattern may span lines. The persistent read-only
+`*Occur*` result groups multiple matches on one source line, merges overlapping
+context, retains live source points, and is displayed without selecting it.
+Return, `C-c C-c`, Shift-Return, and `g o` visit; `M-Return` displays without
+selection; `gj/gk`, `C-j/C-k`, and `n/p` traverse match blocks while previewing
+the source. Invalid regexps preserve the prior result, no matches remove it,
+and navigation refuses killed sources. Inputs are bounded at 16 million
+characters per buffer and 64 million total, with 10,000 matches and 2 MiB of
+rendered output.
 Like GNU Ibuffer, ordinary bulk operations implicitly mark the current row when
 there are no ordinary marks and exclude `D` deletion marks. Revert failures are
 isolated per buffer so a missing file does not prevent later buffers from being

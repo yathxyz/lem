@@ -941,12 +941,27 @@ through the ncurses editor.
   focused bounded `=` diffs for ordinary marks or the
   unmarked current row, and reload. Diff selection excludes `D` and non-file
   buffers; missing files fail before replacing the prior read-only patch view.
+  `O` and `M-s a C-o` add bounded GNU-style marked-buffer Occur: ordinary marks
+  are searched in reverse display order, `D` is excluded, and an unmarked
+  current row receives GNU's persistent implicit mark. Smart-case, multiline
+  CL-PPCRE patterns and nonnegative numeric context render into a persistent,
+  read-only `*Occur*` without selecting it. Same-line matches share one
+  navigation block, context ranges merge with separators, and control and
+  Unicode format characters are escaped. Return/`C-c C-c`/Shift-Return/`g o`
+  visit a live source point; `M-Return` displays it without selection;
+  `gj/gk`, `C-j/C-k`, and `n/p` traverse and preview blocks. Invalid regexps
+  retain the previous result, zero matches remove it, source edits move retained
+  targets, and killed sources fail closed. Scanning is capped at 16 million
+  characters per buffer and 64 million total, 10,000 matches, and 2 MiB of
+  output.
   Lem has no visited-file locking state;
   Ibuffer's process/directory/predicate filters, compound/saved filter
-  operations, mode/age/regexp marking, and remaining
-  specialized bulk operations are not reproduced. CL-PPCRE regexp syntax can
-  differ from Emacs regexp syntax. Content filters skip buffers above 16
-  million characters, and mode completion uses package-qualified labels.
+  operations, mode/age/regexp marking, other-frame, view-and-eval, multi-buffer
+  isearch/query-replace, Occur edit/rename/clone, shell, eval, and print
+  operations are not reproduced.
+  CL-PPCRE regexp syntax can differ from Emacs regexp syntax. Content filters
+  skip buffers above 16 million characters, and mode completion uses
+  package-qualified labels.
   Multi-buffer `V` uses GNU Ibuffer's exact
   count prompt without its auxiliary confirmation-name window. The diff view
   uses concise buffer headings rather than GNU Emacs's shell-command
@@ -2792,9 +2807,11 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
 - **isearch / occur**: `src/ext/isearch.lisp` (`lem/isearch`): `isearch-forward`/
   `-backward`/`-regexp`/`-symbol`, `query-replace`, `query-replace-regexp`,
   `query-replace-symbol`, isearch→multiple-cursors (`isearch-add-cursor-to-next-match`).
-  **No dedicated `occur` command**; the grep/peek-source UI (§4) covers "list matches"
-  with immediate source-buffer write-through rather than wgrep's staged finish/abort
-  workflow.
+  Upstream has no dedicated `occur` command. Lem-yath adds the bounded,
+  persistent marked-buffer Occur described in §4; grep/peek-source separately
+  covers project/file results with immediate source-buffer write-through rather
+  than wgrep's staged finish/abort workflow. True multi-buffer incremental
+  isearch and query-replace remain gaps.
 - **Multiple cursors**: core support. `src/cursors.lisp` + `src/commands/multiple-cursors.lisp`
   (`add-cursors-to-next-line`, bound `M-C`); isearch can add cursors at matches.
 - **Markdown preview**: yes, `preview` generic in markdown-mode (§8), plus literate

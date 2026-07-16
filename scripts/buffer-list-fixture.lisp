@@ -13,6 +13,9 @@
 (defvar *buffer-list-test-revert-clean* nil)
 (defvar *buffer-list-test-revert-dirty* nil)
 (defvar *buffer-list-test-revert-missing* nil)
+(defvar *buffer-list-test-occur-alpha* nil)
+(defvar *buffer-list-test-occur-beta* nil)
+(defvar *buffer-list-test-occur-delete* nil)
 
 (define-major-mode buffer-list-test-long-mode ()
     (:name "Long Fixture Mode Name"))
@@ -252,7 +255,7 @@
 (define-command lem-yath-test-buffer-list-picker-bindings () ()
   (let ((windows (window-list)))
     (buffer-list-test-log
-     "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a group-jump=~a other-noselect=~a one-window=~a view=~a view-g=~a view-horizontal=~a mode=~a derived=~a starred=~a size-lt=~a size-gt=~a content=~a current-popup=~a ordinary-count=~d ordinary-buffers=~{~a~^,~}"
+     "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a group-jump=~a other-noselect=~a one-window=~a view=~a view-g=~a view-horizontal=~a occur=~a occur-meta=~a mode=~a derived=~a starred=~a size-lt=~a size-gt=~a content=~a current-popup=~a ordinary-count=~d ordinary-buffers=~{~a~^,~}"
      (buffer-list-test-binding "Backspace")
      (buffer-list-test-binding "C-h")
      (buffer-list-test-binding "Delete")
@@ -265,6 +268,8 @@
      (buffer-list-test-binding "A")
      (buffer-list-test-binding "g v")
      (buffer-list-test-binding "g V")
+     (buffer-list-test-binding "O")
+     (buffer-list-test-binding "M-s a C-o")
      (buffer-list-test-binding "s Return")
      (buffer-list-test-binding "s M")
      (buffer-list-test-binding "s *")
@@ -277,6 +282,156 @@
                (completion-path-display-string
                 (buffer-name (window-buffer window))))
              windows))))
+
+(define-command lem-yath-test-buffer-list-occur-state () ()
+  (let* ((occur (get-buffer *buffer-list-occur-buffer-name*))
+         (selected-p (and occur (eq occur (current-buffer))))
+         (point (and selected-p
+                     (copy-point (current-point) :temporary)))
+         (targets
+           (when point
+             (line-start point)
+             (text-property-at point :buffer-list-occur-targets)))
+         (target (first targets))
+         (target-live-p
+           (and target
+                (not (deleted-buffer-p
+                      (buffer-list-occur-target-buffer target)))
+                (alive-point-p (buffer-list-occur-target-start target)))))
+    (buffer-list-test-log
+     "OCCUR live=~a current=~a mode=~a readonly=~a modified=~a line=~a row-source=~a row-line=~a target-count=~d sources=~{~a~^,~} windows=~{~a~^,~} text=~a"
+     (if occur "yes" "no")
+     (completion-path-display-string (buffer-name (current-buffer)))
+     (if occur (buffer-major-mode occur) "none")
+     (if (and occur (buffer-read-only-p occur)) "yes" "no")
+     (if (and occur (buffer-modified-p occur)) "yes" "no")
+     (if point (line-number-at-point point) 0)
+     (if target
+         (completion-path-display-string
+          (buffer-name (buffer-list-occur-target-buffer target)))
+         "none")
+     (if target-live-p
+         (line-number-at-point (buffer-list-occur-target-start target))
+         (if target -1 0))
+     (length targets)
+     (if occur
+         (mapcar (lambda (buffer)
+                   (completion-path-display-string (buffer-name buffer)))
+                 (buffer-value occur :lem-yath-buffer-list-occur-sources))
+         nil)
+     (mapcar (lambda (window)
+               (completion-path-display-string
+                (buffer-name (window-buffer window))))
+             (window-list))
+     (if occur
+         (completion-path-display-string
+          (points-to-string (buffer-start-point occur)
+                            (buffer-end-point occur)))
+         ""))))
+
+(define-command lem-yath-test-buffer-list-occur-shift-source () ()
+  (let* ((target (first (buffer-list-occur-current-targets)))
+         (buffer (buffer-list-occur-target-buffer target)))
+    (buffer-list-occur-validate-target target)
+    (with-buffer-read-only buffer nil
+      (insert-string (buffer-start-point buffer)
+                     (format nil "inserted before match~%")))))
+
+(define-command lem-yath-test-buffer-list-occur-kill-source () ()
+  (let ((target (first (buffer-list-occur-current-targets))))
+    (buffer-list-occur-validate-target target)
+    (let ((buffer (buffer-list-occur-target-buffer target)))
+      ;; This disposable source was made dirty by the live-point test.  Avoid a
+      ;; confirmation prompt so the following physical Return tests the stale
+      ;; target rather than answering that prompt.
+      (buffer-mark-saved buffer)
+      (kill-buffer buffer))))
+
+(defmethod execute :after
+    (mode (command lem-yath-buffer-list-occur-visit) argument)
+  (declare (ignore mode command argument))
+  (buffer-list-test-log
+   "OCCUR-VISIT current=~a line=~d column=~d"
+   (completion-path-display-string (buffer-name (current-buffer)))
+   (line-number-at-point (current-point))
+   (point-column (current-point))))
+
+(defun buffer-list-test-occur-refused-p (thunk)
+  (handler-case
+      (progn (funcall thunk) nil)
+    (editor-error () t)))
+
+(define-command lem-yath-test-buffer-list-occur-bounds () ()
+  (let* ((occur (get-buffer *buffer-list-occur-buffer-name*))
+         (before (and occur
+                      (points-to-string (buffer-start-point occur)
+                                        (buffer-end-point occur))))
+         (per-buffer-p
+           (let ((*buffer-list-occur-buffer-character-limit* 1)
+                 (*buffer-list-occur-total-character-limit*
+                   most-positive-fixnum))
+             (buffer-list-test-occur-refused-p
+              (lambda ()
+                (buffer-list-occur-run
+                 nil (list *buffer-list-test-occur-alpha*) "Needle" 0)))))
+         (total-p
+           (let ((*buffer-list-occur-buffer-character-limit*
+                   most-positive-fixnum)
+                 (*buffer-list-occur-total-character-limit* 1))
+             (buffer-list-test-occur-refused-p
+              (lambda ()
+                (buffer-list-occur-run
+                 nil (list *buffer-list-test-occur-alpha*) "Needle" 0))))))
+    (buffer-list-test-log
+     "OCCUR-BOUNDS per=~a total=~a preserved=~a"
+     (if per-buffer-p "yes" "no")
+     (if total-p "yes" "no")
+     (if (and occur
+              (string= before
+                       (points-to-string (buffer-start-point occur)
+                                         (buffer-end-point occur))))
+         "yes"
+         "no"))))
+
+(define-command lem-yath-test-buffer-list-occur-source-zero-match () ()
+  (let ((occur (get-buffer *buffer-list-occur-buffer-name*)))
+    (unless (buffer-list-occur-owned-buffer-p occur)
+      (editor-error "No owned Ibuffer Occur result"))
+    (buffer-list-occur-run
+     nil (list occur) "definitely-no-match-in-owned-occur-source" 0)
+    (buffer-list-test-log
+     "OCCUR-SOURCE-ZERO source-live=~a canonical-live=~a renamed=~a"
+     (if (deleted-buffer-p occur) "no" "yes")
+     (if (get-buffer *buffer-list-occur-buffer-name*) "yes" "no")
+     (if (and (not (deleted-buffer-p occur))
+              (not (string= (buffer-name occur)
+                            *buffer-list-occur-buffer-name*)))
+         "yes"
+         "no"))))
+
+(define-command lem-yath-test-buffer-list-occur-bindings () ()
+  (buffer-list-test-log
+   "OCCUR-BINDINGS return=~a control-return=~a shift-return=~a meta-return=~a other=~a next=~a previous=~a control-next=~a control-previous=~a quit=~a"
+   (buffer-list-test-binding "Return")
+   (buffer-list-test-binding "C-c C-c")
+   (buffer-list-test-binding "S-Return")
+   (buffer-list-test-binding "M-Return")
+   (buffer-list-test-binding "g o")
+   (buffer-list-test-binding "g j")
+   (buffer-list-test-binding "g k")
+   (buffer-list-test-binding "C-j")
+   (buffer-list-test-binding "C-k")
+   (buffer-list-test-binding "q")))
+
+(define-command lem-yath-test-buffer-list-select-occur-window () ()
+  (let* ((buffer (get-buffer *buffer-list-occur-buffer-name*))
+         (window (and buffer
+                      (find buffer (window-list)
+                            :key #'window-buffer
+                            :test #'eq))))
+    (unless window
+      (editor-error "No displayed Ibuffer Occur result"))
+    (switch-to-window window)))
 
 (define-command lem-yath-test-buffer-list-diff-state () ()
   (let ((buffer (get-buffer *buffer-list-diff-buffer-name*)))
@@ -460,6 +615,28 @@
 (buffer-list-test-make-buffer 'view-beta "buffer-list-view-beta")
 (buffer-list-test-make-buffer 'view-delete "buffer-list-view-delete")
 
+(setf *buffer-list-test-occur-alpha*
+      (buffer-list-test-make-buffer
+       'occur-alpha "buffer-list-occur-alpha"))
+(buffer-list-test-set-content
+ *buffer-list-test-occur-alpha*
+ (format nil
+         "zero~%Needle alpha mixed~%after~%far~%needle alpha and needle again~%after-two~%multi start~%finish token~%control~c~c~cneedle~%"
+         #\Tab (code-char #x9B) (code-char #x202E))
+ t)
+(setf *buffer-list-test-occur-beta*
+      (buffer-list-test-make-buffer
+       'occur-beta "buffer-list-occur-beta"))
+(buffer-list-test-set-content
+ *buffer-list-test-occur-beta*
+ (format nil "needle beta lower~%tail~%NEEDLE beta upper~%") t)
+(setf *buffer-list-test-occur-delete*
+      (buffer-list-test-make-buffer
+       'occur-delete "buffer-list-occur-delete"))
+(buffer-list-test-set-content
+ *buffer-list-test-occur-delete*
+ (format nil "needle forbidden deletion~%") t)
+
 (define-key lem-vi-mode:*normal-keymap* "F5"
   'lem-yath-test-buffer-list-report)
 (define-key lem-vi-mode:*normal-keymap* "F6"
@@ -494,5 +671,21 @@
   'lem-yath-test-buffer-list-window-state)
 (define-key lem-vi-mode:*normal-keymap* "F10"
   'lem-yath-test-buffer-list-reload)
+(define-key *global-keymap* "F2"
+  'lem-yath-test-buffer-list-select-occur-window)
+(define-key *global-keymap* "F3"
+  'lem-yath-test-buffer-list-occur-state)
+(define-key *buffer-list-occur-mode-keymap* "F8"
+  'lem-yath-test-buffer-list-occur-state)
+(define-key *buffer-list-occur-mode-keymap* "F1"
+  'lem-yath-test-buffer-list-occur-bindings)
+(define-key *buffer-list-occur-mode-keymap* "F6"
+  'lem-yath-test-buffer-list-occur-kill-source)
+(define-key *buffer-list-occur-mode-keymap* "F7"
+  'lem-yath-test-buffer-list-occur-shift-source)
+(define-key *buffer-list-occur-mode-keymap* "F4"
+  'lem-yath-test-buffer-list-occur-bounds)
+(define-key *buffer-list-occur-mode-keymap* "F9"
+  'lem-yath-test-buffer-list-occur-source-zero-match)
 
 (buffer-list-test-log "READY")
