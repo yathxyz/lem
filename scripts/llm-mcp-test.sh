@@ -36,6 +36,11 @@ mkdir -p "$HOME/mcp-test-log" "$XDG_CACHE_HOME" "$root/bin" \
 cp "$here/scripts/llm-mcp-fake-server.py" "$LEM_YATH_MCP_FETCH_PROGRAM"
 cp "$here/scripts/llm-mcp-fake-server.py" "$LEM_YATH_MCP_DOCKER_PROGRAM"
 cp "$here/scripts/llm-mcp-fake-curl.sh" "$LEM_YATH_LLM_MCP_CURL"
+python="$(command -v python3)"
+bash_program="$(command -v bash)"
+sed -i "1s|.*|#!$python|" "$LEM_YATH_MCP_FETCH_PROGRAM" \
+  "$LEM_YATH_MCP_DOCKER_PROGRAM"
+sed -i "1s|.*|#!$bash_program|" "$LEM_YATH_LLM_MCP_CURL"
 chmod +x "$LEM_YATH_MCP_FETCH_PROGRAM" "$LEM_YATH_MCP_DOCKER_PROGRAM" \
   "$LEM_YATH_LLM_MCP_CURL"
 

@@ -28,6 +28,23 @@
 
 (defvar *llm-buffer-name* "*lem-yath-llm*")
 
+(defvar *llm-output-buffer-override* nil
+  "Dynamically selected output buffer for one interactive LLM dispatch.")
+
+(defvar *llm-response-origin* nil
+  "Point where a conversation response should begin for one dispatch.")
+
+(defvar *lem-yath-llm-conversation-mode-keymap*
+  (make-keymap :description '*lem-yath-llm-conversation-mode-keymap*))
+
+(define-key *lem-yath-llm-conversation-mode-keymap*
+  "C-c Return" 'lem-yath-llm-send)
+
+(define-minor-mode lem-yath-llm-conversation-mode
+    (:name "LLM"
+     :keymap *lem-yath-llm-conversation-mode-keymap*)
+  "Insert streamed LLM replies into this buffer at the send position.")
+
 (defparameter *llm-max-tool-rounds* 4)
 (defparameter *llm-max-tool-calls-per-round* 8)
 (defparameter *llm-max-tool-calls-per-request* 24)
@@ -52,11 +69,13 @@
 
 (defstruct (llm-request
             (:constructor make-llm-request
-                (buffer process backend &key tool-context tools-p)))
+                (buffer process backend
+                 &key insertion-point tool-context tools-p)))
   "One asynchronous LLM request owned by BUFFER."
   buffer
   process
   backend
+  insertion-point
   tool-context
   tools-p
   (aborted-p nil)
@@ -308,15 +327,33 @@ end of the current word or punctuation run."
             (skip-chars-forward end #'llm-word-or-punctuation-char-p))
           (points-to-string (buffer-start-point buffer) end)))))
 
-(defun llm-output-buffer ()
-  (let ((buffer (make-buffer *llm-buffer-name*)))
-    (handler-case
-        (change-buffer-mode buffer 'lem-markdown-mode:markdown-mode)
-      (error () nil))
-    buffer))
-
 (defun llm-buffer-live-p (buffer)
   (and buffer (not (deleted-buffer-p buffer))))
+
+(defun llm-conversation-buffer-p (&optional (buffer (current-buffer)))
+  (and (llm-buffer-live-p buffer)
+       (ignore-errors
+         (mode-active-p buffer 'lem-yath-llm-conversation-mode))))
+
+(defun llm-output-buffer ()
+  (if (llm-buffer-live-p *llm-output-buffer-override*)
+      *llm-output-buffer-override*
+      (let ((buffer (make-buffer *llm-buffer-name*)))
+        (handler-case
+            (change-buffer-mode buffer 'lem-markdown-mode:markdown-mode)
+          (error () nil))
+        buffer)))
+
+(defun llm-current-output-buffer ()
+  "Return the request-bearing conversation buffer or shared transcript."
+  (if (llm-conversation-buffer-p)
+      (let ((current (current-buffer)))
+        (if (llm-active-request current)
+            current
+            (let* ((*llm-output-buffer-override* nil)
+                   (shared (llm-output-buffer)))
+              (if (llm-active-request shared) shared current))))
+      (llm-output-buffer)))
 
 (defun llm-active-request (buffer)
   (and (llm-buffer-live-p buffer)
@@ -328,33 +365,120 @@ end of the current word or punctuation run."
     (insert-string (buffer-end-point buffer) string)
     (redraw-display)))
 
+(defun llm-prepare-response (buffer shared-heading)
+  "Present BUFFER and prepare one response insertion point.
+SHARED-HEADING is rendered only for the traditional shared transcript."
+  (if (llm-conversation-buffer-p buffer)
+      (progn
+        (when (buffer-read-only-p buffer)
+          (editor-error "Conversation buffer is read only"))
+        (let* ((origin (if (and *llm-response-origin*
+                                (eq buffer
+                                    (point-buffer *llm-response-origin*)))
+                           *llm-response-origin*
+                           (buffer-point buffer)))
+               (insertion-point (copy-point origin :left-inserting)))
+          (insert-string insertion-point (format nil "~2%"))
+          insertion-point))
+      (progn
+        (pop-to-buffer buffer)
+        (llm-buffer-append-now buffer shared-heading)
+        nil)))
+
+(defun llm-request-conversation-p (request)
+  (not (null (llm-request-insertion-point request))))
+
+(defun llm-response-insert-now (insertion-point string &key assistant-p)
+  (when (and insertion-point (alive-point-p insertion-point)
+             (plusp (length string)))
+    (if assistant-p
+        (insert-string insertion-point string
+                       'lem-yath-llm-role :assistant)
+        (insert-string insertion-point string))))
+
+(defun llm-response-close-now (insertion-point)
+  (when (and insertion-point (alive-point-p insertion-point))
+    (insert-string insertion-point (format nil "~2%* ")
+                   'lem-yath-llm-role :user)
+    (delete-point insertion-point)))
+
+(defun llm-unregistered-response-failure-now
+    (buffer insertion-point text)
+  "Render TEXT and release an insertion point that no request owns."
+  (if insertion-point
+      (progn
+        (llm-response-insert-now insertion-point text :assistant-p t)
+        (llm-response-close-now insertion-point)
+        (redraw-display))
+      (llm-buffer-append-now buffer text)))
+
 (defun llm-request-current-p (request)
   (let ((buffer (llm-request-buffer request)))
     (and (llm-buffer-live-p buffer)
          (eq request (llm-active-request buffer)))))
+
+(defun llm-request-insert-now (request string)
+  "Insert STRING at REQUEST's tracked point, or append to its shared buffer."
+  (if (llm-request-conversation-p request)
+      (progn
+        (llm-response-insert-now (llm-request-insertion-point request)
+                                 string :assistant-p t)
+        (redraw-display))
+      (llm-buffer-append-now (llm-request-buffer request) string)))
+
+(defun llm-request-release-insertion-point (request)
+  (alexandria:when-let ((point (llm-request-insertion-point request)))
+    (ignore-errors (delete-point point))
+    (setf (llm-request-insertion-point request) nil)))
+
+(defun llm-request-complete-now (request final-text)
+  "Complete current REQUEST on the editor thread."
+  (when (llm-request-current-p request)
+    (when final-text
+      (let ((text (if (llm-request-conversation-p request)
+                      (string-right-trim '(#\Newline #\Return) final-text)
+                      final-text)))
+        (when (plusp (length text))
+          (llm-request-insert-now request text))))
+    (when (llm-request-conversation-p request)
+      (llm-response-close-now (llm-request-insertion-point request))
+      (setf (llm-request-insertion-point request) nil)
+      (redraw-display))
+    (setf (buffer-value (llm-request-buffer request)
+                        *llm-active-request-key*)
+          nil)
+    (llm-request-release-insertion-point request)))
 
 (defun llm-request-append (request string)
   "Append STRING for REQUEST via the editor queue when it is still current."
   (send-event
    (lambda ()
      (when (llm-request-current-p request)
-       (llm-buffer-append-now (llm-request-buffer request) string)))))
+       (llm-request-insert-now request string)))))
 
 (defun llm-request-finish (request final-text)
   "Finish REQUEST on the editor thread, appending FINAL-TEXT when non-NIL."
   (send-event
    (lambda ()
-     (when (llm-request-current-p request)
-       (when final-text
-         (llm-buffer-append-now (llm-request-buffer request) final-text))
-       (setf (buffer-value (llm-request-buffer request)
-                           *llm-active-request-key*)
-             nil)))))
+     (llm-request-complete-now request final-text))))
+
+(defun llm-start-request-thread (request function name failure-text)
+  "Start FUNCTION for REQUEST and fail it closed when thread creation fails."
+  (handler-case
+      (bt2:make-thread function :name name)
+    (error ()
+      (alexandria:when-let ((process (llm-request-process request)))
+        (ignore-errors (uiop:terminate-process process :urgent t))
+        (ignore-errors (uiop:close-streams process))
+        (llm-request-release-process request process))
+      (llm-request-complete-now request failure-text)
+      nil)))
 
 (defun llm-register-request
-    (buffer process backend &key tool-context tools-p)
+    (buffer process backend &key insertion-point tool-context tools-p)
   "Register and return an asynchronous request for BUFFER."
   (let ((request (make-llm-request buffer process backend
+                                   :insertion-point insertion-point
                                    :tool-context tool-context
                                    :tools-p tools-p)))
     (setf (buffer-value buffer *llm-active-request-key*) request)
@@ -396,13 +520,13 @@ end of the current word or punctuation run."
 
 (defun llm-request-finish-text (request code failure-label)
   (cond
-    ((llm-request-aborted-p request) "\n[request aborted]\n")
+    ((llm-request-aborted-p request) (format nil "~%[request aborted]~%"))
     ((and code (zerop code)) (string #\Newline))
     (t (format nil "~%[~a, exit ~a]~%" failure-label code))))
 
 (define-command lem-yath-llm-abort () ()
-  "Abort the active request in the shared LLM buffer."
-  (let* ((buffer (llm-output-buffer))
+  "Abort the active request in the current conversation or shared transcript."
+  (let* ((buffer (llm-current-output-buffer))
          (request (llm-active-request buffer)))
     (if (null request)
         (message "No active LLM request")
@@ -410,8 +534,8 @@ end of the current word or punctuation run."
           (when process
             (ignore-errors (uiop:terminate-process process :urgent t))
             (ignore-errors (uiop:close-streams process)))
-          (llm-buffer-append-now buffer "\n[request aborted]\n")
-          (setf (buffer-value buffer *llm-active-request-key*) nil)
+          (llm-request-complete-now
+           request (format nil "~%[request aborted]~%"))
           (message "Aborting ~(~a~) request"
                    (llm-request-backend request))))))
 
@@ -562,47 +686,56 @@ end of the current word or punctuation run."
                   (error ()
                     (message "Could not capture the LLM project context")
                     (return-from llm-stream))))))
-        (pop-to-buffer buffer)
-        (llm-buffer-append-now
-         buffer
-         (format nil "~%## User (~a)~%~%~a~%~%## Assistant~%~%"
-                 model prompt))
-        (handler-case
-            (let ((request
-                    (llm-register-request
-                     buffer nil :openrouter
-                     :tool-context tool-context :tools-p tools-p)))
-              (bt2:make-thread
-               (lambda ()
-                 (unwind-protect
-                      (handler-case
-                          (let* ((sessions
-                                   (and mcp-server-names
-                                        (llm-mcp-ensure-servers
-                                         mcp-server-names)))
-                                 (tools
-                                   (and tools-p
-                                        (llm-tool-definitions sessions))))
-                            (when tool-context
-                              (setf (llm-tool-context-mcp-sessions tool-context)
-                                    sessions))
-                            (llm-openrouter-loop
-                             request key (llm-initial-messages prompt system)
-                             model temperature max-tokens tools))
-                        (error (condition)
-                          (unless (llm-request-aborted-now-p request)
-                            (llm-request-finish
-                             request
-                             (format nil "~%[MCP connection error: ~a]~%"
-                                     condition)))))
-                   (when tool-context
-                     (cancel-project-request
-                      (llm-tool-context-project-request tool-context)))))
-               :name "lem-yath/llm-openrouter"))
-          (error ()
-            (setf (buffer-value buffer *llm-active-request-key*) nil)
-            (llm-buffer-append-now
-             buffer "\n[failed to launch curl]\n")))))))
+        (let ((insertion-point
+                (llm-prepare-response
+                 buffer
+                 (format nil "~%## User (~a)~%~%~a~%~%## Assistant~%~%"
+                         model prompt)))
+              (request nil))
+          (handler-case
+              (progn
+                (setf request
+                      (llm-register-request
+                       buffer nil :openrouter
+                       :insertion-point insertion-point
+                       :tool-context tool-context :tools-p tools-p))
+                (llm-start-request-thread
+                 request
+                 (lambda ()
+                   (unwind-protect
+                        (handler-case
+                            (let* ((sessions
+                                     (and mcp-server-names
+                                          (llm-mcp-ensure-servers
+                                           mcp-server-names)))
+                                   (tools
+                                     (and tools-p
+                                          (llm-tool-definitions sessions))))
+                              (when tool-context
+                                (setf
+                                 (llm-tool-context-mcp-sessions tool-context)
+                                 sessions))
+                              (llm-openrouter-loop
+                               request key (llm-initial-messages prompt system)
+                               model temperature max-tokens tools))
+                          (error (condition)
+                            (unless (llm-request-aborted-now-p request)
+                              (llm-request-finish
+                               request
+                               (format nil "~%[MCP connection error: ~a]~%"
+                                       condition)))))
+                     (when tool-context
+                       (cancel-project-request
+                        (llm-tool-context-project-request tool-context)))))
+                 "lem-yath/llm-openrouter"
+                 (format nil "~%[failed to start OpenRouter request]~%")))
+            (error ()
+              (if request
+                  (llm-request-complete-now
+                   request (format nil "~%[failed to launch curl]~%"))
+                  (llm-unregistered-response-failure-now
+                   buffer insertion-point
+                   (format nil "~%[failed to launch curl]~%"))))))))))
 
 (defvar *llm-backend* :openrouter
   "Active backend. CLI-agent backends (apps/llm-cli.lisp) add more.")
@@ -612,6 +745,21 @@ end of the current word or punctuation run."
   (:method ((backend (eql :openrouter)) prompt)
     (llm-stream prompt)))
 
+(defun llm-dispatch-from-current-buffer (function)
+  "Call FUNCTION with conversation routing for the current buffer.
+Read-only conversations follow gptel by falling back to the shared transcript."
+  (let ((buffer (current-buffer)))
+    (cond
+      ((not (llm-conversation-buffer-p buffer))
+       (funcall function))
+      ((buffer-read-only-p buffer)
+       (message "Conversation is read only; using the shared LLM buffer")
+       (funcall function))
+      (t
+       (let ((*llm-output-buffer-override* buffer)
+             (*llm-response-origin* (current-point)))
+         (funcall function))))))
+
 (define-command lem-yath-llm-send () ()
   "Send region (or buffer up to point) to the LLM, streaming the reply
 (gptel-send)."
@@ -619,7 +767,8 @@ end of the current word or punctuation run."
                            (llm-source-text))))
     (if (zerop (length text))
         (message "Nothing to send")
-        (llm-backend-stream *llm-backend* text))))
+        (llm-dispatch-from-current-buffer
+         (lambda () (llm-backend-stream *llm-backend* text))))))
 
 (define-command lem-yath-llm-ask () ()
   "Prompt for an instruction, prepend it to the region/buffer text, send
@@ -627,10 +776,13 @@ end of the current word or punctuation run."
   (let ((instruction (prompt-for-string "LLM instruction: "))
         (text (string-trim '(#\Space #\Tab #\Newline) (llm-source-text))))
     (when (plusp (length instruction))
-      (llm-backend-stream *llm-backend*
-                          (if (zerop (length text))
-                              instruction
-                              (format nil "~a~%~%~a" instruction text))))))
+      (llm-dispatch-from-current-buffer
+       (lambda ()
+         (llm-backend-stream *llm-backend*
+                             (if (zerop (length text))
+                                 instruction
+                                 (format nil "~a~%~%~a"
+                                         instruction text))))))))
 
 (define-command lem-yath-llm-set-model () ()
   "Choose the OpenRouter model (gptel preset switching, simplified)."

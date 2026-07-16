@@ -10,7 +10,8 @@ work="$root/work"
 socket="lem-yath-startup-$id"
 cold_budget_ms="${LEM_YATH_COLD_STARTUP_BUDGET_MS:-30000}"
 warm_budget_ms="${LEM_YATH_STARTUP_BUDGET_MS:-10000}"
-expected_fasl_count=94
+source_root="${LEM_YATH_SOURCE:-$PWD/lem-yath}"
+expected_fasl_count=$(find "$source_root/src" -type f -name '*.lisp' | wc -l)
 mkdir -p "$home" "$cache" "$work"
 export WORKDIR="$work"
 unset LEM_HOME
@@ -158,7 +159,6 @@ fi
 direct_source="$root/direct-source"
 direct_cache="$root/direct-cache"
 direct_report="$root/direct-report"
-source_root="${LEM_YATH_SOURCE:-$PWD/lem-yath}"
 cp -R "$source_root" "$direct_source"
 chmod -R u+w "$direct_source"
 mkdir -p "$direct_cache"

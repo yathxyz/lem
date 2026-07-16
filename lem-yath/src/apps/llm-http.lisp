@@ -427,13 +427,15 @@
     (when (llm-active-request buffer)
       (message "An LLM request is already running; use M-x lem-yath-llm-abort")
       (return-from llm-http-stream))
-    (pop-to-buffer buffer)
-    (llm-buffer-append-now
-     buffer
-     (format nil "~%## User (~a / ~a)~%~%~a~%~%## Assistant~%~%"
-             (llm-http-provider-name provider) model prompt))
-    (let ((request (llm-register-request buffer nil provider)))
-      (bt2:make-thread
+    (let* ((insertion-point
+             (llm-prepare-response
+              buffer
+              (format nil "~%## User (~a / ~a)~%~%~a~%~%## Assistant~%~%"
+                      (llm-http-provider-name provider) model prompt)))
+           (request (llm-register-request
+                     buffer nil provider :insertion-point insertion-point)))
+      (llm-start-request-thread
+       request
        (lambda ()
          (handler-case
              (multiple-value-bind (url headers)
@@ -460,7 +462,9 @@
                 request
                 (format nil "~%[~a protocol error: ~a]~%"
                         (llm-http-provider-name provider) condition))))))
-       :name (format nil "lem-yath/llm-~(~a~)" provider)))))
+       (format nil "lem-yath/llm-~(~a~)" provider)
+       (format nil "~%[failed to start ~a request]~%"
+               (llm-http-provider-name provider))))))
 
 (defmethod llm-backend-stream ((backend (eql :perplexity)) prompt)
   (llm-http-stream backend prompt))
@@ -591,7 +595,8 @@
   (if (not (llm-copilot-login-claim))
       (message "GitHub Copilot login is already running")
       (progn
-        (llm-copilot-login-publish "Starting GitHub device authorization…\n")
+        (llm-copilot-login-publish
+         (format nil "Starting GitHub device authorization…~%"))
         (bt2:make-thread
          (lambda ()
            (unwind-protect
@@ -599,7 +604,8 @@
                     (progn
                       (llm-copilot-device-flow)
                       (llm-copilot-login-publish
-                       "Authorization complete. Copilot Chat is ready.\n"))
+                       (format nil
+                               "Authorization complete. Copilot Chat is ready.~%")))
                   (error (condition)
                     (llm-copilot-login-publish
                      (format nil "Authorization failed: ~a~%" condition))))

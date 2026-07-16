@@ -65,9 +65,39 @@
              (llm-cli-session-id-valid-p session-id))
     (setf (buffer-value buffer (llm-cli-session-key backend)) session-id)))
 
+(defun llm-buffer-has-backend-session-p (buffer backend)
+  "Whether BUFFER carries resumable state for BACKEND."
+  (let ((oauth-history-keys
+          (and (boundp '*llm-oauth-history-keys*)
+               (symbol-value '*llm-oauth-history-keys*))))
+    (cond
+      ((llm-cli-spec backend)
+       (not (null (llm-cli-session-id backend buffer))))
+      ((assoc backend oauth-history-keys)
+       (or (and (fboundp 'llm-oauth-history)
+                (llm-oauth-history backend buffer))
+           (loop :for symbol :in '(*llm-oauth-session-keys*
+                                   *llm-oauth-cache-keys*)
+                 :for table := (and (boundp symbol) (symbol-value symbol))
+                 :for key := (cdr (assoc backend table))
+                 :thereis (and key (buffer-value buffer key)))))
+      (t nil))))
+
+(defun llm-session-output-buffer (backend)
+  "Choose the current conversation or shared transcript for BACKEND state."
+  (if (llm-conversation-buffer-p)
+      (let* ((current (current-buffer))
+             (*llm-output-buffer-override* nil)
+             (shared (llm-output-buffer)))
+        (cond
+          ((llm-buffer-has-backend-session-p current backend) current)
+          ((llm-buffer-has-backend-session-p shared backend) shared)
+          (t current)))
+      (llm-output-buffer)))
+
 (define-command lem-yath-llm-new-session () ()
   "Start a fresh conversation for the active stateful LLM backend."
-  (let ((buffer (llm-output-buffer)))
+  (let ((buffer (llm-session-output-buffer *llm-backend*)))
     (if (llm-active-request buffer)
         (message "Wait for or abort the active LLM request first")
         (cond
@@ -197,7 +227,7 @@
   (if (> (length output) *llm-cli-command-output-limit*)
       (concatenate 'string
                    (subseq output 0 *llm-cli-command-output-limit*)
-                   "\n[output truncated]")
+                   (format nil "~%[output truncated]"))
       output))
 
 (defun llm-cli-codex-command-event (item)
@@ -269,12 +299,13 @@
                (session-id (getf event :session-id))
                (error-text (getf event :error)))
            (when (stringp text)
-             (llm-buffer-append-now buffer text))
+             (llm-request-insert-now request text))
            (when session-id
              (llm-cli-store-session-id buffer backend session-id))
            (when error-text
-             (llm-buffer-append-now
-              buffer (format nil "~%[~a error: ~a]~%" backend error-text)))))))))
+             (llm-request-insert-now
+              request (format nil "~%[~a error: ~a]~%"
+                              backend error-text)))))))))
 
 (defun llm-cli-stream (backend prompt)
   "Run BACKEND for PROMPT, parsing and streaming its native event protocol."
@@ -286,18 +317,22 @@
       (message "An LLM request is already running; use M-x lem-yath-llm-abort")
       (return-from llm-cli-stream))
     (let* ((session-id (llm-cli-session-id backend buffer))
-           (command (llm-cli-command backend prompt session-id)))
-      (pop-to-buffer buffer)
-      (llm-buffer-append-now
-       buffer
-       (format nil "~%## User (~a~:[~; resume~])~%~%~a~%~%## Assistant~%~%"
-               backend session-id prompt))
+           (command (llm-cli-command backend prompt session-id))
+           (insertion-point
+             (llm-prepare-response
+              buffer
+              (format nil
+                      "~%## User (~a~:[~; resume~])~%~%~a~%~%## Assistant~%~%"
+                      backend session-id prompt))))
       (handler-case
           (let* ((process (uiop:launch-program command
                                                :output :stream
                                                :error-output :output))
-                 (request (llm-register-request buffer process backend)))
-            (bt2:make-thread
+                 (request (llm-register-request
+                           buffer process backend
+                           :insertion-point insertion-point)))
+            (llm-start-request-thread
+             request
              (lambda ()
                (unwind-protect
                     (with-open-stream (output (uiop:process-info-output process))
@@ -312,11 +347,14 @@
                     (llm-request-finish-text
                      request code
                      (format nil "~a failed" (llm-cli-spec backend)))))))
-             :name (format nil "lem-yath/llm-~(~a~)" backend)))
+             (format nil "lem-yath/llm-~(~a~)" backend)
+             (format nil "~%[failed to start ~a request]~%"
+                     (llm-cli-spec backend))))
         (error ()
-          (llm-buffer-append-now
-           buffer (format nil "~%[failed to launch ~a]~%"
-                          (llm-cli-spec backend))))))))
+          (llm-unregistered-response-failure-now
+           buffer insertion-point
+           (format nil "~%[failed to launch ~a]~%"
+                   (llm-cli-spec backend))))))))
 
 (defmethod llm-backend-stream ((backend (eql :claude-code)) prompt)
   (llm-cli-stream backend prompt))

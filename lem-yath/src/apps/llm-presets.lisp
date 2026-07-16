@@ -519,7 +519,7 @@
 (defun llm-chatgpt-handoff (mode)
   (let* ((prompt (llm-handoff-prompt "ChatGPT"))
          (prompt (if (eq mode :research)
-                     (concatenate 'string "/Deepresearch\n\n" prompt)
+                     (format nil "/Deepresearch~2%~a" prompt)
                      prompt))
          (parameters `(("q" . ,prompt)))
          (parameters

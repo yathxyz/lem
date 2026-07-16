@@ -55,6 +55,7 @@ chmod +x "$LEM_YATH_LLM_WORKFLOW_BROWSER"
 
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-60}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-15}"
+default_preset=quick-lookup
 
 pass() { printf 'PASS  %-30s %s\n' "$1" "$2"; }
 
@@ -155,8 +156,9 @@ send_key l
 if ! lem_wait_for "$session" 'LLM preset:' "$WAIT_TIMEOUT" >/dev/null; then
   die preset-load-prompt 'menu load did not open preset completion'
 fi
-send_key C-a
-send_key C-k
+for _ in $(seq 1 "${#default_preset}"); do
+  send_key BSpace
+done
 send_literal 'fixture-preset'
 send_key Enter
 sleep 0.5

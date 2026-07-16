@@ -1,13 +1,14 @@
 # Emacs Configuration Feature Inventory ("lem-yath")
 
-Authoritative inventory for porting this Emacs config (config name: **lem-yath**, user `yanni`/`yath`) to the Lem editor (Common Lisp). Built from the elisp under `home/config/emacs/` and the Nix package declarations in `lib/emacs-profile.nix`.
+Authoritative inventory for porting this Emacs config (config name: **lem-yath**, user `yanni`/`yath`) to the Lem editor (Common Lisp). Built from the authored elisp under `portable/dot_config/emacs/` and the Nix package declarations in `lib/emacs-profile.nix`.
 
-Source root: `/home/yanni/proj/nix/computer/home/config/emacs/`
+Source root: `/home/yanni/proj/nix/computer/portable/dot_config/emacs/`
 Packages provided by Nix/Home-Manager (`package-enable-at-startup nil`); `use-package-always-ensure nil`.
 
 Completion and VCS behavior were refreshed against computer commit
 `6bb888bba6d2547409b5c05c9740f0392fa96e30` and the running Emacs 31 daemon on
-2026-07-12. Other sections still require row-by-row refresh through
+2026-07-12. AI startup and conversation behavior were refreshed against computer
+commit `8d3d28d3438c44c4d63a7fb5b4e18d4297a68bee` on 2026-07-16. Other sections still require row-by-row refresh through
 `docs/parity-ledger.tsv` rather than being assumed current.
 
 Key environment:
@@ -583,6 +584,10 @@ to its top-level, non-hidden `.org` files. `initial-major-mode org-mode`.
 Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 
 ### gptel core config
+- No-file startup runs `vile/scratch-gptel-mode`: `*scratch*` is an Org buffer
+  with `gptel-mode` enabled. The mode binds `C-c RET` to `gptel-send`, inserts
+  streamed replies at the send marker, and adds the next Org prompt prefix
+  after a completed response.
 - `gptel-default-mode 'org-mode`; prompt prefixes per mode (`# ` markdown/text, `* ` org).
 - `gptel-use-tools nil` (default), `gptel-expert-commands t`, system message "Very short answers. Be helpful." API key from `OPENAI_API_KEY`.
 - Loads local `gptel-stability.el` (`yath/gptel-stability-mode 1`) — hardening shims (killed-buffer callbacks, FSM/UI live-buffer assumptions, parallel prompt-transform races).
@@ -625,7 +630,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **helpful**: better help buffers (`SPC h k/v/K`, `helpful-at-point`).
 - **editorconfig**: `editorconfig-mode` on `prog-mode`.
 - **which-key**: enabled globally after a one-second deferred package load; its independent one-second popup delay and the paging, column, separator, replacement, and echo-area settings retain their defaults.
-- **Startup**: early-init disables tool/scroll/menu/blink-cursor bars, silences startup messages, sets `gc-cons-threshold` huge + `file-name-handler-alist nil` for fast init (restored on `emacs-startup-hook`). Native-comp warnings silenced. `inhibit-startup-message`, empty scratch message.
+- **Startup**: early-init disables tool/scroll/menu/blink-cursor bars, silences startup messages, sets `gc-cons-threshold` huge + `file-name-handler-alist nil` for fast init (restored on `emacs-startup-hook`). Native-comp warnings silenced. `inhibit-startup-message`, empty scratch message; the resulting Org `*scratch*` enables `gptel-mode`.
 - **Server/daemon**: `lem-yath/server-start-maybe` starts server on init; `recentf-auto-cleanup` differs under daemon; editor env vars point to `emacsclient`.
 - **xref/grep**: `xref-search-program 'ripgrep`; `grep-command "rg -nS --no-heading "`; extra ignored dirs (node_modules, build, dist, VCS).
 - **auto-revert**: `global-auto-revert-mode`, also non-file buffers. `repeat-mode`, `savehist-mode` (+ kill ring and literal/regexp search rings), `save-place-mode` (limit 600).
@@ -659,7 +664,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **dape** debugging (Python/Go/Rust/C) — likely partial/gap in Lem.
 - **Org capture + org-roam + dailies + journal** (`SPC o`, `SPC n r *`, `SPC n j j`) — Lem now has bounded native Org editing, a shared named/partial/relative date reader with a terminal calendar, in-buffer scheduling/deadline insertion, suffix-preserving replacement, one-prefix removal, and two-prefix warning/delay editing on the stock chords, active/inactive ordinary timestamp insertion/replacement, successive-command timestamp ranges, and date shifting, metadata-aware Org/Markdown roam-node selection, the configured five roam capture templates with finalize/abort and deferred insertion, an editable one-key implementation of all four configured general capture templates with initial selection and local source context, a persistent right-side backlink/reflink view with exact source visits, save-driven visible-panel refresh, and manual refresh for out-of-band changes, daily, journal, and agenda implementations. Org-roam's persistent database, always-on incremental autosync and arbitrary third-party reference schemes, arbitrary Org capture template language/stored-link providers, and the full journal interface remain gaps.
 - **vundo, pulsar (recenter-on-jump), indent-bars, dirvish** UI niceties.
-- **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`) — Lem has OpenRouter, Perplexity-with-citations, GitHub Copilot Chat, ChatGPT Codex Responses, and Grok OAuth-proxy streaming; explicit Copilot device and Codex PKCE authorization plus token renewal; resumable native CLI backend ports; the configured Codex/Grok agentic presets; private named presets; bounded local agent tools; configured fetch/read-only-GitHub stdio MCP clients; Claude/ChatGPT web handoff; and a tested project-aware interactive Claude Code buffer. Emacs's Claude transient/vterm, Codex startup model probing/cache, tracing, arbitrary third-party MCP registry/UI, and advanced MCP client capabilities remain gaps.
+- **AI: gptel + claude-code/monet + mcp** entry commands (`SPC g j/l/L`, `C-c c`, `C-c i`, conversation-local `C-c RET`) — Lem starts its Org scratch in an LLM conversation mode and streams tagged replies at the tracked send position before adding the next `* ` prompt. It also has OpenRouter, Perplexity-with-citations, GitHub Copilot Chat, ChatGPT Codex Responses, and Grok OAuth-proxy streaming; explicit Copilot device and Codex PKCE authorization plus token renewal; resumable native CLI backend ports; the configured Codex/Grok agentic presets; private named presets; bounded local agent tools; configured fetch/read-only-GitHub stdio MCP clients; Claude/ChatGPT web handoff; and a tested project-aware interactive Claude Code buffer. Emacs's Claude transient/vterm, Codex startup model probing/cache, tracing, arbitrary third-party MCP registry/UI, and advanced MCP client capabilities remain gaps.
 
 ### Tier 3 — apps / bespoke integrations with likely no Lem equivalent (document as gaps)
 - **notmuch mail** (+ Proton Bridge/mbsync pipeline, PDF preview) — a CLI-backed Lem reader covers search/read/refresh and owner-private PDF extraction into the shared page-text reader; composition, sending, non-PDF attachment actions, and Outlook integration remain gaps.
@@ -669,7 +674,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **salta.el** (Supabase/PostgREST property/contractor/payments client; tabulated-list UIs; `C-c s` prefix; notmuch payment-email bridge) — the six primary REST/list/detail workflows are ported and covered against a hermetic fake API; `C-c s e` also tracks the current rendered Notmuch message and opens its URL-encoded payment-email page through a direct desktop argv. The owner-operated live API and web application remain outside hermetic validation.
 - **business-visual / business-document modes** (office presentation profile, host-gated to `workwin`) — ported as a reversible ncurses analogue with a light semantic palette, compact modeline, shape-only cursors, disabled jump pulse, and 88-column centered/wrapped Org, Markdown/EPUB, text, Notmuch-message, feed-entry, and DevDocs buffers. `M-x business-visual-mode` permits an explicit trial on other hosts. Proportional/fixed-pitch font mixing, fractional line spacing, hollow cursors, fringes, GUI chrome, and unavailable message/EWW/Helpful/Info modes remain terminal divergences.
 - **nodes-org-sync** (PostgreSQL graph sync of Org headings, host-gated to `nova`) is wired through Lem's native Org save lifecycle while retaining the external projector and database; the psql-backed viewer separately covers the pgmacs entry workflow.
-- The **gptel backends** include bounded Claude/Codex/Grok process adapters with native event rendering and resumable per-backend sessions plus credential-safe Perplexity, GitHub Copilot Chat, ChatGPT Codex Responses, and Grok OAuth HTTP adapters. The latter two retain per-buffer history and execute the configured project tools. Org-tree conversation forking, per-request backend controls, richer Copilot request families, and Codex startup model probing/cache remain gaps.
+- The **gptel backends** include bounded Claude/Codex/Grok process adapters with native event rendering and resumable per-backend sessions plus credential-safe Perplexity, GitHub Copilot Chat, ChatGPT Codex Responses, and Grok OAuth HTTP adapters. The latter two retain per-buffer history and execute the configured project tools. Lem now has tracked source-position Org replies and independent buffer-local request/session ownership; typed conversation reconstruction and Org-tree forking, per-request backend controls, parallel replies in one buffer, richer Copilot request families, and Codex startup model probing/cache remain gaps.
 
 ### salta.el commands (reference for any port)
 - `salta-find-property` (fuzzy property search -> tabulated list), `salta-property-detail`, `salta-property-reckoner` (revenue/cost/profit + totals/margin), `salta-contractor-rates`, `salta-contractor-financials`, `salta-payments`, plus list/detail navigation (`RET` open, `w` copy, `r` reckoner, `g` refresh; detail: `c` claims, `p` payments) and `salta-open-payment-email-from-notmuch`. Talks to a Supabase PostgREST API (`/rest/v1/...`, RPCs `fuzzy_search_properties`, `get_reckoner_data`); creds via `salta-base-url`/`salta-api-key`/env/`~/.config/salta/credentials.json`.

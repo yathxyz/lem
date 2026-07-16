@@ -781,12 +781,17 @@
             vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
             llm-keybinding-test = mkTestApp "lem-yath-llm-keybinding-test" "llm-keybinding-test.sh";
+            llm-conversation-test =
+              mkTestAppWithLem lemYath "lem-yath-llm-conversation-test"
+                "llm-conversation-test.sh";
             llm-backend-test = mkTestAppWithLem lemYath "lem-yath-llm-backend-test" "llm-backend-test.sh";
             llm-http-test = mkTestAppWithLem lemYath "lem-yath-llm-http-test" "llm-http-test.sh";
             llm-oauth-test = mkTestAppWithLem lemYath "lem-yath-llm-oauth-test" "llm-oauth-test.sh";
             llm-workflow-test = mkTestAppWithLem lemYath "lem-yath-llm-workflow-test" "llm-workflow-test.sh";
             llm-tools-test = mkTestAppWithLem lemYath "lem-yath-llm-tools-test" "llm-tools-test.sh";
-            llm-mcp-test = mkTestAppWithLem lemYath "lem-yath-llm-mcp-test" "llm-mcp-test.sh";
+            llm-mcp-test =
+              mkTestAppWithLemAndInputs lemYath [ pkgs.python3 ]
+                "lem-yath-llm-mcp-test" "llm-mcp-test.sh";
             claude-code-test = mkTestAppWithLem lemYath "lem-yath-claude-code-test" "claude-code-test.sh";
             claude-bridge-test = mkTestAppWithLem lemYath "lem-yath-claude-bridge-test" "claude-bridge-test.sh";
             lisp-eval-test = mkTestApp "lem-yath-lisp-eval-test" "lisp-eval-test.sh";
@@ -874,12 +879,17 @@
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";
+            llm-conversation =
+              mkCheckWithLem lemYath "llm-conversation"
+                "llm-conversation-test.sh";
             llm-backend = mkCheckWithLem lemYath "llm-backend" "llm-backend-test.sh";
             llm-http = mkCheckWithLem lemYath "llm-http" "llm-http-test.sh";
             llm-oauth = mkCheckWithLem lemYath "llm-oauth" "llm-oauth-test.sh";
             llm-workflow = mkCheckWithLem lemYath "llm-workflow" "llm-workflow-test.sh";
             llm-tools = mkCheckWithLem lemYath "llm-tools" "llm-tools-test.sh";
-            llm-mcp = mkCheckWithLem lemYath "llm-mcp" "llm-mcp-test.sh";
+            llm-mcp =
+              mkCheckWithLemAndInputs lemYath [ pkgs.python3 ]
+                "llm-mcp" "llm-mcp-test.sh";
             claude-code = mkCheckWithLem lemYath "claude-code" "claude-code-test.sh";
             claude-bridge = mkCheckWithLem lemYath "claude-bridge" "claude-bridge-test.sh";
             lisp-eval = mkCheck "lisp-eval" "lisp-eval-test.sh";

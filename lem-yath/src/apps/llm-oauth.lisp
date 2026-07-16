@@ -994,15 +994,15 @@
                 (error ()
                   (message "Could not capture the LLM project context")
                   (return-from llm-oauth-stream))))))
-      (pop-to-buffer buffer)
-      (llm-buffer-append-now
-       buffer
-       (format nil "~%## User (~a / ~a)~%~%~a~%~%## Assistant~%~%"
-               (ecase backend
-                 (:chatgpt-codex "ChatGPT Codex")
-                 (:grok-oauth "Grok OAuth"))
-               model prompt))
-      (let* ((history (llm-oauth-history backend buffer))
+      (let* ((insertion-point
+               (llm-prepare-response
+                buffer
+                (format nil "~%## User (~a / ~a)~%~%~a~%~%## Assistant~%~%"
+                        (ecase backend
+                          (:chatgpt-codex "ChatGPT Codex")
+                          (:grok-oauth "Grok OAuth"))
+                        model prompt)))
+             (history (llm-oauth-history backend buffer))
              (messages
                (ecase backend
                  (:chatgpt-codex
@@ -1022,8 +1022,10 @@
                     (llm-oauth-buffer-id buffer *llm-oauth-cache-keys*)))
              (request
                (llm-register-request
-                buffer nil backend :tool-context tool-context :tools-p tools-p)))
-        (bt2:make-thread
+                buffer nil backend :insertion-point insertion-point
+                :tool-context tool-context :tools-p tools-p)))
+        (llm-start-request-thread
+         request
          (lambda ()
            (unwind-protect
                 (handler-case
@@ -1045,7 +1047,8 @@
              (when tool-context
                (cancel-project-request
                 (llm-tool-context-project-request tool-context)))))
-         :name (format nil "lem-yath/llm-~(~a~)" backend))))))
+         (format nil "lem-yath/llm-~(~a~)" backend)
+         (format nil "~%[failed to start ~(~a~) request]~%" backend))))))
 
 (defmethod llm-backend-stream ((backend (eql :chatgpt-codex)) prompt)
   (llm-oauth-stream backend prompt))
@@ -1258,7 +1261,8 @@
   (if (not (llm-codex-login-claim))
       (message "ChatGPT Codex login is already running")
       (progn
-        (llm-codex-login-publish "Starting ChatGPT Codex authorization…\n")
+        (llm-codex-login-publish
+         (format nil "Starting ChatGPT Codex authorization…~%"))
         (bt2:make-thread
          (lambda ()
            (unwind-protect
@@ -1266,7 +1270,8 @@
                     (progn
                       (llm-codex-login-flow)
                       (llm-codex-login-publish
-                       "Authorization complete. ChatGPT Codex is ready.\n"))
+                       (format nil
+                               "Authorization complete. ChatGPT Codex is ready.~%")))
                   (error (condition)
                     (llm-codex-login-publish
                      (format nil "Authorization failed: ~a~%" condition))))
