@@ -13,8 +13,14 @@ export LEM_YATH_BUFFER_LIST_SAVE_TARGET="$root/buffer-list-save-target.txt"
 export LEM_YATH_BUFFER_LIST_SORT_A="$root/a-file.txt"
 export LEM_YATH_BUFFER_LIST_SORT_B="$root/b-file.txt"
 export LEM_YATH_BUFFER_LIST_SORT_C="$root/c-file.txt"
+export LEM_YATH_BUFFER_LIST_MARK_UNSAVED_HIT="$root/buffer-list-mark-unsaved-hit.txt"
+export LEM_YATH_BUFFER_LIST_MARK_UNSAVED_MISS="$root/buffer-list-mark-unsaved-miss.txt"
+export LEM_YATH_BUFFER_LIST_MARK_DISSOCIATED_HIT="$root/buffer-list-mark-dissociated-hit.txt"
+export LEM_YATH_BUFFER_LIST_MARK_DISSOCIATED_MISS="$root/buffer-list-mark-dissociated-miss.txt"
+export LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_HIT="$root/buffer-list-mark-compressed-hit.GZ"
+export LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_MISS="$root/buffer-list-mark-compressed-miss.txt"
 export LEM_TUI_WIDTH=180
-export LEM_TUI_HEIGHT=36
+export LEM_TUI_HEIGHT=60
 mkdir -p "$HOME" "$XDG_CACHE_HOME"
 
 source_file="$root/buffer-list-source.txt"
@@ -24,6 +30,11 @@ printf 'SAVE ORIGINAL\n' >"$LEM_YATH_BUFFER_LIST_SAVE_TARGET"
 : >"$LEM_YATH_BUFFER_LIST_SORT_A"
 : >"$LEM_YATH_BUFFER_LIST_SORT_B"
 : >"$LEM_YATH_BUFFER_LIST_SORT_C"
+printf 'UNSAVED HIT\n' >"$LEM_YATH_BUFFER_LIST_MARK_UNSAVED_HIT"
+printf 'UNSAVED MISS\n' >"$LEM_YATH_BUFFER_LIST_MARK_UNSAVED_MISS"
+printf 'DISSOCIATED MISS\n' >"$LEM_YATH_BUFFER_LIST_MARK_DISSOCIATED_MISS"
+printf 'COMPRESSED HIT\n' >"$LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_HIT"
+printf 'COMPRESSED MISS\n' >"$LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_MISS"
 : >"$LEM_YATH_BUFFER_LIST_REPORT"
 
 source "$here/scripts/tui-driver.sh"
@@ -169,6 +180,20 @@ report_picker_bindings() {
     attempts=$((attempts + 1))
   done
   return 1
+}
+
+check_star_mark() {
+  local label=$1 query=$2 suffix=$3 expected=$4 nav
+  lem_keys "$session" s / U
+  lem_keys "$session" s n
+  tmux_cmd send-keys -t "$session" -l "$query"
+  lem_keys "$session" Enter '*' "$suffix"
+  nav=$(report_nav || true)
+  if [[ "$nav" == *"marks=$expected:>" ]]; then
+    pass "$label" "* $suffix marked only the matching visible buffer"
+  else
+    fail "$label" "* $suffix produced unexpected marks: $nav"
+  fi
 }
 
 fixture="$(lem-yath_lisp_string "$here/scripts/buffer-list-fixture.lisp")"
@@ -637,6 +662,17 @@ else
   lem_keys "$session" Escape
 fi
 lem_keys "$session" q
+
+lem_keys "$session" C-x C-b
+check_star_mark mark-modified mark-modified m buffer-list-mark-modified-hit
+check_star_mark mark-unsaved mark-unsaved u buffer-list-mark-unsaved-hit.txt
+check_star_mark mark-special mark-special '*' '*buffer-list-mark-special-hit*'
+check_star_mark mark-read-only mark-read-only r buffer-list-mark-read-only-hit
+check_star_mark mark-dired mark-dired / buffer-list-mark-dired-hit
+check_star_mark mark-dissociated mark-dissociated e buffer-list-mark-dissociated-hit
+check_star_mark mark-help Help h '*Help*'
+check_star_mark mark-compressed mark-compressed z buffer-list-mark-compressed-hit.GZ
+lem_keys "$session" s / U q
 
 lem_keys "$session" C-x C-b
 lem_keys "$session" s n

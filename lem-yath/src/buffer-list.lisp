@@ -576,6 +576,74 @@ Each nonempty group begins with a distinct heading entry."
              :marked)))))
   (lem/multi-column-list:update component))
 
+(defun buffer-list-mark-matching (component predicate)
+  (let ((count 0))
+    (dolist (item (buffer-list-current-view-items component))
+      (let ((entry (buffer-list-item-entry item)))
+        (when (and (not (buffer-list-entry-heading-p entry))
+                   (funcall predicate (buffer-list-entry-buffer entry)))
+          (buffer-list-set-item-mark component item :marked)
+          (incf count))))
+    (lem/multi-column-list:update component)
+    (message "Marked ~d buffers" count)))
+
+(defun buffer-list-special-buffer-p (buffer)
+  (let ((name (buffer-name buffer)))
+    (and (> (length name) 2)
+         (char= #\* (char name 0))
+         (char= #\* (char name (1- (length name)))))))
+
+(defun buffer-list-unsaved-buffer-p (buffer)
+  (and (buffer-filename buffer) (buffer-modified-p buffer)))
+
+(defun buffer-list-dissociated-buffer-p (buffer)
+  (alexandria:when-let ((filename (buffer-filename buffer)))
+    (null (ignore-errors (uiop:probe-file* filename)))))
+
+(defun buffer-list-compressed-file-buffer-p (buffer)
+  (alexandria:when-let ((filename (buffer-filename buffer)))
+    (buffer-list-regexp-match-p
+     "\\.(?:arj|bgz|bz2|gz|lzh|taz|tgz|xz|zip|z)$"
+     (namestring filename))))
+
+(define-command lem-yath-buffer-list-mark-modified () ()
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list) #'buffer-modified-p))
+
+(define-command lem-yath-buffer-list-mark-unsaved () ()
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list)
+   #'buffer-list-unsaved-buffer-p))
+
+(define-command lem-yath-buffer-list-mark-special () ()
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list)
+   #'buffer-list-special-buffer-p))
+
+(define-command lem-yath-buffer-list-mark-read-only () ()
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list) #'buffer-read-only-p))
+
+(define-command lem-yath-buffer-list-mark-dired () ()
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list)
+   #'buffer-list-dired-buffer-p))
+
+(define-command lem-yath-buffer-list-mark-dissociated () ()
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list)
+   #'buffer-list-dissociated-buffer-p))
+
+(define-command lem-yath-buffer-list-mark-help () ()
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list)
+   #'buffer-list-help-buffer-p))
+
+(define-command lem-yath-buffer-list-mark-compressed-file () ()
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list)
+   #'buffer-list-compressed-file-buffer-p))
+
 (define-command lem-yath-buffer-list-check-and-down () ()
   (let ((component (lem/multi-column-list::current-multi-column-list)))
     (buffer-list-toggle-current-check component)
@@ -1192,6 +1260,24 @@ Each nonempty group begins with a distinct heading entry."
   'lem-yath-buffer-list-toggle-marks)
 (define-key *buffer-list-picker-mode-keymap* "~"
   'lem-yath-buffer-list-toggle-marks)
+(define-key *buffer-list-picker-mode-keymap* "* *"
+  'lem-yath-buffer-list-mark-special)
+(define-key *buffer-list-picker-mode-keymap* "* s"
+  'lem-yath-buffer-list-mark-special)
+(define-key *buffer-list-picker-mode-keymap* "* m"
+  'lem-yath-buffer-list-mark-modified)
+(define-key *buffer-list-picker-mode-keymap* "* u"
+  'lem-yath-buffer-list-mark-unsaved)
+(define-key *buffer-list-picker-mode-keymap* "* r"
+  'lem-yath-buffer-list-mark-read-only)
+(define-key *buffer-list-picker-mode-keymap* "* /"
+  'lem-yath-buffer-list-mark-dired)
+(define-key *buffer-list-picker-mode-keymap* "* e"
+  'lem-yath-buffer-list-mark-dissociated)
+(define-key *buffer-list-picker-mode-keymap* "* h"
+  'lem-yath-buffer-list-mark-help)
+(define-key *buffer-list-picker-mode-keymap* "* z"
+  'lem-yath-buffer-list-mark-compressed-file)
 (define-key *buffer-list-picker-mode-keymap* "d"
   'lem-yath-buffer-list-mark-deletion)
 (define-key *buffer-list-picker-mode-keymap* "x"

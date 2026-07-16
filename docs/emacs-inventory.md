@@ -139,7 +139,10 @@ rotates to the second stock name/file format; `s` remains its filter prefix.
 The Lem chooser implements those controls within each configured group. Its
 effective modal core also matches `m/u/Backspace/U/t/~`, deletion marking and
 execution with `d` then `x`, marked save with `S`, cyclic ordinary-mark
-navigation with `{`/`}`, marked modified/read-only toggles and Emacs-style
+navigation with `{`/`}`, visible-snapshot starred marking for special,
+modified, unsaved, read-only, Dired, dissociated, help, and compressed-file
+buffers on `* *`/`* s`, `* m`, `* u`, `* r`, `* /`, `* e`, `* h`, and `* z`,
+marked modified/read-only toggles and Emacs-style
 unique renaming with `M/T/R`, focused-buffer burying with `X`, row movement
 with `gj/gk`, group
 movement with Tab/backtab, `C-j/C-k`, and `]]/[[`, and quit with `q`.

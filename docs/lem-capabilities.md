@@ -900,6 +900,9 @@ through the ncurses editor.
   full filename, basename, or extension; Return pushes the pending filter and
   Escape cancels it. The modal operation core uses `m/u/Backspace/U/t/~` for ordinary marks,
   distinct `d` deletion marks followed by `x`, and `S` for marked saves;
+  `* *`/`* s`, `* m`, `* u`, `* r`, `* /`, `* e`, `* h`, and `* z` mark
+  visible special, modified, unsaved, read-only, directory, dissociated, help,
+  or compressed-file buffers;
   `{`/`}` cycle ordinary marks, `M/T/R` change marked modified/read-only/name
   state, and `X` buries the focused buffer while retaining its row;
   `gj/gk`, Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide row movement, group
@@ -914,13 +917,15 @@ through the ncurses editor.
   safety, regexp filter input across modal command letters, stock field widths
   including wide characters, selection, every modal movement above, ordinary
   and deletion mark rendering, backward unmark and ordinary-mark traversal,
+  all eight non-prompt starred mark predicates with hidden-row exclusion,
   filter composition/negation/pop/disable, marked save/deletion/state changes,
   Emacs-style unique renaming, focused burying, snapshot redisplay/update,
   exact name/path copying,
   alternate-window visits, and reload. Lem has no visited-file locking state;
   Ibuffer's process/starred/derived/directory/size/content/predicate filters,
-  compound/saved filter operations, and specialized bulk mark/operation catalogs
-  are not reproduced. CL-PPCRE regexp syntax can differ from Emacs regexp syntax.
+  compound/saved filter operations, mode/age/regexp marking, and remaining
+  specialized bulk operations are not reproduced. CL-PPCRE regexp syntax can
+  differ from Emacs regexp syntax.
 - Recent files: `M-g r` opens an annotated Lem persistent-MRU prompt after
   lem-yath sets the loaded
   history's 300-entry limit and normalizes oversized persisted histories to their

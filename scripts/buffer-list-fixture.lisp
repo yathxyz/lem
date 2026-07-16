@@ -38,6 +38,11 @@
     (push (cons label buffer) *buffer-list-test-buffers*)
     buffer))
 
+(defun buffer-list-test-find-file-buffer (label environment-variable)
+  (let ((buffer (find-file-buffer (uiop:getenv environment-variable))))
+    (push (cons label buffer) *buffer-list-test-buffers*)
+    buffer))
+
 (defun buffer-list-test-mode-symbol (package name)
   (or (find-symbol name package) 'fundamental-mode))
 
@@ -255,6 +260,55 @@
       (buffer-list-test-make-buffer 'op-alpha "buffer-list-op-alpha"))
 (setf *buffer-list-test-op-beta*
       (buffer-list-test-make-buffer 'op-beta "buffer-list-op-beta"))
+(let ((buffer
+        (buffer-list-test-make-buffer
+         'mark-modified-hit "buffer-list-mark-modified-hit")))
+  (insert-string (buffer-end-point buffer) "modified"))
+(buffer-list-test-make-buffer
+ 'mark-modified-miss "buffer-list-mark-modified-miss")
+(let ((buffer
+        (buffer-list-test-find-file-buffer
+         'mark-unsaved-hit "LEM_YATH_BUFFER_LIST_MARK_UNSAVED_HIT")))
+  (insert-string (buffer-end-point buffer) "modified"))
+(buffer-list-test-find-file-buffer
+ 'mark-unsaved-miss "LEM_YATH_BUFFER_LIST_MARK_UNSAVED_MISS")
+(buffer-list-test-make-buffer
+ 'mark-special-hit "*buffer-list-mark-special-hit*")
+(buffer-list-test-make-buffer
+ 'mark-special-miss "buffer-list-mark-special-miss")
+(let ((buffer
+        (buffer-list-test-make-buffer
+         'mark-read-only-hit "buffer-list-mark-read-only-hit")))
+  (setf (buffer-read-only-p buffer) t))
+(buffer-list-test-make-buffer
+ 'mark-read-only-miss "buffer-list-mark-read-only-miss")
+(buffer-list-test-make-buffer
+ 'mark-dired-hit "buffer-list-mark-dired-hit"
+ (buffer-list-test-mode-symbol "LEM/DIRECTORY-MODE/MODE" "DIRECTORY-MODE"))
+(buffer-list-test-make-buffer
+ 'mark-dired-miss "buffer-list-mark-dired-miss")
+(let ((buffer
+        (buffer-list-test-make-buffer
+         'mark-dissociated-hit "buffer-list-mark-dissociated-hit")))
+  (setf (buffer-filename buffer)
+        (uiop:getenv "LEM_YATH_BUFFER_LIST_MARK_DISSOCIATED_HIT")))
+(let ((buffer
+        (buffer-list-test-make-buffer
+         'mark-dissociated-miss "buffer-list-mark-dissociated-miss")))
+  (setf (buffer-filename buffer)
+        (uiop:getenv "LEM_YATH_BUFFER_LIST_MARK_DISSOCIATED_MISS")))
+(buffer-list-test-make-buffer
+ 'mark-help-miss "buffer-list-mark-help-miss")
+(let ((buffer
+        (buffer-list-test-make-buffer
+         'mark-compressed-hit "buffer-list-mark-compressed-hit.GZ")))
+  (setf (buffer-filename buffer)
+        (uiop:getenv "LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_HIT")))
+(let ((buffer
+        (buffer-list-test-make-buffer
+         'mark-compressed-miss "buffer-list-mark-compressed-miss.txt")))
+  (setf (buffer-filename buffer)
+        (uiop:getenv "LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_MISS")))
 (buffer-list-test-make-buffer
  'control (format nil "ctl~%name"))
 (let ((buffer

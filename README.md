@@ -261,7 +261,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   extension; Return pushes the filter and Escape cancels pending input.
   `m/u/Backspace/U/t/~`
   manage ordinary `>` marks, `d` assigns distinct `D` deletion marks, `x`
-  executes those deletions, and `S` saves marked buffers. `{`/`}` traverse
+  executes those deletions, and `S` saves marked buffers. The starred
+  `* *`/`* s`, `* m`, `* u`, `* r`, `* /`, `* e`, `* h`, and `* z` catalog
+  marks visible special, modified, unsaved, read-only, directory, dissociated,
+  help, or compressed-file buffers.
+  `{`/`}` traverse
   ordinary marks; `M`, `T`, and `R` toggle modified/read-only state or rename
   marked buffers uniquely, while `X` buries the focused buffer. `gj/gk`,
   Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide the corresponding modal row,
