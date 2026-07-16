@@ -354,6 +354,10 @@
            (zerop
             (hash-table-count
              (jsonrpc/connection::connection-response-callback connection)))
+           (zerop
+            (hash-table-count
+             (jsonrpc/connection::connection-ignored-response-ids
+              connection)))
            (null
             (find "RESPONSE-MAP"
                   (c2mop:class-slots (class-of connection))

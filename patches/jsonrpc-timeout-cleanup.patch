@@ -68,12 +68,17 @@ index d7f8dfd..0f2100d 100644
             #:add-message-to-outbox
             #:process-request
             #:connection-request-queue
-@@ -39,8 +40,6 @@
+@@ -39,8 +40,11 @@
     (request-queue :initform (make-instance 'chanl:unbounded-channel)
                    :accessor connection-request-queue)
 
 -   (response-map :initform (make-hash-table :test 'equal)
 -                 :reader connection-response-map)
++   ;; Responses to locally cancelled or timed-out requests are expected.
++   ;; Retain a bounded set so they can be ignored without hiding genuinely
++   ;; unknown response IDs or leaking state on a long-lived LSP connection.
++   (ignored-response-ids :initform (make-hash-table :test 'equal)
++                         :reader connection-ignored-response-ids)
     (response-lock :initform (bt:make-recursive-lock "jsonrpc/connection response-lock")
                    :reader connection-response-lock)
     (response-callback :initform (make-hash-table :test 'equal)
@@ -87,13 +92,15 @@ index d7f8dfd..0f2100d 100644
              (response-callback (connection-response-callback connection)))
          (bt:with-recursive-lock-held (response-lock)
            (let ((callback (gethash id response-callback)))
-@@ -97,25 +95,24 @@
+@@ -97,25 +95,33 @@
                                   (type-of e)
                                   e)))
                    (remhash id response-callback))
 -                (setf (gethash id response-map) message))))))
-+                (vom:warn "Unexpected JSON-RPC response id ~S. Ignored."
-+                          id))))))
++                (unless (remhash id
++                                 (connection-ignored-response-ids connection))
++                  (vom:warn "Unexpected JSON-RPC response id ~S. Ignored."
++                            id)))))))
 
      (values)))
 
@@ -101,9 +108,16 @@ index d7f8dfd..0f2100d 100644
    (send-and-notify connection (connection-outbox connection) message))
 
 +(defun remove-callback-for-id (connection id)
-+  "Remove the response callback for ID, returning true when one existed."
++  "Remove ID's callback and remember its expected late response, boundedly."
 +  (bt:with-recursive-lock-held ((connection-response-lock connection))
-+    (remhash id (connection-response-callback connection))))
++    (let ((removed-p
++            (remhash id (connection-response-callback connection))))
++      (when removed-p
++        (let ((ignored (connection-ignored-response-ids connection)))
++          (when (>= (hash-table-count ignored) 1024)
++            (clrhash ignored))
++          (setf (gethash id ignored) t)))
++      removed-p)))
 +
  (defun set-callback-for-id (connection id callback)
 -  (let ((response-map (connection-response-map connection))
