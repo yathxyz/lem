@@ -259,6 +259,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   compact name/file formats. Evil-Collection-style `s m/n/f/b/.` enter live,
   case-insensitive regexp filters for mode, name, full filename, basename, or
   extension; Return pushes the filter and Escape cancels pending input.
+  `s RET` completes over all registered exact major modes (including
+  comma-separated choices), `s M` includes active parent modes, `s *` selects
+  GNU-style starred names, `s </>` apply strict character-size limits, and
+  `s c` matches buffer content case-insensitively. Content scanning skips
+  buffers above 16 million characters.
   `m/u/Backspace/U/t/~`
   manage ordinary `>` marks, `d` assigns distinct `D` deletion marks, `x`
   executes those deletions, and `S` saves marked buffers. The starred
@@ -280,9 +285,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   read-only unified diff for ordinary-marked file buffers or the unmarked
   current row; it ignores non-file and deletion-marked buffers and fails
   without replacing the prior diff when an associated file is missing. The
-  filter stack also supports modified and
-  visiting-file filters on `s i/v`, top-filter negation and removal on `s !/p`,
-  and complete disable on `s /`
+  filter stack also supports modified and visiting-file filters on `s i/v`,
+  top-filter negation and removal on `s !/p`, and complete disable on `s /`
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
   deduplication and timeout, explicit buffer ownership with save-as migration,
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,

@@ -157,9 +157,13 @@ row; non-file and `D`-marked buffers are ignored.
 `s m/n/f/b/.` enter live case-insensitive regexp filters for used mode, buffer
 name, full filename, basename, or extension; modal command letters remain
 literal while entering a filter, Return pushes it onto the stack, and Escape
-cancels only the pending input. `s i` and `s v` push GNU Ibuffer's modified and
-visiting-file filters, multiple filters compose by AND, `s !` negates the top
-filter, `s p` removes it, and `s /` disables the stack
+cancels only the pending input. `s RET` completes over one or more exact
+registered major modes and accepts the displayed current-mode default; `s M`
+offers snapshot modes and their CLOS parents. `s *` matches GNU's exact starred
+name form, `s <`/`s >` compare character sizes strictly, and `s c` applies a
+case-insensitive content regexp. `s i` and `s v` push GNU Ibuffer's modified
+and visiting-file filters, multiple filters compose by AND, `s !` negates the
+top filter, `s p` removes it, and `s /` disables the stack
 (`src/buffer-list.lisp`, `scripts/buffer-list-test.sh`).
 Like GNU Ibuffer, ordinary bulk operations implicitly mark the current row when
 there are no ordinary marks and exclude `D` deletion marks. Revert failures are
@@ -168,9 +172,13 @@ reverted. The terminal implementation uses the exact one/count confirmation
 prompt but omits GNU Ibuffer's auxiliary buffer-name window for a multi-buffer
 confirmation.
 Diff generation uses direct argument vectors, private temporary files, a
-ten-second bound, 16-million-character per-input and 2-MiB output limits. A missing associated
-file aborts before replacing the previous diff view. The view uses a concise
-buffer heading instead of GNU Emacs's displayed shell-command transcript.
+ten-second bound, 16-million-character per-input and 2-MiB output limits. A
+missing associated file aborts before replacing the previous diff view. The
+view uses a concise buffer heading instead of GNU Emacs's displayed
+shell-command transcript.
+Content filters skip buffers above 16 million characters rather than allocating
+an unbounded copy; Lem also shows package-qualified mode labels to disambiguate
+its Common Lisp mode registry.
 
 ### 1.4 Mode-local bindings
 

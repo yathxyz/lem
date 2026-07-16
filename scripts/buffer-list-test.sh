@@ -610,6 +610,162 @@ else
   fail filter-disable "unexpected disabled filter state: $filter"
 fi
 
+lem_keys "$session" s Enter
+if lem_wait_for "$session" 'Filter by major mode' 10 >/dev/null; then
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" -l \
+    'LEM-YATH::BUFFER-LIST-TEST-DERIVED-CHILD-MODE,LEM-YATH::BUFFER-LIST-TEST-DERIVED-PARENT-MODE'
+  sleep 0.4
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=mode-is=LEM-YATH::BUFFER-LIST-TEST-DERIVED-CHILD-MODE,LEM-YATH::BUFFER-LIST-TEST-DERIVED-PARENT-MODE* ]] &&
+     [[ "$filter" == *'buffer-list-op-alpha'* ]] &&
+     [[ "$filter" == *'buffer-list-op-beta'* ]]; then
+    pass filter-exact-mode "s RET accepted multiple exact registered major modes"
+  else
+    fail filter-exact-mode "unexpected exact-mode filter state: $filter"
+  fi
+else
+  fail filter-exact-mode "s RET did not open the major-mode completion prompt"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" J
+if lem_wait_for "$session" 'Jump to buffer:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'buffer-list-op-alpha'
+  sleep 0.3
+  lem_keys "$session" Enter
+  sleep 0.3
+  lem_keys "$session" s Enter
+  if lem_wait_for "$session" 'Filter by major mode.*default LEM-YATH::BUFFER-LIST-TEST-DERIVED-CHILD-MODE' 10 >/dev/null; then
+    lem_keys "$session" Enter
+    filter=$(report_filter || true)
+    if [[ "$filter" == FILTER\ stack=mode-is=LEM-YATH::BUFFER-LIST-TEST-DERIVED-CHILD-MODE* ]] &&
+       [[ "$filter" == *'buffer-list-op-alpha'* ]] &&
+       [[ "$filter" != *'buffer-list-op-beta'* ]]; then
+      pass filter-mode-default "empty s RET accepted the focused buffer's displayed mode default"
+    else
+      fail filter-mode-default "unexpected default-mode filter state: $filter"
+    fi
+  else
+    fail filter-mode-default "s RET did not display the focused buffer's mode default"
+  fi
+else
+  fail filter-mode-default "could not focus the exact-mode default fixture"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" s M
+if lem_wait_for "$session" 'Filter by derived mode' 10 >/dev/null; then
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" -l \
+    'LEM-YATH::BUFFER-LIST-TEST-DERIVED-PARENT-MODE'
+  sleep 0.4
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=derived-mode=LEM-YATH::BUFFER-LIST-TEST-DERIVED-PARENT-MODE* ]] &&
+     [[ "$filter" == *'buffer-list-op-alpha'* ]] &&
+     [[ "$filter" == *'buffer-list-op-beta'* ]]; then
+    pass filter-derived-mode "s M matched both a parent mode and its derived child"
+  else
+    fail filter-derived-mode "unexpected derived-mode filter state: $filter"
+  fi
+else
+  fail filter-derived-mode "s M did not open the derived-mode completion prompt"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" s '*'
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=starred-name* ]] &&
+   [[ "$filter" == *'*buffer-list-mark-special-hit*'* ]] &&
+   [[ "$filter" != *'buffer-list-mark-special-miss'* ]]; then
+  pass filter-starred-name "s * retained only GNU-style starred buffer names"
+else
+  fail filter-starred-name "unexpected starred-name filter state: $filter"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" s '<'
+if lem_wait_for "$session" 'Filter by size less than:' 10 >/dev/null; then
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" -l '15'
+  sleep 0.2
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=size\<15* ]] &&
+     [[ "$filter" == *'buffer-list-sort-zeta'* ]] &&
+     [[ "$filter" != *'buffer-list-sort-middle'* ]] &&
+     [[ "$filter" != *'buffer-list-sort-alpha'* ]]; then
+    pass filter-size-lt "s < used GNU Ibuffer's strict character-size boundary"
+  else
+    fail filter-size-lt "unexpected size-lt filter state: $filter"
+  fi
+else
+  fail filter-size-lt "s < did not prompt for a size"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" s '>'
+if lem_wait_for "$session" 'Filter by size greater than:' 10 >/dev/null; then
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" -l '25'
+  sleep 0.2
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=size\>25* ]] &&
+     [[ "$filter" == *'buffer-list-sort-alpha'* ]] &&
+     [[ "$filter" != *'buffer-list-sort-middle'* ]] &&
+     [[ "$filter" != *'buffer-list-sort-zeta'* ]]; then
+    pass filter-size-gt "s > used GNU Ibuffer's strict character-size boundary"
+  else
+    fail filter-size-gt "unexpected size-gt filter state: $filter"
+  fi
+else
+  fail filter-size-gt "s > did not prompt for a size"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" s c
+if lem_wait_for "$session" 'Filter by content \(regexp\):' 10 >/dev/null; then
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" -l 'FILTER NEEDLE'
+  sleep 0.2
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=content=FILTER\ NEEDLE* ]] &&
+     [[ "$filter" == *'buffer-list-op-alpha'* ]] &&
+     [[ "$filter" != *'buffer-list-op-beta'* ]]; then
+    pass filter-content "s c matched buffer content case-insensitively"
+  else
+    fail filter-content "unexpected content filter state: $filter"
+  fi
+else
+  fail filter-content "s c did not prompt for a content regexp"
+fi
+lem_keys "$session" s p
+
+lem_keys "$session" s c
+if lem_wait_for "$session" 'Filter by content \(regexp\):' 10 >/dev/null; then
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" -l '['
+  sleep 0.2
+  lem_keys "$session" Enter
+  if lem_wait_for "$session" 'Invalid Ibuffer content regexp' 10 >/dev/null; then
+    filter=$(report_filter || true)
+    if [[ "$filter" == FILTER\ stack=\ visible=* ]] &&
+       [[ "$filter" == *'buffer-list-op-alpha'* ]]; then
+      pass filter-content-invalid "an invalid content regexp left the filter stack unchanged"
+    else
+      fail filter-content-invalid "invalid content regexp changed state: $filter"
+    fi
+  else
+    fail filter-content-invalid "invalid content regexp was not rejected"
+  fi
+else
+  fail filter-content-invalid "s c did not reopen the content regexp prompt"
+fi
+
 lem_keys "$session" s m
 tmux_cmd send-keys -t "$session" -l 'buffer-list-test-sort-m-mode'
 sleep 0.3

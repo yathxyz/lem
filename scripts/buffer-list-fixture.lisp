@@ -26,6 +26,13 @@
 (define-major-mode buffer-list-test-sort-z-mode ()
     (:name "Middle Display Mode"))
 
+(define-major-mode buffer-list-test-derived-parent-mode ()
+    (:name "Ibuffer Parent Fixture"))
+
+(define-major-mode buffer-list-test-derived-child-mode
+    buffer-list-test-derived-parent-mode
+    (:name "Ibuffer Child Fixture"))
+
 (defun buffer-list-test-log (control &rest arguments)
   (with-open-file (stream *buffer-list-test-report*
                           :direction :output
@@ -223,13 +230,19 @@
 
 (define-command lem-yath-test-buffer-list-picker-bindings () ()
   (buffer-list-test-log
-   "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a"
+   "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a mode=~a derived=~a starred=~a size-lt=~a size-gt=~a content=~a"
    (buffer-list-test-binding "Backspace")
    (buffer-list-test-binding "C-h")
    (buffer-list-test-binding "Delete")
    (buffer-list-test-binding "=")
    (buffer-list-test-binding "J")
-   (buffer-list-test-binding "M-g")))
+   (buffer-list-test-binding "M-g")
+   (buffer-list-test-binding "s Return")
+   (buffer-list-test-binding "s M")
+   (buffer-list-test-binding "s *")
+   (buffer-list-test-binding "s <")
+   (buffer-list-test-binding "s >")
+   (buffer-list-test-binding "s c")))
 
 (define-command lem-yath-test-buffer-list-diff-state () ()
   (let ((buffer (get-buffer *buffer-list-diff-buffer-name*)))
@@ -313,9 +326,17 @@
 (setf *buffer-list-test-kill-b*
       (buffer-list-test-make-buffer 'kill-b "buffer-list-kill-target-b"))
 (setf *buffer-list-test-op-alpha*
-      (buffer-list-test-make-buffer 'op-alpha "buffer-list-op-alpha"))
+      (buffer-list-test-make-buffer
+       'op-alpha "buffer-list-op-alpha"
+       'buffer-list-test-derived-child-mode))
 (setf *buffer-list-test-op-beta*
-      (buffer-list-test-make-buffer 'op-beta "buffer-list-op-beta"))
+      (buffer-list-test-make-buffer
+       'op-beta "buffer-list-op-beta"
+       'buffer-list-test-derived-parent-mode))
+(buffer-list-test-set-content
+ *buffer-list-test-op-alpha* (format nil "unique filter needle alpha~%") t)
+(buffer-list-test-set-content
+ *buffer-list-test-op-beta* (format nil "ordinary beta content~%") t)
 (setf *buffer-list-test-revert-clean*
       (buffer-list-test-find-file-buffer
        'revert-clean "LEM_YATH_BUFFER_LIST_REVERT_CLEAN"))

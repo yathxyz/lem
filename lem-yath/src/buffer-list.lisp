@@ -233,13 +233,41 @@ Each nonempty group begins with a distinct heading entry."
                        value)))
          (error () nil))))
 
+(defparameter *buffer-list-content-filter-character-limit* (* 16 1024 1024)
+  "Maximum buffer length inspected by one Ibuffer content filter.")
+
+(defparameter *buffer-list-starred-name-scanner*
+  (cl-ppcre:create-scanner "\\A\\*[^*]+\\*(?:<[0-9]+>)?\\z"))
+
+(defun buffer-list-mode-derived-p (mode parent)
+  (alexandria:when-let ((object (ignore-errors (ensure-mode-object mode))))
+    (ignore-errors (typep object parent))))
+
+(defun buffer-list-content-regexp-match-p (scanner buffer)
+  (and (<= (completion-buffer-size buffer)
+           *buffer-list-content-filter-character-limit*)
+       (not (null
+             (cl-ppcre:scan
+              scanner
+              (points-to-string (buffer-start-point buffer)
+                                (buffer-end-point buffer)))))))
+
 (defun buffer-list-filter-match-p (filter buffer)
   (ecase (first filter)
     (:modified (buffer-modified-p buffer))
     (:visiting-file (buffer-filename buffer))
+    (:exact-mode
+     (member (buffer-major-mode buffer) (second filter) :test #'eq))
+    (:derived-mode
+     (some (lambda (parent)
+             (buffer-list-mode-derived-p (buffer-major-mode buffer) parent))
+           (second filter)))
     (:mode
      (buffer-list-regexp-match-p
       (second filter) (symbol-name (buffer-major-mode buffer))))
+    (:starred-name
+     (not (null (cl-ppcre:scan *buffer-list-starred-name-scanner*
+                               (buffer-name buffer)))))
     (:name
      (buffer-list-regexp-match-p (second filter) (buffer-name buffer)))
     (:filename
@@ -252,6 +280,9 @@ Each nonempty group begins with a distinct heading entry."
      (alexandria:when-let ((filename (buffer-filename buffer)))
        (buffer-list-regexp-match-p
         (second filter) (or (pathname-type filename) ""))))
+    (:size-lt (< (completion-buffer-size buffer) (second filter)))
+    (:size-gt (> (completion-buffer-size buffer) (second filter)))
+    (:content (buffer-list-content-regexp-match-p (third filter) buffer))
     (:not (not (buffer-list-filter-match-p (second filter) buffer)))))
 
 (defun buffer-list-active-filters-match-p (component buffer)
@@ -530,6 +561,62 @@ Each nonempty group begins with a distinct heading entry."
         :when (and buffer (eq buffer (get-buffer (buffer-name buffer))))
           :collect buffer))
 
+(defun buffer-list-mode-label (mode)
+  (if (symbol-package mode)
+      (format nil "~a::~a"
+              (package-name (symbol-package mode))
+              (symbol-name mode))
+      (symbol-name mode)))
+
+(defun buffer-list-mode-candidates (modes)
+  (sort
+   (mapcar (lambda (mode) (cons (buffer-list-mode-label mode) mode))
+           (remove-duplicates modes :test #'eq))
+   #'string-lessp :key #'car))
+
+(defun buffer-list-snapshot-derived-modes (component)
+  (let ((registered (major-modes)))
+    (remove-duplicates
+     (loop :for buffer :in (buffer-list-snapshot-buffers component)
+           :for object := (ignore-errors
+                            (ensure-mode-object (buffer-major-mode buffer)))
+           :when object
+             :append
+             (loop :for class :in
+                     (c2mop:class-precedence-list (class-of object))
+                   :for name := (class-name class)
+                   :when (and (symbolp name)
+                              (member name registered :test #'eq))
+                     :collect name))
+     :test #'eq)))
+
+(defun buffer-list-comma-parts (input)
+  (loop :with start := 0
+        :for comma := (position #\, input :start start)
+        :collect (string-trim '(#\Space #\Tab)
+                              (subseq input start comma))
+        :while comma
+        :do (setf start (1+ comma))))
+
+(defun buffer-list-mode-choices (input candidates)
+  (let ((parts (buffer-list-comma-parts input)))
+    (when (and parts (every (lambda (part) (plusp (length part))) parts))
+      (let ((modes
+              (mapcar (lambda (part)
+                        (cdr (assoc part candidates :test #'string=)))
+                      parts)))
+        (when (every #'identity modes)
+          (remove-duplicates modes :test #'eq))))))
+
+(defun buffer-list-mode-completions (input candidates)
+  (let* ((comma (position #\, input :from-end t))
+         (prefix (if comma (subseq input 0 (1+ comma)) ""))
+         (fragment (string-trim '(#\Space #\Tab)
+                                (if comma (subseq input (1+ comma)) input))))
+    (mapcar (lambda (candidate)
+              (concatenate 'string prefix (car candidate)))
+            (prescient-filter fragment candidates :key #'car))))
+
 (defun buffer-list-set-item-mark (component item mark)
   (let ((entry (and item (buffer-list-item-entry item))))
     (when (and entry (not (buffer-list-entry-heading-p entry)))
@@ -745,11 +832,21 @@ Each nonempty group begins with a distinct heading entry."
   (ecase (first filter)
     (:modified "modified")
     (:visiting-file "visiting-file")
+    (:exact-mode
+     (format nil "mode-is=~{~a~^,~}"
+             (mapcar #'buffer-list-mode-label (second filter))))
+    (:derived-mode
+     (format nil "derived-mode=~{~a~^,~}"
+             (mapcar #'buffer-list-mode-label (second filter))))
     (:mode (format nil "mode=~a" (second filter)))
+    (:starred-name "starred-name")
     (:name (format nil "name=~a" (second filter)))
     (:filename (format nil "filename=~a" (second filter)))
     (:basename (format nil "basename=~a" (second filter)))
     (:extension (format nil "extension=~a" (second filter)))
+    (:size-lt (format nil "size<~d" (second filter)))
+    (:size-gt (format nil "size>~d" (second filter)))
+    (:content (format nil "content=~a" (second filter)))
     (:not (format nil "not(~a)"
                   (buffer-list-filter-description (second filter))))))
 
@@ -775,6 +872,72 @@ Each nonempty group begins with a distinct heading entry."
   (unless (member filter (buffer-list-component-filters component) :test #'equal)
     (push filter (buffer-list-component-filters component)))
   (buffer-list-refresh-filters component))
+
+(defun buffer-list-prompt-mode-filter (component kind prompt modes)
+  (let* ((candidates (buffer-list-mode-candidates modes))
+         (current (buffer-list-require-current-buffer component))
+         (default (rassoc (buffer-major-mode current) candidates :test #'eq)))
+    (unless candidates
+      (editor-error "No Ibuffer modes are available"))
+    (let* ((choice
+             (prompt-for-string
+              (if default
+                  (format nil "~a (default ~a): " prompt (car default))
+                  (format nil "~a: " prompt))
+              :completion-function
+              (lambda (input)
+                (let ((completions
+                        (buffer-list-mode-completions input candidates)))
+                  (if (and default (zerop (length input)))
+                      (cons (car default)
+                            (remove (car default) completions :test #'string=))
+                      completions)))
+              :test-function
+              (lambda (input)
+                (or (and default (zerop (length input)))
+                    (buffer-list-mode-choices input candidates)))))
+           (selected
+             (if (zerop (length choice))
+                 (and default (list (cdr default)))
+                 (buffer-list-mode-choices choice candidates))))
+      (unless selected
+        (editor-error "No matching Ibuffer mode"))
+      (buffer-list-push-filter component (list kind selected)))))
+
+(define-command lem-yath-buffer-list-filter-by-mode () ()
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (buffer-list-prompt-mode-filter
+     component :exact-mode "Filter by major mode" (major-modes))))
+
+(define-command lem-yath-buffer-list-filter-by-derived-mode () ()
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (buffer-list-prompt-mode-filter
+     component :derived-mode "Filter by derived mode"
+     (buffer-list-snapshot-derived-modes component))))
+
+(define-command lem-yath-buffer-list-filter-starred-name () ()
+  (buffer-list-push-filter
+   (lem/multi-column-list::current-multi-column-list) '(:starred-name)))
+
+(define-command lem-yath-buffer-list-filter-size-lt () ()
+  (buffer-list-push-filter
+   (lem/multi-column-list::current-multi-column-list)
+   (list :size-lt (prompt-for-integer "Filter by size less than: "))))
+
+(define-command lem-yath-buffer-list-filter-size-gt () ()
+  (buffer-list-push-filter
+   (lem/multi-column-list::current-multi-column-list)
+   (list :size-gt (prompt-for-integer "Filter by size greater than: "))))
+
+(define-command lem-yath-buffer-list-filter-content () ()
+  (let* ((pattern (prompt-for-string "Filter by content (regexp): "))
+         (scanner
+           (handler-case
+               (cl-ppcre:create-scanner pattern :case-insensitive-mode t)
+             (error () (editor-error "Invalid Ibuffer content regexp")))))
+    (buffer-list-push-filter
+     (lem/multi-column-list::current-multi-column-list)
+     (list :content pattern scanner))))
 
 (define-command lem-yath-buffer-list-filter-modified () ()
   (buffer-list-push-filter
@@ -1523,20 +1686,32 @@ Each nonempty group begins with a distinct heading entry."
   'lem-yath-buffer-list-previous-group)
 (define-key *buffer-list-picker-mode-keymap* "q"
   'lem/multi-column-list::multi-column-list/quit)
+(define-key *buffer-list-picker-mode-keymap* "s Return"
+  'lem-yath-buffer-list-filter-by-mode)
 (define-key *buffer-list-picker-mode-keymap* "s n"
   'lem-yath-buffer-list-start-name-filter)
 (define-key *buffer-list-picker-mode-keymap* "s m"
   'lem-yath-buffer-list-start-mode-filter)
+(define-key *buffer-list-picker-mode-keymap* "s M"
+  'lem-yath-buffer-list-filter-by-derived-mode)
+(define-key *buffer-list-picker-mode-keymap* "s *"
+  'lem-yath-buffer-list-filter-starred-name)
 (define-key *buffer-list-picker-mode-keymap* "s f"
   'lem-yath-buffer-list-start-filename-filter)
 (define-key *buffer-list-picker-mode-keymap* "s b"
   'lem-yath-buffer-list-start-basename-filter)
 (define-key *buffer-list-picker-mode-keymap* "s ."
   'lem-yath-buffer-list-start-extension-filter)
+(define-key *buffer-list-picker-mode-keymap* "s <"
+  'lem-yath-buffer-list-filter-size-lt)
+(define-key *buffer-list-picker-mode-keymap* "s >"
+  'lem-yath-buffer-list-filter-size-gt)
 (define-key *buffer-list-picker-mode-keymap* "s i"
   'lem-yath-buffer-list-filter-modified)
 (define-key *buffer-list-picker-mode-keymap* "s v"
   'lem-yath-buffer-list-filter-visiting-file)
+(define-key *buffer-list-picker-mode-keymap* "s c"
+  'lem-yath-buffer-list-filter-content)
 (define-key *buffer-list-picker-mode-keymap* "s p"
   'lem-yath-buffer-list-pop-filter)
 (define-key *buffer-list-picker-mode-keymap* "s !"

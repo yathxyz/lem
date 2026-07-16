@@ -909,16 +909,22 @@ through the ncurses editor.
   movement, and quit. `gR` redisplays the existing snapshot, `gr` rebuilds it
   from live buffers while preserving applicable marks and filters, `yb/yf`
   copy exact buffer/file names, and `go` visits in another ordinary window.
-  `s i/v` push modified and visiting-file filters onto an
-  AND stack, while `s !`, `s p`, and `s /` negate the top, pop the top, or
-  disable all filters. Control-character-safe display remains available.
+  `s RET` selects one or more exact registered major modes, `s M` includes
+  CLOS parent modes represented in the snapshot, `s *` selects GNU-style
+  starred names, `s </>` apply strict character-size filters, and `s c`
+  applies a case-insensitive content regexp. `s i/v` push modified and
+  visiting-file filters onto an AND stack, while `s !`, `s p`, and `s /`
+  negate the top, pop the top, or disable all filters. Control-character-safe
+  display remains available.
   The real TUI verifies classification, ordering, every bound sorter, reversal,
   cycling, both formats, empty-group omission, heading collapse/expansion and
   safety, regexp filter input across modal command letters, stock field widths
   including wide characters, selection, every modal movement above, ordinary
   and deletion mark rendering, backward unmark and ordinary-mark traversal,
   all eight non-prompt starred mark predicates with hidden-row exclusion,
-  filter composition/negation/pop/disable, marked save/deletion/state changes,
+  exact and derived multi-mode completion, starred-name, strict-size, and
+  bounded content filters including invalid-regexp refusal, filter
+  composition/negation/pop/disable, marked save/deletion/state changes,
   Emacs-style unique renaming, one-confirmation `V` reversion of ordinary marks
   or the implicitly marked current row, deletion-mark exclusion, safe
   continuation after a per-buffer revert failure, focused burying, snapshot redisplay/update,
@@ -928,13 +934,16 @@ through the ncurses editor.
   unmarked current row, and reload. Diff selection excludes `D` and non-file
   buffers; missing files fail before replacing the prior read-only patch view.
   Lem has no visited-file locking state;
-  Ibuffer's process/starred/derived/directory/size/content/predicate filters,
-  compound/saved filter operations, mode/age/regexp marking, and remaining
+  Ibuffer's process/directory/predicate filters, compound/saved filter
+  operations, mode/age/regexp marking, and remaining
   specialized bulk operations are not reproduced. CL-PPCRE regexp syntax can
-  differ from Emacs regexp syntax. Multi-buffer `V` uses GNU Ibuffer's exact
+  differ from Emacs regexp syntax. Content filters skip buffers above 16
+  million characters, and mode completion uses package-qualified labels.
+  Multi-buffer `V` uses GNU Ibuffer's exact
   count prompt without its auxiliary confirmation-name window. The diff view
   uses concise buffer headings rather than GNU Emacs's shell-command
-  transcript and adds 10-second, 16-million-character input, and 2-MiB output bounds.
+  transcript and adds 10-second, 16-million-character input, and 2-MiB output
+  bounds.
 - Recent files: `M-g r` opens an annotated Lem persistent-MRU prompt after
   lem-yath sets the loaded
   history's 300-entry limit and normalizes oversized persisted histories to their
