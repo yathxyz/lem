@@ -437,3 +437,39 @@ When RANK-P is false, preserve the provider's source-defined order."
 
 (define-key lem/completion-mode::*completion-mode-keymap*
   "Space" 'lem-yath-completion-space)
+
+;;; Vertico-style zero-result recovery ---------------------------------------
+
+(defparameter *prompt-completion-edit-commands*
+  '(lem/completion-mode::completion-self-insert
+    lem/completion-mode::completion-delete-previous-char
+    lem/completion-mode::completion-backward-delete-word
+    lem-yath-completion-space)
+  "Completion commands that can end a prompt context after editing its input.")
+
+(defun prompt-completion-edit-command-p (command)
+  "Whether COMMAND may have edited the current prompt input.
+
+Ordinary prompt edits carry Lem's EDITABLE-ADVICE marker.  Completion-mode's
+fallback editing commands do not, so name those explicitly."
+  (and command
+       (or (typep command 'lem:editable-advice)
+           (member (command-name command)
+                   *prompt-completion-edit-commands*))))
+
+(defun reopen-empty-prompt-completion-after-command ()
+  "Reopen automatic prompt completion after a zero-result edit.
+
+Lem ends a synchronous completion context when its provider returns no items.
+Keep that ordinary lifecycle for non-prompt completion, but let the next prompt
+edit query the provider again like Vertico.  This covers both deleting back
+into a valid query and regexp input that becomes valid after another character."
+  (when (and (completion-prompt-active-p)
+             (null lem/completion-mode::*completion-context*)
+             (prompt-completion-edit-command-p (this-command)))
+    (lem/prompt-window::open-prompt-completion)))
+
+(remove-hook *post-command-hook*
+             'reopen-empty-prompt-completion-after-command)
+(add-hook *post-command-hook*
+          'reopen-empty-prompt-completion-after-command)

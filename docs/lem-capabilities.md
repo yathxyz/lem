@@ -322,7 +322,13 @@ Lem-yath gives prompt contexts Vertico-style display-only startup: presenting
 candidates neither inserts a shared prefix nor automatically accepts a
 synchronous singleton. `Tab` inserts the focused candidate and refreshes
 completion without closing the prompt; one `Return` accepts it and submits the
-prompt. `M-p` and `M-n` traverse prompt history and reopen completion.
+prompt. `M-p` and `M-n` traverse prompt history and reopen completion. If an
+edit produces no candidates, the prompt retains the unmatched input and the
+next edit queries its provider again; deleting back into a valid command,
+buffer, or path query and completing a Prescient regexp both restore the popup
+in place. `scripts/prompt-completion-test.sh` drives the real M-x and annotated
+buffer prompts through zero results and verifies stale rows, Backspace recovery,
+and recovery through further input.
 
 ### Directory-local Consult outline — `lem-yath/src/project-outline.lisp` (verified)
 
@@ -1088,8 +1094,7 @@ and snippet mirrors as well as Fundamental, Python, and Lisp buffers.
 
 This remains an approximation of the complete Emacs mode: preserve-balance does
 not yet scan across intervening non-whitespace forms, a negative prefix delegates
-to ordinary Backspace instead of symmetrically deleting around a pair, and a
-zero-result prompt completion cannot yet be recovered without reopening it.
+to ordinary Backspace instead of symmetrically deleting around a pair.
 For an active selection wider than one delimiter, Lem deletes exactly the
 selection; Emacs can also consume an unselected adjacent delimiter depending on
 orientation, a destructive quirk Lem deliberately does not reproduce.

@@ -72,6 +72,40 @@ else
   pass boot "configured Lem opened both file-backed fixture buffers"
 fi
 
+# Vertico keeps the prompt editable after a zero-result query and repopulates
+# candidates as soon as the query becomes valid again.  Exercise the actual
+# M-x command provider first, including its Marginalia-style documentation.
+lem_keys "$session" Escape
+sleep 0.2
+lem_keys "$session" M-x
+if lem_wait_for "$session" 'Command:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'lem-yath-test-buffer-promptx'
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Fq 'Command: lem-yath-test-buffer-promptx' <<<"$screen" &&
+     ! grep -Fq 'Open the configured buffer prompt over the fixture buffers.' \
+       <<<"$screen"; then
+    pass command-zero-results 'M-x retained the unmatched query without stale candidates'
+  else
+    fail command-zero-results 'M-x did not settle on a clean zero-result prompt' "$session"
+  fi
+  lem_keys "$session" BSpace
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Fq 'Command: lem-yath-test-buffer-prompt' <<<"$screen" &&
+     grep -Fq 'Open the configured buffer prompt over the fixture buffers.' \
+       <<<"$screen"; then
+    pass command-zero-recovery 'Backspace restored the exact M-x candidate in place'
+  else
+    fail command-zero-recovery 'M-x candidates did not recover after Backspace' "$session"
+  fi
+  lem_keys "$session" Escape
+  sleep 0.2
+  lem_keys "$session" Escape
+else
+  fail command-zero-results 'M-x prompt did not open' "$session"
+fi
+
 chmod 640 "$LEM_YATH_PROMPT_COMPLETION_ROOT/files/nested/alpha-report.txt"
 touch -d '2020-01-02 03:04:05 UTC' \
   "$LEM_YATH_PROMPT_COMPLETION_ROOT/files/nested/alpha-report.txt"
@@ -165,6 +199,54 @@ fi
 
 # Buffer prompt: both buffers have the same basename, so Lem assigns unique
 # labels while retaining each backing path as the completion detail.
+if invoke_prompt_command lem-yath-test-buffer-prompt 'Fixture buffer:'; then
+  tmux_cmd send-keys -t "$session" -l sharedx
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Fq 'Fixture buffer: sharedx' <<<"$screen" &&
+     ! grep -Eq 'shared\.txt.*buffers/(one|two)/shared\.txt' <<<"$screen"; then
+    pass buffer-zero-results 'buffer prompt retained an unmatched query without stale rows'
+  else
+    fail buffer-zero-results 'buffer prompt did not enter a clean zero-result state' "$session"
+  fi
+  lem_keys "$session" BSpace
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Fq 'Fixture buffer: shared' <<<"$screen" &&
+     grep -q 'buffers/one/shared.txt' <<<"$screen" &&
+     grep -q 'buffers/two/shared.txt' <<<"$screen"; then
+    pass buffer-zero-recovery 'Backspace restored both annotated buffer candidates'
+  else
+    fail buffer-zero-recovery 'buffer candidates did not recover after Backspace' "$session"
+  fi
+
+  # Once completion has ended on zero results, a further regexp character can
+  # also make Prescient matching valid again ("z|" has an empty alternative).
+  lem_keys "$session" C-g
+  sleep 0.2
+  lem_keys "$session" Escape
+  if invoke_prompt_command lem-yath-test-buffer-prompt 'Fixture buffer:'; then
+    tmux_cmd send-keys -t "$session" -l z
+    sleep 0.5
+    tmux_cmd send-keys -t "$session" -l '|'
+    sleep 0.8
+    screen=$(lem_capture "$session")
+    if grep -Fq 'Fixture buffer: z|' <<<"$screen" &&
+       grep -q 'buffers/one/shared.txt' <<<"$screen"; then
+      pass buffer-insert-recovery 'further regexp input reopened buffer candidates'
+    else
+      fail buffer-insert-recovery 'non-deletion input could not recover completion' "$session"
+    fi
+  else
+    fail buffer-insert-recovery 'second configured buffer prompt did not open' "$session"
+  fi
+  lem_keys "$session" Escape
+  sleep 0.2
+  lem_keys "$session" Escape
+else
+  fail buffer-zero-results 'configured buffer prompt did not open' "$session"
+fi
+
 if invoke_prompt_command lem-yath-test-buffer-prompt 'Fixture buffer:'; then
   tmux_cmd send-keys -t "$session" -l shared
   sleep 0.8
