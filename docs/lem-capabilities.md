@@ -2129,12 +2129,17 @@ change. Normal one-character `x/X` inserts replacement table padding like
 `org-delete-char`; counted and Visual deletion deliberately retain ordinary Evil
 semantics.
 
-`src/org/planning.lisp` provides GNU Org's in-buffer `C-c C-s` scheduling and
-`C-c C-d` deadline chords. The date prompt displays the existing field—or
-today—as a bracketed default, accepts an empty submission for that default,
-and supports exact `YYYY-MM-DD`, `.`, and signed day/week/month/year offsets.
-A doubled sign such as `++1m` is relative to the existing field; a single sign
-is relative to today. Insertion creates the structural line immediately below
+`src/org/date-reader.lisp` and `src/org/planning.lisp` provide GNU Org's
+in-buffer `C-c C-s` scheduling and `C-c C-d` deadline chords. The shared date
+prompt displays the existing field—or today—as a bracketed default and an
+adaptive one- or three-month terminal calendar. It accepts empty/default,
+validated ISO and partial numeric dates, English month and weekday names, ISO
+weeks, today/tomorrow/yesterday, and signed hour/day/week/month/year or weekday
+offsets. A doubled sign such as `++1m` is relative to the existing field; a
+single sign is relative to today. Like the configured GNU Org default,
+explicit prompted years are constrained to 1970–2037. `Shift` arrows move by
+day/week, `M-Shift` arrows and `</>` move by month, `C-v`/`M-v` by quarter, and
+`C-.` returns to today. Insertion creates the structural line immediately below
 the current heading, replacement preserves the other planning field and its
 order, and one universal prefix removes only the requested field (including
 the complete line when it becomes empty). Ordinary Org-buffer edits remain
@@ -2144,10 +2149,10 @@ read-only refusal occur before mutation, and each successful command is one
 undo step. `scripts/org-planning-test.sh` drives both physical chords through
 the packaged ncurses editor and proves those boundaries.
 
-The same module supplies GNU Org's ordinary timestamp workflow. `C-c .` and
+The same reader supplies GNU Org's ordinary timestamp workflow. `C-c .` and
 `C-c !` insert or replace active `<...>` and inactive `[...]` timestamps at
 point. Their bracketed prompt defaults to today or the timestamp at point and
-accepts exact or relative dates, a start time, or a start/end time range.
+accepts the shared date forms, a start time, or a start/end time range.
 Replacement recomputes the weekday and preserves repeater and warning suffixes;
 one universal prefix supplies the current time when none is entered, and a
 double universal prefix inserts the current active or inactive timestamp
@@ -2269,8 +2274,8 @@ This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
 footnote, nested-special, and malformed text-object contexts; structural
 repairs beyond the bounded `d/x/X/< />` behavior; region-aware Meta operations,
 generic Org-element movement, unimplemented list/table Shift-control contexts,
-and richer list/table semantics; named-date/calendar prompt input,
-consecutive-command timestamp-range creation, warning and delay cookies,
+and richer list/table semantics; mouse calendar selection and Org's exact live
+echo overlay, consecutive-command timestamp-range creation, warning and delay cookies,
 region-wide planning, and wider timestamp variants; prefixed live Babel-session
 source editing, variables/sessions and the rest of Babel's
 backend/header/result matrix; in-editor LaTeX preview, non-HTML export

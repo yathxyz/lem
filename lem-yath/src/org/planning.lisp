@@ -42,44 +42,6 @@
                              (now (funcall *org-planning-now-function*)))
   (iso-date-for-time now))
 
-(defun org-parse-planning-date-input
-    (input &key default-date
-                (now (funcall *org-planning-now-function*)))
-  "Parse the bounded GNU Org date forms supported by planning commands.
-
-Absolute ISO dates, `.`, and signed day/week/month/year offsets are accepted.
-A doubled sign applies the offset to DEFAULT-DATE rather than today."
-  (let ((value (string-trim '(#\Space #\Tab) input)))
-    (cond
-      ((valid-iso-date-p value) value)
-      ((string= value ".") (org-planning-today now))
-      (t
-       (multiple-value-bind (start end registers register-ends)
-           (ppcre:scan "^([+-]{1,2})([0-9]+)([dDwWmMyY]?)$" value)
-         (declare (ignore end))
-         (when start
-           (let* ((sign (subseq value
-                                (aref registers 0)
-                                (aref register-ends 0)))
-                  (magnitude
-                    (parse-integer value
-                                   :start (aref registers 1)
-                                   :end (aref register-ends 1)))
-                  (unit-start (aref registers 2))
-                  (unit (if (and unit-start
-                                 (< unit-start (aref register-ends 2)))
-                            (char value unit-start)
-                            #\d))
-                  (base (if (= (length sign) 2)
-                            (or default-date (org-planning-today now))
-                            (org-planning-today now)))
-                  (amount (if (char= (char sign 0) #\-)
-                              (- magnitude)
-                              magnitude)))
-             (when (<= magnitude 100000)
-               (ignore-errors
-                 (iso-date-add-calendar base amount unit))))))))))
-
 (defun org-planning-field-scanner (kind &optional capture-date-p)
   (ppcre:create-scanner
    (if capture-date-p
@@ -105,20 +67,10 @@ A doubled sign applies the offset to DEFAULT-DATE rather than today."
   "Prompt for LABEL's date, defaulting to KIND's existing date or today."
   (let ((default (or (org-planning-field-date heading kind)
                      (org-planning-today))))
-    (loop
-      :for input :=
-        (string-trim
-         '(#\Space #\Tab)
-         (prompt-for-string
-          (format nil "~a date [~a] (YYYY-MM-DD or relative): "
-                  label default)))
-      :for date :=
-        (if (zerop (length input))
-            default
-            (org-parse-planning-date-input input :default-date default))
-      :when date :return date
-      :do (message
-           "Invalid date; use YYYY-MM-DD, ., or +/-N[d/w/m/y]"))))
+    (org-read-date-prompt
+     (format nil "~a date" label)
+     :default-date default
+     :now (funcall *org-planning-now-function*))))
 
 (defun org-set-planning-field (heading kind date)
   "Set KIND to DATE on HEADING's immediate Org planning line."
@@ -295,32 +247,49 @@ A doubled sign applies the offset to DEFAULT-DATE rather than today."
     (format nil "~a~@[ ~a~]~@[-~a~]" date time end-time)))
 
 (defun org-parse-timestamp-input (input default-date now)
-  "Return date, start time, end time, and true for bounded timestamp INPUT."
-  (let* ((value (string-trim '(#\Space #\Tab) input))
-         (parts (if (zerop (length value))
-                    nil
-                    (ppcre:split "\\s+" value))))
+  "Return date, start time, end time, and true for Org-style timestamp INPUT."
+  (let ((value (string-trim '(#\Space #\Tab) input)))
     (cond
-      ((null parts) (values default-date nil nil t))
-      ((= (length parts) 1)
+      ((zerop (length value)) (values default-date nil nil t))
+      (t
        (multiple-value-bind (time end-time clock-p)
-           (org-parse-clock-spec (first parts))
-         (if clock-p
-             (values default-date time end-time t)
-             (alexandria:if-let
-                 ((date (org-parse-planning-date-input
-                         (first parts) :default-date default-date :now now)))
-               (values date nil nil t)
-               (values nil nil nil nil)))))
-      ((= (length parts) 2)
-       (let ((date (org-parse-planning-date-input
-                    (first parts) :default-date default-date :now now)))
-         (multiple-value-bind (time end-time clock-p)
-             (org-parse-clock-spec (second parts))
-           (if (and date clock-p)
-               (values date time end-time t)
-               (values nil nil nil nil)))))
-      (t (values nil nil nil nil)))))
+           (org-parse-clock-spec value)
+         (when clock-p
+           (return-from org-parse-timestamp-input
+             (values default-date time end-time t))))
+       (alexandria:when-let
+           ((date (org-parse-date-input
+                   value :default-date default-date :now now)))
+         (return-from org-parse-timestamp-input
+           (values date nil nil t)))
+       (alexandria:when-let ((separator (position #\Space value :from-end t)))
+         (let ((date-text (string-trim '(#\Space #\Tab)
+                                       (subseq value 0 separator)))
+               (clock-text (string-trim '(#\Space #\Tab)
+                                        (subseq value (1+ separator)))))
+           (multiple-value-bind (time end-time clock-p)
+               (org-parse-clock-spec clock-text)
+             (alexandria:when-let
+                 ((date (and clock-p
+                             (org-parse-date-input
+                              date-text :default-date default-date :now now))))
+               (return-from org-parse-timestamp-input
+                 (values date time end-time t))))))
+       (values nil nil nil nil)))))
+
+(defun org-timestamp-calendar-rewrite (date input)
+  "Replace INPUT's date with DATE while retaining a final clock specification."
+  (let* ((value (string-trim '(#\Space #\Tab) input))
+         (separator (position #\Space value :from-end t))
+         (candidate (if separator
+                        (subseq value (1+ separator))
+                        value)))
+    (multiple-value-bind (time end-time clock-p)
+        (org-parse-clock-spec candidate)
+      (declare (ignore time end-time))
+      (if clock-p
+          (format nil "~a ~a" date candidate)
+          date))))
 
 (defun org-prefix-magnitude (argument)
   (typecase argument
@@ -338,9 +307,19 @@ A doubled sign applies the offset to DEFAULT-DATE rather than today."
       :for input :=
         (string-trim
          '(#\Space #\Tab)
-         (prompt-for-string
+         (org-read-date-input
           (format nil "~a [~a] (date and optional time): "
-                  label default-input)))
+                  label default-input)
+          default-date
+          (lambda (value)
+            (multiple-value-bind (date time end-time valid-p)
+                (org-parse-timestamp-input
+                 (if (zerop (length value)) default-input value)
+                 default-date now)
+              (declare (ignore time end-time))
+              (and valid-p date)))
+          :now now
+          :selection-rewriter #'org-timestamp-calendar-rewrite))
       :do
          (when (zerop (length input))
            (setf input default-input))

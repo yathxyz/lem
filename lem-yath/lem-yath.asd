@@ -53,6 +53,7 @@
                              (:file "modern")
                              (:file "babel")
                              (:file "source-editing")
+                             (:file "date-reader")
                              (:file "planning")
                              (:file "commands")
                              (:file "structure")

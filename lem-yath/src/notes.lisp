@@ -134,11 +134,8 @@ Signal an error before constructing a pathname unless DATE is valid YYYY-MM-DD."
 
 (define-command lem-yath-dailies-date () ()
   "Open a daily note by date (org-roam-dailies-goto-date)."
-  (let ((date (prompt-for-string "Date (YYYY-MM-DD): ")))
-    (cond
-      ((zerop (length date)))
-      ((valid-iso-date-p date) (open-daily-note date))
-      (t (message "Invalid date; use a real calendar date in YYYY-MM-DD form")))))
+  (open-daily-note
+   (org-read-date-prompt "Find daily-note" :default-date (org-date-today))))
 
 (defun open-journal-entry (&optional (time (get-universal-time)))
   "Open TIME's journal file and append its configured time heading."

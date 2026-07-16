@@ -46,7 +46,7 @@ fail() {
 
 mx() {
   local command="$1"
-  tmux_cmd send-keys -t "$session" Escape Escape M-x
+  tmux_cmd send-keys -t "$session" M-x
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.3

@@ -340,6 +340,25 @@
                          (notes-test-yes-no
                           (search "USER SENTINEL" (buffer-text buffer)))))))
 
+(define-command lem-yath-test-notes-daily-state () ()
+  (let* ((filename (buffer-filename (current-buffer)))
+         (target (merge-pathnames "roam/2026-09-15.org" (workdir))))
+    (notes-test-report
+     "DAILY file=~a title=~a state=~a prompt=~a calendars=~d exists=~a visited=~a parsed=~a"
+     (if filename (file-namestring filename) "none")
+     (notes-test-yes-no
+      (search "#+title: 2026-09-15" (buffer-text (current-buffer))))
+     (notes-test-state-name)
+     (notes-test-yes-no (lem-core::active-prompt-window))
+     (count-if
+      (lambda (window)
+        (alexandria:when-let ((buffer (window-buffer window)))
+          (search "S-arrows" (buffer-text buffer))))
+      (lem-core::frame-floating-windows (current-frame)))
+     (notes-test-yes-no (uiop:probe-file* target))
+     (notes-test-yes-no (get-file-buffer target))
+     (or (org-parse-date-input "sep 15 2026") "none"))))
+
 (setf lem-yath::*org-capture-time-function* #'notes-test-fixed-time
       lem-yath::*org-capture-id-function* #'notes-test-fixed-id)
 
@@ -348,6 +367,7 @@
 (define-key *global-keymap* "F7" 'lem-yath-test-notes-target-state)
 (define-key *global-keymap* "F8" 'lem-yath-test-notes-reload)
 (define-key *global-keymap* "F9" 'lem-yath-test-notes-toggle-occupied-capture)
+(define-key *global-keymap* "F10" 'lem-yath-test-notes-daily-state)
 
 (lem-yath-test-notes-reset-origin)
 (notes-test-report "READY boot=~a"

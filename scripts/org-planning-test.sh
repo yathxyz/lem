@@ -38,7 +38,7 @@ fail() {
 
 mx() {
   local command="$1"
-  tmux_cmd send-keys -t "$session" Escape Escape M-x
+  tmux_cmd send-keys -t "$session" M-x
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.3
@@ -72,9 +72,24 @@ else
   fail bindings 'one or both planning chords did not resolve'
 fi
 
+if mx lem-yath-test-org-date-static &&
+   lem_wait_for "$session" 'Org date static passed' 10 >/dev/null &&
+   grep -q '^PASS$' "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/date-static"; then
+  pass date-parser 'named, partial, relative, ISO-week, and invalid forms match Org semantics'
+else
+  fail date-parser "shared date parser diverged: $(cat "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/date-static" 2>/dev/null)"
+fi
+
 tmux_cmd send-keys -t "$session" C-c C-s
 if lem_wait_for "$session" 'Schedule date \[2026-07-15\]' 10 >/dev/null; then
-  tmux_cmd send-keys -t "$session" -l '+2d'
+  if lem_capture "$session" | grep -q 'June 2026' &&
+     lem_capture "$session" | grep -q 'July 2026' &&
+     lem_capture "$session" | grep -q 'August 2026'; then
+    pass calendar-popup 'the date prompt displays the surrounding three months'
+  else
+    fail calendar-popup 'the three-month calendar was absent or clipped'
+  fi
+  tmux_cmd send-keys -t "$session" -l 'fri'
   tmux_cmd send-keys -t "$session" Enter
 else
   fail schedule-prompt 'C-c C-s did not open the date prompt'
@@ -106,7 +121,7 @@ fi
 
 tmux_cmd send-keys -t "$session" C-c C-s
 if lem_wait_for "$session" 'Schedule date \[2026-07-17\]' 10 >/dev/null; then
-  tmux_cmd send-keys -t "$session" -l '++1m'
+  tmux_cmd send-keys -t "$session" -l '>'
   tmux_cmd send-keys -t "$session" Enter
 else
   fail reschedule-prompt 'existing schedule did not reopen the date prompt'
@@ -116,7 +131,7 @@ if snapshot 3 &&
    grep -q '^DEADLINE: <2026-07-22 Wed> SCHEDULED: <2026-08-17 Mon>$' \
      "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-3" &&
    test "$(grep -o 'SCHEDULED:' "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/state-3" | wc -l)" -eq 1; then
-  pass reschedule 'double-relative input replaces the existing field once'
+  pass reschedule 'calendar month motion replaces the existing field once'
 else
   fail reschedule 'existing scheduling was duplicated or miscomputed'
 fi
@@ -157,6 +172,12 @@ if snapshot 6 &&
   pass default 'an empty submission accepts the bracketed existing date'
 else
   fail default 'empty date submission did not retain the displayed default'
+fi
+if grep -q '^active=NORMAL buffer=NORMAL$' \
+     "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/mode-6"; then
+  pass prompt-state 'the date prompt restored the source buffer to Normal state'
+else
+  fail prompt-state "date prompt state diverged: $(cat "$LEM_YATH_ORG_PLANNING_SNAPSHOTS/mode-6" 2>/dev/null)"
 fi
 
 tmux_cmd send-keys -t "$session" C-z

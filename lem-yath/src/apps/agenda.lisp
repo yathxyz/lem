@@ -804,22 +804,13 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
   state)
 
 (defun agenda-read-date (label)
-  "Read a bounded Org date for LABEL, returning DATE and true on success."
-  (loop
-    :for input := (string-trim '(#\Space #\Tab)
-                               (prompt-for-string
-                                (format nil "~a date (YYYY-MM-DD or +Nd/+Nw): "
-                                        label)))
-    :do (cond
-          ((zerop (length input)) (return (values nil nil)))
-          (t
-           (alexandria:if-let
-               ((date
-                  (org-parse-planning-date-input
-                   input :now (funcall *agenda-now-function*))))
-             (return (values date t))
-             (message
-              "Invalid date; use YYYY-MM-DD, ., or +/-N[d/w/m/y]"))))))
+  "Read an Org-style date for LABEL, returning DATE and true on success."
+  (values
+   (org-read-date-prompt
+    (format nil "~a date" label)
+    :default-date (org-date-today (funcall *agenda-now-function*))
+    :now (funcall *agenda-now-function*))
+   t))
 
 (defun agenda-set-source-planning (file line expected-heading kind date)
   "Set one exact agenda source planning KIND to DATE and save immediately."

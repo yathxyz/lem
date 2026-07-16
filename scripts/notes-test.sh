@@ -231,6 +231,26 @@ else
   fail capture-reload-reopen 'post-reload selector did not open'
 fi
 
+record_key F5 '^ORIGIN ' || fail daily-date 'could not reset the daily-note origin'
+lem_keys "$session" Space n r d d
+if lem_wait_for "$session" 'Find daily-note \[[0-9]{4}-[0-9]{2}-[0-9]{2}\]' 10 >/dev/null &&
+   lem_wait_for "$session" 'S-arrows.*C-\.: today' 10 >/dev/null; then
+  pass daily-calendar 'SPC n r d d opened the Org-style terminal calendar'
+else
+  fail daily-calendar 'the daily-note key path did not display its date calendar'
+fi
+lem_keys "$session" -l 'sep 15 2026'
+sleep 0.8
+lem_keys "$session" Enter
+sleep 1
+if record_key F10 '^DAILY ' &&
+   report_is '^DAILY ' \
+     'DAILY file=2026-09-15.org title=yes state=NORMAL prompt=no calendars=0 exists=no visited=yes parsed=2026-09-15'; then
+  pass daily-date 'named-date input created the configured daily note and cleaned up the popup'
+else
+  fail daily-date 'daily named-date creation, state restoration, or popup cleanup diverged'
+fi
+
 if [ "$failed" -ne 0 ]; then
   tail -n 50 "$LEM_YATH_NOTES_REPORT" >&2 || true
   lem_capture "$session" >&2 || true
