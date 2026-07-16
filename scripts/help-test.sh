@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Real-ncurses coverage for Helpful-style typed symbol selection.
+# Real-ncurses coverage for typed Helpful inspection and source navigation.
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,7 +9,9 @@ export HOME="$root/home"
 export WORKDIR="$root/work"
 export LEM_YATH_COMPLETION_STATE_FILE="$root/completion-ranking.sexp"
 export LEM_YATH_HELP_SOURCE="${LEM_YATH_HELP_SOURCE:-$here/lem-yath/src/help.lisp}"
+export LEM_YATH_HELP_REPORT="$root/report"
 mkdir -p "$HOME" "$WORKDIR/roam"
+: >"$LEM_YATH_HELP_REPORT"
 
 source "$here/scripts/tui-driver.sh"
 
@@ -20,7 +22,8 @@ cleanup() {
   lem_stop "$session"
   rm -rf "$root"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 pass() { printf 'PASS  %-26s %s\n' "$1" "$2"; }
 fail() {
@@ -39,12 +42,41 @@ open_help_prompt() {
   lem_wait_for "$session" "$prompt" 20 >/dev/null
 }
 
-fixture="$(lem-yath_lisp_string "$here/scripts/help-fixture.lisp")"
+return_to_origin() {
+  lem_keys "$session" Escape
+  sleep 0.2
+  lem_keys "$session" F7
+  lem_wait_for "$session" 'ZYZZYVA-HELP-ORIGIN' 10 >/dev/null
+}
+
+wait_report() {
+  local pattern=$1 timeout=${2:-10} index=0
+  while ((index < timeout * 4)); do
+    if grep -qE "$pattern" "$LEM_YATH_HELP_REPORT" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+report_state() {
+  local pattern=$1
+  : >"$LEM_YATH_HELP_REPORT"
+  lem_keys "$session" F5
+  wait_report "$pattern" 10
+}
+
+fixture_path="$root/help-fixture.lisp"
+cp "$here/scripts/help-fixture.lisp" "$fixture_path"
+fixture="$(lem-yath_lisp_string "$fixture_path")"
 lem_start_lem-yath_eval "$session" "(load #P$fixture)"
-if lem_wait_for "$session" 'NORMAL|Dashboard' 40 >/dev/null; then
-  pass boot 'configured Lem loaded the help fixture'
+if lem_wait_for "$session" 'ZYZZYVA-HELP-ORIGIN' 40 >/dev/null &&
+   lem_wait_for "$session" 'NORMAL' 10 >/dev/null; then
+  pass boot 'configured Lem loaded the isolated help fixture'
 else
-  fail boot 'Lem did not reach the dashboard' "$session"
+  fail boot 'Lem did not reach the stable origin buffer' "$session"
 fi
 
 if open_help_prompt k 'Callable:'; then
@@ -62,15 +94,94 @@ if open_help_prompt k 'Callable:'; then
     fail callable-metadata 'the callable row lacked typed Marginalia fields' "$session"
   fi
   lem_keys "$session" Enter
-  if lem_wait_for "$session" 'Zyzzyva-callable-documentation' 10 >/dev/null; then
-    pass callable-selection 'Return described the exact non-command function'
+  if lem_wait_for "$session" 'Helpful: q quit' 30 >/dev/null; then
+    screen=$(lem_capture "$session")
+    if grep -Fq 'Source' <<<"$screen" &&
+       grep -Fq 'Callers (' <<<"$screen" &&
+       grep -Fq 'LEM-YATH::LEM-YATH-HELP-TEST-CALLER' <<<"$screen"; then
+      pass callable-selection 'Return opened source-backed callable help with callers'
+    else
+      fail callable-selection 'callable help lacked source or caller rows' "$session"
+    fi
   else
     fail callable-selection 'Return did not open the selected callable' "$session"
   fi
-  lem_keys "$session" Space
-  sleep 0.5
+
+  touch -d '2031-01-02 03:04:05 UTC' "$fixture_path"
+  lem_keys "$session" s
+  if lem_wait_for "$session" 'Helpful source changed; press g to refresh' 10 >/dev/null; then
+    pass stale-source 'a changed source invalidated the rendered location'
+  else
+    fail stale-source 's followed a stale source offset' "$session"
+  fi
+  lem_keys "$session" g
+  sleep 0.8
+  lem_keys "$session" s
+  sleep 0.8
+  if report_state '^HELP-STATE buffer=help-fixture\.lisp .* token=callable$'; then
+    pass source-refresh 'g rebuilt locations and s reached the exact definition'
+  else
+    fail source-refresh 'refresh did not restore the callable source jump' "$session"
+  fi
+  return_to_origin
 else
   fail callable-binding 'SPC h k did not open the callable prompt' "$session"
+fi
+
+if open_help_prompt k 'Callable:'; then
+  tmux_cmd send-keys -t "$session" -l 'lem-yath::lem-yath-help-test-callabl'
+  sleep 0.7
+  lem_keys "$session" Enter
+  if lem_wait_for "$session" 'Helpful: q quit' 30 >/dev/null &&
+     lem_wait_for "$session" 'Callers \(' 10 >/dev/null; then
+    lem_keys "$session" n
+    if report_state 'location=LEM-YATH::LEM-YATH-HELP-TEST-CALLABLE token=other$'; then
+      lem_keys "$session" n
+      if report_state 'location=LEM-YATH::LEM-YATH-HELP-TEST-CALLER token=caller$'; then
+        lem_keys "$session" Enter
+        sleep 0.8
+        if report_state '^HELP-STATE buffer=help-fixture\.lisp .* token=caller$'; then
+          pass caller-navigation 'n and RET visited the exact caller definition'
+        else
+          fail caller-navigation 'RET did not visit the selected caller' "$session"
+        fi
+      else
+        fail caller-navigation 'the second n did not select the caller row' "$session"
+      fi
+    else
+      fail caller-navigation 'the first n did not select the definition row' "$session"
+    fi
+  else
+    fail caller-navigation 'callable help did not expose caller rows' "$session"
+  fi
+  return_to_origin
+else
+  fail caller-navigation 'could not reopen callable help for navigation' "$session"
+fi
+
+if open_help_prompt k 'Callable:'; then
+  tmux_cmd send-keys -t "$session" -l 'lem-yath::lem-yath-help-test-callabl'
+  sleep 0.7
+  lem_keys "$session" Enter
+  if lem_wait_for "$session" 'Helpful: q quit' 30 >/dev/null; then
+    lem_keys "$session" p
+    if report_state 'location=LEM-YATH::LEM-YATH-HELP-TEST-CALLER token=caller$'; then
+      lem_keys "$session" BTab
+      if report_state 'location=LEM-YATH::LEM-YATH-HELP-TEST-CALLABLE token=other$'; then
+        pass reverse-navigation 'p wrapped backward and S-Tab returned to source'
+      else
+        fail reverse-navigation 'S-Tab did not select the previous source row' "$session"
+      fi
+    else
+      fail reverse-navigation 'p did not wrap to the final caller row' "$session"
+    fi
+    lem_keys "$session" q
+    sleep 0.5
+  else
+    fail reverse-navigation 'callable help did not open for reverse navigation' "$session"
+  fi
+else
+  fail reverse-navigation 'could not reopen callable help for reverse navigation' "$session"
 fi
 
 if open_help_prompt k 'Callable:'; then
@@ -98,13 +209,36 @@ if open_help_prompt v 'Variable:'; then
     fail variable-metadata 'the variable row lacked typed Marginalia fields' "$session"
   fi
   lem_keys "$session" Enter
-  if lem_wait_for "$session" 'Zyzzyva-variable-documentation' 10 >/dev/null; then
-    pass variable-selection 'Return described the exact variable'
+  if lem_wait_for "$session" 'Helpful: q quit' 30 >/dev/null; then
+    screen=$(lem_capture "$session")
+    if grep -Fq 'Source' <<<"$screen" &&
+       grep -Fq 'References (' <<<"$screen" &&
+       grep -Fq 'LEM-YATH::LEM-YATH-HELP-TEST-READER' <<<"$screen"; then
+      pass variable-selection 'Return opened source-backed variable help with references'
+    else
+      fail variable-selection 'variable help lacked source or reference rows' "$session"
+    fi
+    lem_keys "$session" Tab
+    if report_state 'location=LEM-YATH::\*LEM-YATH-HELP-TEST-VALUE\* token=other$'; then
+      lem_keys "$session" Tab
+      if report_state 'location=LEM-YATH::LEM-YATH-HELP-TEST-READER token=reader$'; then
+        lem_keys "$session" Enter
+        sleep 0.8
+        if report_state '^HELP-STATE buffer=help-fixture\.lisp .* token=reader$'; then
+          pass reference-navigation 'Tab and RET visited the exact variable reader'
+        else
+          fail reference-navigation 'RET did not visit the selected variable reader' "$session"
+        fi
+      else
+        fail reference-navigation 'the second Tab did not select the reference row' "$session"
+      fi
+    else
+      fail reference-navigation 'the first Tab did not select the definition row' "$session"
+    fi
   else
     fail variable-selection 'Return did not open the selected variable' "$session"
   fi
-  lem_keys "$session" Space
-  sleep 0.5
+  return_to_origin
 else
   fail variable-binding 'SPC h v did not open the variable prompt' "$session"
 fi
@@ -117,14 +251,14 @@ if open_help_prompt v 'Variable:'; then
   if grep -Fq '*****' <<<"$screen" &&
      ! grep -Fq 'ZYZZYVA-SECRET-MUST-NEVER-RENDER' <<<"$screen"; then
     lem_keys "$session" Enter
-    sleep 0.5
+    lem_wait_for "$session" 'Helpful: q quit' 30 >/dev/null
     if lem_capture "$session" | grep -Fq '*****' &&
        ! lem_capture "$session" | grep -Fq 'ZYZZYVA-SECRET-MUST-NEVER-RENDER'; then
       pass secret-censoring 'credential values stayed hidden in prompt and help buffer'
     else
       fail secret-censoring 'the final help buffer exposed a credential value' "$session"
     fi
-    lem_keys "$session" Space
+    lem_keys "$session" q
     sleep 0.5
   else
     fail secret-censoring 'the completion row exposed or omitted the censored value' "$session"
@@ -137,26 +271,84 @@ if open_help_prompt v 'Variable:'; then
   tmux_cmd send-keys -t "$session" -l 'lem-yath-help-other::*lem-yath-help-test-value*'
   sleep 1
   lem_keys "$session" Enter
-  if lem_wait_for "$session" 'Zyzzyva-other-package-documentation' 10 >/dev/null &&
+  if lem_wait_for "$session" 'Helpful: q quit' 30 >/dev/null &&
+     lem_wait_for "$session" 'Zyzzyva-other-package-documentation' 10 >/dev/null &&
      lem_capture "$session" | grep -Fq 'OTHER-PACKAGE-VALUE'; then
     pass qualified-identity 'same-named symbols remained package-distinct'
   else
     fail qualified-identity 'qualified selection resolved the wrong symbol' "$session"
   fi
-  lem_keys "$session" Space
+  lem_keys "$session" q
   sleep 0.5
 else
   fail qualified-identity 'could not reopen the variable prompt' "$session"
 fi
 
-lem_keys "$session" Escape
-sleep 0.2
-lem_keys "$session" F8
-if lem_wait_for "$session" 'HELP-RELOADED' 10 >/dev/null &&
-   open_help_prompt k 'Callable:'; then
-  pass reload 'source reload retained the exact leader workflow'
+return_to_origin
+if open_help_prompt k 'Callable:'; then
+  tmux_cmd send-keys -t "$session" -l 'lem-yath::lem-yath-help-test-callabl'
+  sleep 0.7
+  lem_keys "$session" Enter
+  lem_wait_for "$session" 'Helpful: q quit' 30 >/dev/null
+  lem_keys "$session" q
+  sleep 0.5
+  if report_state '^HELP-STATE buffer=\*Help Origin\* .* position=1:8 .* token=origin$'; then
+    pass quit-window 'q restored the exact originating buffer and point'
+  else
+    fail quit-window 'q did not restore the originating window' "$session"
+  fi
 else
-  fail reload 'source reload broke the callable workflow' "$session"
+  fail quit-window 'could not open help for quit-window coverage' "$session"
+fi
+
+return_to_origin
+lem_keys "$session" Space h K
+if lem_wait_for "$session" 'Helpful key:' 10 >/dev/null; then
+  lem_keys "$session" F5
+  if lem_wait_for "$session" 'Zyzzyva-key-command-documentation' 10 >/dev/null; then
+    screen=$(lem_capture "$session")
+    if grep -Fq 'Key: F5' <<<"$screen" &&
+       grep -Fq 'Type: command' <<<"$screen" &&
+       grep -Fq 'Source' <<<"$screen"; then
+      pass key-inspection 'SPC h K resolved F5 into the same navigable command help'
+    else
+      fail key-inspection 'key help omitted the key, command type, or source' "$session"
+    fi
+    lem_keys "$session" q
+    sleep 0.5
+  else
+    fail key-inspection 'SPC h K did not inspect the resolved command' "$session"
+  fi
+else
+  fail key-inspection 'SPC h K did not begin key capture' "$session"
+fi
+
+return_to_origin
+if open_help_prompt k 'Callable:'; then
+  tmux_cmd send-keys -t "$session" -l 'lem-yath::lem-yath-help-test-callabl'
+  sleep 0.7
+  lem_keys "$session" Enter
+  lem_wait_for "$session" 'Helpful: q quit' 30 >/dev/null
+  lem_keys "$session" F8
+  if lem_wait_for "$session" 'HELP-RELOADED' 10 >/dev/null; then
+    if report_state '^HELP-STATE buffer=\*Callable Help\* mode=LEM-YATH-HELP-MODE modes=1 '; then
+      lem_keys "$session" g
+      sleep 0.8
+      lem_keys "$session" q
+      sleep 0.5
+      if report_state '^HELP-STATE buffer=\*Help Origin\* .* position=1:8 .* token=origin$'; then
+        pass reload 'reload retained one active mode plus refresh and quit behavior'
+      else
+        fail reload 'the reloaded help mode lost its originating window' "$session"
+      fi
+    else
+      fail reload 'reload duplicated or detached the active help mode' "$session"
+    fi
+  else
+    fail reload 'source reload did not complete in the active help buffer' "$session"
+  fi
+else
+  fail reload 'could not open callable help for reload coverage' "$session"
 fi
 
 if ((failed)); then

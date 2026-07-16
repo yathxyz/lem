@@ -424,10 +424,21 @@ and documentation. Variable names matching Marginalia's credential patterns are
 censored in both the candidate row and final help buffer. Selection preserves
 package identity without reading prompt text as Lisp, while Prescient compiles
 each regexp component once per candidate batch so the larger symbol tables remain
-responsive. `scripts/help-test.sh` drives both leader chords through ncurses and
-verifies non-command callables, exact same-name package selection, display-only
-metadata, secret censoring, and reload. Helpful source links, references, callers,
-and richer cross-reference navigation remain gaps.
+responsive.
+
+Accepted callables and variables open an ordinary read-only `Helpful` buffer.
+SB-INTROSPECT supplies definition, caller, and reference records; when SBCL only
+retains a top-level form path, a non-evaluating source reader derives the exact
+character offset. `n`/`p` and `Tab`/backtab traverse source-backed rows cyclically,
+Return visits one, `s` visits the main definition, `g` rebuilds the snapshot, and
+`q` restores the originating window. Every jump enters Lem's location stack and
+Vi jumplist, and a source timestamp change fails closed until refresh. `SPC h K`
+reads a physical key and opens its resolved command through the same buffer;
+`SPC h b` keeps Lem's binding list. `scripts/help-test.sh` physically covers all
+of these paths, same-name package selection, display-only metadata, secret
+censoring, exact form jumps, and live reload. Helpful's advice, disassembly,
+debugging/customization sections, syntax-highlighted embedded source, and
+semantic button graph remain outside this approximation.
 
 Lem-yath carries `patches/lem-completion-lifecycle.patch`,
 `patches/lem-completion-detail-accessor.patch`, and

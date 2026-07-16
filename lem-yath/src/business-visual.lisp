@@ -20,7 +20,8 @@
     lem-markdown-mode:markdown-mode
     notmuch-show-mode
     lem-yath-feed-entry-mode
-    devdocs-mode)
+    devdocs-mode
+    lem-yath-help-mode)
   "Lem major-mode classes corresponding to Emacs business document modes.")
 
 (defparameter *business-document-text-types* '("txt" "text")

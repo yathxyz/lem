@@ -104,7 +104,7 @@
   ;; help (helpful)
   ("h k" 'lem-yath-describe-callable)       ; SPC h k
   ("h v" 'lem-yath-describe-variable)       ; SPC h v
-  ("h K" 'describe-key)                     ; SPC h K
+  ("h K" 'lem-yath-describe-key)            ; SPC h K
   ("h d" 'lem-yath-devdocs-lookup)          ; SPC h d
   ("h b" 'describe-bindings)                ; SPC h b
 

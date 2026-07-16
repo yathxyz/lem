@@ -91,7 +91,7 @@ else
   fail presentation "theme, modeline, cursor, or rendered document geometry diverged"
 fi
 
-if wait_report '^PREDICATES org=yes markdown=yes epub=yes notmuch=yes feed=yes devdocs=yes text=yes pdf=no search=no lisp=no$'; then
+if wait_report '^PREDICATES org=yes markdown=yes epub=yes notmuch=yes feed=yes devdocs=yes help=yes text=yes pdf=no search=no lisp=no$'; then
   pass mode-boundary "document modes were included without styling code, lists, or PDFs"
 else
   fail mode-boundary "business document mode classification was too broad or incomplete"

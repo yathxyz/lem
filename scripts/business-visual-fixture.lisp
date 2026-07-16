@@ -88,7 +88,7 @@
    (concatenate
     'string
     "PREDICATES org=~a markdown=~a epub=~a notmuch=~a feed=~a "
-    "devdocs=~a text=~a pdf=~a search=~a lisp=~a")
+    "devdocs=~a help=~a text=~a pdf=~a search=~a lisp=~a")
    (business-visual-test-yes-no
     (business-visual-test-predicate 'org-mode))
    (business-visual-test-yes-no
@@ -101,6 +101,8 @@
     (business-visual-test-predicate 'lem-yath-feed-entry-mode))
    (business-visual-test-yes-no
     (business-visual-test-predicate 'devdocs-mode))
+   (business-visual-test-yes-no
+    (business-visual-test-predicate 'lem-yath-help-mode))
    (business-visual-test-yes-no
     (business-visual-test-predicate
      nil #P"/tmp/business-document.txt"))

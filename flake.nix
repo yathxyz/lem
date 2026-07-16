@@ -627,6 +627,7 @@
               }
               ''
                 export TERM=xterm-256color
+                export LC_ALL=C.UTF-8
                 export HOME=$TMPDIR/home
                 export XDG_CACHE_HOME=$TMPDIR/cache
                 export LEM_BIN=${lemPackage}/bin/lem
@@ -656,6 +657,7 @@
               }
               ''
                 export TERM=xterm-256color
+                export LC_ALL=C.UTF-8
                 export HOME=$TMPDIR/home
                 export XDG_CACHE_HOME=$TMPDIR/cache
                 export LEM_BIN=${lemYath}/bin/lem
