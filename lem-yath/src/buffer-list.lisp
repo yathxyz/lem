@@ -2204,6 +2204,239 @@ through later selected buffers without wrapping."
 (define-command lem-yath-buffer-list-multi-isearch-regexp () ()
   (buffer-list-multi-isearch-start t))
 
+(defvar *buffer-list-query-replace-before* nil)
+(defvar *buffer-list-query-replace-after* nil)
+
+(defun buffer-list-query-replace-read-args (regexp-p)
+  (let* ((label (if regexp-p "Query replace regexp" "Query replace"))
+         (before
+           (prompt-for-string
+            (if *buffer-list-query-replace-before*
+                (format nil "~a (default ~s): "
+                        label *buffer-list-query-replace-before*)
+                (format nil "~a: " label)))))
+    (when (zerop (length before))
+      (unless *buffer-list-query-replace-before*
+        (editor-error "Query-replace search string is empty"))
+      (return-from buffer-list-query-replace-read-args
+        (values *buffer-list-query-replace-before*
+                *buffer-list-query-replace-after*)))
+    (let ((after
+            (prompt-for-string
+             (format nil "~a ~s with: " label before))))
+      (setf *buffer-list-query-replace-before* before
+            *buffer-list-query-replace-after* after)
+      (values before after))))
+
+(defun buffer-list-query-replace-preflight (buffers)
+  (unless buffers
+    (editor-error "No buffer on this Ibuffer row"))
+  (dolist (buffer buffers)
+    (unless (buffer-list-multi-isearch-live-buffer-p buffer)
+      (editor-error "Ibuffer query-replace source was killed"))
+    (when (buffer-read-only-p buffer)
+      (editor-error "Ibuffer query-replace source is read-only: ~a"
+                    (completion-path-display-string (buffer-name buffer))))))
+
+(defun buffer-list-query-replace-empty-regexp-match-p (scanner buffers)
+  (dolist (buffer buffers)
+    (with-point ((point (buffer-start-point buffer)))
+      (loop
+        (let* ((text (line-string point))
+               (length (length text))
+               (offset 0)
+               (end-probed-p nil))
+          (loop
+            (multiple-value-bind (start end)
+                (cl-ppcre:scan scanner text :start offset)
+              (unless start
+                (return))
+              (when (= start end)
+                (return-from
+                  buffer-list-query-replace-empty-regexp-match-p t))
+              (cond
+                ((< end length)
+                 (setf offset end))
+                (end-probed-p
+                 (return))
+                (t
+                 ;; Probe once at EOL as well: a regexp such as `a|$' can
+                 ;; first consume the line and then match an empty suffix.
+                 (setf offset length
+                       end-probed-p t))))))
+        (unless (line-offset point 1)
+          (return)))))
+  nil)
+
+(defun buffer-list-query-replace-regexp-scanner (pattern buffers)
+  (let ((scanner
+          (handler-case
+              (cl-ppcre:create-scanner pattern :case-insensitive-mode t)
+            (error () nil))))
+    (unless scanner
+      (editor-error "Invalid Ibuffer query-replace regexp"))
+    (when (buffer-list-query-replace-empty-regexp-match-p scanner buffers)
+      (editor-error
+       "Ibuffer query-replace refuses a regexp with empty matches"))
+    scanner))
+
+(defun buffer-list-query-replace-response (before after)
+  (loop
+    :for response :=
+      (prompt-for-character
+       (format nil "Replace ~s with ~s [y/n/!/q/.]" before after))
+    :do
+       (cond
+         ((or (char-equal response #\y)
+              (char= response #\Space))
+          (return :replace))
+         ((or (char-equal response #\n)
+              (char= response #\Backspace)
+              (= (char-code response) 127))
+          (return :skip))
+         ((char= response #\!)
+          (return :replace-rest))
+         ((or (char-equal response #\q)
+              (char= response #\Newline)
+              (char= response #\Return)
+              (= (char-code response) 27))
+          (return :exit))
+         ((char= response #\.)
+          (return :replace-and-exit))
+         ((char= response #\?)
+          (message
+           "y/Space replace; n/Backspace skip; ! rest of this buffer; q/Return exit this buffer; . replace and exit"))
+         (t
+          (message "Unsupported query-replace response: ~s" response)))))
+
+(defun buffer-list-query-replace-buffer
+    (buffer before after forward-function backward-function)
+  (with-current-buffer buffer
+    (let ((lem/isearch::*isearch-search-forward-function* forward-function)
+          (lem/isearch::*isearch-search-backward-function* backward-function)
+          (replace-rest-p nil)
+          (replacement-count 0))
+      (buffer-undo-boundary buffer)
+      (unwind-protect
+          (with-point ((cursor (buffer-start-point buffer) :left-inserting)
+                       (goal (buffer-end-point buffer) :right-inserting))
+            (lem/isearch::highlight-region cursor goal before)
+            (loop
+              (unless (funcall forward-function cursor before)
+                (return replacement-count))
+              (when (point< goal cursor)
+                (return replacement-count))
+              (with-point ((end cursor :right-inserting))
+                (unless (funcall backward-function cursor before)
+                  (error "Ibuffer query-replace could not recover match start"))
+                (with-point ((start cursor :right-inserting))
+                  (when (point= start end)
+                    (editor-error
+                     "Ibuffer query-replace encountered an empty match"))
+                  (let ((response
+                          (if replace-rest-p
+                              :replace
+                              (save-excursion
+                                (move-point (current-point) cursor)
+                                (lem/isearch::activate-current-highlight cursor)
+                                (redraw-display)
+                                (buffer-list-query-replace-response
+                                 before after)))))
+                    (case response
+                      (:skip
+                       (move-point cursor end))
+                      (:exit
+                       (return replacement-count))
+                      ((:replace :replace-rest :replace-and-exit)
+                       (when (eq response :replace-rest)
+                         (setf replace-rest-p t))
+                       (delete-between-points start end)
+                       (insert-string cursor after)
+                       (incf replacement-count)
+                       (when (eq response :replace-and-exit)
+                         (return replacement-count)))))))))
+        (lem/isearch::isearch-reset-overlays buffer)
+        (buffer-undo-boundary buffer)))))
+
+(defun buffer-list-query-replace-restore-picker
+    (component source-window source-buffer source-point source-view-point
+     focused-buffer focused-index)
+  (unless (and source-window (not (deleted-window-p source-window)))
+    (editor-error "Ibuffer source window was deleted during query-replace"))
+  (setf (current-window) source-window)
+  (when (buffer-list-multi-isearch-live-buffer-p source-buffer)
+    (switch-to-buffer source-buffer)
+    (when (alive-point-p source-point)
+      (move-point (current-point) source-point))
+    (when (alive-point-p source-view-point)
+      (move-point (window-view-point source-window) source-view-point)))
+  (buffer-list-reset-visible-items component)
+  (lem/multi-column-list:display component)
+  (buffer-list-filter-input-mode nil)
+  (buffer-list-picker-mode t)
+  (unless (buffer-list-focus-buffer component focused-buffer)
+    (buffer-list-focus-index component focused-index)))
+
+(defun buffer-list-query-replace-run (regexp-p)
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (focused-buffer (buffer-list-current-buffer component))
+         (focused-index
+           (or (position (buffer-list-current-item component)
+                         (lem/multi-column-list::multi-column-list-items component)
+                         :test #'eq)
+               0))
+         (buffers (buffer-list-action-buffers component))
+         (source-window (buffer-list-source-window component))
+         (source-buffer (window-buffer source-window))
+         (source-point (copy-point (window-point source-window) :temporary))
+         (source-view-point
+           (copy-point (window-view-point source-window) :temporary)))
+    (buffer-list-query-replace-preflight buffers)
+    (multiple-value-bind (before after)
+        (buffer-list-query-replace-read-args regexp-p)
+      (let ((scanner
+              (and regexp-p
+                   (buffer-list-query-replace-regexp-scanner
+                    before buffers)))
+            (replacement-count 0)
+            (processed-count 0))
+        ;; Hide the floating chooser while matches are displayed.  The same
+        ;; component is rebuilt in the unwind path with marks and focus intact.
+        (lem/multi-column-list:quit component)
+        (unwind-protect
+            (dolist (buffer buffers)
+              (unless (buffer-list-multi-isearch-live-buffer-p buffer)
+                (editor-error "Ibuffer query-replace source was killed"))
+              (with-current-window source-window
+                (switch-to-buffer buffer)
+                (buffer-start (current-point))
+                (incf replacement-count
+                      (if scanner
+                          (flet ((forward (point _pattern &optional limit)
+                                   (declare (ignore _pattern))
+                                   (search-forward-regexp point scanner limit))
+                                 (backward (point _pattern &optional limit)
+                                   (declare (ignore _pattern))
+                                   (search-backward-regexp point scanner limit)))
+                            (buffer-list-query-replace-buffer
+                             buffer before after #'forward #'backward))
+                          (let ((lem/buffer/internal::*case-fold-search* nil))
+                            (buffer-list-query-replace-buffer
+                             buffer before after
+                             #'search-forward #'search-backward))))
+                (incf processed-count)))
+          (buffer-list-query-replace-restore-picker
+           component source-window source-buffer source-point source-view-point
+           focused-buffer focused-index))
+        (message "Query replace finished; ~d replacement~:p in ~d buffer~:p"
+                 replacement-count processed-count)))))
+
+(define-command lem-yath-buffer-list-query-replace () ()
+  (buffer-list-query-replace-run nil))
+
+(define-command lem-yath-buffer-list-query-replace-regexp () ()
+  (buffer-list-query-replace-run t))
+
 (defun buffer-list-move-to-marked (component direction)
   (let* ((items (lem/multi-column-list::multi-column-list-items component))
          (current (buffer-list-current-item component))
@@ -2717,6 +2950,10 @@ through later selected buffers without wrapping."
   'lem-yath-buffer-list-view-horizontally)
 (define-key *buffer-list-picker-mode-keymap* "O"
   'lem-yath-buffer-list-occur)
+(define-key *buffer-list-picker-mode-keymap* "Q"
+  'lem-yath-buffer-list-query-replace)
+(define-key *buffer-list-picker-mode-keymap* "I"
+  'lem-yath-buffer-list-query-replace-regexp)
 (define-key *buffer-list-picker-mode-keymap* "M-s a C-o"
   'lem-yath-buffer-list-occur)
 (define-key *buffer-list-picker-mode-keymap* "M-s a C-s"

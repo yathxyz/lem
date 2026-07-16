@@ -307,6 +307,36 @@ report_multi_isearch_lifecycle() {
   return 1
 }
 
+report_query_state() {
+  local before attempts=0
+  before=$(grep -c '^QUERY ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F5
+  while ((attempts < 40)); do
+    if (( $(grep -c '^QUERY ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^QUERY ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+report_current() {
+  local before attempts=0
+  before=$(grep -c '^CURRENT ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F6
+  while ((attempts < 40)); do
+    if (( $(grep -c '^CURRENT ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^CURRENT ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
 report_occur_bindings() {
   local before attempts=0
   before=$(grep -c '^OCCUR-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
@@ -1325,8 +1355,8 @@ if [[ "$picker_bindings" == *'group-jump=LEM-YATH-BUFFER-LIST-JUMP-TO-GROUP'* ]]
    [[ "$picker_bindings" == *'other-noselect=LEM-YATH-BUFFER-LIST-VISIT-OTHER-WINDOW-NOSELECT'* ]] &&
    [[ "$picker_bindings" == *'one-window=LEM-YATH-BUFFER-LIST-VISIT-ONE-WINDOW'* ]] &&
    [[ "$picker_bindings" == *'view=LEM-YATH-BUFFER-LIST-VIEW view-g=LEM-YATH-BUFFER-LIST-VIEW view-horizontal=LEM-YATH-BUFFER-LIST-VIEW-HORIZONTALLY'* ]] &&
-   [[ "$picker_bindings" == *'occur=LEM-YATH-BUFFER-LIST-OCCUR occur-meta=LEM-YATH-BUFFER-LIST-OCCUR isearch=LEM-YATH-BUFFER-LIST-MULTI-ISEARCH isearch-regexp=LEM-YATH-BUFFER-LIST-MULTI-ISEARCH-REGEXP'* ]]; then
-  pass visit-view-bindings "M-j, visits, views, Occur, and both multi-isearch chords resolve in the picker map"
+   [[ "$picker_bindings" == *'occur=LEM-YATH-BUFFER-LIST-OCCUR occur-meta=LEM-YATH-BUFFER-LIST-OCCUR isearch=LEM-YATH-BUFFER-LIST-MULTI-ISEARCH isearch-regexp=LEM-YATH-BUFFER-LIST-MULTI-ISEARCH-REGEXP query=LEM-YATH-BUFFER-LIST-QUERY-REPLACE query-regexp=LEM-YATH-BUFFER-LIST-QUERY-REPLACE-REGEXP'* ]]; then
+  pass visit-view-bindings "M-j, visits, views, Occur, multi-isearch, and query-replace resolve in the picker map"
 else
   fail visit-view-bindings "one or more visit/view bindings diverged: $picker_bindings"
 fi
@@ -1641,9 +1671,224 @@ else
   fail multi-isearch-abort "regexp abort leaked state or retained the later buffer: $regexp_lifecycle"
 fi
 
+# GNU Ibuffer Q/I use ordinary marks in display order, implicitly mark the
+# current row when needed, and run a fresh query from each buffer's beginning.
+# The picker must disappear while a target is being queried and return with its
+# marks/focus intact afterward.
+lem_keys "$session" F11
+attempts=0
+while ((attempts < 40)) &&
+      ! grep -q '^QUERY-PREPARED$' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null; do
+  sleep 0.25
+  attempts=$((attempts + 1))
+done
+if grep -q '^QUERY-PREPARED$' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null; then
+  pass query-fixture "isolated query-replace buffers were created after layout-sensitive cases"
+else
+  fail query-fixture "query-replace fixture buffers were not created"
+fi
+lem_keys "$session" C-x C-b o a
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-alpha'
+lem_keys "$session" Enter U Q
+if lem_wait_for "$session" 'Query replace:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'foo'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'unchanged'
+  lem_keys "$session" Enter
+  if lem_wait_for "$session" 'Replace "foo" with "unchanged"' 10 >/dev/null; then
+    lem_keys "$session" q
+    if lem_wait_for "$session" 'Query replace finished; 0 replacements in 1 buffer' 10 >/dev/null; then
+      implicit_nav=$(report_nav || true)
+      if [[ "$implicit_nav" == *'buffer-list-query-alpha:>'* ]]; then
+        pass query-current-fallback "unmarked Q implicitly marked and queried only the current row"
+      else
+        fail query-current-fallback "Q did not retain the implicit current-row mark: $implicit_nav"
+      fi
+    else
+      fail query-current-fallback "q did not finish the implicit current-row query"
+    fi
+  else
+    fail query-current-fallback "the implicit current-row query did not reach its first match"
+  fi
+else
+  fail query-current-fallback "Q did not open its literal search prompt"
+fi
+
+# Select two ordinary buffers and one D row.  y/n/! applies within the first
+# buffer; the fresh prompt in beta proves ! did not leak across buffers.  Dot
+# replaces beta's current match and exits that per-buffer query.
+lem_keys "$session" U
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-alpha'
+lem_keys "$session" Enter m
+lem_keys "$session" s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-beta'
+lem_keys "$session" Enter m
+lem_keys "$session" s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-delete'
+lem_keys "$session" Enter d
+lem_keys "$session" s / Q
+if lem_wait_for "$session" 'Query replace' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'foo'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'qux'
+  lem_keys "$session" Enter
+  if lem_wait_for "$session" 'foo alpha one' 10 >/dev/null &&
+     lem_wait_for "$session" 'Replace "foo" with "qux"' 10 >/dev/null; then
+    pass query-visible-first "Q hid Ibuffer and displayed the first marked target at its match"
+  else
+    fail query-visible-first "Q did not visibly query the first display-order mark"
+  fi
+  lem_keys "$session" y n '!'
+  if lem_wait_for "$session" 'foo beta one' 10 >/dev/null &&
+     lem_wait_for "$session" 'Replace "foo" with "qux"' 10 >/dev/null; then
+    pass query-per-buffer-bang "! replaced the first buffer's remainder and prompted afresh in beta"
+  else
+    fail query-per-buffer-bang "! leaked across buffers or beta was not displayed"
+  fi
+  lem_keys "$session" .
+else
+  fail query-visible-first "marked Q did not open its literal search prompt"
+fi
+
+if lem_wait_for "$session" 'Query replace finished; 3 replacements in 2 buffers' 10 >/dev/null; then
+  query_literal=$(report_query_state || true)
+  query_nav=$(report_nav || true)
+  if [[ "$query_literal" == *'alpha=modified:writable:qux alpha one\nFOO alpha two\nqux alpha three\n'* ]] &&
+     [[ "$query_literal" == *'beta=modified:writable:qux beta one\nbar 42\nBAR 99\n'* ]] &&
+     [[ "$query_literal" == *'delete=clean:writable:foo forbidden deletion\nbar 77\n'* ]] &&
+     [[ "$query_nav" == *'buffer-list-query-alpha:>'* ]] &&
+     [[ "$query_nav" == *'buffer-list-query-beta:>'* ]] &&
+     [[ "$query_nav" == *'buffer-list-query-delete:D'* ]]; then
+    pass query-literal-result "literal Q honored y/n/!, case-folding, D exclusion, marks, and picker restoration"
+  else
+    fail query-literal-result "literal Q state diverged: $query_literal / $query_nav"
+  fi
+else
+  fail query-literal-result "literal Q did not finish with the expected replacement count"
+fi
+
+# Each target receives an explicit undo boundary even though the outer command
+# returns to Ibuffer.  One physical Normal u in each target restores all edits
+# made there by the single Q invocation.
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-alpha'
+lem_keys "$session" Enter Enter u
+alpha_undo=$(report_current || true)
+lem_keys "$session" C-x C-b s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-beta'
+lem_keys "$session" Enter Enter u
+beta_undo=$(report_current || true)
+if [[ "$alpha_undo" == *'name=buffer-list-query-alpha'*'text=foo alpha one\nFOO alpha two\nfoo alpha three\n'* ]] &&
+   [[ "$beta_undo" == *'name=buffer-list-query-beta'*'text=foo beta one\nbar 42\nBAR 99\n'* ]]; then
+  pass query-undo "one Normal undo per target restored every replacement from Q"
+else
+  fail query-undo "query-replace edits were not one undo unit per buffer: $alpha_undo / $beta_undo"
+fi
+
+# A read-only source is rejected before prompts or mutations, so a later
+# selected target cannot cause an earlier writable buffer to be changed first.
+lem_keys "$session" C-x C-b U o a
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-alpha'
+lem_keys "$session" Enter m
+lem_keys "$session" s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-read-only'
+lem_keys "$session" Enter m
+lem_keys "$session" s / Q
+if lem_wait_for "$session" 'Ibuffer query-replace source is read-only: buffer-list-query-read-only' 10 >/dev/null; then
+  query_readonly=$(report_query_state || true)
+  if [[ "$query_readonly" == *'alpha=clean:writable:foo alpha one\nFOO alpha two\nfoo alpha three\n'* ]] &&
+     [[ "$query_readonly" == *'readonly=clean:readonly:foo read only\n'* ]]; then
+    pass query-read-only-preflight "Q rejected the complete marked set before changing its writable member"
+  else
+    fail query-read-only-preflight "read-only preflight allowed a partial mutation: $query_readonly"
+  fi
+else
+  fail query-read-only-preflight "Q did not fail closed on a read-only marked buffer"
+fi
+
+# Invalid and empty-matching regexps fail while Ibuffer is still present.  A
+# valid regexp is case-insensitive like ibuffer-case-fold-search; q exits only
+# beta's per-buffer query after the first accepted match.
+lem_keys "$session" U
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-beta'
+lem_keys "$session" Enter I
+if lem_wait_for "$session" 'Query replace regexp' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '*'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'invalid'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Invalid Ibuffer query-replace regexp' 10 >/dev/null; then
+  pass query-invalid-regexp "I refused an invalid regexp without dismissing Ibuffer"
+else
+  fail query-invalid-regexp "I did not reject an invalid regexp"
+fi
+
+lem_keys "$session" I
+if lem_wait_for "$session" 'Query replace regexp' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '^'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'prefix'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Ibuffer query-replace refuses a regexp with empty matches' 10 >/dev/null; then
+  pass query-empty-regexp "I refused an empty-matching regexp before entering its query loop"
+else
+  fail query-empty-regexp "I did not fail closed on an empty-matching regexp"
+fi
+
+lem_keys "$session" I
+if lem_wait_for "$session" 'Query replace regexp' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'bar [0-9]+'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'num'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'bar 42' 10 >/dev/null &&
+   lem_wait_for "$session" 'Replace "bar.*with "num"' 10 >/dev/null; then
+  lem_keys "$session" y
+  if lem_wait_for "$session" 'BAR 99' 10 >/dev/null; then
+    lem_keys "$session" q
+  fi
+fi
+if lem_wait_for "$session" 'Query replace finished; 1 replacement in 1 buffer' 10 >/dev/null; then
+  query_regexp=$(report_query_state || true)
+  if [[ "$query_regexp" == *'beta=modified:writable:foo beta one\nnum\nBAR 99\n'* ]]; then
+    pass query-regexp-result "I matched case-insensitively and q retained the later match"
+  else
+    fail query-regexp-result "regexp query result diverged: $query_regexp"
+  fi
+else
+  fail query-regexp-result "valid I did not complete its y/q lifecycle"
+fi
+
+# Restore beta for the existing Occur and reload cases that follow.
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-beta'
+lem_keys "$session" Enter Enter u
+beta_regexp_undo=$(report_current || true)
+if [[ "$beta_regexp_undo" == *'text=foo beta one\nbar 42\nBAR 99\n'* ]]; then
+  pass query-regexp-undo "one undo restored the regexp query replacement"
+else
+  fail query-regexp-undo "regexp query replacement was not one undo unit: $beta_regexp_undo"
+fi
+
+# Restore the pre-query source-buffer context expected by the Occur window
+# ownership cases below.
+lem_keys "$session" C-x C-b s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-alpha'
+lem_keys "$session" Enter Enter
+
 # GNU Ibuffer's O searches ordinary marks in reverse display order, excludes D,
 # displays *Occur* without selecting it, and retains the chooser and its marks.
-lem_keys "$session" C-x C-b
+lem_keys "$session" C-x C-b o a o i
 lem_keys "$session" s n
 tmux_cmd send-keys -t "$session" -l 'buffer-list-occur-alpha'
 lem_keys "$session" Enter m

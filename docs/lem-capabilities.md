@@ -961,11 +961,22 @@ through the ncurses editor.
   the exact match and records same-kind history, while `C-g` restores the first
   source's starting point; either exit removes transient search modes from all
   sources.
+  Evil Collection's `Q` and `I` run literal or case-insensitive regexp
+  query-replace over ordinary marks in display order, with `D` exclusion and
+  the ordinary implicit-current fallback. The floating chooser is hidden while
+  each target is queried from its beginning and is rebuilt afterward with its
+  source window, point, focus, filters, and marks intact. `y`/Space replaces,
+  `n`/Backspace skips, `!` replaces the rest of the current buffer without
+  leaking into the next, `q`/Return advances, and `.` replaces once before
+  advancing. Each affected target has one undo unit. Read-only target sets,
+  invalid regexps, and regexps with empty matches fail before mutation.
   Lem has no visited-file locking state;
   Ibuffer's process/directory/predicate filters, compound/saved filter
-  operations, mode/age/regexp marking, other-frame, view-and-eval, multi-buffer
-  query-replace, Occur edit/rename/clone, shell, eval, and print operations are
-  not reproduced.
+  operations, mode/age/regexp marking, other-frame, view-and-eval, Occur
+  edit/rename/clone, shell, eval, and print operations are not reproduced.
+  Marked-buffer regexp query-replace inserts literal replacement text and
+  omits GNU backreferences, case transfer, zero-width matching, and the
+  advanced `^`, `u/U`, `e/E`, and recursive-edit response paths.
   CL-PPCRE regexp syntax can differ from Emacs regexp syntax. Content filters
   skip buffers above 16 million characters, and mode completion uses
   package-qualified labels.
@@ -2819,7 +2830,10 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   covers project/file results with immediate source-buffer write-through rather
   than wgrep's staged finish/abort workflow. Lem-yath also adds marked-buffer
   literal and regexp incremental isearch through the effective Evil Collection
-  chords described in §4. Multi-buffer query-replace remains a gap.
+  chords described in §4, plus the marked-buffer literal/regexp query-replace
+  coordinator described there. GNU's richer regexp replacement language,
+  zero-width matching, case transfer, and advanced interactive response map
+  remain gaps.
 - **Multiple cursors**: core support. `src/cursors.lisp` + `src/commands/multiple-cursors.lisp`
   (`add-cursors-to-next-line`, bound `M-C`); isearch can add cursors at matches.
 - **Markdown preview**: yes, `preview` generic in markdown-mode (§8), plus literate

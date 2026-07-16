@@ -16,6 +16,10 @@
 (defvar *buffer-list-test-occur-alpha* nil)
 (defvar *buffer-list-test-occur-beta* nil)
 (defvar *buffer-list-test-occur-delete* nil)
+(defvar *buffer-list-test-query-alpha* nil)
+(defvar *buffer-list-test-query-beta* nil)
+(defvar *buffer-list-test-query-delete* nil)
+(defvar *buffer-list-test-query-read-only* nil)
 
 (define-major-mode buffer-list-test-long-mode ()
     (:name "Long Fixture Mode Name"))
@@ -255,7 +259,7 @@
 (define-command lem-yath-test-buffer-list-picker-bindings () ()
   (let ((windows (window-list)))
     (buffer-list-test-log
-     "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a group-jump=~a other-noselect=~a one-window=~a view=~a view-g=~a view-horizontal=~a occur=~a occur-meta=~a isearch=~a isearch-regexp=~a mode=~a derived=~a starred=~a size-lt=~a size-gt=~a content=~a current-popup=~a ordinary-count=~d ordinary-buffers=~{~a~^,~}"
+     "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a group-jump=~a other-noselect=~a one-window=~a view=~a view-g=~a view-horizontal=~a occur=~a occur-meta=~a isearch=~a isearch-regexp=~a query=~a query-regexp=~a mode=~a derived=~a starred=~a size-lt=~a size-gt=~a content=~a current-popup=~a ordinary-count=~d ordinary-buffers=~{~a~^,~}"
      (buffer-list-test-binding "Backspace")
      (buffer-list-test-binding "C-h")
      (buffer-list-test-binding "Delete")
@@ -272,6 +276,8 @@
      (buffer-list-test-binding "M-s a C-o")
      (buffer-list-test-binding "M-s a C-s")
      (buffer-list-test-binding "M-s a M-C-s")
+     (buffer-list-test-binding "Q")
+     (buffer-list-test-binding "I")
      (buffer-list-test-binding "s Return")
      (buffer-list-test-binding "s M")
      (buffer-list-test-binding "s *")
@@ -456,6 +462,26 @@
                     "multi"
                     "no-multi")))
       buffers))))
+
+(defun buffer-list-test-query-buffer-state (buffer)
+  (format nil "~a:~a:~a"
+          (if (buffer-modified-p buffer) "modified" "clean")
+          (if (buffer-read-only-p buffer) "readonly" "writable")
+          (completion-path-display-string
+           (points-to-string (buffer-start-point buffer)
+                             (buffer-end-point buffer)))))
+
+(define-command lem-yath-test-buffer-list-query-state () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (source-window (buffer-list-source-window component)))
+    (buffer-list-test-log
+     "QUERY source=~a alpha=~a beta=~a delete=~a readonly=~a"
+     (completion-path-display-string
+      (buffer-name (window-buffer source-window)))
+     (buffer-list-test-query-buffer-state *buffer-list-test-query-alpha*)
+     (buffer-list-test-query-buffer-state *buffer-list-test-query-beta*)
+     (buffer-list-test-query-buffer-state *buffer-list-test-query-delete*)
+     (buffer-list-test-query-buffer-state *buffer-list-test-query-read-only*))))
 
 (define-command lem-yath-test-buffer-list-multi-isearch-lifecycle () ()
   (buffer-list-test-log
@@ -714,6 +740,34 @@
  *buffer-list-test-occur-delete*
  (format nil "needle forbidden deletion~%") t)
 
+(define-command lem-yath-test-buffer-list-prepare-query () ()
+  (setf *buffer-list-test-query-alpha*
+        (buffer-list-test-make-buffer
+         'query-alpha "buffer-list-query-alpha"))
+  (buffer-list-test-set-content
+   *buffer-list-test-query-alpha*
+   (format nil "foo alpha one~%FOO alpha two~%foo alpha three~%") t)
+  (setf *buffer-list-test-query-beta*
+        (buffer-list-test-make-buffer
+         'query-beta "buffer-list-query-beta"))
+  (buffer-list-test-set-content
+   *buffer-list-test-query-beta*
+   (format nil "foo beta one~%bar 42~%BAR 99~%") t)
+  (setf *buffer-list-test-query-delete*
+        (buffer-list-test-make-buffer
+         'query-delete "buffer-list-query-delete"))
+  (buffer-list-test-set-content
+   *buffer-list-test-query-delete*
+   (format nil "foo forbidden deletion~%bar 77~%") t)
+  (setf *buffer-list-test-query-read-only*
+        (buffer-list-test-make-buffer
+         'query-read-only "buffer-list-query-read-only"))
+  (buffer-list-test-set-content
+   *buffer-list-test-query-read-only*
+   (format nil "foo read only~%") t)
+  (setf (buffer-read-only-p *buffer-list-test-query-read-only*) t)
+  (buffer-list-test-log "QUERY-PREPARED"))
+
 (define-key lem-vi-mode:*normal-keymap* "F5"
   'lem-yath-test-buffer-list-report)
 (define-key lem-vi-mode:*normal-keymap* "F6"
@@ -768,5 +822,9 @@
   'lem-yath-test-buffer-list-multi-isearch-state)
 (define-key *global-keymap* "F12"
   'lem-yath-test-buffer-list-multi-isearch-lifecycle)
+(define-key *global-keymap* "F11"
+  'lem-yath-test-buffer-list-prepare-query)
+(define-key *buffer-list-picker-mode-keymap* "F5"
+  'lem-yath-test-buffer-list-query-state)
 
 (buffer-list-test-log "READY")

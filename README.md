@@ -305,6 +305,17 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   first buffer; `C-s`/`C-r` continue and wrap through the marked set, Return
   keeps the match and search history, and `C-g` restores the first buffer's
   starting point.
+  Evil Collection's `Q` and `I` run literal or case-insensitive regexp
+  query-replace over ordinary marks in display order, excluding `D` and
+  visibly marking the current row when no ordinary marks exist. Each buffer is
+  queried from its beginning with the chooser hidden; `y`/Space replaces,
+  `n`/Backspace skips, `!` replaces the rest of only that buffer, `q`/Return
+  moves on, and `.` replaces once before moving on. The chooser, focus, marks,
+  source window, and point return afterward, and each affected buffer is one
+  undo unit. Read-only sets, invalid regexps, and regexps with empty matches
+  fail before mutation. Regexp replacement text is currently literal; GNU
+  backreferences, case transfer, and its advanced replacement-edit actions
+  remain gaps.
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
   deduplication and timeout, explicit buffer ownership with save-as migration,
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,
