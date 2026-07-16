@@ -1,0 +1,109 @@
+diff --git a/src/buffer/internal/undo.lisp b/src/buffer/internal/undo.lisp
+index 83d8ff6..763686d 100644
+--- a/src/buffer/internal/undo.lisp
++++ b/src/buffer/internal/undo.lisp
+@@ -65,13 +65,14 @@
+ 
+ (defstruct (undo-tree-node
+             (:constructor %make-undo-tree-node
+-                (id &key parent edits (payload-bytes 0))))
++                (id &key parent edits (payload-bytes 0) point-position)))
+   id
+   parent
+   (children '())
+   preferred
+   (edits '())
+   (payload-bytes 0)
++  point-position
+   saved-sequence)
+ 
+ (defstruct (undo-tree-ref
+@@ -274,12 +276,36 @@
+                       (touch-undo-buffer buffer))))))))
+   nil)
+ 
++(defun initialize-current-undo-point-position (buffer edit)
++  "Give a history root its first meaningful source position."
++  (let ((current (buffer-%undo-tree-current buffer)))
++    (when (and current (null (undo-tree-node-point-position current)))
++      (setf (undo-tree-node-point-position current) (edit-position edit)))))
++
++(defun transform-undo-point-position (position edit)
++  "Transform POSITION across the untracked EDIT applied to every state."
++  (ecase (edit-kind edit)
++    (:insert-string
++     (if (<= (edit-position edit) position)
++         (+ position (length (edit-string edit)))
++         position))
++    (:delete-string
++     (if (< (edit-position edit) position)
++         (max (edit-position edit)
++              (- position (length (edit-string edit))))
++         position))))
++
+ (defun transform-sealed-history (buffer source-edit)
+   (when (buffer-%undo-tree-table buffer)
+     (maphash (lambda (id node)
+                (declare (ignore id))
+                (dolist (edit (undo-tree-node-edits node))
+-                 (compute-edit-offset edit source-edit)))
++                 (compute-edit-offset edit source-edit))
++               (let ((position (undo-tree-node-point-position node)))
++                 (when position
++                   (setf (undo-tree-node-point-position node)
++                         (transform-undo-point-position
++                          position source-edit)))))
+              (buffer-%undo-tree-table buffer))))
+ 
+ (defun recompute-undo-position-offset (buffer edit)
+@@ -467,6 +490,8 @@
+              (node (%make-undo-tree-node
+                     id :parent parent :edits edits
+-                       :payload-bytes payload-bytes)))
++                       :payload-bytes payload-bytes
++                       :point-position
++                       (position-at-point (buffer-point buffer)))))
+         (unless (node-in-buffer-p buffer parent)
+           (buffer-reset-undo-tree buffer :dirty t :truncated t)
+           (editor-error "Undo tree lost its current node"))
+@@ -543,5 +568,10 @@
+                                   (undo-tree-node-edits node)))
+                 (editor-error "Undo tree contains malformed payload"))
++              (unless
++                  (or (and (integerp (undo-tree-node-point-position node))
++                           (plusp (undo-tree-node-point-position node)))
++                      (and (eq node root) (null (undo-tree-node-children node))))
++                (editor-error "Undo tree contains an invalid point position"))
+               (unless (= (node-payload-sum node)
+                          (undo-tree-node-payload-bytes node))
+                 (editor-error "Undo tree payload accounting mismatch"))
+@@ -761,5 +791,12 @@
+                 (buffer-reset-undo-tree buffer :dirty t :truncated t)
+                 (editor-error "Undo history changed during replay"))
++              (let ((position (undo-tree-node-point-position destination)))
++                (when position
++                  (unless
++                      (move-to-position
++                       point (min position (position-at-point
++                                            (buffer-end-point buffer))))
++                    (editor-error "Could not restore the undo-state point"))))
+               (setf (buffer-%undo-tree-current buffer) destination
+                     (buffer-%undo-tree-pending-dirty-p buffer) nil)
+               (make-node-ref buffer destination))
+@@ -851,3 +887,4 @@
+         :preferred (and (undo-tree-node-preferred node)
+                         (undo-tree-node-id (undo-tree-node-preferred node)))
++        :point-position (undo-tree-node-point-position node)
+         :saved-sequence (undo-tree-node-saved-sequence node)))
+
+diff --git a/src/buffer/internal/undo.lisp b/src/buffer/internal/undo.lisp
+index 763686d..c7f35e0 100644
+--- a/src/buffer/internal/undo.lisp
++++ b/src/buffer/internal/undo.lisp
+@@ -266,5 +266,6 @@
+                     (warn "Undo command exceeded its retention limit; history was reset"))
+                    (t
++                    (initialize-current-undo-point-position buffer edit)
+                     (let ((copy (copy-retained-edit edit)))
+                       (vector-push-extend copy (buffer-edit-history buffer))
+                       (incf (buffer-%undo-tree-payload-bytes buffer) cost)

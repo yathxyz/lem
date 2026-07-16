@@ -44,6 +44,7 @@
               ./patches/lem-undo-tree.patch
               ./patches/lem-completion-observer-change-group.patch
               ./patches/lem-after-change-undo.patch
+              ./patches/lem-undo-state-point.patch
               ./patches/lem-completion-presentation-focus.patch
               ./patches/lem-completion-groups.patch
               ./patches/lem-vi-screen-line.patch

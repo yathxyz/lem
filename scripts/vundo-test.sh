@@ -186,6 +186,8 @@ if invoke_mx lem-yath-test-vundo-core-probes '^SUMMARY CORE ' 120 &&
    grep -q '^PROBE forward-mutating-delete result=pass$' \
      "$LEM_YATH_VUNDO_REPORT" &&
    grep -q '^PROBE throwing-mutating-change-group result=pass$' \
+     "$LEM_YATH_VUNDO_REPORT" &&
+   grep -q '^PROBE state-point-restoration result=pass$' \
      "$LEM_YATH_VUNDO_REPORT"; then
   pass core-invariants \
     'dirty/tick, graph, hook ordering, and invalid move contracts hold'
@@ -271,16 +273,16 @@ fi
 
 send_keys b
 if press_report F2 '^ORIGIN ' &&
-   [[ "$(last_report '^ORIGIN ')" == *'line40=A '*'read-only=yes '*'focus=vundo' ]]; then
-  pass preview-backward 'b previewed parent A without leaving vundo'
+   [[ "$(last_report '^ORIGIN ')" == *'line40=A '*'point=40:'*'read-only=yes '*'focus=vundo' ]]; then
+  pass preview-backward 'b previewed parent A at its historical point without leaving vundo'
 else
   fail preview-backward 'b did not preview parent A'
 fi
 
 send_keys f
 if press_report F2 '^ORIGIN ' &&
-   [[ "$(last_report '^ORIGIN ')" == *'line40=AC '*'read-only=yes '*'focus=vundo' ]]; then
-  pass preview-forward 'f returned to preferred C'
+   [[ "$(last_report '^ORIGIN ')" == *'line40=AC '*'point=40:'*'read-only=yes '*'focus=vundo' ]]; then
+  pass preview-forward 'f returned to preferred C at its historical point'
 else
   fail preview-forward 'f did not preview preferred C'
 fi

@@ -85,8 +85,14 @@
                 (let ((id (getf node :id))
                       (parent (getf node :parent))
                       (children (getf node :children))
-                      (preferred (getf node :preferred)))
+                      (preferred (getf node :preferred))
+                      (point-position (getf node :point-position)))
                   (and (integerp id)
+                       (or (and (integerp point-position)
+                                (plusp point-position))
+                           (and (eql id root)
+                                (= 1 (getf snapshot :node-count))
+                                (null point-position)))
                        (listp children)
                        (= (length children)
                           (length (remove-duplicates children :test #'eql)))
@@ -689,6 +695,65 @@
                      'vundo-test-mutate-after-save))
       (ignore-errors (delete-buffer buffer)))))
 
+(defun vundo-test-state-point-restoration-p ()
+  "Restore the source position sealed with each text state, like Vundo 2.4."
+  (let ((buffer (make-buffer " *vundo-state-points*" :temporary t)))
+    (unwind-protect
+         (with-current-buffer buffer
+           (let ((point (buffer-point buffer)))
+             (insert-string point "abcdef")
+             (buffer-undo-boundary buffer)
+             (move-to-position point 3)
+             (insert-string point "X")
+             (buffer-undo-boundary buffer)
+             (let* ((snapshot (lem:buffer-undo-tree-snapshot buffer))
+                    (current (getf snapshot :current))
+                    (child (vundo-test-node snapshot current))
+                    (parent (vundo-test-node snapshot (getf child :parent)))
+                    (root (vundo-test-node snapshot (getf snapshot :root)))
+                    (stored
+                      (and (= 1 (getf root :point-position))
+                           (= 7 (getf parent :point-position))
+                           (= 4 (getf child :point-position)))))
+               ;; Cursor-only movement after the edit must not overwrite the
+               ;; position associated with the sealed child state.
+               (move-point point (buffer-end-point buffer))
+               (let ((backward
+                       (and (buffer-undo point)
+                            (string= "abcdef" (buffer-text buffer))
+                            (= 7 (position-at-point point))))
+                     (forward nil)
+                     (transformed nil))
+                 (setf forward
+                       (and (buffer-redo point)
+                            (string= "abXcdef" (buffer-text buffer))
+                            (= 4 (position-at-point point))))
+                 ;; Edits deliberately excluded from undo are applied to every
+                 ;; retained state, so their point positions must move too.
+                 (with-inhibit-undo ()
+                   (insert-string (buffer-start-point buffer) "!"))
+                 (let* ((shifted (lem:buffer-undo-tree-snapshot buffer))
+                        (shifted-child
+                          (vundo-test-node shifted (getf shifted :current)))
+                        (shifted-parent
+                          (vundo-test-node shifted
+                                           (getf shifted-child :parent)))
+                        (shifted-root
+                          (vundo-test-node shifted (getf shifted :root))))
+                   (setf transformed
+                         (and (= 2 (getf shifted-root :point-position))
+                              (= 8 (getf shifted-parent :point-position))
+                              (= 5 (getf shifted-child :point-position))
+                              (buffer-undo point)
+                              (string= "!abcdef" (buffer-text buffer))
+                              (= 8 (position-at-point point))
+                              (buffer-redo point)
+                              (string= "!abXcdef" (buffer-text buffer))
+                              (= 5 (position-at-point point))
+                              (vundo-test-snapshot-valid-p shifted))))
+                 (and stored backward forward transformed)))))
+      (ignore-errors (delete-buffer buffer)))))
+
 (define-command lem-yath-test-vundo-core-probes () ()
   (let* ((path (uiop:getenv "LEM_YATH_VUNDO_DIRTY_FILE"))
          (buffer (find-file-buffer path))
@@ -719,6 +784,10 @@
            (vundo-test-run-probe
             "after-save-descendant"
             (lambda () (vundo-test-after-save-descendant-p path))))
+         (state-points-restored
+           (vundo-test-run-probe
+            "state-point-restoration"
+            #'vundo-test-state-point-restoration-p))
          (failures 0))
     (unwind-protect
          (with-current-buffer buffer
@@ -810,6 +879,7 @@
                              (check read-only-preserved)
                              (check asymmetric-refused)
                              (check after-save-descendant)
+                             (check state-points-restored)
                              (check (< tick-edit tick-undo tick-branch
                                        tick-undo-branch tick-redo))
                              (check (and (string= saved-text "A")
