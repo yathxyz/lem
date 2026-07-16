@@ -137,8 +137,11 @@ prefix: `o a/v/s/f/m` select name, recency, size, filename, or major-mode
 sorting, `o i` reverses it, comma cycles the available sorters, and backtick
 rotates to the second stock name/file format; `s` remains its filter prefix.
 The Lem chooser implements those controls within each configured group. Its
-effective modal core also matches `m/u/U/t/~`, deletion marking and execution
-with `d` then `x`, marked save with `S`, row movement with `gj/gk`, group
+effective modal core also matches `m/u/Backspace/U/t/~`, deletion marking and
+execution with `d` then `x`, marked save with `S`, cyclic ordinary-mark
+navigation with `{`/`}`, marked modified/read-only toggles and Emacs-style
+unique renaming with `M/T/R`, focused-buffer burying with `X`, row movement
+with `gj/gk`, group
 movement with Tab/backtab, `C-j/C-k`, and `]]/[[`, and quit with `q`.
 `gR` redisplays the existing snapshot, `gr` rebuilds it from live buffers while
 preserving applicable marks and filters, `yb/yf` copy the focused buffer name or

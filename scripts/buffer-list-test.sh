@@ -141,6 +141,36 @@ report_window() {
   return 1
 }
 
+report_operations() {
+  local before attempts=0
+  before=$(grep -c '^OPS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F3
+  while ((attempts < 40)); do
+    if (( $(grep -c '^OPS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^OPS ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+report_picker_bindings() {
+  local before attempts=0
+  before=$(grep -c '^PICKER-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" F2
+  while ((attempts < 40)); do
+    if (( $(grep -c '^PICKER-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^PICKER-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
 fixture="$(lem-yath_lisp_string "$here/scripts/buffer-list-fixture.lisp")"
 lem_start "$session" "$source_file" --eval "(load #P$fixture)"
 
@@ -655,6 +685,70 @@ if (( $(grep -Fc 'buffer-list-kil...' <<<"$screen") >= 2 )); then
   fi
 else
   fail marked-kill "the kill fixtures did not survive grouped filtering"
+fi
+
+lem_keys "$session" s /
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-op-'
+lem_keys "$session" Enter m m
+lem_keys "$session" '}'
+nav=$(report_nav || true)
+if [[ "$nav" == NAV\ focus=buffer:buffer-list-op-beta* ]]; then
+  pass marked-next "} cycled forward to the next ordinary mark"
+else
+  fail marked-next "} selected an unexpected row: $nav"
+fi
+
+lem_keys "$session" '{'
+nav=$(report_nav || true)
+if [[ "$nav" == NAV\ focus=buffer:buffer-list-op-alpha* ]]; then
+  pass marked-previous "{ cycled backward to the previous ordinary mark"
+else
+  fail marked-previous "{ selected an unexpected row: $nav"
+fi
+
+picker_bindings=$(report_picker_bindings || true)
+if [[ "$picker_bindings" == *'backspace=LEM-YATH-BUFFER-LIST-UNMARK-BACKWARD'* ]]; then
+  pass backward-binding "the picker resolves Backspace to backward unmark"
+else
+  fail backward-binding "the active Backspace binding diverged: $picker_bindings"
+fi
+
+lem_keys "$session" BSpace
+nav=$(report_nav || true)
+if [[ "$nav" == *'focus=buffer:buffer-list-op-beta'* ]] &&
+   [[ "$nav" == *'marks=buffer-list-op-alpha:>'* ]] &&
+   [[ "$nav" != *'buffer-list-op-beta:>'* ]]; then
+  pass unmark-backward "Backspace moved backward before clearing that row"
+else
+  fail unmark-backward "Backspace diverged from Ibuffer: $nav"
+fi
+
+lem_keys "$session" '}' M T R
+ops=$(report_operations || true)
+if [[ "$ops" == OPS\ alpha=buffer-list-op-alpha\<2\>:modified:readonly\ beta=buffer-list-op-beta:clean:writable* ]]; then
+  pass marked-state-operations "M, T, and R changed only the marked buffer with Emacs naming"
+else
+  fail marked-state-operations "marked state operations diverged: $ops"
+fi
+
+lem_keys "$session" R
+ops=$(report_operations || true)
+if [[ "$ops" == OPS\ alpha=buffer-list-op-alpha:modified:readonly\ beta=buffer-list-op-beta:clean:writable* ]]; then
+  pass repeated-unique-rename "repeated R removed the synthetic Emacs <2> suffix"
+else
+  fail repeated-unique-rename "repeated R diverged from rename-uniquely: $ops"
+fi
+
+lem_keys "$session" R
+lem_keys "$session" g k X
+ops=$(report_operations || true)
+nav=$(report_nav || true)
+if [[ "$ops" == *'relative=buffer-list-op-alpha<2>,buffer-list-op-beta tail=buffer-list-op-beta' ]] &&
+   [[ "$nav" == *'focus=buffer:buffer-list-op-alpha<2>'* ]]; then
+  pass bury-buffer "X buried the current buffer and retained the original row"
+else
+  fail bury-buffer "X produced an unexpected order or focus: $ops / $nav"
 fi
 
 lem_keys "$session" s /

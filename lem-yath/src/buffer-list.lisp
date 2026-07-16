@@ -546,6 +546,12 @@ Each nonempty group begins with a distinct heading entry."
     (lem/multi-column-list:update component))
   (lem/multi-column-list::multi-column-list/down))
 
+(defun buffer-list-unmark-backward (component)
+  (lem/multi-column-list::multi-column-list/up)
+  (when (buffer-list-set-item-mark
+         component (buffer-list-current-item component) :none)
+    (lem/multi-column-list:update component)))
+
 (defun buffer-list-unmark-all (component)
   (dolist (item (buffer-list-component-all-items component))
     (buffer-list-set-item-mark component item :none))
@@ -587,6 +593,10 @@ Each nonempty group begins with a distinct heading entry."
 (define-command lem-yath-buffer-list-unmark-forward () ()
   (buffer-list-mark-current-and-down
    (lem/multi-column-list::current-multi-column-list) :none))
+
+(define-command lem-yath-buffer-list-unmark-backward () ()
+  (buffer-list-unmark-backward
+   (lem/multi-column-list::current-multi-column-list)))
 
 (define-command lem-yath-buffer-list-mark-deletion () ()
   (buffer-list-mark-current-and-down
@@ -822,12 +832,21 @@ Each nonempty group begins with a distinct heading entry."
                               (unless (buffer-list-entry-heading-p entry)
                                 (buffer-list-entry-buffer entry))))
                      :test #'eq)))
-      (lem/multi-column-list::multi-column-list/first)
-      (dotimes (_ index)
-        (lem/multi-column-list::multi-column-list/down)))))
+      (buffer-list-focus-index component index))))
 
-(defun buffer-list-rebuild-snapshot (component)
-  (let ((focused-buffer (buffer-list-current-buffer component))
+(defun buffer-list-focus-index (component index)
+  (let ((items (lem/multi-column-list::multi-column-list-items component)))
+    (when items
+      (lem/multi-column-list::multi-column-list/first)
+      (dotimes (_ (min index (1- (length items))))
+        (lem/multi-column-list::multi-column-list/down))
+      t)))
+
+(defun buffer-list-rebuild-snapshot
+    (component &key (preserve-focused-buffer-p t) focus-index)
+  (let ((focused-buffer
+          (and preserve-focused-buffer-p
+               (buffer-list-current-buffer component)))
         (marks (buffer-list-record-marks component))
         (items
           (mapcar #'lem/multi-column-list::wrap
@@ -850,7 +869,9 @@ Each nonempty group begins with a distinct heading entry."
                    (buffer-list-set-item-mark component item mark))))
     (buffer-list-sort-all-items component)
     (buffer-list-refresh component :recompute-columns t)
-    (buffer-list-focus-buffer component focused-buffer)
+    (if focus-index
+        (buffer-list-focus-index component focus-index)
+        (buffer-list-focus-buffer component focused-buffer))
     (message "Ibuffer updated")))
 
 (define-command lem-yath-buffer-list-update () ()
@@ -862,6 +883,135 @@ Each nonempty group begins with a distinct heading entry."
    (lem/multi-column-list::current-multi-column-list)
    :recompute-columns t)
   (message "Ibuffer redisplayed"))
+
+(defun buffer-list-ordinary-marked-item-p (component item)
+  (and (lem/multi-column-list::multi-column-list-item-checked-p item)
+       (not (gethash item (buffer-list-component-deletion-items component)))
+       (not (buffer-list-entry-heading-p (buffer-list-item-entry item)))))
+
+(defun buffer-list-move-to-marked (component direction)
+  (let* ((items (lem/multi-column-list::multi-column-list-items component))
+         (current (buffer-list-current-item component))
+         (start (or (position current items :test #'eq) 0))
+         (length (length items)))
+    (when (zerop length)
+      (editor-error "No marked buffers"))
+    (loop :for offset :from 1 :to length
+          :for index := (mod (+ start (* direction offset)) length)
+          :for item := (elt items index)
+          :when (buffer-list-ordinary-marked-item-p component item)
+            :do (buffer-list-focus-index component index)
+                (return-from buffer-list-move-to-marked item))
+    (editor-error "No ordinarily marked buffers")))
+
+(define-command lem-yath-buffer-list-next-marked () ()
+  (buffer-list-move-to-marked
+   (lem/multi-column-list::current-multi-column-list) 1))
+
+(define-command lem-yath-buffer-list-previous-marked () ()
+  (buffer-list-move-to-marked
+   (lem/multi-column-list::current-multi-column-list) -1))
+
+(defun buffer-list-action-buffers (component)
+  (mapcar (lambda (item)
+            (buffer-list-entry-buffer (buffer-list-item-entry item)))
+          (buffer-list-action-items component)))
+
+(defun buffer-list-refresh-after-buffer-mutation
+    (component focused-buffer focused-index &key resort)
+  (when resort
+    (buffer-list-sort-all-items component))
+  (buffer-list-refresh component :recompute-columns t)
+  (unless (buffer-list-focus-buffer component focused-buffer)
+    (buffer-list-focus-index component focused-index)))
+
+(defun buffer-list-set-modified (buffer)
+  "Mark BUFFER dirty without manufacturing an edit in the retained undo tree."
+  (let ((slot
+          (find "%UNDO-TREE-UNTRACKED-DIRTY-P"
+                (sb-mop:class-slots (class-of buffer))
+                :key (lambda (definition)
+                       (symbol-name (sb-mop:slot-definition-name definition)))
+                :test #'string=)))
+    (unless slot
+      (error "Lem buffer class has no modification-state slot"))
+    (setf (slot-value buffer (sb-mop:slot-definition-name slot)) t)))
+
+(define-command lem-yath-buffer-list-toggle-modified () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (focused-buffer (buffer-list-current-buffer component))
+         (focused-index
+           (or (position (buffer-list-current-item component)
+                         (lem/multi-column-list::multi-column-list-items component)
+                         :test #'eq)
+               0)))
+    (dolist (buffer (buffer-list-action-buffers component))
+      (if (buffer-modified-p buffer)
+          (buffer-unmark buffer)
+          (buffer-list-set-modified buffer)))
+    (buffer-list-refresh-after-buffer-mutation
+     component focused-buffer focused-index)))
+
+(define-command lem-yath-buffer-list-toggle-read-only () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (focused-buffer (buffer-list-current-buffer component))
+         (focused-index
+           (or (position (buffer-list-current-item component)
+                         (lem/multi-column-list::multi-column-list-items component)
+                         :test #'eq)
+               0)))
+    (dolist (buffer (buffer-list-action-buffers component))
+      (setf (buffer-read-only-p buffer)
+            (not (buffer-read-only-p buffer))))
+    (buffer-list-refresh-after-buffer-mutation
+     component focused-buffer focused-index)))
+
+(defun buffer-list-emacs-unique-base-name (buffer)
+  (let* ((name (buffer-name buffer))
+         (file-name
+           (alexandria:when-let ((filename (buffer-filename buffer)))
+             (ignore-errors (file-namestring filename)))))
+    (multiple-value-bind (start end)
+        (cl-ppcre:scan "<[0-9]+>$" name)
+      (declare (ignore end))
+      (if (and start
+               (not (and file-name (string= name file-name))))
+          (subseq name 0 start)
+          name))))
+
+(defun buffer-list-emacs-unique-name (buffer)
+  (let ((base-name (buffer-list-emacs-unique-base-name buffer)))
+    (if (null (get-buffer base-name))
+        base-name
+        (loop :for suffix :from 2
+              :for name := (format nil "~a<~d>" base-name suffix)
+              :unless (get-buffer name)
+                :return name))))
+
+(define-command lem-yath-buffer-list-rename-uniquely () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (focused-buffer (buffer-list-current-buffer component))
+         (focused-index
+           (or (position (buffer-list-current-item component)
+                         (lem/multi-column-list::multi-column-list-items component)
+                         :test #'eq)
+               0)))
+    (dolist (buffer (buffer-list-action-buffers component))
+      (buffer-rename buffer (buffer-list-emacs-unique-name buffer)))
+    (buffer-list-refresh-after-buffer-mutation
+     component focused-buffer focused-index :resort t)))
+
+(define-command lem-yath-buffer-list-bury () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (buffer (buffer-list-require-current-buffer component))
+         (index
+           (or (position (buffer-list-current-item component)
+                         (lem/multi-column-list::multi-column-list-items component)
+                         :test #'eq)
+               0)))
+    (bury-buffer buffer)
+    (buffer-list-rebuild-snapshot
+     component :preserve-focused-buffer-p nil :focus-index index)))
 
 (define-command lem-yath-buffer-list-delete-items () ()
   (buffer-list-delete-action-items
@@ -1028,6 +1178,14 @@ Each nonempty group begins with a distinct heading entry."
   'lem-yath-buffer-list-mark-forward)
 (define-key *buffer-list-picker-mode-keymap* "u"
   'lem-yath-buffer-list-unmark-forward)
+(define-key *buffer-list-picker-mode-keymap* "Backspace"
+  'lem-yath-buffer-list-unmark-backward)
+(define-key *buffer-list-picker-mode-keymap* "C-h"
+  'lem-yath-buffer-list-unmark-backward)
+(define-key *buffer-list-picker-mode-keymap* 'delete-previous-char
+  'lem-yath-buffer-list-unmark-backward)
+(define-key *buffer-list-picker-mode-keymap* "Delete"
+  'lem-yath-buffer-list-unmark-backward)
 (define-key *buffer-list-picker-mode-keymap* "U"
   'lem-yath-buffer-list-unmark-all)
 (define-key *buffer-list-picker-mode-keymap* "t"
@@ -1054,6 +1212,22 @@ Each nonempty group begins with a distinct heading entry."
   'lem-yath-buffer-list-copy-buffer-name)
 (define-key *buffer-list-picker-mode-keymap* "y f"
   'lem-yath-buffer-list-copy-file-name)
+(define-key *buffer-list-picker-mode-keymap* "}"
+  'lem-yath-buffer-list-next-marked)
+(define-key *buffer-list-picker-mode-keymap* "M-}"
+  'lem-yath-buffer-list-next-marked)
+(define-key *buffer-list-picker-mode-keymap* "{"
+  'lem-yath-buffer-list-previous-marked)
+(define-key *buffer-list-picker-mode-keymap* "M-{"
+  'lem-yath-buffer-list-previous-marked)
+(define-key *buffer-list-picker-mode-keymap* "M"
+  'lem-yath-buffer-list-toggle-modified)
+(define-key *buffer-list-picker-mode-keymap* "T"
+  'lem-yath-buffer-list-toggle-read-only)
+(define-key *buffer-list-picker-mode-keymap* "R"
+  'lem-yath-buffer-list-rename-uniquely)
+(define-key *buffer-list-picker-mode-keymap* "X"
+  'lem-yath-buffer-list-bury)
 (define-key *buffer-list-picker-mode-keymap* "Tab"
   'lem-yath-buffer-list-next-group)
 (define-key *buffer-list-picker-mode-keymap* "Shift-Tab"

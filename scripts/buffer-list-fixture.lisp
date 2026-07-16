@@ -8,6 +8,8 @@
 (defvar *buffer-list-test-kill-a* nil)
 (defvar *buffer-list-test-kill-b* nil)
 (defvar *buffer-list-test-late-buffer* nil)
+(defvar *buffer-list-test-op-alpha* nil)
+(defvar *buffer-list-test-op-beta* nil)
 
 (define-major-mode buffer-list-test-long-mode ()
     (:name "Long Fixture Mode Name"))
@@ -194,6 +196,30 @@
               (buffer-name (window-buffer window))))
            (window-list))))
 
+(define-command lem-yath-test-buffer-list-operation-state () ()
+  (buffer-list-test-log
+   "OPS alpha=~a:~a:~a beta=~a:~a:~a relative=~{~a~^,~} tail=~a"
+   (buffer-name *buffer-list-test-op-alpha*)
+   (if (buffer-modified-p *buffer-list-test-op-alpha*) "modified" "clean")
+   (if (buffer-read-only-p *buffer-list-test-op-alpha*) "readonly" "writable")
+   (buffer-name *buffer-list-test-op-beta*)
+   (if (buffer-modified-p *buffer-list-test-op-beta*) "modified" "clean")
+   (if (buffer-read-only-p *buffer-list-test-op-beta*) "readonly" "writable")
+   (loop :for buffer :in (buffer-list)
+         :when (member buffer
+                       (list *buffer-list-test-op-alpha*
+                             *buffer-list-test-op-beta*)
+                       :test #'eq)
+           :collect (buffer-name buffer))
+   (buffer-name (car (last (buffer-list))))))
+
+(define-command lem-yath-test-buffer-list-picker-bindings () ()
+  (buffer-list-test-log
+   "PICKER-BINDINGS backspace=~a control-h=~a delete=~a"
+   (buffer-list-test-binding "Backspace")
+   (buffer-list-test-binding "C-h")
+   (buffer-list-test-binding "Delete")))
+
 (define-command lem-yath-test-buffer-list-reload () ()
   (load (merge-pathnames "src/buffer-list.lisp"
                          (asdf:system-source-directory "lem-yath"))))
@@ -225,6 +251,10 @@
       (buffer-list-test-make-buffer 'kill-a "buffer-list-kill-target-a"))
 (setf *buffer-list-test-kill-b*
       (buffer-list-test-make-buffer 'kill-b "buffer-list-kill-target-b"))
+(setf *buffer-list-test-op-alpha*
+      (buffer-list-test-make-buffer 'op-alpha "buffer-list-op-alpha"))
+(setf *buffer-list-test-op-beta*
+      (buffer-list-test-make-buffer 'op-beta "buffer-list-op-beta"))
 (buffer-list-test-make-buffer
  'control (format nil "ctl~%name"))
 (let ((buffer
@@ -267,6 +297,10 @@
   'lem-yath-test-buffer-list-create-late-buffer)
 (define-key *buffer-list-picker-mode-keymap* "F9"
   'lem-yath-test-buffer-list-killring)
+(define-key *buffer-list-picker-mode-keymap* "F3"
+  'lem-yath-test-buffer-list-operation-state)
+(define-key *buffer-list-picker-mode-keymap* "F2"
+  'lem-yath-test-buffer-list-picker-bindings)
 (define-key lem-vi-mode:*normal-keymap* "F4"
   'lem-yath-test-buffer-list-window-state)
 (define-key lem-vi-mode:*normal-keymap* "F10"
