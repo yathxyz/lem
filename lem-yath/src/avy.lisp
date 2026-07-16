@@ -30,6 +30,12 @@
 
 (defvar *avy-action* :goto)
 
+(defparameter *avy-spell-dictionary* "en_US")
+(defparameter *avy-spell-timeout-seconds* 2)
+(defparameter *avy-spell-word-limit* 256)
+(defparameter *avy-spell-output-limit* (* 64 1024))
+(defparameter *avy-spell-suggestion-limit* 64)
+
 (defvar *avy-label-windows* nil)
 (defvar *avy-label-buffers* nil)
 (defvar *avy-session-active* nil)
@@ -557,6 +563,217 @@
     (message "Killed: ~a" text)
     text))
 
+(defun avy-spell-program (environment-variable executable)
+  "Resolve a packaged spell helper before consulting the mutable PATH."
+  (or (alexandria:when-let ((configured (uiop:getenv environment-variable)))
+        (unless (zerop (length configured))
+          (uiop:probe-file* configured)))
+      (executable-find executable)))
+
+(defun avy-spell-command ()
+  (let ((aspell (avy-spell-program "LEM_YATH_ASPELL_PROGRAM" "aspell"))
+        (timeout (avy-spell-program "LEM_YATH_TIMEOUT_PROGRAM" "timeout")))
+    (unless aspell
+      (editor-error "Avy spell correction needs Aspell"))
+    (unless timeout
+      (editor-error "Avy spell correction needs GNU timeout"))
+    (list (uiop:native-namestring timeout)
+          "--signal=TERM"
+          "--kill-after=1"
+          (princ-to-string *avy-spell-timeout-seconds*)
+          (uiop:native-namestring aspell)
+          "-a"
+          (format nil "--lang=~a" *avy-spell-dictionary*)
+          "--encoding=utf-8")))
+
+(defun avy-spell-valid-word-p (word)
+  (and (plusp (length word))
+       (<= (length word) *avy-spell-word-limit*)
+       (every (lambda (character)
+                (and (graphic-char-p character)
+                     (not (find character '(#\Newline #\Return)))))
+              word)))
+
+(defun avy-spell-parse-suggestions (line)
+  (alexandria:when-let ((colon (position #\: line)))
+    (let ((suggestions
+            (remove-if
+             (lambda (suggestion) (zerop (length suggestion)))
+             (mapcar
+              (lambda (suggestion)
+                (string-trim '(#\Space #\Tab) suggestion))
+              (uiop:split-string
+               (subseq line (1+ colon)) :separator '(#\,))))))
+      (subseq (remove-duplicates suggestions :test #'equal)
+              0 (min (length suggestions)
+                     *avy-spell-suggestion-limit*)))))
+
+(defun avy-spell-suggestions (word)
+  "Return Aspell status and bounded suggestions for WORD."
+  (unless (avy-spell-valid-word-p word)
+    (editor-error "Aspell word is empty, non-printing, or too long"))
+  (multiple-value-bind (stdout stderr status)
+      (with-input-from-string (input (format nil "^~a~%" word))
+        (uiop:run-program
+         (avy-spell-command)
+         :input input
+         :output :string
+         :error-output :string
+         :ignore-error-status t))
+    (unless (zerop status)
+      (editor-error "Aspell exited ~d~@[ — ~a~]"
+                    status
+                    (let ((summary
+                            (string-trim
+                             '(#\Space #\Tab #\Newline #\Return)
+                             (or stderr ""))))
+                      (unless (zerop (length summary))
+                        (subseq summary 0 (min 200 (length summary)))))))
+    (when (> (length stdout) *avy-spell-output-limit*)
+      (editor-error "Aspell produced more than ~d characters"
+                    *avy-spell-output-limit*))
+    (let ((result
+            (find-if
+             (lambda (line)
+               (and (plusp (length line))
+                    (find (char line 0) "*+-&?#" :test #'char=)))
+             (uiop:split-string stdout :separator '(#\Newline)))))
+      (unless result
+        (editor-error "Aspell returned no result for ~s" word))
+      (case (char result 0)
+        ((#\* #\+ #\-)
+         (values :correct nil))
+        ((#\& #\?)
+         (values :misspelled (avy-spell-parse-suggestions result)))
+        (#\#
+         (values :misspelled nil))
+        (otherwise
+         (editor-error "Unsupported Aspell response: ~s" result))))))
+
+(defun avy-spell-letter-p (character)
+  (and (characterp character) (alpha-char-p character)))
+
+(defun avy-spell-word-range (point)
+  "Return the alphabetic word at or preceding POINT."
+  (with-point ((cursor point))
+    (unless (avy-spell-letter-p (character-at cursor))
+      (loop :while (and (not (start-buffer-p cursor))
+                        (not (avy-spell-letter-p (character-at cursor -1))))
+            :do (character-offset cursor -1))
+      (when (avy-spell-letter-p (character-at cursor -1))
+        (character-offset cursor -1)))
+    (when (avy-spell-letter-p (character-at cursor))
+      (with-point ((start cursor)
+                   (end cursor))
+        (loop :while (avy-spell-letter-p (character-at start -1))
+              :do (character-offset start -1))
+        (loop :while (avy-spell-letter-p (character-at end))
+              :do (character-offset end 1))
+        (values (copy-point start :temporary)
+                (copy-point end :temporary))))))
+
+(defun avy-spell-preflight-range (start end)
+  (unless lem/buffer/internal:*inhibit-read-only*
+    (lem/buffer/internal::check-read-only-buffer (point-buffer start))
+    (lem/buffer/internal::check-read-only-at-point
+     start (count-characters start end))
+    (lem/buffer/internal::check-read-only-at-point start 0)
+    (lem/buffer/internal::check-read-only-at-point end 0)))
+
+(defun call-with-avy-spell-prompt-state (function)
+  "Call FUNCTION without leaking Lem's temporary Vi prompt state."
+  (let ((buffer (current-buffer))
+        (state (ignore-errors (lem-vi-mode/core:current-state))))
+    (unwind-protect
+         (funcall function)
+      (when (and state (not (deleted-buffer-p buffer)))
+        (setf (lem-vi-mode/core:buffer-state buffer) state)
+        (when (eq buffer (current-buffer))
+          (setf (lem-vi-mode/core:current-state) state))))))
+
+(defun avy-spell-prompt-replacement (word suggestions)
+  "Prompt for a replacement, keeping WORD as the first no-change choice."
+  (let ((replacement
+          (call-with-avy-spell-prompt-state
+           (lambda ()
+             (if suggestions
+                 (let ((choices
+                         (cons word (remove word suggestions :test #'equal))))
+                   (prompt-for-string
+                    (format nil "Correct ~a: " word)
+                    :completion-function
+                    (lambda (input)
+                      (let ((matches
+                              (prescient-filter input choices :rank-p nil)))
+                        ;; Preserve Aspell's order for partial queries, but do
+                        ;; not let the no-change choice shadow an exact answer.
+                        (alexandria:if-let ((exact
+                                              (find input matches
+                                                    :test #'string=)))
+                          (cons exact (remove exact matches :test #'eq))
+                          matches)))))
+                 ;; A completion provider cannot safely invent arbitrary live
+                 ;; candidates.  Ispell's no-proposal path is free-text.
+                 (prompt-for-string (format nil "Correct ~a: " word)))))))
+    (unless (avy-spell-valid-word-p replacement)
+      (editor-error "Spell replacement is empty, non-printing, or too long"))
+    replacement))
+
+(defun avy-spell-correct-one (start end)
+  "Offer a correction for START..END and return whether text changed."
+  (let ((word (points-to-string start end)))
+    (multiple-value-bind (status suggestions)
+        (avy-spell-suggestions word)
+      (ecase status
+        (:correct nil)
+        (:misspelled
+         (let ((replacement
+                 (avy-spell-prompt-replacement word suggestions)))
+           (unless (equal replacement word)
+             (avy-spell-preflight-range start end)
+             (delete-between-points start end)
+             (insert-string start replacement)
+             replacement)))))))
+
+(defun avy-spell-correct-word (point)
+  (multiple-value-bind (start end) (avy-spell-word-range point)
+    (unless start
+      (editor-error "No word at the selected Avy target"))
+    (let ((word (points-to-string start end)))
+      (if (avy-spell-correct-one start end)
+          (message "Corrected spelling at Avy target")
+          (message "Kept spelling: ~a" word)))))
+
+(defun avy-spell-correct-line (candidate)
+  "Offer corrections for every misspelled word on CANDIDATE's line."
+  (with-point ((cursor (avy-candidate-point candidate) :right-inserting)
+               (limit (avy-candidate-point candidate) :right-inserting))
+    (line-start cursor)
+    (line-end limit)
+    (loop :with corrections := 0
+          :while (point< cursor limit)
+          :do (loop :while (and (point< cursor limit)
+                                (not (avy-spell-letter-p
+                                      (character-at cursor))))
+                    :do (character-offset cursor 1))
+              (when (point< cursor limit)
+                (with-point ((start cursor)
+                             (end cursor :right-inserting))
+                  (loop :while (and (point< end limit)
+                                    (avy-spell-letter-p
+                                     (character-at end)))
+                        :do (character-offset end 1))
+                  (let ((replacement (avy-spell-correct-one start end)))
+                    (move-point cursor start)
+                    (character-offset
+                     cursor
+                     (length (or replacement
+                                 (points-to-string start end))))
+                    (when replacement (incf corrections)))))
+          :finally
+             (message "Avy corrected ~d word~:p on the selected line"
+                      corrections))))
+
 (defun perform-avy-action (action candidate kind origin-window origin-point)
   "Apply ACTION to CANDIDATE, preserving Avy's origin semantics."
   (ecase action
@@ -598,8 +815,9 @@
      (avy-jump-to-candidate candidate)
      (kill-region origin-point (current-point)))
     (:ispell
-     (editor-error
-      "Avy spell correction is unavailable: no spell checker is configured"))))
+     (if (eq kind :line)
+         (avy-spell-correct-line candidate)
+         (avy-spell-correct-word (avy-candidate-point candidate))))))
 
 (defun perform-avy-jump (kind &key flip-scope)
   "Run the configured Avy selector KIND and move to its chosen target."

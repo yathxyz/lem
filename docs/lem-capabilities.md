@@ -284,12 +284,19 @@ fallback, zero and singleton candidate sets retain Avy's behavior, and Escape
 or `C-g` removes every label. A size change invalidates the cached screen
 coordinates and aborts on the next Avy input. `scripts/avy-test.sh` verifies
 these paths, jumplist integration, reload cleanup, and source non-mutation in
-the real ncurses frontend. Avy's default `x/X/t/m/n/y/Y/z` dispatch actions
+the real ncurses frontend. Avy's default `x/X/t/m/n/y/Y/i/z` dispatch actions
 restart the selector and provide kill-and-move, kill-and-stay, teleport, mark,
-copy, yank, line-yank, and zap behavior; `?` displays the stock action map.
-The stock `i` key reports an explicit unavailable error because this setup has
-no spell-correction backend. Exotic display/syntax geometry and exact Emacs
-minibuffer presentation remain approximate.
+copy, yank, line-yank, spell correction, and zap behavior; `?` displays the
+stock action map. The `i` action invokes an exact flake-packaged Aspell binary
+with the configured `en_US` dictionary and a bounded timeout. Character and
+symbol targets correct the alphabetic word at or preceding the target; line
+targets inspect every alphabetic word on the selected line. Suggestions retain
+Aspell order under Prescient filtering, an exact typed choice wins, and a
+no-proposal response accepts a validated free-text replacement. The operation
+preserves the Avy origin and Vi state and remains one undo step. Personal and
+session dictionaries, Flyspell presentation, non-alphabetic word syntax,
+exotic display/syntax geometry, and exact Emacs minibuffer presentation remain
+approximate or absent.
 
 ### Options — `extensions/vi-mode/options.lisp`, README §Options
 Vim-like global options via `(setf (lem-vi-mode:option-value "name") val)` or `:set`.

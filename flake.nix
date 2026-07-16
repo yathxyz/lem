@@ -261,9 +261,12 @@
             pythonPackages.debugpy
           ]);
 
+          aspellRuntime = pkgs.aspellWithDicts (dictionaries: [ dictionaries.en ]);
+
           coreRuntimeInputs =
             with pkgs;
             [
+              aspellRuntime
               bash
               black
               clang
@@ -462,6 +465,8 @@
               export LEM_YATH_CLIENT=${lemClient}/bin/lemclient
               export LEM_YATH_ALTERNATE_EDITOR="$0"
               export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
+              export LEM_YATH_ASPELL_PROGRAM=${lib.getExe' aspellRuntime "aspell"}
+              export LEM_YATH_TIMEOUT_PROGRAM=${lib.getExe' pkgs.coreutils "timeout"}
               export LEM_YATH_GUARDIAN_PYTHON=${lib.getExe' pkgs.python3 "python3"}
               export LEM_YATH_MCP_FETCH_PROGRAM="''${LEM_YATH_MCP_FETCH_PROGRAM:-${lib.getExe' pkgs.uv "uvx"}}"
               export LEM_YATH_MCP_DOCKER_PROGRAM="''${LEM_YATH_MCP_DOCKER_PROGRAM:-${lib.getExe pkgs.docker-client}}"
@@ -576,6 +581,9 @@
                   export LEM_UPSTREAM_BIN=${lemNcurses}/bin/lem
                   export LEM_YATH_LEM_SOURCE=${lemPatchedSrc}
                   export LEM_YATH_SOURCE=${self}/lem-yath
+                  export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
+                  export LEM_YATH_ASPELL_PROGRAM=${lib.getExe' aspellRuntime "aspell"}
+                  export LEM_YATH_TIMEOUT_PROGRAM=${lib.getExe' pkgs.coreutils "timeout"}
                   export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
                   exec bash ${self}/scripts/${script} "$@"
                 '';

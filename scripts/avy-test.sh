@@ -197,6 +197,7 @@ symbol_file="$root/fixtures/symbols.lisp"
 line_file="$root/fixtures/lines.txt"
 wrap_file="$root/fixtures/wrap.txt"
 actions_file="$root/fixtures/actions.txt"
+spell_file="$root/fixtures/spell.txt"
 
 for number in $(seq 1 12); do
   printf 'x-target-%02d alpha beta\n' "$number"
@@ -219,6 +220,7 @@ done >"$line_file"
 } >"$wrap_file"
 
 printf 'ORIGIN|\nalpha qone tail\nbeta qtwo tail\n' >"$actions_file"
+printf 'ORIGIN|\nclean text\nqqqqqqqqqqqqqqqqqqqq tail\n' >"$spell_file"
 
 # Static contracts, exact 12 -> 4 label narrowing, composited ncurses output,
 # jump history, cancellation, resize cleanup, reload, and read-only invariants.
@@ -553,15 +555,50 @@ if start_session "$actions" "$actions_file" 'ORIGIN|'; then
 
   lem_keys "$actions" F7
   send_keys "$actions" ' ' a q i s
-  if lem_wait_for "$actions" 'spell correction is unavailable' "$WAIT_TIMEOUT" \
-       >/dev/null; then
-    pass dispatch-ispell-unavailable \
-      "stock key reports the missing configured spell backend"
+  if lem_wait_for "$actions" 'Correct qtwo:' "$WAIT_TIMEOUT" >/dev/null; then
+    tmux_cmd send-keys -t "$actions" -l two
+    lem_keys "$actions" Enter
+    if lem_wait_for "$actions" 'Corrected spelling at Avy target' \
+         "$WAIT_TIMEOUT" >/dev/null; then
+      pass dispatch-ispell "stock key offered the configured Aspell correction"
+    else
+      fail dispatch-ispell "selected correction did not finish" "$actions"
+    fi
   else
-    fail dispatch-ispell-unavailable "missing backend was not explicit" "$actions"
+    fail dispatch-ispell "stock key did not open the correction prompt" "$actions"
   fi
-  record_state "$actions" || fail record "ispell action state timed out" "$actions"
+  record_state "$actions" || fail record "ispell correction state timed out" "$actions"
   assert_state dispatch-ispell-invariants \
+    'point=7 .*text=ORIGIN\|\\nalpha qone tail\\nbeta two tail\\n' \
+    "$actions"
+  send_keys "$actions" u
+  record_state "$actions" || fail record "ispell undo state timed out" "$actions"
+  assert_state dispatch-ispell-undo \
+    'point=7 .*text=ORIGIN\|\\nalpha qone tail\\nbeta qtwo tail\\n' \
+    "$actions"
+
+  lem_keys "$actions" F7
+  send_keys "$actions" ' ' l i d
+  if lem_wait_for "$actions" 'Correct qtwo:' "$WAIT_TIMEOUT" >/dev/null; then
+    tmux_cmd send-keys -t "$actions" -l two
+    lem_keys "$actions" Enter
+    if lem_wait_for "$actions" 'Avy corrected 1 word on the selected line' \
+         "$WAIT_TIMEOUT" >/dev/null; then
+      pass dispatch-ispell-line \
+        "line dispatch checked and corrected the selected line"
+    else
+      fail dispatch-ispell-line "selected-line correction did not finish" "$actions"
+    fi
+  else
+    fail dispatch-ispell-line "line dispatch did not open the correction prompt" "$actions"
+  fi
+  record_state "$actions" || fail record "line ispell state timed out" "$actions"
+  assert_state dispatch-ispell-line-invariants \
+    'point=7 .*text=ORIGIN\|\\nalpha qone tail\\nbeta two tail\\n' \
+    "$actions"
+  send_keys "$actions" u
+  record_state "$actions" || fail record "line ispell undo state timed out" "$actions"
+  assert_state dispatch-ispell-line-undo \
     'point=7 .*text=ORIGIN\|\\nalpha qone tail\\nbeta qtwo tail\\n' \
     "$actions"
 
@@ -573,6 +610,42 @@ if start_session "$actions" "$actions_file" 'ORIGIN|'; then
     "$actions"
 fi
 stop_session "$actions"
+
+# Aspell's no-suggestion response still permits Ispell-style manual editing.
+spell="lem-yath-avy-spell-$id"
+if start_session "$spell" "$spell_file" 'ORIGIN|'; then
+  marker_before=$(report_count '^MARKER ')
+  lem_keys "$spell" F7
+  wait_report_count '^MARKER ' "$((marker_before + 1))" || true
+  send_keys "$spell" ' ' l i d
+  if lem_wait_for "$spell" 'Correct qqqqqqqqqqqqqqqqqqqq:' \
+       "$WAIT_TIMEOUT" >/dev/null; then
+    tmux_cmd send-keys -t "$spell" -l queue
+    lem_keys "$spell" Enter
+    if lem_wait_for "$spell" 'Avy corrected 1 word on the selected line' \
+         "$WAIT_TIMEOUT" >/dev/null; then
+      pass dispatch-ispell-manual \
+        "a no-suggestion word accepted a manually typed correction"
+    else
+      fail dispatch-ispell-manual "manual correction did not finish" "$spell"
+    fi
+  else
+    fail dispatch-ispell-manual "no-suggestion word did not open a prompt" "$spell"
+  fi
+  if ! lem_wait_for "$spell" 'NORMAL' "$WAIT_TIMEOUT" >/dev/null; then
+    fail dispatch-ispell-manual-state \
+      "manual correction did not restore Normal state" "$spell"
+  fi
+  record_state "$spell" || fail record "manual ispell state timed out" "$spell"
+  assert_state dispatch-ispell-manual-invariants \
+    'point=7 .*text=ORIGIN\|\\nclean text\\nqueue tail\\n' "$spell"
+  send_keys "$spell" u
+  record_state "$spell" || fail record "manual ispell undo state timed out" "$spell"
+  assert_state dispatch-ispell-manual-undo \
+    'point=20 .*text=ORIGIN\|\\nclean text\\nqqqqqqqqqqqqqqqqqqqq tail\\n' \
+    "$spell"
+fi
+stop_session "$spell"
 
 # Normal state sees all text windows; Evil visual state remains current-window
 # only.  The two windows deliberately show the same source to make counts exact.

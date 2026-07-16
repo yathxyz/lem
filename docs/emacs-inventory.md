@@ -97,6 +97,10 @@ use the package defaults: balanced labels over `a/s/d/f/g/h/j/k/l`, `at-full`
 placement, case-folded matching, immediate single-candidate jumps, every window
 in the current frame from normal state (a prefix narrows to the current window),
 and the current window from Visual or operator state with or without a prefix.
+The stock dispatch map includes `x/X/t/m/n/y/Y/i/z` plus `?` help. Its `i`
+action runs `ispell-word` at or before character/symbol targets and
+`ispell-region` across line targets; the active configuration sets
+`ispell-dictionary` to `en_US`.
 
 #### Insert-state `C-c` prefix (keymap override)
 

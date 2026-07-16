@@ -142,9 +142,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   floating labels over visible line, character, and symbol targets. Normal state
   searches every ordinary or side text window, Visual stays in the current
   window, wrapped and hidden rows are respected, and the display never mutates
-  source buffers. During selection, `x/X/t/m/n/y/Y/z` provide Avy's default
-  kill, teleport, mark, copy, yank, and zap actions, while `?` shows the action
-  keys; `i` reports that no spell backend is configured
+  source buffers. During selection, `x/X/t/m/n/y/Y/i/z` provide Avy's default
+  kill, teleport, mark, copy, yank, spell-correction, and zap actions, while
+  `?` shows the action keys. The flake-packaged `en_US` Aspell backend offers
+  Prescient-filtered corrections for a selected word or every word on a
+  selected line, including a free-text fallback when Aspell has no proposal
 - Prescient-style literal/regexp/initialism filtering and persistent learned
   ranking in command, buffer, and custom prompts; file prompts retain Lem's
   path-aware matching and gain the same ranking
