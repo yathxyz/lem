@@ -153,6 +153,9 @@ case "$test_name" in
   ui-parity)
     remote_command='nix run path:$PWD#ui-parity-test'
     ;;
+  business-visual)
+    remote_command='nix run path:$PWD#business-visual-test --option max-jobs 2'
+    ;;
   cursor-state)
     remote_command='nix run path:$PWD#cursor-state-test'
     ;;
@@ -169,7 +172,7 @@ case "$test_name" in
     remote_command='nix run path:$PWD#notmuch-test --option max-jobs 2'
     ;;
   *)
-    echo "Usage: $0 [all|check|compile|compilation|terminal|server|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|llm-backend|llm-workflow|llm-tools|llm-mcp|claude-code|lisp-eval|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|tree-sitter|dap|project-navigation|project-outline|prompt-completion|daily-workflows|direnv|electric-editing|ui-parity|cursor-state|snipe|avy|documents|notmuch|interactive|structural|notes|roam|roam-backlinks|org|agenda|editing]" >&2
+    echo "Usage: $0 [all|check|compile|compilation|terminal|server|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|llm-backend|llm-workflow|llm-tools|llm-mcp|claude-code|lisp-eval|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|tree-sitter|dap|project-navigation|project-outline|prompt-completion|daily-workflows|direnv|electric-editing|ui-parity|business-visual|cursor-state|snipe|avy|documents|notmuch|interactive|structural|notes|roam|roam-backlinks|org|agenda|editing]" >&2
     exit 2
     ;;
 esac

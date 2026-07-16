@@ -77,6 +77,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   state on `C-z`: red-box normal, green-bar insert, cyan-box Emacs, portable
   visual/replace shapes, Emacs mark semantics, GNU Emacs undo on `C-/`, `C-_`,
   and `C-x u`, and exact prior-state return
+- a host-gated office-document profile in its own module: `workwin` starts with
+  a calm light semantic theme, compact modeline, shape-only cursors, disabled
+  jump pulses, and centered/wrapped 88-column Org, Markdown/EPUB, text,
+  Notmuch-message, feed-entry, and DevDocs buffers. `M-x business-visual-mode`
+  permits an explicit trial on another host and toggle-off restores the prior
+  theme and per-buffer presentation exactly; ncurses-specific font and frame
+  limitations remain documented
 - an Evil-aware in-editor terminal on `M-x vterm` (with `M-x terminal` retained):
   new sessions start in Insert, Escape enters a live read-only Normal view,
   `i/I/a/A` return to raw input, Normal `p/P` and Return send to the child, and
@@ -422,7 +429,8 @@ editing, formatting, Orderless completion, snippets, LSP snippets, real installe
 language-server handshakes (including an external Godot TCP server), tree-sitter
 highlighting, real DAP adapter
 workflows, daily-workflows, Direnv environment switching,
-electric-editing, grouped-buffer-list, UI parity, project navigation and outline, VCS and Forge,
+electric-editing, grouped-buffer-list, UI parity, host-gated business presentation,
+project navigation and outline, VCS and Forge,
 persistence, bookmarks,
 retained undo/Vundo, project-scoped LSP lifecycle, LLM key dispatch,
 credential-free backend streaming/resume, private preset persistence, web
@@ -477,6 +485,7 @@ nix run .#daily-workflows-test
 nix run .#direnv-test
 nix run .#electric-editing-test
 nix run .#ui-parity-test
+nix run .#business-visual-test
 nix run .#vcs-test
 nix run .#jj-porcelain-test
 nix run .#forge-test
@@ -515,7 +524,7 @@ Pass `check`, `compile`, `compilation`, `terminal`, `server`, `boot`, `completio
 `completion-lifecycle`, `auto-completion`, `actions`, `editing`,
 `daily-workflows`, `direnv`, `llm-keybinding`, `llm-backend`, `llm-workflow`, `llm-tools`, `claude-code`, `lisp-eval`, `orderless-completion`, `snippets`, `lsp-snippets`,
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
-`vundo`, `electric-editing`, `ui-parity`, `cursor-state`, `snipe`, `avy`,
+`vundo`, `electric-editing`, `ui-parity`, `business-visual`, `cursor-state`, `snipe`, `avy`,
 `documents`, `notmuch`, `interactive`, `structural`, `roam`, `roam-backlinks`, or
 `notes` to run only that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote

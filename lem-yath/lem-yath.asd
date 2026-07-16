@@ -92,6 +92,7 @@
                              (:file "llm-presets")
                              (:file "claude-bridge")
                              (:file "claude-code")))
+               (:file "business-visual")
                (:file "bookmarks")
                (:file "persistence")
                (:file "vundo")

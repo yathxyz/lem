@@ -2365,7 +2365,8 @@ rendering.
 
 ### Centered document view — `lem-yath/src/centered-view.lisp`
 `SPC y c` toggles a buffer-local `Center` minor mode with configurable
-`*centered-view-width*` (default 100). The pinned
+`*centered-view-width*` (default 100), with an optional buffer-local override
+used by the business document profile. The pinned
 `patches/lem-centered-content-width.patch` adds a mode-dispatched preferred
 content width and a right-margin component to Lem windows. Redisplay derives
 balanced margins independently from each window's current width, keeps an
@@ -2376,6 +2377,32 @@ that choice intact when disabled. `scripts/centered-view-test.sh` drives the
 real leader chord and verifies rendered first/continuation columns, live width
 customization, resize, narrow and split windows, reload, horizontal clipping,
 and restoration.
+
+### Business document presentation — `lem-yath/src/business-visual.lisp`
+The global `business-visual-mode` starts automatically only when the short host
+name is present in `*business-visual-hosts*` (default `("workwin")`); it can be
+tried explicitly elsewhere through `M-x business-visual-mode`. It installs the
+native light `business-operandi` semantic palette, a compact modeline that
+retains the Vi state indicator, shape-only Normal/Insert/Emacs/Visual/Replace
+cursors, and the configured suppression of Pulsar-style jump feedback.
+
+The hidden buffer-local `business-document-mode` applies only to Org,
+Markdown/EPUB, plain `.txt`/`.text`, Notmuch message, feed-entry, and DevDocs
+buffers. It enables wrapping, fill width 88, and centered content width 88.
+PDF page text, Notmuch search lists, feed lists, code, and utility buffers stay
+outside the document boundary. Every affected buffer saves its prior wrapping,
+fill width, centered width, and centered-mode state; global toggle-off or a
+major-mode transition restores those values. Existing centered views remain
+active with their original width. Reload reasserts presentation after Lem
+clears editor-local variables during a major-mode change without duplicating
+mode state.
+
+`scripts/business-visual-test.sh` runs the installed ncurses editor and proves
+the `ex44` dark baseline, manual activation, rendered 88-column margins, mode
+classification, compact modeline, light colors, cursor shapes, pulse
+suppression, reload, document/code transitions, preservation of pre-existing
+centering, and complete teardown. Proportional fonts, fractional line spacing,
+hollow cursors, fringes, and graphical frame chrome have no ncurses analogue.
 
 ### Long-line display — `src/window/window.lisp`, `src/commands/window.lisp`
 The `line-wrap` editor variable defaults to true upstream, and

@@ -5,6 +5,16 @@
 (defvar *centered-view-width* 100
   "Preferred text width, in columns, for `centered-view-mode'.")
 
+(defvar *centered-view-buffer-width-key* 'centered-view-width
+  "Buffer variable holding an optional centered-view width override.")
+
+(defun centered-view-width-for-buffer (&optional (buffer (current-buffer)))
+  "Return BUFFER's positive centered-view width, or the global default."
+  (let ((width (or (buffer-value buffer *centered-view-buffer-width-key*)
+                   *centered-view-width*)))
+    (check-type width (integer 1))
+    width))
+
 (defun centered-view-mark-visible-windows (buffer)
   "Request redisplay for every ordinary window currently showing BUFFER."
   (dolist (window (window-list))
@@ -28,6 +38,5 @@
 
 (defmethod compute-window-content-width
     ((mode centered-view-mode) buffer window)
-  (declare (ignore mode buffer window))
-  (check-type *centered-view-width* (integer 1))
-  *centered-view-width*)
+  (declare (ignore mode window))
+  (centered-view-width-for-buffer buffer))

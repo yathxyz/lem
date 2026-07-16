@@ -725,6 +725,9 @@
             ui-parity-test = mkTestAppWithLem lemYath "lem-yath-ui-parity-test" "ui-parity-test.sh";
             indent-guides-test = mkTestAppWithLem lemYath "lem-yath-indent-guides-test" "indent-guides-test.sh";
             centered-view-test = mkTestAppWithLem lemYath "lem-yath-centered-view-test" "centered-view-test.sh";
+            business-visual-test =
+              mkTestAppWithLem lemYath "lem-yath-business-visual-test"
+                "business-visual-test.sh";
             window-history-test =
               mkTestAppWithLem lemYath "lem-yath-window-history-test"
                 "window-history-test.sh";
@@ -818,6 +821,7 @@
             ui-parity = mkCheckWithLem lemYath "ui-parity" "ui-parity-test.sh";
             indent-guides = mkCheckWithLem lemYath "indent-guides" "indent-guides-test.sh";
             centered-view = mkCheckWithLem lemYath "centered-view" "centered-view-test.sh";
+            business-visual = mkCheckWithLem lemYath "business-visual" "business-visual-test.sh";
             window-history = mkCheckWithLem lemYath "window-history" "window-history-test.sh";
             help = mkCheck "help" "help-test.sh";
             sops = mkCheck "sops" "sops-test.sh";

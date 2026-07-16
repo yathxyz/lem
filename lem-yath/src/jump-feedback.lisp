@@ -25,6 +25,9 @@
     lem-yath-jump-pulse-4-attribute)
   "The four configured Pulsar-style fade stages, brightest first.")
 
+(defparameter *jump-feedback-enabled* t
+  "Whether explicit destination jumps should use Pulsar-style feedback.")
+
 (defstruct jump-feedback-pulse
   overlay
   timer
@@ -71,6 +74,8 @@ notification."
 (defun jump-feedback-pulse-line (&optional (point (current-point)))
   "Pulse the complete line at POINT using the configured four-stage fade."
   (jump-feedback-cancel)
+  (unless *jump-feedback-enabled*
+    (return-from jump-feedback-pulse-line nil))
   (let* ((overlay
            (make-line-overlay
             point
