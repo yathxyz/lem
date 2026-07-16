@@ -307,6 +307,33 @@ fi
 selected_file_name=""
 if invoke_prompt_command lem-yath-test-file-prompt 'Fixture file:' &&
    lem_wait_for "$session" 'nested/' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l nestedx
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Eq 'Fixture file: .*nestedx' <<<"$screen" &&
+     ! grep -Eq 'nested/[[:space:]]+drwx' <<<"$screen"; then
+    pass file-zero-results 'file prompt retained an unmatched path component without stale rows'
+  else
+    fail file-zero-results 'file prompt did not enter a clean zero-result state' "$session"
+  fi
+  lem_keys "$session" BSpace
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Eq 'Fixture file: .*nested[[:space:]]' <<<"$screen" &&
+     grep -Eq 'nested/[[:space:]]+drwx' <<<"$screen"; then
+    pass file-zero-recovery 'Backspace restored the slash-terminated directory candidate'
+  else
+    fail file-zero-recovery 'path candidates did not recover after Backspace' "$session"
+  fi
+  lem_keys "$session" Escape
+  sleep 0.2
+  lem_keys "$session" Escape
+else
+  fail file-zero-results 'configured file prompt did not open' "$session"
+fi
+
+if invoke_prompt_command lem-yath-test-file-prompt 'Fixture file:' &&
+   lem_wait_for "$session" 'nested/' 10 >/dev/null; then
   tmux_cmd send-keys -t "$session" -l neste
   sleep 0.5
   if lem_wait_for "$session" 'nested/' 5 >/dev/null; then
