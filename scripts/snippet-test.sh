@@ -787,6 +787,24 @@ if run_mx lem-yath-test-snippet-undo-setup && enter_insert_after; then
     else
       fail redo-revived-field-edit "revived-field edit probe did not run"
     fi
+    lem_keys "$session" Escape
+    sleep 0.3
+    lem_keys "$session" u
+    if record_state undo; then
+      assert_state field-edit-undo-revival undo $'agai:agai-\n' \
+        'active=yes' 'field=1' 'completion=no' 'vi=normal' \
+        'before-hook=yes' 'after-hook=yes'
+    else
+      fail field-edit-undo-revival "field-edit undo probe did not run"
+    fi
+    lem_keys "$session" C-r
+    if record_state undo; then
+      assert_state field-edit-redo-revival undo $'again:again-\n' \
+        'active=yes' 'field=1' 'completion=no' 'vi=normal' \
+        'before-hook=yes' 'after-hook=yes'
+    else
+      fail field-edit-redo-revival "field-edit redo probe did not run"
+    fi
   else
     fail redo-revived-field-edit "could not re-enter insert state"
   fi

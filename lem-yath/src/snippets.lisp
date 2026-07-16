@@ -52,6 +52,8 @@
 (defvar *snippet-table-cache* (make-hash-table :test #'equal))
 (defvar *snippet-editing* nil)
 (defvar *snippet-time-function* #'get-universal-time)
+(defparameter *snippet-revival-state-limit* 16)
+(defparameter *snippet-revival-character-limit* (* 1024 1024))
 
 (define-attribute snippet-inactive-field)
 
@@ -111,8 +113,7 @@
   exit-overlay
   current-index
   pending-field-edit-p
-  defer-zero-exit-p
-  undo-node)
+  defer-zero-exit-p)
 
 (defstruct snippet-mirror-revival
   start
@@ -134,7 +135,8 @@
 (defstruct snippet-revival
   buffer
   template
-  undo-node
+  undo-table
+  undo-node-id
   root-start
   root-text
   fields
@@ -1481,12 +1483,21 @@ Only trusted file templates may use the bounded Yasnippet translation layer."
 (defun snippet-current-undo-node (&optional (buffer (current-buffer)))
   (ignore-errors (buffer-undo-tree-current buffer)))
 
-(defun snippet-same-undo-node-p (left right)
-  (and left
-       right
-       (ignore-errors
-         (= (buffer-undo-tree-node-id left)
-            (buffer-undo-tree-node-id right)))))
+(defun snippet-current-undo-identity (&optional (buffer (current-buffer)))
+  (let ((node (snippet-current-undo-node buffer)))
+    (when node
+      (values (lem/buffer/internal::buffer-%undo-tree-table buffer)
+              (buffer-undo-tree-node-id node)))))
+
+(defun snippet-prune-revivals (&optional (buffer (current-buffer)))
+  "Release snapshots whose undo tree or retained node no longer exists."
+  (let ((table (lem/buffer/internal::buffer-%undo-tree-table buffer)))
+    (setf (buffer-value buffer :lem-yath-snippet-revivals)
+          (remove-if-not
+           (lambda (revival)
+             (and (eq table (snippet-revival-undo-table revival))
+                  (gethash (snippet-revival-undo-node-id revival) table)))
+           (buffer-value buffer :lem-yath-snippet-revivals)))))
 
 (defun snippet-overlay-relative-bounds (overlay root-position)
   (values (- (position-at-point (overlay-start overlay)) root-position)
@@ -1519,37 +1530,57 @@ Only trusted file templates may use the bounded Yasnippet translation layer."
      :modified-p (snippet-field-modified-p field)
      :disabled-p (snippet-field-disabled-p field))))
 
-(defun snippet-capture-revival (session)
-  "Capture SESSION's overlay geometry for its exact expansion undo node."
+(defun snippet-capture-revival (session undo-table undo-node-id)
+  "Capture SESSION's overlay geometry for one bounded undo-tree state."
   (let* ((root (snippet-session-root-overlay session))
          (root-position (position-at-point (overlay-start root)))
+         (root-length
+           (- (position-at-point (overlay-end root)) root-position))
          (exit (snippet-session-exit-overlay session)))
-    (multiple-value-bind (exit-start exit-end)
-        (snippet-overlay-relative-bounds exit root-position)
-      (make-snippet-revival
-       :buffer (snippet-session-buffer session)
-       :template (snippet-session-template session)
-       :undo-node (snippet-session-undo-node session)
-       :root-start root-position
-       :root-text (snippet-overlay-string root)
-       :fields
-       (mapcar (lambda (field)
-                 (snippet-capture-field-revival field root-position))
-               (snippet-session-fields session))
-       :exit-start exit-start
-       :exit-end exit-end
-       :current-index (snippet-session-current-index session)
-       :defer-zero-exit-p
-       (snippet-session-defer-zero-exit-p session)))))
+    (when (<= root-length *snippet-revival-character-limit*)
+      (multiple-value-bind (exit-start exit-end)
+          (snippet-overlay-relative-bounds exit root-position)
+        (make-snippet-revival
+         :buffer (snippet-session-buffer session)
+         :template (snippet-session-template session)
+         :undo-table undo-table
+         :undo-node-id undo-node-id
+         :root-start root-position
+         :root-text (snippet-overlay-string root)
+         :fields
+         (mapcar (lambda (field)
+                   (snippet-capture-field-revival field root-position))
+                 (snippet-session-fields session))
+         :exit-start exit-start
+         :exit-end exit-end
+         :current-index (snippet-session-current-index session)
+         :defer-zero-exit-p
+         (snippet-session-defer-zero-exit-p session))))))
 
-(defun snippet-save-revival-before-undo (session)
+(defun snippet-store-current-revival (session)
+  "Remember SESSION's current state under its stable undo-tree node."
   (let ((buffer (snippet-session-buffer session)))
-    (if (snippet-same-undo-node-p
-         (snippet-session-undo-node session)
-         (snippet-current-undo-node buffer))
-        (setf (buffer-value buffer :lem-yath-snippet-revival)
-              (snippet-capture-revival session))
-        (setf (buffer-value buffer :lem-yath-snippet-revival) nil))))
+    (multiple-value-bind (undo-table undo-node-id)
+        (snippet-current-undo-identity buffer)
+      (let ((revival
+              (and undo-table
+                   undo-node-id
+                   (snippet-capture-revival
+                    session undo-table undo-node-id))))
+        (when revival
+          (let ((states
+                  (remove-if
+                   (lambda (candidate)
+                     (and (eq undo-table
+                              (snippet-revival-undo-table candidate))
+                          (= undo-node-id
+                             (snippet-revival-undo-node-id candidate))))
+                   (buffer-value buffer :lem-yath-snippet-revivals))))
+            (setf (buffer-value buffer :lem-yath-snippet-revivals)
+                  (subseq (cons revival states)
+                          0 (min *snippet-revival-state-limit*
+                                 (1+ (length states)))))))
+        revival))))
 
 (defun snippet-end-session (&optional (buffer (current-buffer)))
   "End BUFFER's live field session while retaining inserted text."
@@ -1807,11 +1838,10 @@ original text and return NIL."
                                :exit-overlay exit-overlay
                                :current-index nil
                                :pending-field-edit-p nil
-                               :defer-zero-exit-p nil
-                               :undo-node nil)))
+                               :defer-zero-exit-p nil)))
                         (setf (buffer-value buffer :lem-yath-snippet-session)
                               session)
-                        (setf (buffer-value buffer :lem-yath-snippet-revival)
+                        (setf (buffer-value buffer :lem-yath-snippet-revivals)
                               nil)
                         (add-hook
                          (variable-value 'before-change-functions
@@ -2074,6 +2104,7 @@ Tab reports the failure without also invoking its fallback indentation."
 (defun snippet-ensure-session-valid (&optional (buffer (current-buffer)))
   (alexandria:when-let ((session (snippet-active-session buffer)))
     (unless (snippet-session-valid-p session buffer)
+      (setf (buffer-value buffer :lem-yath-snippet-revivals) nil)
       (snippet-end-session buffer))))
 
 (defun snippet-enable-buffer (buffer)
@@ -2098,11 +2129,6 @@ Tab reports the failure without also invoking its fallback indentation."
           '("UNDO" "REDO" "VI-UNDO" "VI-REDO")
           :test #'string=))
 
-(defun snippet-redo-command-p ()
-  (member (symbol-name (command-name (this-command)))
-          '("REDO" "VI-REDO")
-          :test #'string=))
-
 (defun snippet-revival-offset-valid-p (start end root-length)
   (and (integerp start)
        (integerp end)
@@ -2110,9 +2136,10 @@ Tab reports the failure without also invoking its fallback indentation."
 
 (defun snippet-revival-valid-p (revival buffer)
   (and (eq buffer (snippet-revival-buffer revival))
-       (snippet-same-undo-node-p
-        (snippet-revival-undo-node revival)
-        (snippet-current-undo-node buffer))
+       (multiple-value-bind (undo-table undo-node-id)
+           (snippet-current-undo-identity buffer)
+         (and (eq undo-table (snippet-revival-undo-table revival))
+              (eql undo-node-id (snippet-revival-undo-node-id revival))))
        (let ((root-length (length (snippet-revival-root-text revival))))
          (and
           (snippet-revival-offset-valid-p
@@ -2209,8 +2236,7 @@ Tab reports the failure without also invoking its fallback indentation."
                 :current-index nil
                 :pending-field-edit-p nil
                 :defer-zero-exit-p
-                (snippet-revival-defer-zero-exit-p revival)
-                :undo-node (snippet-revival-undo-node revival))))
+                (snippet-revival-defer-zero-exit-p revival))))
         (setf (buffer-value buffer :lem-yath-snippet-session) session)
         (add-hook (variable-value 'before-change-functions :buffer buffer)
                   'snippet-before-change)
@@ -2220,20 +2246,14 @@ Tab reports the failure without also invoking its fallback indentation."
                                 (snippet-revival-current-index revival))
         t))))
 
-(defun snippet-restore-after-redo (&optional (buffer (current-buffer)))
-  (alexandria:when-let
-      ((revival (buffer-value buffer :lem-yath-snippet-revival)))
-    (when (snippet-revival-valid-p revival buffer)
-      ;; A restored live session can capture a fresh descriptor if the user
-      ;; undoes it again; do not retain a duplicate copy of its root text.
-      (snippet-restore-revival revival buffer)
-      (setf (buffer-value buffer :lem-yath-snippet-revival) nil))))
-
-(defun snippet-note-session-undo-node (&optional (buffer (current-buffer)))
-  (alexandria:when-let ((session (snippet-active-session buffer)))
-    (unless (snippet-session-undo-node session)
-      (setf (snippet-session-undo-node session)
-            (snippet-current-undo-node buffer)))))
+(defun snippet-restore-after-history-move
+    (&optional (buffer (current-buffer)))
+  (let ((revival
+          (find-if (lambda (candidate)
+                     (snippet-revival-valid-p candidate buffer))
+                   (buffer-value buffer :lem-yath-snippet-revivals))))
+    (when revival
+      (snippet-restore-revival revival buffer))))
 
 (defun snippet-major-mode-command-p ()
   (member (command-name (this-command)) (major-modes)))
@@ -2242,13 +2262,21 @@ Tab reports the failure without also invoking its fallback indentation."
   ;; Undo/redo replays every recorded primary and mirror edit.  Tear down
   ;; derived overlays first so the inverse edits cannot recursively mirror.
   (snippet-ensure-session-valid)
-  (when (and (snippet-active-session-p)
-             (or (snippet-undo-command-p)
-                 (snippet-major-mode-command-p)))
-    (when (and (snippet-undo-command-p)
-               (not (snippet-redo-command-p)))
-      (snippet-save-revival-before-undo (snippet-active-session)))
-    (snippet-end-session)))
+  (alexandria:when-let ((session (snippet-active-session)))
+    (if (snippet-major-mode-command-p)
+        (progn
+          (setf (buffer-value (current-buffer)
+                              :lem-yath-snippet-revivals)
+                nil)
+          (snippet-end-session))
+        (progn
+          ;; Save the state before every command. If that command creates a
+          ;; new undo node, this is precisely the parent state needed by a
+          ;; later undo; before a history move, it also records the state
+          ;; needed by the inverse move.
+          (snippet-store-current-revival session)
+          (when (snippet-undo-command-p)
+            (snippet-end-session))))))
 
 (defun snippet-post-command ()
   ;; Major-mode activation clears buffer-local minor modes.  Reapply the
@@ -2256,6 +2284,7 @@ Tab reports the failure without also invoking its fallback indentation."
   ;; it if a buffer became temporary or read-only.
   (let ((buffer (current-buffer)))
     (snippet-ensure-session-valid buffer)
+    (snippet-prune-revivals buffer)
     (alexandria:when-let* ((session (snippet-active-session buffer))
                            (field (snippet-current-field session)))
       (unless (snippet-point-within-overlay-p
@@ -2275,12 +2304,12 @@ Tab reports the failure without also invoking its fallback indentation."
         (snippet-enable-buffer buffer)
         (progn
           (snippet-end-session buffer)
+          (setf (buffer-value buffer :lem-yath-snippet-revivals) nil)
           (when (snippet-mode-present-p buffer)
             (lem-yath-snippet-mode nil))))
-    (when (and (snippet-redo-command-p)
+    (when (and (snippet-undo-command-p)
                (not (snippet-active-session-p buffer)))
-      (snippet-restore-after-redo buffer))
-    (snippet-note-session-undo-node buffer)))
+      (snippet-restore-after-history-move buffer))))
 
 (add-hook *find-file-hook* 'snippet-enable-buffer)
 (add-hook *switch-to-buffer-hook* 'snippet-enable-buffer)

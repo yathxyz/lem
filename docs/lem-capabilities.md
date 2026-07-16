@@ -779,13 +779,15 @@ insert state retains the session for later resumption, and edits inside fields
 continue through Paredit and electric-pair behavior. With no trigger or session,
 the original mode-specific `Tab` binding runs unchanged.
 
-Each field session records the stable undo-tree node that introduced its
-expansion. Undoing that exact node removes the live overlays before replay;
-redoing it restores the captured root, fields, mirrors, selection, and edit
-hooks only when both the node identity and resulting text match. The restored
-field remains editable in Vi Normal/Insert transitions and mirrors continue to
-update. This reproduces the configured `yas-snippet-revival t` path without
-placing mutable editor objects in undo history.
+Each field session retains up to 16 snapshots whose roots contain at most
+1,048,576 characters, keyed by the stable undo-tree identity and node ID for
+the corresponding buffer state. Undo or redo removes live overlays before
+replay, then restores the captured root, fields, mirrors, selection, and edit
+hooks only when both the node identity and resulting text match. This covers
+undoing and redoing the expansion itself as well as edits inside a live field;
+restored mirrors continue to update through Vi Normal/Insert transitions. It
+reproduces the configured `yas-snippet-revival t` path without placing mutable
+editor objects in undo history or retaining unbounded snapshots.
 
 `M-x lem-yath-insert-snippet` exposes the active portable templates without
 requiring a trigger. Its Prescient-filtered labels include the template name,
@@ -883,8 +885,8 @@ is `nix run .#snippet-test`; it drives the private snippet, portable field
 grammar, bounded dynamic forms, exact corpus audit, the Prescient selector,
 navigation and editing keys,
 completion/Vi/Paredit precedence,
-indentation, lifecycle cleanup, expansion undo/redo revival, and a real pinned
-Python community snippet
+indentation, lifecycle cleanup, expansion and field-edit undo/redo revival, and
+a real pinned Python community snippet
 through the ncurses editor.
 
 ### consult-like commands (verified)
