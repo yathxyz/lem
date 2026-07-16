@@ -55,87 +55,6 @@
 (defun orderless-case-sensitive-p (query)
   (some #'upper-case-p (or query "")))
 
-(defun orderless-character-test (case-sensitive-p)
-  (if case-sensitive-p #'char= #'char-equal))
-
-(defun orderless-literal-matcher (component case-sensitive-p)
-  (let ((test (orderless-character-test case-sensitive-p)))
-    (lambda (candidate)
-      (not (null (search component candidate :test test))))))
-
-(defun orderless-character-fold-string (text)
-  "Return TEXT compatibility-decomposed without Unicode combining marks."
-  (handler-case
-      (sb-unicode:normalize-string
-       text :nfkd
-       (lambda (character)
-         (not (member (sb-unicode:general-category character)
-                      '(:mn :mc :me)))))
-    (error () text)))
-
-(defun orderless-canonical-string (text)
-  "Return TEXT in canonical decomposed form."
-  (handler-case (sb-unicode:normalize-string text :nfd)
-    (error () text)))
-
-(defparameter *orderless-character-fold-punctuation*
-  '((#\" . "\"«»“”„‟❝❞❠⹂〝〞〟＂🙶🙷🙸")
-    (#\' . "'‘’‚‛‹›❛❜❟❮❯＇")
-    (#\` . "``‘‛‹❛❮｀")))
-
-(defun orderless-character-fold-punctuation-scanner
-    (component case-sensitive-p)
-  "Compile pinned ASCII quote folding in COMPONENT, or return NIL."
-  (when (some (lambda (character)
-                (assoc character *orderless-character-fold-punctuation*))
-              component)
-    (ppcre:create-scanner
-     (with-output-to-string (stream)
-       (loop :for character :across component
-             :for equivalents :=
-               (cdr (assoc character
-                           *orderless-character-fold-punctuation*))
-             :if equivalents
-               :do (format stream "(?:~{~a~^|~})"
-                           (map 'list
-                                (lambda (equivalent)
-                                  (ppcre:quote-meta-chars
-                                   (string equivalent)))
-                                equivalents))
-             :else
-               :do (write-string
-                    (ppcre:quote-meta-chars (string character)) stream)))
-     :case-insensitive-mode (not case-sensitive-p))))
-
-(defun orderless-character-fold-matcher (component case-sensitive-p)
-  "Match COMPONENT literally against original or character-folded candidates.
-
-This preserves Emacs' directional char-fold contract: an ASCII component can
-match a diacritic or compatibility form, while a diacritic in the component is
-not silently removed."
-  (let ((literal (orderless-literal-matcher component case-sensitive-p))
-        (canonical
-          (orderless-literal-matcher
-           (orderless-canonical-string component) case-sensitive-p))
-        (punctuation
-          (orderless-character-fold-punctuation-scanner
-           component case-sensitive-p))
-        (cache (make-hash-table :test 'equal)))
-    (lambda (candidate)
-      (or (funcall literal candidate)
-          (and punctuation (ppcre:scan punctuation candidate))
-          (multiple-value-bind (forms present-p) (gethash candidate cache)
-            (unless present-p
-              (setf forms
-                    (cons (orderless-canonical-string candidate)
-                          (orderless-character-fold-string candidate))
-                    (gethash candidate cache) forms))
-            (or (funcall canonical (car forms))
-                (funcall literal (cdr forms))
-                (and punctuation
-                     (or (ppcre:scan punctuation (car forms))
-                         (ppcre:scan punctuation (cdr forms))))))))))
-
 (defun orderless-regexp-scanner (component case-sensitive-p)
   (handler-case
       (ppcre:create-scanner
@@ -143,19 +62,19 @@ not silently removed."
     (error () nil)))
 
 (defun orderless-default-matcher (component case-sensitive-p)
-  (let ((literal (orderless-literal-matcher component case-sensitive-p))
+  (let ((literal (completion-literal-matcher component case-sensitive-p))
         (scanner (orderless-regexp-scanner component case-sensitive-p)))
     (lambda (candidate)
       (or (funcall literal candidate)
           (and scanner (not (null (ppcre:scan scanner candidate))))))))
 
 (defun orderless-prefix-matcher (component case-sensitive-p)
-  (let ((test (orderless-character-test case-sensitive-p)))
+  (let ((test (completion-character-test case-sensitive-p)))
     (lambda (candidate)
       (eql 0 (search component candidate :test test)))))
 
 (defun orderless-flex-matcher (component case-sensitive-p)
-  (let ((test (orderless-character-test case-sensitive-p)))
+  (let ((test (completion-character-test case-sensitive-p)))
     (lambda (candidate)
       (loop :with candidate-index := 0
             :for component-character :across component
@@ -211,9 +130,9 @@ not silently removed."
       ((null dispatcher)
        (orderless-default-matcher body case-sensitive-p))
       ((char= dispatcher #\=)
-       (orderless-literal-matcher body case-sensitive-p))
+       (completion-literal-matcher body case-sensitive-p))
       ((char= dispatcher #\%)
-       (orderless-character-fold-matcher body case-sensitive-p))
+       (completion-character-fold-matcher body case-sensitive-p))
       ((char= dispatcher #\^)
        (orderless-prefix-matcher body case-sensitive-p))
       ((char= dispatcher #\~)

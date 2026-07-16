@@ -400,6 +400,40 @@ if start_session "$s1"; then
   fi
   close_prompt "$s1"
 
+  if open_command_prompt "$s1" \
+       lem-yath-test-prescient-character-fold-prompt 'Character fold:'; then
+    tmux_cmd send-keys -t "$s1" -l cafe-target
+    if lem_wait_for "$s1" 'Character fold: cafe-target' 10 >/dev/null &&
+       lem_wait_for "$s1" 'CAFÉ-TARGET' 10 >/dev/null; then
+      screen=$(lem_capture "$s1")
+      if ! grep -Fq 'cafe-plain-decoy' <<<"$screen"; then
+        lem_keys "$s1" Enter
+        for _ in $(seq 1 40); do
+          grep -Fxq 'CHARACTER-FOLD=CAFÉ-TARGET' \
+            "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null && break
+          sleep 0.1
+        done
+        if grep -Fxq 'CHARACTER-FOLD=CAFÉ-TARGET' \
+             "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null; then
+          pass character-fold \
+            'ASCII input matched and accepted the exact accented candidate'
+        else
+          fail character-fold \
+            'folded completion did not preserve candidate identity' "$s1"
+        fi
+      else
+        fail character-fold \
+          'folded matching retained a nonmatching plain decoy' "$s1"
+      fi
+    else
+      fail character-fold \
+        'ASCII input did not match the accented Prescient candidate' "$s1"
+    fi
+  else
+    fail character-fold 'could not open the character-fold prompt' "$s1"
+  fi
+  close_prompt "$s1"
+
   if open_query "$s1" 'lem-yath-roam-' &&
      lem_wait_for "$s1" 'lem-yath-roam-(find|insert|random)' 10 >/dev/null; then
     lem_keys "$s1" C-n

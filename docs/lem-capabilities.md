@@ -318,6 +318,16 @@ whether the list opens instantly or on TAB. Core has fuzzy primitives, but no
 Orderless component dispatch or persistent Prescient ranking; lem-yath adds the
 prompt behavior described in `src/completion.lisp`.
 
+Prompt matching reproduces the pinned Prescient defaults: every space-separated
+component may match as a literal, regexp, or initialism, with whole-query smart
+case. Literal matching performs directional character folding, so plain input
+matches diacritics, Unicode compatibility forms, and Prescient's ASCII quote
+variants without simplifying non-ASCII query characters. The real TUI gate
+accepts an accented result through plain input and verifies its exact identity;
+the fixture oracle also covers directionality, smart case, compatibility forms,
+quote variants, and Prescient's deliberate lack of `ae`/`ss` expansions for
+`æ`/`ß`.
+
 Lem-yath gives prompt contexts Vertico-style display-only startup: presenting
 candidates neither inserts a shared prefix nor automatically accepts a
 synchronous singleton. `Tab` inserts the focused candidate and refreshes

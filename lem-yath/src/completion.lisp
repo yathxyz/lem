@@ -1,8 +1,9 @@
 ;;;; Completion: Vertico + Prescient + Marginalia prompt behavior.
 ;;;;
 ;;;; The live Emacs configuration uses Prescient inside Vertico minibuffers:
-;;;; literal, regexp, or initialism matching for every space-separated
-;;;; component, followed by persistent recency/frequency sorting.  Orderless
+;;;; directional character-folded literal, regexp, or initialism matching for
+;;;; every space-separated component, followed by persistent recency/frequency
+;;;; sorting.  Orderless
 ;;;; remains the global completion style outside Vertico and is handled by the
 ;;;; in-buffer completion work separately.  File prompts deliberately retain
 ;;;; Lem's path-aware completion and receive ranking only.
@@ -181,16 +182,189 @@
 (defun prescient-case-sensitive-p (query)
   (some #'upper-case-p query))
 
-(defun prescient-literal-match-p (component label case-sensitive-p)
-  (search component label :test (if case-sensitive-p #'char= #'char-equal)))
+(defun completion-character-test (case-sensitive-p)
+  (if case-sensitive-p #'char= #'char-equal))
 
-(defun prescient-regexp-match-p (component label case-sensitive-p)
+(defun completion-literal-matcher (component case-sensitive-p)
+  (let ((test (completion-character-test case-sensitive-p)))
+    (lambda (candidate)
+      (not (null (search component candidate :test test))))))
+
+(defun completion-character-fold-string (text)
+  "Return TEXT compatibility-decomposed without Unicode combining marks."
   (handler-case
-      (not (null (ppcre:scan
-                  (ppcre:create-scanner
-                   component :case-insensitive-mode (not case-sensitive-p))
-                  label)))
-    (error () nil)))
+      (sb-unicode:normalize-string
+       text :nfkd
+       (lambda (character)
+         (not (member (sb-unicode:general-category character)
+                      '(:mn :mc :me)))))
+    (error () text)))
+
+(defun completion-canonical-string (text)
+  "Return TEXT in canonical decomposed form."
+  (handler-case (sb-unicode:normalize-string text :nfd)
+    (error () text)))
+
+(defparameter *completion-character-fold-punctuation*
+  '((#\" . "\"«»“”„‟❝❞❠⹂〝〞〟＂🙶🙷🙸")
+    (#\' . "'‘’‚‛‹›❛❜❟❮❯＇")
+    (#\` . "``‘‛‹❛❮｀")))
+
+(defun completion-combining-mark-p (character)
+  (member (sb-unicode:general-category character) '(:mn :mc :me)))
+
+(defun completion-canonical-clusters (text)
+  "Return canonical base-plus-combining-mark clusters for TEXT."
+  (let ((clusters '())
+        (current nil))
+    (labels ((finish-cluster ()
+               (when current
+                 (push (coerce (nreverse current) 'string) clusters)
+                 (setf current nil))))
+      (loop :for character :across (completion-canonical-string text)
+            :do (if (and current
+                         (completion-combining-mark-p character))
+                    (push character current)
+                    (progn
+                      (finish-cluster)
+                      (push character current))))
+      (finish-cluster)
+      (nreverse clusters))))
+
+(defstruct (completion-fold-form
+             (:constructor make-completion-fold-form
+                 (text unit-map canonicals ranges boundaries)))
+  text
+  unit-map
+  canonicals
+  ranges
+  boundaries)
+
+(defun completion-build-fold-form (text)
+  "Build a compatibility-folded string retaining source-cluster identity."
+  (let* ((clusters (completion-canonical-clusters text))
+         (folded-units
+           (mapcar (lambda (cluster)
+                     (let ((folded
+                             (completion-character-fold-string cluster)))
+                       ;; A standalone combining mark must remain matchable.
+                       (if (zerop (length folded)) cluster folded)))
+                   clusters))
+         (folded-length (reduce #'+ folded-units
+                                :key #'length :initial-value 0))
+         (folded (make-string folded-length))
+         (unit-map (make-array folded-length :element-type 'fixnum))
+         (canonicals (coerce clusters 'vector))
+         (ranges (make-array (length clusters)))
+         (boundaries
+           (make-array (1+ folded-length)
+                       :element-type 'bit :initial-element 0))
+         (offset 0))
+    (setf (sbit boundaries 0) 1)
+    (loop :for unit :in folded-units
+          :for unit-index :from 0
+          :for end := (+ offset (length unit))
+          :do (replace folded unit :start1 offset)
+              (loop :for index :from offset :below end
+                    :do (setf (aref unit-map index) unit-index))
+              (setf (aref ranges unit-index) (cons offset end)
+                    (sbit boundaries end) 1
+                    offset end))
+    (make-completion-fold-form
+     folded unit-map canonicals ranges boundaries)))
+
+(defun completion-fold-character-match-p
+    (query-character candidate-character case-sensitive-p)
+  (or (funcall (completion-character-test case-sensitive-p)
+               query-character candidate-character)
+      (alexandria:when-let
+          ((equivalents
+             (cdr (assoc query-character
+                         *completion-character-fold-punctuation*))))
+        (find candidate-character equivalents :test #'char=))))
+
+(defun completion-fold-string-equal-p
+    (left right case-sensitive-p)
+  (and (= (length left) (length right))
+       (loop :for left-character :across left
+             :for right-character :across right
+             :always (funcall (completion-character-test case-sensitive-p)
+                              left-character right-character))))
+
+(defun completion-fold-protected-unit-p (canonical)
+  "Whether CANONICAL came from an explicitly non-ASCII query cluster."
+  (or (/= 1 (length canonical))
+      (> (char-code (char canonical 0)) 127)))
+
+(defun completion-fold-protected-units-match-p
+    (query candidate candidate-start case-sensitive-p)
+  (loop
+    :with query-ranges := (completion-fold-form-ranges query)
+    :with query-canonicals := (completion-fold-form-canonicals query)
+    :with candidate-map := (completion-fold-form-unit-map candidate)
+    :with candidate-canonicals :=
+      (completion-fold-form-canonicals candidate)
+    :for query-unit-index :from 0 :below (length query-canonicals)
+    :for canonical := (aref query-canonicals query-unit-index)
+    :when (completion-fold-protected-unit-p canonical)
+      :unless
+        (let* ((query-range (aref query-ranges query-unit-index))
+               (candidate-range-start
+                 (+ candidate-start (car query-range)))
+               (candidate-range-end
+                 (+ candidate-start (cdr query-range)))
+               (candidate-unit-index
+                 (aref candidate-map candidate-range-start)))
+          (and (loop :for index :from candidate-range-start
+                     :below candidate-range-end
+                     :always (= candidate-unit-index
+                                (aref candidate-map index)))
+               (completion-fold-string-equal-p
+                canonical
+                (aref candidate-canonicals candidate-unit-index)
+                case-sensitive-p)))
+        :do (return nil)
+    :finally (return t)))
+
+(defun completion-fold-form-match-p
+    (query candidate case-sensitive-p)
+  "Search CANDIDATE for QUERY without splitting compatibility characters."
+  (let* ((query-text (completion-fold-form-text query))
+         (candidate-text (completion-fold-form-text candidate))
+         (query-length (length query-text))
+         (candidate-length (length candidate-text))
+         (boundaries (completion-fold-form-boundaries candidate)))
+    (loop :for start :from 0 :to (- candidate-length query-length)
+          :for end := (+ start query-length)
+          :when (and (= 1 (sbit boundaries start))
+                     (= 1 (sbit boundaries end))
+                     (loop :for query-index :from 0 :below query-length
+                           :always
+                             (completion-fold-character-match-p
+                              (char query-text query-index)
+                              (char candidate-text (+ start query-index))
+                              case-sensitive-p))
+                     (completion-fold-protected-units-match-p
+                      query candidate start case-sensitive-p))
+            :do (return t)
+          :finally (return nil))))
+
+(defun completion-character-fold-matcher (component case-sensitive-p)
+  "Match COMPONENT literally using pinned directional character folding.
+
+An ASCII component can match diacritic, compatibility, and configured quote
+variants.  A non-ASCII component is not silently simplified."
+  (let ((literal (completion-literal-matcher component case-sensitive-p))
+        (query (completion-build-fold-form component))
+        (cache (make-hash-table :test 'equal)))
+    (lambda (candidate)
+      (or (funcall literal candidate)
+          (multiple-value-bind (form present-p) (gethash candidate cache)
+            (unless present-p
+              (setf form (completion-build-fold-form candidate)
+                    (gethash candidate cache) form))
+            (completion-fold-form-match-p
+             query form case-sensitive-p))))))
 
 (defun prescient-regexp-scanner (component case-sensitive-p)
   "Compile COMPONENT once for a candidate batch, or return NIL if invalid."
@@ -213,31 +387,33 @@
   (search component (prescient-initials label)
           :test (if case-sensitive-p #'char= #'char-equal)))
 
-(defun prescient-component-match-p
-    (component label case-sensitive-p
-     &optional (regexp-scanner nil regexp-scanner-supplied-p))
-  (or (prescient-literal-match-p component label case-sensitive-p)
-      (if regexp-scanner-supplied-p
-          (and regexp-scanner (ppcre:scan regexp-scanner label))
-          (prescient-regexp-match-p component label case-sensitive-p))
-      (prescient-initialism-match-p component label case-sensitive-p)))
+(defun prescient-component-matcher (component case-sensitive-p)
+  "Compile Prescient's literal, regexp, and initialism methods for COMPONENT."
+  (let ((literal
+          (completion-character-fold-matcher component case-sensitive-p))
+        (regexp (prescient-regexp-scanner component case-sensitive-p)))
+    (lambda (label)
+      (or (funcall literal label)
+          (and regexp (ppcre:scan regexp label))
+          (prescient-initialism-match-p
+           component label case-sensitive-p)))))
 
 (defun prescient-filter (input candidates
                          &key (key #'identity) (category :generic)
                            (rank-p t))
   "Filter and rank CANDIDATES like the active Vertico-Prescient setup.
 
-Every query component may match literally, as a regexp, or as an initialism;
-all components must match.  Uppercase input makes matching case-sensitive.
-When RANK-P is false, preserve the provider's source-defined order."
+Every query component may match as a character-folded literal, regexp, or
+initialism; all components must match.  Character folding is directional and
+uppercase input makes matching case-sensitive.  When RANK-P is false, preserve
+the provider's source-defined order."
   (setf *completion-current-category* category)
   (let* ((components (prescient-split-query input))
          (case-sensitive-p (prescient-case-sensitive-p (or input "")))
          (matchers
            (mapcar (lambda (component)
-                     (cons component
-                           (prescient-regexp-scanner
-                            component case-sensitive-p)))
+                     (prescient-component-matcher
+                      component case-sensitive-p))
                    components))
          (filtered
            (if (null matchers)
@@ -246,9 +422,7 @@ When RANK-P is false, preserve the provider's source-defined order."
                 (lambda (candidate)
                   (let ((label (funcall key candidate)))
                     (every (lambda (matcher)
-                             (prescient-component-match-p
-                              (car matcher) label case-sensitive-p
-                              (cdr matcher)))
+                             (funcall matcher label))
                            matchers)))
                 candidates))))
     (if rank-p

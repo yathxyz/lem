@@ -63,6 +63,66 @@
      (declare (ignore input))
      '("singleton-value"))))
 
+(define-command lem-yath-test-prescient-character-fold-prompt () ()
+  "Open a controlled prompt using the configured Prescient matcher."
+  (let ((choice
+          (prompt-for-string
+           "Character fold: "
+           :completion-function
+           (lambda (input)
+             (prescient-filter
+              input
+              '("CAFÉ-TARGET" "cafe-plain-decoy")
+              :rank-p nil)))))
+    (with-open-file (stream (uiop:getenv "LEM_YATH_COMPLETION_REPORT")
+                            :direction :output
+                            :if-exists :append
+                            :if-does-not-exist :create)
+      (format stream "CHARACTER-FOLD=~a~%" choice))))
+
+(defun lem-yath-test-prescient-character-fold-oracle ()
+  "Check the pinned Prescient character-fold contract without prompt timing."
+  (flet ((same (expected query candidates name)
+           (let ((actual
+                   (prescient-filter query candidates :rank-p nil)))
+             (unless (equal expected actual)
+               (error "~a: expected ~s, got ~s" name expected actual)))))
+    (same '("CAFÉ-TARGET" "cafe-plain")
+          "cafe" '("CAFÉ-TARGET" "cafe-plain" "other")
+          "diacritic folding")
+    (same '("résumé" "resume")
+          "resume" '("résumé" "resume")
+          "ASCII query direction")
+    (same '("résumé")
+          "résumé" '("resume" "résumé")
+          "accented query direction")
+    (same '("ŕésumé" "résumé")
+          "résumé" '("ŕésumé" "résumé" "resume" "rḗsumé")
+          "mixed directional folding")
+    (same '("CAFÉ")
+          "CAFE" '("CAFÉ" "café" "Cafe")
+          "smart case")
+    (same '("①" "1")
+          "1" '("①" "1")
+          "compatibility folding")
+    (same '("ﬂé" "flé")
+          "flé" '("ﬂé" "flé" "fle")
+          "mixed compatibility folding")
+    (same '("flower")
+          "f" '("ﬂower" "flower")
+          "compatibility unit boundary")
+    (same '("quote”" "quote\"")
+          "quote\"" '("quote”" "quote\"")
+          "double-quote folding")
+    (same '("quote’" "quote'")
+          "quote'" '("quote’" "quote'")
+          "single-quote folding")
+    (same '("quote‘" "quote`")
+          "quote`" '("quote‘" "quote`")
+          "backtick folding")
+    (same '("ae") "ae" '("æ" "ae") "no invented ae expansion")
+    (same '("ss") "ss" '("ß" "ss") "no invented ss expansion")))
+
 (defun lem-yath-test-grouped-prompt-item (label group)
   "Return a grouped completion item spanning the live prompt input."
   (with-point ((start (lem/prompt-window::current-prompt-start-point))
@@ -86,3 +146,5 @@
       (lem-yath-test-grouped-prompt-item "group-beta" "First Group")
       (lem-yath-test-grouped-prompt-item "group-gamma" "Second Group")
       (lem-yath-test-grouped-prompt-item "group-delta" "Second Group")))))
+
+(lem-yath-test-prescient-character-fold-oracle)
