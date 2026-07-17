@@ -13,8 +13,13 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 |------|------|
 | `hello.lisp` | Permanent canary book: `k-sq` + two theorems. First thing that goes red if the toolchain breaks. |
 | `buffer-model.lisp` | VK-1 formal buffer model + `wf-buffer` well-formedness predicate. Certified; also the in-image runtime assertion. |
+| `buffer-edit.lisp` | VK-2 edit primitives (`k-insert`, `k-delete`), shift-markers marker algebra, position algebra, and the five VK-2 obligation groups as certified theorems. |
 | `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — under 200 lines, every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
 | `README.md` | This file. |
+
+Books are certified in the dependency order pinned in `scripts/run-proofs.sh`
+(`ORDERED_BOOKS`): `buffer-edit` includes `buffer-model`, and the alphabetical
+glob would order them wrongly.
 
 ## VK-1 — buffer model + well-formedness
 
@@ -43,11 +48,75 @@ ACL2 base-function whitelist: `natp`, `len`, `true-listp` (each a fresh ACL2-pac
 symbol defined with its axiomatic semantics in `shim.lisp`). The exec path
 otherwise uses only CL homonyms; no `std/` function is exec-reachable.
 
+## VK-2 — edit primitives + marker algebra
+
+`buffer-edit.lisp` defines the pure edit kernel:
+
+- `k-insert (buffer linum charpos payload)` and
+  `k-delete (buffer linum charpos n) → (mv buffer' deleted)`, faithful
+  transcriptions of production `insert-string/point` / `delete-char/point`
+  (`src/buffer/internal/buffer-insert.lisp:99-150`), with marker relocation
+  transcribing `shift-markers`' exact four cases (`buffer-insert.lisp:39-97`)
+  including the left-inserting-moves / right-inserting-stays boundary
+  semantics (delete relocation is kind-independent, as in production).
+- `k-position` / `k-point-at-position`: production `position-at-point`'s
+  1-based absolute-position algebra (`src/buffer/internal/basic.lisp:382-387`).
+- `k-shift-position-insert` / `k-shift-position-delete`: production
+  `compute-edit-offset` (`src/buffer/internal/edit.lisp:40-51`).
+
+Certified obligations (SPEC-VK VK-2, all five groups):
+
+1. **wf-preservation**: `wf-buffer-of-k-insert`, `wf-buffer-of-k-delete`.
+2. **Inverse law**: `k-delete-of-k-insert` — deleting exactly the inserted
+   codepoints restores the lines and **every point exactly** and returns the
+   payload as the deleted text. The kind-conditional boundary behaviour is
+   stated separately and precisely
+   (`shift-point-insert-left-inserting-at-position` — moves to the end of the
+   inserted text; `shift-point-insert-right-inserting-at-position` — stays).
+3. **Content laws**: `k-flatten-of-k-insert` (splice) and
+   `content-of-k-delete` (excision + deleted-chunk equality) over the
+   flattened codepoint content.
+4. **Order preservation**: `shift-point-insert-preserves-strict-order`
+   (strict order strictly preserved; weak order on coincident mixed-kind
+   points is *intentionally* not preserved — that is the production boundary
+   semantics), `shift-point-delete-preserves-order` (weak order preserved;
+   collapses inside the deleted region may equalize).
+5. **Offset algebra**: `k-shift-position-insert-tracks-content` /
+   `k-shift-position-delete-tracks-content` — a shifted recorded position
+   points at the same character of the flattened content (delete version for
+   positions strictly past the deleted region), plus the
+   `k-point-at-position-of-k-position` round trip.
+
+**wf strengthening (VK-2 change to the VK-1 predicate).** `wf-distinguished`
+now also pins start-point at charpos 0 with kind `:right-inserting` and
+end-point kind `:left-inserting`. These are production truths
+(`make-buffer-start-point` / `make-buffer-end-point`,
+`src/buffer/internal/buffer.lisp:140-144`) and are exactly what makes
+wf-preservation provable: without them an insert at (1,0) could carry a
+left-inserting "start" off line 1.
+
+**Differential acceptance**: `tests/pbt/kernel-conformance.lisp` runs ~2k
+random edit scripts (newline-mixing multibyte inserts, deletes running off
+the buffer end, extra registered points of both kinds, point moves) through
+BOTH a live production buffer and the kernel from identical initial states,
+comparing full content, every registered point's (linum charpos kind),
+`buffer-nlines` vs `(len lines)`, the deleted string vs the kernel's deleted
+payload, and production's landing coordinates vs `k-point-at-position`, after
+every step. No divergence found; production is the spec.
+
+**Shim growth for VK-2** (header updated in `shim.lisp`): `local` (no-op),
+`include-book` (same-directory books load once via `load-verified-book`;
+`:dir :system` community books are proof-only and ignored), `mv`/`mv-let`
+(ACL2's own raw-Lisp semantics: `values` / `multiple-value-bind`). The
+whitelist is unchanged; `arithmetic/top-with-meta` is included `local`ly so
+nothing from it is exec-reachable.
+
 ## Proof status
 
 All theorems in every book under `verified/` certify with real ACL2 (no
 `skip-proofs`, `defaxiom`, trust tags, or `:program`-mode kernel functions). No
-theorem is PROOF PENDING.
+theorem is PROOF PENDING. (VK-2's five obligation groups are all certified in
+`buffer-edit.lisp`; no statement was weakened.)
 
 ## ACL2 toolchain — install and pin
 

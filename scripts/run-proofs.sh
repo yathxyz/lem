@@ -55,8 +55,28 @@ fail=0
 certified=0
 skipped=0
 
+# Dependency order: certify-book needs included books certified first, and the
+# glob is alphabetical (buffer-edit would sort before the buffer-model book it
+# includes). Books listed here certify first, in this order; any book not
+# listed follows in glob order.
+ORDERED_BOOKS=(hello buffer-model buffer-edit)
+
+ordered_paths=()
+for name in "${ORDERED_BOOKS[@]}"; do
+  [ -f "$VERIFIED/$name.lisp" ] && ordered_paths+=("$VERIFIED/$name.lisp")
+done
 shopt -s nullglob
 for book in "$VERIFIED"/*.lisp; do
+  name="$(basename "${book%.lisp}")"
+  listed=0
+  for n in "${ORDERED_BOOKS[@]}"; do
+    [ "$n" = "$name" ] && listed=1 && break
+  done
+  [ "$listed" -eq 0 ] && ordered_paths+=("$book")
+done
+shopt -u nullglob
+
+for book in "${ordered_paths[@]}"; do
   case "$(basename "$book")" in
     shim.lisp|shim-*.lisp) continue ;;
   esac
@@ -66,8 +86,21 @@ for book in "$VERIFIED"/*.lisp; do
   cert="$base.cert"
   log="$base.cert.out"
 
-  # Incremental skip: cert newer than source AND newer than the shim.
-  if [ -f "$cert" ] && [ "$cert" -nt "$book" ] && [ "$cert" -nt "$SHIM" ]; then
+  # Incremental skip: cert newer than the shim and EVERY book source (a book
+  # may include a sibling book, so any source change conservatively invalidates
+  # all certs; with a handful of books this stays cheap and correct).
+  fresh=1
+  if [ -f "$cert" ] && [ "$cert" -nt "$SHIM" ]; then
+    for src in "$VERIFIED"/*.lisp; do
+      if [ ! "$cert" -nt "$src" ]; then
+        fresh=0
+        break
+      fi
+    done
+  else
+    fresh=0
+  fi
+  if [ "$fresh" -eq 1 ]; then
     echo "run-proofs: SKIP  $name (up to date)"
     skipped=$((skipped + 1))
     continue
@@ -87,7 +120,6 @@ for book in "$VERIFIED"/*.lisp; do
     fail=1
   fi
 done
-shopt -u nullglob
 
 echo "run-proofs: certified=$certified skipped=$skipped failed=$([ "$fail" -eq 0 ] && echo 0 || echo yes)"
 exit "$fail"

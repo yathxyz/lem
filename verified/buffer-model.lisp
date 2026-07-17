@@ -31,9 +31,13 @@
 ;;;;
 ;;;; Three DISTINGUISHED point ids are required present, mirroring production's
 ;;;; buffer-start-point / buffer-end-point / buffer-point:
-;;;;   0 = start-point : linum = 1
-;;;;   1 = end-point   : linum = (len lines) AND charpos = length of the last line
+;;;;   0 = start-point : linum = 1, charpos = 0, kind :right-inserting
+;;;;   1 = end-point   : linum = (len lines) AND charpos = length of the last
+;;;;                     line, kind :left-inserting
 ;;;;   2 = buffer-point.
+;;;; (The start/end charpos+kind conjuncts were added by VK-2: they are
+;;;; production truth -- make-buffer-start-point/-end-point -- and are exactly
+;;;; what makes wf-preservation of the edit primitives provable.)
 ;;;;
 ;;;; `wf-buffer' captures every structural invariant check-buffer-corruption
 ;;;; enforces today (src/buffer/internal/check-corruption.lisp), translated to
@@ -201,6 +205,16 @@
        (find-point 1 points)                       ; end present
        (find-point 2 points)                       ; buffer-point present
        (= (pt-linum (find-point 0 points)) 1)      ; start on line 1
+       ;; VK-2 strengthening (production truth; needed for wf-preservation):
+       ;; start-point is pinned at (1,0) and is :right-inserting, end-point is
+       ;; :left-inserting -- production make-buffer-start-point/-end-point
+       ;; (src/buffer/internal/buffer.lisp:140-144). Without these kinds an
+       ;; insert at the point's exact position could move "start" off (1,0) or
+       ;; leave "end" short of the end of the last line, so wf-preservation of
+       ;; the edit primitives would be false.
+       (= (pt-charpos (find-point 0 points)) 0)    ; start at column 0
+       (eq (pt-kind (find-point 0 points)) :right-inserting)
+       (eq (pt-kind (find-point 1 points)) :left-inserting)
        (= (pt-linum (find-point 1 points))         ; end on last line
           (len lines))
        (= (pt-charpos (find-point 1 points))       ; end at end of last line

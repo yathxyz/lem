@@ -24,13 +24,29 @@
 ;;;;                             valid-and-ignored declaration identifier so the CL
 ;;;;                             compiler accepts and discards it. Guards are thus
 ;;;;                             not enforced in-image (they are proved in ACL2).
+;;;;   4. (local ...)          -- ACL2 events local to a book (lemma support only;
+;;;;                             books never wrap exec-reachable defuns in local).
+;;;;                             Reinterpreted as a no-op macro, body NOT evaluated
+;;;;                             -- exactly ACL2's own include-book semantics,
+;;;;                             where local events are skipped.
+;;;;   5. (include-book ...)   -- with :dir :system (community books: lemma
+;;;;                             libraries only, never exec-reachable): expands to
+;;;;                             NIL. Without :dir (a sibling book in verified/):
+;;;;                             expands to a load of that book via
+;;;;                             LOAD-VERIFIED-BOOK, which is idempotent per book
+;;;;                             name, mirroring ACL2's load-once semantics.
+;;;;   6. (mv ...) / (mv-let ...) -- ACL2 multiple values. In ACL2's own raw-Lisp
+;;;;                             execution mv IS CL `values` and mv-let IS
+;;;;                             `multiple-value-bind` (ACL2 axioms.lisp raw-mode
+;;;;                             definitions); reinterpreted identically here.
 ;;;;
 ;;;; ACL2 BASE-FUNCTION WHITELIST: the small set of ACL2 built-ins (natp, len,
 ;;;;   true-listp, ...) that are ACL2 defuns, do NOT exist in CL, and are
 ;;;;   actually used by the exec path of some book. Each is defined here with its
 ;;;;   ACL2 semantics and a citation. Anything a book references outside CL and
 ;;;;   this whitelist fails LOUDLY at load time (undefined function) -- that is
-;;;;   the intended enforcement. Current entries (used by buffer-model.lisp):
+;;;;   the intended enforcement. Current entries (used by buffer-model.lisp and
+;;;;   buffer-edit.lisp):
 ;;;;     natp, len, true-listp  (see the ACL2 base-function whitelist section).
 ;;;;
 ;;;; NOT reinterpreted (deliberately): ACL2's own `defun` for the applicative
@@ -52,7 +68,12 @@
   (unless (find-package "ACL2")
     (make-package "ACL2" :use '("CL")))
   (dolist (name *acl2-shadows*)
-    (shadow name (find-package "ACL2"))))
+    (shadow name (find-package "ACL2")))
+  ;; LEM/KERNEL exists from here on: the include-book macro below names
+  ;; lem/kernel::load-verified-book in its expansion, so the reader needs the
+  ;; package before that defmacro is read.
+  (unless (find-package "LEM/KERNEL")
+    (make-package "LEM/KERNEL" :use '())))
 
 ;;; ---- (2) defthm: proof-only, no-op, body NOT evaluated -------------------
 (defmacro acl2::defthm (&rest ignored)
@@ -65,6 +86,32 @@
 
 ;;; ---- (3) (declare (xargs ...)) accepted and ignored ----------------------
 (declaim (declaration acl2::xargs))
+
+;;; ---- (4) local: book-local (proof-only) events, body NOT evaluated -------
+(defmacro acl2::local (&rest ignored)
+  (declare (ignore ignored))
+  nil)
+
+;;; ---- (5) include-book -----------------------------------------------------
+;;; :dir :system community books are lemma libraries only (their functions must
+;;; never be exec-reachable), so they are ignored. A bare name is a sibling book
+;;; in verified/, loaded once through LOAD-VERIFIED-BOOK (defined below;
+;;; idempotent). Loading happens at macroexpansion of the top-level form's
+;;; execution, i.e. in book load order, exactly like ACL2's include-book.
+(defmacro acl2::include-book (name &rest args)
+  (if (getf args :dir)
+      nil
+      `(lem/kernel::load-verified-book ,name)))
+
+;;; ---- (6) mv / mv-let: ACL2 multiple values --------------------------------
+;;; ACL2 raw-Lisp semantics: (mv a b ...) = (values a b ...) and mv-let =
+;;; multiple-value-bind (ACL2 axioms.lisp). mv-nth is proof-only in our books
+;;; (defthm statements), so it is deliberately NOT defined here.
+(defmacro acl2::mv (&rest args)
+  `(values ,@args))
+
+(defmacro acl2::mv-let (vars form &rest body)
+  `(multiple-value-bind ,vars ,form ,@body))
 
 ;;; ---- ACL2 base-function whitelist ---------------------------------------
 ;;; Define ONLY built-ins actually used by some book's exec path. Each is a
@@ -95,12 +142,15 @@
 ;;; owning book is loaded via LOAD-VERIFIED-BOOK. Extend as kernel books grow.
 (defparameter *kernel-exports* '("K-SQ"
                                  ;; buffer-model.lisp (VK-1)
-                                 "WF-BUFFER" "EMPTY-BUFFER")
+                                 "WF-BUFFER" "EMPTY-BUFFER"
+                                 ;; buffer-edit.lisp (VK-2)
+                                 "K-INSERT" "K-DELETE"
+                                 "K-POSITION" "K-POINT-AT-POSITION"
+                                 "K-FLATTEN"
+                                 "K-SHIFT-POSITION-INSERT" "K-SHIFT-POSITION-DELETE")
   "ACL2 symbol-names re-exported through :lem/kernel. See header.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (unless (find-package "LEM/KERNEL")
-    (make-package "LEM/KERNEL" :use '()))
   (dolist (name *kernel-exports*)
     (let ((sym (intern name (find-package "ACL2"))))
       (import sym (find-package "LEM/KERNEL"))
@@ -113,14 +163,20 @@
                                *default-pathname-defaults*))
   "Directory holding verified/*.lisp, resolved from this shim's own location.")
 
+(defvar lem/kernel::*loaded-books* '()
+  "Book base names already loaded in this image; LOAD-VERIFIED-BOOK loads each
+book once, mirroring ACL2's include-book load-once semantics.")
+
 (defun lem/kernel::load-verified-book (name)
   "Load verified/NAME.lisp into the running SBCL image the same way ACL2
 certified it: in the ACL2 package, with a clean readtable. NAME is the book's
-base name without extension. Signals loudly if the book references any construct
-the shim does not provide."
-  (let ((*package* (find-package "ACL2"))
-        (*readtable* (copy-readtable nil)))
-    (load (make-pathname :name name :type "lisp"
-                         :defaults cl-user::*verified-directory*))))
+base name without extension. Idempotent per NAME (see *LOADED-BOOKS*). Signals
+loudly if the book references any construct the shim does not provide."
+  (unless (member name lem/kernel::*loaded-books* :test #'string=)
+    (push name lem/kernel::*loaded-books*)
+    (let ((*package* (find-package "ACL2"))
+          (*readtable* (copy-readtable nil)))
+      (load (make-pathname :name name :type "lisp"
+                           :defaults cl-user::*verified-directory*)))))
 
 (export 'lem/kernel::load-verified-book (find-package "LEM/KERNEL"))
