@@ -26,6 +26,9 @@
                              (:file "killring")
                              (:file "history")
                              (:file "timer")))
+               (:module "pbt"
+                :components ((:file "harness")
+                             (:file "harness-test")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")
