@@ -290,7 +290,7 @@ its Common Lisp mode registry.
 | **yasnippet-snippets** | active if installed | 2,387 community definitions at commit `606ee926df6839243098de6d71332a697518cb86` |
 | **prescient / vertico-prescient** | active | persistent usage data; Vertico locally uses Prescient's default directional character-folded literal/regexp/initialism filtering, smart case, and learned sorting instead of the global Orderless style; filtering also installs Prescient's prompt-local `M-s` toggle map (`a/f/i/l/P/p/r/'/c`), with a prefix argument selecting one method exclusively |
 | **consult** | deferred/autoloaded | `consult-project-buffer` (`SPC SPC`); `consult-outline` is bound by `.dir-locals.el` but has a cold-start autoload defect in Emacs that Lem should not reproduce |
-| **consult-eglot** | deferred/autoloaded | `consult-eglot-symbols` (`SPC p s`) performs workspace-symbol search |
+| **consult-eglot** | deferred/autoloaded | `consult-eglot-symbols` (`SPC p s`) queries every symbol-capable Eglot server registered to the current project, progressively appending responses without deduplication |
 | **embark** | deferred/autoloaded | only `embark-act` is exposed (`SPC e a` and `M-x`); no minibuffer binding or custom action maps |
 | **embark-consult** | effective on demand | no user configuration; the pinned Embark package loads it automatically after Consult loads when the installed library is available |
 | **wgrep** | deferred; `wgrep-change-to-wgrep-mode` (editable grep buffers) |
@@ -304,6 +304,14 @@ classes, `A/B/C/E/F/M/N/O/P/S` for the uppercase classes, and `o` for every
 unlisted kind.  Lem reproduces this default path rather than inventing a global
 narrow-prefix binding (`src/workspace-symbol.lisp`,
 `scripts/lsp-project-test.sh`).
+
+Lem mirrors the pinned multi-server source: an invoking project fans each
+debounced query out to all of its ready symbol providers, appends responses as
+they arrive, isolates server failures, and cancels every outstanding request
+when input changes. Servers belonging to another open project are excluded,
+and each result retains its source workspace for position conversion, preview,
+and the final jump. Outside a recognized project, both implementations fall
+back to the invoking language server.
 
 The Lem port now covers the effective directory-local `consult-outline` path
 without reproducing the Emacs cold-start defect: the exact declaration is read

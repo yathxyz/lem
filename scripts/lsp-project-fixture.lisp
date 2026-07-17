@@ -53,6 +53,11 @@
     (:name "LSP Slow Shutdown Fixture"
      :mode-hook *lem-yath-lsp-slow-shutdown-test-mode-hook*))
 
+(define-major-mode lem-yath-lsp-symbol-peer-test-mode
+    lem/language-mode:language-mode
+    (:name "LSP Symbol Peer Fixture"
+     :mode-hook *lem-yath-lsp-symbol-peer-test-mode-hook*))
+
 (lem-lsp-mode:define-language-spec
     (lem-yath-lsp-project-test-spec lem-yath-lsp-project-test-mode)
   :language-id "lem-yath-project-fixture"
@@ -88,6 +93,18 @@
             "--shutdown-delay-ms" "5000")
   :connection-mode :stdio)
 
+(lem-lsp-mode:define-language-spec
+    (lem-yath-lsp-symbol-peer-test-spec
+     lem-yath-lsp-symbol-peer-test-mode)
+  :language-id "lem-yath-symbol-peer-fixture"
+  :root-uri-patterns '(".lsp-fixture-root")
+  :command (lsp-project-test-server-command
+            "--symbol-prefix" "Peer"
+            "--symbol-file" "peer-symbols.fixture"
+            "--workspace-symbol-delay-ms" "700"
+            "--workspace-symbol-failure-query" "never")
+  :connection-mode :stdio)
+
 (defclass lem-yath-lsp-project-lisp-test-spec
     (lem-lisp-mode/v2/lsp-config::lisp-spec)
   ())
@@ -107,6 +124,7 @@
 (defvar *lsp-project-test-a-one* nil)
 (defvar *lsp-project-test-a-two* nil)
 (defvar *lsp-project-test-b-one* nil)
+(defvar *lsp-project-test-symbol-peer* nil)
 (defvar *lsp-project-test-pre-save-a-workspace* nil)
 (defvar *lsp-project-test-post-save-b-workspace* nil)
 (defvar *lsp-project-test-mode-change-had-diagnostics* nil)
@@ -393,6 +411,27 @@
   (switch-to-buffer *lsp-project-test-a-one*)
   (lsp-project-test-report "ACTIVE project=a"))
 
+(define-command lem-yath-test-lsp-open-symbol-peer () ()
+  (setf *lsp-project-test-symbol-peer*
+        (lsp-project-test-open
+         "LEM_YATH_LSP_TEST_PROJECT_A"
+         "peer.fixture"
+         'lem-yath-lsp-symbol-peer-test-mode))
+  (switch-to-buffer *lsp-project-test-a-one*)
+  (lsp-project-test-report "OPEN symbol-peer=yes"))
+
+(define-command lem-yath-test-lsp-close-symbol-peer () ()
+  (let ((buffer *lsp-project-test-symbol-peer*))
+    (when (lsp-project-test-live-buffer-p buffer)
+      (let ((workspace (lsp-project-test-workspace buffer)))
+        (delete-buffer buffer)
+        (when workspace
+          (lem-lsp-mode::dispose-workspace workspace))))
+    (setf *lsp-project-test-symbol-peer* nil)
+    (when (lsp-project-test-live-buffer-p *lsp-project-test-a-one*)
+      (switch-to-buffer *lsp-project-test-a-one*))
+    (lsp-project-test-report "CLOSE symbol-peer=yes")))
+
 (define-command lem-yath-test-lsp-record-workspaces () ()
   (lsp-project-test-record-workspaces "manual"))
 
@@ -424,7 +463,8 @@
         'string
         "SYMBOL_SOURCE file=~a line=~d column=~d "
         "view-line=~d view-column=~d hscroll=~a "
-        "prompt=~a preview=~a query=~s")
+        "prompt=~a preview=~a query=~s candidates=~{~a~^,~} "
+        "requests=~d workspaces=~d")
        (or (buffer-filename (current-buffer)) "none")
        (line-number-at-point (current-point))
        (point-charpos (current-point))
@@ -437,7 +477,17 @@
              (workspace-symbol-session-preview-candidate session)))
        (if session
            (workspace-symbol-session-query session)
-           "")))))
+           "")
+       (if session
+           (mapcar #'workspace-symbol-candidate-label
+                   (workspace-symbol-session-candidates session))
+           nil)
+       (if session
+           (length (workspace-symbol-session-requests session))
+           0)
+       (if session
+           (length (workspace-symbol-session-workspaces session))
+           0)))))
 
 (define-command lem-yath-test-lsp-close-project-a () ()
   (dolist (buffer (list *lsp-project-test-a-one*

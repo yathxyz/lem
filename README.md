@@ -335,10 +335,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   deduplication and timeout, explicit buffer ownership with save-as migration,
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,
   and a one-prompt `SPC p s` workspace-symbol search with Consult's minimum
-  input, debounce/throttle timing, annotated kind groups, cancellable incremental
-  requests, case-sensitive kind-key-plus-Space narrowing with empty-Backspace
-  widening, reversible preview, and Vi-jumplist acceptance; optional Lisp-v2
-  connections remain globally selected when loaded
+  input, debounce/throttle timing, annotated kind groups, project-scoped
+  fan-out across every active language server, progressive results, isolated
+  server failures, all-request cancellation, case-sensitive kind-key-plus-Space
+  narrowing with empty-Backspace widening, source-workspace-aware reversible
+  preview, and Vi-jumplist acceptance; optional Lisp-v2 connections remain
+  globally selected when loaded
 - installed LSP stack for Rust, Python, Markdown, C#, Nix, Go, Terraform, and
   Java, with Python and Java deliberately enabled manually: rust-analyzer,
   pyright, harper-ls, csharp-ls,

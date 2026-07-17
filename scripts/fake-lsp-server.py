@@ -29,6 +29,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initialize-delay-ms", type=int, default=0)
     parser.add_argument("--shutdown-delay-ms", type=int, default=0)
     parser.add_argument("--publish-diagnostics", action="store_true")
+    parser.add_argument("--symbol-prefix")
+    parser.add_argument("--symbol-file", default="symbols.fixture")
+    parser.add_argument("--workspace-symbol-delay-ms", type=int, default=0)
+    parser.add_argument("--workspace-symbol-failure-query", default="explode")
     parser.add_argument("--tcp-port", type=int)
     parser.add_argument("--port-file", type=Path)
     return parser.parse_args()
@@ -86,12 +90,21 @@ class FixtureServer:
         initialize_delay_ms: int,
         shutdown_delay_ms: int,
         publish_diagnostics: bool,
+        symbol_prefix: str | None,
+        symbol_file: str,
+        workspace_symbol_delay_ms: int,
+        workspace_symbol_failure_query: str,
     ) -> None:
         self.event_path = event_path
         self.initialize_delay = initialize_delay_ms / 1000
         self.shutdown_delay = shutdown_delay_ms / 1000
         self.shutdown_delay_ms = shutdown_delay_ms
         self.publish_diagnostics = publish_diagnostics
+        self.symbol_prefix = symbol_prefix
+        self.symbol_file = symbol_file
+        self.workspace_symbol_delay = workspace_symbol_delay_ms / 1000
+        self.workspace_symbol_delay_ms = workspace_symbol_delay_ms
+        self.workspace_symbol_failure_query = workspace_symbol_failure_query
         self.pid = os.getpid()
         self.root_uri = ""
         self.root_path = ""
@@ -125,15 +138,18 @@ class FixtureServer:
         }
 
     def workspace_symbols(self, query: str) -> list[dict[str, Any]]:
-        target_uri = self.root_uri.rstrip("/") + "/symbols.fixture"
+        target_uri = self.root_uri.rstrip("/") + "/" + self.symbol_file
         container = Path(self.root_path).name.replace("-", " ").title()
         folded_query = query.casefold()
         if "slowalpha" in folded_query:
-            prefix = "Stale"
+            query_prefix = "Stale"
         elif "beta" in folded_query:
-            prefix = "Beta"
+            query_prefix = "Beta"
+        elif "explode" in folded_query:
+            query_prefix = "Explode"
         else:
-            prefix = "Alpha"
+            query_prefix = "Alpha"
+        prefix = f"{self.symbol_prefix or ''}{query_prefix}"
         return [
             {
                 "name": f"{prefix}Symbol",
@@ -240,13 +256,20 @@ class FixtureServer:
         if method == "workspace/symbol":
             query = str(params.get("query") or "")
             self.log("WORKSPACE_SYMBOL", query=query)
-            if query == "explode":
+            if query == self.workspace_symbol_failure_query:
                 return self.error(
                     request_id, -32001, "fixture workspace-symbol failure"
                 )
             if query == "slowalpha":
                 self.log("WORKSPACE_SYMBOL_DELAY", query=query, delay_ms=900)
                 time.sleep(0.9)
+            elif self.workspace_symbol_delay:
+                self.log(
+                    "WORKSPACE_SYMBOL_DELAY",
+                    query=query,
+                    delay_ms=self.workspace_symbol_delay_ms,
+                )
+                time.sleep(self.workspace_symbol_delay)
             return self.response(request_id, self.workspace_symbols(query))
 
         if method == "$/cancelRequest":
@@ -295,6 +318,10 @@ def main() -> int:
         args.initialize_delay_ms,
         args.shutdown_delay_ms,
         args.publish_diagnostics,
+        args.symbol_prefix,
+        args.symbol_file,
+        args.workspace_symbol_delay_ms,
+        args.workspace_symbol_failure_query,
     )
     if args.tcp_port is None:
         return server.run(sys.stdin.buffer, sys.stdout.buffer)

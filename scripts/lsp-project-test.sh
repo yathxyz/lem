@@ -41,6 +41,8 @@ export LEM_YATH_LSP_TEST_PYTHON="${LEM_YATH_LSP_TEST_PYTHON:-$(command -v python
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR" \
   "$LEM_YATH_LSP_TEST_PROJECT_A" "$LEM_YATH_LSP_TEST_PROJECT_B" \
+  "$LEM_YATH_LSP_TEST_PROJECT_A/.git" \
+  "$LEM_YATH_LSP_TEST_PROJECT_B/.git" \
   "$LEM_YATH_LSP_TEST_GIT_ROOT/.git" \
   "$LEM_YATH_LSP_TEST_GIT_ROOT/nested" \
   "$LEM_YATH_LSP_TEST_TIMEOUT_ROOT" \
@@ -57,6 +59,9 @@ for project in "$LEM_YATH_LSP_TEST_PROJECT_A" "$LEM_YATH_LSP_TEST_PROJECT_B"; do
 done
 
 printf 'idle\n' >"$LEM_YATH_LSP_TEST_PROJECT_A/idle.fixture"
+printf 'peer\n' >"$LEM_YATH_LSP_TEST_PROJECT_A/peer.fixture"
+printf 'constant\npadding\nxxxxPeerAlphaSymbol tail\n' \
+  >"$LEM_YATH_LSP_TEST_PROJECT_A/peer-symbols.fixture"
 printf 'migration target\n' \
   >"$LEM_YATH_LSP_TEST_PROJECT_B/migrated+raw.fixture"
 : >"$LEM_YATH_LSP_TEST_TIMEOUT_ROOT/.lsp-timeout-root"
@@ -354,7 +359,7 @@ if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
         "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
       if [[ "$symbol_preview" == \
            *'/project-a/symbols.fixture line=3 column=4 '* &&
-          "$symbol_preview" == *'prompt=yes preview=yes query="alpha"' ]]; then
+          "$symbol_preview" == *'prompt=yes preview=yes query="alpha"'* ]]; then
         pass workspace-symbol-preview \
           'focused result previews its exact LSP position'
       else
@@ -374,7 +379,7 @@ if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
         "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
       symbol_restored_key=${symbol_restored%% prompt=*}
       if [ "$symbol_restored_key" = "$symbol_origin_key" ] &&
-         [[ "$symbol_restored" == *'prompt=no preview=no query=""' ]]; then
+         [[ "$symbol_restored" == *'prompt=no preview=no query=""'* ]]; then
         pass workspace-symbol-cancel \
           'C-g restores the exact source buffer, point, viewport, and scroll'
       else
@@ -593,26 +598,248 @@ else
     'workspace-symbol prompt could not start for narrowing validation'
 fi
 
+# Consult-Eglot fans one query out to every symbol-capable server registered to
+# the current project.  Start a second language server at project A's root;
+# project B remains live and must never receive A's symbol query.
+a_initializes_before_peer=$(event_count INITIALIZE \
+  "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
+if invoke_mx lem-yath-test-lsp-open-symbol-peer &&
+   wait_event_count INITIALIZE \
+     "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+     "$((a_initializes_before_peer + 1))" &&
+   wait_event_count DID_OPEN 'language_id=lem-yath-symbol-peer-fixture' 1; then
+  pass workspace-symbol-peer-start \
+    'a second language server is live in the invoking project'
+else
+  fail workspace-symbol-peer-start \
+    'the same-project symbol server did not initialize'
+fi
+
+invoke_mx lem-yath-test-lsp-activate-project-a >/dev/null || true
+alpha_before_multi=$(event_count WORKSPACE_SYMBOL 'query=alpha')
+b_alpha_before_multi=$(grep -E '^WORKSPACE_SYMBOL[[:space:]]' \
+  "$LEM_YATH_LSP_TEST_EVENTS" 2>/dev/null |
+  grep -F "root_path=${LEM_YATH_LSP_TEST_PROJECT_B%/}" |
+  grep -Fc 'query=alpha' || true)
+if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
+  tmux_cmd send-keys -t "$session" -l alpha
+  if wait_event_count WORKSPACE_SYMBOL 'query=alpha' \
+       "$((alpha_before_multi + 2))" &&
+     lem_wait_for "$session" 'AlphaSymbol' 10 >/dev/null; then
+    early_screen=$(lem_capture "$session")
+    if ! grep -q 'PeerAlphaSymbol' <<<"$early_screen"; then
+      pass workspace-symbol-progressive \
+        'the first server refreshes results without waiting for the slower peer'
+    else
+      fail workspace-symbol-progressive \
+        'the delayed peer result appeared before the first progressive refresh'
+    fi
+    multi_report_before=$(report_count '^SYMBOL_SOURCE ')
+    sleep 1
+    lem_keys "$session" F11
+    wait_report_count '^SYMBOL_SOURCE ' "$((multi_report_before + 1))" || true
+    multi_symbol_state=$(grep '^SYMBOL_SOURCE ' \
+      "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+    if lem_wait_for "$session" 'PeerAlphaSymbol' 10 >/dev/null &&
+       lem_wait_for "$session" 'peer-symbols.fixture' 10 >/dev/null; then
+      b_alpha_after_multi=$(grep -E '^WORKSPACE_SYMBOL[[:space:]]' \
+        "$LEM_YATH_LSP_TEST_EVENTS" 2>/dev/null |
+        grep -F "root_path=${LEM_YATH_LSP_TEST_PROJECT_B%/}" |
+        grep -Fc 'query=alpha' || true)
+      if [ "$b_alpha_after_multi" -eq "$b_alpha_before_multi" ]; then
+        pass workspace-symbol-project-fanout \
+          'same-project servers aggregate while another project is excluded'
+      else
+        fail workspace-symbol-project-fanout \
+          'the invoking project query leaked to project B'
+      fi
+    else
+      fail workspace-symbol-project-fanout \
+        "the delayed peer was not visible; state: $multi_symbol_state"
+    fi
+  else
+    fail workspace-symbol-progressive \
+      'the primary server did not refresh the multi-server picker'
+  fi
+  lem_keys "$session" C-g
+else
+  fail workspace-symbol-project-fanout \
+    'the multi-server workspace-symbol prompt did not open'
+fi
+
+# One server rejects `explode`, while the peer deliberately succeeds.  The
+# healthy result must survive the failing response and the prompt must remain
+# active, matching Consult-Eglot's per-server error isolation.
+explode_before_multi=$(event_count WORKSPACE_SYMBOL 'query=explode')
+if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
+  tmux_cmd send-keys -t "$session" -l explode
+  if wait_event_count WORKSPACE_SYMBOL 'query=explode' \
+       "$((explode_before_multi + 2))" &&
+     lem_wait_for "$session" 'PeerExplodeSymbol' 10 >/dev/null &&
+     lem_wait_for "$session" 'LSP Symbols:' 10 >/dev/null; then
+    pass workspace-symbol-partial-error \
+      'one failed server cannot erase a healthy peer response'
+  else
+    fail workspace-symbol-partial-error \
+      'a server error erased the peer result or closed the prompt'
+  fi
+  lem_keys "$session" C-g
+else
+  fail workspace-symbol-partial-error \
+    'the partial-error workspace-symbol prompt did not open'
+fi
+
+# Superseding a fan-out query invalidates and cancels both live callbacks.  A
+# late response from either server must be unable to replace the beta results.
+slow_before_multi=$(event_count WORKSPACE_SYMBOL 'query=slowalpha')
+beta_before_multi=$(event_count WORKSPACE_SYMBOL 'query=beta')
+cancel_before_multi=$(event_count CANCEL_REQUEST \
+  "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
+if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
+  tmux_cmd send-keys -t "$session" -l slowalpha
+  if wait_event_count WORKSPACE_SYMBOL 'query=slowalpha' \
+       "$((slow_before_multi + 2))"; then
+    prompt_backspace 9
+    tmux_cmd send-keys -t "$session" -l beta
+    if wait_event_count CANCEL_REQUEST \
+         "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+         "$((cancel_before_multi + 2))" &&
+       wait_event_count WORKSPACE_SYMBOL 'query=beta' \
+         "$((beta_before_multi + 2))" 20 &&
+       lem_wait_for "$session" 'BetaSymbol' 10 >/dev/null; then
+      sleep 0.35
+      screen=$(lem_capture "$session")
+      if ! grep -q 'StaleSymbol' <<<"$screen"; then
+        pass workspace-symbol-fanout-cancel \
+          'replacement input cancels every server and rejects both stale callbacks'
+      else
+        fail workspace-symbol-fanout-cancel \
+          'a cancelled multi-server response replaced the current results'
+      fi
+    else
+      fail workspace-symbol-fanout-cancel \
+        'both cancellations or both replacement responses were not observed'
+    fi
+  else
+    fail workspace-symbol-fanout-cancel \
+      'both slow multi-server requests were not observed'
+  fi
+  lem_keys "$session" C-g
+else
+  fail workspace-symbol-fanout-cancel \
+    'the multi-server cancellation prompt did not open'
+fi
+
+# The deterministic fixture handles requests serially, so its cancelled sleep
+# can delay later messages even though the client removed both callbacks.
+# Recycle only that peer before independently testing peer navigation.
+peer_reset_initialize_before=$(event_count INITIALIZE \
+  "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
+invoke_mx lem-yath-test-lsp-close-symbol-peer >/dev/null || true
+if invoke_mx lem-yath-test-lsp-open-symbol-peer &&
+   wait_event_count INITIALIZE \
+     "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+     "$((peer_reset_initialize_before + 1))" 30; then
+  invoke_mx lem-yath-test-lsp-activate-project-a >/dev/null || true
+else
+  fail workspace-symbol-peer-reset \
+    'the peer fixture could not be recycled after cancellation'
+fi
+
+# A query matching only the peer result proves preview and commit use the
+# candidate's source workspace rather than the invoking language server.
+peer_before_multi=$(event_count WORKSPACE_SYMBOL 'query=peer')
+if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
+  tmux_cmd send-keys -t "$session" -l peer
+  if wait_event_count WORKSPACE_SYMBOL 'query=peer' \
+       "$((peer_before_multi + 2))"; then
+    peer_report_before=$(report_count '^SYMBOL_SOURCE ')
+    sleep 1
+    lem_keys "$session" F11
+    wait_report_count '^SYMBOL_SOURCE ' "$((peer_report_before + 1))" || true
+    peer_symbol_state=$(grep '^SYMBOL_SOURCE ' \
+      "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  else
+    peer_symbol_state='requests were not observed'
+  fi
+  if lem_wait_for "$session" 'PeerAlphaSymbol' 10 >/dev/null; then
+    source_count=$(report_count '^SYMBOL_SOURCE ')
+    lem_keys "$session" F11
+    if wait_report_count '^SYMBOL_SOURCE ' "$((source_count + 1))"; then
+      peer_preview=$(grep '^SYMBOL_SOURCE ' \
+        "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+      if [[ "$peer_preview" == \
+           *'/project-a/peer-symbols.fixture line=3 column=4 '* ]]; then
+        pass workspace-symbol-peer-preview \
+          'a peer-only candidate previews through its source workspace'
+      else
+        fail workspace-symbol-peer-preview \
+          "unexpected peer preview: $peer_preview"
+      fi
+    else
+      fail workspace-symbol-peer-preview \
+        'the peer candidate preview could not be inspected'
+    fi
+    lem_keys "$session" Enter
+    sleep 0.45
+    before=$(report_count '^LOCATION ')
+    lem_keys "$session" F12
+    if wait_report_count '^LOCATION ' "$((before + 1))"; then
+      location=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+      if [[ "$location" == \
+           *'/project-a/peer-symbols.fixture line=3 column=4 '* ]]; then
+        pass workspace-symbol-peer-jump \
+          'Return commits a symbol supplied by the secondary server'
+      else
+        fail workspace-symbol-peer-jump \
+          "unexpected peer selection location: $location"
+      fi
+    else
+      fail workspace-symbol-peer-jump \
+        'the committed peer location could not be inspected'
+    fi
+  else
+    fail workspace-symbol-peer-preview \
+      "the peer-only query did not produce its candidate; state: $peer_symbol_state"
+    lem_keys "$session" C-g
+  fi
+else
+  fail workspace-symbol-peer-jump \
+    'the peer navigation prompt did not open'
+fi
+
+invoke_mx lem-yath-test-lsp-close-symbol-peer >/dev/null ||
+  fail workspace-symbol-peer-stop 'the peer workspace could not be disposed'
+invoke_mx lem-yath-test-lsp-activate-project-a >/dev/null || true
+
 # Restart must replace project A once, reopen both of its live buffers, and
 # leave project B's server and open document untouched.
 invoke_mx lem-yath-test-lsp-activate-project-a >/dev/null || true
 a_pid_before_restart=$(latest_event_pid INITIALIZE \
+  "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
+a_initialize_before_restart=$(event_count INITIALIZE \
+  "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
+a_open_before_restart=$(event_count DID_OPEN \
   "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
 a_shutdown_before_restart=$(event_count SHUTDOWN \
   "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
 a_exit_before_restart=$(event_count EXIT \
   "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
 if invoke_mx lsp-restart-server &&
-   wait_event_count INITIALIZE "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" 2 30 &&
-   wait_event_count DID_OPEN "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" 4 30 &&
+   wait_event_count INITIALIZE "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+     "$((a_initialize_before_restart + 1))" 30 &&
+   wait_event_count DID_OPEN "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+     "$((a_open_before_restart + 2))" 30 &&
    wait_event_count SHUTDOWN "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
      "$((a_shutdown_before_restart + 1))" &&
    wait_event_count EXIT "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
      "$((a_exit_before_restart + 1))"; then
   assert_event_count restart-one-replacement INITIALIZE \
-    "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" 2
+    "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+    "$((a_initialize_before_restart + 1))"
   assert_event_count restart-reopens-project DID_OPEN \
-    "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" 4
+    "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+    "$((a_open_before_restart + 2))"
   assert_event_count restart-isolates-other-root INITIALIZE \
     "root_path=${LEM_YATH_LSP_TEST_PROJECT_B%/}" 1
   assert_event_count restart-preserves-other-open DID_OPEN \
@@ -688,13 +915,16 @@ fi
 
 a_reenable_open_before=$(event_count DID_OPEN \
   "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
+a_reenable_initialize_before=$(event_count INITIALIZE \
+  "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}")
 reenable_report_before=$(report_count '^REENABLE ')
 if invoke_mx lem-yath-test-lsp-enable-project-a-two &&
    wait_event_count DID_OPEN "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
      "$((a_reenable_open_before + 1))" &&
    wait_report_count '^REENABLE owned=yes$' "$((reenable_report_before + 1))"; then
   assert_event_count reenable-reuses-project INITIALIZE \
-    "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" 2
+    "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+    "$a_reenable_initialize_before"
 else
   fail reenable-ownership 're-enabling did not reuse and reopen the project workspace'
 fi
