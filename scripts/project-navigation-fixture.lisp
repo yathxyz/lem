@@ -1055,14 +1055,33 @@
          (sibling (and text (search "SHARED_GREP SIBLING" text)))
          (ignored (and text (search "SHARED_GREP IGNORED" text))))
     (project-navigation-test-log
-     "GREP alpha=~a tracked-build=~a sibling=~a ignored=~a matches=~d"
+     (concatenate
+      'string
+      "GREP alpha=~a tracked-build=~a sibling=~a ignored=~a matches=~d "
+      "readonly=~a active=~a enter=~a finish=~a abort=~a exit=~a")
      (project-navigation-test-yes-no alpha)
      (project-navigation-test-yes-no tracked-build)
      (project-navigation-test-yes-no sibling)
      (project-navigation-test-yes-no ignored)
      (if text
          (project-navigation-test-count-substring "SHARED_GREP" text)
-         0))
+         0)
+     (project-navigation-test-yes-no
+      (and buffer (buffer-read-only-p buffer)))
+     (project-navigation-test-yes-no
+      (and buffer (project-grep-edit-active-p buffer)))
+     (project-navigation-test-yes-no
+      (project-navigation-test-key-bound-p
+       lem/grep::*peek-grep-mode-keymap* "C-c C-p"))
+     (project-navigation-test-yes-no
+      (project-navigation-test-key-bound-p
+       lem/grep::*peek-grep-mode-keymap* "C-c C-c"))
+     (project-navigation-test-yes-no
+      (project-navigation-test-key-bound-p
+       lem/grep::*peek-grep-mode-keymap* "C-c C-k"))
+     (project-navigation-test-yes-no
+      (project-navigation-test-key-bound-p
+       lem/grep::*peek-grep-mode-keymap* "C-x C-q")))
     (when *project-navigation-test-grep-writeback-focus-pending*
       (setf *project-navigation-test-grep-writeback-focus-pending* nil)
       (project-navigation-test-focus-grep-writeback))
@@ -1083,10 +1102,9 @@
       (switch-to-buffer buffer))
     (let ((point (current-point)))
       (buffer-start point)
-      (let ((match (search-forward point "SHARED_GREP ALPHA")))
+      (let ((match (search-forward point "SHARED_GREP A")))
         (unless match
           (editor-error "No editable Alpha grep result")))
-      (character-offset point -4)
       (window-see (current-window)))
     (project-navigation-test-log
      "GREP-WRITEBACK focus=yes column=~d readonly=~s previous-readonly=~s"
@@ -1107,15 +1125,57 @@
                 (points-to-string (buffer-start-point grep-buffer)
                                   (buffer-end-point grep-buffer))))
          (disk-text (uiop:read-file-string path)))
-    (project-navigation-test-log
-     "GREP-WRITEBACK result=~a source=~a modified=~a disk=~a"
+    (let* ((record
+             (find-if
+              (lambda (record)
+                (string= (project-grep-edit-record-relative record)
+                         "src/tracked-target.txt"))
+              (and grep-buffer (project-grep-edit-records grep-buffer))))
+           (status (and record (project-grep-edit-record-status record))))
+      (project-navigation-test-log
+       (concatenate
+        'string
+        "GREP-WRITEBACK result=~a source=~a modified=~a disk=~a "
+        "abort-result=~a abort-source=~a exit-result=~a exit-source=~a "
+        "stale-result=~a external-source=~a "
+        "active=~a readonly=~a status=~a")
      (project-navigation-test-yes-no
-      (and grep-text (search "SHARED_GREP AWRITEBACK_LPHA" grep-text)))
+        (and grep-text (search "SHARED_GREP ASTAGED_LPHA" grep-text)))
      (project-navigation-test-yes-no
-      (search "SHARED_GREP AWRITEBACK_LPHA" source-text))
+        (search "SHARED_GREP ASTAGED_LPHA" source-text))
      (project-navigation-test-yes-no (buffer-modified-p source))
      (project-navigation-test-yes-no
-      (search "SHARED_GREP AWRITEBACK_LPHA" disk-text)))))
+        (search "SHARED_GREP ASTAGED_LPHA" disk-text))
+       (project-navigation-test-yes-no
+        (and grep-text (search "ABORT_" grep-text)))
+       (project-navigation-test-yes-no (search "ABORT_" source-text))
+       (project-navigation-test-yes-no
+        (and grep-text (search "EXIT_" grep-text)))
+       (project-navigation-test-yes-no (search "EXIT_" source-text))
+       (project-navigation-test-yes-no
+        (and grep-text (search "STALE_" grep-text)))
+       (project-navigation-test-yes-no (search "EXTERNAL_" source-text))
+       (project-navigation-test-yes-no
+        (and grep-buffer (project-grep-edit-active-p grep-buffer)))
+       (project-navigation-test-yes-no
+        (and grep-buffer (buffer-read-only-p grep-buffer)))
+       (or status 'none)))))
+
+(define-command lem-yath-test-project-navigation-focus-grep-edit () ()
+  (project-navigation-test-focus-grep-writeback))
+
+(define-command lem-yath-test-project-navigation-stale-grep-source () ()
+  (let* ((path (project-navigation-test-path
+                *project-navigation-test-alpha* "src/tracked-target.txt"))
+         (source (find-file-buffer path))
+         (point (buffer-point source)))
+    (buffer-start point)
+    (unless (search-forward point "SHARED_GREP A")
+      (editor-error "No source row for stale grep test"))
+    (insert-string point "EXTERNAL_")
+    (project-navigation-test-log
+     "GREP-STALE source=yes modified=~a"
+     (project-navigation-test-yes-no (buffer-modified-p source)))))
 
 (define-command lem-yath-test-project-navigation-record-grep-escape () ()
   (let* ((state (lem-vi-mode/core:current-state))
@@ -1125,16 +1185,36 @@
                 (points-to-string (buffer-start-point grep-buffer)
                                   (buffer-end-point grep-buffer)))))
     (project-navigation-test-log
-     "GREP-ESCAPE normal=~a result=~a"
+     "GREP-ESCAPE normal=~a state=~a result=~a"
      (project-navigation-test-yes-no
       (and state
            (lem-vi-mode/core:state=
             state
             (lem-vi-mode/core:ensure-state
              'lem-vi-mode/states:normal))))
+     (if state (type-of state) 'none)
      (project-navigation-test-yes-no
       (and grep-text
-           (search "SHARED_GREP AWRITEBACK_LPHA" grep-text))))))
+           (search "SHARED_GREP ASTAGED_LPHA" grep-text))))))
+
+(define-command lem-yath-test-project-navigation-multiline-guard () ()
+  (let* ((buffer (current-buffer))
+         (before (points-to-string (buffer-start-point buffer)
+                                   (buffer-end-point buffer)))
+         (blocked nil))
+    (handler-case
+        (insert-string (current-point) (format nil "BROKEN~%ROW"))
+      (editor-error ()
+        (setf blocked t)))
+    (project-navigation-test-log
+     "GREP-MULTILINE blocked=~a unchanged=~a active=~a"
+     (project-navigation-test-yes-no blocked)
+     (project-navigation-test-yes-no
+      (string= before
+               (points-to-string (buffer-start-point buffer)
+                                 (buffer-end-point buffer))))
+     (project-navigation-test-yes-no
+      (project-grep-edit-active-p buffer)))))
 
 (define-command lem-yath-test-project-navigation-submit-gamma () ()
   (lem/prompt-window::replace-prompt-input
@@ -1150,7 +1230,9 @@
   (define-key keymap "F8" 'lem-yath-test-project-navigation-record-grep)
   (define-key keymap "F9" 'lem-yath-test-project-navigation-cancellation)
   (define-key keymap "F10" 'lem-yath-test-project-navigation-picker-state)
-  (define-key keymap "F11" 'lem-yath-test-project-navigation-edit-picker-origin))
+  (define-key keymap "F11" 'lem-yath-test-project-navigation-edit-picker-origin)
+  (define-key keymap "F2" 'lem-yath-test-project-navigation-focus-grep-edit)
+  (define-key keymap "F3" 'lem-yath-test-project-navigation-stale-grep-source))
 
 (define-key *project-picker-keymap*
   "F10" 'lem-yath-test-project-navigation-picker-state)
@@ -1173,6 +1255,12 @@
   "F8" 'lem-yath-test-project-navigation-record-grep)
 (define-key lem/peek-source:*peek-source-keymap*
   "F12" 'lem-yath-test-project-navigation-record-grep-escape)
+(define-key lem/peek-source:*peek-source-keymap*
+  "F2" 'lem-yath-test-project-navigation-focus-grep-edit)
+(define-key lem/peek-source:*peek-source-keymap*
+  "F3" 'lem-yath-test-project-navigation-stale-grep-source)
+(define-key lem/peek-source:*peek-source-keymap*
+  "F4" 'lem-yath-test-project-navigation-multiline-guard)
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F4" 'lem-yath-test-project-navigation-submit-gamma)
 

@@ -1154,16 +1154,24 @@ history.
   While a search is running,
   `C-c C-k` terminates only the subprocess owned by that `*Find*` request and
   leaves a persistent cancelled result buffer that can be retried with `g`.
-- Grep: `lem/grep:grep` and `lem/grep:project-grep` (`src/ext/grep.lisp`, bound
-  `C-x p g`). Default command **`git grep -nHI`** (`grep.lisp:14-18`); change with
-  `(setf lem/grep:*grep-command* "rg")` or `lem/grep:change-grep-command`. Results are
-  line-editable: each edit writes through immediately to the source buffer, while
-  disk remains unchanged until that source buffer is saved. Lem-yath's
-  `patches/lem-grep-writeback.patch` preserves points by replacing only the changed
-  span, and `patches/lem-peek-source-timer.patch` owns and invalidates one preview
-  timer while keeping background previews from changing Vi state. The real ncurses
-  project-navigation gate verifies edit, preview, save, and Insert-to-Normal Escape
-  behavior. This is wgrep-like, but has no explicit staged finish/abort transaction.
+- Grep: upstream `lem/grep:grep` and `lem/grep:project-grep` live in
+  `src/ext/grep.lisp`; the configured `C-x p g`/`SPC p g` route is
+  `lem-yath-project-grep` in `src/project.lisp`. Its results open read-only. Normal
+  `i` (the effective Evil-Collection grep binding) or `C-c C-p` starts an isolated
+  editable stage and highlights changed rows without mutating their sources.
+  `ZZ`, `C-c C-c`/`C-c C-e`, or `C-x C-s` applies non-stale rows to source buffers
+  without saving; `ZQ`/`C-c C-k` aborts, while `C-x C-q` and normal-state Escape
+  use wgrep's apply-or-discard exit. Each source file is one cancellable change
+  group, and changed-after-grep rows are rejected visibly rather than overwritten.
+  Ordinary source-buffer save remains the persistence step. The real ncurses gate
+  verifies stage isolation, atomic multiline refusal, single-Escape return to
+  Normal, apply, abort, save, and stale-source refusal.
+  `patches/lem-grep-writeback.patch` still supplies the
+  point-preserving replacement primitive, and
+  `patches/lem-peek-source-timer.patch` owns and invalidates preview timers.
+  Editable headers/newlines, whole-row deletion, region unmarking, multiline
+  replacement, auto-save, per-row error echo, and Evil-Collection's `:w` finish
+  remap remain outside this bounded port.
 - ripgrep: not the default, but trivially `(setf lem/grep:*grep-command* "rg"
   lem/grep:*grep-args* "-nH")`.
 
@@ -2896,9 +2904,9 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   `-backward`/`-regexp`/`-symbol`, `query-replace`, `query-replace-regexp`,
   `query-replace-symbol`, isearch→multiple-cursors (`isearch-add-cursor-to-next-match`).
   Upstream has no dedicated `occur` command. Lem-yath adds the bounded,
-  persistent marked-buffer Occur described in §4; grep/peek-source separately
-  covers project/file results with immediate source-buffer write-through rather
-  than wgrep's staged finish/abort workflow. Lem-yath also adds marked-buffer
+  persistent marked-buffer Occur described in §4; configured project grep now
+  covers read-only results plus wgrep-style staged editing, source-buffer apply,
+  rollback, ordinary save, and stale-row refusal. Lem-yath also adds marked-buffer
   literal and regexp incremental isearch through the effective Evil Collection
   chords described in §4, plus the marked-buffer literal/regexp query-replace
   coordinator described there. GNU's Lisp-evaluated and per-match-edited

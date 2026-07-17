@@ -39,6 +39,33 @@
 (defvar *active-project-file-request* nil)
 (defvar *active-project-grep-request* nil)
 
+(defconstant +project-grep-records-key+ 'lem-yath-project-grep-records)
+(defconstant +project-grep-edit-session-key+
+  'lem-yath-project-grep-edit-session)
+
+(define-attribute project-grep-changed-attribute
+  (t :foreground :base0A :background :base02))
+
+(define-attribute project-grep-done-attribute
+  (t :foreground :base0B))
+
+(define-attribute project-grep-reject-attribute
+  (t :foreground :base08 :bold t))
+
+(defstruct project-grep-edit-record
+  point
+  root
+  relative
+  line-number
+  original
+  overlay
+  status
+  error)
+
+(defstruct project-grep-edit-session
+  buffer
+  change-group)
+
 (defstruct project-request-origin
   buffer
   window)
@@ -931,30 +958,337 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
                    (project-absolute-path root relative))))
       (move-to-line (buffer-point buffer) line-number))))
 
+(defun project-grep-edit-session (&optional (buffer (current-buffer)))
+  (buffer-value buffer +project-grep-edit-session-key+))
+
+(defun project-grep-edit-records (&optional (buffer (current-buffer)))
+  (buffer-value buffer +project-grep-records-key+))
+
+(defun project-grep-record-content-bounds (record)
+  "Return fresh content bounds for project grep RECORD."
+  (let ((start (copy-point (project-grep-edit-record-point record)
+                           :temporary))
+        (end nil))
+    (line-start start)
+    (unless (next-single-property-change start :content-start)
+      (editor-error "Project grep row lost its content boundary"))
+    (character-offset start 1)
+    (setf end (copy-point start :temporary))
+    (line-end end)
+    (values start end)))
+
+(defun project-grep-record-current-text (record)
+  (multiple-value-bind (start end)
+      (project-grep-record-content-bounds record)
+    (points-to-string start end)))
+
+(defun project-grep-record-changed-p (record)
+  (not (string= (project-grep-edit-record-original record)
+                (project-grep-record-current-text record))))
+
+(defun project-grep-set-record-status (record status &optional error)
+  "Set RECORD's staged result STATUS and replace its display overlay."
+  (alexandria:when-let ((overlay (project-grep-edit-record-overlay record)))
+    (ignore-errors (delete-overlay overlay)))
+  (setf (project-grep-edit-record-overlay record) nil
+        (project-grep-edit-record-status record) status
+        (project-grep-edit-record-error record) error)
+  (alexandria:when-let
+      ((attribute
+         (ecase status
+           ((nil) nil)
+           (:changed 'project-grep-changed-attribute)
+           (:done 'project-grep-done-attribute)
+           (:reject 'project-grep-reject-attribute))))
+    (multiple-value-bind (start end)
+        (project-grep-record-content-bounds record)
+      (setf (project-grep-edit-record-overlay record)
+            (make-overlay start end attribute))))
+  status)
+
+(defun project-grep-record-at-point (point)
+  (with-point ((line point))
+    (line-start line)
+    (text-property-at line :lem-yath-project-grep-record)))
+
+(defun project-grep-stage-before-change (point change)
+  "Refuse structural row changes that the staged grep model cannot apply."
+  (when (project-grep-edit-active-p (point-buffer point))
+    (cond
+      ((and (stringp change)
+            (find-if (lambda (character)
+                       (member character '(#\Newline #\Return)))
+                     change))
+       (editor-error "Multiline project grep edits are not supported"))
+      ((and (integerp change) (plusp change))
+       (with-point ((end point))
+         (character-offset end change)
+         (unless (same-line-p point end)
+           (editor-error
+            "Project grep row boundaries are not editable")))))))
+
+(defun project-grep-stage-after-change (start end old-length)
+  (declare (ignore end old-length))
+  (alexandria:when-let ((record (project-grep-record-at-point start)))
+    (project-grep-set-record-status
+     record
+     (and (project-grep-record-changed-p record) :changed))))
+
+(defun project-grep-reset-result-undo (buffer)
+  "Make BUFFER clean and give the next staging session fresh undo history."
+  (buffer-disable-undo buffer)
+  (buffer-enable-undo buffer)
+  (buffer-unmark buffer))
+
+(defun project-grep-edit-active-p (&optional (buffer (current-buffer)))
+  (not (null (project-grep-edit-session buffer))))
+
+(defun project-grep-begin-edit ()
+  "Enter the pinned wgrep-style staged editing state."
+  (let* ((buffer (current-buffer))
+         (records (project-grep-edit-records buffer)))
+    (unless records
+      (editor-error "This is not a project grep result buffer"))
+    (if (project-grep-edit-active-p buffer)
+        (message "Project grep content fields are already editable")
+        (progn
+          (project-grep-reset-result-undo buffer)
+          (setf (buffer-read-only-p buffer) nil)
+          (let ((group (handler-case (buffer-prepare-change-group buffer)
+                         (error (condition)
+                           (setf (buffer-read-only-p buffer) t)
+                           (editor-error
+                            "Cannot start staged grep editing: ~a"
+                            condition)))))
+            (setf (buffer-value buffer +project-grep-edit-session-key+)
+                  (make-project-grep-edit-session
+                   :buffer buffer :change-group group))
+            (add-hook (variable-value 'before-change-functions :buffer buffer)
+                      'project-grep-stage-before-change)
+            (add-hook (variable-value 'after-change-functions :buffer buffer)
+                      'project-grep-stage-after-change)
+            (message
+             "Edit matches; C-c C-c applies, C-c C-k aborts"))))))
+
+(defun project-grep-source-line-text (buffer line-number)
+  (with-point ((point (buffer-point buffer)))
+    (move-to-line point line-number)
+    (with-point ((start point)
+                 (end point))
+      (line-start start)
+      (line-end end)
+      (points-to-string start end))))
+
+(defun project-grep-validate-record (record)
+  "Return RECORD's writable source buffer, or NIL and a rejection reason."
+  (handler-case
+      (let* ((path (project-absolute-path
+                    (project-grep-edit-record-root record)
+                    (project-grep-edit-record-relative record)))
+             (buffer (find-file-buffer path)))
+        (cond
+          ((buffer-read-only-p buffer)
+           (values nil "Source buffer is read-only"))
+          ((not (string=
+                 (project-grep-edit-record-original record)
+                 (project-grep-source-line-text
+                  buffer (project-grep-edit-record-line-number record))))
+           (values nil "Source changed after grep"))
+          (t
+           (values buffer nil))))
+    (error (condition)
+      (values nil (princ-to-string condition)))))
+
+(defun project-grep-group-apply-records (records buffer)
+  "Apply validated RECORDS to BUFFER as one cancellable change group."
+  (let ((group nil)
+        (ordered (sort (copy-list records) #'>
+                       :key #'project-grep-edit-record-line-number)))
+    (handler-case
+        (progn
+          (setf group (buffer-prepare-change-group buffer))
+          (dolist (record ordered)
+            (let ((line-number (project-grep-edit-record-line-number record))
+                  (replacement (project-grep-record-current-text record)))
+              (unless (string=
+                       (project-grep-edit-record-original record)
+                       (project-grep-source-line-text buffer line-number))
+                (error "Source changed while applying staged grep edits"))
+              (with-point ((point (buffer-point buffer)))
+                (move-to-line point line-number)
+                (lem/grep::replace-grep-source-line point replacement))))
+          (buffer-accept-change-group group)
+          (dolist (record records)
+            (let ((replacement (project-grep-record-current-text record)))
+              (setf (project-grep-edit-record-original record) replacement)
+              (project-grep-set-record-status record :done)))
+          (values (length records) nil))
+      (error (condition)
+        (when group
+          (ignore-errors (buffer-cancel-change-group group)))
+        (dolist (record records)
+          (project-grep-set-record-status
+           record :reject (princ-to-string condition)))
+        (values 0 (length records))))))
+
+(defun project-grep-close-edit-session (buffer disposition)
+  "Close BUFFER's staged edit session by accepting or cancelling its edits."
+  (alexandria:when-let ((session (project-grep-edit-session buffer)))
+    (let ((group (project-grep-edit-session-change-group session)))
+      (handler-case
+          (ecase disposition
+            (:accept (buffer-accept-change-group group))
+            (:cancel (buffer-cancel-change-group group)))
+        (error (condition)
+          (editor-error "Could not close staged grep edits: ~a" condition))))
+    (remove-hook (variable-value 'before-change-functions :buffer buffer)
+                 'project-grep-stage-before-change)
+    (remove-hook (variable-value 'after-change-functions :buffer buffer)
+                 'project-grep-stage-after-change)
+    (setf (buffer-value buffer +project-grep-edit-session-key+) nil
+          (buffer-read-only-p buffer) t)
+    (project-grep-reset-result-undo buffer)))
+
+(defun project-grep-apply-staged-edits ()
+  "Apply changed result rows to source buffers without saving them to disk."
+  (let* ((buffer (current-buffer))
+         (records (project-grep-edit-records buffer))
+         (changed (remove-if-not #'project-grep-record-changed-p records))
+         (groups nil)
+         (applied 0)
+         (rejected 0))
+    (unless (project-grep-edit-active-p buffer)
+      (editor-error "Project grep is not in staged edit mode"))
+    (dolist (record changed)
+      (multiple-value-bind (source reason)
+          (project-grep-validate-record record)
+        (if source
+            (alexandria:if-let ((entry (assoc source groups :test #'eq)))
+              (push record (cdr entry))
+              (push (list source record) groups))
+            (progn
+              (incf rejected)
+              (project-grep-set-record-status record :reject reason)))))
+    (dolist (entry groups)
+      (multiple-value-bind (done failed)
+          (project-grep-group-apply-records (cdr entry) (car entry))
+        (incf applied done)
+        (incf rejected (or failed 0))))
+    (project-grep-close-edit-session buffer :accept)
+    (cond
+      ((plusp rejected)
+       (message "Applied ~d grep edit~:p; rejected ~d stale or unsafe edit~:p"
+                applied rejected))
+      ((zerop applied)
+       (message "No project grep changes to apply"))
+      (t
+       (message "Applied ~d grep edit~:p to source buffer~:p" applied)))
+    (values applied rejected)))
+
+(defun project-grep-abort-staged-edits ()
+  "Restore the result buffer to its pre-edit state without touching sources."
+  (let ((buffer (current-buffer)))
+    (unless (project-grep-edit-active-p buffer)
+      (editor-error "Project grep is not in staged edit mode"))
+    (project-grep-close-edit-session buffer :cancel)
+    (dolist (record (project-grep-edit-records buffer))
+      (project-grep-set-record-status
+       record
+       (and (project-grep-record-changed-p record) :changed)))
+    (message "Project grep changes discarded")))
+
+(defun project-grep-kill-buffer-hook (&optional (buffer (current-buffer)))
+  (alexandria:when-let ((session (project-grep-edit-session buffer)))
+    (ignore-errors
+      (buffer-cancel-change-group
+       (project-grep-edit-session-change-group session)))
+    (setf (buffer-value buffer +project-grep-edit-session-key+) nil)))
+
 (defun display-project-grep-results (root results)
-  "Display editable project grep RESULTS using Lem's peek-source UI."
-  (lem/peek-source:with-collecting-sources (collector :read-only nil)
-    (setf (buffer-directory (lem/peek-source:collector-buffer collector)) root)
-    (loop :for (file line-number content) :in results
-          :do
-             (lem/peek-source:with-appending-source
-                 (point :move-function
-                        (project-result-move-function root file line-number))
-               (insert-string point (project-display-string file)
-                              :attribute 'lem/peek-source:filename-attribute
-                              :mode 'lem/grep::peek-grep-mode
-                              :read-only t)
-               (insert-string point ":" :read-only t)
-               (insert-string point (princ-to-string line-number)
-                              :attribute 'lem/peek-source:position-attribute
-                              :read-only t)
-               (insert-string point ":" :read-only t :content-start t)
-               (insert-string point content)))
-    (add-hook
-     (variable-value
-      'after-change-functions
-      :buffer (lem/peek-source:collector-buffer collector))
-     'lem/grep::change-grep-buffer)))
+  "Display project grep RESULTS read-only until staged editing is requested."
+  (let ((records nil))
+    (lem/peek-source:with-collecting-sources (collector :read-only t)
+      (let ((buffer (lem/peek-source:collector-buffer collector)))
+        (setf (buffer-directory buffer) root)
+        (loop :for (file line-number content) :in results
+              :do
+                 (lem/peek-source:with-appending-source
+                     (point :move-function
+                            (project-result-move-function
+                             root file line-number))
+                   (let* ((start (copy-point point :right-inserting))
+                          (record
+                            (make-project-grep-edit-record
+                             :point start
+                             :root root
+                             :relative file
+                             :line-number line-number
+                             :original content)))
+                     (push record records)
+                     (insert-string
+                      point (project-display-string file)
+                      :attribute 'lem/peek-source:filename-attribute
+                      :mode 'lem/grep::peek-grep-mode
+                      :read-only t)
+                     (insert-string point ":" :read-only t)
+                     (insert-string
+                      point (princ-to-string line-number)
+                      :attribute 'lem/peek-source:position-attribute
+                      :read-only t)
+                     (insert-string point ":" :read-only t :content-start t)
+                     (insert-string point content)
+                     (with-point ((property-end start))
+                       (character-offset property-end 1)
+                       (put-text-property
+                        start property-end
+                        :lem-yath-project-grep-record record)))))
+        (setf (buffer-value buffer +project-grep-records-key+)
+              (nreverse records)
+              (buffer-value buffer +project-grep-edit-session-key+) nil)
+        (add-hook (variable-value 'kill-buffer-hook :buffer buffer)
+                  'project-grep-kill-buffer-hook)
+        (project-grep-reset-result-undo buffer)))))
+
+(define-command lem-yath-project-grep-begin-edit () ()
+  (project-grep-begin-edit))
+
+(define-command lem-yath-project-grep-finish-edit () ()
+  (project-grep-apply-staged-edits))
+
+(define-command lem-yath-project-grep-abort-edit () ()
+  (if (project-grep-edit-active-p)
+      (project-grep-abort-staged-edits)
+      (lem/peek-source::peek-source-quit)))
+
+(define-command lem-yath-project-grep-exit-edit () ()
+  (if (project-grep-edit-active-p)
+      (if (some #'project-grep-record-changed-p
+                (project-grep-edit-records))
+          (if (prompt-for-y-or-n-p
+               "Project grep modified; apply changes? ")
+              (project-grep-apply-staged-edits)
+              (project-grep-abort-staged-edits))
+          (project-grep-abort-staged-edits))
+      (lem/peek-source::peek-source-quit)))
+
+(define-command lem-yath-project-grep-normal-insert () ()
+  "Enter staged grep editing on first i, then retain ordinary Vi insert."
+  (if (and (project-grep-edit-records)
+           (not (project-grep-edit-active-p)))
+      (project-grep-begin-edit)
+      (lem-vi-mode/commands:vi-insert)))
+
+(define-command lem-yath-project-grep-normal-write-quit () ()
+  "Apply staged grep edits on ZZ, otherwise retain ordinary Vi behavior."
+  (if (project-grep-edit-active-p)
+      (project-grep-apply-staged-edits)
+      (lem-vi-mode/commands:vi-write-quit)))
+
+(define-command lem-yath-project-grep-normal-quit () ()
+  "Abort staged grep edits on ZQ, otherwise retain ordinary Vi behavior."
+  (if (project-grep-edit-active-p)
+      (project-grep-abort-staged-edits)
+      (lem-vi-mode/commands:vi-quit)))
 
 (define-command lem-yath-peek-source-escape () ()
   "Leave a non-Normal Vi state before dismissing a peek-source UI."
@@ -968,6 +1302,8 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
                   (lem-vi-mode/core:ensure-state
                    'lem-vi-mode/states:normal))))
        (lem-vi-mode/commands:vi-normal))
+      ((project-grep-edit-active-p)
+       (lem-yath-project-grep-exit-edit))
       (t
        (lem/peek-source::peek-source-quit)))))
 
@@ -1153,6 +1489,28 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
 (define-key *global-keymap* "C-x p d" 'lem-yath-project-root-directory)
 (define-key lem/peek-source:*peek-source-keymap*
   "Escape" 'lem-yath-peek-source-escape)
+(define-key lem/grep::*peek-grep-mode-keymap*
+  "C-c C-p" 'lem-yath-project-grep-begin-edit)
+(define-key lem/grep::*peek-grep-mode-keymap*
+  "C-c C-c" 'lem-yath-project-grep-finish-edit)
+(define-key lem/grep::*peek-grep-mode-keymap*
+  "C-c C-e" 'lem-yath-project-grep-finish-edit)
+(define-key lem/grep::*peek-grep-mode-keymap*
+  "C-x C-s" 'lem-yath-project-grep-finish-edit)
+(define-key lem/grep::*peek-grep-mode-keymap*
+  "C-c C-k" 'lem-yath-project-grep-abort-edit)
+(define-key lem/grep::*peek-grep-mode-keymap*
+  "C-x C-q" 'lem-yath-project-grep-exit-edit)
+(define-key lem/grep::*peek-grep-mode-keymap*
+  "Z Z" 'lem-yath-project-grep-finish-edit)
+(define-key lem/grep::*peek-grep-mode-keymap*
+  "Z Q" 'lem-yath-project-grep-abort-edit)
+(define-key lem-vi-mode:*normal-keymap*
+  "i" 'lem-yath-project-grep-normal-insert)
+(define-key lem-vi-mode:*normal-keymap*
+  "Z Z" 'lem-yath-project-grep-normal-write-quit)
+(define-key lem-vi-mode:*normal-keymap*
+  "Z Q" 'lem-yath-project-grep-normal-quit)
 
 ;; Hot reloads must not multiply registration work.
 (remove-hook *find-file-hook* 'register-buffer-project)

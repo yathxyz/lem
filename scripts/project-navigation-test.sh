@@ -211,6 +211,22 @@ wait_report_count() {
   return 1
 }
 
+latest_report() {
+  grep -E "$1" "$LEM_YATH_PROJECT_NAVIGATION_REPORT" 2>/dev/null |
+    tail -n 1
+}
+
+leave_grep_insert() {
+  local session=$1 before state
+  before=$(report_count '^GREP-ESCAPE ')
+  lem_keys "$session" Escape
+  sleep 0.25
+  lem_keys "$session" F12
+  wait_report_count '^GREP-ESCAPE ' "$((before + 1))" || return 1
+  state=$(latest_report '^GREP-ESCAPE ')
+  [[ "$state" == 'GREP-ESCAPE normal=yes '* ]]
+}
+
 send_chord() {
   local session=$1
   shift
@@ -526,28 +542,80 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
     before=$(report_count '^GREP ')
     lem_keys "$verify_session" F8
     if wait_report_count '^GREP ' "$((before + 1))" &&
-       grep -q '^GREP alpha=yes tracked-build=yes sibling=no ignored=no matches=2$' \
+       grep -q '^GREP alpha=yes tracked-build=yes sibling=no ignored=no matches=2 readonly=yes active=no enter=yes finish=yes abort=yes exit=yes$' \
          "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
       pass spc-p-g-buffer \
-        'project grep includes tracked build files and excludes ignored paths'
+        'project grep opens read-only with the pinned staged-edit bindings'
     else
       fail spc-p-g-buffer 'the project grep result buffer diverged' \
         "$verify_session"
     fi
 
     send_chord "$verify_session" i
-    tmux_cmd send-keys -t "$verify_session" -l 'WRITEBACK_'
+    sleep 0.2
+    before=$(report_count '^GREP ')
+    lem_keys "$verify_session" F8
+    if wait_report_count '^GREP ' "$((before + 1))" &&
+       grep -q '^GREP .* readonly=no active=yes ' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-stage-entry \
+        'Evil-Collection i entered a writable isolated wgrep-style stage'
+    else
+      fail spc-p-g-stage-entry \
+        'normal-state i did not enter staged project-grep editing' \
+        "$verify_session"
+    fi
+
+    lem_keys "$verify_session" F2
+    send_chord "$verify_session" i
+    tmux_cmd send-keys -t "$verify_session" -l 'STAGED_'
+    sleep 0.4
+    before=$(report_count '^GREP-MULTILINE ')
+    lem_keys "$verify_session" F4
+    if wait_report_count '^GREP-MULTILINE ' "$((before + 1))" &&
+       grep -qx 'GREP-MULTILINE blocked=yes unchanged=yes active=yes' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-stage-multiline \
+        'pasted multiline text was refused before it could split a staged row'
+    else
+      fail spc-p-g-stage-multiline \
+        'a pasted multiline staged grep edit was not refused atomically' \
+        "$verify_session"
+    fi
+    before=$(report_count '^GREP-WRITEBACK result=')
+    lem_keys "$verify_session" F8
+    if wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" &&
+       grep -q '^GREP-WRITEBACK result=yes source=no modified=no disk=no .* active=yes readonly=no status=CHANGED$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-stage-isolation \
+        'editing changed only the staged result and highlighted it as pending'
+    else
+      fail spc-p-g-stage-isolation \
+        'a staged edit leaked into the source or lost its pending state' \
+        "$verify_session"
+    fi
+
+    if leave_grep_insert "$verify_session" &&
+       [[ "$(latest_report '^GREP-ESCAPE ')" =~ ^GREP-ESCAPE\ normal=yes\ state=.*\ result=yes$ ]]; then
+      pass spc-p-g-escape \
+        'Escape left Vi Insert state without dismissing staged grep results'
+    else
+      fail spc-p-g-escape \
+        'Escape did not preserve the staged grep UI in Vi Normal state' \
+        "$verify_session"
+    fi
+    send_chord "$verify_session" Z Z
     sleep 0.4
     before=$(report_count '^GREP-WRITEBACK result=')
     lem_keys "$verify_session" F8
     if wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" &&
-       grep -q '^GREP-WRITEBACK result=yes source=yes modified=yes disk=no$' \
+       grep -q '^GREP-WRITEBACK result=yes source=yes modified=yes disk=no .* active=no readonly=yes status=DONE$' \
          "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
-      pass spc-p-g-writeback \
-        'editing a grep result immediately changed the source buffer only'
+      pass spc-p-g-stage-apply \
+        'Evil-Collection ZZ applied the staged row without saving it'
     else
-      fail spc-p-g-writeback \
-        'grep-result editing did not update the source buffer transactionally' \
+      fail spc-p-g-stage-apply \
+        'ZZ did not apply and close the staged transaction safely' \
         "$verify_session"
     fi
 
@@ -559,7 +627,7 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
     before=$(report_count '^GREP-WRITEBACK result=')
     lem_keys "$verify_session" F8
     if wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" &&
-       grep -q '^GREP-WRITEBACK result=yes source=yes modified=no disk=yes$' \
+       grep -q '^GREP-WRITEBACK result=yes source=yes modified=no disk=yes .* active=no readonly=yes status=DONE$' \
          "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
       pass spc-p-g-writeback-save \
         'saving the source window persisted the grep edit to disk'
@@ -569,20 +637,102 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
         "$verify_session"
     fi
 
-    lem_keys "$verify_session" Escape
-    sleep 0.2
-    before=$(report_count '^GREP-ESCAPE ')
-    lem_keys "$verify_session" F12
-    if wait_report_count '^GREP-ESCAPE ' "$((before + 1))" &&
-       grep -q '^GREP-ESCAPE normal=yes result=yes$' \
-         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
-      pass spc-p-g-escape \
-        'Escape left Vi Insert state without dismissing the grep results'
-    else
-      fail spc-p-g-escape \
-        'Escape did not preserve the grep UI in Vi Normal state' \
+    send_chord "$verify_session" i
+    lem_keys "$verify_session" F2
+    send_chord "$verify_session" i
+    tmux_cmd send-keys -t "$verify_session" -l 'ABORT_'
+    sleep 0.3
+    before=$(report_count '^GREP-WRITEBACK result=')
+    lem_keys "$verify_session" F8
+    wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" || true
+    if ! leave_grep_insert "$verify_session"; then
+      fail spc-p-g-stage-abort-state \
+        'could not leave Insert state before the ZQ abort' \
         "$verify_session"
     fi
+    send_chord "$verify_session" Z Q
+    sleep 0.3
+    before=$(report_count '^GREP-WRITEBACK result=')
+    lem_keys "$verify_session" F8
+    if wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" &&
+       grep -q '^GREP-WRITEBACK result=yes source=yes modified=no disk=yes abort-result=no abort-source=no .* active=no readonly=yes status=NONE$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-stage-abort \
+        'Evil-Collection ZQ restored the result without touching the source'
+    else
+      fail spc-p-g-stage-abort \
+        'aborting did not restore the staged result exactly' \
+        "$verify_session"
+    fi
+
+    send_chord "$verify_session" i
+    lem_keys "$verify_session" F2
+    send_chord "$verify_session" i
+    tmux_cmd send-keys -t "$verify_session" -l 'EXIT_'
+    sleep 0.3
+    before=$(report_count '^GREP-WRITEBACK result=')
+    lem_keys "$verify_session" F8
+    wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" || true
+    if ! leave_grep_insert "$verify_session"; then
+      fail spc-p-g-stage-exit-state \
+        'could not leave Insert state before normal Escape exit' \
+        "$verify_session"
+    fi
+    lem_keys "$verify_session" Escape
+    if lem_wait_for "$verify_session" \
+         'Project grep modified; apply changes.*\[y/n\]' \
+         "$WAIT_TIMEOUT" >/dev/null; then
+      lem_keys "$verify_session" n
+      sleep 0.3
+      before=$(report_count '^GREP-WRITEBACK result=')
+      lem_keys "$verify_session" F8
+      if wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" &&
+         grep -q '^GREP-WRITEBACK result=yes source=yes modified=no disk=yes abort-result=no abort-source=no exit-result=no exit-source=no .* active=no readonly=yes status=NONE$' \
+           "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+        pass spc-p-g-stage-exit \
+          'normal Escape prompted and n discarded only the staged result edit'
+      else
+        fail spc-p-g-stage-exit \
+          'normal Escape cancellation did not restore the staged result' \
+          "$verify_session"
+      fi
+    else
+      fail spc-p-g-stage-exit \
+        'normal Escape did not open the pinned apply-or-discard prompt' \
+        "$verify_session"
+    fi
+
+    send_chord "$verify_session" i
+    lem_keys "$verify_session" F2
+    send_chord "$verify_session" i
+    tmux_cmd send-keys -t "$verify_session" -l 'STALE_'
+    sleep 0.3
+    before=$(report_count '^GREP-WRITEBACK result=')
+    lem_keys "$verify_session" F8
+    wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" || true
+    if ! leave_grep_insert "$verify_session"; then
+      fail spc-p-g-stage-stale-state \
+        'could not leave Insert state before the stale-source apply' \
+        "$verify_session"
+    fi
+    before=$(report_count '^GREP-STALE ')
+    lem_keys "$verify_session" F3
+    wait_report_count '^GREP-STALE ' "$((before + 1))" || true
+    send_chord "$verify_session" Z Z
+    sleep 0.3
+    before=$(report_count '^GREP-WRITEBACK result=')
+    lem_keys "$verify_session" F8
+    if wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" &&
+       grep -q '^GREP-WRITEBACK result=no source=no modified=yes disk=yes abort-result=no abort-source=no exit-result=no exit-source=no stale-result=yes external-source=yes active=no readonly=yes status=REJECT$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-stage-stale \
+        'apply rejected a source line changed after grep without overwriting it'
+    else
+      fail spc-p-g-stage-stale \
+        'stale-source protection lost either the source or staged edit' \
+        "$verify_session"
+    fi
+
   else
     fail spc-p-g-results 'SPC p g produced no Alpha match' "$verify_session"
   fi
