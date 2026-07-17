@@ -333,6 +333,7 @@
    :*external-format-function*
    :*find-directory-function*
    :*default-external-format*
+   :*mixed-eol-notification-function*
    :encoding-read-error
    :insert-file-contents
    :find-file-buffer

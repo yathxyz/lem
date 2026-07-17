@@ -70,6 +70,7 @@
                (:file "file")
                (:file "revert-buffer")
                (:file "save-clobber")
+               (:file "eol-roundtrip")
                (:file "scala-mode")
                (:file "wat-mode")
                (:file "nix-mode")

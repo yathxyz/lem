@@ -120,3 +120,8 @@
           (or (inq:detect-end-of-line (pathname pathname)) :lf)))
 
 (setf *external-format-function* 'detect-external-format-from-file)
+
+(setf *mixed-eol-notification-function*
+      (lambda (filename)
+        (message "~A has mixed line endings; normalized to the dominant style on save."
+                 filename)))

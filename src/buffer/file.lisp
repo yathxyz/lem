@@ -9,6 +9,12 @@
 (defvar *find-directory-function* nil)
 (defvar *default-external-format* :detect-encoding)
 
+(defvar *mixed-eol-notification-function* nil
+  "Function of one argument (the filename string) called once by
+INSERT-FILE-CONTENTS when a file's lines do not all share the detected
+end-of-line style and are therefore normalized to it on save. Used to surface a
+one-time, non-blocking message. NIL disables the notification.")
+
 (define-condition encoding-read-error (editor-error)
   ((condition :initarg :condition)
    (filename :initarg :filename
@@ -18,7 +24,8 @@
                (format s "Couldn't read this file: ~A" filename)))))
 
 (defun %encoding-read (encoding point stream stream-filename)
-  (let ((end-of-line (encoding-end-of-line encoding)))
+  (let ((end-of-line (encoding-end-of-line encoding))
+        (mixed-eol-p nil))
     (loop
       (multiple-value-bind (str eof-p)
           (handler-bind ((error (lambda (e)
@@ -33,15 +40,24 @@
            (return))
           (t
            (let ((end nil))
+             ;; READ-LINE consumes the LF; for a CRLF pair the CR is left as the
+             ;; final character. In a CRLF file strip that CR only when it is
+             ;; actually present -- never remove a real character. A line that
+             ;; lacks the CR is an LF-only line: keep it intact and flag the
+             ;; file as mixed so save-time normalization can be announced.
              #+sbcl
-             (when (and (eq end-of-line :crlf)
-                        (< 0 (length str)))
-               (setf end (1- (length str))))
+             (when (eq end-of-line :crlf)
+               (if (and (< 0 (length str))
+                        (char= (char str (1- (length str))) #\return))
+                   (setf end (1- (length str)))
+                   (setf mixed-eol-p t)))
              (insert-string point
                             (if end
                                 (subseq str 0 end)
                                 str))
-             (insert-character point #\newline))))))))
+             (insert-character point #\newline))))))
+    (when (and mixed-eol-p *mixed-eol-notification-function*)
+      (funcall *mixed-eol-notification-function* stream-filename))))
 
 (defun insert-file-contents (point filename
                              &key (external-format *default-external-format*)
