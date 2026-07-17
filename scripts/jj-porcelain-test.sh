@@ -81,6 +81,23 @@ wait_revision_absent() {
   return 1
 }
 
+revision_parent() {
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph \
+    -r "($1)-" --template change_id
+}
+
+wait_revision_parent() {
+  local revision=$1 expected=$2 index=0
+  while ((index < 80)); do
+    if [ "$(revision_parent "$revision")" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
 wait_description() {
   local expected=$1 index=0
   while ((index < 80)); do
@@ -333,6 +350,104 @@ if lem_wait_for "$session" 'no parent to squash into' 10 >/dev/null &&
   pass squash-refusal 's rejected the root revision before opening the popup'
 else
   fail squash-refusal 'root squash did not fail closed'
+fi
+
+# Build sibling source/destination changes below the multiline base, then
+# select the source physically through the row map for rebase coverage.
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new \
+  "$base_change_id" --message 'rebase destination' >/dev/null
+printf 'destination content\n' \
+  >"${LEM_YATH_JJ_PORCELAIN_ROOT}rebase-destination.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" status >/dev/null
+rebase_destination_id=$("$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log \
+  --no-graph -r @ --template change_id)
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new \
+  "$base_change_id" --message 'rebase source' >/dev/null
+printf 'source content\n' \
+  >"${LEM_YATH_JJ_PORCELAIN_ROOT}rebase-source.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" status >/dev/null
+rebase_source_id=$("$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log \
+  --no-graph -r @ --template change_id)
+
+lem_keys "$session" g r
+selected_rebase_source=0
+for _ in 1 2 3 4 5 6 7 8; do
+  if invoke_report &&
+     [[ $(latest_report) == *'kind=log row=yes description=rebase_source '* ]]; then
+    selected_rebase_source=1
+    break
+  fi
+  lem_keys "$session" C-k
+done
+if ((selected_rebase_source)); then
+  pass rebase-row 'the row map selected the content-bearing rebase source'
+else
+  fail rebase-row 'the rebase source was not reachable through revision navigation'
+fi
+
+lem_keys "$session" r
+if lem_wait_for "$session" 'JJ Rebase' 10 >/dev/null; then
+  lem_keys "$session" q
+fi
+if [ "$(revision_parent "$rebase_source_id")" = "$base_change_id" ] &&
+   ! lem_capture "$session" | grep -q 'JJ Rebase'; then
+  pass rebase-popup-cancel 'q closed the rebase popup without moving the source'
+else
+  fail rebase-popup-cancel 'rebase popup cancellation changed history or stayed active'
+fi
+
+lem_keys "$session" r
+if lem_wait_for "$session" 'JJ Rebase' 10 >/dev/null; then
+  lem_keys "$session" s
+fi
+if lem_wait_for "$session" 'Rebase destination revision or revset:' 10 >/dev/null; then
+  replace_prompt_text "$rebase_destination_id"
+fi
+if lem_wait_for "$session" 'Rebase Jujutsu revision' 10 >/dev/null; then
+  lem_keys "$session" n
+fi
+if [ "$(revision_parent "$rebase_source_id")" = "$base_change_id" ]; then
+  pass rebase-confirm-cancel 'n refused the prepared rebase without mutation'
+else
+  fail rebase-confirm-cancel 'confirmation cancellation moved the source revision'
+fi
+
+lem_keys "$session" r
+if lem_wait_for "$session" 'JJ Rebase' 10 >/dev/null; then
+  lem_keys "$session" s
+fi
+if lem_wait_for "$session" 'Rebase destination revision or revset:' 10 >/dev/null; then
+  replace_prompt_text "$rebase_destination_id"
+fi
+if lem_wait_for "$session" 'Rebase Jujutsu revision' 10 >/dev/null; then
+  lem_keys "$session" y
+fi
+if wait_revision_parent "$rebase_source_id" "$rebase_destination_id" &&
+   "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" file show \
+     -r "$rebase_source_id" 'root:rebase-source.txt' |
+       grep -Fxq 'source content' &&
+   invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=rebase_source '* ]]; then
+  pass rebase 'r s moved the selected subtree and retained its content and row'
+else
+  fail rebase 'selected-subtree rebase or row restoration failed'
+fi
+
+lem_keys "$session" r
+if lem_wait_for "$session" 'JJ Rebase' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+if lem_wait_for "$session" 'Rebase destination revision or revset:' 10 >/dev/null; then
+  replace_prompt_text "$rebase_source_id"
+fi
+if lem_wait_for "$session" 'Rebase Jujutsu revision' 10 >/dev/null; then
+  lem_keys "$session" y
+fi
+if lem_wait_for "$session" 'jj rebase failed' 10 >/dev/null &&
+   [ "$(revision_parent "$rebase_source_id")" = "$rebase_destination_id" ]; then
+  pass rebase-refusal 'an invalid self-destination surfaced jj failure without mutation'
+else
+  fail rebase-refusal 'invalid rebase did not fail closed'
 fi
 
 lem_keys "$session" q

@@ -553,6 +553,106 @@
          (parent (jj-single-parent-revision root revision)))
     (dispatch-jj-squash root revision parent)))
 
+(defun jj-prompt-for-rebase-destination (root)
+  "Read a history change ID or arbitrary jj revset for a rebase destination."
+  (let* ((entries (jj-log-entries root))
+         (choices
+           (mapcar (lambda (entry)
+                     (cons (jj-log-entry-change-id entry) entry))
+                   entries)))
+    (prompt-for-string
+     "Rebase destination revision or revset: "
+     :completion-function
+     (lambda (input)
+       (completion-annotated-prompt-choices
+        (prescient-filter input choices :key #'car :category :jj-revision)
+        (lambda (entry)
+          (format nil "~12a  ~a"
+                  (jj-log-entry-commit-id entry)
+                  (if (str:blankp (jj-log-entry-description entry))
+                      "(no description)"
+                      (jj-log-entry-description entry))))))
+     :test-function (lambda (input) (not (str:blankp input)))
+     :history-symbol 'lem-yath-jj-rebase-destination)))
+
+(defun jj-rebase-keymap ()
+  "Build the focused Majutsu-style rebase popup."
+  (let ((keymap (make-keymap :description "JJ Rebase")))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist (entry
+              '(("Return" "branch onto destination")
+                ("b" "branch onto destination")
+                ("s" "selected revision and descendants onto destination")
+                ("r" "selected revision only onto destination")
+                ("a" "selected revision after destination")
+                ("B" "selected revision before destination")
+                ("q" "cancel")))
+      (destructuring-bind (key description) entry
+        (define-key keymap key 'nop-command)
+        (setf (lem-core::prefix-description
+               (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
+              description)))
+    keymap))
+
+(defun jj-rebase-arguments (revision destination action)
+  "Return direct jj rebase arguments for row REVISION and popup ACTION."
+  (ecase action
+    (:branch
+     (list "rebase" "--branch" revision "--destination" destination))
+    (:source
+     (list "rebase" "--source" revision "--destination" destination))
+    (:revision
+     (list "rebase" "--revisions" revision "--destination" destination))
+    (:after
+     (list "rebase" "--revisions" revision "--insert-after" destination))
+    (:before
+     (list "rebase" "--revisions" revision "--insert-before" destination))))
+
+(defun jj-execute-rebase (root revision action)
+  "Prompt for a destination and rebase row REVISION according to ACTION."
+  (let ((destination (jj-prompt-for-rebase-destination root)))
+    (if (prompt-for-y-or-n-p
+         (format nil "Rebase Jujutsu revision ~a using ~a onto ~a?"
+                 revision (string-downcase (symbol-name action)) destination))
+        (progn
+          (run-jj root (jj-rebase-arguments revision destination action))
+          (let ((buffer (current-buffer)))
+            (render-jj-buffer buffer root)
+            (jj-restore-revision-point buffer revision))
+          (message "Jujutsu rebase completed"))
+        (message "Jujutsu rebase cancelled"))))
+
+(defun dispatch-jj-rebase (root revision)
+  "Read one focused Majutsu-style rebase action for REVISION."
+  (unwind-protect
+       (progn
+         (let ((lem/transient:*transient-popup-delay* 0))
+           (keymap-activate (jj-rebase-keymap)))
+         (redraw-display)
+         (let* ((key (read-key))
+                (name (lem-core::keyseq-to-string (list key))))
+           (lem/transient::hide-transient)
+           (cond
+             ((or (string= name "Return") (string= name "b"))
+              (jj-execute-rebase root revision :branch))
+             ((string= name "s")
+              (jj-execute-rebase root revision :source))
+             ((string= name "r")
+              (jj-execute-rebase root revision :revision))
+             ((string= name "a")
+              (jj-execute-rebase root revision :after))
+             ((string= name "B")
+              (jj-execute-rebase root revision :before))
+             ((or (string= name "q") (string= name "Escape"))
+              (message "Jujutsu rebase cancelled"))
+             (t (message "No rebase action is bound to ~a" name)))))
+    (lem/transient::hide-transient)))
+
+(define-command lem-yath-jj-rebase () ()
+  "Rebase the selected change through a focused Majutsu-style popup."
+  (dispatch-jj-rebase (jj-current-root) (jj-selected-revision)))
+
 (define-command lem-yath-jj-describe () ()
   "Set the selected change's description, like Majutsu `c'."
   (let* ((root (jj-current-root))
@@ -651,7 +751,7 @@
 (define-command lem-yath-jj-help () ()
   "Show the focused Majutsu-compatible Jujutsu command surface."
   (message
-   "Jujutsu: c describe (one line), o new, s squash, e edit, u undo, C-r redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
+   "Jujutsu: c describe (one line), o new, s squash, r rebase, e edit, u undo, C-r redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
 
 (define-command lem-yath-jj-quit () ()
   "Quit the current Jujutsu status/log window."
@@ -684,6 +784,7 @@
 (define-key *lem-yath-jj-view-keymap* "c" 'lem-yath-jj-describe)
 (define-key *lem-yath-jj-view-keymap* "o" 'lem-yath-jj-new)
 (define-key *lem-yath-jj-view-keymap* "s" 'lem-yath-jj-squash)
+(define-key *lem-yath-jj-view-keymap* "r" 'lem-yath-jj-rebase)
 (define-key *lem-yath-jj-view-keymap* "e" 'lem-yath-jj-edit)
 (define-key *lem-yath-jj-view-keymap* "u" 'lem-yath-jj-undo)
 (define-key *lem-yath-jj-view-keymap* "C-r" 'lem-yath-jj-redo)

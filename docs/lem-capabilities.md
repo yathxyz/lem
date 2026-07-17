@@ -2008,24 +2008,33 @@ worktrees. The repository-specific Jujutsu porcelain renders `jj status` plus
 30 row-aware history entries. Its Evil-compatible core uses `C-j`/`C-k` or
 `g j`/`g k` for revisions, `c` to describe, `o` to create a child, `e` to edit,
 `s` to open a whole-change squash popup, `u`/`C-r` to undo/redo operations,
+`r` to open a selected-row rebase popup, `u`/`C-r` to undo/redo operations,
 confirmed `x` to abandon, `d` or Return to browse `jj show`, `g r` to refresh,
 `?` for help, and `q` to unwind first to history and then the exact source
 buffer. The squash popup retains Majutsu's `s s` default: it moves the selected
 change into its sole parent and combines both complete descriptions. Its other
 single-key actions keep only the destination or source description, or retain
 the emptied source; cancellation is non-mutating, roots and merges fail closed,
-and a successful squash selects the rewritten parent. Every subprocess uses
-direct argv; the history is bounded and refresh preserves the selected change
-ID when that change still exists. `scripts/jj-porcelain-test.sh` drives the
-complete loop through the installed ncurses editor and real `jj` in a
-metacharacter-bearing repository path, including popup cancellation, exact
-multiline combination, content movement, parent restoration, and root refusal.
+and a successful squash selects the rewritten parent. The rebase popup binds
+the selected row as its source: Return/`b`, `s`, and `r` choose jj's branch,
+source-with-descendants, or exact-revision mode, while `a` and `B` insert that
+revision after or before the destination. A Prescient prompt offers bounded
+history IDs with descriptions but accepts an arbitrary nonblank revset; Lem
+then confirms before mutation and preserves the source row after success.
+Every subprocess uses direct argv; the history is bounded and refresh preserves
+the selected change ID when that change still exists.
+`scripts/jj-porcelain-test.sh` drives the complete loop through the installed
+ncurses editor and real `jj` in a metacharacter-bearing repository path,
+including squash popup cancellation, exact multiline combination, content
+movement, parent restoration, root refusal, both rebase cancellation paths,
+content-bearing sibling rebase, row restoration, and invalid self-destination.
 The in-editor description prompt is intentionally single-line and refuses an
 existing multiline description rather than truncating it. Majutsu's general
 transient dispatch, multiline description buffer, bookmarks, split, arbitrary
-source/destination and partial-patch squash, rebase, conflict handling,
-operation log, workspaces, sparse checkout, and partial patch selection remain
-outside this focused approximation.
+source/destination and partial-patch squash, multi-source/destination rebase
+selection and advanced rebase flags, conflict handling, operation log,
+workspaces, sparse checkout, and partial patch selection remain outside this
+focused approximation.
 
 Git status also appends navigable TODO/FIXME rows from tracked, nonbinary
 files. Moving onto a row previews the exact source line and visiting it opens

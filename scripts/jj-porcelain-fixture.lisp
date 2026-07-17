@@ -35,6 +35,7 @@
    '(("c" lem-yath-jj-describe)
      ("o" lem-yath-jj-new)
      ("s" lem-yath-jj-squash)
+     ("r" lem-yath-jj-rebase)
      ("e" lem-yath-jj-edit)
      ("u" lem-yath-jj-undo)
      ("C-r" lem-yath-jj-redo)
