@@ -35,6 +35,21 @@
   (setf *mouse-mode* 0)
   (charms/ll:mousemask 0))
 
+(defun write-terminal-string (string)
+  "Write STRING to the controlling terminal, bypassing ncurses' screen buffer.
+Used for control sequences ncurses does not manage (e.g. bracketed paste)."
+  (uiop:run-program (list "printf" "%s" string)
+                    :output :interactive
+                    :ignore-error-status t))
+
+(defun enable-bracketed-paste ()
+  "Ask the terminal to wrap pasted text in ESC[200~ ... ESC[201~ (DEC mode 2004)."
+  (write-terminal-string (format nil "~C[?2004h" #\Esc)))
+
+(defun disable-bracketed-paste ()
+  "Turn off terminal bracketed paste (DEC mode 2004)."
+  (write-terminal-string (format nil "~C[?2004l" #\Esc)))
+
 
 (defvar *colors*)
 
@@ -468,12 +483,14 @@
   ;; for mouse
   (when (= *mouse-mode* 1)
     (enable-mouse))
+  (enable-bracketed-paste)
   t)
 
 (defun term-set-tty (tty-name)
   (setf *tty-name* tty-name))
 
 (defun term-finalize ()
+  (disable-bracketed-paste)
   (when *term-io*
     (fclose *term-io*)
     (setf *term-io* nil))

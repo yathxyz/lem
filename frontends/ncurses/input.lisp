@@ -108,6 +108,61 @@
                   (#.(char-code #\H) (make-key :shift t :meta t :ctrl t :sym "Home")))))))
       (get-key-from-name "escape")))
 
+(defparameter +bracketed-paste-end+
+  (coerce (list #.(char-code #\Esc)
+                #.(char-code #\[)
+                #.(char-code #\2)
+                #.(char-code #\0)
+                #.(char-code #\1)
+                #.(char-code #\~))
+          '(simple-array (unsigned-byte 8) (*)))
+  "Byte sequence ESC[201~ that terminates a bracketed paste.")
+
+(defun read-bracketed-paste ()
+  "Read a bracketed-paste payload after the ESC[200~ introducer.
+Accumulate raw octets from the terminal until the ESC[201~ terminator,
+UTF-8 decode them, and return an event closure that inserts the text as a
+single undo unit without running keymaps, auto-indent, or abbrev. Any ESC
+byte inside the payload is treated as literal text, not as a key."
+  (let ((bytes (make-array 64 :element-type '(unsigned-byte 8)
+                              :adjustable t :fill-pointer 0))
+        (match 0)
+        (terminator-length (length +bracketed-paste-end+)))
+    (with-getch-input-timeout (1000)
+      (loop
+        (let ((code (getch)))
+          (cond
+            ((< code 0)
+             ;; timed out before the terminator arrived; stop with what we have.
+             (return))
+            ((= code (aref +bracketed-paste-end+ match))
+             (incf match)
+             (when (= match terminator-length)
+               (return)))
+            (t
+             ;; a partial terminator match failed: the matched bytes were real
+             ;; payload, so flush them and reconsider the current byte.
+             (loop :for i :from 0 :below match
+                   :do (vector-push-extend (aref +bracketed-paste-end+ i) bytes))
+             (if (= code (aref +bracketed-paste-end+ 0))
+                 (setf match 1)
+                 (progn
+                   (setf match 0)
+                   (vector-push-extend code bytes))))))))
+    (let ((text (babel:octets-to-string bytes :encoding :utf-8 :errorp nil)))
+      (lambda ()
+        (lem:insert-bracketed-paste (lem:current-point) text)))))
+
+(defun csi\[2 ()
+  "Handle CSI sequences beginning with ESC[2.
+Only bracketed paste (ESC[200~) is recognized; other ESC[2... sequences
+fall back to Escape."
+  (if (and (= (getch) #.(char-code #\0))
+           (= (getch) #.(char-code #\0))
+           (= (getch) #.(char-code #\~)))
+      (read-bracketed-paste)
+      (get-key-from-name "escape")))
+
 (let ((resize-code (get-code "[resize]"))
       (abort-code (get-code "C-]"))
       (escape-code (get-code "escape")))
@@ -134,6 +189,8 @@
                                                    #'getch))
                               (#.(char-code #\1)
                                  (csi\[1))
+                              (#.(char-code #\2)
+                                 (csi\[2))
                               (t (get-key-from-name "escape")))))
                          (t
                           (let ((key (get-key code)))

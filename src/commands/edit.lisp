@@ -24,6 +24,7 @@
            :yank-pop-next
            :yank-to-clipboard
            :paste-from-clipboard
+           :insert-bracketed-paste
            :entab-line
            :detab-line
            :delete-blank-lines
@@ -478,6 +479,38 @@ current line."
 
 (defmethod lem-core:paste-using-mode (mode text)
   (yank-string (current-point) text))
+
+(defun normalize-bracketed-paste-newlines (text)
+  "Return TEXT with CR and CRLF line endings converted to LF.
+Terminals deliver pasted line breaks as CR (the byte the Enter key sends in
+raw mode), so a bracketed paste must treat them as newlines."
+  (let ((out (make-string-output-stream))
+        (len (length text))
+        (i 0))
+    (loop :while (< i len)
+          :for ch := (char text i)
+          :do (cond ((char= ch #\Return)
+                     (write-char #\Newline out)
+                     (when (and (< (1+ i) len)
+                                (char= (char text (1+ i)) #\Newline))
+                       (incf i))
+                     (incf i))
+                    (t
+                     (write-char ch out)
+                     (incf i))))
+    (get-output-stream-string out)))
+
+(defun insert-bracketed-paste (point text)
+  "Insert TEXT at POINT as a single undo unit.
+Bypasses keymaps, auto-indent, and abbrev expansion by inserting the payload
+literally (only normalizing terminal CR/CRLF line endings to LF); used for
+terminal bracketed paste (ESC[200~ ... ESC[201~). Undo boundaries around the
+insertion group the whole paste so that one undo removes it entirely."
+  (let ((buffer (point-buffer point)))
+    (buffer-undo-boundary buffer)
+    (insert-string point (normalize-bracketed-paste-newlines text))
+    (buffer-undo-boundary buffer))
+  (values))
 
 (define-command mark-and-forward-char (n) (:universal)
   "Sets a mark if none is set, then moves cursor forward by n characters"

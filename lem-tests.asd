@@ -68,6 +68,7 @@
                (:file "self-insert-command")
                (:file "interp")
                (:file "input")
+               (:file "bracketed-paste")
                (:file "file")
                (:file "revert-buffer")
                (:file "large-file-guard")
