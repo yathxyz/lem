@@ -308,6 +308,6 @@ marker relocation are exercised."
 ;;; VK-2 acceptance: ~2k random scripts, full comparison after every step.
 (deftest kernel-conformance-differential
   (ensure-kernel-loaded)
-  (let ((*num-tests* 2000))
+  (let ((*num-tests* 10000))
     (for-all ((script (gen-script)))
       (run-script script))))

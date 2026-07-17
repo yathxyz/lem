@@ -567,3 +567,34 @@
            :in-theory (disable k-flatten flat-len-before)
            :use ((:instance flat-prefix-plus-line-le-flatten
                             (lines (buf-lines b)) (j (+ -1 linum)))))))
+
+;;;; ---------------------------------------------------------------------------
+;;;; PROOF PENDING (SPEC-VK VK-3; see verified/README.md "Proof status").
+;;;; The following general theorems are stated but not yet mechanically
+;;;; certified; each is PBT-pinned by the STRICT differential suite in
+;;;; tests/pbt/kernel-undo-conformance (zero divergences). Statements are kept
+;;;; here, commented out, per the SPEC-VK escape hatch — none was weakened.
+;;;;
+;;;; PROOF PENDING (SPEC-VK VK-3.1, group + delete generalization):
+;;;;   (defthm k-undo-group-of-recorded-group
+;;;;     ;; undoing a just-recorded GROUP of edits (any mix of inserts and
+;;;;     ;; deletes up to the separator) restores buf-lines exactly and restores
+;;;;     ;; points up to production's delete-region collapse (a point interior
+;;;;     ;; to a deleted region collapses to the deletion start and is not
+;;;;     ;; resurrected by the undo re-insert, exactly as in production).
+;;;;     ...)   ; needs a k-insert-of-k-delete content-inverse lemma chain
+;;;;
+;;;; PROOF PENDING (SPEC-VK VK-3.2, group + delete generalization):
+;;;;   (defthm k-redo-group-of-k-undo-group-general
+;;;;     ;; redo∘undo = identity on (buffer, history, redo) for recorded groups
+;;;;     ;; including deletes, absent intervening edits.
+;;;;     ...)
+;;;;
+;;;; PROOF PENDING (SPEC-VK VK-3.4, cross-op history validity, inhibition-free):
+;;;;   (defthm history-positions-in-bounds-invariant
+;;;;     ;; after any inhibition-free sequence of k-do-insert/k-do-delete/
+;;;;     ;; k-boundary/k-undo-group/k-redo-group, every stored position in
+;;;;     ;; history and redo is within [1, char-count+1].
+;;;;     ;; NOTE: the WITH-inhibition variant of this claim is REFUTED
+;;;;     ;; (see README "Proof status"); only the inhibition-free form is claimed.
+;;;;     ...)
