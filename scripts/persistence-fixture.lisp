@@ -93,6 +93,10 @@
                entry "SAFE-AUTO-REVERT"))
             *pre-command-hook*))
 
+(defun persistence-test-safe-timer-live-p ()
+  (and *safe-auto-revert-timer*
+       (not (timer-expired-p *safe-auto-revert-timer*))))
+
 (defun persistence-test-dangerous-hook-count ()
   (count 'lem-core/commands/file::ask-revert-buffer
          *pre-command-hook*
@@ -113,9 +117,10 @@
   (load *persistence-test-source*)
   (load *persistence-test-source*)
   (persistence-test-log
-   "HOOK dangerous=~d safe=~d api=~a"
+   "HOOK dangerous=~d safe=~d timer=~a api=~a"
    (persistence-test-dangerous-hook-count)
    (persistence-test-safe-hook-count)
+   (persistence-test-yes-no (persistence-test-safe-timer-live-p))
    (persistence-test-yes-no (persistence-test-api-present-p))))
 
 (define-command lem-yath-test-persistence-record-current () ()

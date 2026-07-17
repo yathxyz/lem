@@ -1071,8 +1071,11 @@ through the ncurses editor.
 ### Configured persistence and safe external changes (verified)
 
 `lem-yath/src/persistence.lisp` replaces pinned Lem's unsafe current-buffer
-pre-command reverter with a reload-idempotent global pre-command poll throttled
-to five seconds. Clean,
+pre-command reverter with a reload-owned regular timer at Emacs's five-second
+cadence. The same throttled scanner remains on pre-command and buffer-selection
+paths as a latency and safety fallback. Timer callbacks execute on Lem's editor
+thread, and stale callbacks from a source reload lose ownership before they can
+touch a buffer. Clean,
 readable file buffers reload transactionally after metadata changes; the current
 or explicitly selected buffer also uses a content digest up to 16 MiB, so a
 same-size rewrite with the same mtime is detected in that range. Dirty, deleted, unreadable, and
@@ -1108,12 +1111,13 @@ It provides:
   memory-only.
 
 `scripts/persistence-test.sh` drives real ncurses processes and external file
-writers. Its 45 checks cover clean and dirty reload behavior,
+writers. Its 46 checks include a no-input periodic refresh and cover clean and
+dirty reload behavior,
 deletion/recreation, stale-save refusal including a same-metadata 17 MiB file,
 first-save and late-target Save As races, modified quit refusal, fresh-process
 restoration and Vi paste behavior, prompt privacy/live caps, bounded malformed
 and dispatch/evaluation-free state reads, private file modes, failure-safe
-commands/exit, and stale concurrent writers. Filesystem
+commands/exit, reload-safe timer ownership, and stale concurrent writers. Filesystem
 notifications, directory-buffer save-place, and registered adapters for Lem's
 non-file list buffers remain gaps; the module exposes a buffer-local stale/revert
 adapter contract for later use.

@@ -33,6 +33,7 @@
 (defvar *last-persistence-failure-time* nil)
 (defvar *persistence-failure-reported-p* nil)
 (defvar *last-auto-revert-check-time* nil)
+(defvar *safe-auto-revert-timer* nil)
 (defvar *isearch-history-position* nil)
 (defvar *isearch-history-edit-string* "")
 (defvar *isearch-history-selected-string* nil)
@@ -1212,6 +1213,34 @@ the visited file byte-for-byte."
                          (buffer-name buffer) condition))
               :failed)))))
 
+(defun stop-safe-auto-revert-timer ()
+  "Stop the periodic external-change timer owned by this configuration."
+  (alexandria:when-let ((timer *safe-auto-revert-timer*))
+    ;; Clear ownership first so an already queued callback becomes a no-op.
+    (setf *safe-auto-revert-timer* nil)
+    (ignore-errors (stop-timer timer)))
+  nil)
+
+(defun start-safe-auto-revert-timer ()
+  "Poll clean file and adapter-backed buffers at Emacs' five-second cadence."
+  (stop-safe-auto-revert-timer)
+  (let (timer)
+    (setf timer
+          (make-timer
+           (lambda ()
+             (when (eq timer *safe-auto-revert-timer*)
+               (handler-case
+                   (safe-auto-revert-check-all)
+                 (error (condition)
+                   (ignore-errors
+                     (message "Periodic external-change check failed: ~a"
+                              condition))))))
+           :name "lem-yath safe auto revert"))
+    (setf *safe-auto-revert-timer*
+          (start-timer timer
+                       (* 1000 *safe-auto-revert-interval*)
+                       :repeat t))))
+
 (defun restore-buffer-tracked-identity (buffer)
   (let ((tracked-path (buffer-value buffer 'lem-yath-file-state-path))
         (tracked-name (buffer-value buffer 'lem-yath-file-state-buffer-name))
@@ -1308,6 +1337,7 @@ the visited file byte-for-byte."
   (safe-auto-revert-check-buffer target :force-digest t))
 
 (defun persistence-exit-hook ()
+  (stop-safe-auto-revert-timer)
   (call-persistence-safely #'flush-persistence-state "exit save"))
 
 (defun persistence-post-command-hook ()
@@ -1330,6 +1360,7 @@ the visited file byte-for-byte."
 (remove-hook *pre-command-hook* 'lem-core/commands/file::ask-revert-buffer)
 (remove-hook *pre-command-hook* 'safe-auto-revert-check-all)
 (add-hook *pre-command-hook* 'safe-auto-revert-check-all 5000)
+(start-safe-auto-revert-timer)
 
 (remove-hook (variable-value 'before-save-hook :global t)
              'safe-stale-save-guard)

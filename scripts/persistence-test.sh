@@ -202,11 +202,24 @@ else
 fi
 
 if press_and_wait "$auto_session" F9 '^HOOK ' &&
-   grep -q '^HOOK dangerous=0 safe=1 api=yes$' \
+   grep -q '^HOOK dangerous=0 safe=1 timer=yes api=yes$' \
      "$LEM_YATH_PERSISTENCE_TEST_REPORT"; then
-  pass hook-idempotence 'two reloads left one safe hook and removed the unsafe core hook'
+  pass hook-idempotence 'two reloads left one safe hook and one live periodic timer'
 else
-  fail hook-idempotence 'hook ownership or the public API contract diverged' "$auto_session"
+  fail hook-idempotence 'hook, timer ownership, or public API contract diverged' "$auto_session"
+fi
+
+# A clean current buffer must update without any key event.  Capture-pane only
+# observes ncurses output, so seeing the replacement proves the regular timer
+# ran rather than the pre-command fallback.
+printf 'CLEAN-IDLE\nsteady-line\n' >"$main_file"
+touch -r "$main_stamp" "$main_file"
+if lem_wait_for "$auto_session" 'CLEAN-IDLE' "$((WAIT_TIMEOUT + 5))" \
+     >/dev/null; then
+  pass periodic-no-input 'a clean external rewrite appeared without a keypress'
+else
+  fail periodic-no-input 'the periodic scanner did not refresh an idle buffer' \
+    "$auto_session"
 fi
 
 # A same-length write with the exact original timestamp must still be noticed.
