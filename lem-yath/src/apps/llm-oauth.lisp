@@ -1006,14 +1006,31 @@
              (messages
                (ecase backend
                  (:chatgpt-codex
-                  (append history
-                          (list (llm-codex-message-item "user" prompt))))
+                  (if history
+                      (append history
+                              (list (llm-codex-message-item "user" prompt)))
+                      (or (and *llm-conversation-messages*
+                               (mapcar
+                                (lambda (message)
+                                  (llm-codex-message-item
+                                   (llm-message-role message)
+                                   (llm-message-content message)))
+                                *llm-conversation-messages*))
+                          (list (llm-codex-message-item "user" prompt)))))
                  (:grok-oauth
-                  (append (or history
+                  (if history
+                      (append history
                               (list (llm-json-object
-                                     "role" "system" "content" system)))
+                                     "role" "user" "content" prompt)))
+                      (or (and *llm-conversation-messages*
+                               (append
+                                (list (llm-json-object
+                                       "role" "system" "content" system))
+                                *llm-conversation-messages*))
                           (list (llm-json-object
-                                 "role" "user" "content" prompt))))))
+                                 "role" "system" "content" system)
+                                (llm-json-object
+                                 "role" "user" "content" prompt)))))))
              (session-id
                (and (eq backend :chatgpt-codex)
                     (llm-oauth-buffer-id buffer *llm-oauth-session-keys*)))

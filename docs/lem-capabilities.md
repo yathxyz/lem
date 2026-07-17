@@ -3313,6 +3313,12 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
 - **AI / shipped in-tree (all in the image):**
   Lem-yath starts its Org scratch as a buffer-local LLM conversation and streams
   replies at the tracked send position before adding the next `* ` prompt.
+  `C-c Return` reconstructs role-tagged user and assistant turns through point
+  instead of flattening visible transcript text. Org user turns and active Org
+  regions are rendered as bounded GitHub-flavored Markdown; source blocks and
+  adjacent Babel results become language/text fences. Stateless HTTP providers
+  receive the typed transcript, while resumable CLI and established OAuth
+  sessions keep their provider-owned history and receive only the new user turn.
   Ordinary buffers retain a shared Markdown transcript for OpenRouter,
   Perplexity, GitHub Copilot Chat, native ChatGPT Codex and Grok OAuth HTTP,
   and the Claude Code, Codex, and Grok CLIs; read-only conversation buffers use

@@ -279,7 +279,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   six Modus-matched delimiter depths in Common Lisp buffers
 - quiet no-file startup into the configured empty Org `*scratch*` buffer with
   buffer-local LLM conversation mode and `C-c Return`; replies stream at the
-  tracked send position and leave the next `* ` prompt. Logs remain below
+  tracked send position and leave the next `* ` prompt. Later sends reconstruct
+  separate user/assistant turns, and Org user text—including selected regions
+  and source/result pairs—is converted to bounded Markdown before dispatch.
+  Logs remain below
   `XDG_CACHE_HOME` and all installed configuration FASLs are prebuilt by Nix;
   installed-wrapper gates cover cold AOT readiness, a 10-second repeated-start
   budget, tracked insertion, abort, and read-only fallback
@@ -554,10 +557,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   when none are marked. Marks clear only after a successful supported action.
 - streaming OpenRouter LLM client plus native Claude/Codex/Grok JSON event
   backends, with source-position Org conversations, tagged assistant/user spans,
+  typed history reconstruction, bounded Org-to-Markdown user prompts,
   per-buffer session resume, rendered agent activity, guarded request lifecycle,
   abort (`SPC g a`), fresh-session (`SPC g n`), and killed-buffer process/marker
-  cleanup. Ordinary buffers retain the shared Markdown transcript, which is also
-  the non-destructive read-only fallback
+  cleanup. Stateless APIs receive the reconstructed turns; stateful CLI and
+  OAuth sessions retain provider-owned history without duplicating it. Ordinary
+  buffers retain the shared Markdown transcript, which is also the
+  non-destructive read-only fallback
 - native `chatgpt-codex` and `grok-oauth` HTTP backends with the configured
   `codex-agentic` and `grok-build-oauth-agentic` five-tool presets. ChatGPT
   Codex shares and safely refreshes `~/.codex/auth.json`, streams the Responses

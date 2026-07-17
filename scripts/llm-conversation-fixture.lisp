@@ -38,6 +38,19 @@
       (when (search-forward point text)
         (text-property-at point 'lem-yath-llm-role -1)))))
 
+(defun llm-conversation-test-log-messages (messages)
+  (llm-conversation-test-log "MESSAGES count=~d roles=~{~a~^,~}"
+                             (length messages)
+                             (mapcar #'llm-message-role messages))
+  (loop :for message :in messages
+        :for index :from 0
+        :do
+           (llm-conversation-test-log
+            "MESSAGE index=~d role=~a content-hex=~a"
+            index
+            (llm-message-role message)
+            (llm-conversation-test-hex (llm-message-content message)))))
+
 (defmethod llm-backend-stream
     ((backend (eql :lem-yath-conversation-test)) prompt)
   (let* ((buffer (llm-output-buffer))
@@ -58,6 +71,8 @@
            (llm-register-request
             buffer process backend :insertion-point insertion-point)))
     (setf *llm-conversation-test-last-prompt* prompt)
+    (when *llm-conversation-messages*
+      (llm-conversation-test-log-messages *llm-conversation-messages*))
     (when process
       (setf *llm-conversation-test-killed-buffer* buffer
             *llm-conversation-test-killed-request* request
@@ -151,6 +166,40 @@
         *llm-conversation-test-killed-process* nil)
   (llm-conversation-test-setup "kill" "kill" 4))
 
+(define-command lem-yath-test-llm-conversation-typed () ()
+  (llm-conversation-test-setup "typed" "" 0)
+  (let ((point (buffer-point (current-buffer))))
+    (insert-string point (format nil "Earlier *question*.~2%")
+                   'lem-yath-llm-role :user)
+    (insert-string point "Earlier answer."
+                   'lem-yath-llm-role :assistant)
+    (insert-string
+     point
+     (format nil
+             (concatenate
+              'string
+              "~2%* Current [[https://example.com][link]] and *bold*.~2%"
+              "#+begin_src sh~%"
+              "printf 'ok\\n'~%"
+              "#+end_src~2%"
+              "#+RESULTS:~%"
+              ": ok~%"))
+     'lem-yath-llm-role :user)
+    (buffer-end point)
+    (clear-buffer-edit-history (current-buffer))
+    (llm-conversation-test-log "SETUP-TYPED point=~d"
+                               (position-at-point point))))
+
+(define-command lem-yath-test-llm-conversation-region () ()
+  (llm-conversation-test-setup
+   "region" "prefix *selected* suffix" 17)
+  (with-point ((mark (buffer-start-point (current-buffer))))
+    (character-offset mark 7)
+    (setf (buffer-mark (current-buffer)) mark))
+  (llm-conversation-test-log
+   "SETUP-REGION mark=~a"
+   (if (buffer-mark-p (current-buffer)) "yes" "no")))
+
 (define-command lem-yath-test-llm-conversation-static () ()
   (let* ((buffer (current-buffer))
          (command
@@ -221,6 +270,8 @@
   (define-key keymap "F5" 'lem-yath-test-llm-conversation-abort)
   (define-key keymap "F6" 'lem-yath-test-llm-conversation-read-only)
   (define-key keymap "F7" 'lem-yath-test-llm-conversation-kill)
+  (define-key keymap "F8" 'lem-yath-test-llm-conversation-typed)
+  (define-key keymap "F9" 'lem-yath-test-llm-conversation-region)
   (define-key keymap "F11" 'lem-yath-test-llm-conversation-kill-record)
   (define-key keymap "F12" 'lem-yath-test-llm-conversation-record))
 

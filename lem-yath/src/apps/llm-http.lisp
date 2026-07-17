@@ -419,11 +419,12 @@
                (error () t)))
     (message "Run M-x lem-yath-copilot-login first")
     (return-from llm-http-stream))
-  (let ((buffer (llm-output-buffer))
-        (model *llm-model*)
-        (system *llm-system-message*)
-        (temperature *llm-temperature*)
-        (max-tokens *llm-max-tokens*))
+  (let* ((buffer (llm-output-buffer))
+         (model *llm-model*)
+         (system *llm-system-message*)
+         (temperature *llm-temperature*)
+         (max-tokens *llm-max-tokens*)
+         (messages (llm-messages-with-system prompt system)))
     (when (llm-active-request buffer)
       (message "An LLM request is already running; use M-x lem-yath-llm-abort")
       (return-from llm-http-stream))
@@ -442,7 +443,7 @@
                  (llm-http-provider-credentials provider)
                (let ((body
                        (llm-request-body-for-messages
-                        (llm-initial-messages prompt system)
+                        messages
                         model temperature max-tokens nil)))
                  (multiple-value-bind (citations status)
                      (llm-http-stream-round request provider url headers body)

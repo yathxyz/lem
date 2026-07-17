@@ -95,6 +95,56 @@ if ! wait_report_count \
 fi
 pass startup-mode 'startup is an Org LLM conversation with C-c Return'
 
+send_key F8
+if ! wait_report_count '^SETUP-TYPED ' 1; then
+  die typed-conversation 'could not prepare the typed conversation scenario'
+fi
+send_conversation
+if ! wait_report_count '^SEND label=typed ' 1; then
+  die typed-conversation 'C-c Return did not send the current typed user turn'
+fi
+if ! grep -qE '^MESSAGES count=3 roles=user,assistant,user$' \
+  "$LEM_YATH_LLM_CONVERSATION_REPORT"; then
+  die typed-conversation 'user and assistant turns were not reconstructed separately'
+fi
+typed_first=$(hex_text 'Earlier **question**.')
+typed_assistant=$(hex_text 'Earlier answer.')
+typed_current=$'Current [link](https://example.com) and **bold**.\n\n```sh\nprintf \'ok\\n\'\n```\nOutput:\n```text\nok\n```'
+typed_current_hex=$(hex_text "$typed_current")
+if ! grep -qE \
+  "^MESSAGE index=0 role=user content-hex=$typed_first$" \
+  "$LEM_YATH_LLM_CONVERSATION_REPORT" ||
+   ! grep -qE \
+  "^MESSAGE index=1 role=assistant content-hex=$typed_assistant$" \
+  "$LEM_YATH_LLM_CONVERSATION_REPORT" ||
+   ! grep -qE \
+  "^MESSAGE index=2 role=user content-hex=$typed_current_hex$" \
+  "$LEM_YATH_LLM_CONVERSATION_REPORT" ||
+   ! grep -qE \
+  "^SEND label=typed buffer=\\*scratch\\* prompt-hex=$typed_current_hex$" \
+  "$LEM_YATH_LLM_CONVERSATION_REPORT"; then
+  die typed-conversation 'typed contents or bounded Org-to-Markdown prompt differed'
+fi
+if ! wait_report_count '^DONE label=typed$' 1; then
+  die typed-conversation 'the typed response did not finish before buffer reuse'
+fi
+pass typed-conversation 'typed roles and Org-to-Markdown prompt reached the backend intact'
+
+send_key F9
+if ! wait_report_count '^SETUP-REGION mark=yes$' 1; then
+  die org-region 'could not prepare the active Org region scenario'
+fi
+send_conversation
+region_expected=$(hex_text '**selected**')
+if ! wait_report_count \
+  "^SEND label=region buffer=\\*scratch\\* prompt-hex=$region_expected$" 1; then
+  die org-region 'the active Org region was not rendered without conversation history'
+fi
+if ! wait_report_count '^DONE label=region$' 1; then
+  die org-region 'the active Org region response did not finish before buffer reuse'
+fi
+pass org-region 'active Org region rendered independently as Markdown'
+
 send_key F2
 if ! wait_report_count '^SETUP label=origin ' 1; then
   die origin-setup 'could not prepare the origin-marker scenario'

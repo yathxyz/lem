@@ -79,6 +79,7 @@
                (:file "lisp-eval")
                (:file "llm-tools")
                (:file "llm-mcp")
+               (:file "llm-conversation")
                (:file "llm")
                (:file "indent-guides")
                (:file "theme")

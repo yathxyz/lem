@@ -316,16 +316,22 @@ Return the parsed round and an optional HTTP status marker."
   "Return gptel-send's source text without moving the live point.
 Use an active region when present.  Otherwise include buffer text through the
 end of the current word or punctuation run."
+  (multiple-value-bind (start end) (llm-source-bounds)
+    (points-to-string start end)))
+
+(defun llm-source-bounds ()
+  "Return gptel-send's source bounds and whether they are an active region."
   (let ((buffer (current-buffer)))
     (if (buffer-mark-p buffer)
         (let ((global-mode (current-global-mode)))
-          (points-to-string
+          (values
            (region-beginning-using-global-mode global-mode buffer)
-           (region-end-using-global-mode global-mode buffer)))
+           (region-end-using-global-mode global-mode buffer)
+           t))
         (with-point ((end (current-point)))
           (with-point-syntax end
             (skip-chars-forward end #'llm-word-or-punctuation-char-p))
-          (points-to-string (buffer-start-point buffer) end)))))
+          (values (buffer-start-point buffer) end nil)))))
 
 (defun llm-buffer-live-p (buffer)
   (and buffer (not (deleted-buffer-p buffer))))
@@ -679,13 +685,14 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
                    condition)))))))
 
 (defun llm-stream (prompt)
-  (let ((key (llm-api-key))
-        (model *llm-model*)
-        (system *llm-system-message*)
-        (temperature *llm-temperature*)
-        (max-tokens *llm-max-tokens*)
-        (tools-p *llm-use-tools*)
-        (mcp-server-names (copy-list *llm-mcp-server-names*)))
+  (let* ((key (llm-api-key))
+         (model *llm-model*)
+         (system *llm-system-message*)
+         (temperature *llm-temperature*)
+         (max-tokens *llm-max-tokens*)
+         (tools-p *llm-use-tools*)
+         (mcp-server-names (copy-list *llm-mcp-server-names*))
+         (messages (llm-messages-with-system prompt system)))
     (unless key
       (message "Set OPENROUTER_API_KEY (or OPENAI_API_KEY) first")
       (return-from llm-stream))
@@ -730,7 +737,7 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
                                  (llm-tool-context-mcp-sessions tool-context)
                                  sessions))
                               (llm-openrouter-loop
-                               request key (llm-initial-messages prompt system)
+                               request key messages
                                model temperature max-tokens tools))
                           (error (condition)
                             (unless (llm-request-aborted-now-p request)
@@ -777,26 +784,57 @@ Read-only conversations follow gptel by falling back to the shared transcript."
 (define-command lem-yath-llm-send () ()
   "Send region (or buffer up to point) to the LLM, streaming the reply
 (gptel-send)."
-  (let ((text (string-trim '(#\Space #\Tab #\Newline #\Return)
-                           (llm-source-text))))
-    (if (zerop (length text))
-        (message "Nothing to send")
-        (llm-dispatch-from-current-buffer
-         (lambda () (llm-backend-stream *llm-backend* text))))))
+  (multiple-value-bind (start end region-p) (llm-source-bounds)
+    (let* ((raw (points-to-string start end))
+           (messages
+             (and (not region-p)
+                  (llm-conversation-buffer-p)
+                  (llm-conversation-messages-to-point
+                   (current-buffer) end)))
+           (text
+             (string-trim
+              '(#\Space #\Tab #\Newline #\Return)
+              (or (and messages
+                       (llm-conversation-last-user-content messages))
+                  (llm-render-user-text-for-buffer
+                   raw (current-buffer))))))
+      (if (zerop (length text))
+          (message "Nothing to send")
+          (let ((*llm-conversation-messages* messages))
+            (llm-dispatch-from-current-buffer
+             (lambda () (llm-backend-stream *llm-backend* text))))))))
 
 (define-command lem-yath-llm-ask () ()
   "Prompt for an instruction, prepend it to the region/buffer text, send
 (gptel-menu's ad-hoc directive, approximately)."
-  (let ((instruction (prompt-for-string "LLM instruction: "))
-        (text (string-trim '(#\Space #\Tab #\Newline) (llm-source-text))))
+  (let ((instruction (prompt-for-string "LLM instruction: ")))
     (when (plusp (length instruction))
-      (llm-dispatch-from-current-buffer
-       (lambda ()
-         (llm-backend-stream *llm-backend*
-                             (if (zerop (length text))
-                                 instruction
-                                 (format nil "~a~%~%~a"
-                                         instruction text))))))))
+      (multiple-value-bind (start end region-p) (llm-source-bounds)
+        (let* ((raw (points-to-string start end))
+               (messages
+                 (and (not region-p)
+                      (llm-conversation-buffer-p)
+                      (llm-conversation-messages-to-point
+                       (current-buffer) end)))
+               (source
+                 (string-trim
+                  '(#\Space #\Tab #\Newline #\Return)
+                  (or (and messages
+                           (llm-conversation-last-user-content messages))
+                      (llm-render-user-text-for-buffer
+                       raw (current-buffer)))))
+               (prompt
+                 (if (zerop (length source))
+                     instruction
+                     (format nil "~a~2%~a" instruction source)))
+               (dispatch-messages
+                 (and messages
+                      (llm-conversation-replace-last-user-content
+                       messages prompt))))
+          (let ((*llm-conversation-messages* dispatch-messages))
+            (llm-dispatch-from-current-buffer
+             (lambda ()
+               (llm-backend-stream *llm-backend* prompt)))))))))
 
 (define-command lem-yath-llm-set-model () ()
   "Choose the OpenRouter model (gptel preset switching, simplified)."
