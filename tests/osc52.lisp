@@ -50,3 +50,18 @@
       (lem/common/osc52:encode-clipboard-sequence "hello" :max-octets 99000)
     (declare (ignore seq))
     (ng truncated-p)))
+
+(deftest emitted-sequence-stays-under-terminal-limit
+  ;; The cap must bound the EMITTED sequence, not the raw payload: base64 expands
+  ;; 3 octets to 4 characters. A payload far over the cap must still encode to a
+  ;; sequence comfortably under the ~100 KB terminal buffer limit, both plain and
+  ;; tmux-wrapped.
+  (let ((huge (make-string 500000 :initial-element #\a)))
+    (multiple-value-bind (seq truncated-p)
+        (lem/common/osc52:encode-clipboard-sequence huge)
+      (ok truncated-p)
+      (ok (< (length seq) 100000)))
+    (multiple-value-bind (seq truncated-p)
+        (lem/common/osc52:encode-clipboard-sequence huge :tmux t)
+      (ok truncated-p)
+      (ok (< (length seq) 100000)))))

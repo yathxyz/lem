@@ -57,37 +57,62 @@
           '(simple-array (unsigned-byte 8) (*)))
   "Byte sequence ESC[201~ that terminates a bracketed paste.")
 
+(defun collect-bracketed-paste (next-byte)
+  "Accumulate the raw octets of a bracketed-paste payload.
+NEXT-BYTE is a thunk returning the next input code: a byte 0-255, a negative
+value on timeout, or a keypad-translated keycode >= 256 (e.g. KEY_RESIZE) which
+is ignored because it can never be part of a byte payload. Reading stops at the
+ESC[201~ terminator or on timeout. Any ESC byte inside the payload is literal
+text, not a key. Returns the payload as an adjustable (unsigned-byte 8) vector.
+Pure with respect to terminal I/O, so it is unit-testable with a byte feeder."
+  (let ((bytes (make-array 64 :element-type '(unsigned-byte 8)
+                              :adjustable t :fill-pointer 0))
+        (match 0)
+        (terminator-length (length +bracketed-paste-end+)))
+    (loop
+      (let ((code (funcall next-byte)))
+        (cond
+          ((< code 0)
+           ;; timed out before the terminator arrived; stop with what we have.
+           (return))
+          ((> code 255)
+           ;; a translated keycode (e.g. KEY_RESIZE) slipped through; it is not
+           ;; a payload byte, so drop it and keep the (unsigned-byte 8) vector safe.
+           nil)
+          ((= code (aref +bracketed-paste-end+ match))
+           (incf match)
+           (when (= match terminator-length)
+             (return)))
+          (t
+           ;; a partial terminator match failed: the matched bytes were real
+           ;; payload, so flush them and reconsider the current byte.
+           (loop :for i :from 0 :below match
+                 :do (vector-push-extend (aref +bracketed-paste-end+ i) bytes))
+           (if (= code (aref +bracketed-paste-end+ 0))
+               (setf match 1)
+               (progn
+                 (setf match 0)
+                 (vector-push-extend code bytes)))))))
+    bytes))
+
 (defun read-bracketed-paste ()
   "Read a bracketed-paste payload after the ESC[200~ introducer.
 Accumulate raw octets from the terminal until the ESC[201~ terminator,
 UTF-8 decode them, and return an event closure that inserts the text as a
 single undo unit without running keymaps, auto-indent, or abbrev. Any ESC
-byte inside the payload is treated as literal text, not as a key."
-  (let ((bytes (make-array 64 :element-type '(unsigned-byte 8)
-                              :adjustable t :fill-pointer 0))
-        (match 0)
-        (terminator-length (length +bracketed-paste-end+)))
-    (with-getch-input-timeout (1000)
-      (loop
-        (let ((code (getch)))
-          (cond
-            ((< code 0)
-             ;; timed out before the terminator arrived; stop with what we have.
-             (return))
-            ((= code (aref +bracketed-paste-end+ match))
-             (incf match)
-             (when (= match terminator-length)
-               (return)))
-            (t
-             ;; a partial terminator match failed: the matched bytes were real
-             ;; payload, so flush them and reconsider the current byte.
-             (loop :for i :from 0 :below match
-                   :do (vector-push-extend (aref +bracketed-paste-end+ i) bytes))
-             (if (= code (aref +bracketed-paste-end+ 0))
-                 (setf match 1)
-                 (progn
-                   (setf match 0)
-                   (vector-push-extend code bytes))))))))
+byte inside the payload is treated as literal text, not as a key.
+
+Keypad translation is disabled on the input pad for the duration of the read so
+terminfo-recognized sequences in the payload (ESC[A, ESC OP, ...) arrive as raw
+bytes rather than translated keycodes >= 256, which would both corrupt the
+payload and crash on the (unsigned-byte 8) accumulator. It is restored
+afterwards regardless of how the read exits."
+  (let ((bytes (unwind-protect
+                    (progn
+                      (charms/ll:keypad *padwin* 0)
+                      (with-getch-input-timeout (1000)
+                        (collect-bracketed-paste #'getch)))
+                 (charms/ll:keypad *padwin* 1))))
     (let ((text (babel:octets-to-string bytes :encoding :utf-8 :errorp nil)))
       (lambda ()
         (lem:insert-bracketed-paste (lem:current-point) text)))))

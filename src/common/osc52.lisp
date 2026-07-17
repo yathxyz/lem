@@ -19,10 +19,13 @@
 ;;; Paste (OSC 52 read) is deliberately not implemented here; most terminals
 ;;; disable it and paste is handled by the bracketed-paste path.
 
-(defparameter *max-payload-octets* 99000
+(defparameter *max-payload-octets* 74000
   "Maximum number of UTF-8 octets carried in a single OSC 52 sequence.
-Kept below the ~100 KB payload limit common to terminal emulators. Text longer
-than this is truncated at a character boundary before encoding.")
+This bounds the RAW payload, not the emitted sequence. base64 expands 3 octets
+into 4 characters, so the transmitted ESC]52 sequence is ~4/3 the payload size;
+74000 raw octets encode to roughly 98 KB, staying under the ~100 KB payload
+limit common to terminal emulators. Text longer than this is truncated at a
+character boundary before encoding.")
 
 (defparameter +base64-alphabet+
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")

@@ -660,8 +660,17 @@ global key trie, so it also governs the input pad used for reading."
 (defun term-set-tty (tty-name)
   (setf *tty-name* tty-name))
 
+(defun emit-mouse-reporting-off ()
+  "Emit the SGR-1006 mouse-reporting disable sequences straight to the terminal.
+Duplicated here (rather than calling lem-ncurses/mouse) because term.lisp is
+compiled before mouse.lisp; this guarantees a normal exit always turns mouse
+reporting off regardless of module state. Harmless when mouse was never enabled.
+Mirrors lem-ncurses/mouse:disable-mouse-reporting."
+  (write-terminal-string (format nil "~C[?1006l~C[?1002l~C[?1000l" #\Esc #\Esc #\Esc)))
+
 (defun term-finalize ()
   (disable-bracketed-paste)
+  (emit-mouse-reporting-off)
   (when *term-io*
     (fclose *term-io*)
     (setf *term-io* nil))
