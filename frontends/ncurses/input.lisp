@@ -46,68 +46,6 @@
          (key (char-to-key char)))
     key))
 
-(defun csi\[1 ()
-  (or (case (getch)
-        (#.(char-code #\;)
-           (case (getch)
-             (#.(char-code #\2)
-                (case (getch)
-                  (#.(char-code #\A) (make-key :shift t :sym "Up"))
-                  (#.(char-code #\B) (make-key :shift t :sym "Down"))
-                  (#.(char-code #\C) (make-key :shift t :sym "Right"))
-                  (#.(char-code #\D) (make-key :shift t :sym "Left"))
-                  (#.(char-code #\F) (make-key :shift t :sym "End"))
-                  (#.(char-code #\H) (make-key :shift t :sym "Home"))))
-             (#.(char-code #\3)
-                (case (getch)
-                  (#.(char-code #\A) (make-key :meta t :sym "Up"))
-                  (#.(char-code #\B) (make-key :meta t :sym "Down"))
-                  (#.(char-code #\C) (make-key :meta t :sym "Right"))
-                  (#.(char-code #\D) (make-key :meta t :sym "Left"))
-                  (#.(char-code #\F) (make-key :meta t :sym "End"))
-                  (#.(char-code #\H) (make-key :meta t :sym "Home"))))
-             (#.(char-code #\4)
-                (case (getch)
-                  (#.(char-code #\A) (make-key :shift t :meta t :sym "Up"))
-                  (#.(char-code #\B) (make-key :shift t :meta t :sym "Down"))
-                  (#.(char-code #\C) (make-key :shift t :meta t :sym "Right"))
-                  (#.(char-code #\D) (make-key :shift t :meta t :sym "Left"))
-                  (#.(char-code #\F) (make-key :shift t :meta t :sym "End"))
-                  (#.(char-code #\H) (make-key :shift t :meta t :sym "Home"))))
-             (#.(char-code #\5)
-                (case (getch)
-                  (#.(char-code #\A) (make-key :ctrl t :sym "Up"))
-                  (#.(char-code #\B) (make-key :ctrl t :sym "Down"))
-                  (#.(char-code #\C) (make-key :ctrl t :sym "Right"))
-                  (#.(char-code #\D) (make-key :ctrl t :sym "Left"))
-                  (#.(char-code #\F) (make-key :ctrl t :sym "End"))
-                  (#.(char-code #\H) (make-key :ctrl t :sym "Home"))))
-             (#.(char-code #\6)
-                (case (getch)
-                  (#.(char-code #\A) (make-key :shift t :ctrl t :sym "Up"))
-                  (#.(char-code #\B) (make-key :shift t :ctrl t :sym "Down"))
-                  (#.(char-code #\C) (make-key :shift t :ctrl t :sym "Right"))
-                  (#.(char-code #\D) (make-key :shift t :ctrl t :sym "Left"))
-                  (#.(char-code #\F) (make-key :shift t :ctrl t :sym "End"))
-                  (#.(char-code #\H) (make-key :shift t :ctrl t :sym "Home"))))
-             (#.(char-code #\7)
-                (case (getch)
-                  (#.(char-code #\A) (make-key :meta t :ctrl t :sym "Up"))
-                  (#.(char-code #\B) (make-key :meta t :ctrl t :sym "Down"))
-                  (#.(char-code #\C) (make-key :meta t :ctrl t :sym "Right"))
-                  (#.(char-code #\D) (make-key :meta t :ctrl t :sym "Left"))
-                  (#.(char-code #\F) (make-key :meta t :ctrl t :sym "End"))
-                  (#.(char-code #\H) (make-key :meta t :ctrl t :sym "Home"))))
-             (#.(char-code #\8)
-                (case (getch)
-                  (#.(char-code #\A) (make-key :shift t :meta t :ctrl t :sym "Up"))
-                  (#.(char-code #\B) (make-key :shift t :meta t :ctrl t :sym "Down"))
-                  (#.(char-code #\C) (make-key :shift t :meta t :ctrl t :sym "Right"))
-                  (#.(char-code #\D) (make-key :shift t :meta t :ctrl t :sym "Left"))
-                  (#.(char-code #\F) (make-key :shift t :meta t :ctrl t :sym "End"))
-                  (#.(char-code #\H) (make-key :shift t :meta t :ctrl t :sym "Home")))))))
-      (get-key-from-name "escape")))
-
 (defparameter +bracketed-paste-end+
   (coerce (list #.(char-code #\Esc)
                 #.(char-code #\[)
@@ -153,15 +91,87 @@ byte inside the payload is treated as literal text, not as a key."
       (lambda ()
         (lem:insert-bracketed-paste (lem:current-point) text)))))
 
-(defun csi\[2 ()
-  "Handle CSI sequences beginning with ESC[2.
-Only bracketed paste (ESC[200~) is recognized; other ESC[2... sequences
-fall back to Escape."
-  (if (and (= (getch) #.(char-code #\0))
-           (= (getch) #.(char-code #\0))
-           (= (getch) #.(char-code #\~)))
-      (read-bracketed-paste)
-      (get-key-from-name "escape")))
+(defun decode-csi-modifier (mod)
+  "Decode an xterm CSI modifier parameter into (values shift meta ctrl).
+MOD is the numeric parameter where 1 (or NIL) means no modifier. The encoding
+is 1 + a bitmask of Shift=1, Alt(Meta)=2, Ctrl=4, so 2=Shift, 3=Alt,
+4=Alt+Shift, 5=Ctrl, 6=Ctrl+Shift, 7=Ctrl+Alt, 8=Ctrl+Alt+Shift."
+  (let ((bits (max 0 (- (or mod 1) 1))))
+    (values (logbitp 0 bits)
+            (logbitp 1 bits)
+            (logbitp 2 bits))))
+
+(defparameter +csi-final-syms+
+  '((#\A . "Up") (#\B . "Down") (#\C . "Right") (#\D . "Left")
+    (#\F . "End") (#\H . "Home")
+    (#\P . "F1") (#\Q . "F2") (#\R . "F3") (#\S . "F4"))
+  "Map a CSI 1;<mod> final byte (A-F/H/P-S) to a lem key sym.")
+
+(defparameter +csi-tilde-syms+
+  '((1 . "Home") (2 . "Insert") (3 . "Delete") (4 . "End")
+    (5 . "PageUp") (6 . "PageDown") (7 . "Home") (8 . "End")
+    (11 . "F1") (12 . "F2") (13 . "F3") (14 . "F4")
+    (15 . "F5") (17 . "F6") (18 . "F7") (19 . "F8")
+    (20 . "F9") (21 . "F10") (23 . "F11") (24 . "F12"))
+  "Map the first parameter of a CSI <n>;<mod>~ sequence to a lem key sym.")
+
+(defun make-modified-key (sym mod)
+  "Build a lem key for SYM with the modifiers encoded in the CSI parameter MOD."
+  (multiple-value-bind (shift meta ctrl) (decode-csi-modifier mod)
+    (make-key :shift shift :meta meta :ctrl ctrl :sym sym)))
+
+(defun csi-param (params index)
+  "Return the INDEX-th parameter of the vector PARAMS, or NIL if absent."
+  (when (< index (length params))
+    (aref params index)))
+
+(defun dispatch-csi (final params)
+  "Dispatch a fully-read CSI sequence.
+FINAL is the final byte as a character; PARAMS is a vector of numeric
+parameters (each NIL when the field was empty). Handles the modified
+cursor/function family (ESC[1;<mod><A-F/H/P-S>), the modified navigation
+family (ESC[<n>;<mod>~), and bracketed paste (ESC[200~). Unknown sequences
+fall back to Escape so a stray or unsupported sequence is swallowed harmlessly."
+  (case final
+    (#\~
+     (let ((n (or (csi-param params 0) 1))
+           (mod (csi-param params 1)))
+       (cond
+         ((= n 200) (read-bracketed-paste))
+         (t (let ((sym (cdr (assoc n +csi-tilde-syms+))))
+              (if sym
+                  (make-modified-key sym mod)
+                  (get-key-from-name "escape")))))))
+    (t
+     (let ((sym (cdr (assoc final +csi-final-syms+)))
+           (mod (csi-param params 1)))
+       (if sym
+           (make-modified-key sym mod)
+           (get-key-from-name "escape"))))))
+
+(defun read-csi (first-byte)
+  "Read a CSI sequence after the ESC[ introducer and its FIRST-BYTE are known.
+Accumulate the numeric parameters (separated by ';') until a final byte in
+0x40-0x7E, then dispatch. Any unexpected byte or a timeout aborts the read and
+falls back to Escape, keeping the editor responsive to malformed input."
+  (let ((params (make-array 4 :adjustable t :fill-pointer 0))
+        (cur nil)
+        (byte first-byte))
+    (loop
+      (cond
+        ((or (null byte) (minusp byte))
+         (return (get-key-from-name "escape")))
+        ((<= #.(char-code #\0) byte #.(char-code #\9))
+         (setf cur (+ (* (or cur 0) 10) (- byte #.(char-code #\0)))))
+        ((= byte #.(char-code #\;))
+         (vector-push-extend cur params)
+         (setf cur nil))
+        ((<= #x40 byte #x7e)
+         (vector-push-extend cur params)
+         (return (dispatch-csi (code-char byte) params)))
+        (t
+         (return (get-key-from-name "escape"))))
+      (setf byte (getch)))))
 
 (let ((resize-code (get-code "[resize]"))
       (abort-code (get-code "C-]"))
@@ -181,16 +191,12 @@ fall back to Escape."
                           (get-key-from-name "escape"))
                          ((= code #.(char-code #\[))
                           (with-getch-input-timeout (100)
-                            (case (getch)
-                              (#.(char-code #\<)
-                                 ;;sgr(1006)
-                                 (or (lem-ncurses/mouse:read-sgr-mouse-event #'getch)
-                                     (go :start)))
-                              (#.(char-code #\1)
-                                 (csi\[1))
-                              (#.(char-code #\2)
-                                 (csi\[2))
-                              (t (get-key-from-name "escape")))))
+                            (let ((c (getch)))
+                              (if (= c #.(char-code #\<))
+                                  ;; sgr(1006) mouse
+                                  (or (lem-ncurses/mouse:read-sgr-mouse-event #'getch)
+                                      (go :start))
+                                  (read-csi c)))))
                          (t
                           (let ((key (get-key code)))
                             (make-key :meta t

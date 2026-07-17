@@ -431,6 +431,8 @@ Used for control sequences ncurses does not manage (e.g. bracketed paste)."
 (cffi:defcfun "fopen" :pointer (path :string) (mode :string))
 (cffi:defcfun "fclose" :int (fp :pointer))
 (cffi:defcfun "fileno" :int (fd :pointer))
+(cffi:defcfun "fputs" :int (str :string) (fp :pointer))
+(cffi:defcfun "fflush" :int (fp :pointer))
 
 (cffi:defcstruct winsize
   (ws-row :unsigned-short)
@@ -498,18 +500,31 @@ Used for control sequences ncurses does not manage (e.g. bracketed paste)."
   (charms/ll:endwin)
   (charms/ll:delscreen charms/ll:*stdscr*))
 
+(defun terminal-file-pointer ()
+  "Return a C FILE* for the controlling terminal.
+Prefer the tty opened by term-init-tty; otherwise fall back to the C stdout
+that ncurses' default screen writes to."
+  (or *term-io*
+      (let ((p (cffi:foreign-symbol-pointer "stdout")))
+        (and p (cffi:mem-ref p :pointer)))))
+
 (defun update-cursor-shape (cursor-type)
+  "Set the terminal cursor shape via DECSCUSR (ESC[<n> q).
+Writes the sequence straight to the terminal FILE* and flushes, avoiding a
+printf subprocess fork on every cursor-shape change (e.g. the vi-mode
+insert/normal toggle)."
   (check-type cursor-type lem:cursor-type)
-  (uiop:run-program `("printf"
-                      ,(format nil "~C[~D q"
-                               #\Esc
-                               (case cursor-type
-                                 (:box 2)
-                                 (:bar 5)
-                                 (:underline 4)
-                                 (otherwise 2))))
-                    :output :interactive
-                    :ignore-error-status t))
+  (let ((fp (terminal-file-pointer)))
+    (when fp
+      (fputs (format nil "~C[~D q"
+                     #\Esc
+                     (case cursor-type
+                       (:box 2)
+                       (:bar 5)
+                       (:underline 4)
+                       (otherwise 2)))
+             fp)
+      (fflush fp))))
 
 (defun get-display-width ()
   (max 5 charms/ll:*cols*))
