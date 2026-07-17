@@ -38,7 +38,8 @@
                              (:file "crash-safety-faults")
                              (:file "input-decode-conformance")
                              (:file "width-vectors")
-                             (:file "width-conformance")))
+                             (:file "width-conformance")
+                             (:file "layout-conformance")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")

@@ -198,7 +198,11 @@
                                  "ITEM-LISTP"
                                  "K-ENCODE-KEY" "ALL-SUPPORTED-KEYS"
                                  ;; width.lisp (VK-10)
-                                 "K-CHAR-WIDTH" "K-STRING-WIDTH" "K-WIDE-INDEX")
+                                 "K-CHAR-WIDTH" "K-STRING-WIDTH" "K-WIDE-INDEX"
+                                 ;; layout.lisp (VK-11)
+                                 "K-TEXT" "K-OPAQUE"
+                                 "K-WRAP" "K-WRAP-ROW" "K-CLIP"
+                                 "K-SCROLL-ADJUST")
   "ACL2 symbol-names re-exported through :lem/kernel. See header.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

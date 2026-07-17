@@ -582,6 +582,108 @@ BOTH the kernel and the kernel-backed production shell (the swap changed nothing
 observable), plus property tests of all four theorems on random inputs (ASCII,
 CJK, tabs, control, emoji, combining marks). No divergence.
 
+## VK-11 — line layout kernel (wrapping & clipping)
+
+**Book:** `layout.lisp` (standalone; no sibling includes). Transcribes the two
+pure layout algorithms of `src/display/physical-line.lisp` over an abstract
+display-object type:
+
+- `(:text codes widths tag)` — a text run: codepoint list plus the ALIGNED
+  per-char width list (the ncurses column widths), `tag` an opaque payload
+  carried verbatim (attribute/type/CLOS identity for an adapter);
+- `(:opaque width tag)` — an unbreakable non-text object (void / eol-cursor /
+  extend-to-eol / image; all width 0 on ncurses).
+
+`k-wrap-row`/`k-wrap` transcribe `separate-objects-by-width` (with its inner
+`explode-object` halving at `(floor len 2)`) and the row loop of
+`redraw-logical-line-when-line-wrapping`; `k-clip`/`k-clip-chars` transcribe
+`clip-objects-to-display-range`; `k-scroll-adjust` transcribes the
+horizontal-scroll-start adjustment of
+`redraw-logical-line-when-horizontal-scroll`.
+
+Certified obligations (SPEC-VK VK-11):
+
+1. **Content preservation** — `k-wrap-row-preserves-contents` /
+   `k-wrap-preserves-contents` (+ `-wcontents` width-list versions): appending
+   the emitted rows' contents and the leftover's contents reproduces the input
+   contents exactly — nothing dropped, duplicated or reordered (opaque objects
+   appear in the content stream as themselves, so their order is pinned too).
+2. **Width bound** — `k-wrap-row-width-bound` / `k-wrap-rows-fit`: every row's
+   total width ≤ (view-width − 1) + the width of the row's opaque objects;
+   `k-wrap-rows-all-lt`: with all-zero opaque widths (the ncurses reality)
+   every row is strictly narrower than the view. **The exception, stated as
+   production actually behaves:** production never over-fills a row with text —
+   an unbreakable (single-codepoint) text object at least as wide as the view is
+   *never placed at all*; it is pushed back and only wrap-marker rows are
+   emitted until the height budget runs out. `k-wrap-row-blocked` characterizes
+   that stuck case precisely (empty row + non-nil rest ⟹ the head is a
+   ≤ 1-codepoint text object with `view-width ≤ total + width`). Only opaque
+   (non-text) objects, which production places unconditionally, can push a row
+   past the view width — the bound accounts for them column-for-column.
+3. **Termination/totality** — admission itself: `k-wrap-row` terminates by the
+   explode-tree node-count measure `k-objs-msr` (halving strictly decreases
+   it; zero-length runs take the unbreakable branch), `k-wrap` by fuel — the
+   row budget production itself enforces via the window height (ncurses rows
+   all have height 1), which is why fuel, not list length, is the measure
+   (see the blocked case above: production genuinely does not make progress).
+4. **Clip correctness** — `k-clip-width-bound` (clipped output width fits the
+   display range, zero-opaque hypothesis), `k-clip-keeps-fully-visible` (an
+   object fully inside the range survives clipping verbatim, with the exact
+   strict-side boundary conditions production's cond order imposes),
+   `k-scroll-adjust-contains-cursor` (the auto-scroll postcondition: the
+   adjusted range contains the cursor cells whenever the cursor is no wider
+   than the window) and their composition `k-clip-contains-cursor-object`
+   (after adjustment, clipping keeps the cursor object itself).
+
+**Documented deviations (Constraint 5):**
+
+- **Wrap marker abstracted as the row boundary.** Production pushes a
+  `wrap-line-character` letter object onto every wrapped row; kernel rows never
+  contain marker objects — a row was wrapped iff the returned rest is non-nil,
+  and the adapter/test re-attaches the marker there. The differential suite
+  asserts production's marker is exactly where the kernel's row boundaries say.
+- **Char granularity with exact per-char widths.** Production
+  `clip-objects-to-display-range` approximates per-char width as total/len;
+  that is exact precisely for uniform-per-char-width runs — which is what the
+  ncurses pipeline produces — and exists for SDL2 surface metrics, out of scope
+  per the spec's monospace non-goal. `k-clip-chars` walks the exact per-char
+  width list instead. For wrapping there is no such gap: production re-measures
+  each half with `string-width`, which equals the sum of the recorded per-char
+  widths for every object the pipeline builds (no raw multi-char tab runs reach
+  drawing objects; a tab run's deltas from column 0 are all tab-size anyway).
+
+**Production swap DEFERRED to VK-4 (differential adapter is tests-only).**
+`separate-objects-by-width` / `clip-objects-to-display-range` live in
+frontend-generic core display code shared by SDL2, whose `lem-if:object-width`
+is a surface-metrics measurement: the halving re-measure is exactly how SDL2
+obtains accurate sub-object widths, and a char-granular kernel adapter would
+either change SDL2 behavior (precomputed per-char widths) or fork the shared
+hot path per frontend. Neither is a low-risk ncurses-only swap, so per the
+spec's incremental-swap philosophy the kernel + theorems land now, pinned to
+production by the mandatory differential suite, and the production delegation
+rides the VK-4 shell swap (which already owns the "swap the running editor
+onto the kernel" risk budget). The adapter that converts CLOS drawing objects
+↔ kernel records (ncurses width semantics) lives in the test suite.
+
+**Shim growth for VK-11:** none — no new constructs, no whitelist changes (the
+exec path uses only CL homonyms + `natp`/`len`/`true-listp`). Six symbols added
+to `*kernel-exports*` (`K-TEXT`, `K-OPAQUE`, `K-WRAP`, `K-WRAP-ROW`, `K-CLIP`,
+`K-SCROLL-ADJUST`). `layout` is *not* in `shim-loader.lisp` (production does
+not call it yet — VK-4); the test suite loads it via `load-verified-book`.
+
+**Differential/PBT acceptance:** `tests/pbt/layout-conformance.lisp` — random
+drawing-object lists (narrow/wide/emoji runs, mixed-width Greek+CJK runs,
+single tabs, control characters, zero-width combining runs, zero-width opaque
+objects) with view widths down to 1 and row budgets down to 1, through
+production `separate-objects-by-width` (iterated with the redraw loop's height
+cutoff) vs `k-wrap` — comparing row break positions, per-row contents,
+per-object widths, marker placement and the leftover — and through production
+`clip-objects-to-display-range` vs `k-clip` (uniform-width runs; multi-char
+control objects excluded from clip inputs because production's straddle
+rebuild of an already-replaced control string maps to a NIL string — an edge
+the real pipeline cannot reach). Plus property tests of all four theorem
+groups on random kernel inputs. No divergence.
+
 ## Proof status
 
 All theorems in every book under `verified/` certify with real ACL2 (no
@@ -589,8 +691,10 @@ All theorems in every book under `verified/` certify with real ACL2 (no
 no statement was weakened. VK-1, VK-2 (five obligation groups), VK-5 (all
 three obligations), VK-6 (all three obligations, with the checkpoint-tear
 prefix disjunct and the intra-hash-namespace residue stated explicitly rather
-than over-claimed — see the VK-6 section), VK-7 (all five obligations) and
-VK-10 (all four obligations) are fully certified.
+than over-claimed — see the VK-6 section), VK-7 (all five obligations), VK-10
+(all four obligations) and VK-11 (all four obligation groups, including the
+blocked-head characterization and the clip/auto-scroll composition) are fully
+certified.
 
 **VK-3.** Certified: obligation 1 for the single recorded **insert**
 (content + points + tick), obligation 2 (`redo ∘ undo = id`, full session), and
