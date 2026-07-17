@@ -58,6 +58,19 @@ for project in "$LEM_YATH_LSP_TEST_PROJECT_A" "$LEM_YATH_LSP_TEST_PROJECT_B"; do
   printf 'constant\npadding\nxxxxAlphaSymbol tail\n' >"$project/symbols.fixture"
 done
 
+# Give generic Imenu enough vertical distance to prove recentering.  The LSP
+# fixture returns a hierarchical child whose full range begins at column zero
+# and whose selection range begins at column four; pinned Eglot uses the full
+# range start for Imenu.
+for line in $(seq 1 80); do
+  case "$line" in
+    40) printf '%s\n' 'AlphaClass' ;;
+    41) printf '%s\n' '    AlphaMethod target' ;;
+    80) printf '\n' ;;
+    *) printf 'fixture line %d\n' "$line" ;;
+  esac
+done >"$LEM_YATH_LSP_TEST_PROJECT_A/one.fixture"
+
 printf 'idle\n' >"$LEM_YATH_LSP_TEST_PROJECT_A/idle.fixture"
 printf 'peer\n' >"$LEM_YATH_LSP_TEST_PROJECT_A/peer.fixture"
 printf 'constant\npadding\nxxxxPeerAlphaSymbol tail\n' \
@@ -311,6 +324,142 @@ fi
 invoke_mx lem-yath-test-lsp-activate-project-a >/dev/null ||
   fail workspace-symbol-origin 'could not activate project A'
 
+# Eglot overrides native Imenu with one synchronous documentSymbol request.
+# Prove successive hierarchy prompts, full-range placement, configured
+# recenter-only feedback, and the Vi jumplist through physical keys.
+lem_keys "$session" F10
+before=$(report_count '^LOCATION ')
+lem_keys "$session" F12
+wait_report_count '^LOCATION ' "$((before + 1))" || true
+imenu_origin=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+imenu_origin_view=$(sed -n 's/^.* view-line=\([0-9][0-9]*\).*$/\1/p' \
+  <<<"$imenu_origin")
+document_symbol_before=$(event_count DOCUMENT_SYMBOL \
+  "uri=file://${LEM_YATH_LSP_TEST_PROJECT_A%/}/one.fixture")
+if invoke_mx imenu 'Index item:' &&
+   wait_event_count DOCUMENT_SYMBOL \
+     "uri=file://${LEM_YATH_LSP_TEST_PROJECT_A%/}/one.fixture" \
+     "$((document_symbol_before + 1))"; then
+  if grep -Fq 'AlphaClass' <<<"$(lem_capture "$session")"; then
+    pass imenu-lsp-parent 'M-x Imenu presents the DocumentSymbol parent first'
+  else
+    fail imenu-lsp-parent 'the top-level DocumentSymbol parent was not visible'
+  fi
+  tmux_cmd send-keys -t "$session" -l AlphaClass
+  lem_keys "$session" Enter
+  sleep 0.4
+  tmux_cmd send-keys -t "$session" -l AlphaMethod
+  sleep 0.5
+  if grep -Fq 'AlphaMethod' <<<"$(lem_capture "$session")"; then
+    pass imenu-lsp-presentation \
+      'M-x Imenu opens the Eglot child in a successive prompt'
+  else
+    fail imenu-lsp-presentation \
+      'the hierarchical Eglot Imenu candidate was not visible'
+  fi
+  lem_keys "$session" Enter
+  sleep 0.45
+  before=$(report_count '^LOCATION ')
+  lem_keys "$session" F12
+  if wait_report_count '^LOCATION ' "$((before + 1))"; then
+    imenu_location=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+    imenu_target_view=$(sed -n \
+      's/^.* view-line=\([0-9][0-9]*\).*$/\1/p' <<<"$imenu_location")
+    if [[ "$imenu_location" == \
+         *'/project-a/one.fixture line=41 column=0 pulse=no '* ]] &&
+       [ -n "$imenu_origin_view" ] && [ -n "$imenu_target_view" ] &&
+       [ "$imenu_origin_view" != "$imenu_target_view" ]; then
+      pass imenu-lsp-jump \
+        'Eglot Imenu uses range start, recenters, and does not pulse'
+    else
+      fail imenu-lsp-jump \
+        "unexpected Eglot Imenu destination: $imenu_location"
+    fi
+  else
+    fail imenu-lsp-jump 'the Eglot Imenu destination could not be inspected'
+  fi
+  actual_document_symbols=$(event_count DOCUMENT_SYMBOL \
+    "uri=file://${LEM_YATH_LSP_TEST_PROJECT_A%/}/one.fixture")
+  if [ "$actual_document_symbols" -eq "$((document_symbol_before + 1))" ]; then
+    pass imenu-lsp-request 'one invocation made exactly one documentSymbol request'
+  else
+    fail imenu-lsp-request \
+      "expected one documentSymbol request, got $actual_document_symbols"
+  fi
+  lem_keys "$session" C-o
+  sleep 0.35
+  before=$(report_count '^LOCATION ')
+  lem_keys "$session" F12
+  if wait_report_count '^LOCATION ' "$((before + 1))"; then
+    imenu_return=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+    if [[ "$imenu_return" == \
+         *'/project-a/one.fixture line=80 column=0 '* ]]; then
+      pass imenu-lsp-jumplist 'C-o returns from Eglot Imenu to the exact origin'
+    else
+      fail imenu-lsp-jumplist \
+        "C-o returned to an unexpected Imenu origin: $imenu_return"
+    fi
+  fi
+else
+  fail imenu-lsp-command \
+    'M-x imenu did not issue a documentSymbol request and open its prompt'
+fi
+
+# LSP also permits the older flat SymbolInformation response.  Eglot turns it
+# into kind -> optional container -> name submenus, so exercise that distinct
+# decoder and hierarchy before returning to the main project buffer.
+if invoke_mx lem-yath-test-lsp-activate-project-a-two; then
+  legacy_before=$(event_count DOCUMENT_SYMBOL \
+    "uri=file://${LEM_YATH_LSP_TEST_PROJECT_A%/}/two.fixture")
+  if invoke_mx imenu 'Index item:' &&
+     wait_event_count DOCUMENT_SYMBOL \
+       "uri=file://${LEM_YATH_LSP_TEST_PROJECT_A%/}/two.fixture" \
+       "$((legacy_before + 1))"; then
+    legacy_hierarchy_ok=yes
+    for level in Method LegacyClass LegacyMethod; do
+      if ! grep -Fq "$level" <<<"$(lem_capture "$session")"; then
+        legacy_hierarchy_ok=no
+      fi
+      tmux_cmd send-keys -t "$session" -l "$level"
+      lem_keys "$session" Enter
+      sleep 0.35
+    done
+    if [ "$legacy_hierarchy_ok" = yes ]; then
+      pass imenu-symbol-information \
+        'SymbolInformation opens kind, container, and name prompts'
+    else
+      fail imenu-symbol-information \
+        'one SymbolInformation hierarchy level was not visible'
+    fi
+    before=$(report_count '^LOCATION ')
+    lem_keys "$session" F12
+    if wait_report_count '^LOCATION ' "$((before + 1))"; then
+      legacy_location=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+      if [[ "$legacy_location" == \
+           *'/project-a/two.fixture line=1 column=0 pulse=no '* ]]; then
+        pass imenu-symbol-information-jump \
+          'SymbolInformation commits its current-document range without pulse'
+      else
+        fail imenu-symbol-information-jump \
+          "unexpected SymbolInformation destination: $legacy_location"
+      fi
+    fi
+    lem_keys "$session" C-o
+    sleep 0.35
+  else
+    fail imenu-symbol-information \
+      'the SymbolInformation documentSymbol prompt did not open'
+  fi
+else
+  fail imenu-symbol-information 'project A second buffer could not be activated'
+fi
+active_a_before=$(report_count '^ACTIVE project=a$')
+lem_keys "$session" F9
+if ! wait_report_count '^ACTIVE project=a$' "$((active_a_before + 1))"; then
+  fail imenu-symbol-information-return \
+    'the main project buffer could not be restored after legacy Imenu'
+fi
+
 # Capture the source window before the picker so abort can be checked against
 # its exact point, viewport, and horizontal scroll rather than only its file.
 source_count=$(report_count '^SYMBOL_SOURCE ')
@@ -422,7 +571,7 @@ if invoke_mx lem-yath-workspace-symbol 'LSP Symbols:'; then
     if wait_report_count '^LOCATION ' "$((before + 1))"; then
       location=$(grep '^LOCATION ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
       if [[ "$location" == \
-           *'/project-a/symbols.fixture line=3 column=4 pulse=yes pulse-line=3 pulse-buffer=yes' ]]; then
+           *'/project-a/symbols.fixture line=3 column=4 pulse=yes pulse-line=3 pulse-buffer=yes '* ]]; then
         pass workspace-symbol-jump \
           'one Return commits the exact LSP location and pulses its line'
       else

@@ -56,6 +56,22 @@ send_chord() {
   tmux_cmd send-keys -t "$session" "$@"
 }
 
+invoke_mx() {
+  local command=$1 prompt=${2:-}
+  send_chord Escape
+  sleep 0.15
+  send_chord Escape
+  sleep 0.15
+  send_chord M-x
+  lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
+  tmux_cmd send-keys -t "$session" -l "$command"
+  sleep 0.4
+  send_chord Enter
+  if [ -n "$prompt" ]; then
+    lem_wait_for "$session" "$prompt" 10 >/dev/null
+  fi
+}
+
 printf '%s\n' \
   "((emacs-lisp-mode . ((eval . (local-set-key (kbd \"C-c i\") #'consult-outline))" \
   '                       (outline-regexp . ";;;"))))' \
@@ -217,6 +233,55 @@ if lem_wait_for "$session" 'Go to heading:' 10 >/dev/null; then
   fi
 else
   fail final-jump 'the second outline prompt did not open'
+fi
+
+# Generic M-x Imenu is deliberately a separate path from Consult outline:
+# pinned Lisp definitions, no live preview or pulse, recenter on acceptance,
+# and one Vi jumplist entry.
+if invoke_mx imenu 'Index item:'; then
+  if grep -Fq 'Variables' <<<"$(lem_capture "$session")"; then
+    pass imenu-group 'M-x Imenu opens the pinned Variables submenu'
+  else
+    fail imenu-group 'the top-level Lisp Imenu Variables group was not visible'
+  fi
+  tmux_cmd send-keys -t "$session" -l Variables
+  send_chord Enter
+  sleep 0.4
+  tmux_cmd send-keys -t "$session" -l 'outline-line-41'
+  sleep 0.5
+  if grep -Fq '*outline-line-41*' <<<"$(lem_capture "$session")"; then
+    pass imenu-presentation 'the successive prompt exposes the selected group'
+  else
+    fail imenu-presentation 'the filtered Lisp Imenu candidate was not visible'
+  fi
+  send_chord Enter
+  sleep 0.5
+  send_chord C-c z r
+  wait_report_count '^STATE file=main line=41 column=14 ' 1 || true
+  imenu_final="$(grep '^STATE file=main line=41 column=14 ' \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  imenu_view="$(sed -n 's/^.* view=\([^ ]*\) minor=.*$/\1/p' \
+    <<<"$imenu_final")"
+  if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+       <<<"$imenu_final" &&
+     [ -n "$origin_view" ] && [ -n "$imenu_view" ] &&
+     [ "$origin_view" != "$imenu_view" ]; then
+    pass imenu-jump 'Lisp Imenu lands on the name, recenters, and does not pulse'
+  else
+    fail imenu-jump "the accepted Lisp Imenu destination differed: $imenu_final"
+  fi
+  send_chord C-o
+  sleep 0.3
+  send_chord C-c z r
+  wait_report_count '^STATE file=main line=80 ' 5 || true
+  if [ "$(grep -c '^STATE file=main line=80 ' \
+          "$LEM_YATH_PROJECT_OUTLINE_REPORT")" -ge 5 ]; then
+    pass imenu-jumplist 'C-o returns from generic Imenu to the exact origin'
+  else
+    fail imenu-jumplist 'generic Imenu did not record one Vi jump'
+  fi
+else
+  fail imenu-command 'M-x imenu did not open the Index item prompt'
 fi
 
 send_chord C-c z 2

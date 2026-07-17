@@ -321,6 +321,17 @@ Normal/Emacs-state selector retains source order, preview rollback, matched-text
 placement, recentering, and jumplist return (`src/project-outline.lisp`,
 `scripts/project-outline-test.sh`).
 
+The ordinary `M-x imenu` path is also effective and leaves GNU Imenu's defaults
+unchanged: `imenu-flatten` is nil, spaces in names are displayed as dots, and a
+nested group or document-symbol parent opens a successive `Index item` prompt.
+When Eglot owns a buffer and advertises `documentSymbolProvider`, its response
+replaces the mode-local index; hierarchical `DocumentSymbol` parents and the
+older kind/container-grouped `SymbolInformation` schema are both accepted.
+The configured `imenu-after-jump-hook` recenters but does not reveal or pulse
+the destination. Lem reproduces this path for those Eglot buffers and for the
+pinned Lisp generic-expression forms (`src/imenu.lisp`); native non-LSP indices
+for modes such as Org and Markdown remain a separate provider gap.
+
 The `embark-consult` load path comes from the pinned package rather than this
 configuration: its `embark.el` registers a `with-eval-after-load` form for
 Consult and then requires the installed integration library.  It is therefore

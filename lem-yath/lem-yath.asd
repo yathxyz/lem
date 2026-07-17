@@ -45,6 +45,7 @@
                (:file "project-picker")
                (:file "workspace-symbol")
                (:file "project-outline")
+               (:file "imenu")
                (:module "org"
                 :serial t
                 :components ((:file "parser")

@@ -412,6 +412,20 @@
   (switch-to-buffer *lsp-project-test-a-one*)
   (lsp-project-test-report "ACTIVE project=a"))
 
+(define-command lem-yath-test-lsp-activate-project-a-two () ()
+  (unless (lsp-project-test-live-buffer-p *lsp-project-test-a-two*)
+    (editor-error "Project A second fixture buffer is not live"))
+  (switch-to-buffer *lsp-project-test-a-two*)
+  (lsp-project-test-report "ACTIVE project=a-two"))
+
+(define-command lem-yath-test-lsp-bottom () ()
+  (let ((point (buffer-point (current-buffer))))
+    (move-point point (buffer-end-point (current-buffer)))
+    (when (plusp (position-at-point point))
+      (character-offset point -1))
+    (line-start point)
+    (window-recenter (current-window))))
+
 (define-command lem-yath-test-lsp-open-symbol-peer () ()
   (setf *lsp-project-test-symbol-peer*
         (lsp-project-test-open
@@ -443,14 +457,18 @@
                 (jump-feedback-pulse-active-p pulse)
                 (jump-feedback-pulse-overlay pulse))))
     (lsp-project-test-report
-     "LOCATION file=~a line=~d column=~d pulse=~a pulse-line=~a pulse-buffer=~a"
+     (concatenate
+      'string
+      "LOCATION file=~a line=~d column=~d pulse=~a pulse-line=~a "
+      "pulse-buffer=~a view-line=~d")
      (or (buffer-filename (current-buffer)) "none")
      (line-number-at-point (current-point))
      (point-charpos (current-point))
      (lsp-project-test-yes-no overlay)
      (or (and overlay (line-number-at-point (overlay-start overlay))) "none")
      (lsp-project-test-yes-no
-      (and overlay (eq (current-buffer) (overlay-buffer overlay)))))))
+      (and overlay (eq (current-buffer) (overlay-buffer overlay))))
+     (line-number-at-point (window-view-point (current-window))))))
 
 (define-command lem-yath-test-lsp-record-workspace-symbol-source () ()
   (let* ((session *workspace-symbol-session*)
@@ -962,6 +980,8 @@
                       lem-vi-mode:*normal-keymap*
                       lem-vi-mode:*insert-keymap*))
   (define-key keymap "F12" 'lem-yath-test-lsp-record-location)
+  (define-key keymap "F10" 'lem-yath-test-lsp-bottom)
+  (define-key keymap "F9" 'lem-yath-test-lsp-activate-project-a)
   (define-key keymap "F11"
     'lem-yath-test-lsp-record-workspace-symbol-source))
 

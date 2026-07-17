@@ -206,6 +206,7 @@ class FixtureServer:
                             "save": True,
                         },
                         "workspaceSymbolProvider": True,
+                        "documentSymbolProvider": True,
                     },
                     "serverInfo": {"name": "lem-yath-fixture", "version": "1"},
                 },
@@ -259,6 +260,60 @@ class FixtureServer:
             document = params.get("textDocument") or {}
             self.log("DID_CHANGE", uri=document.get("uri", ""))
             return None
+
+        if method == "textDocument/documentSymbol":
+            document = params.get("textDocument") or {}
+            uri = str(document.get("uri") or "")
+            self.log("DOCUMENT_SYMBOL", uri=uri)
+            if uri.endswith("/two.fixture"):
+                return self.response(
+                    request_id,
+                    [
+                        {
+                            "name": "LegacyMethod",
+                            "kind": 6,
+                            "location": {
+                                "uri": uri,
+                                "range": {
+                                    "start": {"line": 0, "character": 0},
+                                    "end": {"line": 0, "character": 3},
+                                },
+                            },
+                            "containerName": "LegacyClass",
+                        }
+                    ],
+                )
+            return self.response(
+                request_id,
+                [
+                    {
+                        "name": "AlphaClass",
+                        "kind": 5,
+                        "range": {
+                            "start": {"line": 39, "character": 0},
+                            "end": {"line": 41, "character": 0},
+                        },
+                        "selectionRange": {
+                            "start": {"line": 39, "character": 0},
+                            "end": {"line": 39, "character": 10},
+                        },
+                        "children": [
+                            {
+                                "name": "AlphaMethod",
+                                "kind": 6,
+                                "range": {
+                                    "start": {"line": 40, "character": 0},
+                                    "end": {"line": 40, "character": 22},
+                                },
+                                "selectionRange": {
+                                    "start": {"line": 40, "character": 4},
+                                    "end": {"line": 40, "character": 15},
+                                },
+                            }
+                        ],
+                    }
+                ],
+            )
 
         if method == "workspace/symbol":
             query = str(params.get("query") or "")
