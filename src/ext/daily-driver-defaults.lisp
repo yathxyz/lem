@@ -20,3 +20,9 @@ cleanly. See SPEC.md, constraint 3.")
 ;;; detected encoding still cannot decode falls back to latin-1 losslessly via
 ;;; FIND-FILE-BUFFER.
 (setf (variable-value 'lem-core:detect-encoding-scheme :global) :tr)
+
+;;; DS-4: back up each file's pre-save content to <file>~ once per session,
+;;; independent of auto-save-mode. Upstream keeps this off.
+(setf lem/backup-on-save:*backup-on-save* t)
+(add-hook (variable-value 'before-save-hook :global t)
+          'lem/backup-on-save:backup-on-save)

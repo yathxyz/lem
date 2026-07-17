@@ -72,6 +72,7 @@
                (:file "save-clobber")
                (:file "eol-roundtrip")
                (:file "atomic-save")
+               (:file "backup-on-save")
                (:file "encoding-fallback")
                (:file "scala-mode")
                (:file "wat-mode")
