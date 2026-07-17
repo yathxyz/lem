@@ -282,13 +282,15 @@
    "change_id.shortest(12) ++ \"\\0\" ++ "
    "commit_id.shortest(12) ++ \"\\0\" ++ "
    "if(current_working_copy, \"@\", \" \") ++ \"\\0\" ++ "
-   "description.first_line() ++ \"\\0\""))
+   "description.first_line() ++ \"\\0\" ++ "
+   "local_bookmarks ++ \"\\0\""))
 
 (defstruct jj-log-entry
   change-id
   commit-id
   marker
-  description)
+  description
+  bookmarks)
 
 (defun jj-split-null-fields (text)
   "Split TEXT at NUL characters without interpreting its contents."
@@ -304,12 +306,13 @@
 (defun parse-jj-log-entries (output)
   "Parse the NUL-delimited log OUTPUT produced by `*jj-log-template*'."
   (let ((fields (jj-split-null-fields output)))
-    (loop :while (>= (length fields) 4)
+    (loop :while (>= (length fields) 5)
           :collect (make-jj-log-entry
                     :change-id (pop fields)
                     :commit-id (pop fields)
                     :marker (pop fields)
-                    :description (pop fields)))))
+                    :description (pop fields)
+                    :bookmarks (pop fields)))))
 
 (defun jj-log-entries (root)
   (parse-jj-log-entries
@@ -331,10 +334,14 @@
       (with-point ((start point))
         (insert-string
          point
-         (format nil "~a ~12a ~12a  ~a~%"
+         (format nil "~a ~12a ~12a  ~a~a~%"
                  (jj-log-entry-marker entry)
                  (jj-log-entry-change-id entry)
                  (jj-log-entry-commit-id entry)
+                 (if (str:blankp (jj-log-entry-bookmarks entry))
+                     ""
+                     (format nil "[~a] "
+                             (jj-log-entry-bookmarks entry)))
                  (if (str:blankp (jj-log-entry-description entry))
                      "(no description)"
                      (jj-log-entry-description entry))))
@@ -400,6 +407,28 @@
           (buffer-read-only-p buffer) t)
     buffer))
 
+(defun jj-bookmark-buffer-name (root)
+  (format nil "*lem-yath-jj-bookmarks: ~a*"
+          (namestring (or (ignore-errors (truename root)) root))))
+
+(defun render-jj-bookmark-buffer (buffer root)
+  "Render local Jujutsu bookmarks in a focused read-only BUFFER."
+  (let ((text (run-jj root '("bookmark" "list" "--quiet"))))
+    (with-buffer-read-only buffer nil
+      (erase-buffer buffer)
+      (insert-string
+       (buffer-start-point buffer)
+       (format nil "Jujutsu bookmarks: ~a~%~%~a"
+               (namestring root)
+               (if (str:blankp text) "(no local bookmarks)\n" text)))
+      (buffer-start (buffer-point buffer)))
+    (buffer-unmark buffer)
+    (setf (buffer-directory buffer) root
+          (buffer-value buffer *lem-yath-jj-root-key*) root
+          (buffer-value buffer *lem-yath-jj-view-kind-key*) :bookmarks
+          (buffer-read-only-p buffer) t)
+    buffer))
+
 (defun lem-yath-jj-log-at (directory)
   "Show Jujutsu status/log for the workspace enclosing DIRECTORY."
   (let ((root (jj-root directory)))
@@ -424,12 +453,13 @@
   (alexandria:if-let ((root (buffer-value (current-buffer)
                                           *lem-yath-jj-root-key*)))
     (progn
-      (if (eq :show (buffer-value (current-buffer)
-                                  *lem-yath-jj-view-kind-key*))
-          (render-jj-show-buffer
-           (current-buffer) root
-           (buffer-value (current-buffer) *lem-yath-jj-revision-key*))
-          (render-jj-buffer (current-buffer) root))
+      (case (buffer-value (current-buffer) *lem-yath-jj-view-kind-key*)
+        (:show
+         (render-jj-show-buffer
+          (current-buffer) root
+          (buffer-value (current-buffer) *lem-yath-jj-revision-key*)))
+        (:bookmarks (render-jj-bookmark-buffer (current-buffer) root))
+        (otherwise (render-jj-buffer (current-buffer) root)))
       (message "Jujutsu view refreshed"))
     (message "This is not a Jujutsu view")))
 
@@ -653,6 +683,150 @@
   "Rebase the selected change through a focused Majutsu-style popup."
   (dispatch-jj-rebase (jj-current-root) (jj-selected-revision)))
 
+(defun jj-bookmark-names (root)
+  "Return the sorted local bookmark names at ROOT."
+  (sort
+   (remove-if #'str:blankp
+              (jj-split-null-fields
+               (run-jj root
+                       '("bookmark" "list" "--quiet" "--template"
+                         "name ++ \"\\0\""))))
+   #'string<))
+
+(defun jj-prompt-for-bookmark (root prompt &key allow-new)
+  "Read a local bookmark at ROOT, permitting a new name when ALLOW-NEW."
+  (let* ((names (jj-bookmark-names root))
+         (choices (mapcar (lambda (name) (cons name name)) names)))
+    (when (and (null names) (not allow-new))
+      (editor-error "There are no local Jujutsu bookmarks"))
+    (prompt-for-string
+     prompt
+     :completion-function
+     (lambda (input)
+       (completion-annotated-prompt-choices
+        (prescient-filter input choices :key #'car :category :jj-bookmark)
+        (lambda (name)
+          (declare (ignore name))
+          "local bookmark")))
+     :test-function
+     (lambda (input)
+       (and (not (str:blankp input))
+            (or allow-new (member input names :test #'string=))))
+     :history-symbol 'lem-yath-jj-bookmark)))
+
+(defun jj-refresh-after-bookmark-mutation
+    (root revision arguments success-message)
+  "Run bookmark ARGUMENTS, refresh, and retain selected REVISION."
+  (run-jj root arguments)
+  (let ((buffer (current-buffer)))
+    (render-jj-buffer buffer root)
+    (jj-restore-revision-point buffer revision))
+  (message success-message))
+
+(defun jj-show-bookmarks (root)
+  "Open the local bookmark list for ROOT in a nested read-only view."
+  (let ((buffer (make-buffer (jj-bookmark-buffer-name root) :directory root)))
+    (change-buffer-mode buffer 'lem/buffer/fundamental-mode:fundamental-mode)
+    (save-excursion
+      (setf (current-buffer) buffer)
+      (enable-minor-mode 'lem-yath-jj-view-mode))
+    (render-jj-bookmark-buffer buffer root)
+    (switch-to-buffer buffer)))
+
+(defun jj-bookmark-create-or-set (root revision set-p)
+  (let ((name
+          (jj-prompt-for-bookmark
+           root (if set-p "Set bookmark: " "Create bookmark: ")
+           :allow-new t)))
+    (jj-refresh-after-bookmark-mutation
+     root revision
+     (list "bookmark" (if set-p "set" "create") name
+           "--revision" revision)
+     (format nil "Jujutsu bookmark ~a ~a"
+             name (if set-p "set" "created")))))
+
+(defun jj-bookmark-move (root revision allow-backwards)
+  (let ((name (jj-prompt-for-bookmark root "Move bookmark: ")))
+    (jj-refresh-after-bookmark-mutation
+     root revision
+     (append (list "bookmark" "move" name "--to" revision)
+             (when allow-backwards '("--allow-backwards")))
+     (format nil "Jujutsu bookmark ~a moved" name))))
+
+(defun jj-bookmark-rename (root revision)
+  (let* ((old (jj-prompt-for-bookmark root "Rename bookmark: "))
+         (new (jj-prompt-for-bookmark root "New bookmark name: "
+                                      :allow-new t)))
+    (jj-refresh-after-bookmark-mutation
+     root revision (list "bookmark" "rename" old new)
+     (format nil "Jujutsu bookmark ~a renamed to ~a" old new))))
+
+(defun jj-bookmark-remove (root revision forget-p)
+  (let ((name
+          (jj-prompt-for-bookmark
+           root (if forget-p "Forget bookmark: " "Delete bookmark: "))))
+    (if (prompt-for-y-or-n-p
+         (format nil "~a Jujutsu bookmark ~a?"
+                 (if forget-p "Forget" "Delete") name))
+        (jj-refresh-after-bookmark-mutation
+         root revision
+         (list "bookmark" (if forget-p "forget" "delete") name)
+         (format nil "Jujutsu bookmark ~a ~a"
+                 name (if forget-p "forgotten" "deleted")))
+        (message "Jujutsu bookmark removal cancelled"))))
+
+(defun jj-bookmark-keymap ()
+  "Build the focused local-bookmark popup."
+  (let ((keymap (make-keymap :description "JJ Bookmarks")))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist (entry
+              '(("l" "list local bookmarks")
+                ("c" "create at selected revision")
+                ("s" "create or set at selected revision")
+                ("m" "move to selected revision")
+                ("M" "move backwards/sideways to selected revision")
+                ("r" "rename local bookmark")
+                ("d" "delete and propagate")
+                ("f" "forget locally")
+                ("q" "cancel")))
+      (destructuring-bind (key description) entry
+        (define-key keymap key 'nop-command)
+        (setf (lem-core::prefix-description
+               (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
+              description)))
+    keymap))
+
+(defun dispatch-jj-bookmark (root revision)
+  "Read one focused Majutsu-style local bookmark action."
+  (unwind-protect
+       (progn
+         (let ((lem/transient:*transient-popup-delay* 0))
+           (keymap-activate (jj-bookmark-keymap)))
+         (redraw-display)
+         (let* ((key (read-key))
+                (name (lem-core::keyseq-to-string (list key))))
+           (lem/transient::hide-transient)
+           (cond
+             ((string= name "l") (jj-show-bookmarks root))
+             ((string= name "c")
+              (jj-bookmark-create-or-set root revision nil))
+             ((string= name "s")
+              (jj-bookmark-create-or-set root revision t))
+             ((string= name "m") (jj-bookmark-move root revision nil))
+             ((string= name "M") (jj-bookmark-move root revision t))
+             ((string= name "r") (jj-bookmark-rename root revision))
+             ((string= name "d") (jj-bookmark-remove root revision nil))
+             ((string= name "f") (jj-bookmark-remove root revision t))
+             ((or (string= name "q") (string= name "Escape"))
+              (message "Jujutsu bookmark action cancelled"))
+             (t (message "No bookmark action is bound to ~a" name)))))
+    (lem/transient::hide-transient)))
+
+(define-command lem-yath-jj-bookmark () ()
+  "Manage local bookmarks for the selected Jujutsu revision."
+  (dispatch-jj-bookmark (jj-current-root) (jj-selected-revision)))
+
 (define-command lem-yath-jj-describe () ()
   "Set the selected change's description, like Majutsu `c'."
   (let* ((root (jj-current-root))
@@ -751,7 +925,7 @@
 (define-command lem-yath-jj-help () ()
   "Show the focused Majutsu-compatible Jujutsu command surface."
   (message
-   "Jujutsu: c describe (one line), o new, s squash, r rebase, e edit, u undo, C-r redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
+   "Jujutsu: c describe, o new, s squash, r rebase, b bookmarks, e edit, u undo, C-r redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
 
 (define-command lem-yath-jj-quit () ()
   "Quit the current Jujutsu status/log window."
@@ -785,6 +959,7 @@
 (define-key *lem-yath-jj-view-keymap* "o" 'lem-yath-jj-new)
 (define-key *lem-yath-jj-view-keymap* "s" 'lem-yath-jj-squash)
 (define-key *lem-yath-jj-view-keymap* "r" 'lem-yath-jj-rebase)
+(define-key *lem-yath-jj-view-keymap* "b" 'lem-yath-jj-bookmark)
 (define-key *lem-yath-jj-view-keymap* "e" 'lem-yath-jj-edit)
 (define-key *lem-yath-jj-view-keymap* "u" 'lem-yath-jj-undo)
 (define-key *lem-yath-jj-view-keymap* "C-r" 'lem-yath-jj-redo)

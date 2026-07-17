@@ -98,6 +98,45 @@ wait_revision_parent() {
   return 1
 }
 
+bookmark_target() {
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" bookmark list --quiet "$1" \
+    --template 'normal_target.change_id()'
+}
+
+wait_bookmark_target() {
+  local name=$1 expected=$2 index=0
+  while ((index < 80)); do
+    if [ "$(bookmark_target "$name")" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+wait_bookmark_absent() {
+  local name=$1 index=0
+  while ((index < 80)); do
+    if [ -z "$(bookmark_target "$name")" ]; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+open_bookmark_action() {
+  local action=$1
+  lem_keys "$session" b
+  if lem_wait_for "$session" 'JJ Bookmarks' 10 >/dev/null; then
+    lem_keys "$session" "$action"
+    return 0
+  fi
+  return 1
+}
+
 wait_description() {
   local expected=$1 index=0
   while ((index < 80)); do
@@ -448,6 +487,134 @@ if lem_wait_for "$session" 'jj rebase failed' 10 >/dev/null &&
   pass rebase-refusal 'an invalid self-destination surfaced jj failure without mutation'
 else
   fail rebase-refusal 'invalid rebase did not fail closed'
+fi
+
+lem_keys "$session" b
+if lem_wait_for "$session" 'JJ Bookmarks' 10 >/dev/null; then
+  lem_keys "$session" q
+fi
+if [ -z "$(bookmark_target topic-lem)" ] &&
+   ! lem_capture "$session" | grep -q 'JJ Bookmarks'; then
+  pass bookmark-popup-cancel 'b q closed the bookmark popup without mutation'
+else
+  fail bookmark-popup-cancel 'bookmark cancellation changed state or stayed active'
+fi
+
+if open_bookmark_action c &&
+   lem_wait_for "$session" 'Create bookmark:' 10 >/dev/null; then
+  replace_prompt_text 'topic-lem'
+fi
+if wait_bookmark_target topic-lem "$rebase_source_id" &&
+   lem_wait_for "$session" '\[topic-lem\].*rebase source' 10 >/dev/null; then
+  pass bookmark-create 'b c created a bookmark and rendered its row label'
+else
+  fail bookmark-create 'bookmark creation, target, or inline label failed'
+fi
+
+if open_bookmark_action l &&
+   lem_wait_for "$session" 'Jujutsu bookmarks:' 10 >/dev/null &&
+   lem_wait_for "$session" 'topic-lem:' 10 >/dev/null; then
+  pass bookmark-list 'b l opened the focused local bookmark list'
+else
+  fail bookmark-list 'the local bookmark list did not render'
+fi
+lem_keys "$session" q
+if lem_wait_for "$session" 'History' 10 >/dev/null; then
+  pass bookmark-list-quit 'q restored the history from the bookmark list'
+else
+  fail bookmark-list-quit 'bookmark list quit did not restore history'
+fi
+
+if open_bookmark_action r &&
+   lem_wait_for "$session" 'Rename bookmark:' 10 >/dev/null; then
+  replace_prompt_text 'topic-lem'
+fi
+if lem_wait_for "$session" 'New bookmark name:' 10 >/dev/null; then
+  replace_prompt_text 'topic-renamed'
+fi
+if wait_bookmark_absent topic-lem &&
+   wait_bookmark_target topic-renamed "$rebase_source_id"; then
+  pass bookmark-rename 'b r renamed the selected local bookmark'
+else
+  fail bookmark-rename 'bookmark rename did not preserve its target'
+fi
+
+lem_keys "$session" C-j
+if invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=rebase_destination '* ]]; then
+  if open_bookmark_action M &&
+     lem_wait_for "$session" 'Move bookmark:' 10 >/dev/null; then
+    replace_prompt_text 'topic-renamed'
+  fi
+else
+  fail bookmark-move-row 'the rebase destination row was not selected'
+fi
+if wait_bookmark_target topic-renamed "$rebase_destination_id"; then
+  pass bookmark-move 'b M moved the bookmark backwards to the selected parent'
+else
+  fail bookmark-move 'allow-backwards bookmark move failed'
+fi
+
+lem_keys "$session" C-k
+if invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=rebase_source '* ]]; then
+  if open_bookmark_action s &&
+     lem_wait_for "$session" 'Set bookmark:' 10 >/dev/null; then
+    replace_prompt_text 'topic-renamed'
+  fi
+else
+  fail bookmark-set-row 'the rebase source row was not restored'
+fi
+if wait_bookmark_target topic-renamed "$rebase_source_id"; then
+  pass bookmark-set 'b s set the bookmark forward to the selected source'
+else
+  fail bookmark-set 'bookmark set did not target the selected revision'
+fi
+
+if open_bookmark_action d &&
+   lem_wait_for "$session" 'Delete bookmark:' 10 >/dev/null; then
+  replace_prompt_text 'topic-renamed'
+fi
+if lem_wait_for "$session" 'Delete Jujutsu bookmark' 10 >/dev/null; then
+  lem_keys "$session" n
+fi
+if wait_bookmark_target topic-renamed "$rebase_source_id"; then
+  pass bookmark-delete-cancel 'n cancelled bookmark deletion without mutation'
+else
+  fail bookmark-delete-cancel 'cancelled deletion removed or moved the bookmark'
+fi
+
+if open_bookmark_action c &&
+   lem_wait_for "$session" 'Create bookmark:' 10 >/dev/null; then
+  replace_prompt_text 'forget-me'
+fi
+if ! wait_bookmark_target forget-me "$rebase_source_id"; then
+  fail bookmark-forget-setup 'the forget fixture bookmark was not created'
+fi
+if open_bookmark_action f &&
+   lem_wait_for "$session" 'Forget bookmark:' 10 >/dev/null; then
+  replace_prompt_text 'forget-me'
+fi
+if lem_wait_for "$session" 'Forget Jujutsu bookmark' 10 >/dev/null; then
+  lem_keys "$session" y
+fi
+if wait_bookmark_absent forget-me; then
+  pass bookmark-forget 'b f forgot the local bookmark after confirmation'
+else
+  fail bookmark-forget 'confirmed bookmark forget left the bookmark present'
+fi
+
+if open_bookmark_action d &&
+   lem_wait_for "$session" 'Delete bookmark:' 10 >/dev/null; then
+  replace_prompt_text 'topic-renamed'
+fi
+if lem_wait_for "$session" 'Delete Jujutsu bookmark' 10 >/dev/null; then
+  lem_keys "$session" y
+fi
+if wait_bookmark_absent topic-renamed; then
+  pass bookmark-delete 'b d deleted the bookmark after confirmation'
+else
+  fail bookmark-delete 'confirmed bookmark deletion left the bookmark present'
 fi
 
 lem_keys "$session" q

@@ -36,6 +36,7 @@
      ("o" lem-yath-jj-new)
      ("s" lem-yath-jj-squash)
      ("r" lem-yath-jj-rebase)
+     ("b" lem-yath-jj-bookmark)
      ("e" lem-yath-jj-edit)
      ("u" lem-yath-jj-undo)
      ("C-r" lem-yath-jj-redo)

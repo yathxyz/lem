@@ -2007,11 +2007,16 @@ Legit, project dispatch, the gutter, and time travel work from linked
 worktrees. The repository-specific Jujutsu porcelain renders `jj status` plus
 30 row-aware history entries. Its Evil-compatible core uses `C-j`/`C-k` or
 `g j`/`g k` for revisions, `c` to describe, `o` to create a child, `e` to edit,
-`s` to open a whole-change squash popup, `u`/`C-r` to undo/redo operations,
-`r` to open a selected-row rebase popup, `u`/`C-r` to undo/redo operations,
-confirmed `x` to abandon, `d` or Return to browse `jj show`, `g r` to refresh,
-`?` for help, and `q` to unwind first to history and then the exact source
-buffer. The squash popup retains Majutsu's `s s` default: it moves the selected
+`s` to open a whole-change squash popup, `r` to open a selected-row rebase
+popup, `u`/`C-r` to undo/redo operations,
+`b` to manage local bookmarks, confirmed `x` to abandon, `d` or Return to
+browse `jj show`, `g r` to refresh, `?` for help, and `q` to unwind first to
+history and then the exact source buffer. Local bookmark names render directly
+on their revision rows. The `b` popup retains Majutsu's `l/c/s/m/M/r/d/f`
+local core: list, create, create-or-set, move, allow-backwards move, rename,
+confirmed delete, and confirmed forget. Its list is a nested read-only view;
+every mutating action refreshes bookmark labels without losing the selected
+revision. The squash popup retains Majutsu's `s s` default: it moves the selected
 change into its sole parent and combines both complete descriptions. Its other
 single-key actions keep only the destination or source description, or retain
 the emptied source; cancellation is non-mutating, roots and merges fail closed,
@@ -2027,12 +2032,14 @@ the selected change ID when that change still exists.
 ncurses editor and real `jj` in a metacharacter-bearing repository path,
 including squash popup cancellation, exact multiline combination, content
 movement, parent restoration, root refusal, both rebase cancellation paths,
-content-bearing sibling rebase, row restoration, and invalid self-destination.
+content-bearing sibling rebase, row restoration, invalid self-destination, and
+the complete local bookmark lifecycle with inline-label and nested-list checks.
 The in-editor description prompt is intentionally single-line and refuses an
 existing multiline description rather than truncating it. Majutsu's general
-transient dispatch, multiline description buffer, bookmarks, split, arbitrary
-source/destination and partial-patch squash, multi-source/destination rebase
-selection and advanced rebase flags, conflict handling, operation log,
+transient dispatch, multiline description buffer, arbitrary source/destination
+and partial-patch squash, multi-source/destination rebase selection and
+advanced rebase flags, remote bookmark tracking and advance patterns,
+multi-bookmark operations, split, conflict handling, operation log,
 workspaces, sparse checkout, and partial patch selection remain outside this
 focused approximation.
 
