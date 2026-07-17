@@ -80,6 +80,13 @@
 ;;;; the two protocols' steps (a superset of production's behaviors), so no
 ;;;; scheduling assumption is load-bearing.
 ;;;;
+;;;; SCOPE BOUNDARY.  Only the default *atomic-save* = T path is modeled.
+;;;; The `write-file-in-place' fallback (src/buffer/file-utils.lisp, taken
+;;;; when *atomic-save* is NIL or a virtual-file handler claims the target)
+;;;; truncates and rewrites the target directly and provides NONE of the
+;;;; guarantees proved here.  This matches DS-2 scope (atomic save is the
+;;;; default); anyone disabling *atomic-save* opts out of these theorems.
+;;;;
 ;;;; "RECOVERABLE", PRECISELY.  When the target still holds OLD and the buffer
 ;;;; was modified, the edits are recoverable iff the checkpoint file holds the
 ;;;; complete CPC: on the next find-file, checkpoint-newer-than-file-p offers

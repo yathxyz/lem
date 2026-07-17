@@ -88,7 +88,13 @@ a hash plus a readable tail to stay within filesystem name limits."
 (defun write-string-to-file-atomically (path string)
   "Write STRING to PATH, creating parent directories, via a temp file in the same
 directory followed by a rename, so a crash mid-write never leaves a torn
-checkpoint in place of a good one."
+checkpoint in place of a good one.
+
+The create/write/rename/cleanup step sequence is transcribed by
+verified/crash-safety.lisp (SPEC-VK VK-6) and tests/pbt/crash-safety-faults.lisp;
+any change to the sequence must be mirrored there. Note: FINISH-OUTPUT is not
+fsync — on power loss the renamed-in checkpoint may tear to a prefix (the
+documented VK-6 residue); adding an fsync here would close it."
   (ensure-directories-exist path)
   (let ((temp (format nil "~A.~36R.tmp" (namestring path) (random (expt 36 12)))))
     (unwind-protect

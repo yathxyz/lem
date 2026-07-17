@@ -300,6 +300,13 @@ invariant `cs-inv` is proved inductive over the step relation
 states — every interleaving of the two protocols (a superset of production's
 single-threaded scheduling) and every crash point.
 
+**Scope boundary.** Only the default `*atomic-save*` = T path is modeled. The
+`write-file-in-place` fallback (src/buffer/file-utils.lisp, taken when
+`*atomic-save*` is NIL or a virtual-file handler claims the target) truncates
+and rewrites the target directly and provides none of the guarantees below —
+disabling `*atomic-save*` opts out of these theorems. This matches DS-2 scope
+(atomic save is the default).
+
 **Hook ordering, verified in production.** `call-with-write-hook`
 (src/buffer/file.lisp:182-186) runs the after-save hooks (which include
 `delete-checkpoint-on-save`, wired at src/ext/checkpoint.lisp:249) strictly

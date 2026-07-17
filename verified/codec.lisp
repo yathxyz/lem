@@ -262,12 +262,6 @@
   (implies (true-listp y)
            (equal (expand y (list 10)) y)))
 
-;; flatten o decode = strip-eols: the flattened decoded lines are exactly the
-;; buffer content, so nothing is added, dropped, or reordered.
-(defthm flatten-lines-of-decode-lines
-  (equal (flatten-lines (decode-lines cs eol))
-         (strip-eols cs eol)))
-
 ;;; ===========================================================================
 ;;; VK-5 obligation 3: totality / well-formedness
 ;;;   decode always yields a wf line list (VK-1 `line-listp': nat-lists, no 10)
@@ -303,7 +297,9 @@
 ;;; VK-5 obligation 2: no-character-loss for arbitrary (mixed) input
 ;;; ===========================================================================
 
-;; Primary form (spec wording): strip-eols(cs) = flatten(decode lines).
+;; Primary form (spec wording): flatten o decode = strip-eols -- the flattened
+;; decoded lines are exactly the buffer content, so nothing is added, dropped,
+;; or reordered.
 (defthm no-char-loss
   (equal (flatten-lines (decode-lines cs eol))
          (strip-eols cs eol)))

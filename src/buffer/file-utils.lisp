@@ -252,7 +252,12 @@ rather than replaced by a regular file.
 When *ATOMIC-SAVE* is NIL, or a virtual-file handler claims FILENAME, WRITER's
 output is written to FILENAME in place instead. Signals EDITOR-ERROR, leaving
 the original untouched, when the target directory is not writable and the atomic
-temporary file therefore cannot be created."
+temporary file therefore cannot be created.
+
+The create/write/fsync/metadata/rename/cleanup step sequence is transcribed by
+verified/crash-safety.lisp (SPEC-VK VK-6) and tests/pbt/crash-safety-faults.lisp;
+any change to the sequence (especially removing the fsync before rename, which
+the durability proof depends on) must be mirrored there."
   (when (or (not *atomic-save*) *virtual-file-open*)
     (return-from write-file-atomically
       (write-file-in-place filename writer element-type external-format)))
