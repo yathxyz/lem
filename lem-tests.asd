@@ -68,6 +68,7 @@
                (:file "interp")
                (:file "input")
                (:file "file")
+               (:file "revert-buffer")
                (:file "scala-mode")
                (:file "wat-mode")
                (:file "nix-mode")

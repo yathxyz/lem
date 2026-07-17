@@ -382,21 +382,45 @@
 
 (defvar *last-revert-time* nil)
 
+(defvar *asking-revert-buffer-p* nil
+  "True while a revert prompt is open, so the *pre-command-hook* does not prompt
+recursively or repeatedly per keystroke.")
+
+(defun buffer-revert-declined-p (buffer)
+  "True when the user already chose to keep BUFFER against the current on-disk
+revision, so it should not be asked about again until the file changes again."
+  (eql (buffer-value buffer 'declined-revert-disk-date)
+       (file-write-date (buffer-filename buffer))))
+
+(defun revert-buffer-without-asking (buffer)
+  "Reload BUFFER from its file, honoring any `revert-buffer-function'."
+  (alexandria:if-let (fn (revert-buffer-function buffer))
+    (funcall fn buffer)
+    (sync-buffer-with-file-content buffer)))
+
 (defun ask-revert-buffer ()
-  (when (or (null *last-revert-time*)
-            (< (* 2 (/ internal-time-units-per-second 10))
-               (- (get-internal-real-time) *last-revert-time*)))
-    (setf *last-revert-time* (get-internal-real-time))
-    (when (changed-disk-p (current-buffer))
-      (revert-buffer t)
-      #+(or)
-      (cond ((eql (buffer-value (current-buffer) 'no-revert-buffer)
-                  (file-write-date (buffer-filename))))
-            ((prompt-for-y-or-n-p (format nil "Revert buffer from file ~A" (buffer-filename)))
-             (revert-buffer t))
-            (t
-             (setf (buffer-value (current-buffer) 'no-revert-buffer)
-                   (file-write-date (buffer-filename))))))))
+  (unless *asking-revert-buffer-p*
+    (when (or (null *last-revert-time*)
+              (< (* 2 (/ internal-time-units-per-second 10))
+                 (- (get-internal-real-time) *last-revert-time*)))
+      (setf *last-revert-time* (get-internal-real-time))
+      (let ((buffer (current-buffer)))
+        (when (changed-disk-p buffer)
+          (cond ((not (buffer-modified-p buffer))
+                 ;; No unsaved edits to lose: refresh silently.
+                 (revert-buffer-without-asking buffer))
+                ((buffer-revert-declined-p buffer)
+                 ;; User already declined to revert this on-disk revision.
+                 nil)
+                (t
+                 ;; Modified buffer: never discard edits without an answer.
+                 (let ((*asking-revert-buffer-p* t))
+                   (if (prompt-for-y-or-n-p
+                        (format nil "~A changed on disk. Revert and discard your edits?"
+                                (buffer-filename buffer)))
+                       (revert-buffer-without-asking buffer)
+                       (setf (buffer-value buffer 'declined-revert-disk-date)
+                             (file-write-date (buffer-filename buffer))))))))))))
 
 (add-hook *pre-command-hook* 'ask-revert-buffer)
 
