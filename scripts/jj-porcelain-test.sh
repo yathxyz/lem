@@ -59,6 +59,30 @@ current_change_id() {
     --template change_id
 }
 
+wait_current_change_id() {
+  local expected=$1 index=0
+  while ((index < 80)); do
+    if [ "$(current_change_id)" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+wait_current_change_not() {
+  local previous=$1 index=0
+  while ((index < 80)); do
+    if [ "$(current_change_id)" != "$previous" ]; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
 visible_description() {
   "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph -r 'all()' \
     --template 'description.first_line() ++ "\n"' | grep -Fxq -- "$1"
@@ -332,10 +356,139 @@ else
 fi
 
 lem_keys "$session" '?'
-if lem_wait_for "$session" 'c describe, C commit' 10 >/dev/null; then
+if lem_wait_for "$session" 'o/O/I/A new' 10 >/dev/null; then
   pass help '? exposed the focused porcelain command surface'
 else
   fail help 'the porcelain help summary was not visible'
+fi
+
+initial_working_copy_id=$(current_change_id)
+lem_keys "$session" '['
+if invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=base\nbody_line '* ]]; then
+  pass goto-parent '[ selected the sole visible parent row'
+else
+  fail goto-parent '[ did not select the working copy parent'
+fi
+lem_keys "$session" ']'
+if invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=current '* ]]; then
+  pass goto-child '] selected the sole visible child row'
+else
+  fail goto-child '] did not return to the working copy child'
+fi
+lem_keys "$session" '[' '[' '['
+if lem_wait_for "$session" 'No parent revisions are visible' 10 >/dev/null &&
+   [ "$(current_change_id)" = "$initial_working_copy_id" ] &&
+   invoke_report && [[ $(latest_report) == *'kind=log row=yes description= rows=3 '* ]]; then
+  pass parent-refusal '[ refused the root row without moving or mutating'
+else
+  fail parent-refusal 'root-parent refusal changed point or repository state'
+fi
+lem_keys "$session" '.'
+if invoke_report && [[ $(latest_report) == *'description=current '* ]]; then
+  pass goto-working-copy '. selected the current working-copy row'
+else
+  fail goto-working-copy '. did not restore the @ row'
+fi
+
+# A temporary non-working-copy sibling makes ] exercise Majutsu's exact-choice
+# path rather than silently choosing one of several visible children.
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new --no-edit \
+  "$base_change_id" --message 'navigation sibling' >/dev/null
+navigation_sibling_id=$(
+  revision_with_description_parent \
+    'navigation sibling' "$base_change_id" "$initial_working_copy_id"
+)
+navigation_sibling_short=$(
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph \
+    -r "$navigation_sibling_id" --template 'change_id.shortest(12)'
+)
+lem_keys "$session" g r '[' ']'
+if lem_wait_for "$session" 'Go to child:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l "$navigation_sibling_short"
+  lem_keys "$session" Enter
+fi
+if invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=navigation_sibling '* ]]; then
+  pass goto-child-choice '] prompted for and selected one of multiple children'
+else
+  fail goto-child-choice 'multiple-child selection was absent or chose the wrong row'
+fi
+lem_keys "$session" '.'
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" undo >/dev/null
+lem_keys "$session" g r
+if wait_revision_absent "$navigation_sibling_id" && invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=current rows=3 '* ]]; then
+  pass navigation-cleanup 'the temporary branch was removed and @ stayed selected'
+else
+  fail navigation-cleanup 'temporary relationship fixture cleanup diverged'
+fi
+
+# Log-local O/I/A are immediate Majutsu workflows. Each graph rewrite is
+# verified through real jj and then undone before the longstanding suite runs.
+lem_keys "$session" O
+new_child_id=$initial_working_copy_id
+if wait_current_change_not "$initial_working_copy_id"; then
+  new_child_id=$(current_change_id)
+fi
+if [ "$new_child_id" != "$initial_working_copy_id" ] &&
+   [ "$(revision_parent "$new_child_id")" = "$initial_working_copy_id" ] &&
+   invoke_report && [[ $(latest_report) == *'kind=log row=yes description= '* ]]; then
+  pass new-dwim 'O created and selected a child of the selected row'
+else
+  fail new-dwim 'O did not create the expected child graph'
+fi
+lem_keys "$session" u '.'
+if wait_current_change_id "$initial_working_copy_id" &&
+   wait_revision_absent "$new_child_id"; then
+  pass new-dwim-undo 'u restored the graph after O'
+else
+  fail new-dwim-undo 'O was not cleanly undoable'
+fi
+
+lem_keys "$session" I
+new_before_id=$initial_working_copy_id
+if wait_current_change_not "$initial_working_copy_id"; then
+  new_before_id=$(current_change_id)
+fi
+if [ "$new_before_id" != "$initial_working_copy_id" ] &&
+   [ "$(revision_parent "$new_before_id")" = "$base_change_id" ] &&
+   [ "$(revision_parent "$initial_working_copy_id")" = "$new_before_id" ] &&
+   invoke_report && [[ $(latest_report) == *'kind=log row=yes description= '* ]]; then
+  pass new-before 'I inserted and selected a change before the selected row'
+else
+  fail new-before 'I did not create the expected before graph'
+fi
+lem_keys "$session" u '.'
+if wait_current_change_id "$initial_working_copy_id" &&
+   wait_revision_absent "$new_before_id" &&
+   [ "$(revision_parent "$initial_working_copy_id")" = "$base_change_id" ]; then
+  pass new-before-undo 'u restored the graph after I'
+else
+  fail new-before-undo 'I was not cleanly undoable'
+fi
+
+lem_keys "$session" '[' A
+new_after_id=$initial_working_copy_id
+if wait_current_change_not "$initial_working_copy_id"; then
+  new_after_id=$(current_change_id)
+fi
+if [ "$new_after_id" != "$initial_working_copy_id" ] &&
+   [ "$(revision_parent "$new_after_id")" = "$base_change_id" ] &&
+   [ "$(revision_parent "$initial_working_copy_id")" = "$new_after_id" ] &&
+   invoke_report && [[ $(latest_report) == *'kind=log row=yes description= '* ]]; then
+  pass new-after 'A inserted and selected a change after the selected row'
+else
+  fail new-after 'A did not create the expected after graph'
+fi
+lem_keys "$session" u '.'
+if wait_current_change_id "$initial_working_copy_id" &&
+   wait_revision_absent "$new_after_id" &&
+   [ "$(revision_parent "$initial_working_copy_id")" = "$base_change_id" ]; then
+  pass new-after-undo 'u restored the graph after A'
+else
+  fail new-after-undo 'A was not cleanly undoable'
 fi
 
 lem_keys "$session" c

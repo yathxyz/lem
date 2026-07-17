@@ -514,6 +514,14 @@
   "Return the revision at point, defaulting to the working copy."
   (or (jj-row-revision) "@"))
 
+(defun jj-current-log-revision ()
+  "Return the revision row selected in the current Jujutsu log."
+  (unless (eq :log
+              (buffer-value (current-buffer) *lem-yath-jj-view-kind-key*))
+    (editor-error "This command requires the Jujutsu history"))
+  (or (jj-row-revision)
+      (editor-error "No Jujutsu revision is selected")))
+
 (defun jj-refresh-after-mutation (root arguments success-message)
   "Run a mutating jj command and refresh the current porcelain."
   (run-jj root arguments)
@@ -647,6 +655,66 @@
                       (jj-log-entry-description entry))))))
      :test-function (lambda (input) (not (str:blankp input)))
      :history-symbol history-symbol)))
+
+(defun jj-related-visible-entries (root revision relation)
+  "Return visible history entries related to REVISION by RELATION."
+  (let* ((revset
+           (ecase relation
+             (:parent (format nil "parents(~a)" revision))
+             (:child (format nil "children(~a)" revision))))
+         (related
+           (jj-split-null-fields
+            (run-jj root
+                    (list "log" "--no-graph" "-r" revset
+                          "--template"
+                          "change_id.shortest(12) ++ \"\\0\"")))))
+    (remove-if-not
+     (lambda (entry)
+       (find (jj-log-entry-change-id entry) related :test #'string=))
+     (jj-log-entries root))))
+
+(defun jj-prompt-for-related-entry (prompt entries)
+  "Read one exact history entry from ENTRIES using PROMPT."
+  (let ((choices
+          (mapcar (lambda (entry)
+                    (cons (jj-log-entry-change-id entry) entry))
+                  entries)))
+    (prompt-for-string
+     prompt
+     :completion-function
+     (lambda (input)
+       (completion-annotated-prompt-choices
+        (prescient-filter input choices :key #'car :category :jj-revision)
+        (lambda (entry)
+          (format nil "~12a  ~a"
+                  (jj-log-entry-commit-id entry)
+                  (if (str:blankp (jj-log-entry-description entry))
+                      "(no description)"
+                      (jj-log-entry-description entry))))))
+     :test-function
+     (lambda (input)
+       (not (null (assoc input choices :test #'string=)))))))
+
+(defun jj-goto-related-revision (relation)
+  "Move to a visible parent or child row selected by RELATION."
+  (let* ((root (jj-current-root))
+         (revision (jj-current-log-revision))
+         (entries (jj-related-visible-entries root revision relation))
+         (label (if (eq relation :parent) "parent" "child")))
+    (unless entries
+      (editor-error "No ~a revisions are visible in the current history" label))
+    (let* ((entry
+             (if (null (rest entries))
+                 (first entries)
+                 (let ((id
+                         (jj-prompt-for-related-entry
+                          (format nil "Go to ~a: " label) entries)))
+                   (find id entries :key #'jj-log-entry-change-id
+                                    :test #'string=))))
+           (target (jj-log-entry-change-id entry)))
+      (unless (jj-restore-revision-point (current-buffer) target)
+        (editor-error "The selected ~a is no longer visible" label))
+      target)))
 
 (defun jj-rebase-keymap ()
   "Build the focused Majutsu-style rebase popup."
@@ -1615,6 +1683,30 @@
       (setf arguments (append arguments (list "--message" description))))
     (jj-refresh-after-mutation root arguments "Jujutsu change created")))
 
+(defun jj-create-and-select-working-copy (arguments)
+  "Run `jj new' with ARGUMENTS and select the resulting working copy."
+  (let* ((root (jj-current-root))
+         (buffer (current-buffer)))
+    (run-jj root (cons "new" arguments))
+    (render-jj-buffer buffer root)
+    (unless (jj-restore-working-copy-point buffer)
+      (editor-error "The new Jujutsu working copy is outside the visible history"))
+    (message "Jujutsu change created")))
+
+(define-command lem-yath-jj-new-dwim () ()
+  "Create and edit a child of the selected row, like Majutsu `O'."
+  (jj-create-and-select-working-copy (list (jj-current-log-revision))))
+
+(define-command lem-yath-jj-new-before () ()
+  "Insert and edit a change before the selected row, like Majutsu `I'."
+  (jj-create-and-select-working-copy
+   (list "--insert-before" (jj-current-log-revision))))
+
+(define-command lem-yath-jj-new-after () ()
+  "Insert and edit a change after the selected row, like Majutsu `A'."
+  (jj-create-and-select-working-copy
+   (list "--insert-after" (jj-current-log-revision))))
+
 (define-command lem-yath-jj-edit () ()
   "Edit the selected change in the working copy, like Majutsu `e'."
   (let ((root (jj-current-root))
@@ -1679,10 +1771,26 @@
   "Move to the previous rendered Jujutsu revision."
   (jj-move-to-revision-row -1))
 
+(define-command lem-yath-jj-goto-working-copy () ()
+  "Jump to the current working-copy row, like Majutsu `.'."
+  (unless (eq :log
+              (buffer-value (current-buffer) *lem-yath-jj-view-kind-key*))
+    (editor-error "This command requires the Jujutsu history"))
+  (unless (jj-restore-working-copy-point (current-buffer))
+    (editor-error "The working copy is outside the visible history")))
+
+(define-command lem-yath-jj-goto-parent () ()
+  "Jump to a visible parent of the selected row, like Majutsu `['."
+  (jj-goto-related-revision :parent))
+
+(define-command lem-yath-jj-goto-child () ()
+  "Jump to a visible child of the selected row, like Majutsu `]'."
+  (jj-goto-related-revision :child))
+
 (define-command lem-yath-jj-help () ()
   "Show the focused Majutsu-compatible Jujutsu command surface."
   (message
-   "Jujutsu: c describe, C commit, o new, s squash, S split, r rebase, y/Y duplicate, b bookmarks, e edit, u undo, C-r redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
+   "Jujutsu: c/C describe/commit, o/O/I/A new, ./[/] working-copy/parent/child, s/S squash/split, r rebase, y/Y duplicate, b bookmarks, e edit, u/C-r undo/redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
 
 (define-command lem-yath-jj-quit () ()
   "Quit the current Jujutsu status/log window."
@@ -1715,6 +1823,9 @@
 (define-key *lem-yath-jj-view-keymap* "c" 'lem-yath-jj-describe)
 (define-key *lem-yath-jj-view-keymap* "C" 'lem-yath-jj-commit)
 (define-key *lem-yath-jj-view-keymap* "o" 'lem-yath-jj-new)
+(define-key *lem-yath-jj-view-keymap* "O" 'lem-yath-jj-new-dwim)
+(define-key *lem-yath-jj-view-keymap* "I" 'lem-yath-jj-new-before)
+(define-key *lem-yath-jj-view-keymap* "A" 'lem-yath-jj-new-after)
 (define-key *lem-yath-jj-view-keymap* "s" 'lem-yath-jj-squash)
 (define-key *lem-yath-jj-view-keymap* "S" 'lem-yath-jj-split)
 (define-key *lem-yath-jj-view-keymap* "r" 'lem-yath-jj-rebase)
@@ -1729,8 +1840,9 @@
 (define-key *lem-yath-jj-view-keymap* "Return" 'lem-yath-jj-show)
 (define-key *lem-yath-jj-view-keymap* "C-j" 'lem-yath-jj-next-revision)
 (define-key *lem-yath-jj-view-keymap* "C-k" 'lem-yath-jj-previous-revision)
-(define-key *lem-yath-jj-view-keymap* "]" 'lem-yath-jj-next-revision)
-(define-key *lem-yath-jj-view-keymap* "[" 'lem-yath-jj-previous-revision)
+(define-key *lem-yath-jj-view-keymap* "." 'lem-yath-jj-goto-working-copy)
+(define-key *lem-yath-jj-view-keymap* "]" 'lem-yath-jj-goto-child)
+(define-key *lem-yath-jj-view-keymap* "[" 'lem-yath-jj-goto-parent)
 (define-key *lem-yath-jj-view-keymap* "?" 'lem-yath-jj-help)
 
 (define-key *lem-yath-jj-split-mode-keymap* "H"

@@ -388,7 +388,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   are exercised against real Python, Go, C, C++, and Rust programs
 - Legit (Magit approximation) plus packaged `jj` smart dispatch on `SPC g g`;
   the Jujutsu side is a row-aware porcelain with a Majutsu-compatible shared
-  multiline editor for describe and working-copy commit, plus new,
+  multiline editor for describe and working-copy commit, prompt-based `o` plus
+  direct `O`/`I`/`A` child/before/after creation, working-copy and
+  relationship-aware log navigation,
   whole-change squash with a compact description-policy popup, edit,
   confirmed selected-row rebase with branch/subtree/exact/insert modes,
   Majutsu-compatible `y` placement and immediate `Y` duplicate workflows,
