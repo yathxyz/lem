@@ -324,6 +324,13 @@
   restore-descendants
   ignore-immutable)
 
+(defstruct jj-absorb-state
+  revision
+  from
+  into
+  fileset
+  ignore-immutable)
+
 (defun jj-split-null-fields (text)
   "Split TEXT at NUL characters without interpreting its contents."
   (let ((start 0)
@@ -673,6 +680,187 @@
                       (jj-log-entry-description entry))))))
      :test-function (lambda (input) (not (str:blankp input)))
      :history-symbol history-symbol)))
+
+(defun jj-absorb-state-label (value)
+  "Return a bounded popup label for absorb VALUE."
+  (if value (completion-bounded-annotation value) "(unset)"))
+
+(defun jj-absorb-keymap (state)
+  "Build the pinned Majutsu-style absorb popup for STATE."
+  (let* ((keymap (make-keymap :description "JJ Absorb"))
+         (revision (jj-absorb-state-revision state))
+         (from (jj-absorb-state-from state))
+         (into (jj-absorb-state-into state)))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist
+        (entry
+          (list
+           (list "f" (format nil "from selected row: ~a~a"
+                              revision
+                              (if (equal from revision) " [selected]" "")))
+           (list "t" (format nil "into selected row: ~a~a"
+                              revision
+                              (if (equal into revision) " [selected]" "")))
+           (list "c" "clear selections")
+           (list "-" "options: revsets, fileset, immutable")
+           (list "a" "absorb")
+           (list "Return" "absorb")
+           (list "q" "cancel")))
+      (destructuring-bind (key description) entry
+        (define-key keymap key 'nop-command)
+        (setf (lem-core::prefix-description
+               (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
+              description)))
+    keymap))
+
+(defun jj-absorb-option-keymap (state)
+  "Build the option suffix popup for absorb STATE."
+  (let ((keymap (make-keymap :description "JJ Absorb options")))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist
+        (entry
+          (list
+           (list "f" (format nil "from revset: ~a"
+                              (jj-absorb-state-label
+                               (jj-absorb-state-from state))))
+           (list "t" (format nil "into revset: ~a"
+                              (jj-absorb-state-label
+                               (jj-absorb-state-into state))))
+           (list "-" (format nil "fileset/path: ~a"
+                              (jj-absorb-state-label
+                               (jj-absorb-state-fileset state))))
+           (list "I" (format nil "ignore immutable: ~:[off~;on~]"
+                              (jj-absorb-state-ignore-immutable state)))
+           (list "q" "back")))
+      (destructuring-bind (key description) entry
+        (define-key keymap key 'nop-command)
+        (setf (lem-core::prefix-description
+               (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
+              description)))
+    keymap))
+
+(defun jj-absorb-select-row (state category)
+  "Toggle STATE's initiating revision in absorb CATEGORY."
+  (let ((revision (jj-absorb-state-revision state)))
+    (ecase category
+      (:from
+       (setf (jj-absorb-state-from state)
+             (unless (equal (jj-absorb-state-from state) revision)
+               revision)))
+      (:into
+       (setf (jj-absorb-state-into state)
+             (unless (equal (jj-absorb-state-into state) revision)
+               revision))))))
+
+(defun jj-absorb-set-revset (state root category)
+  "Prompt for and set absorb CATEGORY on STATE at ROOT."
+  (let ((revision
+          (jj-prompt-for-revision
+           root
+           (ecase category
+             (:from "Absorb from revision or revset: ")
+             (:into "Absorb into revision or revset: "))
+           (ecase category
+             (:from 'lem-yath-jj-absorb-from)
+             (:into 'lem-yath-jj-absorb-into)))))
+    (ecase category
+      (:from (setf (jj-absorb-state-from state) revision))
+      (:into (setf (jj-absorb-state-into state) revision)))))
+
+(defun jj-absorb-read-option (state)
+  "Read one `-' absorb option key for STATE."
+  (let ((lem/transient:*transient-popup-delay* 0))
+    (keymap-activate (jj-absorb-option-keymap state)))
+  (redraw-display)
+  (prog1
+      (lem-core::keyseq-to-string (list (read-key)))
+    (lem/transient::hide-transient)))
+
+(defun jj-absorb-handle-option (state root)
+  "Update absorb STATE from one pinned option at ROOT."
+  (let ((name (jj-absorb-read-option state)))
+    (cond
+      ((string= name "f") (jj-absorb-set-revset state root :from))
+      ((string= name "t") (jj-absorb-set-revset state root :into))
+      ((string= name "-")
+       (let ((fileset
+               (prompt-for-string
+                "Absorb fileset or path (empty clears): "
+                :history-symbol 'lem-yath-jj-absorb-fileset)))
+         (setf (jj-absorb-state-fileset state)
+               (unless (str:blankp fileset) fileset))))
+      ((string= name "I")
+       (setf (jj-absorb-state-ignore-immutable state)
+             (not (jj-absorb-state-ignore-immutable state))))
+      ((or (string= name "q") (string= name "Escape")) nil)
+      (t (message "No absorb option is bound to - ~a" name)))))
+
+(defun jj-absorb-arguments (state)
+  "Return direct `jj absorb' arguments represented by STATE."
+  (let ((arguments (list "absorb")))
+    (when (jj-absorb-state-from state)
+      (setf arguments
+            (append arguments
+                    (list "--from" (jj-absorb-state-from state)))))
+    (when (jj-absorb-state-into state)
+      (setf arguments
+            (append arguments
+                    (list "--into" (jj-absorb-state-into state)))))
+    (unless (or (jj-absorb-state-from state)
+                (jj-absorb-state-into state))
+      (setf arguments
+            (append arguments
+                    (list "--from" (jj-absorb-state-revision state)))))
+    (when (jj-absorb-state-ignore-immutable state)
+      (setf arguments (append arguments '("--ignore-immutable"))))
+    (when (jj-absorb-state-fileset state)
+      (setf arguments
+            (append arguments
+                    (list "--" (jj-absorb-state-fileset state)))))
+    arguments))
+
+(defun jj-execute-absorb (root state)
+  "Execute absorb STATE at ROOT and retain its initiating history context."
+  (let ((buffer (current-buffer))
+        (revision (jj-absorb-state-revision state)))
+    (run-jj root (jj-absorb-arguments state))
+    (render-jj-buffer buffer root)
+    (unless (jj-restore-revision-point buffer revision)
+      (jj-restore-working-copy-point buffer))
+    (message "Jujutsu absorb completed")))
+
+(defun dispatch-jj-absorb (root revision)
+  "Configure and execute pinned Majutsu absorb from history REVISION."
+  (let ((state (make-jj-absorb-state :revision revision)))
+    (unwind-protect
+         (loop
+           (let ((lem/transient:*transient-popup-delay* 0))
+             (keymap-activate (jj-absorb-keymap state)))
+           (redraw-display)
+           (let* ((key (read-key))
+                  (name (lem-core::keyseq-to-string (list key))))
+             (lem/transient::hide-transient)
+             (cond
+               ((string= name "f") (jj-absorb-select-row state :from))
+               ((string= name "t") (jj-absorb-select-row state :into))
+               ((string= name "c")
+                (setf (jj-absorb-state-from state) nil
+                      (jj-absorb-state-into state) nil))
+               ((string= name "-") (jj-absorb-handle-option state root))
+               ((or (string= name "a") (string= name "Return"))
+                (jj-execute-absorb root state)
+                (return))
+               ((or (string= name "q") (string= name "Escape"))
+                (message "Jujutsu absorb cancelled")
+                (return))
+               (t (message "No absorb action is bound to ~a" name)))))
+      (lem/transient::hide-transient))))
+
+(define-command lem-yath-jj-absorb () ()
+  "Open the pinned Majutsu absorb workflow from the selected revision row."
+  (dispatch-jj-absorb (jj-current-root) (jj-current-log-revision)))
 
 (defun jj-related-visible-entries (root revision relation)
   "Return visible history entries related to REVISION by RELATION."
@@ -2455,7 +2643,7 @@
 (define-command lem-yath-jj-help () ()
   "Show the focused Majutsu-compatible Jujutsu command surface."
   (message
-   "Jujutsu: c/C describe/commit, o/O/I/A new, ./[/] working-copy/parent/child, s/S squash/split, r rebase, _ revert, R restore, y/Y duplicate, b bookmarks, e edit, u/C-r undo/redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
+   "Jujutsu: c/C describe/commit, o/O/I/A new, a absorb, ./[/] working-copy/parent/child, s/S squash/split, r rebase, _ revert, R restore, y/Y duplicate, b bookmarks, e edit, u/C-r undo/redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
 
 (define-command lem-yath-jj-quit () ()
   "Quit the current Jujutsu status/log window."
@@ -2491,6 +2679,7 @@
 (define-key *lem-yath-jj-view-keymap* "O" 'lem-yath-jj-new-dwim)
 (define-key *lem-yath-jj-view-keymap* "I" 'lem-yath-jj-new-before)
 (define-key *lem-yath-jj-view-keymap* "A" 'lem-yath-jj-new-after)
+(define-key *lem-yath-jj-view-keymap* "a" 'lem-yath-jj-absorb)
 (define-key *lem-yath-jj-view-keymap* "s" 'lem-yath-jj-squash)
 (define-key *lem-yath-jj-view-keymap* "S" 'lem-yath-jj-split)
 (define-key *lem-yath-jj-view-keymap* "r" 'lem-yath-jj-rebase)

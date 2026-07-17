@@ -134,6 +134,34 @@ revision_has_file() {
   return 1
 }
 
+revision_file_equals() {
+  local revision=$1 path=$2 expected=$3
+  local actual
+  actual=$(
+    "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+      file show -r "$revision" "root:$path" 2>/dev/null
+  ) || return 1
+  [ "$actual" = "$expected" ]
+}
+
+wait_revision_file_equals() {
+  local revision=$1 path=$2 expected=$3 index=0
+  while ((index < 80)); do
+    if revision_file_equals "$revision" "$path" "$expected"; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+revision_diff_paths() {
+  local revision=$1
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+    diff -r "$revision" --summary
+}
+
 wait_revision_has_file() {
   local revision=$1 path=$2 index=0
   while ((index < 80)); do
@@ -1171,6 +1199,183 @@ if wait_current_change_id "$initial_working_copy_id" &&
   pass restore-cleanup 'operation restore removed the isolated restore fixture'
 else
   fail restore-cleanup 'restore fixture cleanup did not recover the baseline graph'
+fi
+
+absorb_baseline_operation=$(current_operation_id)
+printf 'one original\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}absorb-one.txt"
+printf 'two original\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}absorb-two.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" describe \
+  --message 'absorb destination' >/dev/null
+absorb_destination_id=$(current_change_id)
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new \
+  --message 'absorb source' >/dev/null
+printf 'one updated\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}absorb-one.txt"
+printf 'two updated\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}absorb-two.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" status >/dev/null
+absorb_source_id=$(current_change_id)
+absorb_ready_operation=$(current_operation_id)
+lem_keys "$session" g r
+lem_keys "$session" .
+invoke_report >/dev/null || true
+if [[ $(latest_report) == *'kind=log row=yes description=absorb_source '* ]]; then
+  pass absorb-row 'the absorb fixture selected its content-bearing source row'
+else
+  fail absorb-row 'refresh did not select the absorb source row'
+fi
+
+lem_keys "$session" a
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" f
+fi
+if lem_wait_for "$session" '\[selected\]' 10 >/dev/null; then
+  lem_keys "$session" c
+fi
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" q
+fi
+if [ "$(current_operation_id)" = "$absorb_ready_operation" ] &&
+   revision_file_equals "$absorb_destination_id" absorb-one.txt 'one original' &&
+   revision_file_equals "$absorb_source_id" absorb-one.txt 'one updated' &&
+   ! lem_capture "$session" | grep -q 'JJ Absorb'; then
+  pass absorb-cancel 'f/c cleared the selected source and q cancelled without mutation'
+else
+  fail absorb-cancel 'selection clearing or cancellation changed absorb state'
+fi
+
+lem_keys "$session" a
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" a
+fi
+lem_wait_for "$session" 'Jujutsu absorb completed' 10 >/dev/null || true
+if wait_revision_file_equals "$absorb_destination_id" absorb-one.txt 'one updated' &&
+   wait_revision_file_equals "$absorb_destination_id" absorb-two.txt 'two updated' &&
+   [ -z "$(revision_diff_paths "$absorb_source_id")" ] &&
+   invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=absorb_source '* ]]; then
+  pass absorb-default 'a a absorbed the selected row into its closest mutable ancestor and retained it'
+else
+  fail absorb-default 'default absorb content movement or row restoration diverged'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if wait_revision_file_equals "$absorb_destination_id" absorb-one.txt 'one original' &&
+   revision_diff_paths "$absorb_source_id" | grep -Fq 'absorb-one.txt' &&
+   revision_diff_paths "$absorb_source_id" | grep -Fq 'absorb-two.txt'; then
+  pass absorb-default-undo 'u restored the complete source change after absorb'
+else
+  fail absorb-default-undo 'default absorb was not cleanly undoable'
+fi
+
+lem_keys "$session" a
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Absorb options' 10 >/dev/null; then
+  lem_keys "$session" I
+fi
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Absorb options' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'Absorb fileset or path' 10 >/dev/null; then
+  replace_prompt_text 'absorb-one.txt'
+fi
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" a
+fi
+lem_wait_for "$session" 'Jujutsu absorb completed' 10 >/dev/null || true
+absorb_fileset_diff=$(revision_diff_paths "$absorb_source_id")
+if wait_revision_file_equals "$absorb_destination_id" absorb-one.txt 'one updated' &&
+   wait_revision_file_equals "$absorb_destination_id" absorb-two.txt 'two original' &&
+   [[ "$absorb_fileset_diff" != *'absorb-one.txt'* ]] &&
+   [[ "$absorb_fileset_diff" == *'absorb-two.txt'* ]]; then
+  pass absorb-fileset 'the fileset and immutable options limited absorb to the prompted path'
+else
+  fail absorb-fileset 'fileset-scoped absorb moved the wrong source paths'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if wait_revision_file_equals "$absorb_destination_id" absorb-one.txt 'one original'; then
+  pass absorb-fileset-undo 'u restored the fileset-scoped absorb operation'
+else
+  fail absorb-fileset-undo 'fileset absorb was not cleanly undoable'
+fi
+
+lem_keys "$session" [
+invoke_report >/dev/null || true
+if [[ $(latest_report) == *'kind=log row=yes description=absorb_destination '* ]]; then
+  pass absorb-destination-row 'parent navigation selected the explicit absorb destination'
+else
+  fail absorb-destination-row 'could not select the absorb destination row'
+fi
+lem_keys "$session" a
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" t
+fi
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Absorb options' 10 >/dev/null; then
+  lem_keys "$session" f
+fi
+if lem_wait_for "$session" 'Absorb from revision or revset' 10 >/dev/null; then
+  replace_prompt_text "$absorb_source_id"
+fi
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" Enter
+fi
+lem_wait_for "$session" 'Jujutsu absorb completed' 10 >/dev/null || true
+if wait_revision_file_equals "$absorb_destination_id" absorb-one.txt 'one updated' &&
+   [ -z "$(revision_diff_paths "$absorb_source_id")" ] &&
+   invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=absorb_destination '* ]]; then
+  pass absorb-endpoints 't, -f, and Return used the selected into row and prompted source revset'
+else
+  fail absorb-endpoints 'explicit absorb endpoints or destination-row restoration diverged'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+lem_keys "$session" ]
+invoke_report >/dev/null || true
+
+absorb_refusal_operation=$(current_operation_id)
+lem_keys "$session" a
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Absorb options' 10 >/dev/null; then
+  lem_keys "$session" f
+fi
+if lem_wait_for "$session" 'Absorb from revision or revset' 10 >/dev/null; then
+  replace_prompt_text 'definitely-no-such-absorb-revision'
+fi
+if lem_wait_for "$session" 'JJ Absorb' 10 >/dev/null; then
+  lem_keys "$session" a
+fi
+if lem_wait_for "$session" 'jj absorb failed' 10 >/dev/null &&
+   [ "$(current_operation_id)" = "$absorb_refusal_operation" ] &&
+   revision_file_equals "$absorb_destination_id" absorb-one.txt 'one original' &&
+   revision_file_equals "$absorb_source_id" absorb-one.txt 'one updated'; then
+  pass absorb-refusal 'an invalid source revset surfaced failure without mutation'
+else
+  fail absorb-refusal 'invalid absorb input changed history or hid failure'
+fi
+
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" op restore \
+  "$absorb_baseline_operation" >/dev/null
+lem_keys "$session" g r
+lem_keys "$session" .
+invoke_report >/dev/null || true
+if wait_current_change_id "$initial_working_copy_id" &&
+   wait_revision_absent "$absorb_source_id" &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}absorb-one.txt" ] &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}absorb-two.txt" ] &&
+   [[ $(latest_report) == *'description=current rows=3 '* ]]; then
+  pass absorb-cleanup 'operation restore removed the isolated absorb fixture'
+else
+  fail absorb-cleanup 'absorb fixture cleanup did not recover the baseline graph'
 fi
 
 lem_keys "$session" c

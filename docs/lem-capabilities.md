@@ -2011,7 +2011,7 @@ copy or a visible parent or child, prompting over annotated exact choices when
 a relationship branches. `c` edits the selected description, `C` commits the
 working copy, `o` prompts while creating a child, and `O`, `I`, and `A`
 immediately create a child or insert a change before or after the selected row.
-`e` changes the working copy,
+`a` opens the selected-row absorb workflow, `e` changes the working copy,
 `s` to open a whole-change squash popup, `r` to open a selected-row rebase
 popup, `_` to open a revert popup, `R` to open a restore popup, `S` to open a
 partial-patch split view,
@@ -2040,6 +2040,15 @@ or before a prompted revision. Uppercase `Y` performs the existing-parent
 case immediately. Destination prompts share the annotated Prescient revision
 history, accept arbitrary nonblank revsets, and every successful form keeps
 point on the original revision.
+The `a` absorb popup follows pinned Majutsu's log behavior. With no explicit
+endpoint, `a` or Return passes the initiating row as `--from`; `f` and `t`
+toggle that row as the source or destination, while `- f` and `- t` accept an
+arbitrary nonblank revset through the annotated history prompt. `- -` supplies
+one arbitrary fileset expression or literal path, `- I` permits immutable
+rewrites, and `c` clears both endpoints. If only a destination is selected,
+the source remains jj's working-copy default. Cancellation is non-mutating,
+execution uses direct argv, CLI refusal leaves history unchanged, and success
+retains the initiating row when it still exists.
 The `_` revert popup follows Majutsu's selected-row defaults: the source and
 destination start at that revision and the reversal is inserted after it. `r`
 changes the source revset, while `o`, `a`, and `b` select a prompted onto,
@@ -2102,6 +2111,11 @@ undos, point preservation, and invalid-destination refusal. Revert coverage
 drives popup cancellation, selected-row defaults, prompted onto and
 insert-before placement, exact graph and file-state effects, operation undo,
 point preservation, invalid-source refusal, and isolated fixture restoration.
+Absorb coverage drives endpoint selection and clearing, cancellation, the
+selected-row default, a prompted source plus selected destination, fileset
+scoping, immutable-override transport, Return execution, operation undo,
+source/destination row retention, invalid-revset refusal, and isolated fixture
+restoration while checking the exact revision contents and remaining diff.
 Restore coverage drives cancellation, the argument-free working-copy default,
 one-path fileset scope, explicit source revsets, selected historical destination
 and changes-in modes, selection clearing, ordinary versus content-preserving

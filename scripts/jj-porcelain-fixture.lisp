@@ -38,6 +38,7 @@
      ("O" lem-yath-jj-new-dwim)
      ("I" lem-yath-jj-new-before)
      ("A" lem-yath-jj-new-after)
+     ("a" lem-yath-jj-absorb)
      ("s" lem-yath-jj-squash)
      ("S" lem-yath-jj-split)
      ("r" lem-yath-jj-rebase)
