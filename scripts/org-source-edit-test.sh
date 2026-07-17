@@ -74,6 +74,18 @@ fail() {
   lem_capture "$session" 2>/dev/null || true
 }
 
+wait_for_command_palette_close() {
+  local attempt screen
+  for attempt in {1..100}; do
+    screen="$(lem_capture "$session" 2>/dev/null)" || return 1
+    if ! grep -q 'Command:' <<<"$screen"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 mx() {
   local command="$1"
   tmux_cmd send-keys -t "$session" Escape Escape M-x
@@ -81,7 +93,7 @@ mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.5
   tmux_cmd send-keys -t "$session" Enter
-  sleep 0.8
+  wait_for_command_palette_close
 }
 
 snapshot() {
