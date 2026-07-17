@@ -26,13 +26,13 @@
       "locked": {
         "lastModified": 1781341814,
         "narHash": "sha256-ZReogIALBqsoBBY4fqYqzmwr9EeuXSj3BqIT9wraOoQ=",
-        "owner": "lem-project",
+        "owner": "yathxyz",
         "repo": "lem",
         "rev": "0ddb9ea78248db67abcd806377415e66bb326d45",
         "type": "github"
       },
       "original": {
-        "owner": "lem-project",
+        "owner": "yathxyz",
         "repo": "lem",
         "type": "github"
       }

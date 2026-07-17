@@ -2,7 +2,7 @@
   description = "lem-yath: yanni's Lem editor configuration";
 
   inputs = {
-    lem.url = "github:lem-project/lem";
+    lem.url = "github:yathxyz/lem";
     nixpkgs.follows = "lem/nixpkgs";
     yasnippet-snippets = {
       url = "github:AndreaCrotti/yasnippet-snippets/606ee926df6839243098de6d71332a697518cb86";
