@@ -117,6 +117,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 - `SPC m e e` evaluates exactly the preceding Common Lisp form through Lem's
   native self-connected SLIME environment in Normal or Visual state; an active
   Visual selection is preserved rather than being evaluated as a region
+- `M-x calc` opens a reusable, read-only GNU-style RPN stack in a compact
+  bottom window and Normal state. Digit and algebraic entry use the configured
+  non-Evil prompt, including transactional Escape; the common Evil-Collection
+  arithmetic, stack, undo/redo, copy/yank, angle, precision, and quit bindings
+  use packaged `qalc` evaluation. GNU Calc's advanced symbolic, matrix,
+  programming, graphing, trail, and auxiliary interfaces remain outside the
+  bounded everyday-calculator port
 - Emacs 31-style asynchronous compilation on `SPC c c`, seeded with its exact
   `make -k -jN` default and launched in the originating buffer's directory and
   Direnv-aware environment; the save prompt includes the configured `d` diff,
@@ -625,6 +632,7 @@ nix run .#vundo-test
 nix run .#editing-test
 nix run .#formatting-test
 nix run .#daily-workflows-test
+nix run .#calc-test
 nix run .#direnv-test
 nix run .#electric-editing-test
 nix run .#ui-parity-test

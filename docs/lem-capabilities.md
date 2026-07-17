@@ -3094,14 +3094,24 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   (interactive tutorial). Lem-yath deliberately overrides the splash with an
   empty Org `*scratch*` buffer to match the configured Emacs startup.
 - **bookmark**: `extensions/bookmark/` (`lem-bookmark`).
+- **GNU-style Calc parity (lem-yath, not upstream)**: `src/calc.lisp` supplies
+  the configured `M-x calc` as a reusable read-only RPN stack in Evil Normal
+  state. Common Evil-Collection entry, arithmetic, unary, stack, undo/redo,
+  copy/yank, angle, precision, help, and quit keys drive a bounded direct-argv
+  `qalc` evaluator; Escape aborts prompt entry transactionally and `q` restores
+  the exact origin window. This deliberately does not load upstream contrib
+  `calc-mode`, whose algebraic line evaluator does not match GNU Calc's RPN
+  interaction model (`scripts/calc-test.sh`).
 - **living-canvas / pixel-demo / call-graph**: experimental visual features
   (`#+sbcl lem-living-canvas`; call-graph providers for go/python via tree-sitter).
-- **contrib/ (NOT in the default image)**: `bracket-paren-mode`, `calc-mode`, `fbar`,
+- **contrib/ (NOT in the default image)**: `bracket-paren-mode`, upstream
+  `calc-mode`, `fbar`,
   `migemo`, `modeline-battery`, `mouse-sgr1006`, `overwrite-mode`, `selection-mode`,
   `tetris`, `trailing-spaces`, `version-up`, `ollama`, `google-translate`. These are the
   `lem-contrib` system (`contrib/lem-contrib.asd`) and are **not** depended on by
   `lem/extensions` — they would need to be loaded explicitly (and since the nix image
-  lacks the extension-manager, they must be present to ASDF; see top note).
+  lacks the extension-manager, they must be present to ASDF; see top note). The
+  similarly named lem-yath Calc command described above is loaded independently.
 
 ---
 

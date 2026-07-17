@@ -39,6 +39,7 @@
                (:file "git")
                (:file "forge")
                (:file "project")
+               (:file "calc")
                (:file "lint")
                (:file "dap")
                (:file "jump-feedback")
