@@ -591,6 +591,13 @@ the trailing text-ready space. The profile binds no other org-journal command
 - Agenda sources are the top-level `.org` files in the three existing roots above; roam, journal, and other nested trees are not included by those directory entries.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
+- Lem now covers the configured mutation paths exposed by that map: `dd`
+  deletes a complete subtree with GNU Org's multi-line confirmation threshold,
+  `ce` sets `Effort`, and `H`/`L` move the selected planning or ordinary-event
+  timestamp. GNU `C-k`, `e`/`C-c C-x e`, Shift-Left/Shift-Right, and
+  `C-c C-x Left`/`C-c C-x Right` remain available from the effective base map.
+  Universal prefixes select hour and five-minute movement, and an immediately
+  repeated opposite shift retains that unit as in pinned Org.
 - Effective agenda `I/O` is state-dependent: Evil-Org motion state shadows the
   base map with stock single-current-clock commands; Emacs state reaches the
   custom delegated-clock commands. The latter use bulk-marked rows (or the

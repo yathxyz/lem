@@ -39,7 +39,8 @@
 (defstruct (agenda-item (:constructor make-agenda-item))
   "One parsed heading: its TODO keyword, text, source file/line and date."
   keyword text file line heading date kind event-p end-date repeater time
-  occurrence-index occurrence-count)
+  occurrence-index occurrence-count
+  timestamp-line timestamp-source-line timestamp-start timestamp-raw)
 
 (defparameter *heading-scanner*
   (ppcre:create-scanner
@@ -166,12 +167,14 @@
                                   0 (agenda-parse-active-timestamp second)))))
                       (push (list :date date :time time :repeater repeater
                                   :end-date end-date
+                                  :start start
                                   :raw (subseq line start end))
                             specs)))))
               (setf offset end))
         :finally (return (nreverse specs))))
 
-(defun agenda-item-with-event (item spec &optional heading-line-p)
+(defun agenda-item-with-event
+    (item spec source-line-number source-line &optional heading-line-p)
   (make-agenda-item
    :keyword (agenda-item-keyword item)
    :text (if (and heading-line-p (null (getf spec :end-date)))
@@ -189,7 +192,11 @@
    :event-p t
    :end-date (getf spec :end-date)
    :repeater (getf spec :repeater)
-   :time (getf spec :time)))
+   :time (getf spec :time)
+   :timestamp-line source-line-number
+   :timestamp-source-line source-line
+   :timestamp-start (getf spec :start)
+   :timestamp-raw (getf spec :raw)))
 
 (defun parse-org-file (path)
   "Return parsed agenda items and, as a second value, warnings or read errors.
@@ -209,11 +216,11 @@ Ordinary active timestamps belong to their containing visible heading."
            (labels ((finish-current ()
                       (when (and current (not current-planned-p))
                         (push current items)))
-                    (emit-events (line)
+                    (emit-events (line lineno)
                       (when current
                         (dolist (spec (agenda-active-timestamp-specs line))
                           (push (agenda-item-with-event
-                                 current spec
+                                 current spec lineno line
                                  (string= line (agenda-item-heading current)))
                                 items))))
                     (comment-heading-p (text)
@@ -276,7 +283,7 @@ Ordinary active timestamps belong to their containing visible heading."
                                            planning-line-open-p
                                            (not suppressed-p))
                                      (unless suppressed-p
-                                       (emit-events line)))))
+                                       (emit-events line lineno)))))
                                (when current
                                  (let ((planning-p
                                          (and planning-line-open-p
@@ -313,7 +320,7 @@ Ordinary active timestamps belong to their containing visible heading."
                                       (setf drawer-p nil))
                                      ((or planning-p drawer-p
                                           (ppcre:scan "^\\s*#" line)))
-                                     (t (emit-events line))))))))))
+                                     (t (emit-events line lineno))))))))))
              (finish-current))
            (values (nreverse items) (nreverse warnings))))
     (error (condition)
@@ -553,6 +560,14 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
                                  (agenda-item-time item))
               (put-text-property start point :agenda-occurrence-index
                                  (agenda-item-occurrence-index item))
+              (put-text-property start point :agenda-timestamp-line
+                                 (agenda-item-timestamp-line item))
+              (put-text-property start point :agenda-timestamp-source-line
+                                 (agenda-item-timestamp-source-line item))
+              (put-text-property start point :agenda-timestamp-start
+                                 (agenda-item-timestamp-start item))
+              (put-text-property start point :agenda-timestamp-raw
+                                 (agenda-item-timestamp-raw item))
               (put-text-property start point :agenda-duplicate-index
                                  duplicate-index)))))
     (insert-string point (format nil "~%"))))
@@ -1175,6 +1190,13 @@ suffix."
      (mapcar (lambda (tag) (format nil "~a~a:" prefix tag))
              (prescient-filter fragment known-tags :category :symbol)))))
 
+(defparameter *agenda-tags-prompt-keymap*
+  (let ((keymap (make-keymap :description "Org agenda tags")))
+    ;; CRM accepts the current valid tag list on Return even while candidates
+    ;; for an additional tag remain visible.  Tab retains candidate selection.
+    (define-key keymap "Return" 'lem-yath-prompt-execute)
+    keymap))
+
 (defun agenda-read-tags (heading)
   "Prompt for replacement local tags on HEADING."
   (let ((known-tags (agenda-known-tags)))
@@ -1185,6 +1207,7 @@ suffix."
       :completion-function
       (lambda (input) (agenda-tag-completion-items input known-tags))
       :test-function (constantly t)
+      :special-keymap *agenda-tags-prompt-keymap*
       :history-symbol 'lem-yath-agenda-tags))))
 
 (defun agenda-set-heading-tags (heading tags)

@@ -481,9 +481,14 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope, ordinary and repeating active-timestamp events,
   modal Return/g/q navigation, and Evil-Org-style `t` fast TODO selection plus
-  `J`/`K` GNU Org priority cycling, `C-c C-s`/`C-c C-d` planning edits, and
-  `ct`/`C-c C-q` completion-backed local-tag replacement and clearing,
-  all with immediate source persistence. Evil-Org `dA` archives a complete
+  `J`/`K` GNU Org priority cycling. Evil-Org `dd` and GNU `C-k` durably delete
+  complete source subtrees, while `ce`, GNU `e`, and `C-c C-x e` set validated
+  Effort properties. Agenda `H`/`L` and the GNU shifted-arrow routes move
+  planning or ordinary-event timestamps by days, hours, or five-minute units,
+  including ranges and repeated-unit continuation. `C-c C-s`/`C-c C-d` edit
+  planning fields, and `ct`/`C-c C-q` provide completion-backed local-tag
+  replacement and clearing, all with immediate source persistence. Evil-Org
+  `dA` archives a complete
   subtree to Org's default sibling `_archive` file, while `da` confirms first;
   archive metadata and both files are persisted destination-first. GNU Org's
   `C-c C-w` completes over the current file's level-one headings and

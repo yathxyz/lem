@@ -72,7 +72,8 @@
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
       "return=~a g=~a t=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
-      "J=~a K=~a dA=~a da=~a dollar=~a archive=~a refile=~a kill-hooks=~d "
+      "J=~a K=~a H=~a L=~a dd=~a ce=~a shift-left=~a shift-right=~a "
+      "dA=~a da=~a dollar=~a archive=~a refile=~a kill-hooks=~d "
       "modified=~a undo=~a "
       "running=~a pending=~a")
      serial
@@ -91,6 +92,12 @@
      (agenda-test-command-name "q")
      (agenda-test-command-name "J")
      (agenda-test-command-name "K")
+     (agenda-test-command-name "H")
+     (agenda-test-command-name "L")
+     (agenda-test-command-name "d d")
+     (agenda-test-command-name "c e")
+     (agenda-test-command-name "Shift-Left")
+     (agenda-test-command-name "Shift-Right")
      (agenda-test-command-name "d A")
      (agenda-test-command-name "d a")
      (agenda-test-command-name "$")
@@ -133,6 +140,30 @@
 (define-command lem-yath-test-agenda-goto-work-todo () ()
   (move-point (current-point)
               (agenda-test-find-line "Work unscheduled sentinel")))
+
+(define-command lem-yath-test-agenda-goto-effort () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Effort action sentinel")))
+
+(define-command lem-yath-test-agenda-goto-delete () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Delete action sentinel")))
+
+(define-command lem-yath-test-agenda-goto-delete-one-line () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Delete one-line sentinel")))
+
+(define-command lem-yath-test-agenda-goto-date-shift-planning () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Date shift planning sentinel")))
+
+(define-command lem-yath-test-agenda-goto-date-shift-event () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Date shift event sentinel")))
+
+(define-command lem-yath-test-agenda-goto-time-shift-event () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Time shift event sentinel")))
 
 (define-command lem-yath-test-agenda-goto-archive () ()
   (move-point (current-point)
@@ -257,6 +288,18 @@
         #'agenda-test-failing-top-level-org-files)
   (agenda-start-scan (current-buffer)))
 
+(define-command lem-yath-test-agenda-prompt-point-report () ()
+  (let ((start (lem/prompt-window::current-prompt-start-point))
+        (point (current-point)))
+    (agenda-test-log
+     "PROMPT-POINT input=~s offset=~d"
+     (lem/prompt-window::get-input-string)
+     (- (position-at-point point) (position-at-point start)))))
+
+(dolist (keymap (list lem/prompt-window::*prompt-mode-keymap*
+                      lem/completion-mode::*completion-mode-keymap*))
+  (define-key keymap "F5" 'lem-yath-test-agenda-prompt-point-report))
+
 ;; Test-only controls avoid prompt timing while leaving the production keys
 ;; under test (SPC m a, Return, g, and q) untouched.
 (define-key *lem-yath-agenda-vi-keymap* "F4" 'lem-yath-test-agenda-report)
@@ -264,6 +307,18 @@
 (define-key *lem-yath-agenda-vi-keymap* "F6" 'lem-yath-test-agenda-point-report)
 (define-key *lem-yath-agenda-vi-keymap* "F12"
   'lem-yath-test-agenda-goto-work-todo)
+(define-key *lem-yath-agenda-vi-keymap* "C-c e"
+  'lem-yath-test-agenda-goto-effort)
+(define-key *lem-yath-agenda-vi-keymap* "C-c d"
+  'lem-yath-test-agenda-goto-delete)
+(define-key *lem-yath-agenda-vi-keymap* "C-c k"
+  'lem-yath-test-agenda-goto-delete-one-line)
+(define-key *lem-yath-agenda-vi-keymap* "C-c p"
+  'lem-yath-test-agenda-goto-date-shift-planning)
+(define-key *lem-yath-agenda-vi-keymap* "C-c r"
+  'lem-yath-test-agenda-goto-date-shift-event)
+(define-key *lem-yath-agenda-vi-keymap* "C-c h"
+  'lem-yath-test-agenda-goto-time-shift-event)
 (define-key *lem-yath-agenda-vi-keymap* "F1"
   'lem-yath-test-agenda-goto-archive)
 (define-key *lem-yath-agenda-vi-keymap* "F3"

@@ -2595,7 +2595,28 @@ both replace the current
 heading's local tags. The prompt starts from the existing suffix, completes
 canonical colon-delimited expressions from tags found across the configured
 agenda sources, removes duplicates, offers an explicit clear row for empty
-input, and realigns the result to the active terminal tag column. TODO,
+input, accepts the current valid expression on Return even while add-tag
+candidates remain visible, and realigns the result to the active terminal tag
+column.
+
+Evil-Org `dd` deletes the selected complete source subtree; GNU `C-k` reaches
+the same command from Emacs state. The pinned default asks before deleting a
+subtree with more than one nonblank line, cancellation is mutation-free, and a
+successful deletion saves before refreshing to the nearest surviving row.
+Evil-Org `ce`, GNU `e`, and `C-c C-x e` validate Org duration syntax and create
+or replace the immediate `Effort` property without duplicating an existing
+drawer field.
+
+Evil-Org `H`/`L`, Shift-Left/Shift-Right, and `C-c C-x Left`/`C-c C-x Right`
+move the selected SCHEDULED, DEADLINE, or ordinary active-event timestamp.
+Ordinary use shifts whole days, moving a past non-range item later jumps to
+today as configured. `C-u` selects hours, `C-u C-u` selects five-minute steps,
+and an immediately repeated opposite command continues the chosen unit. Time
+ranges cross midnight coherently and explicit date ranges move both endpoints.
+All changes revalidate the exact scanned source line/token, save immediately,
+refresh, and restore the logical occurrence.
+
+TODO,
 priority, planning, and tag changes save immediately and restore the logical
 agenda row after the asynchronous refresh. A shifted or changed source heading
 fails closed instead of editing the line now occupying its stale location.

@@ -227,7 +227,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -271,6 +271,172 @@ else
     fail sources "source set, grouping, or effective keymap differed"
   fi
 fi
+
+# Add mutation-only targets after the baseline source/grouping assertions so
+# these focused commands do not weaken the established 33-row oracle.
+printf '%s\n' \
+  '* TODO Effort action sentinel' \
+  '* TODO Delete action sentinel' \
+  'Delete body sentinel.' \
+  '** Delete child sentinel' \
+  'Delete child body sentinel.' \
+  '* TODO Delete one-line sentinel' \
+  '* TODO Date shift planning sentinel' \
+  'SCHEDULED: <2026-07-10 Fri>' \
+  '* Date shift event sentinel <2026-07-14 Tue>--<2026-07-15 Wed>' \
+  '* Time shift event sentinel <2026-07-13 Mon 23:30-23:45>' \
+  >>"$work_file"
+tmux_cmd send-keys -t "$session" g
+if ! lem_wait_for "$session" 'Effort action sentinel' 40 >/dev/null; then
+  fail agenda-mutations-setup "new agenda mutation fixtures did not refresh"
+fi
+
+# Evil-Org ce and GNU C-c C-x e set a validated Effort property, preserve an
+# existing drawer, save immediately, and retain the logical agenda row.
+tmux_cmd send-keys -t "$session" C-c e c e
+if lem_wait_for "$session" 'Effort:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'not-a-duration'
+  tmux_cmd send-keys -t "$session" Enter
+  sleep 0.3
+  if ! grep -q '^:Effort:' "$work_file"; then
+    pass effort-invalid "ce rejects an invalid duration before source mutation"
+  else
+    fail effort-invalid "an invalid duration created an Effort property"
+  fi
+else
+  fail effort-prompt "ce did not open the Effort prompt"
+fi
+
+tmux_cmd send-keys -t "$session" c e
+if lem_wait_for "$session" 'Effort:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '1:30'
+  tmux_cmd send-keys -t "$session" Enter
+  if wait_file_pattern '^:Effort:   1:30$' "$work_file" &&
+     lem_wait_for "$session" 'Effort action sentinel' 40 >/dev/null; then
+    pass effort "ce inserted, saved, refreshed, and retained GNU Effort syntax"
+  else
+    fail effort "ce did not persist the expected property drawer value"
+  fi
+else
+  fail effort-prompt "ce did not reopen the Effort prompt"
+fi
+
+tmux_cmd send-keys -t "$session" C-c C-x e
+if lem_wait_for "$session" 'Effort:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '2h'
+  tmux_cmd send-keys -t "$session" Enter
+  if wait_file_pattern '^:Effort:   2h$' "$work_file" &&
+     [ "$(grep -c '^:Effort:' "$work_file")" = 1 ]; then
+    pass effort-gnu-alias "C-c C-x e replaced the existing Effort exactly once"
+  else
+    fail effort-gnu-alias "the GNU Effort alias duplicated or lost the property"
+  fi
+else
+  fail effort-gnu-alias "C-c C-x e did not open the Effort prompt"
+fi
+
+# Evil-Org L moves a past planning date directly to today under GNU's default;
+# H then moves it one ordinary calendar day earlier.
+tmux_cmd send-keys -t "$session" C-c p L
+if wait_file_pattern '^SCHEDULED: <2026-07-12 Sun>$' "$work_file" &&
+   lem_wait_for "$session" 'Date shift planning sentinel.*SCHEDULED 2026-07-12' 40 >/dev/null; then
+  pass agenda-date-catchup "L moved a past planning date directly to today"
+else
+  fail agenda-date-catchup "L did not apply GNU's past-to-today rule"
+fi
+tmux_cmd send-keys -t "$session" H
+if wait_file_pattern '^SCHEDULED: <2026-07-11 Sat>$' "$work_file" &&
+   lem_wait_for "$session" 'Date shift planning sentinel.*SCHEDULED 2026-07-11' 40 >/dev/null; then
+  pass agenda-date-day "H shifted, saved, refreshed, and retained the planning row"
+else
+  fail agenda-date-day "H did not shift the planning date one day earlier"
+fi
+
+# A selected range row identifies the exact source token.  H/L shift both
+# endpoints atomically instead of changing an unrelated timestamp on the same
+# heading or only one side of the range.
+tmux_cmd send-keys -t "$session" C-c r H
+if wait_file_pattern '^\* Date shift event sentinel <2026-07-13 Mon>--<2026-07-14 Tue>$' "$work_file" &&
+   lem_wait_for "$session" 'Date shift event sentinel.*EVENT 2026-07-13' 40 >/dev/null; then
+  pass agenda-date-range "H shifted both event-range endpoints and retained its row"
+else
+  fail agenda-date-range "H did not shift the exact event range"
+fi
+tmux_cmd send-keys -t "$session" L
+if wait_file_pattern '^\* Date shift event sentinel <2026-07-14 Tue>--<2026-07-15 Wed>$' "$work_file" &&
+   lem_wait_for "$session" 'Date shift event sentinel.*EVENT 2026-07-14' 40 >/dev/null; then
+  pass agenda-date-range-return "L restored both event-range endpoints"
+else
+  fail agenda-date-range-return "L failed to shift the event range later"
+fi
+
+# GNU universal-prefix modes shift hours or the default five-minute increment;
+# a following unprefixed opposite command continues the selected unit.
+tmux_cmd send-keys -t "$session" C-c h C-z
+sleep 0.2
+tmux_cmd send-keys -t "$session" C-u C-c C-x Right
+if wait_file_pattern '^\* Time shift event sentinel <2026-07-14 Tue 00:30-00:45>$' "$work_file" &&
+   lem_wait_for "$session" 'Time shift event sentinel.*EVENT 2026-07-14 00:30' 40 >/dev/null; then
+  pass agenda-date-hour "C-u shifted the complete time range across midnight"
+else
+  fail agenda-date-hour "the GNU hour shift did not preserve the time range"
+fi
+tmux_cmd send-keys -t "$session" C-c C-x Left
+if wait_file_pattern '^\* Time shift event sentinel <2026-07-13 Mon 23:30-23:45>$' "$work_file" &&
+   lem_wait_for "$session" 'Time shift event sentinel.*EVENT 2026-07-13 23:30' 40 >/dev/null; then
+  pass agenda-date-hour-repeat "an unprefixed opposite command continued hour mode"
+else
+  fail agenda-date-hour-repeat "hour continuation did not return the timestamp"
+fi
+tmux_cmd send-keys -t "$session" C-u C-u C-c C-x Right
+if wait_file_pattern '^\* Time shift event sentinel <2026-07-13 Mon 23:35-23:50>$' "$work_file" &&
+   lem_wait_for "$session" 'Time shift event sentinel.*EVENT 2026-07-13 23:35' 40 >/dev/null; then
+  pass agenda-date-minute "C-u C-u used the default five-minute increment"
+else
+  fail agenda-date-minute "the GNU minute shift used the wrong increment"
+fi
+tmux_cmd send-keys -t "$session" C-c C-x Left
+wait_file_pattern '^\* Time shift event sentinel <2026-07-13 Mon 23:30-23:45>$' "$work_file" || true
+lem_wait_for "$session" 'Time shift event sentinel.*EVENT 2026-07-13 23:30' 40 >/dev/null || true
+tmux_cmd send-keys -t "$session" C-z
+sleep 0.2
+
+# Evil-Org dd confirms a multi-line subtree at the pinned default threshold.
+# Cancellation is atomic; acceptance removes every child and all duplicate
+# agenda rows.  GNU C-k in Emacs state deletes a one-line entry without asking.
+tmux_cmd send-keys -t "$session" C-c d d d
+if lem_wait_for "$session" 'Delete entry with 4 lines' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" n
+  sleep 0.3
+  if grep -q '^\* TODO Delete action sentinel$' "$work_file"; then
+    pass agenda-delete-cancel "declining dd left the complete subtree untouched"
+  else
+    fail agenda-delete-cancel "declining dd still changed the source"
+  fi
+else
+  fail agenda-delete-prompt "dd did not confirm a multi-line subtree"
+fi
+tmux_cmd send-keys -t "$session" d d
+if lem_wait_for "$session" 'Delete entry with 4 lines' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" y
+  if wait_file_without_pattern 'Delete action sentinel|Delete child sentinel' "$work_file" &&
+     lem_wait_for "$session" 'Delete one-line sentinel' 40 >/dev/null; then
+    pass agenda-delete "dd deleted and saved the complete subtree"
+  else
+    fail agenda-delete "dd left source or rendered subtree remnants"
+  fi
+else
+  fail agenda-delete-prompt "dd did not reopen its confirmation"
+fi
+
+tmux_cmd send-keys -t "$session" C-c k C-z C-k
+if wait_file_without_pattern 'Delete one-line sentinel' "$work_file"; then
+  pass agenda-delete-gnu-alias "C-k deleted a one-line entry without confirmation"
+else
+  fail agenda-delete-gnu-alias "GNU C-k did not delete the one-line source entry"
+fi
+tmux_cmd send-keys -t "$session" C-z
+sleep 0.2
 
 # Evil-Org da asks before using the configured default archive command.  dA
 # performs the same subtree move directly.  Lem persists the archive first so
@@ -526,7 +692,13 @@ fi
 
 tmux_cmd send-keys -t "$session" C-c C-q
 if lem_wait_for "$session" 'Tags:[[:space:]]+:alpha:' 10 >/dev/null; then
-  for _ in $(seq 1 16); do tmux_cmd send-keys -t "$session" BSpace; done
+  tmux_cmd send-keys -t "$session" F5
+  if wait_report 'PROMPT-POINT input=":alpha:" offset=7'; then
+    pass tags-initial-point "the existing tag prompt opened at the input end"
+  else
+    fail tags-initial-point "the existing tag prompt did not place point at the end"
+  fi
+  for _ in $(seq 1 7); do tmux_cmd send-keys -t "$session" BSpace; done
   tmux_cmd send-keys -t "$session" -l ':beta:gamma:beta:'
   tmux_cmd send-keys -t "$session" Enter
   if lem_wait_for "$session" 'NEXT.*Work unscheduled sentinel.*:beta:gamma:' 40 >/dev/null &&
@@ -541,7 +713,7 @@ fi
 
 tmux_cmd send-keys -t "$session" c t
 if lem_wait_for "$session" 'Tags:[[:space:]]+:beta:gamma:' 10 >/dev/null; then
-  for _ in $(seq 1 20); do tmux_cmd send-keys -t "$session" BSpace; done
+  for _ in $(seq 1 12); do tmux_cmd send-keys -t "$session" BSpace; done
   tmux_cmd send-keys -t "$session" Enter
   if wait_file_pattern '^\* NEXT Work unscheduled sentinel$' "$work_file" &&
      lem_wait_for "$session" 'NEXT[[:space:]]+Work unscheduled sentinel' 40 >/dev/null; then
