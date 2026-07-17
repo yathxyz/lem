@@ -411,6 +411,45 @@ else
     "$session"
 fi
 
+# The same Emacs editing map belongs to ordinary minibuffers that have no
+# completion provider.  Exercise every command whose refresh path differs in
+# that case, then prove the prompt still submits an exact value.
+plain_before=$(report_fixed_count 'PLAIN-PROMPT-SELECT value=plain-ok')
+if invoke_prompt_command lem-yath-test-plain-prompt-editing \
+     'Plain prompt: alpha beta'; then
+  lem_keys "$session" C-a
+  lem_keys "$session" C-d
+  lem_keys "$session" M-d
+  lem_keys "$session" C-e
+  lem_keys "$session" M-BSpace
+  lem_keys "$session" C-a
+  lem_keys "$session" C-k
+  tmux_cmd send-keys -t "$session" -l ab
+  lem_keys "$session" C-t
+  sleep 0.5
+  screen=$(lem_capture "$session")
+  if grep -Fq 'Plain prompt: ba' <<<"$screen"; then
+    lem_keys "$session" C-a
+    lem_keys "$session" C-k
+    tmux_cmd send-keys -t "$session" -l plain-ok
+    lem_keys "$session" Enter
+    if wait_report_fixed_count 'PLAIN-PROMPT-SELECT value=plain-ok' \
+         $((plain_before + 1)); then
+      pass prompt-emacs-plain-editing \
+        'Emacs editing commands stayed live without a completion provider'
+    else
+      fail prompt-emacs-plain-editing \
+        'the edited plain prompt did not submit its exact value' "$session"
+    fi
+  else
+    fail prompt-emacs-plain-editing \
+      'a plain-prompt edit command closed or corrupted the field' "$session"
+    close_prompt
+  fi
+else
+  fail prompt-emacs-plain-editing 'the plain prompt did not open' "$session"
+fi
+
 # Vertico keeps the prompt editable after a zero-result query and repopulates
 # candidates as soon as the query becomes valid again.  Exercise the actual
 # M-x command provider first, including its Marginalia-style documentation.

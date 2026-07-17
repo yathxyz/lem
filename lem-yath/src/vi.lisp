@@ -130,29 +130,32 @@
           (t
            (editor-error "Expected a character")))))
 
+(defun surround-tag-input-valid-p (input)
+  "Accept bounded Evil-surround tag INPUT or keep its prompt active."
+  (when (> (length input) 4096)
+    (editor-error "Tag input is too long"))
+  t)
+
+(define-command lem-yath-surround-submit-tag () ()
+  "Insert `>' and submit the active Evil-surround tag prompt."
+  (insert-character (current-point) #\>)
+  (lem/prompt-window::prompt-execute))
+
+(defparameter *surround-tag-prompt-keymap*
+  (let ((keymap (make-keymap :description "Evil-surround tag prompt")))
+    (define-key keymap ">" 'lem-yath-surround-submit-tag)
+    keymap))
+
 (defun read-surround-tag-input ()
-  "Read an evil-surround tag body, accepting Return or the first `>'."
-  (loop :with input := ""
-        :do (message "<~a" input)
-            (let* ((key (read-key))
-                   (character (key-to-char key)))
-              (cond
-                ((abort-key-p key)
-                 (error 'editor-abort))
-                ((match-key key :sym "Return")
-                 (return input))
-                ((match-key key :sym "Backspace")
-                 (when (plusp (length input))
-                   (setf input (subseq input 0 (1- (length input))))))
-                ((null character)
-                 (editor-error "Expected tag text"))
-                ((>= (length input) 4096)
-                 (editor-error "Tag input is too long"))
-                (t
-                 (setf input
-                       (concatenate 'string input (string character)))
-                 (when (char= character #\>)
-                   (return input)))))))
+  "Read an Evil-surround tag in Lem's editable prompt.
+
+Return submits without a literal closing angle bracket, preserving attributes
+from a changed tag.  The prompt-local `>' binding inserts that character and
+submits immediately, matching evil-surround's attribute-discard form."
+  (prompt-for-string
+   "<"
+   :test-function #'surround-tag-input-valid-p
+   :special-keymap *surround-tag-prompt-keymap*))
 
 (defun surround-tag-name-character-p (character)
   (or (alphanumericp character)

@@ -293,6 +293,12 @@
   "Open a nonempty prompt for physical Emacs line-editing coverage."
   (prompt-completion-fixture-read-edit "quick-lookup"))
 
+(define-command lem-yath-test-plain-prompt-editing () ()
+  "Open an editable prompt with no completion provider."
+  (prompt-completion-fixture-log
+   "PLAIN-PROMPT-SELECT value=~a"
+   (prompt-for-string "Plain prompt: " :initial-value "alpha beta")))
+
 (define-command lem-yath-test-prompt-kill-ring () ()
   "Open an empty prompt with two deterministic kill-ring entries."
   (lem/common/killring:push-killring-item

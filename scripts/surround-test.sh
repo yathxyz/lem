@@ -299,6 +299,33 @@ else
 fi
 
 if invoke_setup lem-yath-test-surround-add-form add-form; then
+  lem_keys "$session" y s i w t
+  lem_wait_for "$session" '<' "$WAIT_TIMEOUT" >/dev/null || true
+  tmux_cmd send-keys -t "$session" -l 'xsection class="hero"'
+  sleep 0.2
+  lem_keys "$session" C-a C-d
+  lem_keys "$session" C-e
+  tmux_cmd send-keys -t "$session" -l '>'
+  sleep 0.35
+  record_result add-form &&
+    assert_result tag-prompt-editing add-form \
+      '<section class="hero">alpha</section> beta' yes yes
+else
+  fail tag-prompt-editing 'editable tag insertion fixture did not open'
+fi
+
+if invoke_setup lem-yath-test-surround-add-form add-form; then
+  lem_keys "$session" y s i w t
+  tmux_cmd send-keys -t "$session" -l 'section'
+  lem_keys "$session" C-g
+  sleep 0.35
+  record_result add-form &&
+    assert_result tag-prompt-abort add-form 'alpha beta' no yes
+else
+  fail tag-prompt-abort 'tag prompt cancellation fixture did not open'
+fi
+
+if invoke_setup lem-yath-test-surround-add-form add-form; then
   lem_keys "$session" y s i w f
   lem_wait_for "$session" 'Function:' "$WAIT_TIMEOUT" >/dev/null || true
   tmux_cmd send-keys -t "$session" -l 'wrap'

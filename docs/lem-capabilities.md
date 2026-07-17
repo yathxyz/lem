@@ -261,9 +261,10 @@ dispatcher implements `ys`, `ds`, `cs`, and Visual `S`, the pinned
 evil-surround delimiter/padding table, `#{...}`, XML tag prompts on `t`/`<`,
 ordinary call prompts on `f`, and prefix forms on `C-f`. The XML path matches
 nested tags while respecting quoted `>` characters and self-closing children;
-tag changes preserve prior attributes when submitted with Return and discard
-them when the new tag ends explicitly with `>`. Malformed nesting and
-multi-character block-string delimiters fail closed. Visual Block `S` applies
+its prompt supports the configured Emacs editing keys and `C-g` rollback. Tag
+changes preserve prior attributes when submitted with Return and discard them
+when an explicit `>` inserts that character and submits immediately. Malformed
+nesting and multi-character block-string delimiters fail closed. Visual Block `S` applies
 the chosen pair independently to each covered row with the pinned package's
 corner orientation, short-line, cursor, state-exit, and one-step undo behavior.
 

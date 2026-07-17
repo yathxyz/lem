@@ -760,7 +760,7 @@ provider's source-defined order."
   "Kill to the end of the prompt line and refresh visible completion."
   (unless (end-buffer-p (current-point))
     (call-command 'kill-line argument)
-    (lem/completion-mode:completion-refresh)))
+    (completion-refresh-or-open-prompt)))
 
 (defun completion-clamp-point-to-prompt-input ()
   (let ((point (current-point))
@@ -796,12 +796,12 @@ provider's source-defined order."
         ((point< origin point)
          (kill-region origin point)
          (move-point point origin))))
-    (lem/completion-mode:completion-refresh)))
+    (completion-refresh-or-open-prompt)))
 
 (define-command lem-yath-prompt-delete-next-char (argument) (:universal-nil)
   "Delete forward and refresh visible prompt completion."
   (call-command 'delete-next-char argument)
-  (lem/completion-mode:completion-refresh))
+  (completion-refresh-or-open-prompt))
 
 (define-command lem-yath-prompt-delete-word (&optional (argument 1))
     (:universal)
@@ -809,7 +809,7 @@ provider's source-defined order."
   (when (minusp argument)
     (editor-error "Prompt M-d does not delete before the editable field"))
   (call-command 'delete-word argument)
-  (lem/completion-mode:completion-refresh))
+  (completion-refresh-or-open-prompt))
 
 (defparameter +completion-prompt-last-command-key+
   'lem-yath-completion-prompt-last-command)
@@ -890,7 +890,7 @@ provider's source-defined order."
               (> input-offset 1)
               (plusp input-offset))
       (call-command 'transpose-characters nil)
-      (lem/completion-mode:completion-refresh))))
+      (completion-refresh-or-open-prompt))))
 
 (defun completion-prompt-word-character-p (character)
   (not (null (lem-core/commands/word::word-type character))))
