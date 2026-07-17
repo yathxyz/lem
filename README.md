@@ -341,9 +341,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   kind-key-plus-Space narrowing with empty-Backspace widening,
   source-workspace-aware reversible preview, and Vi-jumplist acceptance;
   optional Lisp-v2 connections remain globally selected when loaded
-- generic `M-x imenu` for Eglot document symbols and Lisp-family definitions,
-  with GNU Imenu's successive hierarchy prompts, Prescient filtering, exact
-  source placement, configured recenter-only feedback, and Vi `C-o` return
+- generic `M-x imenu` for Eglot document symbols, Lisp-family definitions,
+  native Org headings, and native Markdown headings and footnotes, with GNU
+  Imenu's successive hierarchy prompts, Prescient filtering, exact source
+  placement, configured recenter-only feedback, and Vi `C-o` return
 - installed LSP stack for Rust, Python, Markdown, C#, Nix, Go, Terraform, and
   Java, with Python and Java deliberately enabled manually: rust-analyzer,
   pyright, harper-ls, csharp-ls,

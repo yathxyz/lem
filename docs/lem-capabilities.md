@@ -390,7 +390,7 @@ match-column jump and records it in the Vi jumplist. The real ncurses gate in
 immediate reopen, final jump/return, key precedence, outside-tree isolation,
 empty outlines, and a malicious read-time-evaluation form.
 
-### Generic Imenu — `lem-yath/src/imenu.lisp` (verified, provider-partial)
+### Generic Imenu — `lem-yath/src/imenu.lisp`, `lem-yath/src/native-imenu.lisp` (verified, provider-partial)
 
 `M-x imenu` uses the same Prescient-backed prompt surface without live preview.
 In an LSP buffer, a ready server advertising document symbols supplies the
@@ -399,13 +399,19 @@ open one successive prompt per parent and jump to the full range start; legacy
 `SymbolInformation` results open kind, optional container, and name prompts.
 Without that Eglot-style override, Lisp-family buffers scan the exact pinned GNU
 Emacs function, quoted-alias, variable, valued-`defvar`, and type form sets.
+Native Org buffers expose the pinned depth-two heading tree, normalize TODO,
+priority, COMMENT, tags, and bracket-link labels, exclude source-block content,
+and reveal a folded destination. Native Markdown buffers expose nested ATX and
+Setext headings with GNU Markdown's literal `.` self entries and `-` level-gap
+groups, plus unique visible footnote definitions; YAML front matter, fenced
+content, and commented definitions stay out of the index.
 
 Acceptance records one Vi jumplist entry and runs the configured Imenu feedback:
 recenter only, with no Consult Pulsar pulse. `scripts/lsp-project-test.sh` and
 `scripts/project-outline-test.sh` drive the command through physical M-x,
 successive Return selections, exact target placement, viewport change, silent
-feedback, and `C-o` return. Native indices for non-LSP, non-Lisp modes are not
-yet implemented.
+feedback, folded Org reveal, and `C-o` return. Native indices for other
+non-LSP, non-Lisp modes are not yet implemented.
 
 `lem-yath/src/annotations.lisp` supplies a bounded Marginalia-style layer for
 the daily prompt categories. Commands show active bindings and their first

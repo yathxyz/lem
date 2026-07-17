@@ -327,10 +327,14 @@ nested group or document-symbol parent opens a successive `Index item` prompt.
 When Eglot owns a buffer and advertises `documentSymbolProvider`, its response
 replaces the mode-local index; hierarchical `DocumentSymbol` parents and the
 older kind/container-grouped `SymbolInformation` schema are both accepted.
-The configured `imenu-after-jump-hook` recenters but does not reveal or pulse
-the destination. Lem reproduces this path for those Eglot buffers and for the
-pinned Lisp generic-expression forms (`src/imenu.lisp`); native non-LSP indices
-for modes such as Org and Markdown remain a separate provider gap.
+The configured `imenu-after-jump-hook` recenters but does not pulse the
+destination. Lem reproduces this path for those Eglot buffers, for the pinned
+Lisp generic-expression forms, and for native Org and Markdown indices
+(`src/imenu.lisp`, `src/native-imenu.lisp`). Org uses the pinned depth-two
+heading tree and reveals folded destinations. Markdown includes nested ATX and
+Setext headings plus the pinned Footnotes group while excluding front matter,
+fences, and comments. Native indices for other non-LSP modes remain a provider
+gap.
 
 The `embark-consult` load path comes from the pinned package rather than this
 configuration: its `embark.el` registers a `with-eval-after-load` form for

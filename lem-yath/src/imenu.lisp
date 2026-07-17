@@ -44,6 +44,22 @@
   candidates
   selected)
 
+(defparameter *imenu-native-providers* '())
+
+(defun register-imenu-native-provider (mode function)
+  "Use FUNCTION to build the native Imenu index for exact major MODE."
+  (setf *imenu-native-providers*
+        (acons mode function
+               (remove mode *imenu-native-providers*
+                       :key #'car :test #'eq))))
+
+(defun imenu-native-candidates (buffer)
+  (alexandria:if-let
+      ((provider (assoc (buffer-major-mode buffer)
+                        *imenu-native-providers* :test #'eq)))
+    (values (funcall (cdr provider) buffer) t)
+    (values nil nil)))
+
 (defparameter *imenu-prompt-keymap*
   (let ((keymap (make-keymap :description "Imenu prompt")))
     (define-key keymap "C-g" 'lem/prompt-window::prompt-quit)
@@ -298,11 +314,15 @@
 (defun imenu-candidates (buffer)
   (multiple-value-bind (candidates lsp-applicable-p)
       (imenu-lsp-candidates buffer)
-    (cond
-      (lsp-applicable-p candidates)
-      ((structural-language-buffer-p buffer)
-       (imenu-lisp-candidates buffer))
-      (t nil))))
+    (if lsp-applicable-p
+        candidates
+        (multiple-value-bind (native native-applicable-p)
+            (imenu-native-candidates buffer)
+          (cond
+            (native-applicable-p native)
+            ((structural-language-buffer-p buffer)
+             (imenu-lisp-candidates buffer))
+            (t nil))))))
 
 ;;; --- completion and jump -------------------------------------------------
 

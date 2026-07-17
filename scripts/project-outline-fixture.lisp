@@ -20,6 +20,14 @@
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_EMPTY")))
 
+(defvar *project-outline-test-org*
+  (uiop:parse-native-namestring
+   (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_ORG")))
+
+(defvar *project-outline-test-markdown*
+  (uiop:parse-native-namestring
+   (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_MARKDOWN")))
+
 (defvar *project-outline-test-reader-marker*
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_READER_MARKER")))
@@ -49,6 +57,9 @@
       ((and file (uiop:pathname-equal file *project-outline-test-malicious*))
        "malicious")
       ((and file (uiop:pathname-equal file *project-outline-test-empty*)) "empty")
+      ((and file (uiop:pathname-equal file *project-outline-test-org*)) "org")
+      ((and file (uiop:pathname-equal
+                  file *project-outline-test-markdown*)) "markdown")
       (t "other"))))
 
 (defun project-outline-test-command-name (state)
@@ -114,7 +125,7 @@
             "normal=~a emacs=~a insert=~a visual=~a "
             "preview=~s input=~s pulse=~a pulse-stage=~a "
             "pulse-line=~a pulse-attribute=~a pulse-overlays=~d "
-            "reader-marker=~a")
+            "folds=~d hidden=~a reader-marker=~a")
            (project-outline-test-file-label buffer)
            (line-number-at-point point)
            (point-column point)
@@ -145,6 +156,10 @@
            (or pulse-line "none")
            (or pulse-attribute "none")
            pulse-overlays
+           (length (org-buffer-folds buffer))
+           (if (and (mode-active-p buffer 'org-mode)
+                    (org-hidden-range-at-point point))
+               "yes" "no")
            (if (uiop:file-exists-p *project-outline-test-reader-marker*)
                "yes" "no")))))))
 
@@ -164,6 +179,36 @@
               (project-outline-candidate-line candidate)
               (project-outline-candidate-label candidate))))
       (project-outline-delete-candidates candidates))))
+
+(defun project-outline-test-log-imenu-candidate (candidate prefix)
+  (let ((path (if prefix
+                  (concatenate 'string prefix "/"
+                               (imenu-candidate-label candidate))
+                  (imenu-candidate-label candidate))))
+    (project-outline-test-log "IMENU-PATH file=~a path=~s"
+                              (project-outline-test-file-label
+                               (current-buffer))
+                              path)
+    (dolist (child (imenu-candidate-children candidate))
+      (project-outline-test-log-imenu-candidate child path))))
+
+(define-command lem-yath-test-project-outline-imenu-index () ()
+  (let ((candidates (imenu-candidates (current-buffer))))
+    (unwind-protect
+         (progn
+           (project-outline-test-log "IMENU-INDEX file=~a count=~d"
+                                     (project-outline-test-file-label
+                                      (current-buffer))
+                                     (labels ((count-tree (items)
+                                                (loop :for item :in items
+                                                      :sum (+ 1
+                                                              (count-tree
+                                                               (imenu-candidate-children
+                                                                item))))))
+                                       (count-tree candidates)))
+           (dolist (candidate candidates)
+             (project-outline-test-log-imenu-candidate candidate nil)))
+      (imenu-delete-candidates candidates))))
 
 (define-command lem-yath-test-project-outline-bottom () ()
   (let ((point (buffer-point (current-buffer))))
@@ -185,6 +230,23 @@
 (define-command lem-yath-test-project-outline-empty () ()
   (find-file *project-outline-test-empty*))
 
+(define-command lem-yath-test-project-outline-org () ()
+  (find-file *project-outline-test-org*))
+
+(define-command lem-yath-test-project-outline-markdown () ()
+  ;; The production Eglot override has separate fake-server coverage.  This
+  ;; fixture deliberately exercises markdown-mode's native fallback.
+  (lem-lsp-mode:without-lsp-mode ()
+    (find-file *project-outline-test-markdown*)))
+
+(define-command lem-yath-test-project-outline-fold-org () ()
+  (unless (eq (buffer-major-mode (current-buffer)) 'org-mode)
+    (editor-error "The Org Imenu fixture is not current"))
+  (with-point ((heading (buffer-start-point (current-buffer))))
+    (line-offset heading 2)
+    (org-fold-subtree heading))
+  (lem-yath-test-project-outline-bottom))
+
 (dolist (keymap (list *global-keymap*
                       lem-vi-mode:*normal-keymap*
                       lem-vi-mode:*insert-keymap*
@@ -194,11 +256,15 @@
                       lem/completion-mode::*completion-mode-keymap*))
   (define-key keymap "C-c z r" 'lem-yath-test-project-outline-report)
   (define-key keymap "C-c z c" 'lem-yath-test-project-outline-candidates)
+  (define-key keymap "C-c z i" 'lem-yath-test-project-outline-imenu-index)
   (define-key keymap "C-c z b" 'lem-yath-test-project-outline-bottom)
   (define-key keymap "C-c z 1" 'lem-yath-test-project-outline-main)
   (define-key keymap "C-c z 2" 'lem-yath-test-project-outline-outside)
   (define-key keymap "C-c z 3" 'lem-yath-test-project-outline-malicious)
-  (define-key keymap "C-c z 4" 'lem-yath-test-project-outline-empty))
+  (define-key keymap "C-c z 4" 'lem-yath-test-project-outline-empty)
+  (define-key keymap "C-c z 5" 'lem-yath-test-project-outline-org)
+  (define-key keymap "C-c z 6" 'lem-yath-test-project-outline-markdown)
+  (define-key keymap "C-c z f" 'lem-yath-test-project-outline-fold-org))
 
 (project-outline-test-log
  "JUMP-CONFIG delay=~d stages=~d colors=~{~a~^,~}"

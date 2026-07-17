@@ -15,6 +15,8 @@ export LEM_YATH_PROJECT_OUTLINE_MAIN="$root/config/main.el"
 export LEM_YATH_PROJECT_OUTLINE_EMPTY="$root/config/empty.el"
 export LEM_YATH_PROJECT_OUTLINE_OUTSIDE="$root/outside/outside.el"
 export LEM_YATH_PROJECT_OUTLINE_MALICIOUS="$root/malicious/malicious.el"
+export LEM_YATH_PROJECT_OUTLINE_ORG="$root/native-imenu.org"
+export LEM_YATH_PROJECT_OUTLINE_MARKDOWN="$root/native-imenu.md"
 export LEM_YATH_PROJECT_OUTLINE_READER_MARKER="$root/reader-evaluated"
 mkdir -p "$HOME" "$WORKDIR" "$root/config" "$root/outside" "$root/malicious"
 
@@ -97,6 +99,44 @@ printf '%s\n' ';;; Malicious heading sentinel' '(defparameter *malicious* t)' \
 printf '%s\n' \
   "#.(progn (with-open-file (stream #P$marker :direction :output :if-exists :supersede :if-does-not-exist :create) (write-line \"executed\" stream)) '((emacs-lisp-mode . ((eval . (local-set-key (kbd \"C-c i\") #'consult-outline)) (outline-regexp . \";;;\"))))))" \
   >"$root/malicious/.dir-locals.el"
+
+for line in $(seq 1 80); do
+  case "$line" in
+    3) printf '%s\n' '* TODO [#A] [[id:parent][Parent Heading]] :project:' ;;
+    20) printf '%s\n' '** TODO [#B] [[https://example.com][Child Heading]] :tag:' ;;
+    30) printf '%s\n' '*** Hidden Depth' ;;
+    40) printf '%s\n' '* Leaf Heading' ;;
+    60) printf '%s\n' '#+begin_src org' ;;
+    61) printf '%s\n' '* Fake Block Heading' ;;
+    62) printf '%s\n' '#+end_src' ;;
+    80) printf '%s\n' '.' ;;
+    *) printf 'Org body line %d\n' "$line" ;;
+  esac
+done >"$LEM_YATH_PROJECT_OUTLINE_ORG"
+
+for line in $(seq 1 80); do
+  case "$line" in
+    1) printf '%s\n' '---' ;;
+    2) printf '%s\n' 'title: Native Imenu' ;;
+    3) printf '%s\n' '# Fake YAML' ;;
+    4) printf '%s\n' '---' ;;
+    6) printf '%s\n' 'Guide Home' ;;
+    7) printf '%s\n' '==========' ;;
+    20) printf '%s\n' '## Install Steps' ;;
+    30) printf '%s\n' '### Deep Topic' ;;
+    40) printf '%s\n' '# Sibling #' ;;
+    50) printf '%s\n' '```md' ;;
+    51) printf '%s\n' '# Fake Code' ;;
+    52) printf '%s\n' '```' ;;
+    60) printf '%s\n' '<!--' ;;
+    61) printf '%s\n' '[^hidden]: Hidden comment footnote' ;;
+    62) printf '%s\n' '-->' ;;
+    65) printf '%s\n' '[^note]: Visible footnote' ;;
+    70) printf '%s\n' '[^note]: Duplicate footnote' ;;
+    80) printf '%s\n' '.' ;;
+    *) printf 'Markdown body line %d\n' "$line" ;;
+  esac
+done >"$LEM_YATH_PROJECT_OUTLINE_MARKDOWN"
 : >"$LEM_YATH_PROJECT_OUTLINE_REPORT"
 
 lem_start "$session" \
@@ -282,6 +322,204 @@ if invoke_mx imenu 'Index item:'; then
   fi
 else
   fail imenu-command 'M-x imenu did not open the Index item prompt'
+fi
+
+# GNU Org's native index is limited to depth two, normalizes heading labels,
+# reveals folded context, and retains Imenu's recenter-only jump feedback.
+send_chord C-c z 5
+lem_wait_for "$session" 'Parent Heading' 10 >/dev/null || true
+send_chord C-c z i
+wait_report_count '^IMENU-INDEX file=org count=3$' 1 || true
+org_index_ok=1
+grep -q '^IMENU-PATH file=org path="Parent Heading"$' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" || org_index_ok=0
+grep -q '^IMENU-PATH file=org path="Parent Heading/Child Heading"$' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" || org_index_ok=0
+grep -q '^IMENU-PATH file=org path="Leaf Heading"$' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" || org_index_ok=0
+if [ "$org_index_ok" = 1 ] &&
+   [ "$(report_count '^IMENU-PATH file=org ')" -eq 3 ]; then
+  pass imenu-org-index 'Org Imenu keeps normalized level-one/two headings only'
+else
+  fail imenu-org-index 'Org heading depth, normalization, or block exclusion differed'
+fi
+
+send_chord C-c z f
+sleep 0.3
+send_chord C-c z r
+wait_report_count '^STATE file=org line=80 ' 1 || true
+org_origin="$(grep '^STATE file=org line=80 ' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+org_origin_view="$(sed -n 's/^.* view=\([^ ]*\) minor=.*$/\1/p' \
+  <<<"$org_origin")"
+if grep -q 'folds=1 hidden=no reader-marker=no$' <<<"$org_origin"; then
+  pass imenu-org-fold-setup 'the destination starts inside a folded Org subtree'
+else
+  fail imenu-org-fold-setup "the Org fold precondition differed: $org_origin"
+fi
+
+if invoke_mx imenu 'Index item:'; then
+  org_top="$(lem_capture "$session")"
+  if grep -Fq 'Parent.Heading' <<<"$org_top" &&
+     grep -Fq 'Leaf.Heading' <<<"$org_top"; then
+    pass imenu-org-presentation 'Org top-level headings use Imenu space replacement'
+  else
+    fail imenu-org-presentation 'the normalized Org root prompt differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l Parent
+  send_chord Enter
+  sleep 0.4
+  if grep -Fq 'Child.Heading' <<<"$(lem_capture "$session")"; then
+    pass imenu-org-hierarchy 'the Org parent opens its level-two submenu'
+  else
+    fail imenu-org-hierarchy 'the Org child prompt was not visible'
+  fi
+  tmux_cmd send-keys -t "$session" -l Child
+  send_chord Enter
+  sleep 0.5
+  send_chord C-c z r
+  wait_report_count '^STATE file=org line=20 column=0 ' 1 || true
+  org_final="$(grep '^STATE file=org line=20 column=0 ' \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  org_view="$(sed -n 's/^.* view=\([^ ]*\) minor=.*$/\1/p' \
+    <<<"$org_final")"
+  if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0 folds=0 hidden=no' \
+       <<<"$org_final" &&
+     [ -n "$org_origin_view" ] && [ -n "$org_view" ] &&
+     [ "$org_origin_view" != "$org_view" ]; then
+    pass imenu-org-jump 'Org Imenu reveals, recenters, and does not pulse'
+  else
+    fail imenu-org-jump "the accepted Org destination differed: $org_final"
+  fi
+  send_chord C-o
+  sleep 0.3
+  send_chord C-c z r
+  wait_report_count '^STATE file=org line=80 ' 2 || true
+  if [ "$(report_count '^STATE file=org line=80 ')" -ge 2 ]; then
+    pass imenu-org-jumplist 'C-o returns from Org Imenu to the exact origin'
+  else
+    fail imenu-org-jumplist 'Org Imenu did not record one Vi jump'
+  fi
+else
+  fail imenu-org-command 'M-x imenu did not open in the Org fixture'
+fi
+
+# markdown-mode's pinned defaults use a nested ATX/Setext outline, literal `.'
+# self entries, fenced/YAML exclusion, and one deduplicated Footnotes submenu.
+send_chord C-c z 6
+lem_wait_for "$session" 'Guide Home' 10 >/dev/null || true
+send_chord C-c z i
+wait_report_count '^IMENU-INDEX file=markdown count=8$' 1 || true
+markdown_index_ok=1
+for path in \
+  'Guide Home' \
+  'Guide Home/.' \
+  'Guide Home/Install Steps' \
+  'Guide Home/Install Steps/.' \
+  'Guide Home/Install Steps/Deep Topic' \
+  'Sibling' \
+  'Footnotes' \
+  'Footnotes/^note'; do
+  grep -Fqx "IMENU-PATH file=markdown path=\"$path\"" \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" || markdown_index_ok=0
+done
+if [ "$markdown_index_ok" = 1 ] &&
+   [ "$(report_count '^IMENU-PATH file=markdown ')" -eq 8 ]; then
+  pass imenu-markdown-index 'Markdown Imenu matches nested headings and footnotes'
+else
+  fail imenu-markdown-index 'Markdown hierarchy, exclusion, or footnote deduplication differed'
+fi
+
+send_chord C-c z b
+send_chord C-c z r
+wait_report_count '^STATE file=markdown line=80 ' 1 || true
+markdown_origin="$(grep '^STATE file=markdown line=80 ' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+markdown_origin_view="$(sed -n 's/^.* view=\([^ ]*\) minor=.*$/\1/p' \
+  <<<"$markdown_origin")"
+
+if invoke_mx imenu 'Index item:'; then
+  markdown_top="$(lem_capture "$session")"
+  if grep -Fq 'Guide.Home' <<<"$markdown_top" &&
+     grep -Fq 'Sibling' <<<"$markdown_top" &&
+     grep -Fq 'Footnotes' <<<"$markdown_top"; then
+    pass imenu-markdown-presentation 'Markdown roots and Footnotes are visible'
+  else
+    fail imenu-markdown-presentation 'the Markdown root prompt differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l Guide
+  send_chord Enter
+  sleep 0.4
+  markdown_guide="$(lem_capture "$session")"
+  if grep -Fq 'Install.Steps' <<<"$markdown_guide" &&
+     grep -Fq '[Markdown H1] line 6' <<<"$markdown_guide"; then
+    pass imenu-markdown-self 'a parent heading retains its literal self entry'
+  else
+    fail imenu-markdown-self 'the Markdown self/child prompt differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l Install
+  send_chord Enter
+  sleep 0.4
+  if grep -Fq 'Deep.Topic' <<<"$(lem_capture "$session")"; then
+    pass imenu-markdown-hierarchy 'successive prompts preserve Markdown depth'
+  else
+    fail imenu-markdown-hierarchy 'the nested Markdown child was not visible'
+  fi
+  tmux_cmd send-keys -t "$session" -l Deep
+  send_chord Enter
+  sleep 0.5
+  send_chord C-c z r
+  wait_report_count '^STATE file=markdown line=30 column=0 ' 1 || true
+  markdown_final="$(grep '^STATE file=markdown line=30 column=0 ' \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  markdown_view="$(sed -n 's/^.* view=\([^ ]*\) minor=.*$/\1/p' \
+    <<<"$markdown_final")"
+  if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+       <<<"$markdown_final" &&
+     [ -n "$markdown_origin_view" ] && [ -n "$markdown_view" ] &&
+     [ "$markdown_origin_view" != "$markdown_view" ]; then
+    pass imenu-markdown-jump 'Markdown Imenu lands exactly and recenters without pulse'
+  else
+    fail imenu-markdown-jump "the accepted Markdown destination differed: $markdown_final"
+  fi
+  send_chord C-o
+  sleep 0.3
+  send_chord C-c z r
+  wait_report_count '^STATE file=markdown line=80 ' 2 || true
+  if [ "$(report_count '^STATE file=markdown line=80 ')" -ge 2 ]; then
+    pass imenu-markdown-jumplist 'C-o returns from Markdown Imenu to its origin'
+  else
+    fail imenu-markdown-jumplist 'Markdown Imenu did not record one Vi jump'
+  fi
+else
+  fail imenu-markdown-command 'M-x imenu did not open in the Markdown fixture'
+fi
+
+send_chord C-c z b
+if invoke_mx imenu 'Index item:'; then
+  tmux_cmd send-keys -t "$session" -l Footnotes
+  send_chord Enter
+  sleep 0.4
+  if grep -Fq '^note' <<<"$(lem_capture "$session")"; then
+    tmux_cmd send-keys -t "$session" -l '^note'
+    send_chord Enter
+    sleep 0.5
+    send_chord C-c z r
+    wait_report_count '^STATE file=markdown line=65 column=0 ' 1 || true
+    markdown_footnote="$(grep '^STATE file=markdown line=65 column=0 ' \
+      "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+    if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+         <<<"$markdown_footnote"; then
+      pass imenu-markdown-footnote 'Footnotes jump to the first unique definition'
+    else
+      fail imenu-markdown-footnote 'the Markdown footnote destination differed'
+    fi
+  else
+    fail imenu-markdown-footnote 'the Footnotes submenu was empty'
+    send_chord C-g
+  fi
+else
+  fail imenu-markdown-footnote 'M-x imenu did not reopen for Footnotes'
 fi
 
 send_chord C-c z 2

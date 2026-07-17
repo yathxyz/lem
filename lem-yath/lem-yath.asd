@@ -60,6 +60,7 @@
                              (:file "structure")
                              (:file "element-navigation")
                              (:file "text-objects")))
+               (:file "native-imenu")
                (:file "roam")
                (:file "roam-backlinks")
                (:file "org/publish")
