@@ -130,9 +130,11 @@ action runs `ispell-word` at or before character/symbol targets and
 The Lem mapping preserves that group order and Ibuffer's exclusive first-match
 partition, omits empty groups, retains unmatched buffers under `Default`, and
 renders each group as a distinct collapsible heading. Its default row mirrors
-the configured stock format's mark, modified/read-only status, 18-cell elided
-name, 9-cell right-aligned size, 16-cell elided mode, and file fields. Lem has no
-visited-file locking state, so the stock lock field remains a reserved blank.
+the configured stock format's mark, modified/read-only/locked status, 18-cell
+elided name, 9-cell right-aligned size, 16-cell elided mode, and file fields.
+`L` toggles GNU Emacs's default `all` lock on ordinary-marked buffers or the
+current row, `% L` marks locked rows, and the lock refuses buffer deletion and
+editor exit before any window or teardown mutation.
 The active Emacs defaults sort by recency. Evil-Collection remaps the stock sort
 prefix: `o a/v/s/f/m` select name, recency, size, filename, or major-mode
 sorting, `o i` reverses it, comma cycles the available sorters, and backtick

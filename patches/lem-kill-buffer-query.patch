@@ -1,0 +1,33 @@
+diff --git a/src/internal-packages.lisp b/src/internal-packages.lisp
+index 319c436..8d16d57 100644
+--- a/src/internal-packages.lisp
++++ b/src/internal-packages.lisp
+@@ -268,6 +268,7 @@
+    :prompt-for-library)
+   ;; buffer.lisp
+   (:export
++   :kill-buffer-query-hook
+    :kill-buffer-hook)
+   ;; window-tree.lisp
+   (:export
+diff --git a/src/buffer-ext.lisp b/src/buffer-ext.lisp
+index c384efb..f528bca 100644
+--- a/src/buffer-ext.lisp
++++ b/src/buffer-ext.lisp
+@@ -1,5 +1,6 @@
+ (in-package :lem-core)
+ 
++(define-editor-variable kill-buffer-query-hook '())
+ (define-editor-variable kill-buffer-hook '())
+ 
+ (defun strip-buffer-from-frame-windows (buffer frame)
+@@ -12,7 +13,9 @@
+ 
+ (defmethod delete-buffer-using-manager :before
+     ((manager buffer-list-manager)
+      buffer)
++  (run-hooks
++   (make-per-buffer-hook :var 'kill-buffer-query-hook :buffer buffer) buffer)
+   (dolist (frame (all-frames))
+     (strip-buffer-from-frame-windows buffer frame))
+   (run-hooks (make-per-buffer-hook :var 'kill-buffer-hook :buffer buffer) buffer))

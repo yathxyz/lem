@@ -2,6 +2,35 @@
 
 (in-package :lem-yath)
 
+(define-editor-variable buffer-lock-mode nil)
+
+(defun buffer-list-buffer-locked-p (buffer)
+  "Return true when BUFFER has GNU Emacs's default `all' lock."
+  (not (null (variable-value 'buffer-lock-mode :buffer buffer))))
+
+(defun buffer-list-kill-buffer-query (buffer)
+  "Refuse every deletion path while BUFFER is locked."
+  (when (buffer-list-buffer-locked-p buffer)
+    (editor-error "Buffer ~s is locked and cannot be killed"
+                  (buffer-name buffer)))
+  t)
+
+(defun buffer-list-exit-query ()
+  "Refuse editor exit while any live buffer retains an `all' lock."
+  (alexandria:when-let
+      ((buffer (find-if #'buffer-list-buffer-locked-p (buffer-list))))
+    (editor-error "Lem cannot exit because buffer ~s is locked"
+                  (buffer-name buffer)))
+  t)
+
+(remove-hook (variable-value 'kill-buffer-query-hook :global t)
+             'buffer-list-kill-buffer-query)
+(add-hook (variable-value 'kill-buffer-query-hook :global t)
+          'buffer-list-kill-buffer-query)
+(remove-hook *exit-editor-hook* 'buffer-list-exit-query)
+;; Query before persistence and process teardown hooks mutate external state.
+(add-hook *exit-editor-hook* 'buffer-list-exit-query 100000)
+
 (defparameter *buffer-list-filter-groups*
   '(("org" . buffer-list-org-buffer-p)
     ("tramp" . buffer-list-tramp-buffer-p)
@@ -596,10 +625,11 @@ Each nonempty group begins with a distinct heading entry."
            (buffer-list-component-sort-reversed-p component)))
 
 (defun buffer-list-attributes (buffer)
-  "Return Ibuffer's modified, read-only, and reserved lock status fields."
-  (format nil "~c~c "
+  "Return Ibuffer's modified, read-only, and lock status fields."
+  (format nil "~c~c~c"
           (if (buffer-modified-p buffer) #\* #\Space)
-          (if (buffer-read-only-p buffer) #\% #\Space)))
+          (if (buffer-read-only-p buffer) #\% #\Space)
+          (if (buffer-list-buffer-locked-p buffer) #\L #\Space)))
 
 (defun buffer-list-fixed-field (value width)
   "Fit VALUE to exactly WIDTH terminal cells using Ibuffer-style elision."
@@ -879,6 +909,11 @@ Each nonempty group begins with a distinct heading entry."
 (define-command lem-yath-buffer-list-mark-read-only () ()
   (buffer-list-mark-matching
    (lem/multi-column-list::current-multi-column-list) #'buffer-read-only-p))
+
+(define-command lem-yath-buffer-list-mark-locked () ()
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list)
+   #'buffer-list-buffer-locked-p))
 
 (define-command lem-yath-buffer-list-mark-dired () ()
   (buffer-list-mark-matching
@@ -2816,6 +2851,36 @@ through later selected buffers without wrapping."
     (buffer-list-refresh-after-buffer-mutation
      component focused-buffer focused-index)))
 
+(defun buffer-list-set-lock-from-argument (buffer argument)
+  "Apply Emacs minor-mode prefix semantics to BUFFER's lock."
+  (setf (variable-value 'buffer-lock-mode :buffer buffer)
+        (if (integerp argument)
+            (plusp argument)
+            (not (buffer-list-buffer-locked-p buffer)))))
+
+(define-command lem-yath-buffer-lock-mode (argument) (:universal-nil)
+  "Toggle GNU Emacs-style kill-and-exit locking for the current buffer."
+  (buffer-list-set-lock-from-argument (current-buffer) argument)
+  (message "Buffer ~s is ~:[unlocked~;locked~]"
+           (buffer-name (current-buffer))
+           (buffer-list-buffer-locked-p (current-buffer))))
+
+(define-command lem-yath-buffer-list-toggle-lock (argument) (:universal-nil)
+  "Toggle lock state in ordinary-marked buffers or the current row."
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (focused-buffer (buffer-list-current-buffer component))
+         (focused-index
+           (or (position (buffer-list-current-item component)
+                         (lem/multi-column-list::multi-column-list-items component)
+                         :test #'eq)
+               0))
+         (buffers (buffer-list-action-buffers component)))
+    (dolist (buffer buffers)
+      (buffer-list-set-lock-from-argument buffer argument))
+    (buffer-list-refresh-after-buffer-mutation
+     component focused-buffer focused-index)
+    (message "Toggled lock status in ~d buffer~:p" (length buffers))))
+
 (defun buffer-list-emacs-unique-base-name (buffer)
   (let* ((name (buffer-name buffer))
          (file-name
@@ -3226,6 +3291,8 @@ through later selected buffers without wrapping."
   'lem-yath-buffer-list-mark-by-file-regexp)
 (define-key *buffer-list-picker-mode-keymap* "% g"
   'lem-yath-buffer-list-mark-by-content-regexp)
+(define-key *buffer-list-picker-mode-keymap* "% L"
+  'lem-yath-buffer-list-mark-locked)
 (define-key *buffer-list-picker-mode-keymap* "d"
   'lem-yath-buffer-list-mark-deletion)
 (define-key *buffer-list-picker-mode-keymap* "x"
@@ -3288,6 +3355,8 @@ through later selected buffers without wrapping."
   'lem-yath-buffer-list-toggle-modified)
 (define-key *buffer-list-picker-mode-keymap* "T"
   'lem-yath-buffer-list-toggle-read-only)
+(define-key *buffer-list-picker-mode-keymap* "L"
+  'lem-yath-buffer-list-toggle-lock)
 (define-key *buffer-list-picker-mode-keymap* "R"
   'lem-yath-buffer-list-rename-uniquely)
 (define-key *buffer-list-picker-mode-keymap* "X"

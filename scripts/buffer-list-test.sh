@@ -186,6 +186,21 @@ report_operations() {
   return 1
 }
 
+report_lock() {
+  local before attempts=0
+  before=$(grep -c '^LOCK ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" C-c l
+  while ((attempts < 40)); do
+    if (( $(grep -c '^LOCK ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^LOCK ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
 report_picker_bindings() {
   local before attempts=0
   before=$(grep -c '^PICKER-BINDINGS ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
@@ -392,7 +407,9 @@ select_occur_buffer() {
 check_star_mark() {
   local label=$1 query=$2 suffix=$3 expected=$4 nav
   lem_keys "$session" s / U
-  lem_keys "$session" s n
+  lem_keys "$session" s
+  sleep 0.1
+  lem_keys "$session" n
   tmux_cmd send-keys -t "$session" -l "$query"
   lem_keys "$session" Enter '*' "$suffix"
   nav=$(report_nav || true)
@@ -1072,15 +1089,24 @@ if ! wait_for_absent \
   fail filter-transition "the process/directory filter picker did not close"
 fi
 
+# Visual removal precedes final floating-picker teardown by one event-loop
+# turn; do not let that stale teardown own a newly opened picker.
+sleep 0.3
 lem_keys "$session" C-x C-b
 sleep 0.5
 if ! lem_capture "$session" |
      grep -qE 'Buffer[[:space:]]+Size[[:space:]]+Mode[[:space:]]+File'; then
   fail filter-transition "the picker did not reopen after process/directory filters"
 fi
-lem_keys "$session" s n
+transition_picker=$(report_picker_bindings || true)
+if [[ "$transition_picker" != *'current-popup=yes'* ]]; then
+  fail filter-transition "the reopened picker did not own its local command map: $transition_picker"
+fi
+lem_keys "$session" s
+sleep 0.1
+lem_keys "$session" n
 tmux_cmd send-keys -t "$session" -l 'sort-'
-if lem_wait_for "$session" '^[[:space:]]*sort-$' 15 >/dev/null; then
+if lem_wait_for "$session" 'sort-([[:space:]]*│)?$' 15 >/dev/null; then
   lem_keys "$session" Enter
   filter=$(report_filter || true)
   if [[ "$filter" == FILTER\ stack=name=sort-* ]]; then
@@ -1138,7 +1164,7 @@ if lem_wait_for "$session" '^[[:space:]]*sort-$' 15 >/dev/null; then
 
   lem_keys "$session" s n
   tmux_cmd send-keys -t "$session" -l 'sort-'
-  lem_wait_for "$session" '^[[:space:]]*sort-$' 15 >/dev/null ||
+  lem_wait_for "$session" 'sort-([[:space:]]*│)?$' 15 >/dev/null ||
     fail modal-filter-cancel "s n did not re-enter literal filter input"
   lem_keys "$session" Escape
   sleep 0.3
@@ -2429,6 +2455,99 @@ if lem_wait_for "$session" 'Searched 1 buffer; 1 match for "Needle"' 15 >/dev/nu
   fi
 else
   fail occur-killed-source "the stale-source fixture result was not created"
+fi
+
+# GNU Ibuffer's L operation is not merely a status flag: its default `all'
+# lock must reject every buffer-kill path and editor exit, before teardown
+# hooks run.  % L then selects exactly the locked rows.
+lem_keys "$session" F12
+attempts=0
+while ((attempts < 40)) &&
+      ! grep -q '^LOCK-PREPARED$' "$LEM_YATH_BUFFER_LIST_REPORT"; do
+  sleep 0.25
+  attempts=$((attempts + 1))
+done
+if ! grep -q '^LOCK-PREPARED$' "$LEM_YATH_BUFFER_LIST_REPORT"; then
+  fail lock-fixture "the focused lock buffers were not created"
+fi
+lem_keys "$session" q C-x C-b
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-lock-alpha'
+lem_keys "$session" Enter
+lock_bindings=$(report_picker_bindings || true)
+if [[ "$lock_bindings" == *'lock=LEM-YATH-BUFFER-LIST-TOGGLE-LOCK mark-locked=LEM-YATH-BUFFER-LIST-MARK-LOCKED'* ]]; then
+  pass lock-bindings "L and % L resolve to the GNU Ibuffer lock operations"
+else
+  fail lock-bindings "the lock operations are absent from the picker map: $lock_bindings"
+fi
+
+lem_keys "$session" L
+sleep 0.3
+lock_screen=$(lem_capture "$session")
+lock_ops=$(report_lock || true)
+if [[ "$lock_ops" == 'LOCK alpha=live:locked beta=live:unlocked query-hooks=1 exit-hooks=1 cleanup=0' ]] &&
+   grep -Eq 'L[[:space:]]*buffer-list-loc' <<<"$lock_screen"; then
+  pass lock-status "L locked only the focused row and rendered the stock status column"
+else
+  fail lock-status "lock state, hook ownership, or status rendering diverged: $lock_ops"
+fi
+
+lem_keys "$session" U '%' L
+lock_nav=$(report_nav || true)
+if [[ "$lock_nav" == *'marks=buffer-list-lock-alpha:>'* ]]; then
+  pass mark-locked "% L marked exactly the locked visible buffer"
+else
+  fail mark-locked "% L produced unexpected ordinary marks: $lock_nav"
+fi
+
+lem_keys "$session" U d x
+if lem_wait_for "$session" 'locked and cannot be killed' 15 >/dev/null; then
+  refused_ops=$(report_lock || true)
+  if [[ "$refused_ops" == *'alpha=live:locked'* ]]; then
+    pass lock-kill-refusal "x refused the locked deletion before removing the buffer"
+  else
+    fail lock-kill-refusal "the locked row disappeared after refusal: $refused_ops"
+  fi
+else
+  fail lock-kill-refusal "executing a deletion did not report the buffer lock"
+fi
+
+# The fixture has intentionally modified buffers, so answer the ordinary exit
+# confirmation before the higher-priority lock query runs.
+# Leave the floating picker first: its native prefix reader intentionally owns
+# C-x while focused.  The ordinary production C-x C-c binding is then tested
+# from the underlying source window.
+lem_keys "$session" q C-x C-c
+if lem_wait_for "$session" 'Leave anyway' 5 >/dev/null; then
+  lem_keys "$session" y
+fi
+if lem_wait_for "$session" 'cannot exit because buffer.*buffer-list-lock-alpha.*is locked' 15 >/dev/null &&
+   tmux_cmd has-session -t "$session" 2>/dev/null; then
+  lem_keys "$session" C-x C-b
+  lem_keys "$session" s n
+  tmux_cmd send-keys -t "$session" -l 'buffer-list-lock-alpha'
+  lem_keys "$session" Enter
+  refused_exit_ops=$(report_lock || true)
+  if [[ "$refused_exit_ops" == *'alpha=live:locked'*'cleanup=0'* ]]; then
+    pass lock-exit-refusal "C-x C-c refused before any exit teardown hook ran"
+  else
+    fail lock-exit-refusal "exit refusal changed state or ran cleanup: $refused_exit_ops"
+  fi
+else
+  fail lock-exit-refusal "the editor exited or did not report the live lock"
+  lem_keys "$session" C-x C-b
+  lem_keys "$session" s n
+  tmux_cmd send-keys -t "$session" -l 'buffer-list-lock-alpha'
+  lem_keys "$session" Enter
+fi
+
+lem_keys "$session" U L d x
+sleep 0.4
+unlocked_ops=$(report_lock || true)
+if [[ "$unlocked_ops" == *'alpha=dead:unlocked beta=live:unlocked'* ]]; then
+  pass lock-release "unlocking restored ordinary Ibuffer deletion"
+else
+  fail lock-release "the unlocked buffer did not delete normally: $unlocked_ops"
 fi
 
 if ((failed)); then

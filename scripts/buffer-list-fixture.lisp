@@ -10,6 +10,9 @@
 (defvar *buffer-list-test-late-buffer* nil)
 (defvar *buffer-list-test-op-alpha* nil)
 (defvar *buffer-list-test-op-beta* nil)
+(defvar *buffer-list-test-lock-alpha* nil)
+(defvar *buffer-list-test-lock-beta* nil)
+(defvar *buffer-list-test-exit-cleanup-count* 0)
 (defvar *buffer-list-test-revert-clean* nil)
 (defvar *buffer-list-test-revert-dirty* nil)
 (defvar *buffer-list-test-revert-missing* nil)
@@ -48,6 +51,9 @@
       (ignore-errors (uiop:terminate-process *buffer-list-test-process*)))
     (ignore-errors (uiop:wait-process *buffer-list-test-process*))
     (setf *buffer-list-test-process* nil)))
+
+(defun buffer-list-test-exit-cleanup-probe ()
+  (incf *buffer-list-test-exit-cleanup-count*))
 
 (defun buffer-list-test-log (control &rest arguments)
   (with-open-file (stream *buffer-list-test-report*
@@ -265,10 +271,27 @@
            :collect (buffer-name buffer))
    (buffer-name (car (last (buffer-list))))))
 
+(define-command lem-yath-test-buffer-list-lock-state () ()
+  (buffer-list-test-log
+   "LOCK alpha=~a:~a beta=~a:~a query-hooks=~d exit-hooks=~d cleanup=~d"
+   (if (member *buffer-list-test-lock-alpha* (buffer-list) :test #'eq)
+       "live" "dead")
+   (if (buffer-list-buffer-locked-p *buffer-list-test-lock-alpha*)
+       "locked" "unlocked")
+   (if (member *buffer-list-test-lock-beta* (buffer-list) :test #'eq)
+       "live" "dead")
+   (if (buffer-list-buffer-locked-p *buffer-list-test-lock-beta*)
+       "locked" "unlocked")
+   (count 'buffer-list-kill-buffer-query
+          (variable-value 'kill-buffer-query-hook :global t)
+          :key #'car :test #'eq)
+   (count 'buffer-list-exit-query *exit-editor-hook* :key #'car :test #'eq)
+   *buffer-list-test-exit-cleanup-count*))
+
 (define-command lem-yath-test-buffer-list-picker-bindings () ()
   (let ((windows (window-list)))
     (buffer-list-test-log
-     "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a group-jump=~a other-noselect=~a one-window=~a view=~a view-g=~a view-horizontal=~a occur=~a occur-meta=~a isearch=~a isearch-regexp=~a query=~a query-regexp=~a mode=~a derived=~a starred=~a size-lt=~a size-gt=~a content=~a current-popup=~a ordinary-count=~d ordinary-buffers=~{~a~^,~}"
+     "PICKER-BINDINGS backspace=~a control-h=~a delete=~a diff=~a jump=~a meta-jump=~a group-jump=~a other-noselect=~a one-window=~a view=~a view-g=~a view-horizontal=~a occur=~a occur-meta=~a isearch=~a isearch-regexp=~a query=~a query-regexp=~a mode=~a derived=~a starred=~a size-lt=~a size-gt=~a content=~a lock=~a mark-locked=~a current-popup=~a ordinary-count=~d ordinary-buffers=~{~a~^,~}"
      (buffer-list-test-binding "Backspace")
      (buffer-list-test-binding "C-h")
      (buffer-list-test-binding "Delete")
@@ -293,6 +316,8 @@
      (buffer-list-test-binding "s <")
      (buffer-list-test-binding "s >")
      (buffer-list-test-binding "s c")
+     (buffer-list-test-binding "L")
+     (buffer-list-test-binding "% L")
      (if (floating-window-p (current-window)) "yes" "no")
      (length windows)
      (mapcar (lambda (window)
@@ -807,6 +832,17 @@
    (format nil "foo-one~%FOO-TWO~%Foo-Three~%") t)
   (buffer-list-test-log "QUERY-PREPARED"))
 
+(define-command lem-yath-test-buffer-list-prepare-lock () ()
+  (setf *buffer-list-test-lock-alpha*
+        (or (get-buffer "buffer-list-lock-alpha")
+            (buffer-list-test-make-buffer
+             'lock-alpha "buffer-list-lock-alpha"))
+        *buffer-list-test-lock-beta*
+        (or (get-buffer "buffer-list-lock-beta")
+            (buffer-list-test-make-buffer
+             'lock-beta "buffer-list-lock-beta")))
+  (buffer-list-test-log "LOCK-PREPARED"))
+
 (define-key lem-vi-mode:*normal-keymap* "F5"
   'lem-yath-test-buffer-list-report)
 (define-key lem-vi-mode:*normal-keymap* "F6"
@@ -827,6 +863,8 @@
   'lem-yath-test-buffer-list-killring)
 (define-key *buffer-list-picker-mode-keymap* "F3"
   'lem-yath-test-buffer-list-operation-state)
+(define-key *buffer-list-picker-mode-keymap* "C-c l"
+  'lem-yath-test-buffer-list-lock-state)
 (define-key *buffer-list-picker-mode-keymap* "F2"
   'lem-yath-test-buffer-list-picker-bindings)
 (define-key *buffer-list-picker-mode-keymap* "F1"
@@ -863,10 +901,14 @@
   'lem-yath-test-buffer-list-multi-isearch-lifecycle)
 (define-key *global-keymap* "F11"
   'lem-yath-test-buffer-list-prepare-query)
+(define-key *buffer-list-occur-mode-keymap* "F12"
+  'lem-yath-test-buffer-list-prepare-lock)
 (define-key *buffer-list-picker-mode-keymap* "F5"
   'lem-yath-test-buffer-list-query-state)
 
 (remove-hook *exit-editor-hook* 'buffer-list-test-stop-process)
 (add-hook *exit-editor-hook* 'buffer-list-test-stop-process)
+(remove-hook *exit-editor-hook* 'buffer-list-test-exit-cleanup-probe)
+(add-hook *exit-editor-hook* 'buffer-list-test-exit-cleanup-probe 1000)
 
 (buffer-list-test-log "READY")

@@ -62,6 +62,7 @@
               ./patches/lem-terminal-safe-cwd.patch
               ./patches/lem-mcp-server-secure.patch
               ./patches/lem-before-find-file.patch
+              ./patches/lem-kill-buffer-query.patch
             ];
           };
           terminalSo = pkgs.stdenv.mkDerivation {

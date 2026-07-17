@@ -947,7 +947,7 @@ through the ncurses editor.
   Distinct `[ name ]` headings collapse to `[ name ... ]` with Return and are
   excluded from buffer actions. Fuzzy narrowing temporarily displays only
   matching selectable buffers. The default rows preserve mark, modified and
-  read-only status, the reserved lock position, 18-cell elided name, 9-cell
+  read-only status and live `L` lock state, 18-cell elided name, 9-cell
   right-aligned size, 16-cell elided mode, and filename. The pinned Ibuffer
   Evil-Collection controls select name, recency, size, filename, or major-mode
   sorting with `o a/v/s/f/m`, reverse with `o i`, traverse the lexical sorter cycle with
@@ -957,6 +957,9 @@ through the ncurses editor.
   full filename, basename, or extension; Return pushes the pending filter and
   Escape cancels it. The modal operation core uses `m/u/Backspace/U/t/~` for ordinary marks,
   distinct `d` deletion marks followed by `x`, and `S` for marked saves;
+  `L` toggles GNU Emacs's default `all` lock on ordinary-marked buffers or the
+  current row, `% L` marks locked rows, and locked buffers refuse deletion and
+  editor exit before any teardown mutation;
   `* *`/`* s`, `* m`, `* u`, `* r`, `* /`, `* e`, `* h`, and `* z` mark
   visible special, modified, unsaved, read-only, directory, dissociated, help,
   or compressed-file buffers;
@@ -1033,7 +1036,6 @@ through the ncurses editor.
   Regexp replacement expands `\&`, `\1`–`\9`, `\\`, and a per-buffer `\#`
   count. Read-only target sets, invalid regexps or replacement directives, and
   regexps with empty matches fail before mutation.
-  Lem has no visited-file locking state;
   Ibuffer's predicate filters, compound/saved filter operations, age marking,
   other-frame, view-and-eval, Occur
   edit/rename/clone, shell, eval, and print operations are not reproduced.
