@@ -15,6 +15,18 @@ INSERT-FILE-CONTENTS when a file's lines do not all share the detected
 end-of-line style and are therefore normalized to it on save. Used to surface a
 one-time, non-blocking message. NIL disables the notification.")
 
+(defvar *encoding-fallback-external-format* :latin-1
+  "External format used by FIND-FILE-BUFFER to re-read a file when the detected
+encoding fails to decode it. Latin-1 maps all 256 byte values, so decoding never
+fails and the bytes are preserved on round-trip.")
+
+(defvar *encoding-fallback-notification-function* nil
+  "Function of two arguments (the filename string and the fallback external
+format) called by FIND-FILE-BUFFER when the detected encoding fails to decode a
+file and it is re-opened under *ENCODING-FALLBACK-EXTERNAL-FORMAT* instead of
+being refused. Used to surface a one-time, non-blocking message. NIL disables
+the notification.")
+
 (define-condition encoding-read-error (editor-error)
   ((condition :initarg :condition)
    (filename :initarg :filename
@@ -84,6 +96,25 @@ one-time, non-blocking message. NIL disables the notification.")
                               (when c (insert-character point (code-char c)))))))))
     encoding))
 
+(defun detect-file-end-of-line (filename)
+  "Detect FILENAME's end-of-line style using *EXTERNAL-FORMAT-FUNCTION*, whose
+end-of-line detection never fails. Returns :AUTO when no detector is configured
+or detection is inconclusive."
+  (or (and *external-format-function*
+           (ignore-errors (nth-value 1 (funcall *external-format-function* filename))))
+      :auto))
+
+(defun insert-file-contents-as (point filename external-format)
+  "Insert the contents of FILENAME at POINT decoded as EXTERNAL-FORMAT, with the
+end-of-line style auto-detected. Returns the encoding used.
+
+Unlike INSERT-FILE-CONTENTS with :DETECT-ENCODING, EXTERNAL-FORMAT is applied
+unconditionally. Latin-1 in particular maps all 256 byte values, so it never
+fails and preserves the file's bytes on round-trip."
+  (insert-file-contents point filename
+                        :external-format external-format
+                        :end-of-line (detect-file-end-of-line filename)))
+
 (defun find-file-buffer (filename &key temporary (enable-undo-p t) (syntax-table nil syntax-table-p))
   (when (pathnamep filename)
     (setf filename (namestring filename)))
@@ -110,11 +141,23 @@ one-time, non-blocking message. NIL disables the notification.")
            (when (probe-file filename)
              (let ((*inhibit-modification-hooks* t))
                (let ((encoding
-                       (handler-bind ((encoding-read-error
-                                        (lambda (e)
-                                          (declare (ignore e))
-                                          (delete-buffer buffer))))
-                         (insert-file-contents (buffer-start-point buffer) filename))))
+                       (handler-case
+                           (insert-file-contents (buffer-start-point buffer) filename)
+                         (encoding-read-error ()
+                           ;; The detected encoding could not decode the file.
+                           ;; Rather than deleting the buffer and refusing to
+                           ;; open it, discard any partially decoded text and
+                           ;; re-read losslessly under the fallback external
+                           ;; format (latin-1), which maps all 256 byte values.
+                           (erase-buffer buffer)
+                           (prog1 (insert-file-contents-as
+                                   (buffer-start-point buffer)
+                                   filename
+                                   *encoding-fallback-external-format*)
+                             (when *encoding-fallback-notification-function*
+                               (funcall *encoding-fallback-notification-function*
+                                        filename
+                                        *encoding-fallback-external-format*)))))))
                  (setf (buffer-encoding buffer) encoding)))
              (buffer-unmark buffer))
            (buffer-start (buffer-point buffer))

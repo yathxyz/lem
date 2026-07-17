@@ -18,6 +18,7 @@
            :save-some-buffers
            :sync-buffer-with-file-content
            :revert-buffer
+           :revert-buffer-with-encoding
            :revert-buffer-function
            :change-directory
            :current-directory
@@ -388,6 +389,73 @@
                      (prompt-for-y-or-n-p (format nil "Revert buffer from file ~A" (buffer-filename)))
                      t))
         (sync-buffer-with-file-content buffer)))))
+
+(defvar *external-format-candidates*
+  '("latin-1" "utf-8" "utf-8-bom" "utf-16" "utf-16le" "utf-16be"
+    "shift_jis" "euc-jp" "iso-8859-1" "iso-8859-2" "iso-8859-5"
+    "iso-8859-9" "iso-8859-15" "cp1251" "cp1252" "koi8-r" "gbk" "ascii")
+  "External-format names offered as completions by `revert-buffer-with-encoding',
+in addition to any custom encodings registered with the buffer encoding system.
+The typed value is passed to the Lisp implementation's external-format
+machinery, so any name it accepts works even if it is absent from this list.")
+
+(defun prompt-for-external-format ()
+  "Prompt for an external-format name and return it as a keyword."
+  (let* ((candidates (sort (remove-duplicates
+                            (append *external-format-candidates*
+                                    (mapcar #'string-downcase (encodings)))
+                            :test #'string=)
+                           #'string<))
+         (name (prompt-for-string
+                "Reopen with encoding: "
+                :completion-function (lambda (str) (completion-strings str candidates))
+                :test-function (lambda (name) (plusp (length name)))
+                :history-symbol 'mh-revert-buffer-encoding)))
+    (intern (string-upcase name) :keyword)))
+
+(defun reopen-file-with-encoding (buffer external-format)
+  "Re-read BUFFER's file decoded as EXTERNAL-FORMAT, preserving point position.
+Signals `encoding-read-error' (leaving BUFFER erased) when decoding fails."
+  (with-buffer-read-only buffer nil
+    (let ((line-number (line-number-at-point (buffer-point buffer)))
+          (column (point-column (buffer-point buffer))))
+      (erase-buffer buffer)
+      (setf (buffer-encoding buffer)
+            (insert-file-contents-as (buffer-start-point buffer)
+                                     (buffer-filename buffer)
+                                     external-format))
+      (buffer-unmark buffer)
+      (update-changed-disk-date buffer)
+      (move-to-line (buffer-point buffer) line-number)
+      (move-to-column (buffer-point buffer) column))))
+
+(define-command revert-buffer-with-encoding (encoding)
+    ((prompt-for-external-format))
+  "Re-read the current buffer's file using an explicitly named character encoding.
+
+Use this to recover a file that automatic detection decoded incorrectly, for
+example a Latin-1 or UTF-16 file opened as something else. `latin-1' never fails
+and preserves the file's bytes exactly."
+  (let ((buffer (current-buffer)))
+    (unless (buffer-filename buffer)
+      (editor-error "Buffer ~A is not visiting a file." (buffer-name buffer)))
+    (unless (probe-file (buffer-filename buffer))
+      (editor-error "File ~A no longer exists." (buffer-filename buffer)))
+    (when (or (not (buffer-modified-p buffer))
+              (prompt-for-y-or-n-p
+               (format nil "~A has unsaved changes; discard them and reopen?"
+                       (buffer-filename buffer))))
+      (handler-case
+          (progn
+            (reopen-file-with-encoding buffer encoding)
+            (message "Reverted ~A with encoding ~(~A~)."
+                     (buffer-filename buffer) encoding))
+        (encoding-read-error ()
+          ;; The chosen encoding cannot decode this file. Reopen losslessly as
+          ;; latin-1 so the buffer is never left empty, then report the miss.
+          (reopen-file-with-encoding buffer :latin-1)
+          (editor-error "~(~A~) could not decode ~A; reopened as latin-1 instead."
+                        encoding (buffer-filename buffer)))))))
 
 (defvar *last-revert-time* nil)
 

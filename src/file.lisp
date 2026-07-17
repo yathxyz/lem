@@ -115,8 +115,21 @@
     (values)))
 
 ;;;
+(define-editor-variable detect-encoding-scheme :jp
+  "Inquisitor language scheme used to auto-detect a file's character encoding.
+
+Every scheme tries UTF-8 first; the scheme only decides which legacy encodings
+are considered next. The default :JP preserves upstream behavior. Available
+schemes: :jp :tw :cn :kr :ru :ar :tr :gr :hw :pl :bl.
+
+When decoding under the detected encoding fails, FIND-FILE-BUFFER falls back to
+*ENCODING-FALLBACK-EXTERNAL-FORMAT* (latin-1) rather than refusing the file, so
+this variable only affects which encoding is attempted first.")
+
 (defun detect-external-format-from-file (pathname)
-  (values (inq:dependent-name (inq:detect-encoding (pathname pathname) :jp))
+  (values (inq:dependent-name
+           (inq:detect-encoding (pathname pathname)
+                                (variable-value 'detect-encoding-scheme :global)))
           (or (inq:detect-end-of-line (pathname pathname)) :lf)))
 
 (setf *external-format-function* 'detect-external-format-from-file)
@@ -125,3 +138,9 @@
       (lambda (filename)
         (message "~A has mixed line endings; normalized to the dominant style on save."
                  filename)))
+
+(setf *encoding-fallback-notification-function*
+      (lambda (filename external-format)
+        (message "~A: could not decode with the detected encoding; ~
+                  opened as ~(~A~). Use M-x revert-buffer-with-encoding to choose another."
+                 filename external-format)))

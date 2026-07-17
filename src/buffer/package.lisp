@@ -334,8 +334,11 @@
    :*find-directory-function*
    :*default-external-format*
    :*mixed-eol-notification-function*
+   :*encoding-fallback-external-format*
+   :*encoding-fallback-notification-function*
    :encoding-read-error
    :insert-file-contents
+   :insert-file-contents-as
    :find-file-buffer
    :write-to-file
    :write-to-file-without-write-hook

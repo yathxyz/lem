@@ -650,6 +650,9 @@
   ;; highlight-line.lisp
   (:export
    :highlight-line)
+  ;; file.lisp
+  (:export
+   :detect-encoding-scheme)
   ;; display/base.lisp
   (:export
    :wrap-line-character

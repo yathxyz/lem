@@ -71,6 +71,7 @@
                (:file "revert-buffer")
                (:file "save-clobber")
                (:file "eol-roundtrip")
+               (:file "encoding-fallback")
                (:file "scala-mode")
                (:file "wat-mode")
                (:file "nix-mode")

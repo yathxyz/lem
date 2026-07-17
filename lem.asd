@@ -226,7 +226,8 @@
                              (:file "detective")
                              (:file "extension-commands" :if-feature :quicklisp)
                              (:file "read-only-sources")
-                             (:file "image-buffer")))
+                             (:file "image-buffer")
+                             (:file "daily-driver-defaults")))
 
                (:module "ui"
                 :serial t
