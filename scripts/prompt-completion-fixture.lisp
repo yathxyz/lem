@@ -36,6 +36,9 @@
     "One sentence.  Two sentence!"
     "One sentence.  "))
 
+(define-major-mode lem-yath-test-special-annotation-mode ()
+    (:name "Fixture Special"))
+
 (defun prompt-completion-fixture-path (relative)
   (merge-pathnames relative *prompt-completion-fixture-root*))
 
@@ -122,22 +125,28 @@
          (read-only-modified-buffer
            (find-file-buffer
             (prompt-completion-fixture-write
-             "buffers/annotation-readonly-modified.txt" "both\n"))))
+             "buffers/annotation-readonly-modified.txt" "both\n")))
+         (special-buffer (make-buffer "*annotation-special*")))
     (insert-string (buffer-end-point dirty-buffer) "x")
     (setf (buffer-read-only-p read-only-buffer) t)
     (insert-string (buffer-end-point read-only-modified-buffer) "x")
     (setf (buffer-read-only-p read-only-modified-buffer) t)
+    (insert-string (buffer-end-point special-buffer) "special\n")
+    (change-buffer-mode special-buffer
+                        'lem-yath-test-special-annotation-mode)
     (prompt-completion-fixture-write
      "files/nested/alpha-report.txt" (format nil "alpha~%"))
     (prompt-completion-fixture-write
      "files/nested/alpine-report.txt" (format nil "alpine~%"))
     (dolist (buffer (list first-buffer second-buffer paren-buffer
                           dirty-buffer read-only-buffer
-                          read-only-modified-buffer))
+                          read-only-modified-buffer special-buffer))
       (prompt-completion-fixture-log
        "BUFFER name=~a path=~a"
        (buffer-name buffer)
-       (namestring (buffer-filename buffer))))
+       (if (buffer-filename buffer)
+           (namestring (buffer-filename buffer))
+           "-")))
     (prompt-completion-fixture-log "READY")))
 
 (defun prompt-completion-fixture-check-wrapper-installation ()
@@ -186,10 +195,13 @@
   (let* ((choice (prompt-for-buffer "Fixture buffer: " :existing t))
          (buffer (and choice (get-buffer choice))))
     (when buffer
-      (prompt-completion-fixture-log
-       "BUFFER-SELECT name=~a path=~a"
-       choice
-       (namestring (buffer-filename buffer)))
+      (if (buffer-filename buffer)
+          (prompt-completion-fixture-log
+           "BUFFER-SELECT name=~a path=~a"
+           choice
+           (namestring (buffer-filename buffer)))
+          (prompt-completion-fixture-log
+           "SPECIAL-BUFFER-SELECT name=~a path=-" choice))
       (switch-to-buffer buffer))))
 
 (define-command lem-yath-test-file-prompt () ()
@@ -206,6 +218,43 @@
        "FILE-SELECT value=~a directory=~a"
        choice
        (not (null (uiop:directory-pathname-p (pathname choice))))))))
+
+(define-command lem-yath-test-foreign-owner-prompt () ()
+  "Open a controlled prompt annotated from a genuinely foreign-owned file."
+  (let ((choice
+          (prompt-for-string
+           "Foreign owner: "
+           :completion-function
+           (lambda (input)
+             (completion-annotated-prompt-choices
+              (mapcar (lambda (label) (cons label #P"/etc/passwd"))
+                      (prescient-filter
+                       input '("foreign-passwd") :rank-p nil))
+              #'completion-file-detail)))))
+    (prompt-completion-fixture-log "FOREIGN-SELECT value=~a" choice)))
+
+(define-command lem-yath-test-metadata-failure-prompt () ()
+  "Prove an annotation failure cannot remove or corrupt its candidate."
+  (let ((choice
+          (prompt-for-string
+           "Metadata failure: "
+           :completion-function
+           (lambda (input)
+             (completion-annotate-leading-items
+              (mapcar
+               (lambda (label)
+                 (completion-make-prompt-item label "provider-fallback"))
+               (prescient-filter
+                input '("metadata-failure-target" "metadata-safe-target")
+                :rank-p nil))
+              (lambda (item)
+                (if (string= "metadata-failure-target"
+                             (completion-label item))
+                    (progn
+                      (completion-set-detail item "partial-corruption")
+                      (error "intentional annotation fixture failure"))
+                    (completion-set-detail item "annotated-safe"))))))))
+    (prompt-completion-fixture-log "METADATA-SELECT value=~a" choice)))
 
 (define-command lem-yath-test-prescient-toggle-prompt () ()
   "Open a stable candidate corpus for physical Prescient toggle tests."

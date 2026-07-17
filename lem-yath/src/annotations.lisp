@@ -206,10 +206,23 @@ When FROM-LEFT is true, preserve the useful end of paths and locations."
   item)
 
 (defun completion-annotate-leading-items (items function &optional (limit 100))
-  "Apply FUNCTION to the leading LIMIT completion ITEMS in place."
+  "Apply FUNCTION to the leading LIMIT completion ITEMS in place.
+
+An annotation is display-only metadata, so a failure for one candidate must not
+invalidate that candidate or prevent the remaining candidates from appearing.
+On failure, retain the provider's original item and detail unchanged."
   (loop :for item :in items
         :repeat limit
-        :do (funcall function item))
+        :for original-detail
+          := (and (typep item 'lem/completion-mode:completion-item)
+                  (lem/completion-mode:completion-item-detail item))
+        :do (handler-case
+                (funcall function item)
+              (error ()
+                (when (typep item 'lem/completion-mode:completion-item)
+                  (setf (lem/completion-mode:completion-item-detail item)
+                        original-detail))
+                item)))
   items)
 
 (defun completion-make-prompt-item (label detail)

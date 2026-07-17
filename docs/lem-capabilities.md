@@ -435,9 +435,13 @@ leaving its label, filter text, replacement range, insertion text, rank, and
 acceptance identity intact. Custom project, recent-file, library, theme, and
 bookmark providers create correctly ranged items after ranking and retain the
 selected raw value separately from display metadata. The ncurses gates cover
-common local regular files and buffer states, exact library/theme/bookmark
-acceptance, loaded and active state, theme inheritance, bookmark context, and
-missing targets. Candidate columns follow the pinned Marginalia default: a
+common local regular files and buffer states, a non-file special buffer with
+its actual mode, conditional ownership from a real foreign-owned file, exact
+library/theme/bookmark acceptance, loaded and active state, theme inheritance,
+bookmark context, and missing targets. An unexpected annotation failure is
+isolated to that candidate: its provider detail and exact selection identity
+remain intact, and later candidates continue to be annotated. Candidate columns
+follow the pinned Marginalia default: a
 20-cell floor rounded upward in 10-cell steps. Labels are measured in terminal
 cells, so CJK and other wide text cannot shift the detail column. Supported
 documentation, signature, value, source, buffer-path, and bookmark fields use
@@ -447,10 +451,8 @@ ncurses gate verifies identical detail columns for narrow and wide labels. It
 also keeps one prompt open while changing the terminal from 120 to 64 columns
 and back, proving that field budgets repaint immediately while prompt input and
 the focused candidate remain unchanged.
-Special file modes, conditional foreign ownership, and generic metadata-failure
-fallback remain source-inspected. Marginalia's unsupported face and package
-categories, per-field semantic faces, and remote fields remain outside this
-approximation.
+Marginalia's unsupported face and package categories, per-field semantic faces,
+and remote fields remain outside this approximation.
 
 The active Helpful leader workflows are no longer routed through generic
 apropos. `SPC h k` indexes every currently fbound, package-qualified Lisp symbol

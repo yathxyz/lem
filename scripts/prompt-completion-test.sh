@@ -509,6 +509,81 @@ else
   fail buffer-combined-state 'configured buffer prompt did not open' "$session"
 fi
 
+if invoke_prompt_command lem-yath-test-buffer-prompt 'Fixture buffer:'; then
+  tmux_cmd send-keys -t "$session" -l annotation-special
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Eq '\*annotation-special\*.*Fixture Special' <<<"$screen" &&
+     ! grep -Eq '\*annotation-special\*.*buffers/' <<<"$screen"; then
+    pass buffer-special-mode-annotation \
+      'a non-file special buffer showed its actual mode without a fake path'
+  else
+    fail buffer-special-mode-annotation \
+      'special-buffer metadata was missing or invented a file location' "$session"
+  fi
+  lem_keys "$session" Enter
+  if wait_report_count \
+       '^SPECIAL-BUFFER-SELECT name=\*annotation-special\* path=-$' 1; then
+    pass buffer-special-mode-selection \
+      'the annotated special buffer retained its exact selection identity'
+  else
+    fail buffer-special-mode-selection \
+      'the special buffer could not be selected from its annotated row' "$session"
+  fi
+else
+  fail buffer-special-mode-annotation \
+    'configured buffer prompt did not open for the special buffer' "$session"
+fi
+
+if invoke_prompt_command lem-yath-test-foreign-owner-prompt 'Foreign owner:'; then
+  tmux_cmd send-keys -t "$session" -l foreign-passwd
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Eq 'foreign-passwd.*-rw-r--r--.*root:root' <<<"$screen"; then
+    pass file-foreign-owner-annotation \
+      'a real foreign-owned file showed its user and group conditionally'
+  else
+    fail file-foreign-owner-annotation \
+      'the real /etc/passwd row omitted its foreign owner metadata' "$session"
+  fi
+  lem_keys "$session" Enter
+  if wait_report_count '^FOREIGN-SELECT value=foreign-passwd$' 1; then
+    pass file-foreign-owner-selection \
+      'foreign-owner metadata did not change the accepted candidate'
+  else
+    fail file-foreign-owner-selection \
+      'the foreign-owned annotated candidate was not accepted exactly' "$session"
+  fi
+else
+  fail file-foreign-owner-annotation \
+    'controlled foreign-owner prompt did not open' "$session"
+fi
+
+if invoke_prompt_command lem-yath-test-metadata-failure-prompt \
+     'Metadata failure:'; then
+  tmux_cmd send-keys -t "$session" -l metadata-failure-target
+  sleep 0.8
+  screen=$(lem_capture "$session")
+  if grep -Eq 'metadata-failure-target.*provider-fallback' <<<"$screen"; then
+    pass metadata-failure-fallback \
+      'a failed annotation retained the provider fallback and live candidate'
+  else
+    fail metadata-failure-fallback \
+      'one metadata exception removed or corrupted its candidate' "$session"
+  fi
+  lem_keys "$session" Enter
+  if wait_report_count '^METADATA-SELECT value=metadata-failure-target$' 1; then
+    pass metadata-failure-selection \
+      'the failed-metadata candidate retained exact acceptance identity'
+  else
+    fail metadata-failure-selection \
+      'the failed-metadata candidate could not be accepted' "$session"
+  fi
+else
+  fail metadata-failure-fallback \
+    'controlled metadata-failure prompt did not open' "$session"
+fi
+
 # Delimiter input belongs to the prompt query. It must refresh the candidate
 # list rather than invoking ordinary-buffer pairing and closing completion.
 if invoke_prompt_command lem-yath-test-buffer-prompt 'Fixture buffer:'; then
