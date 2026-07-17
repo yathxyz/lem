@@ -18,7 +18,7 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 | `codec.lisp` | VK-5 EOL/encoding codec: pure `decode-eol`/`encode-eol` over codepoint lists, mirroring `src/buffer/file.lisp` read/write (post-DS-6); round-trip, no-char-loss and totality theorems. |
 | `crash-safety.lisp` | VK-6 crash-safety protocol: operational model of the DS-2 atomic save + DS-3 checkpoint interplay with a crash transition after every step; durability/delete-ordering invariants proved inductive over all reachable states, plus `encode-path` injectivity and checkpoint-name namespace disjointness. |
 | `input-decode.lisp` | VK-7 terminal input decode kernel: `k-decode` over byte/keycode/timeout item lists, the CSI key/modifier decoder and bracketed-paste state machine that production `frontends/ncurses/input.lisp` now delegates to (the first one-source swap), with totality/wf, progress/no-overconsumption, table-wide encode/decode round-trip and paste-reconstruction theorems. |
-| `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — under 200 lines, every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
+| `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — ~200 lines (exports list is the only thing that grows), every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
 | `shim-loader.lisp` | Sole component of the `lem-verified-kernel` ASDF system (`lem-verified-kernel.asd` at the repo root): loads the shim + the books production depends on. **Not a book**; the proof runner skips `shim*.lisp`. |
 | `README.md` | This file. |
 
