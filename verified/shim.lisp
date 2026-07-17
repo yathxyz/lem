@@ -14,8 +14,10 @@
 ;;;;                             applicative subset resolves defun/if/let/etc. to
 ;;;;                             their identical CL homonyms. Names that collide
 ;;;;                             with CL are shadowed (see *acl2-shadows*).
-;;;;   2. (defthm ...)        -- proof-only event. Reinterpreted as a no-op MACRO
-;;;;                             that expands to NIL WITHOUT evaluating its body
+;;;;   2. (defthm ...) and (defthmd ...) -- proof-only events (defthmd is the
+;;;;                             disabled-by-default variant; identical here).
+;;;;                             Each is reinterpreted as a no-op MACRO that
+;;;;                             expands to NIL WITHOUT evaluating its body
 ;;;;                             (the body is a logical formula using symbols such
 ;;;;                             as IMPLIES that have no in-image function).
 ;;;;   3. (declare (xargs ...)) -- ACL2 guard/measure/mode annotations. Declared a

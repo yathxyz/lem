@@ -17,29 +17,38 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 
 ## ACL2 toolchain — install and pin
 
-ACL2 is installed from **nixpkgs** as `acl2-minimal` (binary-cached; no
-from-source build needed on this machine). Reproducible install:
+ACL2 is installed from **nixpkgs**, binary-cached; no from-source build needed
+on this machine. The primary toolchain is the **full `acl2` package, which ships
+the certified community books** (`std/`, `arithmetic/`, …), so kernel books may
+freely `(include-book "std/lists/top" :dir :system)` — empirically verified to
+certify. Reproducible install (the bundled glucose SAT library is unfree-licensed,
+hence the flag):
 
 ```bash
-nix build nixpkgs#acl2-minimal --no-link --print-out-paths
+NIXPKGS_ALLOW_UNFREE=1 nix build nixpkgs#acl2 --impure --no-link --print-out-paths
 ```
 
-**Pinned store path** (the exact build these proofs were certified against):
+**Pinned store paths** (the exact builds these proofs are certified against):
 
 ```
-/nix/store/ymb6xzcij4c22all84pcafvjv4wgvf9s-acl2-8.6/bin/acl2
+/nix/store/pcm6pnmxikvnk9pg9abs6k3c0yamsqkj-acl2-8.6/bin/acl2   # full, WITH community books (primary)
+/nix/store/ymb6xzcij4c22all84pcafvjv4wgvf9s-acl2-8.6/bin/acl2   # acl2-minimal, books-free fallback
 ```
 
-- ACL2 version: **8.6**.
-- ACL2's own host Lisp in this closure is **SBCL 2.6.5**. Lem's image runs
+- ACL2 version: **8.6** (both).
+- ACL2's own host Lisp in these closures is **SBCL 2.6.5**. Lem's image runs
   **SBCL 2.5.10**. That difference is fine and does **not** violate the
   one-source rule: the certification host need not equal the execution host
   (SPEC-VK "Standing risks" — the kernel *sources* still run on Lem's SBCL either
-  way). `perl` / `cert.pl` community-book prerequisites are not needed for the V0
+  way). `perl` / `cert.pl` community-book prerequisites are not needed for the
   plain-`certify-book` driver.
+- Binary resolution order in `scripts/run-proofs.sh`: `$ACL2` env override → the
+  pinned full build → `command -v acl2` → the pinned minimal build. The pin beats
+  `PATH` so certification stays reproducible regardless of user environment.
 
 To repin after a nixpkgs bump: run the install command above, replace the store
-path here and in `scripts/run-proofs.sh` (`PINNED_ACL2`), then re-run the proofs.
+paths here and in `scripts/run-proofs.sh` (`PINNED_ACL2`/`PINNED_ACL2_MINIMAL`),
+then re-run the proofs.
 
 ## Running the proofs
 

@@ -24,17 +24,25 @@ ROOT="$(pwd)"
 VERIFIED="$ROOT/verified"
 SHIM="$VERIFIED/shim.lisp"
 
-PINNED_ACL2=/nix/store/ymb6xzcij4c22all84pcafvjv4wgvf9s-acl2-8.6/bin/acl2
+# Full ACL2 (WITH certified community books -- std/, arithmetic/, ...); kernel
+# books may (include-book "std/lists/top" :dir :system). See verified/README.md.
+PINNED_ACL2=/nix/store/pcm6pnmxikvnk9pg9abs6k3c0yamsqkj-acl2-8.6/bin/acl2
+# Books-free fallback (nixpkgs acl2-minimal): certifies only books with no
+# include-book :dir :system.
+PINNED_ACL2_MINIMAL=/nix/store/ymb6xzcij4c22all84pcafvjv4wgvf9s-acl2-8.6/bin/acl2
 
 resolve_acl2() {
   if [ -n "${ACL2:-}" ]; then
     printf '%s\n' "$ACL2"; return 0
   fi
+  if [ -x "$PINNED_ACL2" ]; then
+    printf '%s\n' "$PINNED_ACL2"; return 0
+  fi
   if command -v acl2 >/dev/null 2>&1; then
     command -v acl2; return 0
   fi
-  if [ -x "$PINNED_ACL2" ]; then
-    printf '%s\n' "$PINNED_ACL2"; return 0
+  if [ -x "$PINNED_ACL2_MINIMAL" ]; then
+    printf '%s\n' "$PINNED_ACL2_MINIMAL"; return 0
   fi
   echo "run-proofs: no ACL2 binary found (set \$ACL2, put acl2 on PATH, or install the pinned build)" >&2
   return 1
