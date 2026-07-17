@@ -29,9 +29,15 @@
 (defmacro with-micros-connection ((connection) &body body)
   `(call-with-micros-connection (lambda (,connection) ,@body)))
 
+(defun roswell-installed-p ()
+  (zerop (nth-value 2 (uiop:run-program '("which" "ros") :ignore-error-status t))))
+
 (deftest simple-eval-test
-  (with-micros-connection (connection)
-    (let ((result
-            (micros/client:remote-eval-sync connection
-                                            `(micros:interactive-eval "(cons 1 2)"))))
-      (ok (equal "=> (1 . 2)" result)))))
+  ;; start-server-and-connect launches the server via "ros run"
+  (if (not (roswell-installed-p))
+      (skip "roswell is not installed")
+      (with-micros-connection (connection)
+        (let ((result
+                (micros/client:remote-eval-sync connection
+                                                `(micros:interactive-eval "(cons 1 2)"))))
+          (ok (equal "=> (1 . 2)" result))))))
