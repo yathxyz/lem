@@ -612,7 +612,7 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
       (unless (line-offset point 1)
         (return nil)))))
 
-(defun render-agenda (buffer items &optional failures)
+(defun render-agenda (buffer items &optional failures clock-report)
   "Fill BUFFER with grouped ITEMS and any source FAILURES on the editor thread."
   (let ((now (funcall *agenda-now-function*))
         (restore-key (buffer-value buffer 'lem-yath-agenda-restore-entry))
@@ -630,7 +630,11 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
          buffer (format nil "Upcoming (~a days)" *agenda-upcoming-days*)
          upcoming duplicate-counts)
         (insert-agenda-section buffer "TODOs" todos duplicate-counts)
-        (insert-agenda-failures buffer failures)))
+        (insert-agenda-failures buffer failures)
+        (when (and clock-report
+                   (buffer-value buffer 'lem-yath-agenda-clockreport-mode)
+                   (fboundp 'agenda-clock-insert-report))
+          (agenda-clock-insert-report buffer clock-report))))
     (unless (and restore-key (agenda-restore-entry-point buffer restore-key))
       (buffer-start (buffer-point buffer))))
   (setf (buffer-read-only-p buffer) t)
@@ -638,7 +642,7 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
   (redraw-display))
 
 (defun agenda-collect-items ()
-  "Return all parsed items and a list of per-source failures."
+  "Return parsed items, per-source failures, and discovered agenda files."
   (handler-case
       (multiple-value-bind (files discovery-failures) (agenda-org-files)
         (let ((items '())
@@ -648,9 +652,9 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
               (setf items (nconc items parsed))
               (dolist (error errors)
                 (push (cons file error) failures))))
-          (values items (nreverse failures))))
+          (values items (nreverse failures) files)))
     (error (condition)
-      (values nil (list (cons nil condition))))))
+      (values nil (list (cons nil condition)) nil))))
 
 (defun agenda-buffer-live-p (buffer)
   (not (null (member buffer (buffer-list) :test #'eq))))
@@ -662,12 +666,13 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
   (setf (buffer-value buffer 'lem-yath-agenda-generation)
         (1+ (agenda-buffer-generation buffer))))
 
-(defun agenda-render-if-current (buffer generation items &optional failures)
+(defun agenda-render-if-current
+    (buffer generation items &optional failures clock-report)
   "Render ITEMS only when GENERATION still owns the live agenda BUFFER."
   (when (and (agenda-buffer-live-p buffer)
              (mode-active-p buffer 'lem-yath-agenda-mode)
              (= generation (agenda-buffer-generation buffer)))
-    (render-agenda buffer items failures)
+    (render-agenda buffer items failures clock-report)
     t))
 
 (defun agenda-scan-running-p (buffer)
@@ -676,35 +681,52 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
 (defun agenda-refresh-pending-p (buffer)
   (not (null (buffer-value buffer 'lem-yath-agenda-refresh-pending))))
 
-(defun agenda-scan-worker (buffer generation)
+(defun agenda-scan-worker (buffer generation clock-report-p)
   "Collect agenda items off-thread and marshal one completion event."
-  (multiple-value-bind (items failures)
+  (multiple-value-bind (items failures files)
       (handler-case
           (agenda-collect-items)
         (error (condition)
-          (values nil (list (cons nil condition)))))
-    (send-event
-     (lambda ()
-       (handler-case
-           (agenda-finish-scan buffer generation items failures)
-         (error (condition)
-           (message "Agenda render failed: ~a" condition)))))))
+          (values nil (list (cons nil condition)) nil)))
+    (let ((clock-report nil))
+      (when (and clock-report-p
+                 (fboundp 'agenda-clock-collect-report))
+        (multiple-value-bind (report report-failures)
+            (handler-case
+                (agenda-clock-collect-report files)
+              (error (condition)
+                (values nil (list (cons nil condition)))))
+          (setf clock-report report
+                failures (nconc failures report-failures))))
+      (send-event
+       (lambda ()
+         (handler-case
+             (agenda-finish-scan
+              buffer generation items failures clock-report)
+           (error (condition)
+             (message "Agenda render failed: ~a" condition))))))))
 
 (defun agenda-launch-scan (buffer generation)
   "Launch GENERATION, maintaining at most one worker for BUFFER."
-  (setf (buffer-value buffer 'lem-yath-agenda-scan-running) t)
-  (handler-case
-      (bt2:make-thread (lambda () (agenda-scan-worker buffer generation))
-                       :name (format nil "lem-yath/agenda-scan-~d" generation))
-    (error (condition)
-      (setf (buffer-value buffer 'lem-yath-agenda-scan-running) nil
-            (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)
-      (agenda-render-if-current
-       buffer generation nil (list (cons nil condition)))
-      (message "Agenda scan could not start: ~a" condition)
-      nil)))
+  (let ((clock-report-p
+          (not (null
+                (buffer-value buffer 'lem-yath-agenda-clockreport-mode)))))
+    (setf (buffer-value buffer 'lem-yath-agenda-scan-running) t)
+    (handler-case
+        (bt2:make-thread
+         (lambda ()
+           (agenda-scan-worker buffer generation clock-report-p))
+         :name (format nil "lem-yath/agenda-scan-~d" generation))
+      (error (condition)
+        (setf (buffer-value buffer 'lem-yath-agenda-scan-running) nil
+              (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)
+        (agenda-render-if-current
+         buffer generation nil (list (cons nil condition)))
+        (message "Agenda scan could not start: ~a" condition)
+        nil))))
 
-(defun agenda-finish-scan (buffer generation items failures)
+(defun agenda-finish-scan
+    (buffer generation items failures &optional clock-report)
   "Finish one worker and run at most one coalesced replacement refresh."
   (when (agenda-buffer-live-p buffer)
     (setf (buffer-value buffer 'lem-yath-agenda-scan-running) nil)
@@ -713,7 +735,8 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
           (progn
             (setf (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)
             (agenda-launch-scan buffer (agenda-buffer-generation buffer)))
-          (agenda-render-if-current buffer generation items failures)))))
+          (agenda-render-if-current
+           buffer generation items failures clock-report)))))
 
 (defun agenda-mark-scanning (buffer)
   (with-buffer-read-only buffer nil
@@ -754,8 +777,12 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
 
 (define-command lem-yath-agenda-visit () ()
   "Open the org file for the entry on the current line at its heading."
-  (let ((file (text-property-at (current-point) :agenda-file))
-        (line (text-property-at (current-point) :agenda-line)))
+  (let ((file (or (text-property-at (current-point) :agenda-file)
+                  (text-property-at
+                   (current-point) :agenda-clock-report-file)))
+        (line (or (text-property-at (current-point) :agenda-line)
+                  (text-property-at
+                   (current-point) :agenda-clock-report-line))))
     (if (null file)
         (message "No agenda entry on this line.")
         (progn

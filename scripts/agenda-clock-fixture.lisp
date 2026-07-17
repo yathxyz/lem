@@ -114,7 +114,8 @@
    (concatenate
     'string
     "KEYS state=~a I=~a O=~a cg=~a cc=~a J=~a X=~a plus=~a minus=~a "
-    "control-goto=~a control-cancel=~a m=~a tilde=~a star=~a percent=~a "
+    "control-goto=~a control-cancel=~a cr=~a R=~a "
+    "m=~a tilde=~a star=~a percent=~a "
     "M=~a u=~a U=~a M-m=~a M-star=~a")
    (agenda-clock-test-state-name)
    (agenda-clock-test-command-name "I")
@@ -127,6 +128,8 @@
    (agenda-clock-test-command-name "-")
    (agenda-clock-test-command-name "C-c C-x C-j")
    (agenda-clock-test-command-name "C-c C-x C-x")
+   (agenda-clock-test-command-name "c r")
+   (agenda-clock-test-command-name "R")
    (agenda-clock-test-command-name "m")
    (agenda-clock-test-command-name "~")
    (agenda-clock-test-command-name "*")
@@ -194,6 +197,66 @@
    (agenda-clock-test-state-name)
    (agenda-clock-test-command-name "u")))
 
+(define-command lem-yath-test-agenda-clock-report-state () ()
+  (let ((in-report-p nil)
+        (summary 0)
+        (total 0)
+        (clock-file 0)
+        (public-file 0)
+        (parent 0)
+        (child 0)
+        (decoy 0)
+        (source-rows 0))
+    (with-point ((point (buffer-start-point (current-buffer))))
+      (loop
+        (let ((line (line-string point)))
+          (when (ppcre:scan
+                 "^Clock summary  \\(2026-07-12 through 2026-07-19\\)$"
+                 line)
+            (setf in-report-p t)
+            (incf summary))
+          (when in-report-p
+            (when (and (ppcre:scan "Total time" line)
+                       (ppcre:scan "2:00" line))
+              (incf total))
+            (when (and (ppcre:scan "clock\\.org" line)
+                       (ppcre:scan "File time" line)
+                       (ppcre:scan "1:00" line))
+              (incf clock-file))
+            (when (and (ppcre:scan "public\\.org" line)
+                       (ppcre:scan "File time" line)
+                       (ppcre:scan "1:00" line))
+              (incf public-file))
+            (when (and (ppcre:scan "Clock three sentinel" line)
+                       (ppcre:scan "1:00" line))
+              (incf parent))
+            (when (and (ppcre:scan "Nested clock report" line)
+                       (ppcre:scan "0:30" line))
+              (incf child))
+            (when (ppcre:scan "Semantic clock decoy" line)
+              (incf decoy))
+            (when (text-property-at point :agenda-clock-report-file)
+              (incf source-rows))))
+        (unless (line-offset point 1) (return))))
+    (agenda-clock-test-log
+     (concatenate
+      'string
+      "CLOCK-REPORT enabled=~a summary=~d total=~d clock-file=~d "
+      "public-file=~d parent=~d child=~d decoy=~d source-rows=~d")
+     (if (agenda-clockreport-mode-p) "yes" "no")
+     summary total clock-file public-file parent child decoy source-rows)))
+
+(define-command lem-yath-test-agenda-clock-report-child () ()
+  (with-point ((point (buffer-start-point (current-buffer))))
+    (loop
+      (when (string-equal
+             (or (text-property-at point :agenda-clock-report-heading) "")
+             "** Nested clock report sentinel")
+        (move-point (current-point) point)
+        (return-from lem-yath-test-agenda-clock-report-child))
+      (unless (line-offset point 1)
+        (editor-error "Nested report row is missing")))))
+
 (define-command lem-yath-test-agenda-clock-report () ()
   (let ((marked-rows 0)
         (entry-rows 0))
@@ -234,6 +297,8 @@
   (define-key keymap "C-c z s" 'lem-yath-test-agenda-clock-stale)
   (define-key keymap "C-c z v" 'lem-yath-test-agenda-clock-hide-current-row)
   (define-key keymap "C-c z o" 'lem-yath-test-agenda-clock-visit-source)
+  (define-key keymap "C-c z w" 'lem-yath-test-agenda-clock-report-state)
+  (define-key keymap "C-c z j" 'lem-yath-test-agenda-clock-report-child)
   (define-key keymap "C-c z k" 'lem-yath-test-agenda-clock-keys)
   (define-key keymap "C-c z r" 'lem-yath-test-agenda-clock-report)
   (define-key keymap "C-c z x" 'lem-yath-test-agenda-clock-source-report))

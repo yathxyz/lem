@@ -602,6 +602,10 @@ the trailing text-ready space. The profile binds no other org-journal command
   base map with stock single-current-clock commands; Emacs state reaches the
   custom delegated-clock commands. The latter use bulk-marked rows (or the
   current row for `I`), and unmarked `O` closes open clocks in all agenda files.
+- Evil-Org `cg`/`cc`/`cr` and base `J`/`X`/`R` expose clock goto, cancel, and
+  clock-report mode. Lem's report uses the displayed today-plus-seven-day span,
+  clips closed clocks at both boundaries, and retains source-linked level-one
+  and level-two rollups.
 
 ### Visuals & babel
 - **org-modern**: `org-modern-mode` on org buffers + `org-modern-agenda` on agenda finalize.

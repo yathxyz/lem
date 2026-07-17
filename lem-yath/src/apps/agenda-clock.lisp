@@ -18,6 +18,14 @@
   (ppcre:create-scanner
    "^\\s*CLOCK: \\[(\\d{4})-(\\d{2})-(\\d{2})\\s+[^]\\s]+\\s+(\\d{2}):(\\d{2})\\]\\s*$"))
 
+(defparameter *agenda-clock-report-closed-line-scanner*
+  (ppcre:create-scanner
+   (concatenate
+    'string
+    "^\\s*CLOCK: \\[(\\d{4})-(\\d{2})-(\\d{2})\\s+[^]\\s]+\\s+"
+    "(\\d{2}):(\\d{2})\\]--\\[(\\d{4})-(\\d{2})-(\\d{2})\\s+"
+    "[^]\\s]+\\s+(\\d{2}):(\\d{2})\\](?:\\s+=>.*)?\\s*$")))
+
 (defstruct (agenda-clock-target (:constructor make-agenda-clock-target))
   point file heading kind date time occurrence-index duplicate-index)
 
@@ -26,6 +34,17 @@
 
 (defstruct (agenda-active-clock (:constructor make-agenda-active-clock))
   clock-point heading-point file heading start-time)
+
+(defstruct (agenda-clock-report-heading
+            (:constructor make-agenda-clock-report-heading))
+  level title line heading (minutes 0))
+
+(defstruct (agenda-clock-report-file
+            (:constructor make-agenda-clock-report-file))
+  file (minutes 0) headings)
+
+(defstruct (agenda-clock-report (:constructor make-agenda-clock-report))
+  start-date end-date (minutes 0) files)
 
 (defun agenda-clock-now ()
   (funcall (or *agenda-clock-now-function* *agenda-now-function*)))
@@ -59,6 +78,247 @@
          (hours (floor seconds 3600))
          (minutes (floor (mod seconds 3600) 60)))
     (format nil "~2d:~2,'0d" hours minutes)))
+
+;;; --- current-span clock report ------------------------------------------
+
+(defun agenda-clock-report-register-integer
+    (line registers register-ends index)
+  (parse-integer line
+                 :start (aref registers index)
+                 :end (aref register-ends index)))
+
+(defun agenda-clock-report-closed-interval (line)
+  "Return the start and end times of one exact closed Org clock LINE."
+  (multiple-value-bind (start end registers register-ends)
+      (ppcre:scan *agenda-clock-report-closed-line-scanner* line)
+    (declare (ignore end))
+    (when start
+      (handler-case
+          (flet ((field (index)
+                   (agenda-clock-report-register-integer
+                    line registers register-ends index)))
+            (values
+             (encode-universal-time 0 (field 4) (field 3)
+                                    (field 2) (field 1) (field 0))
+             (encode-universal-time 0 (field 9) (field 8)
+                                    (field 7) (field 6) (field 5))))
+        (error () (values nil nil))))))
+
+(defun agenda-clock-report-date-boundary (date)
+  (multiple-value-bind (year month day) (iso-date-components date)
+    (encode-universal-time 0 0 0 day month year)))
+
+(defun agenda-clock-report-overlap-minutes
+    (start end range-start range-end)
+  (let ((seconds (- (min end range-end) (max start range-start))))
+    (if (plusp seconds) (floor seconds 60) 0)))
+
+(defun agenda-clock-report-file-data (file range-start range-end)
+  "Collect GNU maxlevel-2 rollups for FILE within RANGE-START/RANGE-END."
+  (with-open-file (stream file :direction :input :external-format :utf-8)
+    (let ((stack '())
+          (headings '())
+          (file-minutes 0)
+          (block-p nil))
+      (loop :for line := (read-line stream nil)
+            :for lineno :from 1
+            :while line
+            :do
+               (cond
+                 (block-p
+                  (when (ppcre:scan "(?i)^\\s*#\\+end_" line)
+                    (setf block-p nil)))
+                 ((ppcre:scan "(?i)^\\s*#\\+begin_" line)
+                  (setf block-p t))
+                 ((ppcre:scan "^\\*+\\s+" line)
+                  (let ((raw-level (org-heading-level-from-line line)))
+                    (loop :while (and stack
+                                      (>= (car (car stack)) raw-level))
+                          :do (pop stack))
+                    (let ((heading
+                            (make-agenda-clock-report-heading
+                             :level (1+ (length stack))
+                             :title (agenda-refile-heading-title line)
+                             :line lineno
+                             :heading line)))
+                      (push heading headings)
+                      (push (cons raw-level heading) stack))))
+                 (stack
+                  (multiple-value-bind (start end)
+                      (agenda-clock-report-closed-interval line)
+                    (when (and start end)
+                      (let ((minutes
+                              (agenda-clock-report-overlap-minutes
+                               start end range-start range-end)))
+                        (when (plusp minutes)
+                          (incf file-minutes minutes)
+                          (dolist (entry stack)
+                            (incf
+                             (agenda-clock-report-heading-minutes (cdr entry))
+                             minutes)))))))))
+      (make-agenda-clock-report-file
+       :file file
+       :minutes file-minutes
+       :headings
+       (remove-if
+        (lambda (heading)
+          (or (> (agenda-clock-report-heading-level heading) 2)
+              (zerop (agenda-clock-report-heading-minutes heading))))
+        (nreverse headings))))))
+
+(defun agenda-clock-collect-report (files)
+  "Collect a clock report for Lem's displayed today-plus-seven-day span."
+  (let* ((now (funcall *agenda-now-function*))
+         (start-date (today-iso now))
+         (end-date (iso-plus-days *agenda-upcoming-days* now))
+         (exclusive-end-date (iso-date-add-calendar end-date 1 #\d))
+         (range-start (agenda-clock-report-date-boundary start-date))
+         (range-end (agenda-clock-report-date-boundary exclusive-end-date))
+         (report-files '())
+         (failures '())
+         (total 0))
+    (dolist (file files)
+      (handler-case
+          (let ((data
+                  (agenda-clock-report-file-data
+                   file range-start range-end)))
+            (incf total (agenda-clock-report-file-minutes data))
+            (push data report-files))
+        (error (condition)
+          (push (cons file condition) failures))))
+    (values
+     (make-agenda-clock-report
+      :start-date start-date
+      :end-date end-date
+      :minutes total
+      :files (nreverse report-files))
+     (nreverse failures))))
+
+(defun agenda-clock-report-duration (minutes)
+  (format nil "~d:~2,'0d" (floor minutes 60) (mod minutes 60)))
+
+(defun agenda-clock-report-fit-cell (text width)
+  (let ((target (abs width)))
+    (completion-pad-annotation-field
+     (completion-truncate-display-width text target)
+     width)))
+
+(defun agenda-clock-report-row
+    (file-text heading-text time-text file-width heading-width time-width)
+  (format nil "| ~a | ~a | ~a |~%"
+          (agenda-clock-report-fit-cell file-text file-width)
+          (agenda-clock-report-fit-cell heading-text heading-width)
+          (agenda-clock-report-fit-cell time-text (- time-width))))
+
+(defun agenda-clock-insert-report-heading-row
+    (point data file file-width heading-width time-width)
+  (with-point ((start point))
+    (insert-string
+     point
+     (agenda-clock-report-row
+      ""
+      (if (= (agenda-clock-report-heading-level data) 1)
+          (agenda-clock-report-heading-title data)
+          (format nil "\\_  ~a"
+                  (agenda-clock-report-heading-title data)))
+      (agenda-clock-report-duration
+       (agenda-clock-report-heading-minutes data))
+      file-width heading-width time-width))
+    (put-text-property start point :agenda-clock-report-file file)
+    (put-text-property start point :agenda-clock-report-line
+                       (agenda-clock-report-heading-line data))
+    (put-text-property start point :agenda-clock-report-heading
+                       (agenda-clock-report-heading-heading data))))
+
+(defun agenda-clock-insert-report (buffer report)
+  "Append REPORT to BUFFER as a source-linked, read-only clocktable."
+  (let* ((files (agenda-clock-report-files report))
+         (file-width
+           (min 24
+                (max 4
+                     (or
+                      (loop :for data :in files
+                            :maximize
+                            (lem/common/character:string-width
+                             (file-namestring
+                              (agenda-clock-report-file-file data))))
+                      0))))
+         (time-width
+           (max 4
+                (lem/common/character:string-width
+                 (agenda-clock-report-duration
+                  (agenda-clock-report-minutes report)))))
+         (heading-maximum
+           (max 10
+                (or
+                 (loop :for data :in files
+                       :maximize
+                       (or
+                        (loop :for heading
+                                :in (agenda-clock-report-file-headings data)
+                              :maximize
+                              (+ (if (= (agenda-clock-report-heading-level
+                                         heading) 1)
+                                     0 4)
+                                 (lem/common/character:string-width
+                                  (agenda-clock-report-heading-title
+                                   heading))))
+                        0))
+                 0)))
+         (heading-width
+           (min heading-maximum
+                (max 10 (- (max 36 (display-width))
+                           file-width time-width 10))))
+         (point (buffer-end-point buffer)))
+    (insert-string
+     point
+     (format nil "Clock summary  (~a through ~a)~%~%"
+             (agenda-clock-report-start-date report)
+             (agenda-clock-report-end-date report)))
+    (insert-string
+     point
+     (agenda-clock-report-row
+      "File" "Headline" "Time" file-width heading-width time-width))
+    (insert-string
+     point
+     (format nil "|-~a-+-~a-+-~a-|~%"
+             (make-string file-width :initial-element #\-)
+             (make-string heading-width :initial-element #\-)
+             (make-string time-width :initial-element #\-)))
+    (insert-string
+     point
+     (agenda-clock-report-row
+      "ALL" "Total time"
+      (agenda-clock-report-duration
+       (agenda-clock-report-minutes report))
+      file-width heading-width time-width))
+    (dolist (data files)
+      (insert-string
+       point
+       (agenda-clock-report-row
+        (file-namestring (agenda-clock-report-file-file data))
+        "File time"
+        (agenda-clock-report-duration
+         (agenda-clock-report-file-minutes data))
+        file-width heading-width time-width))
+      (dolist (heading (agenda-clock-report-file-headings data))
+        (agenda-clock-insert-report-heading-row
+         point heading (agenda-clock-report-file-file data)
+         file-width heading-width time-width)))
+    (insert-string point "\n")))
+
+(defun agenda-clockreport-mode-p (&optional (buffer (current-buffer)))
+  (not (null (buffer-value buffer 'lem-yath-agenda-clockreport-mode))))
+
+(define-command lem-yath-agenda-clockreport-mode () ()
+  "Toggle the current-span clocktable in the agenda buffer."
+  (let* ((buffer (current-buffer))
+         (enabled-p (not (agenda-clockreport-mode-p buffer))))
+    (setf (buffer-value buffer 'lem-yath-agenda-clockreport-mode) enabled-p)
+    (alexandria:when-let ((key (agenda-entry-key-at-point (current-point))))
+      (setf (buffer-value buffer 'lem-yath-agenda-restore-entry) key))
+    (agenda-start-scan buffer)
+    (message "Clocktable mode is ~a" (if enabled-p "on" "off"))))
 
 ;;; --- exact source targets ------------------------------------------------
 
@@ -841,6 +1101,8 @@ valid after an insertion even though the unrefreshed agenda row is numeric."
 (define-key *lem-yath-agenda-vi-keymap* "O" 'lem-yath-agenda-clock-out)
 (define-key *lem-yath-agenda-vi-keymap* "c g" 'lem-yath-agenda-clock-goto)
 (define-key *lem-yath-agenda-vi-keymap* "c c" 'lem-yath-agenda-clock-cancel)
+(define-key *lem-yath-agenda-vi-keymap* "c r"
+  'lem-yath-agenda-clockreport-mode)
 (define-key *lem-yath-agenda-vi-keymap* "m" 'lem-yath-agenda-bulk-toggle)
 (define-key *lem-yath-agenda-vi-keymap* "~" 'lem-yath-agenda-bulk-toggle-all)
 (define-key *lem-yath-agenda-vi-keymap* "*" 'lem-yath-agenda-bulk-mark-all)
@@ -854,6 +1116,8 @@ valid after an insertion even though the unrefreshed agenda row is numeric."
   'lem-yath-agenda-clock-out-open-clocks)
 (define-key *lem-yath-agenda-mode-keymap* "J" 'lem-yath-agenda-clock-goto)
 (define-key *lem-yath-agenda-mode-keymap* "X" 'lem-yath-agenda-clock-cancel)
+(define-key *lem-yath-agenda-mode-keymap* "R"
+  'lem-yath-agenda-clockreport-mode)
 (define-key *lem-yath-agenda-mode-keymap* "C-c C-x C-j"
   'lem-yath-agenda-clock-goto)
 (define-key *lem-yath-agenda-mode-keymap* "C-c C-x C-x"

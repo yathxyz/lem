@@ -77,16 +77,22 @@ printf '%s\n' \
   'CLOCK: [2026-07-12 Sun 10:00]--[2026-07-12 Sun 10:30] =>  0:30' \
   ':END:' \
   'Clock three body.' \
+  '** Nested clock report sentinel' \
+  'CLOCK: [2026-07-11 Sat 23:45]--[2026-07-12 Sun 00:15] =>  0:30' \
+  'CLOCK: [2026-07-19 Sun 23:45]--[2026-07-20 Mon 00:15] =>  0:30' \
+  'CLOCK: [2026-07-20 Mon 01:00]--[2026-07-20 Mon 02:00] =>  1:00' \
   '* TODO Duplicate clock sentinel' \
   'SCHEDULED: <2026-07-12 Sun> DEADLINE: <2026-07-13 Mon>' \
   'Duplicate body.' \
   '* TODO Semantic clock decoy sentinel' \
   '#+BEGIN_SRC text' \
   'CLOCK: [2026-07-12 Sun 09:00]' \
+  'CLOCK: [2026-07-12 Sun 08:00]--[2026-07-12 Sun 09:00] =>  1:00' \
   '#+END_SRC' \
   >"$work_file"
 printf '%s\n' \
   '* TODO Public clock sentinel' \
+  'CLOCK: [2026-07-12 Sun 11:00]--[2026-07-12 Sun 12:00] =>  1:00' \
   'Public body.' \
   >"$public_file"
 : >"$LEM_YATH_AGENDA_CLOCK_REPORT"
@@ -107,8 +113,8 @@ send_chord C-z
 send_chord C-c z k
 wait_report_count '^KEYS state=emacs ' 1 || true
 keys_ok=1
-grep -q '^KEYS state=normal I=LEM-YATH-AGENDA-CLOCK-IN O=LEM-YATH-AGENDA-CLOCK-OUT cg=LEM-YATH-AGENDA-CLOCK-GOTO cc=LEM-YATH-AGENDA-CLOCK-CANCEL J=LEM-YATH-AGENDA-PRIORITY-DOWN X=LEM-YATH-STRUCTURAL-DELETE-PREVIOUS-CHAR plus=VI-NEXT-LINE minus=VI-PREVIOUS-LINE control-goto=LEM-YATH-AGENDA-CLOCK-GOTO control-cancel=LEM-YATH-AGENDA-CLOCK-CANCEL ' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
-grep -q '^KEYS state=emacs I=LEM-YATH-AGENDA-CLOCK-IN-ADDITIONAL O=LEM-YATH-AGENDA-CLOCK-OUT-OPEN-CLOCKS cg=SELF-INSERT cc=SELF-INSERT J=LEM-YATH-AGENDA-CLOCK-GOTO X=LEM-YATH-AGENDA-CLOCK-CANCEL plus=LEM-YATH-AGENDA-PRIORITY-UP minus=LEM-YATH-AGENDA-PRIORITY-DOWN control-goto=LEM-YATH-AGENDA-CLOCK-GOTO control-cancel=LEM-YATH-AGENDA-CLOCK-CANCEL m=LEM-YATH-AGENDA-BULK-MARK .*u=LEM-YATH-AGENDA-BULK-UNMARK U=LEM-YATH-AGENDA-BULK-UNMARK-ALL M-m=LEM-YATH-AGENDA-BULK-TOGGLE M-star=LEM-YATH-AGENDA-BULK-TOGGLE-ALL$' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
+grep -q '^KEYS state=normal I=LEM-YATH-AGENDA-CLOCK-IN O=LEM-YATH-AGENDA-CLOCK-OUT cg=LEM-YATH-AGENDA-CLOCK-GOTO cc=LEM-YATH-AGENDA-CLOCK-CANCEL J=LEM-YATH-AGENDA-PRIORITY-DOWN X=LEM-YATH-STRUCTURAL-DELETE-PREVIOUS-CHAR plus=VI-NEXT-LINE minus=VI-PREVIOUS-LINE control-goto=LEM-YATH-AGENDA-CLOCK-GOTO control-cancel=LEM-YATH-AGENDA-CLOCK-CANCEL cr=LEM-YATH-AGENDA-CLOCKREPORT-MODE R=VI-REPLACE ' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
+grep -q '^KEYS state=emacs I=LEM-YATH-AGENDA-CLOCK-IN-ADDITIONAL O=LEM-YATH-AGENDA-CLOCK-OUT-OPEN-CLOCKS cg=SELF-INSERT cc=SELF-INSERT J=LEM-YATH-AGENDA-CLOCK-GOTO X=LEM-YATH-AGENDA-CLOCK-CANCEL plus=LEM-YATH-AGENDA-PRIORITY-UP minus=LEM-YATH-AGENDA-PRIORITY-DOWN control-goto=LEM-YATH-AGENDA-CLOCK-GOTO control-cancel=LEM-YATH-AGENDA-CLOCK-CANCEL cr=SELF-INSERT R=LEM-YATH-AGENDA-CLOCKREPORT-MODE m=LEM-YATH-AGENDA-BULK-MARK .*u=LEM-YATH-AGENDA-BULK-UNMARK U=LEM-YATH-AGENDA-BULK-UNMARK-ALL M-m=LEM-YATH-AGENDA-BULK-TOGGLE M-star=LEM-YATH-AGENDA-BULK-TOGGLE-ALL$' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
 if [ "$keys_ok" = 1 ]; then
   pass state-maps 'clock, priority, and mark keys follow pinned Evil/base shadowing'
 else
@@ -141,6 +147,46 @@ else
   fail bulk-surface '% did not open the regexp prompt'
 fi
 
+# Org 9.8.3 clockreport mode uses the displayed agenda span, excludes a live
+# clock, clips boundary-crossing closed clocks, and rolls descendants into the
+# first two reduced heading levels. Evil-Org exposes cr while the base map uses
+# R. Report rows are source links, not agenda bulk targets.
+report_ok=1
+send_chord C-c z 1
+send_chord c r
+lem_wait_for "$session" 'Clocktable mode is on' 10 >/dev/null || report_ok=0
+wait_agenda || report_ok=0
+send_chord C-c z w
+wait_report_count '^CLOCK-REPORT enabled=yes summary=1 total=1 clock-file=1 public-file=1 parent=1 child=1 decoy=0 source-rows=3$' 1 || report_ok=0
+
+send_chord c r
+lem_wait_for "$session" 'Clocktable mode is off' 10 >/dev/null || report_ok=0
+wait_agenda || report_ok=0
+send_chord C-c z w
+wait_report_count '^CLOCK-REPORT enabled=no summary=0 total=0 clock-file=0 public-file=0 parent=0 child=0 decoy=0 source-rows=0$' 1 || report_ok=0
+
+send_chord C-z
+send_chord R
+lem_wait_for "$session" 'Clocktable mode is on' 10 >/dev/null || report_ok=0
+wait_agenda || report_ok=0
+send_chord C-c z w
+wait_report_count '^CLOCK-REPORT enabled=yes summary=1 total=1 clock-file=1 public-file=1 parent=1 child=1 decoy=0 source-rows=3$' 2 || report_ok=0
+send_chord C-z
+send_chord C-c z j
+send_chord Enter
+send_chord C-c z l
+wait_report_count '^CLOCK-LOCATION file=clock\.org line=[0-9]+ text="\*\* Nested clock report sentinel"$' 1 || report_ok=0
+send_chord C-c z b
+send_chord c r
+lem_wait_for "$session" 'Clocktable mode is off' 10 >/dev/null || report_ok=0
+wait_agenda || report_ok=0
+
+if [ "$report_ok" = 1 ]; then
+  pass clock-report 'cr/R toggle clipped maxlevel-2 multi-file totals and source links'
+else
+  fail clock-report 'clocktable mode, totals, exclusion, or source navigation differed'
+fi
+
 # Stock I creates a LOGBOOK after planning/properties, repeating I is a true
 # no-op, and clocking into another row closes the first at the shared time.
 send_chord C-c z 1
@@ -148,6 +194,16 @@ send_chord I
 wait_file_pattern '^CLOCK: \[2026-07-12 Sun 12:00\]$' "$work_file" || true
 wait_agenda || true
 stock_shape=1
+
+# The pinned Org default excludes the currently running clock from reports.
+send_chord c r
+lem_wait_for "$session" 'Clocktable mode is on' 10 >/dev/null || stock_shape=0
+wait_agenda || stock_shape=0
+send_chord C-c z w
+wait_report_count '^CLOCK-REPORT enabled=yes summary=1 total=1 clock-file=1 public-file=1 parent=1 child=1 decoy=0 source-rows=3$' 3 || stock_shape=0
+send_chord c r
+lem_wait_for "$session" 'Clocktable mode is off' 10 >/dev/null || stock_shape=0
+wait_agenda || stock_shape=0
 
 # Evil-Org uses cg/cc while the underlying agenda map uses J/X. Goto prefers
 # the rendered clock row; cancel removes an otherwise empty LOGBOOK as one
@@ -177,7 +233,7 @@ send_chord c c
 lem_wait_for "$session" 'Clock canceled' 10 >/dev/null || stock_shape=0
 send_chord C-c z x
 wait_report_count '^CLOCK-SOURCE modified=yes open=1 logbook=1 active=no$' 1 || stock_shape=0
-[ "$(grep -c '^CLOCK: \[' "$work_file")" = 3 ] || stock_shape=0
+[ "$(grep -c '^CLOCK: \[2026-07-12 Sun 12:00\]$' "$work_file")" = 1 ] || stock_shape=0
 [ "$(grep -c '^:LOGBOOK:$' "$work_file")" = 2 ] || stock_shape=0
 
 send_chord C-c z o
