@@ -33,7 +33,8 @@
                              (:file "kernel-model")
                              (:file "kernel-conformance")
                              (:file "kernel-undo-conformance")
-                             (:file "codec-conformance")))
+                             (:file "codec-conformance")
+                             (:file "crash-safety-faults")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")

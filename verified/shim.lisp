@@ -156,7 +156,15 @@
                                  "K-RECOMPUTE-OFFSETS"
                                  "K-DO-INHIBITED-INSERT" "K-DO-INHIBITED-DELETE"
                                  ;; codec.lisp (VK-5)
-                                 "DECODE-EOL" "ENCODE-EOL")
+                                 "DECODE-EOL" "ENCODE-EOL"
+                                 ;; crash-safety.lisp (VK-6)
+                                 "CS-INIT" "CS-STEP" "CS-RUN" "CS-INV"
+                                 "ST-TARGET" "ST-SAVE-TEMP" "ST-CP-TEMP"
+                                 "ST-CHECKPOINT" "ST-SAVE-PC" "ST-CP-PC"
+                                 "ST-CRASHED" "ST-CP-DONE"
+                                 "FILE-CONTENT" "FILE-SYNCED"
+                                 "PREFIX-P" "TAKE-AT-MOST"
+                                 "ENCODE-PATH")
   "ACL2 symbol-names re-exported through :lem/kernel. See header.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

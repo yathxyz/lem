@@ -16,14 +16,16 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 | `buffer-edit.lisp` | VK-2 edit primitives (`k-insert`, `k-delete`), shift-markers marker algebra, position algebra, and the five VK-2 obligation groups as certified theorems. |
 | `undo.lisp` | VK-3 undo/redo kernel: edit records, session (history + redo + tick), `k-do-insert`/`k-do-delete`/`k-boundary`/`k-undo-group`/`k-redo-group`/inhibited-edit offset recomputation, and the certified VK-3 obligations. |
 | `codec.lisp` | VK-5 EOL/encoding codec: pure `decode-eol`/`encode-eol` over codepoint lists, mirroring `src/buffer/file.lisp` read/write (post-DS-6); round-trip, no-char-loss and totality theorems. |
+| `crash-safety.lisp` | VK-6 crash-safety protocol: operational model of the DS-2 atomic save + DS-3 checkpoint interplay with a crash transition after every step; durability/delete-ordering invariants proved inductive over all reachable states, plus `encode-path` injectivity and checkpoint-name namespace disjointness. |
 | `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — under 200 lines, every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
 | `README.md` | This file. |
 
 Books are certified in the dependency order pinned in `scripts/run-proofs.sh`
-(`ORDERED_BOOKS` = `hello buffer-model buffer-edit undo codec`): `buffer-edit`
-includes `buffer-model`, `undo` includes `buffer-edit`, and `codec` includes
-`buffer-model` (for VK-1 `line-listp`); the alphabetical glob would order them
-wrongly.
+(`ORDERED_BOOKS` = `hello buffer-model buffer-edit undo codec crash-safety`):
+`buffer-edit` includes `buffer-model`, `undo` includes `buffer-edit`, and
+`codec` includes `buffer-model` (for VK-1 `line-listp`); the alphabetical glob
+would order them wrongly (`crash-safety` is self-contained but listed for a
+deterministic order).
 
 ## VK-1 — buffer model + well-formedness
 
@@ -283,12 +285,108 @@ mixed-EOL notification against the kernel's mixed flag, and the saved bytes
 against the UTF-8 of `encode-eol`. The `tests/eol-roundtrip.lisp` corpus is a
 fixed regression subset. No divergence found.
 
+## VK-6 — crash-safety protocol
+
+`crash-safety.lisp` model-checks the DS-2 atomic save + DS-3 checkpoint
+machinery as an ACL2 small-step operational model: an abstract filesystem
+state (target file, save temp, checkpoint temp, checkpoint file — each a
+`(content synced-p)` record — plus per-protocol pcs), the step sequences
+transcribed from production (`write-file-atomically`,
+src/buffer/file-utils.lisp:242-285; `write-string-to-file-atomically`,
+src/ext/checkpoint.lisp:88-105; `delete-checkpoint-on-save` on the
+after-save hook), and a **crash transition enabled after every step**. The
+invariant `cs-inv` is proved inductive over the step relation
+(`cs-inv-of-reachable`), so every theorem quantifies over **all** reachable
+states — every interleaving of the two protocols (a superset of production's
+single-threaded scheduling) and every crash point.
+
+**Hook ordering, verified in production.** `call-with-write-hook`
+(src/buffer/file.lisp:182-186) runs the after-save hooks (which include
+`delete-checkpoint-on-save`, wired at src/ext/checkpoint.lisp:249) strictly
+after the writer returns, and `write-file-atomically` returns normally only
+after `sb-posix:rename` commits — a failed rename signals `editor-error`,
+unwinding before the hooks. The model's `:save-delete-checkpoint` step is
+therefore enabled only in the post-rename state.
+
+Certified obligations (SPEC-VK VK-6):
+
+1. **Durability invariant** — `crash-safety-target-old-or-new`: in every
+   reachable state, including every crash state, the target holds old-content
+   or new-content — never torn, never lost. `crash-safety-checkpoint-never-junk`
+   + the recoverability theorems give the "old + checkpoint" disjunct its
+   precise form (below).
+2. **Checkpoint-deletion ordering** — `crash-safety-checkpoint-delete-ordering`:
+   checkpoint absent ⇒ target = new-content; no reachable state has
+   "checkpoint gone, target still old" (the delete-then-crash window is closed
+   by the verified hook ordering).
+3. **`encode-path` injectivity** — `encode-path-injective` (verbatim codepoint
+   port of src/ext/checkpoint.lisp:61-71, proved via the explicit prefix-code
+   inverse `decode-path`), full-name injectivity `encoded-name-injective`, and
+   namespace disjointness `encoded-and-hash-names-disjoint` /
+   `checkpoint-name-collision-implies-equal-paths`: an encoded **absolute**
+   path's name starts with `!s` (33 115) while a hash-fallback name starts
+   with a base-36 digit codepoint, so the two namespaces (dispatched on the
+   200-char threshold, checkpoint.lisp:81) can never collide.
+
+**"Recoverable", precisely** (`crash-safety-recoverable-no-crash` /
+`-any-state`): in every reachable state where a checkpoint write has committed
+and the save has not renamed, the target still holds old-content, the
+checkpoint file is present, and it holds the checkpointed edits **exactly** in
+non-crash states — in crash states at worst a **prefix** of them (next
+paragraph). Recovery is then production's find-file offer
+(`maybe-offer-recovery` → `recover-buffer-from-checkpoint`).
+
+**Filesystem axioms (trust base).** The crash transition is *defined* by:
+POSIX rename atomicity (a name maps to the whole old or whole new file, never
+a mixture); fsync durability (synced data survives a crash exactly); unsynced
+data may be lost or torn to an arbitrary prefix (the crash action's
+adversarial choices); ordered durable metadata (create/rename/unlink become
+durable in program order — metadata journaling; a crash losing a metadata
+suffix lands in an earlier protocol state, all of which the theorems already
+cover). These axioms are the definition of `tear-file`/`:crash` in the book,
+not `defaxiom`s; they are what we trust about the OS/filesystem below Lem.
+
+**Production durability gap, documented (not fixed here — VK-6 charter).** The
+save path fsyncs its temp before rename, so the renamed-in target is durable
+and obligation 1 is unconditional. The checkpoint writer
+(`write-string-to-file-atomically`) only `finish-output`s — **it never
+fsyncs** — so on power loss a filesystem that reorders data vs. rename may
+leave the checkpoint file torn to a prefix of the new checkpoint (that is
+exactly the crash-state prefix disjunct in the theorems; the model applies
+the fsync axiom uniformly, carrying the temp's synced flag through rename).
+One `fsync` added to the checkpoint writer would strengthen the prefix
+disjunct to equality. Also documented: intra-hash-namespace collisions
+(`sxhash` is not injective) remain possible for two ≥200-char-encoding paths
+with equal hashes and equal tails, and the namespace-disjointness guarantee
+is conditional on paths being absolute (production guarantees that:
+`buffer-filename` comes from `expand-file-name` and `checkpoint-filename`
+tries `truename` first).
+
+**Shim growth for VK-6:** none in the whitelist — the exec path (`cs-init`,
+`cs-step`, `cs-run`, `cs-inv`, accessors, `prefix-p`, `take-at-most`,
+`encode-path`) uses only CL homonyms. Seventeen symbols were added to
+`*kernel-exports*`.
+
+**Fault-injection acceptance:** `tests/pbt/crash-safety-faults.lisp` — a
+driver executes the real syscall sequence (step-faithful transcription: same
+syscalls, same order, same open flags; checkpoint path from the real
+`checkpoint-filename`) against a tmpdir, stopping after k steps for every
+k = 0..9. Stopping **is** the crash model (power loss / lying fsyncs are
+covered by the axioms above, not testable from userland). At every kill point
+the on-disk state is asserted against the VK-6 invariant AND against the
+kernel model's predicted state (exact for synced/absent files, prefix for
+unsynced ones), pinning the model's step semantics to reality. Plus
+differential PBT of `encode-path` (kernel vs. production) and fixed
+namespace-dispatch fixtures.
+
 ## Proof status
 
 All theorems in every book under `verified/` certify with real ACL2 (no
 `skip-proofs`, `defaxiom`, trust tags, or `:program`-mode kernel functions), and
-no statement was weakened. VK-1, VK-2 (five obligation groups) and VK-5 (all
-three obligations) are fully certified.
+no statement was weakened. VK-1, VK-2 (five obligation groups), VK-5 (all
+three obligations) and VK-6 (all three obligations, with the checkpoint-tear
+prefix disjunct and the intra-hash-namespace residue stated explicitly rather
+than over-claimed — see the VK-6 section) are fully certified.
 
 **VK-3.** Certified: obligation 1 for the single recorded **insert**
 (content + points + tick), obligation 2 (`redo ∘ undo = id`, full session), and
@@ -387,7 +485,10 @@ trusting, unproven, is:
    functions ACL2 certified.
 4. **The imperative shell** — the mutation/IO code that materializes
    kernel-computed results (kept small, conformance-tested, not proven).
-5. **ncurses / libc / the OS kernel** — everything below Lem.
+5. **ncurses / libc / the OS kernel** — everything below Lem. For VK-6 this
+   is made explicit as the filesystem axioms defining the crash transition
+   (rename atomicity, fsync durability, unsynced-data prefix tearing, ordered
+   durable metadata — see the VK-6 section).
 6. **Concurrency-model fidelity** — for the event-loop/interrupt work (V4), the
    theorems hold of an ACL2 interleaving model; whether that model faithfully
    captures SBCL's real thread/interrupt semantics (e.g. interrupts landing in
