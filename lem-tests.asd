@@ -31,7 +31,8 @@
                              (:file "harness-test")
                              (:file "baseline-fuzz")
                              (:file "kernel-model")
-                             (:file "kernel-conformance")))
+                             (:file "kernel-conformance")
+                             (:file "kernel-undo-conformance")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")

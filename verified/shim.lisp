@@ -147,7 +147,14 @@
                                  "K-INSERT" "K-DELETE"
                                  "K-POSITION" "K-POINT-AT-POSITION"
                                  "K-FLATTEN"
-                                 "K-SHIFT-POSITION-INSERT" "K-SHIFT-POSITION-DELETE")
+                                 "K-SHIFT-POSITION-INSERT" "K-SHIFT-POSITION-DELETE"
+                                 ;; undo.lisp (VK-3)
+                                 "MK-EDIT" "EDIT-INVERT" "MK-SESSION"
+                                 "SN-BUFFER" "SN-HISTORY" "SN-REDO"
+                                 "K-DO-INSERT" "K-DO-DELETE" "K-BOUNDARY"
+                                 "K-UNDO-GROUP" "K-REDO-GROUP"
+                                 "K-RECOMPUTE-OFFSETS"
+                                 "K-DO-INHIBITED-INSERT" "K-DO-INHIBITED-DELETE")
   "ACL2 symbol-names re-exported through :lem/kernel. See header.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

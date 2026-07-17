@@ -14,12 +14,14 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 | `hello.lisp` | Permanent canary book: `k-sq` + two theorems. First thing that goes red if the toolchain breaks. |
 | `buffer-model.lisp` | VK-1 formal buffer model + `wf-buffer` well-formedness predicate. Certified; also the in-image runtime assertion. |
 | `buffer-edit.lisp` | VK-2 edit primitives (`k-insert`, `k-delete`), shift-markers marker algebra, position algebra, and the five VK-2 obligation groups as certified theorems. |
+| `undo.lisp` | VK-3 undo/redo kernel: edit records, session (history + redo + tick), `k-do-insert`/`k-do-delete`/`k-boundary`/`k-undo-group`/`k-redo-group`/inhibited-edit offset recomputation, and the certified VK-3 obligations. |
 | `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — under 200 lines, every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
 | `README.md` | This file. |
 
 Books are certified in the dependency order pinned in `scripts/run-proofs.sh`
-(`ORDERED_BOOKS`): `buffer-edit` includes `buffer-model`, and the alphabetical
-glob would order them wrongly.
+(`ORDERED_BOOKS` = `hello buffer-model buffer-edit undo`): `buffer-edit` includes
+`buffer-model` and `undo` includes `buffer-edit`, and the alphabetical glob would
+order them wrongly.
 
 ## VK-1 — buffer model + well-formedness
 
@@ -111,12 +113,145 @@ every step. No divergence found; production is the spec.
 whitelist is unchanged; `arithmetic/top-with-meta` is included `local`ly so
 nothing from it is exec-reachable.
 
+## VK-3 — undo/redo kernel + tick semantics
+
+`undo.lisp` models production's undo machinery (`src/buffer/internal/undo.lisp`,
+`src/buffer/internal/edit.lisp`) as pure data on top of the VK-1 model and VK-2
+edit primitives:
+
+- **Edit record** `(kind position payload)` mirroring the production `edit`
+  struct, with an **absolute 1-based position** (`position-at-point` algebra)
+  and, for deletes, the **actually-removed** codepoints as payload (so
+  insert↔delete are exact content inverses).
+- **Session** `(buffer history redo)`; `history`/`redo` are `(edit | :separator)`
+  lists (CAR = stack top, mirroring the fill-pointer vector / list discipline).
+- Ops: `k-do-insert` / `k-do-delete` (`:edit` mode: push, clear redo, tick +1),
+  `k-boundary` (`buffer-undo-boundary` with separator dedup), `k-undo-group` /
+  `k-redo-group` (`buffer-undo` / `buffer-redo` — the exact separator push/pop
+  dance, popping to the next separator), and `k-do-inhibited-insert` /
+  `k-do-inhibited-delete` (`*inhibit-undo*`: mutate + tick +1, do **not** record,
+  recompute every stored position via `compute-edit-offset`, reusing VK-2's
+  `k-shift-position-insert` / `-delete`).
+
+**Tick accounting.** Production `buffer-modify` sets the tick delta by *mode*
+(`+1` in `:edit`/`:redo`, `-1` in `:undo`), not by insert-vs-delete. VK-2's
+`k-insert`/`k-delete` already bump `+1` (correct for `:edit`/`:redo`); only the
+undo step corrects to net `-1` (via `buf-with-tick`).
+
+### Certified obligations
+
+1. **Undo restores content + points + tick** (`k-undo-group-of-k-do-insert`):
+   undoing a single recorded **insert** restores the pre-edit buffer *exactly* —
+   lines, every registered point, and the tick. The tick restoration is the
+   **sound tick fact**: the net signed edit-application count returns to zero.
+2. **`redo ∘ undo = id`** (`k-redo-group-of-k-undo-group-of-k-do-insert`):
+   redoing an undone insert restores the full session — buffer, history, **and**
+   redo stack — to its pre-undo state (no intervening edit).
+4. **Recorded positions are in bounds** (`k-position-in-bounds`): every position
+   a user edit records lies in `[1, char-count+1]`, so `k-point-at-position`
+   never runs off the buffer.
+
+### VK-3.3 tick decision (obligation 3 — REFUTED, documented not silent)
+
+The claim **"tick = 0 ⟺ content = content at last `unmark`"** is **REFUTED**, in
+**both** directions, and — contrary to the initial suspicion that only the
+`*inhibit-undo*` path breaks it — **even for plain edits with no inhibition**.
+Reproducers (from the throwaway `tick-probe` experiment; all confirmed against
+the live production buffer):
+
+- `tick = 0 ⇏ content = C0`, no inhibit: insert `"a"`, `buffer-unmark` (tick 0,
+  C0=`"a"`), `buffer-undo` (tick −1, `""`), insert `"b"` (the fresh edit clears
+  redo and bumps tick back to **0** — at content `"b"` ≠ `"a"`).
+- `content = C0 ⇏ tick = 0`: insert `"a"`, unmark, insert `"x"`, delete `"x"` —
+  content back to `"a"` but tick = **2** (both edits increment in `:edit` mode;
+  the counter only decrements under `:undo`).
+- `tick = 0 ⇏ content = C0`, inhibit path: undo below the unmark, then an
+  inhibited insert bumps the tick to 0 while recording nothing.
+
+**Root cause.** The production modified-tick is a *net signed counter of buffer
+mutations since unmark*, not a content-identity witness. It returns to zero
+whenever `#(+1 steps) = #(−1 steps)`, which is decoupled from whether the
+content matches the saved snapshot.
+
+**The true, exported claim (what a verified kernel may soundly assert).**
+`buffer-modified-p` (tick ≠ 0) is a **conservative dirty flag with a
+false-clean hazard**: `buffer-modified-p = NIL` does **not** imply the content
+equals the last-saved content, so it is **not** sound as a save-safety oracle in
+the presence of undo-below-unmark or inhibited edits. The kernel proves only the
+sound sub-claim it *can*: the tick **round-trips to its starting value** across a
+recorded edit and its undo (obligation 1 above). This is a genuine latent
+save-safety issue in production; per the item's charter we **do not change
+production here** — the reproducers above are the record.
+
+### VK-3 history-validity decision (obligation 4 — partial, inhibit path refuted)
+
+The full invariant *"every stored position stays in bounds after ANY
+interleaving of edits / undos / redos / inhibited edits"* is **REFUTED on the
+inhibit path**. Reproducer (`tick-probe` c1): an inhibited delete shrinks the
+buffer and recomputes stored positions *consistently with the shrunk buffer*,
+but a later undo applies the group's edits sequentially, and an earlier-applied
+undo can shrink the buffer **below** a still-stored position. Production's
+`move-to-position` then returns `NIL` and the edit is silently mis-placed (the
+undo "drifts"). The kernel's pure `k-point-at-position` has no cursor to drift,
+so on this path the two **diverge in content** and the kernel model can even
+leave `wf-buffer`. What is **proved** is the invariant's sound foundation
+(`k-position-in-bounds`: recorded positions are in bounds); for inhibition-free
+histories, undo reverses the recording order exactly and no undo ever goes
+out of range (pinned by the strict differential suite, 1500 scripts, zero
+divergences).
+
+### Differential acceptance
+
+`tests/pbt/kernel-undo-conformance.lisp` runs random interleavings through BOTH
+a live production buffer (`buffer-undo` / `buffer-redo` / `buffer-undo-boundary`
+/ `with-inhibit-undo`, `enable-undo-p` T) and the kernel session, driving edits
+through a dedicated scratch point so `buffer-point` and the extras are relocated
+only by marker algebra (as the kernel models). Two suites:
+
+- **STRICT** (inhibition-free), 1500 scripts: full comparison after every op —
+  content, tick, every registered point `(linum charpos kind)`, and kernel
+  `wf-buffer`. Zero divergences.
+- **INHIBITED** (with `*inhibit-undo*` edits), 1000 scripts: asserts the
+  invariants that survive the refuted path — production tick == kernel tick (the
+  ±1 accounting stays in lockstep) and production `check-buffer-corruption`
+  passes after every op. Content/point equality is **not** asserted here (it is
+  the refuted claim above).
+
+### Kernel bug found and fixed during VK-3
+
+`recompute-edit-offset` originally tested `(eq (car stored) :separator)`, but a
+separator element **is** the keyword `:separator` (not a list), so `(car …)`
+crashed on the inhibited path. Fixed to `(eq stored :separator)`; the inhibited
+differential suite is the regression pin.
+
 ## Proof status
 
 All theorems in every book under `verified/` certify with real ACL2 (no
-`skip-proofs`, `defaxiom`, trust tags, or `:program`-mode kernel functions). No
-theorem is PROOF PENDING. (VK-2's five obligation groups are all certified in
-`buffer-edit.lisp`; no statement was weakened.)
+`skip-proofs`, `defaxiom`, trust tags, or `:program`-mode kernel functions), and
+no statement was weakened. VK-1 and VK-2 (five obligation groups) are fully
+certified.
+
+**VK-3.** Certified: obligation 1 for the single recorded **insert**
+(content + points + tick), obligation 2 (`redo ∘ undo = id`, full session), and
+obligation 4's sound core (`k-position-in-bounds`). Obligation 3 is **REFUTED**
+and documented above (no theorem claims the false biconditional; the sound
+tick round-trip is what obligation 1 proves).
+
+**PROOF PENDING (VK-3), PBT-pinned by the STRICT differential suite** (1500
+scripts, full content+points+tick+wf, zero divergences — the mandatory
+acceptance is green):
+
+- **Obligation 1, group generalization + delete case** — undo of a recorded
+  *group* and of a recorded *delete* restores content (and, for inserts, points).
+  The delete case needs a `k-insert`-of-`k-delete` content inverse (and points
+  are only partially restored — a point interior to a deleted region collapses
+  to the deletion start on delete and cannot be resurrected by re-insert, exactly
+  as in production). Not attempted as a closed-form theorem; pinned empirically.
+- **Obligation 2, group generalization + delete case** — same scope, same pin.
+- **Obligation 4, full cross-op invariant (inhibition-free)** — the inductive
+  "all stored positions stay in bounds across any inhibition-free op sequence".
+  The inhibit-path version is **refuted** (documented above); the
+  inhibition-free version is pinned by the strict suite.
 
 ## ACL2 toolchain — install and pin
 
