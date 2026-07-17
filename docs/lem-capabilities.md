@@ -2013,7 +2013,8 @@ working copy, `o` prompts while creating a child, and `O`, `I`, and `A`
 immediately create a child or insert a change before or after the selected row.
 `e` changes the working copy,
 `s` to open a whole-change squash popup, `r` to open a selected-row rebase
-popup, `S` to open a partial-patch split view, `u`/`C-r` to undo/redo operations,
+popup, `_` to open a revert popup, `S` to open a partial-patch split view,
+`u`/`C-r` to undo/redo operations,
 `b` to manage local bookmarks, confirmed `x` to abandon, `d` or Return to
 browse `jj show`, `g r` to refresh, `?` for help, and `q` to unwind first to
 history and then the exact source buffer. Local bookmark names render directly
@@ -2038,6 +2039,14 @@ or before a prompted revision. Uppercase `Y` performs the existing-parent
 case immediately. Destination prompts share the annotated Prescient revision
 history, accept arbitrary nonblank revsets, and every successful form keeps
 point on the original revision.
+The `_` revert popup follows Majutsu's selected-row defaults: the source and
+destination start at that revision and the reversal is inserted after it. `r`
+changes the source revset, while `o`, `a`, and `b` select a prompted onto,
+insert-after, or insert-before destination; `c` restores the defaults and `_`,
+`V`, or Return executes. Both annotated prompts accept arbitrary nonblank
+revsets. Cancellation and invalid sources are non-mutating, successful
+execution retains the selected source row, and packaged `jj` 0.35 receives its
+equivalent `--destination` spelling for Majutsu's newer `--onto` behavior.
 The `S` split view renders the selected row's bounded Git-format diff without
 making it editable. `H` or Space toggles a hunk, `F` toggles its file, a Visual
 selection followed by `R` toggles changed lines within one hunk, and `C` clears
@@ -2070,7 +2079,11 @@ content-bearing sibling rebase, row restoration, invalid self-destination, and
 the complete local bookmark lifecycle with inline-label and nested-list checks.
 It also drives duplicate-popup cancellation, immediate parent duplication,
 onto/after/before placement, content retention, graph rewrites and fixture
-undos, point preservation, and invalid-destination refusal. Split coverage
+undos, point preservation, and invalid-destination refusal. Revert coverage
+drives popup cancellation, selected-row defaults, prompted onto and
+insert-before placement, exact graph and file-state effects, operation undo,
+point preservation, invalid-source refusal, and isolated fixture restoration.
+Split coverage
 opens and cancels the two-hunk view, rejects an empty selection, checks file,
 hunk, region, destination, and parallel-layout state, physically selects one
 replacement from a two-replacement file, and proves real `jj split` moves only
@@ -2082,7 +2095,8 @@ dispatch, arbitrary source/destination and partial-patch squash,
 multi-source/destination rebase selection and
 advanced rebase flags, remote bookmark tracking and advance patterns,
 multi-bookmark operations, multi-source/destination duplicate selection and
-configurable duplicate descriptions, binary/conflict split selection,
+configurable duplicate descriptions, a shared visual multi-selection session
+for revert sources/destinations, binary/conflict split selection,
 word-level selection, partial changed-line selection for added/deleted files,
 conflict handling, operation log, workspaces, sparse checkout, and Majutsu's
 wider arbitrary-revision/fileset/tool split options remain outside this focused

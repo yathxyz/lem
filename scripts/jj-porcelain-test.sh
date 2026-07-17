@@ -116,6 +116,24 @@ revision_present() {
     -r "$1" --template change_id >/dev/null 2>&1
 }
 
+revision_has_file() {
+  local revision=$1 path=$2
+  local listed
+  while IFS= read -r listed; do
+    if [[ "$listed" == "$path" || "$listed" == */"$path" ]]; then
+      return 0
+    fi
+  done < <(
+    "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" file list -r "$revision"
+  )
+  return 1
+}
+
+current_operation_id() {
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" op log --no-graph -n 1 \
+    --template id
+}
+
 wait_revision_absent() {
   local revision=$1 index=0
   while ((index < 80)); do
@@ -489,6 +507,148 @@ if wait_current_change_id "$initial_working_copy_id" &&
   pass new-after-undo 'u restored the graph after A'
 else
   fail new-after-undo 'A was not cleanly undoable'
+fi
+
+# Revert operates on a content-bearing historical source with a live descendant
+# so the gate distinguishes destination modes by graph and file state.
+revert_baseline_operation=$(current_operation_id)
+printf 'content introduced by the revert source\n' \
+  >"${LEM_YATH_JJ_PORCELAIN_ROOT}revert.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new \
+  --message 'revert descendant' >/dev/null
+revert_source_id=$initial_working_copy_id
+revert_descendant_id=$(current_change_id)
+revert_description='Revert "current"'
+lem_keys "$session" g r
+
+lem_keys "$session" _
+if lem_wait_for "$session" 'JJ Revert' 10 >/dev/null; then
+  lem_keys "$session" q
+fi
+if [ "$(revision_count_by_description "$revert_description")" -eq 0 ] &&
+   invoke_report && [[ $(latest_report) == *'description=current '* ]]; then
+  pass revert-cancel '_ q closed the revert popup without mutation'
+else
+  fail revert-cancel 'revert cancellation changed history or the selected row'
+fi
+
+lem_keys "$session" _
+if lem_wait_for "$session" 'JJ Revert' 10 >/dev/null; then
+  lem_keys "$session" _
+fi
+if wait_revision_count "$revert_description" 1; then
+  default_revert_id=$(
+    revision_with_description_parent \
+      "$revert_description" "$revert_source_id" '' || true
+  )
+else
+  default_revert_id=
+fi
+if [ -n "$default_revert_id" ] &&
+   wait_revision_parent "$revert_descendant_id" "$default_revert_id" &&
+   ! revision_has_file "$revert_descendant_id" revert.txt &&
+   invoke_report && [[ $(latest_report) == *'description=current '* ]]; then
+  pass revert-default '_ _ inserted the reverse after the selected source and retained its row'
+else
+  fail revert-default 'default revert placement, content, or point restoration diverged'
+fi
+lem_keys "$session" u
+if wait_revision_count "$revert_description" 0 &&
+   wait_revision_parent "$revert_descendant_id" "$revert_source_id" &&
+   revision_has_file "$revert_descendant_id" revert.txt; then
+  pass revert-default-undo 'u restored the graph and content after the default revert'
+else
+  fail revert-default-undo 'default revert was not cleanly undoable'
+fi
+
+lem_keys "$session" _
+if lem_wait_for "$session" 'JJ Revert' 10 >/dev/null; then
+  lem_keys "$session" o
+fi
+if lem_wait_for "$session" 'Revert onto:' 10 >/dev/null; then
+  replace_prompt_text "$base_change_id"
+fi
+if lem_wait_for "$session" 'JJ Revert' 10 >/dev/null; then
+  lem_keys "$session" _
+fi
+if wait_revision_count "$revert_description" 1; then
+  onto_revert_id=$(
+    revision_with_description_parent \
+      "$revert_description" "$base_change_id" '' || true
+  )
+else
+  onto_revert_id=
+fi
+if [ -n "$onto_revert_id" ] &&
+   wait_revision_parent "$revert_descendant_id" "$revert_source_id" &&
+   revision_has_file "$revert_descendant_id" revert.txt; then
+  pass revert-onto '_ o placed a prompted reversal on the destination branch'
+else
+  fail revert-onto 'onto placement rewrote the wrong branch or content'
+fi
+lem_keys "$session" u
+if ! wait_revision_count "$revert_description" 0; then
+  fail revert-onto-undo 'onto revert was not cleanly undoable'
+fi
+
+lem_keys "$session" _
+if lem_wait_for "$session" 'JJ Revert' 10 >/dev/null; then
+  lem_keys "$session" b
+fi
+if lem_wait_for "$session" 'Insert revert before:' 10 >/dev/null; then
+  replace_prompt_text "$revert_descendant_id"
+fi
+if lem_wait_for "$session" 'JJ Revert' 10 >/dev/null; then
+  lem_keys "$session" _
+fi
+if wait_revision_count "$revert_description" 1; then
+  before_revert_id=$(
+    revision_with_description_parent \
+      "$revert_description" "$revert_source_id" '' || true
+  )
+else
+  before_revert_id=
+fi
+if [ -n "$before_revert_id" ] &&
+   wait_revision_parent "$revert_descendant_id" "$before_revert_id" &&
+   ! revision_has_file "$revert_descendant_id" revert.txt; then
+  pass revert-before '_ b inserted the reversal before the prompted descendant'
+else
+  fail revert-before 'insert-before placement or reversed content diverged'
+fi
+lem_keys "$session" u
+if ! wait_revision_count "$revert_description" 0; then
+  fail revert-before-undo 'insert-before revert was not cleanly undoable'
+fi
+
+lem_keys "$session" _
+if lem_wait_for "$session" 'JJ Revert' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+if lem_wait_for "$session" 'Revert revisions:' 10 >/dev/null; then
+  replace_prompt_text 'definitely-no-such-revision'
+fi
+if lem_wait_for "$session" 'JJ Revert' 10 >/dev/null; then
+  lem_keys "$session" _
+fi
+if lem_wait_for "$session" 'jj revert failed' 10 >/dev/null &&
+   [ "$(revision_count_by_description "$revert_description")" -eq 0 ] &&
+   wait_revision_parent "$revert_descendant_id" "$revert_source_id"; then
+  pass revert-refusal 'an invalid source surfaced jj failure without mutation'
+else
+  fail revert-refusal 'invalid-source revert changed the repository or hid failure'
+fi
+
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" op restore \
+  "$revert_baseline_operation" >/dev/null
+lem_keys "$session" g r
+if wait_current_change_id "$initial_working_copy_id" &&
+   wait_revision_absent "$revert_descendant_id" &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}revert.txt" ] &&
+   invoke_report && [[ $(latest_report) == *'description=current rows=3 '* ]]; then
+  pass revert-cleanup 'operation restore removed the isolated revert fixture'
+else
+  fail revert-cleanup 'revert fixture cleanup did not restore the baseline graph'
 fi
 
 lem_keys "$session" c

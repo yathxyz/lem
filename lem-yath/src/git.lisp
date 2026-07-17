@@ -716,6 +716,107 @@
         (editor-error "The selected ~a is no longer visible" label))
       target)))
 
+(defun jj-revert-keymap (source placement destination)
+  "Build a focused Majutsu-style revert popup for the current selections."
+  (let ((keymap (make-keymap :description "JJ Revert"))
+        (source-label (completion-bounded-annotation source))
+        (destination-label (completion-bounded-annotation destination)))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist
+        (entry
+          (list
+           (list "r" (format nil "source revisions: ~a" source-label))
+           (list "o" (format nil "onto: ~a~a"
+                              destination-label
+                              (if (eq placement :onto) " [selected]" "")))
+           (list "a" (format nil "insert after: ~a~a"
+                              destination-label
+                              (if (eq placement :after) " [selected]" "")))
+           (list "b" (format nil "insert before: ~a~a"
+                              destination-label
+                              (if (eq placement :before) " [selected]" "")))
+           (list "c" "reset to selected row")
+           (list "_" "execute revert")
+           (list "V" "execute revert")
+           (list "Return" "execute revert")
+           (list "q" "cancel")))
+      (destructuring-bind (key description) entry
+        (define-key keymap key 'nop-command)
+        (setf (lem-core::prefix-description
+               (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
+              description)))
+    keymap))
+
+(defun jj-execute-revert (root source placement destination selected-revision)
+  "Revert SOURCE at DESTINATION according to PLACEMENT and retain selection."
+  (let ((placement-argument
+          (ecase placement
+            (:onto "--destination")
+            (:after "--insert-after")
+            (:before "--insert-before")))
+        (buffer (current-buffer)))
+    (run-jj root
+            (list "revert" "--revisions" source
+                  placement-argument destination))
+    (render-jj-buffer buffer root)
+    (jj-restore-revision-point buffer selected-revision)
+    (message "Jujutsu revert completed")))
+
+(defun dispatch-jj-revert (root revision)
+  "Configure and execute a Jujutsu revert rooted at REVISION."
+  (let ((source revision)
+        (placement :after)
+        (destination revision))
+    (unwind-protect
+         (loop
+           (let ((lem/transient:*transient-popup-delay* 0))
+             (keymap-activate
+              (jj-revert-keymap source placement destination)))
+           (redraw-display)
+           (let* ((key (read-key))
+                  (name (lem-core::keyseq-to-string (list key))))
+             (lem/transient::hide-transient)
+             (cond
+               ((string= name "r")
+                (setf source
+                      (jj-prompt-for-revision
+                       root "Revert revisions: " 'lem-yath-jj-revert-source)))
+               ((member name '("o" "a" "b") :test #'string=)
+                (setf placement
+                      (cond
+                        ((string= name "o") :onto)
+                        ((string= name "a") :after)
+                        (t :before))
+                      destination
+                      (jj-prompt-for-revision
+                       root
+                       (ecase placement
+                         (:onto "Revert onto: ")
+                         (:after "Insert revert after: ")
+                         (:before "Insert revert before: "))
+                       'lem-yath-jj-revert-destination)))
+               ((string= name "c")
+                (setf source revision
+                      placement :after
+                      destination revision))
+               ((or (string= name "_") (string= name "V")
+                    (string= name "Return"))
+                (jj-execute-revert
+                 root source placement destination revision)
+                (return))
+               ((or (string= name "q") (string= name "Escape"))
+                (message "Jujutsu revert cancelled")
+                (return))
+               (t (message "No revert action is bound to ~a" name)))))
+      (lem/transient::hide-transient))))
+
+(define-command lem-yath-jj-revert () ()
+  "Open the Majutsu-style revert workflow for the selected revision."
+  (let ((root (jj-current-root))
+        (revision (jj-current-log-revision)))
+    (dispatch-jj-revert root revision)))
+
 (defun jj-rebase-keymap ()
   "Build the focused Majutsu-style rebase popup."
   (let ((keymap (make-keymap :description "JJ Rebase")))
@@ -1790,7 +1891,7 @@
 (define-command lem-yath-jj-help () ()
   "Show the focused Majutsu-compatible Jujutsu command surface."
   (message
-   "Jujutsu: c/C describe/commit, o/O/I/A new, ./[/] working-copy/parent/child, s/S squash/split, r rebase, y/Y duplicate, b bookmarks, e edit, u/C-r undo/redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
+   "Jujutsu: c/C describe/commit, o/O/I/A new, ./[/] working-copy/parent/child, s/S squash/split, r rebase, _ revert, y/Y duplicate, b bookmarks, e edit, u/C-r undo/redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
 
 (define-command lem-yath-jj-quit () ()
   "Quit the current Jujutsu status/log window."
@@ -1829,6 +1930,7 @@
 (define-key *lem-yath-jj-view-keymap* "s" 'lem-yath-jj-squash)
 (define-key *lem-yath-jj-view-keymap* "S" 'lem-yath-jj-split)
 (define-key *lem-yath-jj-view-keymap* "r" 'lem-yath-jj-rebase)
+(define-key *lem-yath-jj-view-keymap* "_" 'lem-yath-jj-revert)
 (define-key *lem-yath-jj-view-keymap* "y" 'lem-yath-jj-duplicate)
 (define-key *lem-yath-jj-view-keymap* "Y" 'lem-yath-jj-duplicate-dwim)
 (define-key *lem-yath-jj-view-keymap* "b" 'lem-yath-jj-bookmark)

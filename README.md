@@ -393,6 +393,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   relationship-aware log navigation,
   whole-change squash with a compact description-policy popup, edit,
   confirmed selected-row rebase with branch/subtree/exact/insert modes,
+  Majutsu-compatible `_` revert with source-revset and onto/after/before controls,
   Majutsu-compatible `y` placement and immediate `Y` duplicate workflows,
   a read-only `S` split view with file, hunk, and changed-line selection plus
   destination and parallel-layout controls,
