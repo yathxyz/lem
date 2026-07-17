@@ -364,6 +364,31 @@ porcelain_peer_pulled() {
       "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
 }
 
+porcelain_rebase_todo_ready() {
+  local todo="$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge/git-rebase-todo"
+  [ -f "$todo" ] &&
+    [ "$(grep -c '^pick ' "$todo")" -eq 2 ] &&
+    grep -q 'porcelain commit from Lem' "$todo" &&
+    grep -q 'porcelain-peer' "$todo"
+}
+
+porcelain_rebase_todo_fixup() {
+  local todo="$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge/git-rebase-todo"
+  [ -f "$todo" ] &&
+    [ "$(sed -n '1s/^pick .*/pick/p' "$todo")" = pick ] &&
+    [ "$(sed -n '2s/^fixup .*/fixup/p' "$todo")" = fixup ]
+}
+
+porcelain_rebase_complete() {
+  [ ! -d "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge" ] &&
+    [ "$($git_bin -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-list --count HEAD)" -eq 2 ] &&
+    porcelain_subject_is 'porcelain commit from Lem' &&
+    grep -q 'peer-pull-probe' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt" &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
 send_keys() {
   local session=$1 key
   shift
@@ -965,6 +990,48 @@ if "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" pull -q --ff-only &&
   fi
 else
   fail legit-pull 'could not prepare the independent peer commit' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g
+commit_before=$(report_count '^PORCELAIN-COMMIT ')
+send_keys "$porcelain_session" C-c r
+if wait_report_count '^PORCELAIN-COMMIT ' "$((commit_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-COMMIT ') == \
+      'PORCELAIN-COMMIT row=yes hash=yes rebase=yes subject=yes' ]]; then
+  pass legit-rebase-position 'the real status row exposed its commit hash and r i command'
+else
+  fail legit-rebase-position 'could not select the older commit in Legit status' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" r i
+rebase_before=$(report_count '^REBASE ')
+if wait_until "$WAIT_TIMEOUT" porcelain_rebase_todo_ready; then
+  send_keys "$porcelain_session" C-c v
+fi
+if wait_report_count '^REBASE ' "$((rebase_before + 1))" &&
+   [[ $(latest_report '^REBASE ') == \
+      'REBASE mode=yes file=yes first=yes second=yes fixup=yes continue=yes abort=yes modified=no' ]]; then
+  pass legit-rebase-open 'r i opened the two-commit todo in the native rebase mode'
+else
+  fail legit-rebase-open 'interactive rebase did not expose the expected todo mode' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" n f
+if wait_until "$WAIT_TIMEOUT" porcelain_rebase_todo_fixup; then
+  pass legit-rebase-fixup 'f changed and saved the second todo action to fixup'
+else
+  fail legit-rebase-fixup 'the rebase-mode action did not update the real todo file' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" C-c C-c
+if wait_until "$WAIT_TIMEOUT" porcelain_rebase_complete; then
+  pass legit-rebase-continue 'C-c C-c completed the rewrite and retained both changes'
+else
+  fail legit-rebase-continue 'the interactive rewrite did not reach the expected history' \
     "$porcelain_session"
 fi
 lem_stop "$porcelain_session"

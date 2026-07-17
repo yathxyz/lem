@@ -53,6 +53,7 @@
               ./patches/lem-centered-content-width.patch
               ./patches/lem-word-boundary-wrap.patch
               ./patches/lem-git-worktree.patch
+              ./patches/lem-legit-rebase-editor.patch
               ./patches/lem-legit-status-sections.patch
               ./patches/lem-hidden-lines.patch
               ./patches/lem-buffer-write-function.patch

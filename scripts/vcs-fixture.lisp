@@ -576,6 +576,61 @@
 (define-command lem-yath-test-vcs-porcelain-untracked () ()
   (vcs-test-position-legit-file "untracked.txt"))
 
+(define-command lem-yath-test-vcs-porcelain-commit () ()
+  (let* ((subject "porcelain commit from Lem")
+         (active (lem/legit::legit-status-active-p))
+         (status-buffer
+           (and active (window-buffer lem/legit::*peek-window*)))
+         (row (and status-buffer (buffer-start-point status-buffer))))
+    (when row
+      (unless (search-forward row subject)
+        (setf row nil)))
+    (when row
+      (line-start row)
+      (setf (current-window) lem/legit::*peek-window*)
+      (move-point (buffer-point status-buffer) row)
+      (lem/legit::show-matched-line))
+    (vcs-test-log
+     "PORCELAIN-COMMIT row=~a hash=~a rebase=~a subject=~a"
+     (vcs-test-yes-no row)
+     (vcs-test-yes-no
+      (and row (text-property-at row :commit-hash)))
+     (vcs-test-yes-no
+      (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "r i")
+          'lem/legit::legit-rebase-interactive))
+     (vcs-test-yes-no
+      (and row
+           (search subject (buffer-text status-buffer)))))))
+
+(define-command lem-yath-test-vcs-rebase-state () ()
+  (let* ((buffer (current-buffer))
+         (text (buffer-text buffer))
+         (filename (buffer-filename buffer)))
+    (vcs-test-log
+     (concatenate
+      'string
+      "REBASE mode=~a file=~a first=~a second=~a "
+      "fixup=~a continue=~a abort=~a modified=~a")
+     (vcs-test-yes-no
+      (eq (buffer-major-mode buffer) 'lem/legit::legit-rebase-mode))
+     (vcs-test-yes-no
+      (and filename
+           (string= (file-namestring filename) "git-rebase-todo")))
+     (vcs-test-yes-no (search "porcelain commit from Lem" text))
+     (vcs-test-yes-no (search "porcelain-peer" text))
+     (vcs-test-yes-no
+      (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap* "f")
+          'lem/legit::rebase-mark-line-fixup))
+     (vcs-test-yes-no
+      (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap*
+                                "C-c C-c")
+          'lem/legit::rebase-continue))
+     (vcs-test-yes-no
+      (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap*
+                                "C-c C-k")
+          'lem/legit::rebase-abort))
+     (vcs-test-yes-no (buffer-modified-p buffer)))))
+
 (defun vcs-test-restore-source-point ()
   (let ((point (buffer-point *vcs-test-source-buffer*)))
     (buffer-start point)
@@ -865,6 +920,8 @@
 (define-key *global-keymap* "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)
 (define-key *global-keymap* "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
 (define-key *global-keymap* "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
+(define-key *global-keymap* "C-c r" 'lem-yath-test-vcs-porcelain-commit)
+(define-key *global-keymap* "C-c v" 'lem-yath-test-vcs-rebase-state)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c t" 'lem-yath-test-vcs-todo-preview)
 (define-key lem/legit::*peek-legit-keymap*
@@ -875,6 +932,8 @@
   "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c r" 'lem-yath-test-vcs-porcelain-commit)
 (define-key lem/legit::*legit-diff-mode-keymap*
   "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key lem/legit::*legit-diff-mode-keymap*
@@ -883,6 +942,8 @@
   "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
 (define-key lem/legit::*legit-diff-mode-keymap*
   "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
+(define-key lem/legit::*legit-rebase-mode-keymap*
+  "C-c v" 'lem-yath-test-vcs-rebase-state)
 
 (vcs-test-log "READY phase=~a file=~a"
               *vcs-test-phase*
