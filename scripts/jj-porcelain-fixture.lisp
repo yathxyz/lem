@@ -92,6 +92,30 @@
      ("Return" lem-yath-jj-split-execute)
      ("q" lem-yath-jj-split-cancel))))
 
+(defun jj-porcelain-test-squash-key-command (keys)
+  (alexandria:when-let
+      ((prefix
+         (lem-core::keymap-find *lem-yath-jj-squash-mode-keymap*
+                                (lem-core::parse-keyspec keys))))
+    (lem-core::prefix-suffix prefix)))
+
+(defun jj-porcelain-test-squash-keys-p ()
+  (every
+   (lambda (binding)
+     (eq (second binding)
+         (jj-porcelain-test-squash-key-command (first binding))))
+   '(("H" lem-yath-jj-squash-toggle-hunk)
+     ("Space" lem-yath-jj-squash-toggle-hunk)
+     ("F" lem-yath-jj-squash-toggle-file)
+     ("R" lem-yath-jj-squash-toggle-region)
+     ("C" lem-yath-jj-squash-clear)
+     ("C-j" lem-yath-jj-squash-next-hunk)
+     ("C-k" lem-yath-jj-squash-previous-hunk)
+     ("s" lem-yath-jj-squash-selection-execute)
+     ("Return" lem-yath-jj-squash-selection-execute)
+     ("q" lem-yath-jj-squash-selection-cancel)
+     ("?" lem-yath-jj-squash-selection-help))))
+
 (defun jj-porcelain-test-restore-key-command (keys)
   (alexandria:when-let
       ((prefix
@@ -230,6 +254,32 @@
        (jj-porcelain-test-yes-no (jj-split-hunk-at-point))
        (jj-porcelain-test-yes-no (jj-porcelain-test-restore-keys-p))))))
 
+(define-command lem-yath-jj-porcelain-test-squash-report () ()
+  (let* ((buffer (current-buffer))
+         (hunks (buffer-value buffer *lem-yath-jj-split-hunks-key*))
+         (selected (and hunks (jj-split-selected-count hunks)))
+         (partial
+           (and hunks
+                (count-if (lambda (hunk)
+                            (consp (jj-split-hunk-selection hunk)))
+                          hunks))))
+    (with-open-file (stream *jj-porcelain-test-report*
+                            :direction :output
+                            :if-exists :append
+                            :if-does-not-exist :create)
+      (format
+       stream
+       "SQUASH kind=~a hunks=~d selected=~d partial=~d row=~a keys=~a~%"
+       (if (eq :squash-selection
+               (buffer-value buffer *lem-yath-jj-view-kind-key*))
+           "squash-selection"
+           "other")
+       (length hunks)
+       (or selected 0)
+       (or partial 0)
+       (jj-porcelain-test-yes-no (jj-split-hunk-at-point))
+       (jj-porcelain-test-yes-no (jj-porcelain-test-squash-keys-p))))))
+
 (define-command lem-yath-jj-porcelain-test-restore-select-all () ()
   "Prepare the private tool's all-selected edge without TTY key coalescing."
   (let ((buffer (current-buffer)))
@@ -279,3 +329,4 @@
 (define-key *global-keymap* "F3" 'lem-yath-jj-porcelain-test-message-report)
 (define-key *global-keymap* "F4" 'lem-yath-jj-porcelain-test-restore-report)
 (define-key *global-keymap* "F5" 'lem-yath-jj-porcelain-test-restore-select-all)
+(define-key *global-keymap* "F6" 'lem-yath-jj-porcelain-test-squash-report)

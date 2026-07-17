@@ -156,6 +156,16 @@ wait_revision_file_equals() {
   return 1
 }
 
+revision_file_line_equals() {
+  local revision=$1 path=$2 line=$3 expected=$4
+  local actual
+  actual=$(
+    "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+      file show -r "$revision" "root:$path" 2>/dev/null | sed -n "${line}p"
+  ) || return 1
+  [ "$actual" = "$expected" ]
+}
+
 revision_diff_paths() {
   local revision=$1
   "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
@@ -358,6 +368,29 @@ invoke_restore_report() {
 
 latest_restore_report() {
   grep '^RESTORE ' "$LEM_YATH_JJ_PORCELAIN_REPORT" | tail -n 1
+}
+
+squash_report_count() {
+  grep -c '^SQUASH ' "$LEM_YATH_JJ_PORCELAIN_REPORT" 2>/dev/null || true
+}
+
+invoke_squash_report() {
+  local before
+  before=$(squash_report_count)
+  lem_keys "$session" F6
+  local index=0
+  while ((index < 80)); do
+    if (( $(squash_report_count) > before )); then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+latest_squash_report() {
+  grep '^SQUASH ' "$LEM_YATH_JJ_PORCELAIN_REPORT" | tail -n 1
 }
 
 message_report_count() {
@@ -1376,6 +1409,228 @@ if wait_current_change_id "$initial_working_copy_id" &&
   pass absorb-cleanup 'operation restore removed the isolated absorb fixture'
 else
   fail absorb-cleanup 'absorb fixture cleanup did not recover the baseline graph'
+fi
+
+partial_squash_baseline_operation=$(current_operation_id)
+: >"${LEM_YATH_JJ_PORCELAIN_ROOT}squash-select.txt"
+for line in $(seq 1 30); do
+  printf 'line %d\n' "$line" >>"${LEM_YATH_JJ_PORCELAIN_ROOT}squash-select.txt"
+done
+printf 'other original\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}squash-other.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" describe \
+  --message 'partial squash destination' >/dev/null
+partial_squash_destination_id=$(current_change_id)
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new \
+  --message 'partial squash source' >/dev/null
+: >"${LEM_YATH_JJ_PORCELAIN_ROOT}squash-select.txt"
+for line in $(seq 1 30); do
+  case $line in
+    2) printf 'first moved by squash\n' ;;
+    25) printf 'second remains in source\n' ;;
+    *) printf 'line %d\n' "$line" ;;
+  esac >>"${LEM_YATH_JJ_PORCELAIN_ROOT}squash-select.txt"
+done
+printf 'other updated\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}squash-other.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" status >/dev/null
+partial_squash_source_id=$(current_change_id)
+partial_squash_ready_operation=$(current_operation_id)
+lem_keys "$session" g r .
+invoke_report >/dev/null || true
+if [[ $(latest_report) == *'description=partial_squash_source '* ]]; then
+  pass partial-squash-row 'the native squash fixture selected its source row'
+else
+  fail partial-squash-row 'refresh did not select the partial squash source'
+fi
+
+lem_keys "$session" s
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+sleep 0.25
+lem_keys "$session" c
+sleep 0.25
+lem_keys "$session" q
+if [ "$(current_operation_id)" = "$partial_squash_ready_operation" ] &&
+   ! lem_capture "$session" | grep -q 'JJ Squash'; then
+  pass squash-selection-cancel 'r/c cleared the row selection and q cancelled without mutation'
+else
+  fail squash-selection-cancel 'squash selection clearing or cancellation mutated history'
+fi
+
+lem_keys "$session" s
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" i
+fi
+if lem_wait_for "$session" 'Jujutsu squash:' 10 >/dev/null &&
+   invoke_squash_report &&
+   [[ $(latest_squash_report) == 'SQUASH kind=squash-selection hunks=3 selected=0 partial=0 row=yes keys=yes' ]]; then
+  pass squash-partial-open 's i opened the native three-hunk squash selector'
+else
+  fail squash-partial-open 'native squash parsing, mode, or keymap diverged'
+fi
+lem_keys "$session" s
+if lem_wait_for "$session" 'Select at least one Jujutsu squash hunk' 10 >/dev/null &&
+   invoke_squash_report &&
+   [[ $(latest_squash_report) == *'selected=0 partial=0 '* ]]; then
+  pass squash-partial-empty 's refused an empty squash patch selection'
+else
+  fail squash-partial-empty 'empty partial squash execution did not fail closed'
+fi
+lem_keys "$session" C-j F
+if invoke_squash_report &&
+   [[ $(latest_squash_report) == *'hunks=3 selected=2 partial=0 '* ]]; then
+  pass squash-partial-file 'F selected both hunks in the current file'
+else
+  fail squash-partial-file 'file-level squash selection crossed the wrong boundary'
+fi
+lem_keys "$session" C H
+if invoke_squash_report &&
+   [[ $(latest_squash_report) == *'hunks=3 selected=1 partial=0 '* ]]; then
+  pass squash-partial-hunk 'C then H retained one complete squash hunk'
+else
+  fail squash-partial-hunk 'whole-hunk squash selection diverged'
+fi
+lem_keys "$session" C /
+tmux_cmd send-keys -t "$session" -l '^-line 2$'
+lem_keys "$session" Enter V 2 j R
+if invoke_squash_report &&
+   [[ $(latest_squash_report) == *'hunks=3 selected=1 partial=1 '* ]]; then
+  pass squash-partial-region 'R retained one changed-line squash selection'
+else
+  fail squash-partial-region 'Visual changed-line squash selection was not retained'
+fi
+lem_keys "$session" s
+lem_wait_for "$session" 'Jujutsu partial squash completed' 10 >/dev/null || true
+partial_squash_diff=$(revision_diff_paths "$partial_squash_source_id")
+if revision_file_line_equals "$partial_squash_destination_id" squash-select.txt 2 'first moved by squash' &&
+   revision_file_line_equals "$partial_squash_destination_id" squash-select.txt 25 'line 25' &&
+   revision_file_equals "$partial_squash_destination_id" squash-other.txt 'other original' &&
+   [[ "$partial_squash_diff" == *'squash-select.txt'* ]] &&
+   [[ "$partial_squash_diff" == *'squash-other.txt'* ]] &&
+   [ "$(full_description "$partial_squash_destination_id")" = 'partial squash destination' ] &&
+   [ "$(full_description "$partial_squash_source_id")" = 'partial squash source' ] &&
+   invoke_report &&
+   [[ $(latest_report) == *'description=partial_squash_source '* ]]; then
+  pass squash-partial 'the selected replacement moved while its complement and descriptions remained'
+else
+  fail squash-partial 'partial squash content, descriptions, or source-row restoration diverged'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if revision_file_line_equals "$partial_squash_destination_id" squash-select.txt 2 'line 2' &&
+   revision_file_equals "$partial_squash_destination_id" squash-other.txt 'other original'; then
+  pass squash-partial-undo 'u restored the exact pre-selection squash operation'
+else
+  fail squash-partial-undo 'partial squash was not cleanly undoable'
+fi
+
+lem_keys "$session" s
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Squash options' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'Squash fileset or path' 10 >/dev/null; then
+  replace_prompt_text 'squash-other.txt'
+fi
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Squash options' 10 >/dev/null; then
+  lem_keys "$session" I
+fi
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" s
+fi
+lem_wait_for "$session" 'Jujutsu change squashed' 10 >/dev/null || true
+partial_squash_fileset_diff=$(revision_diff_paths "$partial_squash_source_id")
+if revision_file_equals "$partial_squash_destination_id" squash-other.txt 'other updated' &&
+   [[ "$partial_squash_fileset_diff" == *'squash-select.txt'* ]] &&
+   [[ "$partial_squash_fileset_diff" != *'squash-other.txt'* ]] &&
+   [ "$(full_description "$partial_squash_destination_id")" = 'partial squash destination' ] &&
+   [ "$(full_description "$partial_squash_source_id")" = 'partial squash source' ]; then
+  pass squash-fileset 'the fileset and immutable options moved only the prompted path'
+else
+  fail squash-fileset 'fileset squash moved the wrong paths or descriptions'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+
+lem_keys "$session" [
+invoke_report >/dev/null || true
+lem_keys "$session" s
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" t
+fi
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Squash options' 10 >/dev/null; then
+  lem_keys "$session" f
+fi
+if lem_wait_for "$session" 'Squash from revision or revset' 10 >/dev/null; then
+  replace_prompt_text "$partial_squash_source_id"
+fi
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Squash options' 10 >/dev/null; then
+  lem_keys "$session" k
+fi
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" s
+fi
+lem_wait_for "$session" 'Jujutsu change squashed' 10 >/dev/null || true
+if revision_present "$partial_squash_source_id" &&
+   [ -z "$(revision_diff_paths "$partial_squash_source_id")" ] &&
+   revision_file_equals "$partial_squash_destination_id" squash-other.txt 'other updated' &&
+   [ "$(full_description "$partial_squash_source_id")" = 'partial squash source' ] &&
+   invoke_report &&
+   [[ $(latest_report) == *'description=partial_squash_destination '* ]]; then
+  pass squash-endpoints 't, -f, and -k used explicit endpoints and retained the emptied source'
+else
+  fail squash-endpoints 'explicit squash endpoints or keep-emptied behavior diverged'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+lem_keys "$session" ]
+invoke_report >/dev/null || true
+
+partial_squash_refusal_operation=$(current_operation_id)
+lem_keys "$session" s
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Squash options' 10 >/dev/null; then
+  lem_keys "$session" f
+fi
+if lem_wait_for "$session" 'Squash from revision or revset' 10 >/dev/null; then
+  replace_prompt_text 'definitely-no-such-squash-revision'
+fi
+if lem_wait_for "$session" 'JJ Squash' 10 >/dev/null; then
+  lem_keys "$session" s
+fi
+if lem_wait_for "$session" 'jj squash failed' 10 >/dev/null &&
+   [ "$(current_operation_id)" = "$partial_squash_refusal_operation" ] &&
+   revision_file_equals "$partial_squash_destination_id" squash-other.txt 'other original'; then
+  pass squash-refusal-explicit 'an invalid source revset surfaced failure without mutation'
+else
+  fail squash-refusal-explicit 'invalid arbitrary squash input mutated history or hid failure'
+fi
+
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" op restore \
+  "$partial_squash_baseline_operation" >/dev/null
+lem_keys "$session" g r .
+invoke_report >/dev/null || true
+if wait_current_change_id "$initial_working_copy_id" &&
+   wait_revision_absent "$partial_squash_source_id" &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}squash-select.txt" ] &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}squash-other.txt" ] &&
+   [[ $(latest_report) == *'description=current rows=3 '* ]]; then
+  pass squash-partial-cleanup 'operation restore removed the isolated squash fixture'
+else
+  fail squash-partial-cleanup 'partial squash fixture cleanup did not recover the baseline graph'
 fi
 
 lem_keys "$session" c

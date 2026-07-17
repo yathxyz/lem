@@ -2012,7 +2012,7 @@ a relationship branches. `c` edits the selected description, `C` commits the
 working copy, `o` prompts while creating a child, and `O`, `I`, and `A`
 immediately create a child or insert a change before or after the selected row.
 `a` opens the selected-row absorb workflow, `e` changes the working copy,
-`s` to open a whole-change squash popup, `r` to open a selected-row rebase
+`s` to open squash configuration and native patch selection, `r` to open a selected-row rebase
 popup, `_` to open a revert popup, `R` to open a restore popup, `S` to open a
 partial-patch split view,
 `u`/`C-r` to undo/redo operations,
@@ -2024,10 +2024,20 @@ local core: list, create, create-or-set, move, allow-backwards move, rename,
 confirmed delete, and confirmed forget. Its list is a nested read-only view;
 every mutating action refreshes bookmark labels without losing the selected
 revision. The squash popup retains Majutsu's `s s` default: it moves the selected
-change into its sole parent and combines both complete descriptions. Its other
-single-key actions keep only the destination or source description, or retain
-the emptied source; cancellation is non-mutating, roots and merges fail closed,
-and a successful squash selects the rewritten parent. The rebase popup binds
+change into its sole parent and accepts jj's complete prefilled combined
+description. `r`, `f`, and `t` toggle the initiating row as revision, source,
+or destination; `o`, `a`, and `b` choose destination, insert-after, or
+insert-before placement. `- r/f/t/o/A/B` instead prompt over annotated history
+while accepting arbitrary revsets, `- -` supplies one fileset expression,
+`- k` keeps emptied sources, `- I` permits immutable rewrites, and `c` clears
+the mutually exclusive revision selections. `i` freezes that state and opens
+a bounded native file/hunk/changed-line selector whose `s` or Return moves only
+the selected patch through a private direct-argv diff tool. Empty selections,
+cross-hunk regions, and partial changed-line selection in added/deleted files
+fail closed. Partial and fileset squashes retain both descriptions and their
+source row when changes remain; a truly emptied default source selects the
+rewritten parent. Cancellation and invalid revsets are non-mutating, and roots
+and revision-mode merges fail before the popup. The rebase popup binds
 the selected row as its source: Return/`b`, `s`, and `r` choose jj's branch,
 source-with-descendants, or exact-revision mode, while `a` and `B` insert that
 revision after or before the destination. A Prescient prompt offers bounded
@@ -2101,8 +2111,8 @@ refresh failure cannot expose a retry path that repeats the mutation. The gate
 also covers sole-parent/child navigation, root refusal, working-copy return,
 exact selection between two visible children, all three direct new-change
 placements, their graph rewrites and undo cleanup, squash popup cancellation,
-exact multiline combination, content
-movement, parent restoration, root refusal, both rebase cancellation paths,
+exact multiline combination, content movement, parent restoration, root
+refusal, both rebase cancellation paths,
 content-bearing sibling rebase, row restoration, invalid self-destination, and
 the complete local bookmark lifecycle with inline-label and nested-list checks.
 It also drives duplicate-popup cancellation, immediate parent duplication,
@@ -2116,6 +2126,15 @@ selected-row default, a prompted source plus selected destination, fileset
 scoping, immutable-override transport, Return execution, operation undo,
 source/destination row retention, invalid-revset refusal, and isolated fixture
 restoration while checking the exact revision contents and remaining diff.
+Squash coverage drives row selection and clearing, cancellation, the existing
+whole-change `s s` default, one arbitrary fileset with immutable override,
+prompted source plus selected destination, keep-emptied behavior, operation
+undo, invalid-revset refusal, and isolated fixture restoration. It also opens a
+three-hunk native selector, audits every local key, refuses empty execution,
+checks file and hunk controls, selects one replacement through a physical
+Visual region, proves only that replacement moves while the other file and
+hunk remain in the source, preserves both descriptions and the surviving
+source row, and undoes the exact operation.
 Restore coverage drives cancellation, the argument-free working-copy default,
 one-path fileset scope, explicit source revsets, selected historical destination
 and changes-in modes, selection clearing, ordinary versus content-preserving
@@ -2135,8 +2154,8 @@ that replacement while retaining the remainder and restoring the original
 change-ID row. An empty revision is rejected without mutation.
 The same repository- and revision-specific message buffer is resumed if it is
 already open, preserving an unfinished edit. Majutsu's general transient
-dispatch, arbitrary source/destination and partial-patch squash,
-multi-source/destination rebase selection and
+dispatch, repeated merge-placement values and shared diff-buffer selection
+sessions for squash, multi-source/destination rebase selection and
 advanced rebase flags, remote bookmark tracking and advance patterns,
 multi-bookmark operations, multi-source/destination duplicate selection and
 configurable duplicate descriptions, a shared visual multi-selection session

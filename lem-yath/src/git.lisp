@@ -13,6 +13,10 @@
 (defvar *lem-yath-jj-split-placement-key* 'lem-yath-jj-split-placement)
 (defvar *lem-yath-jj-split-destination-key* 'lem-yath-jj-split-destination)
 (defvar *lem-yath-jj-split-parallel-key* 'lem-yath-jj-split-parallel)
+(defvar *lem-yath-jj-squash-state-key* 'lem-yath-jj-squash-state)
+(defvar *lem-yath-jj-squash-origin-key* 'lem-yath-jj-squash-origin)
+(defvar *lem-yath-jj-squash-mode-keymap*
+  (make-keymap :description '*lem-yath-jj-squash-mode-keymap*))
 (defvar *lem-yath-jj-restore-state-key* 'lem-yath-jj-restore-state)
 (defvar *lem-yath-jj-restore-origin-key* 'lem-yath-jj-restore-origin)
 (defvar *lem-yath-jj-message-action-key* 'lem-yath-jj-message-action)
@@ -331,6 +335,17 @@
   fileset
   ignore-immutable)
 
+(defstruct jj-squash-state
+  initiating-revision
+  revision
+  from
+  into
+  placement
+  destination
+  fileset
+  keep-emptied
+  ignore-immutable)
+
 (defun jj-split-null-fields (text)
   "Split TEXT at NUL characters without interpreting its contents."
   (let ((start 0)
@@ -422,6 +437,11 @@
     (:name "JJ-Split"
      :keymap *lem-yath-jj-split-mode-keymap*)
   "Partial-patch selection keys for a Jujutsu split buffer.")
+
+(define-minor-mode lem-yath-jj-squash-mode
+    (:name "JJ-Squash"
+     :keymap *lem-yath-jj-squash-mode-keymap*)
+  "Partial-patch selection keys for a Jujutsu squash buffer.")
 
 (define-minor-mode lem-yath-jj-restore-mode
     (:name "JJ-Restore"
@@ -576,36 +596,47 @@
        (editor-error "Cannot squash a Jujutsu merge with this focused workflow"))
       (t (first parents)))))
 
-(defun jj-combined-description (destination source)
-  "Combine DESTINATION and SOURCE descriptions without losing either body."
-  (cond
-    ((str:blankp destination) source)
-    ((str:blankp source) destination)
-    (t (format nil "~a~%~%~a" destination source))))
+(defun jj-squash-state-label (value)
+  "Return a bounded popup label for squash VALUE."
+  (if value (completion-bounded-annotation value) "(unset)"))
 
-(defun jj-squash-description (root revision parent policy)
-  "Return the squash message selected by POLICY for REVISION and PARENT."
-  (let ((source (jj-description root revision))
-        (destination (jj-description root parent)))
-    (ecase policy
-      (:combine (jj-combined-description destination source))
-      (:destination destination)
-      (:source source))))
+(defun jj-squash-placement-label (state)
+  "Return a compact placement label for squash STATE."
+  (if (jj-squash-state-placement state)
+      (format nil "~(~a~) ~a"
+              (jj-squash-state-placement state)
+              (jj-squash-state-label
+               (jj-squash-state-destination state)))
+      "(unset)"))
 
-(defun jj-squash-keymap ()
-  "Build the focused Majutsu-style squash popup."
-  (let ((keymap (make-keymap :description "JJ Squash")))
+(defun jj-squash-keymap (state)
+  "Build the pinned Majutsu-style squash popup for STATE."
+  (let* ((keymap (make-keymap :description "JJ Squash"))
+         (row (jj-squash-state-initiating-revision state)))
     (setf (lem/transient::keymap-show-p keymap) t
           (lem/transient::keymap-display-style keymap) :column)
     (dolist
         (entry
-          '(("c" "squash; combine descriptions")
-            ("d" "squash; destination description")
-            ("r" "squash; source description")
-            ("k" "squash; combine and keep emptied source")
-            ("s" "squash; combine descriptions")
-            ("Return" "squash; combine descriptions")
-            ("q" "cancel")))
+          (list
+           (list "r" (format nil "revision selected row: ~a~a" row
+                              (if (equal row
+                                         (jj-squash-state-revision state))
+                                  " [selected]" "")))
+           (list "f" (format nil "from selected row: ~a~a" row
+                              (if (equal row (jj-squash-state-from state))
+                                  " [selected]" "")))
+           (list "t" (format nil "into selected row: ~a~a" row
+                              (if (equal row (jj-squash-state-into state))
+                                  " [selected]" "")))
+           (list "o" "destination at selected row")
+           (list "a" "insert after selected row")
+           (list "b" "insert before selected row")
+           (list "c" "clear revision selections")
+           (list "-" "options: revsets, paths, keep, immutable")
+           (list "i" "select patch in Lem")
+           (list "s" "squash")
+           (list "Return" "squash")
+           (list "q" "cancel")))
       (destructuring-bind (key description) entry
         (define-key keymap key 'nop-command)
         (setf (lem-core::prefix-description
@@ -613,51 +644,252 @@
               description)))
     keymap))
 
-(defun jj-execute-squash (root revision parent policy keep-emptied)
-  "Squash REVISION into PARENT and keep point on the destination row."
-  (let ((arguments
-          (list "squash" "--revision" revision
-                "--message"
-                (jj-squash-description root revision parent policy))))
-    (when keep-emptied
-      (setf arguments (append arguments '("--keep-emptied"))))
-    (run-jj root arguments)
-    (let ((buffer (current-buffer)))
-      (render-jj-buffer buffer root)
-      (jj-restore-revision-point buffer parent))
-    (message "Jujutsu change squashed")))
+(defun jj-squash-option-keymap (state)
+  "Build the option suffix popup for squash STATE."
+  (let ((keymap (make-keymap :description "JJ Squash options")))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist
+        (entry
+          (list
+           (list "r" (format nil "revision: ~a"
+                              (jj-squash-state-label
+                               (jj-squash-state-revision state))))
+           (list "f" (format nil "from: ~a"
+                              (jj-squash-state-label
+                               (jj-squash-state-from state))))
+           (list "t" (format nil "into: ~a"
+                              (jj-squash-state-label
+                               (jj-squash-state-into state))))
+           (list "o" (format nil "destination: ~a"
+                              (jj-squash-placement-label state)))
+           (list "A" "insert-after revset")
+           (list "B" "insert-before revset")
+           (list "-" (format nil "fileset/path: ~a"
+                              (jj-squash-state-label
+                               (jj-squash-state-fileset state))))
+           (list "k" (format nil "keep emptied: ~:[off~;on~]"
+                              (jj-squash-state-keep-emptied state)))
+           (list "I" (format nil "ignore immutable: ~:[off~;on~]"
+                              (jj-squash-state-ignore-immutable state)))
+           (list "q" "back")))
+      (destructuring-bind (key description) entry
+        (define-key keymap key 'nop-command)
+        (setf (lem-core::prefix-description
+               (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
+              description)))
+    keymap))
 
-(defun dispatch-jj-squash (root revision parent)
-  "Read and execute a focused whole-revision squash action."
-  (unwind-protect
-       (progn
-         (let ((lem/transient:*transient-popup-delay* 0))
-           (keymap-activate (jj-squash-keymap)))
-         (redraw-display)
-         (let* ((key (read-key))
-                (name (lem-core::keyseq-to-string (list key))))
-           (lem/transient::hide-transient)
-           (cond
-             ((or (string= name "s") (string= name "Return")
-                  (string= name "c"))
-              (jj-execute-squash root revision parent :combine nil))
-             ((string= name "d")
-              (jj-execute-squash root revision parent :destination nil))
-             ((string= name "r")
-              (jj-execute-squash root revision parent :source nil))
-             ((string= name "k")
-              (jj-execute-squash root revision parent :combine t))
-             ((or (string= name "q") (string= name "Escape"))
-              (message "Jujutsu squash cancelled"))
-             (t (message "No squash action is bound to ~a" name)))))
+(defun jj-squash-clear-selections (state)
+  "Clear mutually exclusive revision selections in squash STATE."
+  (setf (jj-squash-state-revision state) nil
+        (jj-squash-state-from state) nil
+        (jj-squash-state-into state) nil
+        (jj-squash-state-placement state) nil
+        (jj-squash-state-destination state) nil))
+
+(defun jj-squash-select (state category value &optional toggle-p)
+  "Set squash CATEGORY in STATE to VALUE while enforcing jj exclusions.
+When TOGGLE-P is true, selecting the identical row again clears CATEGORY."
+  (ecase category
+    (:revision
+     (let ((selected
+             (unless (and toggle-p
+                          (equal value (jj-squash-state-revision state)))
+               value)))
+       (jj-squash-clear-selections state)
+       (setf (jj-squash-state-revision state) selected)))
+    (:from
+     (setf (jj-squash-state-revision state) nil
+           (jj-squash-state-from state)
+           (unless (and toggle-p
+                        (equal value (jj-squash-state-from state)))
+             value)))
+    (:into
+     (setf (jj-squash-state-revision state) nil
+           (jj-squash-state-placement state) nil
+           (jj-squash-state-destination state) nil
+           (jj-squash-state-into state)
+           (unless (and toggle-p
+                        (equal value (jj-squash-state-into state)))
+             value)))
+    ((:destination :after :before)
+     (let ((selected
+             (unless (and toggle-p
+                          (eq category (jj-squash-state-placement state))
+                          (equal value
+                                 (jj-squash-state-destination state)))
+               value)))
+       (setf (jj-squash-state-revision state) nil
+             (jj-squash-state-into state) nil
+             (jj-squash-state-placement state) (and selected category)
+             (jj-squash-state-destination state) selected)))))
+
+(defun jj-squash-prompt-label (category)
+  (ecase category
+    (:revision "Squash revision or revset: ")
+    (:from "Squash from revision or revset: ")
+    (:into "Squash into revision or revset: ")
+    (:destination "Squash destination revision or revset: ")
+    (:after "Squash insert-after revision or revset: ")
+    (:before "Squash insert-before revision or revset: ")))
+
+(defun jj-squash-set-revset (state root category)
+  "Prompt for and set squash CATEGORY on STATE at ROOT."
+  (jj-squash-select
+   state category
+   (jj-prompt-for-revision
+    root (jj-squash-prompt-label category)
+    (intern (format nil "LEM-YATH-JJ-SQUASH-~a" category) :lem-yath))))
+
+(defun jj-squash-read-option (state)
+  "Read one `-' squash option key for STATE."
+  (let ((lem/transient:*transient-popup-delay* 0))
+    (keymap-activate (jj-squash-option-keymap state)))
+  (redraw-display)
+  (prog1
+      (lem-core::keyseq-to-string (list (read-key)))
     (lem/transient::hide-transient)))
 
+(defun jj-squash-handle-option (state root)
+  "Update squash STATE from one pinned option at ROOT."
+  (let ((name (jj-squash-read-option state)))
+    (cond
+      ((string= name "r") (jj-squash-set-revset state root :revision))
+      ((string= name "f") (jj-squash-set-revset state root :from))
+      ((string= name "t") (jj-squash-set-revset state root :into))
+      ((string= name "o") (jj-squash-set-revset state root :destination))
+      ((string= name "A") (jj-squash-set-revset state root :after))
+      ((string= name "B") (jj-squash-set-revset state root :before))
+      ((string= name "-")
+       (let ((fileset
+               (prompt-for-string
+                "Squash fileset or path (empty clears): "
+                :history-symbol 'lem-yath-jj-squash-fileset)))
+         (setf (jj-squash-state-fileset state)
+               (unless (str:blankp fileset) fileset))))
+      ((string= name "k")
+       (setf (jj-squash-state-keep-emptied state)
+             (not (jj-squash-state-keep-emptied state))))
+      ((string= name "I")
+       (setf (jj-squash-state-ignore-immutable state)
+             (not (jj-squash-state-ignore-immutable state))))
+      ((or (string= name "q") (string= name "Escape")) nil)
+      (t (message "No squash option is bound to - ~a" name)))))
+
+(defun jj-squash-effective-revision (state)
+  "Return STATE's revision-mode source, including the log-row default."
+  (or (jj-squash-state-revision state)
+      (unless (or (jj-squash-state-from state)
+                  (jj-squash-state-into state)
+                  (jj-squash-state-placement state))
+        (jj-squash-state-initiating-revision state))))
+
+(defun jj-squash-editor-config ()
+  "Return config that accepts jj's own prefilled squash description."
+  (list "--config"
+        (format nil "ui.editor=[~a]"
+                (jj-toml-string
+                 (namestring (jj-required-executable "true"))))))
+
+(defun jj-squash-arguments (state &optional extra-options)
+  "Return direct whole or interactive `jj squash' arguments for STATE."
+  (let ((arguments (list "squash"))
+        (revision (jj-squash-effective-revision state)))
+    (cond
+      (revision
+       (setf arguments (append arguments (list "--revision" revision))))
+      (t
+       (when (jj-squash-state-from state)
+         (setf arguments
+               (append arguments
+                       (list "--from" (jj-squash-state-from state)))))
+       (when (jj-squash-state-into state)
+         (setf arguments
+               (append arguments
+                       (list "--into" (jj-squash-state-into state)))))
+       (when (jj-squash-state-placement state)
+         (setf arguments
+               (append
+                arguments
+                (list
+                 (ecase (jj-squash-state-placement state)
+                   (:destination "--destination")
+                   (:after "--insert-after")
+                   (:before "--insert-before"))
+                 (jj-squash-state-destination state)))))))
+    (when (jj-squash-state-keep-emptied state)
+      (setf arguments (append arguments '("--keep-emptied"))))
+    (when (jj-squash-state-ignore-immutable state)
+      (setf arguments (append arguments '("--ignore-immutable"))))
+    (setf arguments (append arguments (jj-squash-editor-config)))
+    (when extra-options
+      (setf arguments (append arguments extra-options)))
+    (when (jj-squash-state-fileset state)
+      (setf arguments
+            (append arguments
+                    (list "--" (jj-squash-state-fileset state)))))
+    arguments))
+
+(defun jj-execute-squash (root state)
+  "Execute whole squash STATE at ROOT and restore its logical history row."
+  (let* ((buffer (current-buffer))
+         (revision (jj-squash-effective-revision state))
+         (parent (and revision (jj-single-parent-revision root revision))))
+    (run-jj root (jj-squash-arguments state))
+    (render-jj-buffer buffer root)
+    (or (jj-restore-revision-point
+         buffer (jj-squash-state-initiating-revision state))
+        (jj-restore-revision-point buffer parent)
+        (jj-restore-working-copy-point buffer))
+    (message "Jujutsu change squashed")))
+
+(defun dispatch-jj-squash (root revision)
+  "Configure and execute pinned Majutsu squash from history REVISION."
+  (let ((state (make-jj-squash-state :initiating-revision revision)))
+    (unwind-protect
+         (loop
+           (let ((lem/transient:*transient-popup-delay* 0))
+             (keymap-activate (jj-squash-keymap state)))
+           (redraw-display)
+           (let* ((key (read-key))
+                  (name (lem-core::keyseq-to-string (list key))))
+             (lem/transient::hide-transient)
+             (cond
+               ((string= name "r")
+                (jj-squash-select state :revision revision t))
+               ((string= name "f")
+                (jj-squash-select state :from revision t))
+               ((string= name "t")
+                (jj-squash-select state :into revision t))
+               ((string= name "o")
+                (jj-squash-select state :destination revision t))
+               ((string= name "a")
+                (jj-squash-select state :after revision t))
+               ((string= name "b")
+                (jj-squash-select state :before revision t))
+               ((string= name "c") (jj-squash-clear-selections state))
+               ((string= name "-") (jj-squash-handle-option state root))
+               ((string= name "i")
+                (jj-open-squash-selection root state)
+                (return))
+               ((or (string= name "s") (string= name "Return"))
+                (jj-execute-squash root state)
+                (return))
+               ((or (string= name "q") (string= name "Escape"))
+                (message "Jujutsu squash cancelled")
+                (return))
+               (t (message "No squash action is bound to ~a" name)))))
+      (lem/transient::hide-transient))))
+
 (define-command lem-yath-jj-squash () ()
-  "Squash the selected change into its sole parent, like Majutsu `s'."
-  (let* ((root (jj-current-root))
-         (revision (jj-selected-revision))
-         (parent (jj-single-parent-revision root revision)))
-    (dispatch-jj-squash root revision parent)))
+  "Open pinned Majutsu squash from the selected Jujutsu revision."
+  (let ((root (jj-current-root))
+        (revision (jj-selected-revision)))
+    ;; Preserve the established fail-fast behavior for roots and merges before
+    ;; presenting a default that cannot execute.
+    (jj-single-parent-revision root revision)
+    (dispatch-jj-squash root revision)))
 
 (defun jj-prompt-for-revision (root prompt history-symbol)
   "Read a history change ID or arbitrary jj revset using PROMPT and HISTORY-SYMBOL."
@@ -1802,6 +2034,227 @@
     (when parts
       (apply #'concatenate 'string (nreverse parts)))))
 
+(defun jj-squash-source-revision (state)
+  "Return the source revset whose changes can be selected for squash STATE."
+  (or (jj-squash-effective-revision state)
+      (jj-squash-state-from state)
+      "@"))
+
+(defun jj-squash-diff-arguments (state)
+  "Return the bounded Git-diff arguments for interactive squash STATE."
+  (let ((arguments
+          (list "diff" "--git" "--context" "3" "--revisions"
+                (jj-squash-source-revision state))))
+    (when (jj-squash-state-fileset state)
+      (setf arguments
+            (append arguments
+                    (list "--" (jj-squash-state-fileset state)))))
+    arguments))
+
+(defun jj-squash-selection-summary (state)
+  "Return a concise endpoint summary for interactive squash STATE."
+  (cond
+    ((jj-squash-effective-revision state)
+     (format nil "revision ~a into its parent"
+             (jj-squash-effective-revision state)))
+    ((jj-squash-state-placement state)
+     (format nil "from ~a, ~(~a~) ~a"
+             (or (jj-squash-state-from state) "@")
+             (jj-squash-state-placement state)
+             (jj-squash-state-destination state)))
+    (t
+     (format nil "from ~a into ~a"
+             (or (jj-squash-state-from state) "@")
+             (or (jj-squash-state-into state) "@")))))
+
+(defun render-jj-squash-buffer (buffer)
+  "Render BUFFER's native partial-squash selection without changing its model."
+  (let* ((hunks (buffer-value buffer *lem-yath-jj-split-hunks-key*))
+         (state (buffer-value buffer *lem-yath-jj-squash-state-key*))
+         (root (buffer-value buffer *lem-yath-jj-root-key*))
+         (current-id
+           (save-excursion
+             (setf (current-buffer) buffer)
+             (alexandria:when-let ((hunk (jj-split-hunk-at-point)))
+               (jj-split-hunk-id hunk))))
+         (previous-file nil))
+    (with-buffer-read-only buffer nil
+      (erase-buffer buffer)
+      (let ((point (buffer-end-point buffer)))
+        (insert-string
+         point
+         (format nil
+                 "Jujutsu squash: ~a~%Range: ~a~%Selected: ~d/~d hunks~%~%H/Space hunk, F file, R region, C clear, C-j/C-k hunks, s/RET execute, q cancel~%"
+                 (namestring root)
+                 (jj-squash-selection-summary state)
+                 (jj-split-selected-count hunks)
+                 (length hunks)))
+        (dolist (hunk hunks)
+          (unless (equal previous-file (jj-split-hunk-file hunk))
+            (setf previous-file (jj-split-hunk-file hunk))
+            (insert-string point (format nil "~%~a~%" previous-file)))
+          (with-point ((start point))
+            (insert-string
+             point
+             (format nil "[~a] Hunk ~d~%"
+                     (jj-split-hunk-marker hunk)
+                     (jj-split-hunk-id hunk)))
+            (put-text-property start point *lem-yath-jj-split-hunk-key*
+                               (jj-split-hunk-id hunk)))
+          (dolist (entry (jj-split-hunk-lines hunk))
+            (destructuring-bind (index line) entry
+              (with-point ((start point))
+                (insert-string point line)
+                (put-text-property start point *lem-yath-jj-split-hunk-key*
+                                   (jj-split-hunk-id hunk))
+                (when (jj-split-change-line-p line)
+                  (put-text-property
+                   start point *lem-yath-jj-split-line-key*
+                   (cons (jj-split-hunk-id hunk) index))))))))
+      (buffer-unmark buffer))
+    (setf (buffer-read-only-p buffer) t)
+    (unless (jj-restore-split-hunk-point buffer current-id)
+      (jj-restore-split-hunk-point
+       buffer (jj-split-hunk-id (first hunks))))
+    buffer))
+
+(define-command lem-yath-jj-squash-toggle-hunk () ()
+  "Toggle the complete squash hunk at point."
+  (let ((hunk (or (jj-split-hunk-at-point)
+                  (editor-error "No Jujutsu squash hunk at point"))))
+    (jj-split-toggle-hunk-model hunk)
+    (render-jj-squash-buffer (current-buffer))
+    (message (if (jj-split-hunk-selection hunk)
+                 "Selected squash hunk"
+                 "Deselected squash hunk"))))
+
+(define-command lem-yath-jj-squash-toggle-file () ()
+  "Toggle every squash hunk belonging to the file at point."
+  (let* ((hunk (or (jj-split-hunk-at-point)
+                   (editor-error "No Jujutsu squash file at point")))
+         (file (jj-split-hunk-file hunk))
+         (hunks
+           (remove-if-not
+            (lambda (candidate)
+              (equal file (jj-split-hunk-file candidate)))
+            (buffer-value (current-buffer) *lem-yath-jj-split-hunks-key*)))
+         (selected-p (every #'jj-split-hunk-selection hunks)))
+    (dolist (candidate hunks)
+      (setf (jj-split-hunk-selection candidate)
+            (unless selected-p :all)))
+    (render-jj-squash-buffer (current-buffer))
+    (message (if selected-p
+                 "Deselected squash file"
+                 "Selected squash file"))))
+
+(define-command lem-yath-jj-squash-toggle-region () ()
+  "Use the active region's changed lines as a partial squash selection."
+  (let* ((buffer (current-buffer))
+         (entries (jj-split-region-entries buffer))
+         (id (caar entries))
+         (indices (mapcar #'cdr entries))
+         (hunk
+           (find id (buffer-value buffer *lem-yath-jj-split-hunks-key*)
+                 :key #'jj-split-hunk-id))
+         (current (jj-split-hunk-selection hunk)))
+    (when (or (search "--- /dev/null" (jj-split-hunk-header hunk))
+              (search "+++ /dev/null" (jj-split-hunk-header hunk)))
+      (editor-error
+       "Select the whole hunk or file when squashing an added or deleted file"))
+    (setf (jj-split-hunk-selection hunk)
+          (cond
+            ((eq current :all) indices)
+            ((every (lambda (index) (member index current)) indices)
+             (set-difference current indices))
+            (t (sort (remove-duplicates (append indices current)) #'<))))
+    (when (and (listp (jj-split-hunk-selection hunk))
+               (null (jj-split-hunk-selection hunk)))
+      (setf (jj-split-hunk-selection hunk) nil))
+    (buffer-mark-cancel buffer)
+    (render-jj-squash-buffer buffer)
+    (message "Squash region selection updated")))
+
+(define-command lem-yath-jj-squash-clear () ()
+  "Clear every patch selection in the current squash buffer."
+  (dolist (hunk (buffer-value (current-buffer)
+                              *lem-yath-jj-split-hunks-key*))
+    (setf (jj-split-hunk-selection hunk) nil))
+  (render-jj-squash-buffer (current-buffer))
+  (message "Cleared squash selections"))
+
+(define-command lem-yath-jj-squash-next-hunk () ()
+  (jj-split-move-hunk 1))
+
+(define-command lem-yath-jj-squash-previous-hunk () ()
+  (jj-split-move-hunk -1))
+
+(define-command lem-yath-jj-squash-selection-execute () ()
+  "Execute the selected patch as a Jujutsu squash."
+  (let* ((buffer (current-buffer))
+         (root (buffer-value buffer *lem-yath-jj-root-key*))
+         (state (buffer-value buffer *lem-yath-jj-squash-state-key*))
+         (origin (buffer-value buffer *lem-yath-jj-squash-origin-key*))
+         (revision (jj-squash-effective-revision state))
+         (parent (and revision (jj-single-parent-revision root revision)))
+         (patch
+           (jj-split-selected-patch
+            (buffer-value buffer *lem-yath-jj-split-hunks-key*))))
+    (unless patch
+      (editor-error "Select at least one Jujutsu squash hunk or changed region"))
+    (jj-run-squash-with-patch root state patch)
+    (quit-active-window)
+    (when (and origin (not (deleted-buffer-p origin)))
+      (render-jj-buffer origin root)
+      (or (jj-restore-revision-point
+           origin (jj-squash-state-initiating-revision state))
+          (jj-restore-revision-point origin parent)
+          (jj-restore-working-copy-point origin)))
+    (message "Jujutsu partial squash completed")))
+
+(define-command lem-yath-jj-squash-selection-cancel () ()
+  "Cancel partial squash and return to the exact history row."
+  (quit-active-window)
+  (message "Jujutsu partial squash cancelled"))
+
+(define-command lem-yath-jj-squash-selection-help () ()
+  (message
+   "JJ Squash: H/Space hunk, F file, R region, C clear, C-j/C-k hunks, s/RET execute, q cancel"))
+
+(defun jj-squash-selection-buffer-name (root revision)
+  (format nil "*lem-yath-jj-squash: ~a:~a*"
+          (namestring (or (ignore-errors (truename root)) root)) revision))
+
+(defun jj-open-squash-selection (root state)
+  "Open native interactive patch selection for squash STATE at ROOT."
+  (let ((diff (run-jj root (jj-squash-diff-arguments state))))
+    (when (> (babel:string-size-in-octets diff :encoding :utf-8)
+             *jj-split-diff-limit*)
+      (editor-error "The Jujutsu squash diff exceeds the ~d-byte safety limit"
+                    *jj-split-diff-limit*))
+    (when (str:blankp diff)
+      (editor-error "There are no Jujutsu changes to squash interactively"))
+    (let ((hunks (parse-jj-split-hunks diff)))
+      (unless hunks
+        (editor-error "The squash source has no selectable textual hunks"))
+      (let* ((origin (current-buffer))
+             (revision (jj-squash-source-revision state))
+             (buffer
+               (make-buffer
+                (jj-squash-selection-buffer-name root revision)
+                :directory (namestring root))))
+        (change-buffer-mode buffer 'lem/buffer/fundamental-mode:fundamental-mode)
+        (save-excursion
+          (setf (current-buffer) buffer)
+          (enable-minor-mode 'lem-yath-jj-squash-mode))
+        (setf (buffer-value buffer *lem-yath-jj-root-key*) root
+              (buffer-value buffer *lem-yath-jj-view-kind-key*)
+              :squash-selection
+              (buffer-value buffer *lem-yath-jj-squash-state-key*) state
+              (buffer-value buffer *lem-yath-jj-squash-origin-key*) origin
+              (buffer-value buffer *lem-yath-jj-split-hunks-key*) hunks)
+        (render-jj-squash-buffer buffer)
+        (switch-to-buffer buffer)))))
+
 (defun jj-restore-diff-arguments (state)
   "Return the Git-diff range represented by restore STATE."
   (let ((arguments (list "diff" "--git" "--context" "3")))
@@ -2146,6 +2599,46 @@
   "Return the fixed private diff-tool script used by partial split."
   (format nil
           "set -eu~%left=$1~%right=$2~%patch=$3~%rm=$4~%cp=$5~%git=$6~%[ -d \"$left\" ]~%[ -d \"$right\" ]~%[ \"${left%/*}\" = \"${right%/*}\" ]~%[ \"${left##*/}\" = left ]~%[ \"${right##*/}\" = right ]~%\"$rm\" -rf -- \"$right\"~%\"$cp\" -a -- \"$left\" \"$right\"~%cd \"$right\"~%\"$git\" apply --recount --unidiff-zero -- \"$patch\"~%"))
+
+(defun jj-squash-tool-config (script patch)
+  "Return temporary jj diff-tool configuration for squash SCRIPT and PATCH."
+  (let* ((program (namestring (jj-required-executable "sh")))
+         (arguments
+           (mapcar #'jj-toml-string
+                   (list (uiop:native-namestring script)
+                         "$left" "$right"
+                         (uiop:native-namestring patch)
+                         (namestring (jj-required-executable "rm"))
+                         (namestring (jj-required-executable "cp"))
+                         (namestring (jj-required-executable "git"))))))
+    (list
+     "--config"
+     (format nil "merge-tools.lem-yath-squash.program=~a"
+             (jj-toml-string program))
+     "--config"
+     (format nil "merge-tools.lem-yath-squash.edit-args=[~{~a~^,~}]"
+             arguments))))
+
+(defun jj-run-squash-with-patch (root state patch)
+  "Run squash STATE at ROOT using the exact selected PATCH."
+  (uiop:with-temporary-file
+      (:pathname patch-path :stream patch-stream
+       :direction :output :element-type 'character)
+    (write-string patch patch-stream)
+    (finish-output patch-stream)
+    (close patch-stream)
+    (uiop:with-temporary-file
+        (:pathname script-path :stream script-stream
+         :direction :output :element-type 'character)
+      (write-string (jj-split-script-text) script-stream)
+      (finish-output script-stream)
+      (close script-stream)
+      (run-jj
+       root
+       (jj-squash-arguments
+        state
+        (append '("--interactive" "--tool" "lem-yath-squash")
+                (jj-squash-tool-config script-path patch-path)))))))
 
 (defun jj-split-command-arguments (buffer revision message)
   "Return non-tool jj split arguments from BUFFER state."
@@ -2700,6 +3193,33 @@
 (define-key *lem-yath-jj-view-keymap* "]" 'lem-yath-jj-goto-child)
 (define-key *lem-yath-jj-view-keymap* "[" 'lem-yath-jj-goto-parent)
 (define-key *lem-yath-jj-view-keymap* "?" 'lem-yath-jj-help)
+
+(define-key *lem-yath-jj-squash-mode-keymap* "H"
+  'lem-yath-jj-squash-toggle-hunk)
+(define-key *lem-yath-jj-squash-mode-keymap* "Space"
+  'lem-yath-jj-squash-toggle-hunk)
+(define-key *lem-yath-jj-squash-mode-keymap* "F"
+  'lem-yath-jj-squash-toggle-file)
+(define-key *lem-yath-jj-squash-mode-keymap* "R"
+  'lem-yath-jj-squash-toggle-region)
+(define-key *lem-yath-jj-squash-mode-keymap* "C"
+  'lem-yath-jj-squash-clear)
+(define-key *lem-yath-jj-squash-mode-keymap* "C-j"
+  'lem-yath-jj-squash-next-hunk)
+(define-key *lem-yath-jj-squash-mode-keymap* "C-k"
+  'lem-yath-jj-squash-previous-hunk)
+(define-key *lem-yath-jj-squash-mode-keymap* "]"
+  'lem-yath-jj-squash-next-hunk)
+(define-key *lem-yath-jj-squash-mode-keymap* "["
+  'lem-yath-jj-squash-previous-hunk)
+(define-key *lem-yath-jj-squash-mode-keymap* "s"
+  'lem-yath-jj-squash-selection-execute)
+(define-key *lem-yath-jj-squash-mode-keymap* "Return"
+  'lem-yath-jj-squash-selection-execute)
+(define-key *lem-yath-jj-squash-mode-keymap* "q"
+  'lem-yath-jj-squash-selection-cancel)
+(define-key *lem-yath-jj-squash-mode-keymap* "?"
+  'lem-yath-jj-squash-selection-help)
 
 (define-key *lem-yath-jj-split-mode-keymap* "H"
   'lem-yath-jj-split-toggle-hunk)

@@ -392,7 +392,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   direct `O`/`I`/`A` child/before/after creation, working-copy and
   relationship-aware log navigation, Majutsu-compatible `a` absorb with
   selected or prompted endpoints, fileset scoping, and immutable override,
-  whole-change squash with a compact description-policy popup, edit,
+  Majutsu-style squash with selected or prompted endpoints, filesets,
+  keep-emptied/immutable controls, and native file/hunk/changed-line selection, edit,
   confirmed selected-row rebase with branch/subtree/exact/insert modes,
   Majutsu-compatible `_` revert with source-revset and onto/after/before controls,
   `R` restore with row toggles, arbitrary revsets, filesets, descendant control,
