@@ -148,7 +148,7 @@ index f7bc8bc..51ef69b 100644
 +            (setf (lem/buffer/internal::buffer-%filename buffer) old-filename
 +                  (lem/buffer/internal::buffer-%directory buffer) old-directory
 +                  (lem/buffer/internal::buffer-%name buffer) old)))))))
-@@ -353,11 +462,31 @@
+@@ -353,11 +462,39 @@
 -  (with-buffer-read-only buffer nil
 -    (let* ((point (buffer-point buffer))
 -           (line-number (line-number-at-point point))
@@ -173,7 +173,15 @@ index f7bc8bc..51ef69b 100644
 +                (encoding
 +                  (let ((*inhibit-modification-hooks* t))
 +                    (insert-byte-snapshot
-+                     staging-point octets (buffer-filename buffer))))
++                     staging-point octets (buffer-filename buffer)
++                     :external-format
++                     (if (variable-value 'find-file-literally :default buffer)
++                         :latin-1
++                         lem/buffer/file::*default-external-format*)
++                     :end-of-line
++                     (if (variable-value 'find-file-literally :default buffer)
++                         :lf
++                         :auto))))
 +                (contents
 +                  (points-to-string (buffer-start-point staging)
 +                                    (buffer-end-point staging))))
@@ -191,7 +199,7 @@ index f7bc8bc..51ef69b 100644
 +               (run-hooks *after-sync-buffer-hook* buffer)
 +               t)))
 +      (delete-buffer staging))))
-@@ -369,8 +498,11 @@
+@@ -369,8 +506,11 @@
 -    (alexandria:if-let (fn (revert-buffer-function buffer))
 -      (funcall fn buffer)
 -      (when (and (or (buffer-modified-p buffer)
@@ -211,7 +219,7 @@ index f7bc8bc..51ef69b 100644
 +        (alexandria:if-let (fn (revert-buffer-function buffer))
 +          (funcall fn buffer)
 +          (sync-buffer-with-file-content buffer))))))
-@@ -385 +517,2 @@
+@@ -385 +525,2 @@
 -    (when (changed-disk-p (current-buffer))
 +    (when (and (not (buffer-modified-p (current-buffer)))
 +               (changed-disk-p (current-buffer)))

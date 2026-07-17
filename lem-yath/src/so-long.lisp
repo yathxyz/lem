@@ -116,7 +116,8 @@
 
 (defun so-long-before-save-process-file (buffer)
   "Keep an active So Long buffer basic; otherwise retain core save behavior."
-  (unless (so-long-buffer-active-p buffer)
+  (unless (or (so-long-buffer-active-p buffer)
+              (variable-value 'find-file-literally :default buffer))
     (lem-core::process-file buffer)))
 
 (define-command so-long-revert () ()

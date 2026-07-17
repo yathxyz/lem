@@ -130,6 +130,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   without parsers, LSP, lint, gutters, DAP, or Paredit; `C-c C-c` restores the
   original mode and `M-x global-so-long-mode` toggles protection for later
   visits. Plain-text and document modes retain their ordinary behavior
+- Files strictly larger than the configured 50 MiB threshold prompt before
+  Lem reads or allocates their buffer. `y` opens normally, `n` aborts without
+  creating a visited buffer, and `l` opens byte-preserving Fundamental mode
+  without file hooks; literal save and external revert round-trip every byte
 - Emacs 31-style asynchronous compilation on `SPC c c`, seeded with its exact
   `make -k -jN` default and launched in the originating buffer's directory and
   Direnv-aware environment; the save prompt includes the configured `d` diff,
@@ -640,6 +644,7 @@ nix run .#formatting-test
 nix run .#daily-workflows-test
 nix run .#calc-test
 nix run .#so-long-test
+nix run .#large-file-test
 nix run .#direnv-test
 nix run .#electric-editing-test
 nix run .#ui-parity-test

@@ -269,6 +269,7 @@ its Common Lisp mode registry.
 - **Electric pairs**: `electric-pair-mode t` (global auto-pairing).
 - **delete-selection-mode 1**: typing replaces active region.
 - **Scrolling**: `scroll-conservatively`/`scroll-margin` are present but **commented out** (defaults in effect). `truncate-lines t` is the default (long lines truncate, arrow glyph `→`); `SPC y v` toggles buffer-local, word-wrapped visual-line mode. Vertical border glyph `│`.
+- **Large files**: `large-file-warning-threshold` is 50 MiB. A newly visited readable file strictly larger than that prompts before reading; Emacs 31 offers normal open, abort, or literal byte-oriented Fundamental mode. An already visited buffer is reused without the size prompt.
 - **Undo**: `evil-undo-system 'undo-redo` (built-in). `vundo` for a visual undo tree (`SPC u`), `vundo-glyph-alist = vundo-unicode-symbols`. Undo limits raised: `undo-limit` 13*160000, `undo-strong-limit` 13*240000, `undo-outer-limit` 2*24000000.
 - **multiple-cursors**: declared in nix; **no keybindings or config**. Only used *internally* by `init-ai.el` to draw a fake cursor overlay during gptel streaming (`mc/make-cursor-overlay-at-point`). Not an interactive editing feature here.
 - **expreg**: region expansion (see §1.5).

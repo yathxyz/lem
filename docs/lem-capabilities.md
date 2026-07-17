@@ -3111,6 +3111,15 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   visits. Unlike GNU So Long, Lem performs the guard before original-mode
   activation and measures decoded text as UTF-8; the action menu and local
   policy/action customization are not reproduced (`scripts/so-long-test.sh`).
+- **Large-file confirmation (lem-yath patch and configuration)**:
+  `patches/lem-before-find-file.patch` adds a true pre-read lifecycle boundary,
+  and `src/large-files.lisp` applies the configured strict 50 MiB threshold to
+  new readable local regular files. `y` retains ordinary decoding and hooks;
+  `n` aborts before buffer allocation; `l` maps bytes through Latin-1 with
+  fixed LF handling, remains Fundamental, and skips file hooks. Literal save
+  and safe external revert preserve every byte. Temporary implementation reads
+  do not prompt, and Lem's literal representation remains character-backed
+  rather than Emacs-unibyte (`scripts/large-file-test.sh`).
 - **living-canvas / pixel-demo / call-graph**: experimental visual features
   (`#+sbcl lem-living-canvas`; call-graph providers for go/python via tree-sitter).
 - **contrib/ (NOT in the default image)**: `bracket-paren-mode`, upstream
