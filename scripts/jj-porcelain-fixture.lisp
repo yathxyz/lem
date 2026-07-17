@@ -91,6 +91,30 @@
      ("Return" lem-yath-jj-split-execute)
      ("q" lem-yath-jj-split-cancel))))
 
+(defun jj-porcelain-test-restore-key-command (keys)
+  (alexandria:when-let
+      ((prefix
+         (lem-core::keymap-find *lem-yath-jj-restore-mode-keymap*
+                                (lem-core::parse-keyspec keys))))
+    (lem-core::prefix-suffix prefix)))
+
+(defun jj-porcelain-test-restore-keys-p ()
+  (every
+   (lambda (binding)
+     (eq (second binding)
+         (jj-porcelain-test-restore-key-command (first binding))))
+   '(("H" lem-yath-jj-restore-toggle-hunk)
+     ("Space" lem-yath-jj-restore-toggle-hunk)
+     ("F" lem-yath-jj-restore-toggle-file)
+     ("R" lem-yath-jj-restore-toggle-region)
+     ("C" lem-yath-jj-restore-clear)
+     ("C-j" lem-yath-jj-restore-next-hunk)
+     ("C-k" lem-yath-jj-restore-previous-hunk)
+     ("r" lem-yath-jj-restore-selection-execute)
+     ("Return" lem-yath-jj-restore-selection-execute)
+     ("q" lem-yath-jj-restore-selection-cancel)
+     ("?" lem-yath-jj-restore-selection-help))))
+
 (defun jj-porcelain-test-message-key-command (keys)
   (alexandria:when-let
       ((prefix
@@ -179,6 +203,42 @@
        (jj-porcelain-test-yes-no
        (buffer-value buffer *lem-yath-jj-split-parallel-key*))))))
 
+(define-command lem-yath-jj-porcelain-test-restore-report () ()
+  (let* ((buffer (current-buffer))
+         (hunks (buffer-value buffer *lem-yath-jj-split-hunks-key*))
+         (selected (and hunks (jj-split-selected-count hunks)))
+         (partial
+           (and hunks
+                (count-if (lambda (hunk)
+                            (consp (jj-split-hunk-selection hunk)))
+                          hunks))))
+    (with-open-file (stream *jj-porcelain-test-report*
+                            :direction :output
+                            :if-exists :append
+                            :if-does-not-exist :create)
+      (format
+       stream
+       "RESTORE kind=~a hunks=~d selected=~d partial=~d row=~a keys=~a~%"
+       (if (eq :restore-selection
+               (buffer-value buffer *lem-yath-jj-view-kind-key*))
+           "restore-selection"
+           "other")
+       (length hunks)
+       (or selected 0)
+       (or partial 0)
+       (jj-porcelain-test-yes-no (jj-split-hunk-at-point))
+       (jj-porcelain-test-yes-no (jj-porcelain-test-restore-keys-p))))))
+
+(define-command lem-yath-jj-porcelain-test-restore-select-all () ()
+  "Prepare the private tool's all-selected edge without TTY key coalescing."
+  (let ((buffer (current-buffer)))
+    (unless (eq :restore-selection
+                (buffer-value buffer *lem-yath-jj-view-kind-key*))
+      (editor-error "The test all-selector requires a restore selection view"))
+    (dolist (hunk (buffer-value buffer *lem-yath-jj-split-hunks-key*))
+      (setf (jj-split-hunk-selection hunk) :all))
+    (render-jj-restore-buffer buffer)))
+
 (define-command lem-yath-jj-porcelain-test-message-report () ()
   (let* ((buffer (current-buffer))
          (root (buffer-value buffer *lem-yath-jj-root-key*))
@@ -216,3 +276,5 @@
 (define-key *global-keymap* "F1" 'lem-yath-jj-porcelain-test-report)
 (define-key *global-keymap* "F2" 'lem-yath-jj-porcelain-test-split-report)
 (define-key *global-keymap* "F3" 'lem-yath-jj-porcelain-test-message-report)
+(define-key *global-keymap* "F4" 'lem-yath-jj-porcelain-test-restore-report)
+(define-key *global-keymap* "F5" 'lem-yath-jj-porcelain-test-restore-select-all)

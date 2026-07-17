@@ -13,10 +13,14 @@
 (defvar *lem-yath-jj-split-placement-key* 'lem-yath-jj-split-placement)
 (defvar *lem-yath-jj-split-destination-key* 'lem-yath-jj-split-destination)
 (defvar *lem-yath-jj-split-parallel-key* 'lem-yath-jj-split-parallel)
+(defvar *lem-yath-jj-restore-state-key* 'lem-yath-jj-restore-state)
+(defvar *lem-yath-jj-restore-origin-key* 'lem-yath-jj-restore-origin)
 (defvar *lem-yath-jj-message-action-key* 'lem-yath-jj-message-action)
 (defvar *lem-yath-jj-message-origin-key* 'lem-yath-jj-message-origin)
 (defvar *lem-yath-jj-message-mode-keymap*
   (make-keymap :description '*lem-yath-jj-message-mode-keymap*))
+(defvar *lem-yath-jj-restore-mode-keymap*
+  (make-keymap :description '*lem-yath-jj-restore-mode-keymap*))
 (defvar *lem-yath-git-gutter-synced-mode-key*
   'lem-yath-git-gutter-synced-mode)
 
@@ -411,6 +415,11 @@
     (:name "JJ-Split"
      :keymap *lem-yath-jj-split-mode-keymap*)
   "Partial-patch selection keys for a Jujutsu split buffer.")
+
+(define-minor-mode lem-yath-jj-restore-mode
+    (:name "JJ-Restore"
+     :keymap *lem-yath-jj-restore-mode-keymap*)
+  "Partial-patch selection keys for a Jujutsu restore buffer.")
 
 (define-major-mode lem-yath-jj-message-mode nil
     (:name "JJ-Message" :keymap *lem-yath-jj-message-mode-keymap*)
@@ -886,6 +895,7 @@
                                (jj-restore-state-fileset state))))
            (list "d" (format nil "restore descendants: ~:[off~;on~]"
                               (jj-restore-state-restore-descendants state)))
+           (list "i" "interactive partial selection")
            (list "I" (format nil "ignore immutable: ~:[off~;on~]"
                               (jj-restore-state-ignore-immutable state)))
            (list "q" "back")))
@@ -966,13 +976,14 @@
       ((string= name "d")
        (setf (jj-restore-state-restore-descendants state)
              (not (jj-restore-state-restore-descendants state))))
+      ((string= name "i") :interactive)
       ((string= name "I")
        (setf (jj-restore-state-ignore-immutable state)
              (not (jj-restore-state-ignore-immutable state))))
       ((or (string= name "q") (string= name "Escape")) nil)
       (t (message "No restore option is bound to - ~a" name)))))
 
-(defun jj-restore-arguments (state)
+(defun jj-restore-arguments (state &optional extra-options)
   "Return direct `jj restore' arguments represented by STATE."
   (let ((arguments (list "restore")))
     (when (jj-restore-state-from state)
@@ -992,6 +1003,8 @@
       (setf arguments (append arguments '("--restore-descendants"))))
     (when (jj-restore-state-ignore-immutable state)
       (setf arguments (append arguments '("--ignore-immutable"))))
+    (when extra-options
+      (setf arguments (append arguments extra-options)))
     (when (jj-restore-state-fileset state)
       (setf arguments
             (append arguments
@@ -1023,7 +1036,11 @@
                ((string= name "t") (jj-restore-select-row state :into))
                ((string= name "c")
                 (jj-restore-select-row state :changes-in))
-               ((string= name "-") (jj-restore-handle-option state root))
+               ((string= name "-")
+                (when (eq :interactive
+                          (jj-restore-handle-option state root))
+                  (jj-open-restore-selection root state)
+                  (return)))
                ((string= name "x")
                 (setf (jj-restore-state-from state) nil
                       (jj-restore-state-into state) nil
@@ -1401,18 +1418,38 @@
   "Return unique (HUNK-ID . LINE-INDEX) entries selected in BUFFER."
   (unless (buffer-mark-p buffer)
     (editor-error "No active region in the Jujutsu split diff"))
-  (let ((start (region-beginning buffer))
-        (end (region-end buffer))
-        (entries '()))
-    (when (point= start end)
+  (let* ((visual-p
+           (and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
+                (lem-vi-mode/visual:visual-p buffer)))
+         (bounds
+           (when visual-p
+             (lem-vi-mode/visual:visual-range buffer)))
+         (start (if bounds
+                    (point-min (first bounds) (second bounds))
+                    (region-beginning buffer)))
+         (end (if bounds
+                  (point-max (first bounds) (second bounds))
+                  (region-end buffer)))
+         (entries '()))
+    (when (and (not visual-p) (point= start end))
       (editor-error "The active split region is empty"))
-    (with-point ((point start))
+    (with-point ((point start)
+                 (last-line end))
       (line-start point)
-      (loop :while (point< point end)
-            :for entry := (text-property-at point
-                                            *lem-yath-jj-split-line-key*)
+      (line-start last-line)
+      (if visual-p
+          (loop
+            :for entry := (text-property-at
+                           point *lem-yath-jj-split-line-key*)
             :do (when entry (pushnew entry entries :test #'equal))
-            :while (line-offset point 1)))
+            :until (point>= point last-line)
+            :unless (line-offset point 1)
+              :do (return))
+          (loop :while (point< point end)
+                :for entry := (text-property-at
+                               point *lem-yath-jj-split-line-key*)
+                :do (when entry (pushnew entry entries :test #'equal))
+                :while (line-offset point 1))))
     (unless entries
       (editor-error "The region contains no changed split lines"))
     (let ((id (caar entries)))
@@ -1577,6 +1614,309 @@
     (when parts
       (apply #'concatenate 'string (nreverse parts)))))
 
+(defun jj-restore-diff-arguments (state)
+  "Return the Git-diff range represented by restore STATE."
+  (let ((arguments (list "diff" "--git" "--context" "3")))
+    (cond
+      ((jj-restore-state-changes-in state)
+       (setf arguments
+             (append arguments
+                     (list "--revisions"
+                           (jj-restore-state-changes-in state)))))
+      ((or (jj-restore-state-from state) (jj-restore-state-into state))
+       (setf arguments
+             (append arguments
+                     (list "--from" (or (jj-restore-state-from state) "@")
+                           "--to" (or (jj-restore-state-into state) "@")))))
+      (t (setf arguments (append arguments '("--revisions" "@")))))
+    (when (jj-restore-state-fileset state)
+      (setf arguments
+            (append arguments
+                    (list "--" (jj-restore-state-fileset state)))))
+    arguments))
+
+(defun jj-restore-selection-summary (state)
+  "Return a compact description of restore STATE."
+  (cond
+    ((jj-restore-state-changes-in state)
+     (format nil "changes in ~a" (jj-restore-state-changes-in state)))
+    ((or (jj-restore-state-from state) (jj-restore-state-into state))
+     (format nil "from ~a into ~a"
+             (or (jj-restore-state-from state) "@")
+             (or (jj-restore-state-into state) "@")))
+    (t "working copy from parents")))
+
+(defun render-jj-restore-buffer (buffer)
+  "Render BUFFER's native partial-restore selection."
+  (let* ((hunks (buffer-value buffer *lem-yath-jj-split-hunks-key*))
+         (state (buffer-value buffer *lem-yath-jj-restore-state-key*))
+         (root (buffer-value buffer *lem-yath-jj-root-key*))
+         (current-id
+           (save-excursion
+             (setf (current-buffer) buffer)
+             (alexandria:when-let ((hunk (jj-split-hunk-at-point)))
+               (jj-split-hunk-id hunk))))
+         (previous-file nil))
+    (with-buffer-read-only buffer nil
+      (erase-buffer buffer)
+      (let ((point (buffer-end-point buffer)))
+        (insert-string
+         point
+         (format nil
+                 "Jujutsu restore selection: ~a~%Range: ~a~%Selected: ~d/~d hunks~%~%H/Space hunk, F file, R region, C clear, C-j/C-k hunks, r/RET execute, q cancel~%"
+                 (namestring root)
+                 (jj-restore-selection-summary state)
+                 (jj-split-selected-count hunks)
+                 (length hunks)))
+        (dolist (hunk hunks)
+          (unless (equal previous-file (jj-split-hunk-file hunk))
+            (setf previous-file (jj-split-hunk-file hunk))
+            (insert-string point (format nil "~%~a~%" previous-file)))
+          (with-point ((start point))
+            (insert-string
+             point
+             (format nil "[~a] Hunk ~d~%"
+                     (jj-split-hunk-marker hunk)
+                     (jj-split-hunk-id hunk)))
+            (put-text-property start point *lem-yath-jj-split-hunk-key*
+                               (jj-split-hunk-id hunk)))
+          (dolist (entry (jj-split-hunk-lines hunk))
+            (destructuring-bind (index line) entry
+              (with-point ((start point))
+                (insert-string point line)
+                (put-text-property start point *lem-yath-jj-split-hunk-key*
+                                   (jj-split-hunk-id hunk))
+                (when (jj-split-change-line-p line)
+                  (put-text-property
+                   start point *lem-yath-jj-split-line-key*
+                   (cons (jj-split-hunk-id hunk) index))))))))
+      (buffer-unmark buffer))
+    (setf (buffer-read-only-p buffer) t)
+    (unless (jj-restore-split-hunk-point buffer current-id)
+      (jj-restore-split-hunk-point
+       buffer (jj-split-hunk-id (first hunks))))
+    buffer))
+
+(define-command lem-yath-jj-restore-toggle-hunk () ()
+  "Toggle the complete restore hunk at point."
+  (let ((hunk (or (jj-split-hunk-at-point)
+                  (editor-error "No Jujutsu restore hunk at point"))))
+    (jj-split-toggle-hunk-model hunk)
+    (render-jj-restore-buffer (current-buffer))
+    (message (if (jj-split-hunk-selection hunk)
+                 "Selected restore hunk"
+                 "Deselected restore hunk"))))
+
+(define-command lem-yath-jj-restore-toggle-file () ()
+  "Toggle every restore hunk belonging to the file at point."
+  (let* ((hunk (or (jj-split-hunk-at-point)
+                   (editor-error "No Jujutsu restore file at point")))
+         (file (jj-split-hunk-file hunk))
+         (hunks
+           (remove-if-not
+            (lambda (candidate)
+              (equal file (jj-split-hunk-file candidate)))
+            (buffer-value (current-buffer)
+                          *lem-yath-jj-split-hunks-key*)))
+         (selected-p (every #'jj-split-hunk-selection hunks)))
+    (dolist (candidate hunks)
+      (setf (jj-split-hunk-selection candidate)
+            (unless selected-p :all)))
+    (render-jj-restore-buffer (current-buffer))
+    (message (if selected-p
+                 "Deselected restore file"
+                 "Selected restore file"))))
+
+(define-command lem-yath-jj-restore-toggle-region () ()
+  "Use the active region's changed lines as a partial restore selection."
+  (let* ((buffer (current-buffer))
+         (entries (jj-split-region-entries buffer))
+         (id (caar entries))
+         (indices (mapcar #'cdr entries))
+         (hunk
+           (find id (buffer-value buffer *lem-yath-jj-split-hunks-key*)
+                 :key #'jj-split-hunk-id))
+         (current (jj-split-hunk-selection hunk)))
+    (when (or (search "--- /dev/null" (jj-split-hunk-header hunk))
+              (search "+++ /dev/null" (jj-split-hunk-header hunk)))
+      (editor-error
+       "Select the whole hunk or file when restoring an added or deleted file"))
+    (setf (jj-split-hunk-selection hunk)
+          (cond
+            ((eq current :all) indices)
+            ((every (lambda (index) (member index current)) indices)
+             (set-difference current indices))
+            (t (sort (remove-duplicates (append indices current)) #'<))))
+    (when (and (listp (jj-split-hunk-selection hunk))
+               (null (jj-split-hunk-selection hunk)))
+      (setf (jj-split-hunk-selection hunk) nil))
+    (buffer-mark-cancel buffer)
+    (render-jj-restore-buffer buffer)
+    (message "Restore region selection updated")))
+
+(define-command lem-yath-jj-restore-clear () ()
+  "Clear every patch selection in the current restore buffer."
+  (dolist (hunk (buffer-value (current-buffer)
+                              *lem-yath-jj-split-hunks-key*))
+    (setf (jj-split-hunk-selection hunk) nil))
+  (render-jj-restore-buffer (current-buffer))
+  (message "Cleared restore selections"))
+
+(defun jj-restore-move-hunk (direction)
+  "Move to the next restore hunk in DIRECTION."
+  (let ((current-id
+          (alexandria:when-let ((hunk (jj-split-hunk-at-point)))
+            (jj-split-hunk-id hunk))))
+    (with-point ((point (current-point)))
+      (loop
+        (unless (line-offset point direction)
+          (editor-error "No more Jujutsu restore hunks"))
+        (let ((id (text-property-at point *lem-yath-jj-split-hunk-key*)))
+          (when (and id (not (eql id current-id)))
+            (move-point (current-point) point)
+            (return)))))))
+
+(define-command lem-yath-jj-restore-next-hunk () ()
+  (jj-restore-move-hunk 1))
+
+(define-command lem-yath-jj-restore-previous-hunk () ()
+  (jj-restore-move-hunk -1))
+
+(defun jj-restore-hunk-complement-patch (hunk)
+  "Return HUNK's unselected changes for a partial restore tool."
+  (let ((selection (jj-split-hunk-selection hunk)))
+    (cond
+      ((null selection) (jj-split-hunk-body hunk))
+      ((eq selection :all) nil)
+      (t
+       (let* ((all
+                (loop :for (index line) :in (jj-split-hunk-lines hunk)
+                      :when (jj-split-change-line-p line)
+                        :collect index))
+              (remaining (set-difference all selection)))
+         (when remaining
+           (jj-split-partial-hunk-patch hunk remaining)))))))
+
+(defun jj-restore-complement-patch (hunks)
+  "Build the patch that preserves every unselected change in HUNKS."
+  (let ((parts '())
+        (previous-file nil))
+    (dolist (hunk hunks)
+      (alexandria:when-let
+          ((patch (jj-restore-hunk-complement-patch hunk)))
+        (unless (equal previous-file (jj-split-hunk-file hunk))
+          (push (jj-split-hunk-header hunk) parts)
+          (setf previous-file (jj-split-hunk-file hunk)))
+        (push patch parts)))
+    (if parts
+        (apply #'concatenate 'string (nreverse parts))
+        "")))
+
+(defun jj-restore-script-text ()
+  "Return the fixed private diff-tool script used by partial restore."
+  (format nil
+          "set -eu~%left=$1~%right=$2~%patch=$3~%git=$4~%[ -d \"$left\" ]~%[ -d \"$right\" ]~%[ \"${left%/*}\" = \"${right%/*}\" ]~%[ \"${left##*/}\" = left ]~%[ \"${right##*/}\" = right ]~%if [ -s \"$patch\" ]; then~%  cd \"$right\"~%  \"$git\" apply --recount --unidiff-zero -- \"$patch\"~%fi~%"))
+
+(defun jj-restore-tool-config (script patch)
+  "Return temporary jj diff-tool configuration for SCRIPT and PATCH."
+  (let* ((program (namestring (jj-required-executable "sh")))
+         (arguments
+           (mapcar #'jj-toml-string
+                   (list (uiop:native-namestring script)
+                         "$left" "$right"
+                         (uiop:native-namestring patch)
+                         (namestring (jj-required-executable "git"))))))
+    (list
+     "--config"
+     (format nil "merge-tools.lem-yath-restore.program=~a"
+             (jj-toml-string program))
+     "--config"
+     (format nil "merge-tools.lem-yath-restore.edit-args=[~{~a~^,~}]"
+             arguments))))
+
+(defun jj-run-restore-with-patch (root state patch)
+  "Run partial restore STATE at ROOT while preserving unselected PATCH."
+  (uiop:with-temporary-file
+      (:pathname patch-path :stream patch-stream
+       :direction :output :element-type 'character)
+    (write-string patch patch-stream)
+    (finish-output patch-stream)
+    (close patch-stream)
+    (uiop:with-temporary-file
+        (:pathname script-path :stream script-stream
+         :direction :output :element-type 'character)
+      (write-string (jj-restore-script-text) script-stream)
+      (finish-output script-stream)
+      (close script-stream)
+      (run-jj
+       root
+       (jj-restore-arguments
+        state
+        (append '("--interactive" "--tool" "lem-yath-restore")
+                (jj-restore-tool-config script-path patch-path)))))))
+
+(define-command lem-yath-jj-restore-selection-execute () ()
+  "Restore the selected patch and preserve all unselected changes."
+  (let* ((buffer (current-buffer))
+         (root (buffer-value buffer *lem-yath-jj-root-key*))
+         (state (buffer-value buffer *lem-yath-jj-restore-state-key*))
+         (origin (buffer-value buffer *lem-yath-jj-restore-origin-key*))
+         (hunks (buffer-value buffer *lem-yath-jj-split-hunks-key*)))
+    (unless (some #'jj-split-hunk-selection hunks)
+      (editor-error "Select at least one Jujutsu restore hunk or changed region"))
+    (jj-run-restore-with-patch
+     root state (jj-restore-complement-patch hunks))
+    (quit-active-window)
+    (when (and origin (not (deleted-buffer-p origin)))
+      (render-jj-buffer origin root)
+      (jj-restore-revision-point
+       origin (jj-restore-state-revision state)))
+    (message "Jujutsu partial restore completed")))
+
+(define-command lem-yath-jj-restore-selection-cancel () ()
+  "Cancel partial restore and return to the exact history row."
+  (quit-active-window)
+  (message "Jujutsu partial restore cancelled"))
+
+(define-command lem-yath-jj-restore-selection-help () ()
+  (message
+   "JJ Restore: H/Space hunk, F file, R region, C clear, C-j/C-k hunks, r/RET execute, q cancel"))
+
+(defun jj-restore-selection-buffer-name (root revision)
+  (format nil "*lem-yath-jj-restore: ~a:~a*"
+          (namestring (or (ignore-errors (truename root)) root)) revision))
+
+(defun jj-open-restore-selection (root state)
+  "Open native interactive patch selection for restore STATE at ROOT."
+  (let ((diff (run-jj root (jj-restore-diff-arguments state))))
+    (when (> (babel:string-size-in-octets diff :encoding :utf-8)
+             *jj-split-diff-limit*)
+      (editor-error "The Jujutsu restore diff exceeds the ~d-byte safety limit"
+                    *jj-split-diff-limit*))
+    (when (str:blankp diff)
+      (editor-error "There are no Jujutsu changes to restore interactively"))
+    (let ((hunks (parse-jj-split-hunks diff)))
+      (unless hunks
+        (editor-error "The restore range has no selectable textual hunks"))
+      (let* ((origin (current-buffer))
+             (revision (jj-restore-state-revision state))
+             (buffer
+               (make-buffer
+                (jj-restore-selection-buffer-name root revision)
+                :directory (namestring root))))
+        (change-buffer-mode buffer 'lem/buffer/fundamental-mode:fundamental-mode)
+        (save-excursion
+          (setf (current-buffer) buffer)
+          (enable-minor-mode 'lem-yath-jj-restore-mode))
+        (setf (buffer-value buffer *lem-yath-jj-root-key*) root
+              (buffer-value buffer *lem-yath-jj-view-kind-key*)
+              :restore-selection
+              (buffer-value buffer *lem-yath-jj-restore-state-key*) state
+              (buffer-value buffer *lem-yath-jj-restore-origin-key*) origin
+              (buffer-value buffer *lem-yath-jj-split-hunks-key*) hunks)
+        (render-jj-restore-buffer buffer)
+        (switch-to-buffer buffer)))))
+
 (defun jj-toml-string (value)
   "Quote VALUE as a basic TOML string."
   (with-output-to-string (stream)
@@ -1592,7 +1932,7 @@
 
 (defun jj-required-executable (name)
   (or (executable-find name)
-      (editor-error "The ~a executable is required for partial Jujutsu split"
+      (editor-error "The ~a executable is required for partial Jujutsu editing"
                     name)))
 
 (defun jj-split-tool-config (script patch)
@@ -2201,6 +2541,29 @@
   'lem-yath-jj-split-execute)
 (define-key *lem-yath-jj-split-mode-keymap* "q" 'lem-yath-jj-split-cancel)
 (define-key *lem-yath-jj-split-mode-keymap* "?" 'lem-yath-jj-split-help)
+
+(define-key *lem-yath-jj-restore-mode-keymap* "H"
+  'lem-yath-jj-restore-toggle-hunk)
+(define-key *lem-yath-jj-restore-mode-keymap* "Space"
+  'lem-yath-jj-restore-toggle-hunk)
+(define-key *lem-yath-jj-restore-mode-keymap* "F"
+  'lem-yath-jj-restore-toggle-file)
+(define-key *lem-yath-jj-restore-mode-keymap* "R"
+  'lem-yath-jj-restore-toggle-region)
+(define-key *lem-yath-jj-restore-mode-keymap* "C"
+  'lem-yath-jj-restore-clear)
+(define-key *lem-yath-jj-restore-mode-keymap* "C-j"
+  'lem-yath-jj-restore-next-hunk)
+(define-key *lem-yath-jj-restore-mode-keymap* "C-k"
+  'lem-yath-jj-restore-previous-hunk)
+(define-key *lem-yath-jj-restore-mode-keymap* "r"
+  'lem-yath-jj-restore-selection-execute)
+(define-key *lem-yath-jj-restore-mode-keymap* "Return"
+  'lem-yath-jj-restore-selection-execute)
+(define-key *lem-yath-jj-restore-mode-keymap* "q"
+  'lem-yath-jj-restore-selection-cancel)
+(define-key *lem-yath-jj-restore-mode-keymap* "?"
+  'lem-yath-jj-restore-selection-help)
 
 (define-key *lem-yath-jj-message-mode-keymap* "C-c C-c"
   'lem-yath-jj-message-finish)

@@ -309,6 +309,29 @@ latest_split_report() {
   grep '^SPLIT ' "$LEM_YATH_JJ_PORCELAIN_REPORT" | tail -n 1
 }
 
+restore_report_count() {
+  grep -c '^RESTORE ' "$LEM_YATH_JJ_PORCELAIN_REPORT" 2>/dev/null || true
+}
+
+invoke_restore_report() {
+  local before
+  before=$(restore_report_count)
+  lem_keys "$session" F4
+  local index=0
+  while ((index < 80)); do
+    if (( $(restore_report_count) > before )); then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+latest_restore_report() {
+  grep '^RESTORE ' "$LEM_YATH_JJ_PORCELAIN_REPORT" | tail -n 1
+}
+
 message_report_count() {
   grep -c '^MESSAGE ' "$LEM_YATH_JJ_PORCELAIN_REPORT" 2>/dev/null || true
 }
@@ -688,6 +711,8 @@ fi
 restore_baseline_operation=$(current_operation_id)
 printf 'restore one\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt"
 printf 'restore two\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt"
+printf 'partial restore line\n' \
+  >>"${LEM_YATH_JJ_PORCELAIN_ROOT}working copy.txt"
 lem_keys "$session" g r
 
 lem_keys "$session" R
@@ -700,6 +725,220 @@ if [ -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt" ] &&
   pass restore-cancel 'R q closed the restore popup without mutation'
 else
   fail restore-cancel 'restore cancellation changed content or the selected row'
+fi
+
+# Majutsu's -i route stays inside Lem. The selector builds the complement
+# patch expected by jj's private interactive diff tool, so unselected changes
+# survive while the selected hunk or changed line is restored.
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" i
+fi
+if lem_wait_for "$session" 'Jujutsu restore selection:' 10 >/dev/null &&
+   invoke_restore_report &&
+   [[ $(latest_restore_report) == \
+     'RESTORE kind=restore-selection hunks=3 selected=0 partial=0 row=yes keys=yes' ]]; then
+  pass restore-partial-open 'R - i opened the native three-hunk restore selector'
+else
+  fail restore-partial-open 'interactive restore parsing, mode, or keymap diverged'
+fi
+lem_keys "$session" q
+if lem_wait_for "$session" 'History' 10 >/dev/null &&
+   [ -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt" ] &&
+   [ -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt" ] &&
+   grep -Fxq 'partial restore line' \
+     "${LEM_YATH_JJ_PORCELAIN_ROOT}working copy.txt" &&
+   invoke_report && [[ $(latest_report) == *'description=current '* ]]; then
+  pass restore-partial-cancel 'q preserved every change and restored the initiating row'
+else
+  fail restore-partial-cancel 'selector cancellation mutated content or lost its row'
+fi
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'Restore fileset or path' 10 >/dev/null; then
+  replace_prompt_text 'restore-one.txt'
+fi
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" i
+fi
+if lem_wait_for "$session" 'Jujutsu restore selection:' 10 >/dev/null &&
+   invoke_restore_report &&
+   [[ $(latest_restore_report) == \
+     'RESTORE kind=restore-selection hunks=1 selected=0 partial=0 row=yes keys=yes' ]]; then
+  pass restore-partial-fileset 'R -- then -i froze the configured one-path range'
+else
+  fail restore-partial-fileset 'interactive restore ignored or swallowed its fileset state'
+fi
+lem_keys "$session" q
+lem_wait_for "$session" 'History' 10 >/dev/null || true
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" i
+fi
+if lem_wait_for "$session" 'Jujutsu restore selection:' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+if lem_wait_for "$session" 'Select at least one Jujutsu restore hunk' 10 >/dev/null &&
+   invoke_restore_report &&
+   [[ $(latest_restore_report) == *'hunks=3 selected=0 partial=0 '* ]]; then
+  pass restore-partial-empty 'r refused an empty native restore selection'
+else
+  fail restore-partial-empty 'empty interactive restore did not fail closed'
+fi
+lem_keys "$session" q
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" i
+fi
+if lem_wait_for "$session" 'Jujutsu restore selection:' 10 >/dev/null; then
+  lem_keys "$session" /
+  tmux_cmd send-keys -t "$session" -l '^restore-one.txt$'
+  lem_keys "$session" Enter j F
+fi
+if invoke_restore_report &&
+   [[ $(latest_restore_report) == *'hunks=3 selected=1 partial=0 '* ]]; then
+  pass restore-partial-file-select 'F selected the exact file represented at point'
+else
+  fail restore-partial-file-select 'file selection changed the wrong restore hunks'
+fi
+lem_keys "$session" C H
+if invoke_restore_report &&
+   [[ $(latest_restore_report) == *'hunks=3 selected=1 partial=0 '* ]]; then
+  pass restore-partial-hunk-select 'C then H retained one complete restore hunk'
+else
+  fail restore-partial-hunk-select 'clear or whole-hunk restore selection diverged'
+fi
+lem_keys "$session" C /
+tmux_cmd send-keys -t "$session" -l '^[+]restore one$'
+lem_keys "$session" Enter V
+lem_wait_for "$session" 'V-LINE' 10 >/dev/null || true
+lem_keys "$session" R
+if lem_wait_for "$session" \
+     'Select the whole hunk or file when restoring an added or deleted file' \
+     10 >/dev/null &&
+   invoke_restore_report &&
+   [[ $(latest_restore_report) == *'selected=0 partial=0 '* ]]; then
+  pass restore-partial-added-refusal 'R rejected unsafe line selection in an added file'
+else
+  fail restore-partial-added-refusal 'added-file line selection did not fail closed'
+fi
+lem_keys "$session" Escape
+lem_wait_for "$session" 'NORMAL' 10 >/dev/null || true
+lem_keys "$session" q
+lem_wait_for "$session" 'History' 10 >/dev/null || true
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" i
+fi
+if lem_wait_for "$session" 'Jujutsu restore selection:' 10 >/dev/null; then
+  lem_keys "$session" /
+  tmux_cmd send-keys -t "$session" -l '^[+]partial restore line$'
+  lem_keys "$session" Enter V
+  lem_wait_for "$session" 'V-LINE' 10 >/dev/null || true
+  lem_keys "$session" R
+fi
+if invoke_restore_report &&
+   [[ $(latest_restore_report) == *'hunks=3 selected=1 partial=1 '* ]]; then
+  pass restore-partial-region-select 'R retained one changed-line restore selection'
+else
+  fail restore-partial-region-select 'changed-line restore selection was not represented exactly'
+fi
+lem_keys "$session" r
+lem_wait_for "$session" 'Jujutsu partial restore completed' 10 >/dev/null || true
+if [ "$(cat "${LEM_YATH_JJ_PORCELAIN_ROOT}working copy.txt")" = \
+     'tracked through every Jujutsu operation' ] &&
+   [ -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt" ] &&
+   [ -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt" ] &&
+   invoke_report && [[ $(latest_report) == *'description=current '* ]]; then
+  pass restore-partial-region 'R/r restored only the selected line and preserved its complement'
+else
+  fail restore-partial-region 'partial restore changed unselected content or lost its row'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if grep -Fxq 'partial restore line' \
+     "${LEM_YATH_JJ_PORCELAIN_ROOT}working copy.txt" &&
+   wait_revision_has_file "$initial_working_copy_id" restore-one.txt &&
+   wait_revision_has_file "$initial_working_copy_id" restore-two.txt; then
+  pass restore-partial-undo 'u restored the exact pre-operation working copy'
+else
+  fail restore-partial-undo 'interactive restore was not cleanly undoable'
+fi
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" i
+fi
+if lem_wait_for "$session" 'Jujutsu restore selection:' 10 >/dev/null; then
+  lem_keys "$session" F5
+fi
+if invoke_restore_report &&
+   [[ $(latest_restore_report) == *'hunks=3 selected=3 partial=0 '* ]]; then
+  pass restore-partial-select-all 'the private-tool edge model covered the complete restore range'
+else
+  fail restore-partial-select-all 'whole-range interactive selection diverged'
+fi
+lem_keys "$session" r
+lem_wait_for "$session" 'Jujutsu partial restore completed' 10 >/dev/null || true
+if [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt" ] &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt" ] &&
+   [ "$(cat "${LEM_YATH_JJ_PORCELAIN_ROOT}working copy.txt")" = \
+     'tracked through every Jujutsu operation' ] &&
+   invoke_report && [[ $(latest_report) == *'description=current '* ]]; then
+  pass restore-partial-empty-complement 'the private tool restored an all-selected range'
+else
+  fail restore-partial-empty-complement 'the empty complement did not produce a full restore'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if grep -Fxq 'partial restore line' \
+     "${LEM_YATH_JJ_PORCELAIN_ROOT}working copy.txt" &&
+   wait_revision_has_file "$initial_working_copy_id" restore-one.txt &&
+   wait_revision_has_file "$initial_working_copy_id" restore-two.txt; then
+  pass restore-partial-empty-complement-undo 'u restored the all-selected operation exactly'
+else
+  fail restore-partial-empty-complement-undo 'all-selected interactive restore was not undoable'
+fi
+
+# Keep the established restore matrix independent of the tracked-line fixture;
+# it expects only the two added paths below. Refresh forces jj to snapshot this
+# external cleanup before the next editor-driven operation.
+sed -i '/^partial restore line$/d' \
+  "${LEM_YATH_JJ_PORCELAIN_ROOT}working copy.txt"
+lem_keys "$session" g r
+invoke_report >/dev/null || true
+if [ "$(cat "${LEM_YATH_JJ_PORCELAIN_ROOT}working copy.txt")" = \
+     'tracked through every Jujutsu operation' ]; then
+  pass restore-partial-isolation 'the partial-line fixture left the legacy restore baseline intact'
+else
+  fail restore-partial-isolation 'the tracked-line fixture leaked into later restore cases'
 fi
 
 lem_keys "$session" R

@@ -394,7 +394,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   whole-change squash with a compact description-policy popup, edit,
   confirmed selected-row rebase with branch/subtree/exact/insert modes,
   Majutsu-compatible `_` revert with source-revset and onto/after/before controls,
-  `R` restore with row toggles, arbitrary revsets, filesets, and descendant control,
+  `R` restore with row toggles, arbitrary revsets, filesets, descendant control,
+  and a native `- i` file/hunk/changed-line selector,
   Majutsu-compatible `y` placement and immediate `Y` duplicate workflows,
   a read-only `S` split view with file, hunk, and changed-line selection plus
   destination and parallel-layout controls,
