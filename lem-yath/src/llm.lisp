@@ -72,11 +72,12 @@
 (defstruct (llm-request
             (:constructor make-llm-request
                 (buffer process backend
-                 &key insertion-point tool-context tools-p)))
+                 &key prompt insertion-point tool-context tools-p)))
   "One asynchronous LLM request owned by BUFFER."
   buffer
   process
   backend
+  prompt
   insertion-point
   tool-context
   tools-p
@@ -569,9 +570,10 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
       nil)))
 
 (defun llm-register-request
-    (buffer process backend &key insertion-point tool-context tools-p)
+    (buffer process backend &key prompt insertion-point tool-context tools-p)
   "Register and return an asynchronous request for BUFFER."
   (let ((request (make-llm-request buffer process backend
+                                   :prompt prompt
                                    :insertion-point insertion-point
                                    :tool-context tool-context
                                    :tools-p tools-p)))
@@ -807,6 +809,7 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
                 (setf request
                       (llm-register-request
                        buffer nil :openrouter
+                       :prompt prompt
                        :insertion-point insertion-point
                        :tool-context tool-context :tools-p tools-p))
                 (llm-start-request-thread

@@ -3331,6 +3331,15 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   disappears on completion, abort, mode disable, or buffer deletion. These
   overlays never enter conversation reconstruction; role presentation toggles
   with `M-x lem-yath-llm-role-visuals-toggle` and composes with other gutters.
+  The configured diagnostic workflow is available through
+  `M-x lem-yath-llm-request-trace-toggle` and
+  `M-x lem-yath-llm-request-trace-open`. Its selected, read-only
+  `*gptel-requests*` viewer records request/backend start, metadata-only chunk
+  counts, and distinct complete, aborted, or killed terminal states. Prompt
+  previews are control-normalized and bounded to 160 characters; provider
+  objects, credentials, headers, request bodies, response content, tool
+  arguments, and tool results are never logged. Disabling tracing clears live
+  trace ownership and leaves the existing log byte-stable.
   The CLI adapters consume their native
   JSON event streams, retain a separate session ID for each backend for the
   lifetime of that buffer, render text/thinking/tool/command/file activity,

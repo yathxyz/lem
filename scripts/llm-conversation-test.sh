@@ -107,6 +107,16 @@ if ! wait_report_count \
 fi
 pass startup-mode 'startup is an Org LLM conversation with C-c Return'
 
+if ! run_mx lem-yath-llm-request-trace-toggle ||
+   ! lem_wait_for "$session" 'LLM request tracing enabled' 5 >/dev/null; then
+  die request-trace 'M-x could not enable request tracing'
+fi
+if ! run_mx lem-yath-test-llm-request-trace-synthetic ||
+   ! wait_report_count \
+  '^TRACE-SYNTHETIC unchanged=yes active=no preview=160 secret=no injection=no$' 1; then
+  die request-trace 'bounded synthetic tracing changed source text or leaked its tail'
+fi
+
 send_key F8
 if ! wait_report_count '^SETUP-TYPED ' 1; then
   die typed-conversation 'could not prepare the typed conversation scenario'
@@ -145,6 +155,35 @@ if ! wait_report_count '^DONE label=typed$' 1; then
 fi
 pass typed-conversation 'typed roles, prompt transform, and stream cursor reached the UI intact'
 
+if ! run_mx lem-yath-llm-request-trace-open ||
+   ! lem_wait_for "$session" 'event=request-finish status=complete' 5 >/dev/null; then
+  die request-trace 'the trace viewer did not show the completed request'
+fi
+if ! run_mx lem-yath-test-llm-request-trace-record ||
+   ! wait_report_count \
+  '^TRACE enabled=yes buffer=yes mode=yes readonly=yes states=0 length=[1-9][0-9]* starts=2 backends=2 chunks=2 complete=2 aborted=0 killed=0 prompt=safe callbacks=1,1,1$' 1; then
+  die request-trace 'trace metadata, prompt normalization, or reload ownership differed'
+fi
+send_key q
+if ! run_mx lem-yath-test-llm-request-trace-view-record ||
+   ! wait_report_count '^TRACE-VIEW current=\*scratch\* windows=0$' 1; then
+  die request-trace 'q did not restore the traced conversation'
+fi
+if ! run_mx lem-yath-llm-request-trace-toggle ||
+   ! lem_wait_for "$session" 'LLM request tracing disabled' 5 >/dev/null; then
+  die request-trace 'M-x could not disable request tracing'
+fi
+if ! run_mx lem-yath-test-llm-request-trace-record ||
+   ! wait_report_count '^TRACE enabled=no ' 1; then
+  die request-trace 'disabled trace state was not observable'
+fi
+trace_length_before=$(sed -n 's/^TRACE enabled=no .* length=\([0-9][0-9]*\) .*/\1/p' \
+  "$LEM_YATH_LLM_CONVERSATION_REPORT" | tail -n 1)
+if [[ -z $trace_length_before ]]; then
+  die request-trace 'could not record the disabled trace length'
+fi
+pass request-trace 'opt-in metadata-only tracing opens as a bounded read-only lifecycle log'
+
 send_key F9
 if ! wait_report_count '^SETUP-REGION mark=yes$' 1; then
   die org-region 'could not prepare the active Org region scenario'
@@ -158,6 +197,20 @@ fi
 if ! wait_report_count '^DONE label=region$' 1; then
   die org-region 'the active Org region response did not finish before buffer reuse'
 fi
+if ! run_mx lem-yath-test-llm-request-trace-record ||
+   ! wait_report_count '^TRACE enabled=no ' 2; then
+  die request-trace-disable 'could not inspect tracing after the disabled request'
+fi
+trace_length_after=$(sed -n 's/^TRACE enabled=no .* length=\([0-9][0-9]*\) .*/\1/p' \
+  "$LEM_YATH_LLM_CONVERSATION_REPORT" | tail -n 1)
+if [[ $trace_length_after != "$trace_length_before" ]]; then
+  die request-trace-disable 'a request was recorded while tracing was disabled'
+fi
+if ! run_mx lem-yath-llm-request-trace-toggle ||
+   ! lem_wait_for "$session" 'LLM request tracing enabled' 5 >/dev/null; then
+  die request-trace-disable 'tracing could not be restored after the disabled request'
+fi
+pass request-trace-disable 'disabled tracing leaves the lifecycle log byte-stable'
 pass org-region 'active Org region rendered independently as Markdown'
 
 send_key F2
@@ -318,5 +371,25 @@ if [ "$kill_ok" -ne 1 ]; then
   die buffer-kill 'buffer deletion did not release the request and child process'
 fi
 pass buffer-kill 'SPC b k released request ownership and terminated its process'
+
+if ! run_mx lem-yath-llm-request-trace-open ||
+   ! lem_wait_for "$session" 'event=request-finish status=killed' 5 >/dev/null; then
+  die request-trace-lifecycle 'the final killed lifecycle state was not visible'
+fi
+if ! run_mx lem-yath-test-llm-request-trace-record ||
+   ! wait_report_count \
+  '^TRACE enabled=yes buffer=yes mode=yes readonly=yes states=0 length=[1-9][0-9]* starts=6 backends=6 chunks=9 complete=4 aborted=1 killed=1 prompt=safe callbacks=1,1,1$' 1; then
+  die request-trace-lifecycle 'complete, abort, kill, or callback trace accounting differed'
+fi
+send_key q
+if ! run_mx lem-yath-test-llm-request-trace-view-record ||
+   ! wait_report_count '^TRACE-VIEW current=.* windows=0$' 2; then
+  die request-trace-lifecycle 'q left the final trace viewer window behind'
+fi
+if ! run_mx lem-yath-llm-request-trace-toggle ||
+   ! lem_wait_for "$session" 'LLM request tracing disabled' 5 >/dev/null; then
+  die request-trace-lifecycle 'trace cleanup toggle failed'
+fi
+pass request-trace-lifecycle 'complete, abort, and killed requests have distinct terminal records'
 
 printf 'All LLM conversation tests passed.\n'

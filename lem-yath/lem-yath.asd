@@ -113,6 +113,7 @@
                              (:file "llm-presets")
                              (:file "claude-bridge")
                              (:file "claude-code")))
+               (:file "llm-trace")
                (:file "business-visual")
                (:file "bookmarks")
                (:file "persistence")

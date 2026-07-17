@@ -330,6 +330,7 @@
                                                :error-output :output))
                  (request (llm-register-request
                            buffer process backend
+                           :prompt prompt
                            :insertion-point insertion-point)))
             (llm-start-request-thread
              request

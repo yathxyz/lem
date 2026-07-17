@@ -26,6 +26,13 @@
                         (buffer-end-point buffer))
       ""))
 
+(defun llm-conversation-test-count-substring (needle text)
+  (loop :with start := 0
+        :for position := (search needle text :start2 start)
+        :while position
+        :count position
+        :do (setf start (+ position (length needle)))))
+
 (defun llm-conversation-test-key-command (keymap keys)
   (alexandria:when-let
       ((prefix (lem-core::keymap-find
@@ -114,7 +121,8 @@
                     prompt)))
          (request
            (llm-register-request
-            buffer process backend :insertion-point insertion-point)))
+            buffer process backend :prompt prompt
+            :insertion-point insertion-point)))
     (setf *llm-conversation-test-last-prompt* prompt)
     (when *llm-conversation-messages*
       (llm-conversation-test-log-messages *llm-conversation-messages*))
@@ -332,8 +340,73 @@
        disabled
        (llm-conversation-test-overlay-count
         buffer :lem-yath-llm-role-visual)
-       (llm-conversation-test-hex
-        (llm-conversation-test-buffer-text buffer))))))
+        (llm-conversation-test-hex
+         (llm-conversation-test-buffer-text buffer))))))
+
+(define-command lem-yath-test-llm-request-trace-synthetic () ()
+  (let* ((buffer (current-buffer))
+         (before (llm-conversation-test-buffer-text buffer))
+         (prompt
+           (concatenate 'string
+                        (make-string 160 :initial-element #\x)
+                        (format nil "~%TRACE_SECRET_AFTER_LIMIT")))
+         (request
+           (llm-register-request buffer nil :trace-test :prompt prompt)))
+    (llm-request-complete-now request nil)
+    (let* ((trace-buffer (get-buffer *llm-request-trace-buffer-name*))
+           (trace (llm-conversation-test-buffer-text trace-buffer)))
+      (llm-conversation-test-log
+       "TRACE-SYNTHETIC unchanged=~a active=~a preview=~d secret=~a injection=~a"
+       (if (string= before (llm-conversation-test-buffer-text buffer))
+           "yes" "no")
+       (if (llm-active-request buffer) "yes" "no")
+       (length (llm-request-trace-preview prompt))
+       (if (search "TRACE_SECRET_AFTER_LIMIT" trace) "yes" "no")
+       (if (search (format nil "~%TRACE_SECRET_AFTER_LIMIT") trace)
+           "yes" "no")))))
+
+(define-command lem-yath-test-llm-request-trace-record () ()
+  (let* ((buffer (get-buffer *llm-request-trace-buffer-name*))
+         (text (llm-conversation-test-buffer-text buffer)))
+    (llm-conversation-test-log
+     (concatenate
+      'string
+      "TRACE enabled=~a buffer=~a mode=~a readonly=~a states=~d length=~d "
+      "starts=~d backends=~d chunks=~d complete=~d aborted=~d killed=~d "
+      "prompt=~a callbacks=~d,~d,~d")
+     (if *llm-request-trace-enabled* "yes" "no")
+     (if buffer "yes" "no")
+     (if (and buffer
+              (mode-active-p buffer 'lem-yath-llm-request-trace-mode))
+         "yes" "no")
+     (if (and buffer (buffer-read-only-p buffer)) "yes" "no")
+     (hash-table-count *llm-request-trace-states*)
+     (length text)
+     (llm-conversation-test-count-substring "event=request-start" text)
+     (llm-conversation-test-count-substring "event=backend-start" text)
+     (llm-conversation-test-count-substring "event=chunk" text)
+     (llm-conversation-test-count-substring
+      "event=request-finish status=complete" text)
+     (llm-conversation-test-count-substring
+      "event=request-finish status=aborted" text)
+     (llm-conversation-test-count-substring
+      "event=request-finish status=killed" text)
+     (if (and (search "prompt=\"Current [link]" text)
+              (search "```sh printf" text))
+         "safe" "missing")
+     (count 'llm-request-trace-start *llm-request-start-functions*)
+     (count 'llm-request-trace-insert *llm-request-insert-functions*)
+     (count 'llm-request-trace-finish *llm-request-finish-functions*))))
+
+(define-command lem-yath-test-llm-request-trace-view-record () ()
+  (let ((trace-buffer (get-buffer *llm-request-trace-buffer-name*)))
+    (llm-conversation-test-log
+     "TRACE-VIEW current=~a windows=~d"
+     (buffer-name (current-buffer))
+     (if trace-buffer
+         (count trace-buffer (window-list)
+                :key #'window-buffer :test #'eq)
+         0))))
 
 (define-command lem-yath-test-llm-conversation-kill-record () ()
   (let ((buffer *llm-conversation-test-killed-buffer*)

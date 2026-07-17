@@ -1040,7 +1040,8 @@
                     (llm-oauth-buffer-id buffer *llm-oauth-cache-keys*)))
              (request
                (llm-register-request
-                buffer nil backend :insertion-point insertion-point
+                buffer nil backend :prompt prompt
+                :insertion-point insertion-point
                 :tool-context tool-context :tools-p tools-p)))
         (llm-start-request-thread
          request

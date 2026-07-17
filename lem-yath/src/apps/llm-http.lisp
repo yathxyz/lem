@@ -372,7 +372,8 @@
               (format nil "~%## User (~a / ~a)~%~%~a~%~%## Assistant~%~%"
                       (llm-http-provider-name provider) model prompt)))
            (request (llm-register-request
-                     buffer nil provider :insertion-point insertion-point)))
+                     buffer nil provider :prompt prompt
+                     :insertion-point insertion-point)))
       (llm-start-request-thread
        request
        (lambda ()

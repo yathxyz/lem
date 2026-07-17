@@ -285,8 +285,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   Fixed-width User/Assistant badges mark semantic turns, the modeline reports
   the role at point, assistant spans receive a terminal-safe tint, and a
   synthetic cursor follows streamed chunks without entering the transcript;
-  `M-x lem-yath-llm-role-visuals-toggle` controls the role presentation. Logs
-  remain below
+  `M-x lem-yath-llm-role-visuals-toggle` controls the role presentation.
+  `M-x lem-yath-llm-request-trace-toggle` records opt-in request, backend,
+  chunk-size, completion, abort, and kill metadata, and
+  `M-x lem-yath-llm-request-trace-open` opens the newest record in a read-only
+  `*gptel-requests*` viewer. Trace records include only a normalized
+  160-character prompt preview—never credentials, headers, payloads, response
+  text, or tool data. Logs remain below
   `XDG_CACHE_HOME` and all installed configuration FASLs are prebuilt by Nix;
   installed-wrapper gates cover cold AOT readiness, a 10-second repeated-start
   budget, tracked insertion, abort, and read-only fallback
