@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# scripts/run-proofs.sh -- Certify every ACL2 book under verified/ (SPEC-VK V0-2).
+#
+# Proofs are CI-gated exactly like rove tests (SPEC-VK Constraint 1): a red proof
+# blocks commit. Run this in the same pre-commit habit as scripts/run-tests.sh.
+#
+# CRITICAL (empirically verified): the ACL2 binary EXITS 0 EVEN WHEN A PROOF
+# FAILS -- it simply does not write the book's .cert file. Therefore this script
+# gates on .cert EXISTENCE/FRESHNESS, never on ACL2's exit status.
+#
+# Behaviour:
+#   * certifies each verified/*.lisp book (shim files are skipped),
+#   * incremental: skips a book whose .cert is newer than both its .lisp source
+#     AND the shim (shim changes can invalidate the dual-load contract),
+#   * writes a per-book log to verified/<book>.cert.out,
+#   * exits nonzero iff any book failed to certify.
+#
+# ACL2 binary resolution order: $ACL2, then `command -v acl2`, then the pinned
+# nixpkgs store path (see verified/README.md).
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+ROOT="$(pwd)"
+VERIFIED="$ROOT/verified"
+SHIM="$VERIFIED/shim.lisp"
+
+PINNED_ACL2=/nix/store/ymb6xzcij4c22all84pcafvjv4wgvf9s-acl2-8.6/bin/acl2
+
+resolve_acl2() {
+  if [ -n "${ACL2:-}" ]; then
+    printf '%s\n' "$ACL2"; return 0
+  fi
+  if command -v acl2 >/dev/null 2>&1; then
+    command -v acl2; return 0
+  fi
+  if [ -x "$PINNED_ACL2" ]; then
+    printf '%s\n' "$PINNED_ACL2"; return 0
+  fi
+  echo "run-proofs: no ACL2 binary found (set \$ACL2, put acl2 on PATH, or install the pinned build)" >&2
+  return 1
+}
+
+ACL2_BIN="$(resolve_acl2)"
+echo "run-proofs: using ACL2 = $ACL2_BIN"
+
+fail=0
+certified=0
+skipped=0
+
+shopt -s nullglob
+for book in "$VERIFIED"/*.lisp; do
+  case "$(basename "$book")" in
+    shim.lisp|shim-*.lisp) continue ;;
+  esac
+
+  base="${book%.lisp}"
+  name="$(basename "$base")"
+  cert="$base.cert"
+  log="$base.cert.out"
+
+  # Incremental skip: cert newer than source AND newer than the shim.
+  if [ -f "$cert" ] && [ "$cert" -nt "$book" ] && [ "$cert" -nt "$SHIM" ]; then
+    echo "run-proofs: SKIP  $name (up to date)"
+    skipped=$((skipped + 1))
+    continue
+  fi
+
+  echo "run-proofs: CERT  $name ..."
+  rm -f "$cert"
+  # ACL2 exit status is meaningless here (always 0); we check for the .cert next.
+  (cd "$VERIFIED" && printf '(certify-book "%s" 0)\n' "$name" | "$ACL2_BIN") \
+    >"$log" 2>&1 || true
+
+  if [ -f "$cert" ]; then
+    echo "run-proofs: OK    $name"
+    certified=$((certified + 1))
+  else
+    echo "run-proofs: FAIL  $name  (see $log)" >&2
+    fail=1
+  fi
+done
+shopt -u nullglob
+
+echo "run-proofs: certified=$certified skipped=$skipped failed=$([ "$fail" -eq 0 ] && echo 0 || echo yes)"
+exit "$fail"

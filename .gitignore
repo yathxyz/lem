@@ -50,3 +50,15 @@ lem-macos/
 
 # lem-terminal native helper, built from terminal.c via `make terminal-lib`
 extensions/terminal/lib/**/*.so
+
+# ACL2 certification build artifacts (SPEC-VK verified/); sources are tracked,
+# outputs are not. See scripts/run-proofs.sh.
+verified/*.cert
+verified/*.cert.out
+verified/*.port
+verified/*@expansion.lsp
+verified/**/*.cert
+verified/**/*.cert.out
+verified/**/*.port
+verified/**/*@expansion.lsp
+verified/.sys/

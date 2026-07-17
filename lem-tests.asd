@@ -95,6 +95,7 @@
                (:file "filer")
                (:file "listener-mode")
                (:file "interface")
-               (:file "display-cache"))
+               (:file "display-cache")
+               (:file "verified-shim"))
   :perform (test-op (o c)
                     (symbol-call :rove :run c)))
