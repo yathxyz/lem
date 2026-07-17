@@ -15,7 +15,8 @@
     (set (intern (string :*local-project-directories*) :ql) local-project-dir)))
 
 (defsystem "lem/core"
-  :depends-on ("iterate"
+  :depends-on ("lem-verified-kernel"
+               "iterate"
                "closer-mop"
                "trivia"
                "alexandria"

@@ -1,3 +1,20 @@
+;;;; SPEC-VK VK-10 one-source swap.  char-width / string-width / wide-index are
+;;;; now THIN SHELLS over the ACL2-certified width kernel (verified/width.lisp),
+;;;; loaded into this image through verified/shim.lisp by the lem-verified-kernel
+;;;; system (a lem/core dependency).  The per-codepoint arithmetic, the tab-stop
+;;;; law, the *char-replacement* control widths and the East-Asian range tables
+;;;; live once, in the kernel; this file only iterates strings (char-code per
+;;;; char, NO per-call codepoint-list allocation -- string-width is redisplay-hot)
+;;;; and threads in the two pieces of DYNAMIC state the kernel cannot hold:
+;;;; *ambiguous-character-width* and the runtime icon table (icon-code-p).
+;;;;
+;;;; Behavior is identical to the pre-swap implementation: tests/string-width-utils.lisp
+;;;; passes unchanged, and the certified kernel reproduces every one of the frozen
+;;;; tests/pbt/width-vectors.lisp regression vectors (captured from this file's
+;;;; previous version).  control-char / wide-char-p are kept as the exported
+;;;; classification helpers other code and tests import; they are no longer on
+;;;; char-width's path (the kernel classifies internally).
+
 (defpackage :lem/common/character/string-width-utils
   (:use :cl)
   (:export :+default-tab-size+
@@ -65,47 +82,38 @@ terminal configured to render ambiguous-width characters as wide (CJK).")
       (lem/common/character/eastasian:eastasian-code-p (char-code char))
       (control-char char)))
 
-(defun zero-width-char-p (char)
-  (declare (character char))
-  (lem/common/character/eastasian:zero-width-code-p (char-code char)))
+;;; ---------------------------------------------------------------------------
+;;; Kernel bridge (verified/width.lisp, via verified/shim.lisp)
+;;; ---------------------------------------------------------------------------
 
-(defun ambiguous-char-p (char)
-  (declare (character char))
-  (lem/common/character/eastasian:ambiguous-code-p (char-code char)))
+(declaim (inline %char-width-step))
+(defun %char-width-step (code width tab-size)
+  "The certified per-codepoint width step: new column after placing CODE at
+column WIDTH.  Threads in the two dynamic overlays the kernel cannot hold --
+the runtime icon table and *ambiguous-character-width*."
+  (declare (fixnum code width tab-size))
+  (lem/kernel:k-char-width code width tab-size
+                           (lem/common/character/icon:icon-code-p code)
+                           *ambiguous-character-width*))
 
 (defun char-width (char width &key (tab-size +default-tab-size+))
   (declare (character char) (fixnum width))
-  (cond ((char= char #\tab)
-         (+ (* (floor width tab-size) tab-size) tab-size))
-        ((char= char #\newline)
-         0)
-        ((control-char char)
-         (loop :for char :across (control-char char)
-               :do (setf width (char-width char width :tab-size tab-size)))
-         width)
-        ((zero-width-char-p char)
-         width)
-        ((wide-char-p char)
-         (+ width 2))
-        ((ambiguous-char-p char)
-         (+ width *ambiguous-character-width*))
-        (t
-         (+ width 1))))
+  (%char-width-step (char-code char) width tab-size))
 
 (defun string-width (string &key (start 0) end (tab-size +default-tab-size+))
   (let* ((len (length string))
-         (safe-end (min (or end len)
-                        len)))
-    (loop :with width := 0
+         (safe-end (min (or end len) len)))
+    (declare (fixnum len safe-end))
+    (loop :with width fixnum := 0
           :for index :from start :below safe-end
-          :for char := (aref string index)
-          :do (setq width (char-width char width :tab-size tab-size))
+          :do (setq width (%char-width-step (char-code (char string index))
+                                            width tab-size))
           :finally (return width))))
 
 (defun wide-index (string goal &key (start 0) (tab-size +default-tab-size+))
-  (loop :with width := 0
+  (loop :with width fixnum := 0
         :for index :from start :below (length string)
-        :for char := (aref string index)
-        :do (setq width (char-width char width :tab-size tab-size))
+        :do (setq width (%char-width-step (char-code (char string index))
+                                          width tab-size))
             (when (< goal width)
               (return index))))

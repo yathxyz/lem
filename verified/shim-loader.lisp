@@ -19,5 +19,11 @@
   (unless (find-package "LEM/KERNEL")
     (load (merge-pathnames "verified/shim.lisp"
                            (asdf:system-source-directory "lem-verified-kernel"))))
-  ;; Books required by production code paths (VK-7: ncurses input decode).
-  (funcall (find-symbol "LOAD-VERIFIED-BOOK" "LEM/KERNEL") "input-decode"))
+  ;; Books required by production code paths:
+  ;;   VK-7  ncurses input decode (frontends/ncurses/input.lisp)
+  ;;   VK-10 width algebra (src/common/character/string-width-utils.lisp; `width'
+  ;;         includes `eastasian-data' via the shim's include-book, so loading
+  ;;         `width' pulls the table book too)
+  (let ((load-book (find-symbol "LOAD-VERIFIED-BOOK" "LEM/KERNEL")))
+    (funcall load-book "input-decode")
+    (funcall load-book "width")))

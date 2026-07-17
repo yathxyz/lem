@@ -59,7 +59,7 @@ skipped=0
 # glob is alphabetical (buffer-edit would sort before the buffer-model book it
 # includes). Books listed here certify first, in this order; any book not
 # listed follows in glob order.
-ORDERED_BOOKS=(hello buffer-model buffer-edit undo codec crash-safety input-decode)
+ORDERED_BOOKS=(hello buffer-model buffer-edit undo codec crash-safety input-decode eastasian-data width)
 
 ordered_paths=()
 for name in "${ORDERED_BOOKS[@]}"; do

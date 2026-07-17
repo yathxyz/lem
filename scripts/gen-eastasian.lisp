@@ -110,7 +110,44 @@ ascending ranges."
             (format stream " '(#x~x #x~x)" (first r) (second r)))
   (format stream ")"))
 
-(defun main ()
+(defun emit-search-if (stream ranges depth)
+  "Emit a balanced binary-search decision tree over sorted RANGES as ACL2 code:
+nested (if (< code lo) LEFT (if (<= code hi) t RIGHT)) with hex literals, leaves
+NIL.  This is production's gen-binary-search-function shape (compiled to literal
+integer comparisons -- O(log n), no memory indirection), written as an ordinary
+ACL2 defun body so SBCL compiles it as fast as the production fasl."
+  (if (null ranges)
+      (format stream "nil")
+      (let* ((n (length ranges))
+             (mid (floor n 2))
+             (node (nth mid ranges))
+             (lo (first node))
+             (hi (second node))
+             (left (subseq ranges 0 mid))
+             (right (subseq ranges (1+ mid)))
+             (pad (make-string (* 2 (1+ depth)) :initial-element #\Space)))
+        (format stream "(if (< code #x~x)~%~A" lo pad)
+        (emit-search-if stream left (1+ depth))
+        (format stream "~%~A(if (<= code #x~x) t~%~A" pad hi pad)
+        (emit-search-if stream right (1+ depth))
+        (format stream "))"))))
+
+(defun emit-code-defun (stream name doc ranges)
+  ;; Same fixnum + (speed 3)(safety 0) codegen policy production's
+  ;; gen-binary-search-function bakes into its predicates, so the certified
+  ;; kernel predicate compiles to the same literal fixnum comparisons.  Logically
+  ;; inert (guards are not verified; the theorems quantify CODE over all objects);
+  ;; the exec path only ever passes char-code values (naturals < #x110000).
+  (format stream "~A~%(defun ~A (code)~%" doc name)
+  (format stream "  (declare (type (unsigned-byte 32) code)~%")
+  (format stream "           (optimize (speed 3) (safety 0) (debug 0)))~%  ")
+  (emit-search-if stream ranges 1)
+  (format stream ")~%~%"))
+
+(defun compute-ranges ()
+  "Download/parse the UCD and return (values version wide ambiguous zero) --
+the merged, sorted range lists shared by BOTH emitters below.  Reproducible for
+a fixed Unicode version (captured from EastAsianWidth.txt)."
   (let* ((eaw-path (ensure-file :eaw))
          (dgc-path (ensure-file :dgc))
          (emoji-path (ensure-file :emoji))
@@ -126,13 +163,66 @@ ascending ranges."
                                         (lambda (v) (string= v "A"))))
          ;; general category Mn or Me -> zero width
          (zero-raw (collect-ranges dgc-path
-                                   (lambda (v) (or (string= v "Mn") (string= v "Me")))))
-         (wide (merge-ranges (append wide-raw emoji-raw)))
-         (ambiguous (merge-ranges ambiguous-raw))
-         ;; ZERO WIDTH JOINER (U+200D, category Cf) must be width 0 for emoji ZWJ
-         ;; sequences to align; add it explicitly since it is not Mn/Me.
-         (zero (merge-ranges (cons (list #x200d #x200d) zero-raw)))
-         (out (merge-pathnames "../src/common/character/eastasian.lisp"
+                                   (lambda (v) (or (string= v "Mn") (string= v "Me"))))))
+    (values version
+            (merge-ranges (append wide-raw emoji-raw))
+            (merge-ranges ambiguous-raw)
+            ;; ZERO WIDTH JOINER (U+200D, category Cf) must be width 0 for emoji
+            ;; ZWJ sequences to align; add it explicitly since it is not Mn/Me.
+            (merge-ranges (cons (list #x200d #x200d) zero-raw)))))
+
+(defun emit-acl2-book (version wide ambiguous zero)
+  "Emit verified/eastasian-data.lisp: the VK-10 certified constant book holding
+the SAME three range tables production uses, as ACL2 quoted (lo hi) lists."
+  (let ((out (merge-pathnames "../verified/eastasian-data.lisp"
+                              (or *load-pathname* *default-pathname-defaults*))))
+    (with-open-file (s out :direction :output :if-exists :supersede
+                           :if-does-not-exist :create)
+      (format s ";;;; verified/eastasian-data.lisp -- East Asian width tables (SPEC-VK VK-10).~%")
+      (format s ";;;;~%")
+      (format s ";;;; GENERATED -- do not edit by hand.  Regenerate with:~%")
+      (format s ";;;;   sbcl --script scripts/gen-eastasian.lisp acl2~%")
+      (format s ";;;; (add UCD_DIR=<dir> to reuse a local UCD mirror; the same command with~%")
+      (format s ";;;; no argument regenerates the production src/.../eastasian.lisp, and~%")
+      (format s ";;;; `both' emits both -- the two files derive from ONE UCD parse, so the~%")
+      (format s ";;;; kernel tables and production tables cannot drift.)~%")
+      (format s ";;;;~%")
+      (format s ";;;; Unicode Character Database version ~A.~%" version)
+      (format s ";;;;~%")
+      (format s ";;;; This is an ACL2 book: (in-package \"ACL2\"), certified by~%")
+      (format s ";;;; scripts/run-proofs.sh and loaded verbatim into the Lem image through~%")
+      (format s ";;;; verified/shim.lisp (SPEC-VK Constraint 2).  It holds ONLY constant~%")
+      (format s ";;;; data as CODE -- three predicates, each a balanced binary-search~%")
+      (format s ";;;; decision tree of literal codepoint comparisons (production's~%")
+      (format s ";;;; gen-binary-search-function shape).  SBCL compiles them to O(log n)~%")
+      (format s ";;;; literal integer compares -- as fast as production's fasl, not an O(n)~%")
+      (format s ";;;; list scan (which regressed CJK string-width ~~30x):~%")
+      (format s ";;;;   (k-wide-code-p code)      East_Asian_Width W/F + Emoji_Presentation~%")
+      (format s ";;;;   (k-ambiguous-code-p code) East_Asian_Width A~%")
+      (format s ";;;;   (k-zero-code-p code)      general category Mn/Me + ZWJ U+200D~%")
+      (format s ";;;; These recognize EXACTLY the same codepoints as production's~%")
+      (format s ";;;; *eastasian-full* / *eastasian-ambiguous* / *zero-width* vectors~%")
+      (format s ";;;; (src/common/character/eastasian.lisp), same UCD parse.  Non-recursive,~%")
+      (format s ";;;; so ACL2 admits them at once; verified/width.lisp keeps them DISABLED~%")
+      (format s ";;;; (opaque booleans) during proofs.~%~%")
+      (format s "(in-package \"ACL2\")~%~%")
+      (emit-code-defun
+       s "k-wide-code-p"
+       ";; East_Asian_Width W or F, plus Emoji_Presentation -> display width 2."
+       wide)
+      (emit-code-defun
+       s "k-ambiguous-code-p"
+       ";; East_Asian_Width A -> configurable width (*ambiguous-character-width*)."
+       ambiguous)
+      (emit-code-defun
+       s "k-zero-code-p"
+       ";; General category Mn or Me, plus ZWJ (U+200D) -> display width 0."
+       zero))
+    (format t "wrote ~A (Unicode ~A): ~D wide, ~D ambiguous, ~D zero-width ranges~%"
+            (namestring out) version (length wide) (length ambiguous) (length zero))))
+
+(defun emit-production-file (version wide ambiguous zero)
+  (let* ((out (merge-pathnames "../src/common/character/eastasian.lisp"
                                (or *load-pathname* *default-pathname-defaults*))))
     (with-open-file (s out :direction :output :if-exists :supersede
                            :if-does-not-exist :create)
@@ -193,5 +283,20 @@ ascending ranges."
           (format s "  (~(~A~) code))~%~%" macro))))
     (format t "wrote ~A (Unicode ~A): ~D wide, ~D ambiguous, ~D zero-width ranges~%"
             (namestring out) version (length wide) (length ambiguous) (length zero))))
+
+(defun main ()
+  "Dispatch on the command-line argument:
+     (no arg) / eastasian -> src/common/character/eastasian.lisp (production)
+     acl2                 -> verified/eastasian-data.lisp (VK-10 certified book)
+     both                 -> both files, from ONE UCD parse (cannot drift)."
+  (let ((mode (or (first (uiop:command-line-arguments)) "eastasian")))
+    (multiple-value-bind (version wide ambiguous zero) (compute-ranges)
+      (cond ((string= mode "acl2")
+             (emit-acl2-book version wide ambiguous zero))
+            ((string= mode "both")
+             (emit-production-file version wide ambiguous zero)
+             (emit-acl2-book version wide ambiguous zero))
+            (t
+             (emit-production-file version wide ambiguous zero))))))
 
 (main)

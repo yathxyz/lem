@@ -36,7 +36,9 @@
                              (:file "kernel-undo-conformance")
                              (:file "codec-conformance")
                              (:file "crash-safety-faults")
-                             (:file "input-decode-conformance")))
+                             (:file "input-decode-conformance")
+                             (:file "width-vectors")
+                             (:file "width-conformance")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")

@@ -14,12 +14,13 @@
 ;;;;                             applicative subset resolves defun/if/let/etc. to
 ;;;;                             their identical CL homonyms. Names that collide
 ;;;;                             with CL are shadowed (see *acl2-shadows*).
-;;;;   2. (defthm ...) and (defthmd ...) -- proof-only events (defthmd is the
-;;;;                             disabled-by-default variant; identical here).
-;;;;                             Each is reinterpreted as a no-op MACRO that
-;;;;                             expands to NIL WITHOUT evaluating its body
-;;;;                             (the body is a logical formula using symbols such
-;;;;                             as IMPLIES that have no in-image function).
+;;;;   2. (defthm ...), (defthmd ...) and (in-theory ...) -- proof-only events
+;;;;                             (defthmd is the disabled-by-default defthm
+;;;;                             variant; in-theory tunes the rewriter).  Each is
+;;;;                             reinterpreted as a no-op MACRO that expands to
+;;;;                             NIL WITHOUT evaluating its body (the body is a
+;;;;                             logical formula / rune list using symbols such as
+;;;;                             IMPLIES or DISABLE that have no in-image function).
 ;;;;   3. (declare (xargs ...)) -- ACL2 guard/measure/mode annotations. Declared a
 ;;;;                             valid-and-ignored declaration identifier so the CL
 ;;;;                             compiler accepts and discards it. Guards are thus
@@ -29,6 +30,11 @@
 ;;;;                             Reinterpreted as a no-op macro, body NOT evaluated
 ;;;;                             -- exactly ACL2's own include-book semantics,
 ;;;;                             where local events are skipped.
+;;;;   4b. (encapsulate sig events...) -- grouping whose NON-local events are
+;;;;                             exported as if at top level.  Reinterpreted as
+;;;;                             (progn events...), signature dropped (our books
+;;;;                             wrap only local include-books + defthms, all
+;;;;                             no-ops here).
 ;;;;   5. (include-book ...)   -- with :dir :system (community books: lemma
 ;;;;                             libraries only, never exec-reachable): expands to
 ;;;;                             NIL. Without :dir (a sibling book in verified/):
@@ -83,6 +89,11 @@
 (defmacro acl2::defthmd (&rest ignored)
   (declare (ignore ignored))
   nil)
+;; in-theory: a proof-only event tuning ACL2's rewriter (enable/disable rules).
+;; Meaningless in-image -- no-op.
+(defmacro acl2::in-theory (&rest ignored)
+  (declare (ignore ignored))
+  nil)
 
 ;;; ---- (3) (declare (xargs ...)) accepted and ignored ----------------------
 (declaim (declaration acl2::xargs))
@@ -91,6 +102,17 @@
 (defmacro acl2::local (&rest ignored)
   (declare (ignore ignored))
   nil)
+
+;;; ---- (4b) encapsulate: a grouping of events with a (possibly empty)
+;;; signature.  ACL2's non-local encapsulate events are exported exactly as if
+;;; written at top level; in-image we therefore drop the signature and splice
+;;; the events into a progn.  Every event our books wrap in an encapsulate is a
+;;; (local (include-book ...)) or a defthm -- all no-ops in-image via the macros
+;;; here -- so this expands to harmless nils; a non-local defun placed inside
+;;; would define normally, matching ACL2's export semantics.
+(defmacro acl2::encapsulate (signatures &rest events)
+  (declare (ignore signatures))
+  `(progn ,@events))
 
 ;;; ---- (5) include-book -----------------------------------------------------
 ;;; :dir :system community books are lemma libraries only (their functions must
@@ -174,7 +196,9 @@
                                  "KEY-EV-META" "KEY-EV-CTRL"
                                  "EVENTP" "EVENT-LISTP"
                                  "ITEM-LISTP"
-                                 "K-ENCODE-KEY" "ALL-SUPPORTED-KEYS")
+                                 "K-ENCODE-KEY" "ALL-SUPPORTED-KEYS"
+                                 ;; width.lisp (VK-10)
+                                 "K-CHAR-WIDTH" "K-STRING-WIDTH" "K-WIDE-INDEX")
   "ACL2 symbol-names re-exported through :lem/kernel. See header.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
