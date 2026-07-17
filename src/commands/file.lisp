@@ -273,11 +273,20 @@
   (cond
     ((and (or force-p (buffer-modified-p buffer))
           (buffer-filename buffer))
-     (add-newline-at-eof buffer)
-     (clear-trailing-whitespace-on-write buffer)
-     (write-to-file buffer (buffer-filename buffer))
-     (buffer-unmark buffer)
-     (buffer-filename buffer))
+     ;; Clobber protection: if the file changed on disk since we loaded or last
+     ;; saved it, writing would silently discard the other process's changes.
+     ;; A forced save (e.g. write-file changing the target) skips this check
+     ;; because buffer-last-write-date no longer refers to the current file.
+     (when (or force-p
+               (not (changed-disk-p buffer))
+               (prompt-for-y-or-n-p
+                (format nil "~A changed on disk; really save?"
+                        (buffer-filename buffer))))
+       (add-newline-at-eof buffer)
+       (clear-trailing-whitespace-on-write buffer)
+       (write-to-file buffer (buffer-filename buffer))
+       (buffer-unmark buffer)
+       (buffer-filename buffer)))
     ((null (buffer-filename buffer))
      (editor-error "No file name"))
     (t nil)))

@@ -69,6 +69,7 @@
                (:file "input")
                (:file "file")
                (:file "revert-buffer")
+               (:file "save-clobber")
                (:file "scala-mode")
                (:file "wat-mode")
                (:file "nix-mode")
