@@ -73,6 +73,7 @@
                (:file "eol-roundtrip")
                (:file "atomic-save")
                (:file "backup-on-save")
+               (:file "checkpoint")
                (:file "encoding-fallback")
                (:file "scala-mode")
                (:file "wat-mode")

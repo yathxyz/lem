@@ -26,3 +26,9 @@ cleanly. See SPEC.md, constraint 3.")
 (setf lem/backup-on-save:*backup-on-save* t)
 (add-hook (variable-value 'before-save-hook :global t)
           'lem/backup-on-save:backup-on-save)
+
+;;; DS-3: crash-recovery checkpoints. Periodically snapshot modified file-backed
+;;; buffers to $XDG_DATA_HOME/lem/autosave/ without touching the real file, delete
+;;; the snapshot on a successful save, and offer recovery on find-file when a
+;;; newer snapshot survives a crash. Upstream ships this off.
+(lem/checkpoint:checkpoint-mode t)

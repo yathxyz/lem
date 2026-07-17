@@ -228,6 +228,7 @@
                              (:file "read-only-sources")
                              (:file "image-buffer")
                              (:file "backup-on-save")
+                             (:file "checkpoint")
                              (:file "daily-driver-defaults")))
 
                (:module "ui"
