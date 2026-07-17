@@ -54,6 +54,11 @@ current_description() {
     --template 'description.first_line()'
 }
 
+current_change_id() {
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph -r @ \
+    --template change_id
+}
+
 visible_description() {
   "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph -r 'all()' \
     --template 'description.first_line() ++ "\n"' | grep -Fxq -- "$1"
@@ -230,11 +235,64 @@ latest_split_report() {
   grep '^SPLIT ' "$LEM_YATH_JJ_PORCELAIN_REPORT" | tail -n 1
 }
 
+message_report_count() {
+  grep -c '^MESSAGE ' "$LEM_YATH_JJ_PORCELAIN_REPORT" 2>/dev/null || true
+}
+
+invoke_message_report() {
+  local before
+  before=$(message_report_count)
+  lem_keys "$session" F3
+  local index=0
+  while ((index < 80)); do
+    if (( $(message_report_count) > before )); then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+latest_message_report() {
+  grep '^MESSAGE ' "$LEM_YATH_JJ_PORCELAIN_REPORT" | tail -n 1
+}
+
 replace_prompt_text() {
   local text=$1
   lem_keys "$session" C-a C-k
   tmux_cmd send-keys -t "$session" -l "$text"
   lem_keys "$session" Enter
+}
+
+replace_message_text() {
+  local text=$1
+  lem_keys "$session" g g d G i
+  tmux_cmd send-keys -t "$session" -l "$text"
+  sleep 0.25
+  lem_keys "$session" Escape
+  sleep 0.25
+  lem_wait_for "$session" 'NORMAL' 10 >/dev/null
+}
+
+finish_message_edit() {
+  lem_keys "$session" C-c
+  sleep 0.5
+  lem_keys "$session" C-c
+  sleep 0.75
+  if lem_capture "$session" | grep -q 'JJ-Message'; then
+    # Some tmux/TTY runs coalesce repeated identical control events and leave
+    # the already-entered C-c prefix pending. Send only that missing suffix.
+    lem_keys "$session" C-c
+    sleep 0.5
+  fi
+}
+
+abort_message_edit() {
+  lem_keys "$session" C-c
+  lem_wait_for "$session" 'C-c-' 10 >/dev/null
+  sleep 0.5
+  lem_keys "$session" C-k
 }
 
 failed=0
@@ -274,19 +332,44 @@ else
 fi
 
 lem_keys "$session" '?'
-if lem_wait_for "$session" 'c describe' 10 >/dev/null; then
+if lem_wait_for "$session" 'c describe, C commit' 10 >/dev/null; then
   pass help '? exposed the focused porcelain command surface'
 else
   fail help 'the porcelain help summary was not visible'
 fi
 
 lem_keys "$session" c
-if lem_wait_for "$session" 'Description:' 10 >/dev/null; then
-  replace_prompt_text 'described in Lem'
+if lem_wait_for "$session" 'Edit the message' 10 >/dev/null &&
+   invoke_message_report &&
+   [[ $(latest_message_report) == \
+     MESSAGE\ action=describe\ revision=*' root=yes mode=yes keys=yes origin=yes row=yes modified=no content=current' ]]; then
+  pass describe-open 'c opened the selected row in the multiline message editor'
+else
+  fail describe-open 'describe editor metadata, initial text, or local keys diverged'
+fi
+
+lem_keys "$session" A
+tmux_cmd send-keys -t "$session" -l ' cancelled'
+sleep 0.25
+lem_keys "$session" Escape
+sleep 0.25
+lem_wait_for "$session" 'NORMAL' 10 >/dev/null || true
+abort_message_edit
+if wait_description current && invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=current '* ]]; then
+  pass describe-abort 'C-c C-k discarded the edited description and restored its row'
+else
+  fail describe-abort 'describe cancellation mutated the revision or lost its row'
+fi
+
+lem_keys "$session" c
+if lem_wait_for "$session" 'Edit the message' 10 >/dev/null; then
+  replace_message_text 'described in Lem'
+  finish_message_edit
 fi
 if wait_description 'described in Lem' && invoke_report &&
    [[ $(latest_report) == *'kind=log row=yes description=described_in_Lem '* ]]; then
-  pass describe 'c changed the selected description and retained its row'
+  pass describe 'C-c C-c submitted the editor text and retained its row'
 else
   fail describe 'description mutation or point restoration failed'
 fi
@@ -425,11 +508,24 @@ if invoke_report &&
    [[ $(latest_report) == *'kind=log row=yes description=base\nbody_line '* ]]; then
   lem_keys "$session" c
 fi
-if lem_wait_for "$session" 'multiline description' 10 >/dev/null &&
-   [ "$(full_description "$base_change_id")" = $'base\nbody line' ]; then
-  pass multiline-refusal 'c preserved an existing multiline description'
+if lem_wait_for "$session" 'Edit the message' 10 >/dev/null &&
+   invoke_message_report &&
+   [[ $(latest_message_report) == *'action=describe '*'content=base\nbody_line' ]]; then
+  lem_keys "$session" A
+  tmux_cmd send-keys -t "$session" -l $'\nthird line'
+  sleep 0.25
+  lem_keys "$session" Escape
+  sleep 0.25
+  lem_wait_for "$session" 'NORMAL' 10 >/dev/null || true
+  finish_message_edit
+fi
+if [ "$(full_description "$base_change_id")" = \
+     $'base\nbody line\nthird line' ] &&
+   invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=base\nbody_line\nthird_line '* ]]; then
+  pass multiline-describe 'c preserved and submitted the complete multiline description'
 else
-  fail multiline-refusal 'the single-line prompt did not fail closed'
+  fail multiline-describe 'multiline prefill, direct argv submission, or row restoration failed'
 fi
 
 lem_keys "$session" e
@@ -1019,6 +1115,58 @@ if lem_wait_for "$session" 'Cannot split an empty Jujutsu revision' 10 >/dev/nul
   pass split-refusal 'S rejected an empty revision without mutation'
 else
   fail split-refusal 'empty-revision split did not fail closed'
+fi
+
+# Majutsu's C action commits @ regardless of the selected historical row. Give
+# the current working copy a description and content, then cover both editor
+# cancellation and the successful multiline commit/new-child transition.
+printf 'content committed through Lem\n' \
+  >"${LEM_YATH_JJ_PORCELAIN_ROOT}commit.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" describe @ \
+  --message 'draft commit' >/dev/null
+commit_source_id=$(current_change_id)
+lem_keys "$session" g r C
+if lem_wait_for "$session" 'Edit the message' 10 >/dev/null &&
+   invoke_message_report &&
+   [[ $(latest_message_report) == \
+     'MESSAGE action=commit revision=@ root=yes mode=yes keys=yes origin=yes row=yes modified=no content=draft_commit' ]]; then
+  pass commit-open 'C opened @ with its existing description and message-local keys'
+else
+  fail commit-open 'commit editor metadata, prefill, or origin state diverged'
+fi
+lem_keys "$session" A
+tmux_cmd send-keys -t "$session" -l ' cancelled'
+sleep 0.25
+lem_keys "$session" Escape
+sleep 0.25
+lem_wait_for "$session" 'NORMAL' 10 >/dev/null || true
+abort_message_edit
+if [ "$(current_change_id)" = "$commit_source_id" ] &&
+   [ "$(full_description "$commit_source_id")" = 'draft commit' ] &&
+   invoke_report && [[ $(latest_report) == *'kind=log row=yes '* ]]; then
+  pass commit-abort 'C-c C-k discarded the commit edit without changing @'
+else
+  fail commit-abort 'commit cancellation mutated @ or lost the history row'
+fi
+
+lem_keys "$session" C
+if lem_wait_for "$session" 'Edit the message' 10 >/dev/null; then
+  replace_message_text $'committed in Lem\nbody line'
+  finish_message_edit
+fi
+commit_child_id=$(current_change_id)
+if [ "$commit_child_id" != "$commit_source_id" ] &&
+   [ "$(revision_parent "$commit_child_id")" = "$commit_source_id" ] &&
+   [ "$(full_description "$commit_source_id")" = \
+     $'committed in Lem\nbody line' ] &&
+   "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" file show \
+     -r "$commit_source_id" 'root:commit.txt' |
+       grep -Fxq 'content committed through Lem' &&
+   [ "$(current_description)" = '' ] &&
+   invoke_report && [[ $(latest_report) == *'kind=log row=yes '* ]]; then
+  pass commit 'C-c C-c committed the multiline message and selected the new @ row'
+else
+  fail commit 'commit message, content, graph transition, or new-row restoration diverged'
 fi
 
 lem_keys "$session" q

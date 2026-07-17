@@ -13,6 +13,10 @@
 (defvar *lem-yath-jj-split-placement-key* 'lem-yath-jj-split-placement)
 (defvar *lem-yath-jj-split-destination-key* 'lem-yath-jj-split-destination)
 (defvar *lem-yath-jj-split-parallel-key* 'lem-yath-jj-split-parallel)
+(defvar *lem-yath-jj-message-action-key* 'lem-yath-jj-message-action)
+(defvar *lem-yath-jj-message-origin-key* 'lem-yath-jj-message-origin)
+(defvar *lem-yath-jj-message-mode-keymap*
+  (make-keymap :description '*lem-yath-jj-message-mode-keymap*))
 (defvar *lem-yath-git-gutter-synced-mode-key*
   'lem-yath-git-gutter-synced-mode)
 
@@ -373,6 +377,17 @@
         (unless (line-offset point 1)
           (return nil))))))
 
+(defun jj-restore-working-copy-point (buffer)
+  "Restore BUFFER point to the rendered working-copy row."
+  (with-point ((point (buffer-start-point buffer)))
+    (loop
+      (when (and (jj-row-revision point)
+                 (eql (character-at point) #\@))
+        (move-point (buffer-point buffer) point)
+        (return t))
+      (unless (line-offset point 1)
+        (return nil)))))
+
 (defun jj-buffer-name (root)
   "Return a repository-specific buffer name for Jujutsu workspace ROOT."
   (format nil "*lem-yath-jj: ~a*"
@@ -387,6 +402,14 @@
     (:name "JJ-Split"
      :keymap *lem-yath-jj-split-mode-keymap*)
   "Partial-patch selection keys for a Jujutsu split buffer.")
+
+(define-major-mode lem-yath-jj-message-mode nil
+    (:name "JJ-Message" :keymap *lem-yath-jj-message-mode-keymap*)
+  "Edit a Jujutsu description or commit message.")
+
+(defmethod lem-vi-mode/core:mode-specific-keymaps
+    ((mode lem-yath-jj-message-mode))
+  (list *lem-yath-jj-message-mode-keymap*))
 
 (defun render-jj-buffer (buffer root)
   "Refresh BUFFER with row-aware Jujutsu data from ROOT."
@@ -1499,23 +1522,85 @@
   "Manage local bookmarks for the selected Jujutsu revision."
   (dispatch-jj-bookmark (jj-current-root) (jj-selected-revision)))
 
+(defun jj-message-buffer-name (root action revision)
+  "Return a repository-specific message buffer name."
+  (format nil "*lem-yath-jj-~(~a~): ~a:~a*"
+          action
+          (namestring (or (ignore-errors (truename root)) root))
+          revision))
+
+(defun jj-open-message-editor (root action revision initial-text)
+  "Edit INITIAL-TEXT for ACTION and REVISION at ROOT."
+  (let* ((name (jj-message-buffer-name root action revision))
+         (existing (get-buffer name)))
+    (when existing
+      (switch-to-buffer existing)
+      (message "Resume editing; C-c C-c finishes and C-c C-k aborts")
+      (return-from jj-open-message-editor existing))
+    (let ((buffer (make-buffer name :directory (namestring root))))
+      (with-buffer-read-only buffer nil
+        (erase-buffer buffer)
+        (change-buffer-mode buffer 'lem-yath-jj-message-mode)
+        (insert-string (buffer-start-point buffer) initial-text)
+        (setf (buffer-value buffer *lem-yath-jj-root-key*) root
+              (buffer-value buffer *lem-yath-jj-revision-key*) revision
+              (buffer-value buffer *lem-yath-jj-message-action-key*) action
+              (buffer-value buffer *lem-yath-jj-message-origin-key*)
+              (current-buffer))
+        (buffer-end (buffer-point buffer)))
+      (buffer-unmark buffer)
+      (switch-to-buffer buffer)
+      (message "Edit the message; C-c C-c finishes and C-c C-k aborts")
+      buffer)))
+
+(defun jj-close-message-editor (buffer)
+  "Close BUFFER and return to its live origin, if any."
+  (let ((origin (buffer-value buffer *lem-yath-jj-message-origin-key*)))
+    (buffer-unmark buffer)
+    (delete-buffer buffer)
+    (when (and origin (not (deleted-buffer-p origin)))
+      (switch-to-buffer origin)
+      origin)))
+
+(define-command lem-yath-jj-message-finish () ()
+  "Apply the current Jujutsu description or commit message."
+  (let* ((buffer (current-buffer))
+         (root (buffer-value buffer *lem-yath-jj-root-key*))
+         (revision (buffer-value buffer *lem-yath-jj-revision-key*))
+         (action (buffer-value buffer *lem-yath-jj-message-action-key*))
+         (text (buffer-text buffer)))
+    (unless (and root revision (member action '(:describe :commit)))
+      (editor-error "This is not a Jujutsu message editor"))
+    (ecase action
+      (:describe
+       (run-jj root (list "describe" revision "--message" text)))
+      (:commit
+       (run-jj root (list "commit" "--message" text))))
+    (alexandria:when-let ((origin (jj-close-message-editor buffer)))
+      (render-jj-buffer origin root)
+      (if (eq action :commit)
+          (jj-restore-working-copy-point origin)
+          (jj-restore-revision-point origin revision)))
+    (message (if (eq action :commit)
+                 "Jujutsu change committed"
+                 "Jujutsu description updated"))))
+
+(define-command lem-yath-jj-message-abort () ()
+  "Discard the current Jujutsu message edit without mutation."
+  (jj-close-message-editor (current-buffer))
+  (message "Jujutsu message edit cancelled"))
+
 (define-command lem-yath-jj-describe () ()
-  "Set the selected change's description, like Majutsu `c'."
-  (let* ((root (jj-current-root))
-         (revision (jj-selected-revision))
-         (existing (jj-description root revision))
-         (description
-           (progn
-             (when (or (find #\Newline existing) (find #\Return existing))
-               (editor-error
-                "This change has a multiline description; use jj describe to preserve it"))
-             (prompt-for-string
-              "Description: "
-              :initial-value existing
-              :history-symbol 'lem-yath-jj-description))))
-    (jj-refresh-after-mutation
-     root (list "describe" revision "--message" description)
-     "Jujutsu description updated")))
+  "Edit the selected change's multiline description, like Majutsu `c'."
+  (let ((root (jj-current-root))
+        (revision (jj-selected-revision)))
+    (jj-open-message-editor
+     root :describe revision (jj-description root revision))))
+
+(define-command lem-yath-jj-commit () ()
+  "Commit the working-copy change through a multiline editor, like Majutsu `C'."
+  (let ((root (jj-current-root)))
+    (jj-open-message-editor root :commit "@" (jj-description root "@"))))
 
 (define-command lem-yath-jj-new () ()
   "Create a new change after the selected revision, like Majutsu `o'."
@@ -1597,7 +1682,7 @@
 (define-command lem-yath-jj-help () ()
   "Show the focused Majutsu-compatible Jujutsu command surface."
   (message
-   "Jujutsu: c describe, o new, s squash, S split, r rebase, y/Y duplicate, b bookmarks, e edit, u undo, C-r redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
+   "Jujutsu: c describe, C commit, o new, s squash, S split, r rebase, y/Y duplicate, b bookmarks, e edit, u undo, C-r redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
 
 (define-command lem-yath-jj-quit () ()
   "Quit the current Jujutsu status/log window."
@@ -1628,6 +1713,7 @@
 (define-key *lem-yath-jj-view-keymap* "g" *lem-yath-jj-g-keymap*)
 (define-key *lem-yath-jj-view-keymap* "q" 'lem-yath-jj-quit)
 (define-key *lem-yath-jj-view-keymap* "c" 'lem-yath-jj-describe)
+(define-key *lem-yath-jj-view-keymap* "C" 'lem-yath-jj-commit)
 (define-key *lem-yath-jj-view-keymap* "o" 'lem-yath-jj-new)
 (define-key *lem-yath-jj-view-keymap* "s" 'lem-yath-jj-squash)
 (define-key *lem-yath-jj-view-keymap* "S" 'lem-yath-jj-split)
@@ -1676,6 +1762,11 @@
   'lem-yath-jj-split-execute)
 (define-key *lem-yath-jj-split-mode-keymap* "q" 'lem-yath-jj-split-cancel)
 (define-key *lem-yath-jj-split-mode-keymap* "?" 'lem-yath-jj-split-help)
+
+(define-key *lem-yath-jj-message-mode-keymap* "C-c C-c"
+  'lem-yath-jj-message-finish)
+(define-key *lem-yath-jj-message-mode-keymap* "C-c C-k"
+  'lem-yath-jj-message-abort)
 
 (defun lem-yath-legit-status-at (directory)
   "Open Legit at the Git root enclosing DIRECTORY."

@@ -33,6 +33,7 @@
      (eq (second binding)
          (jj-porcelain-test-key-command (first binding))))
    '(("c" lem-yath-jj-describe)
+     ("C" lem-yath-jj-commit)
      ("o" lem-yath-jj-new)
      ("s" lem-yath-jj-squash)
      ("S" lem-yath-jj-split)
@@ -81,6 +82,20 @@
      ("s" lem-yath-jj-split-execute)
      ("Return" lem-yath-jj-split-execute)
      ("q" lem-yath-jj-split-cancel))))
+
+(defun jj-porcelain-test-message-key-command (keys)
+  (alexandria:when-let
+      ((prefix
+         (lem-core::keymap-find *lem-yath-jj-message-mode-keymap*
+                                (lem-core::parse-keyspec keys))))
+    (lem-core::prefix-suffix prefix)))
+
+(defun jj-porcelain-test-message-keys-p ()
+  (and
+   (eq 'lem-yath-jj-message-finish
+       (jj-porcelain-test-message-key-command "C-c C-c"))
+   (eq 'lem-yath-jj-message-abort
+       (jj-porcelain-test-message-key-command "C-c C-k"))))
 
 (defun jj-porcelain-test-row-count (buffer)
   (with-point ((point (buffer-start-point buffer)))
@@ -154,7 +169,42 @@
        (jj-porcelain-test-yes-no (jj-porcelain-test-split-keys-p))
        (if placement (string-downcase (symbol-name placement)) "parent")
        (jj-porcelain-test-yes-no
-        (buffer-value buffer *lem-yath-jj-split-parallel-key*))))))
+       (buffer-value buffer *lem-yath-jj-split-parallel-key*))))))
+
+(define-command lem-yath-jj-porcelain-test-message-report () ()
+  (let* ((buffer (current-buffer))
+         (root (buffer-value buffer *lem-yath-jj-root-key*))
+         (revision (buffer-value buffer *lem-yath-jj-revision-key*))
+         (action (buffer-value buffer *lem-yath-jj-message-action-key*))
+         (origin (buffer-value buffer *lem-yath-jj-message-origin-key*)))
+    (with-open-file (stream *jj-porcelain-test-report*
+                            :direction :output
+                            :if-exists :append
+                            :if-does-not-exist :create)
+      (format
+       stream
+       "MESSAGE action=~a revision=~a root=~a mode=~a keys=~a origin=~a row=~a modified=~a content=~a~%"
+       (if action (string-downcase (symbol-name action)) "none")
+       (if revision revision "none")
+       (jj-porcelain-test-yes-no
+        (and root
+             (ignore-errors
+               (equal (truename root)
+                      (truename *jj-porcelain-test-root*)))))
+       (jj-porcelain-test-yes-no
+        (eq (buffer-major-mode buffer) 'lem-yath-jj-message-mode))
+       (jj-porcelain-test-yes-no (jj-porcelain-test-message-keys-p))
+       (jj-porcelain-test-yes-no
+        (and origin (not (deleted-buffer-p origin))))
+       (jj-porcelain-test-yes-no
+        (and origin
+             (not (deleted-buffer-p origin))
+             (save-excursion
+               (setf (current-buffer) origin)
+               (jj-row-revision))))
+       (jj-porcelain-test-yes-no (buffer-modified-p buffer))
+       (jj-porcelain-test-encode (buffer-text buffer))))))
 
 (define-key *global-keymap* "F1" 'lem-yath-jj-porcelain-test-report)
 (define-key *global-keymap* "F2" 'lem-yath-jj-porcelain-test-split-report)
+(define-key *global-keymap* "F3" 'lem-yath-jj-porcelain-test-message-report)

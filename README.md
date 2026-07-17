@@ -387,8 +387,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   `runInTerminal` input. The installed debugpy, Delve, LLDB, and GDB presets
   are exercised against real Python, Go, C, C++, and Rust programs
 - Legit (Magit approximation) plus packaged `jj` smart dispatch on `SPC g g`;
-  the Jujutsu side is a row-aware porcelain with Majutsu-compatible describe,
-  new, whole-change squash with a compact description-policy popup, edit,
+  the Jujutsu side is a row-aware porcelain with a Majutsu-compatible shared
+  multiline editor for describe and working-copy commit, plus new,
+  whole-change squash with a compact description-policy popup, edit,
   confirmed selected-row rebase with branch/subtree/exact/insert modes,
   Majutsu-compatible `y` placement and immediate `Y` duplicate workflows,
   a read-only `S` split view with file, hunk, and changed-line selection plus

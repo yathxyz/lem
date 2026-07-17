@@ -2006,7 +2006,8 @@ Jujutsu. `.git` files are accepted throughout the patched root detection, so
 Legit, project dispatch, the gutter, and time travel work from linked
 worktrees. The repository-specific Jujutsu porcelain renders `jj status` plus
 30 row-aware history entries. Its Evil-compatible core uses `C-j`/`C-k` or
-`g j`/`g k` for revisions, `c` to describe, `o` to create a child, `e` to edit,
+`g j`/`g k` for revisions, `c` to edit the selected description, `C` to commit
+the working copy, `o` to create a child, `e` to edit,
 `s` to open a whole-change squash popup, `r` to open a selected-row rebase
 popup, `S` to open a partial-patch split view, `u`/`C-r` to undo/redo operations,
 `b` to manage local bookmarks, confirmed `x` to abandon, `d` or Return to
@@ -2050,7 +2051,13 @@ Every subprocess uses direct argv; the history is bounded and refresh preserves
 the selected change ID when that change still exists.
 `scripts/jj-porcelain-test.sh` drives the complete loop through the installed
 ncurses editor and real `jj` in a metacharacter-bearing repository path,
-including squash popup cancellation, exact multiline combination, content
+including the shared message editor's exact prefill, mode-local finish/abort
+keys, non-mutating abort, exact multiline describe submission, selected-row
+restoration, multiline working-copy commit, retained file content, and
+selection of the fresh child working copy. Mutation failures leave the editor
+open for correction; a successful mutation closes it before refresh so a
+refresh failure cannot expose a retry path that repeats the mutation. The gate
+also covers squash popup cancellation, exact multiline combination, content
 movement, parent restoration, root refusal, both rebase cancellation paths,
 content-bearing sibling rebase, row restoration, invalid self-destination, and
 the complete local bookmark lifecycle with inline-label and nested-list checks.
@@ -2062,10 +2069,10 @@ hunk, region, destination, and parallel-layout state, physically selects one
 replacement from a two-replacement file, and proves real `jj split` moves only
 that replacement while retaining the remainder and restoring the original
 change-ID row. An empty revision is rejected without mutation.
-The in-editor description prompt is intentionally single-line and refuses an
-existing multiline description rather than truncating it. Majutsu's general
-transient dispatch, multiline description buffer, arbitrary source/destination
-and partial-patch squash, multi-source/destination rebase selection and
+The same repository- and revision-specific message buffer is resumed if it is
+already open, preserving an unfinished edit. Majutsu's general transient
+dispatch, arbitrary source/destination and partial-patch squash,
+multi-source/destination rebase selection and
 advanced rebase flags, remote bookmark tracking and advance patterns,
 multi-bookmark operations, multi-source/destination duplicate selection and
 configurable duplicate descriptions, binary/conflict split selection,
