@@ -1,5 +1,7 @@
 (defpackage :lem/buffer/file-utils
   (:use :cl)
+  (:import-from :lem/buffer/errors
+                :editor-error)
   (:export :expand-file-name
            :tail-of-pathname
            :directory-files
@@ -7,7 +9,9 @@
            :file-size
            :copy-file-or-directory
            :virtual-probe-file
-           :with-open-virtual-file))
+           :with-open-virtual-file
+           :*atomic-save*
+           :write-file-atomically))
 (in-package :lem/buffer/file-utils)
 
 (defun guess-host-name (filename)
@@ -170,3 +174,110 @@
                 (progn ,@body))
          (when ,stream
            (funcall (or ,close/ #'close) ,stream))))))
+
+(defvar *atomic-save* t
+  "When non-NIL, WRITE-FILE-ATOMICALLY writes through a temporary file in the
+target's directory that is fsynced and atomically renamed over the target, so a
+crash or error mid-write can never truncate the original. Bind to NIL to force a
+direct in-place write.")
+
+(defvar *atomic-random-state* (make-random-state t))
+
+(defun fsync-stream (stream)
+  "Best-effort flush of STREAM's buffered data through to stable storage."
+  (finish-output stream)
+  #+sbcl
+  (ignore-errors (sb-posix:fsync (sb-sys:fd-stream-fd stream)))
+  (values))
+
+(defun make-atomic-temp-namestring (target)
+  "Return a fresh, non-existent temporary file namestring in TARGET's directory."
+  (let ((dir (namestring (uiop:pathname-directory-pathname target)))
+        (base (file-namestring target)))
+    (loop :for candidate := (format nil "~A.#~A.~36R.~D.tmp"
+                                    dir
+                                    base
+                                    (random (expt 36 12) *atomic-random-state*)
+                                    #+sbcl (sb-posix:getpid)
+                                    #-sbcl 0)
+          :unless (probe-file candidate)
+          :do (return candidate))))
+
+(defun preserve-file-metadata (source-path temp-path)
+  "Copy SOURCE-PATH's permission bits onto TEMP-PATH, and its ownership when
+possible. Best effort: ownership changes usually require privilege and are
+silently skipped when denied."
+  (declare (ignorable source-path temp-path))
+  #+sbcl
+  (let ((stat (ignore-errors (sb-posix:stat source-path))))
+    (when stat
+      (ignore-errors
+       (sb-posix:chmod temp-path (logand (sb-posix:stat-mode stat) #o7777)))
+      (ignore-errors
+       (sb-posix:chown temp-path
+                       (sb-posix:stat-uid stat)
+                       (sb-posix:stat-gid stat)))))
+  (values))
+
+(defun open-atomic-temp-stream (temp element-type external-format)
+  (apply #'open temp
+         :direction :output
+         :if-exists :error
+         :if-does-not-exist :create
+         :element-type (or element-type 'character)
+         (when external-format (list :external-format external-format))))
+
+(defun write-file-in-place (filename writer element-type external-format)
+  "Write FILENAME by calling WRITER with a fresh output stream, in place. This is
+the legacy, non-atomic path used for virtual files and when *ATOMIC-SAVE* is
+NIL."
+  (with-open-virtual-file (out filename
+                               :element-type element-type
+                               :external-format external-format
+                               :direction :output)
+    (funcall writer out)))
+
+(defun write-file-atomically (filename writer &key element-type external-format)
+  "Write FILENAME by calling WRITER (a function of one argument, an open output
+stream that WRITER must not close) atomically.
+
+The new contents are written to a temporary file in the target's directory,
+fsynced, and renamed over the target, so a crash or error mid-write can never
+truncate the original. The target's permission bits are preserved (ownership
+too, when possible), and symlinks are followed so the real target is updated
+rather than replaced by a regular file.
+
+When *ATOMIC-SAVE* is NIL, or a virtual-file handler claims FILENAME, WRITER's
+output is written to FILENAME in place instead. Signals EDITOR-ERROR, leaving
+the original untouched, when the target directory is not writable and the atomic
+temporary file therefore cannot be created."
+  (when (or (not *atomic-save*) *virtual-file-open*)
+    (return-from write-file-atomically
+      (write-file-in-place filename writer element-type external-format)))
+  (let* ((resolved (uiop:ensure-absolute-pathname
+                    (or (uiop:truename* filename) filename)
+                    (uiop:getcwd)))
+         (temp (make-atomic-temp-namestring resolved))
+         (renamed nil))
+    (unwind-protect
+         (progn
+           (handler-case
+               (let ((out (open-atomic-temp-stream temp element-type external-format)))
+                 (unwind-protect
+                      (progn (funcall writer out)
+                             (fsync-stream out))
+                   (close out)))
+             (file-error (e)
+               (editor-error "Can't save ~A atomically (directory not writable?): ~A"
+                             (namestring resolved) e)))
+           (preserve-file-metadata resolved temp)
+           (handler-case
+               (progn
+                 #+sbcl (sb-posix:rename temp (namestring resolved))
+                 #-sbcl (rename-file temp resolved))
+             (#+sbcl sb-posix:syscall-error #-sbcl file-error (e)
+               (editor-error "Can't replace ~A (rename failed): ~A"
+                             (namestring resolved) e)))
+           (setf renamed t))
+      (unless renamed
+        (ignore-errors (uiop:delete-file-if-exists temp))))))
