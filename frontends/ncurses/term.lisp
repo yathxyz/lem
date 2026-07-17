@@ -38,10 +38,13 @@
 
 (defun write-terminal-string (string)
   "Write STRING to the controlling terminal, bypassing ncurses' screen buffer.
-Used for control sequences ncurses does not manage (e.g. bracketed paste)."
-  (uiop:run-program (list "printf" "%s" string)
-                    :output :interactive
-                    :ignore-error-status t))
+Used for control sequences ncurses does not manage (bracketed paste, OSC 52
+clipboard, mouse toggling). Writes straight to the terminal FILE* and flushes,
+so no printf subprocess is forked."
+  (let ((fp (terminal-file-pointer)))
+    (when fp
+      (fputs string fp)
+      (fflush fp))))
 
 (defun enable-bracketed-paste ()
   "Ask the terminal to wrap pasted text in ESC[200~ ... ESC[201~ (DEC mode 2004)."
@@ -461,6 +464,40 @@ Used for control sequences ncurses does not manage (e.g. bracketed paste)."
     (cffi:with-foreign-string (term "xterm")
       (charms/ll:newterm term io io))))
 
+(cffi:defcfun "key_defined" :int (definition :string))
+
+(defparameter +modified-key-finals+ "ABCDEFHPQRS"
+  "CSI final bytes for the modified cursor/function family, matching the parser's
++csi-final-syms+ (ESC[1;<mod><final>).")
+
+(defparameter +modified-key-tilde-numbers+
+  '(1 2 3 4 5 6 7 8 11 12 13 14 15 17 18 19 20 21 23 24)
+  "Leading parameters of the modified navigation/function family (ESC[<n>;<mod>~),
+matching the parser's +csi-tilde-syms+.")
+
+(defun disable-modified-key-translation ()
+  "Stop ncurses from translating terminfo-known *modified* key escape sequences
+(Ctrl/Alt/Shift + cursor, navigation, and function keys) into keycodes, so their
+raw bytes reach lem-ncurses/input's CSI parser instead. Without this, whether a
+modified key like Shift-F5 or Shift-Left is parsed depends on the terminfo entry:
+ncurses collapses the ones it knows (kf17, kLFT, ...) into extended keycodes that
+never enter the CSI parser. Plain unmodified keys keep their keypad translation,
+so KEY_RESIZE and ordinary special keys are unaffected. keyok operates on the
+global key trie, so it also governs the input pad used for reading."
+  (flet ((disable (seq)
+           ;; key-defined returns the assigned keycode for a complete key,
+           ;; 0 when undefined, or -1 for an ambiguous prefix; only disable
+           ;; complete keys so raw bytes flow through to the parser.
+           (let ((code (key-defined seq)))
+             (when (plusp code)
+               ;; enable=0 (FALSE): charms' bool maps a C bool, so pass an int.
+               (charms/ll:keyok code 0)))))
+    (loop :for modifier :from 2 :to 8
+          :do (loop :for final :across +modified-key-finals+
+                    :do (disable (format nil "~C[1;~D~C" #\Esc modifier final)))
+              (loop :for n :in +modified-key-tilde-numbers+
+                    :do (disable (format nil "~C[~D;~D~C" #\Esc n modifier #\~))))))
+
 (defun term-init ()
   (cl-setlocale:set-all-to-native)
   (if *tty-name*
@@ -481,6 +518,7 @@ Used for control sequences ncurses does not manage (e.g. bracketed paste)."
   (charms/ll:nonl)
   (charms/ll:refresh)
   (charms/ll:keypad charms/ll:*stdscr* 1)
+  (disable-modified-key-translation)
   (setf charms/ll::*escdelay* 0)
   ;; (charms/ll:curs-set 0)
   ;; for mouse

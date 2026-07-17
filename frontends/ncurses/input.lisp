@@ -2,7 +2,8 @@
   (:use :cl
         :lem
         :lem-ncurses/key)
-  (:export :get-event))
+  (:export :get-event
+           :decode-csi-key))
 (in-package :lem-ncurses/input)
 
 ;; for input
@@ -103,7 +104,7 @@ is 1 + a bitmask of Shift=1, Alt(Meta)=2, Ctrl=4, so 2=Shift, 3=Alt,
 
 (defparameter +csi-final-syms+
   '((#\A . "Up") (#\B . "Down") (#\C . "Right") (#\D . "Left")
-    (#\F . "End") (#\H . "Home")
+    (#\E . "Begin") (#\F . "End") (#\H . "Home")
     (#\P . "F1") (#\Q . "F2") (#\R . "F3") (#\S . "F4"))
   "Map a CSI 1;<mod> final byte (A-F/H/P-S) to a lem key sym.")
 
@@ -125,29 +126,35 @@ is 1 + a bitmask of Shift=1, Alt(Meta)=2, Ctrl=4, so 2=Shift, 3=Alt,
   (when (< index (length params))
     (aref params index)))
 
-(defun dispatch-csi (final params)
-  "Dispatch a fully-read CSI sequence.
-FINAL is the final byte as a character; PARAMS is a vector of numeric
-parameters (each NIL when the field was empty). Handles the modified
-cursor/function family (ESC[1;<mod><A-F/H/P-S>), the modified navigation
-family (ESC[<n>;<mod>~), and bracketed paste (ESC[200~). Unknown sequences
-fall back to Escape so a stray or unsupported sequence is swallowed harmlessly."
+(defun decode-csi-key (final params)
+  "Decode a CSI sequence into a lem key, or NIL when it is not a key this parser
+recognises (bracketed paste, or an unknown final byte / parameter). FINAL is the
+final byte as a character; PARAMS is a vector of numeric parameters (each NIL
+when the field was empty). Handles the modified cursor/function family
+(ESC[1;<mod><A-F/H/P-S>) and the modified navigation family (ESC[<n>;<mod>~).
+Pure: performs no terminal I/O, so the modifier/sym mapping is unit-testable
+without a live terminal."
   (case final
     (#\~
-     (let ((n (or (csi-param params 0) 1))
-           (mod (csi-param params 1)))
-       (cond
-         ((= n 200) (read-bracketed-paste))
-         (t (let ((sym (cdr (assoc n +csi-tilde-syms+))))
-              (if sym
-                  (make-modified-key sym mod)
-                  (get-key-from-name "escape")))))))
+     (let ((n (or (csi-param params 0) 1)))
+       (unless (= n 200)                ; 200 = bracketed paste, read elsewhere
+         (let ((sym (cdr (assoc n +csi-tilde-syms+))))
+           (when sym
+             (make-modified-key sym (csi-param params 1)))))))
     (t
-     (let ((sym (cdr (assoc final +csi-final-syms+)))
-           (mod (csi-param params 1)))
-       (if sym
-           (make-modified-key sym mod)
-           (get-key-from-name "escape"))))))
+     (let ((sym (cdr (assoc final +csi-final-syms+))))
+       (when sym
+         (make-modified-key sym (csi-param params 1)))))))
+
+(defun dispatch-csi (final params)
+  "Dispatch a fully-read CSI sequence.
+Bracketed paste (ESC[200~) is handled by reading its payload; every other
+recognised sequence is decoded by DECODE-CSI-KEY. Unknown sequences fall back to
+Escape so a stray or unsupported sequence is swallowed harmlessly."
+  (if (and (eql final #\~) (eql (csi-param params 0) 200))
+      (read-bracketed-paste)
+      (or (decode-csi-key final params)
+          (get-key-from-name "escape"))))
 
 (defun read-csi (first-byte)
   "Read a CSI sequence after the ESC[ introducer and its FIRST-BYTE are known.
