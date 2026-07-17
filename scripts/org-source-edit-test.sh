@@ -43,6 +43,11 @@ print("stale-original")
 #+begin_src python
 print("read-only-original")
 #+end_src
+
+** DSQ
+#+begin_src dsq
+select name from {}
+#+end_src
 EOF
 cp "$fixture" "$root/original.org"
 
@@ -74,9 +79,9 @@ mx() {
   tmux_cmd send-keys -t "$session" Escape Escape M-x
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
   tmux_cmd send-keys -t "$session" -l "$command"
-  sleep 0.3
+  sleep 0.5
   tmux_cmd send-keys -t "$session" Enter
-  sleep 0.3
+  sleep 0.8
 }
 
 snapshot() {
@@ -108,7 +113,7 @@ if ! lem_wait_for "$session" 'Source editing' 40 >/dev/null; then
   exit 1
 fi
 tmux_cmd send-keys -t "$session" Escape
-sleep 1
+sleep 2
 
 mx lem-yath-test-source-edit-bindings
 if grep -q "^BINDING C-c ' LEM-YATH-ORG-EDIT-SPECIAL$" "$report"; then
@@ -293,6 +298,20 @@ if lem_wait_for "$session" 'session-buffer editing is not configured' 10 >/dev/n
   pass prefix-boundary 'the unsupported Babel-session prefix is explicit'
 else
   fail prefix-boundary 'the unsupported prefix was silently ignored'
+fi
+
+goto_marker dsq
+if open_source_edit; then
+  : >"$report"
+  mx lem-yath-test-source-edit-report
+  if grep -q '^CURRENT mode=SQL-MODE edit=yes modified=no origin-modified=' "$report"; then
+    pass dsq-mode 'DSQ source editing uses the SQL major mode'
+  else
+    fail dsq-mode 'DSQ source editing did not select SQL mode'
+  fi
+  tmux_cmd send-keys -t "$session" C-c C-k
+else
+  fail dsq-mode 'DSQ source edit buffer did not open'
 fi
 
 if [ "$failed" -ne 0 ]; then

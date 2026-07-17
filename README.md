@@ -476,13 +476,19 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   aborts, and `C-x C-s` writes back, saves the Org file, and keeps editing;
   ordinary exit remains an unsaved one-step Org-buffer edit
 - configured Org Babel execution on `C-c C-c` for Bash/Shell, Python, C/C++,
-  Nix, SQLite, and PostgreSQL SQL blocks. Shell, Python, C, Nix, and SQL ask
+  Nix, SQLite, PostgreSQL SQL, and DSQ blocks. DSQ accepts ordinary files,
+  mixed ordered file inputs, local or cross-file named Org tables, and named
+  source results; the pinned `:cache`, `:convert-numbers`, `:header`, `:hlines`,
+  `:null-value`, and `:false-value` controls are retained. Shell, Python, C,
+  Nix, SQL, and DSQ ask
   before running; SQLite follows the Emacs configuration's trusted-note
   exemption. Results replace an adjacent `#+RESULTS:` atomically as colon
   output or Org database tables, `:results none` stays buffer-silent, `:dir`
   and preamble header properties are honored, and execution inherits the
-  active Direnv environment. Emacs Lisp blocks fail explicitly rather than
-  being mis-evaluated as Common Lisp
+  active Direnv environment. DSQ references are converted through bounded
+  typed temporary files and every backend uses direct argument vectors.
+  Emacs Lisp blocks fail explicitly rather than being mis-evaluated as Common
+  Lisp
 - configured Org HTML export and publishing through `C-c C-e`: `h h` exports
   the live buffer beside its source, while the publishing branch and
   `lem-yath-org-publish` reproduce the recursive `org-roam-notes`, `static`,

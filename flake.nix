@@ -346,6 +346,7 @@
             ++ vcsRuntimeInputs
             ++ (with pkgs; [
               docker-client
+              dsq
               uv
               pandoc
               poppler-utils

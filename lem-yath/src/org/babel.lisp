@@ -13,6 +13,9 @@
 (defparameter *org-babel-input-limit* (* 16 1024 1024)
   "Maximum characters accepted from one source block.")
 
+(defparameter *org-babel-dsq-input-limit* (* 64 1024 1024)
+  "Maximum bytes accepted from one DSQ file or named Org input.")
+
 (defstruct org-babel-block
   language
   headers
@@ -202,6 +205,7 @@ not treated as global; heading inheritance is outside this bounded parser."
     ((member language '("nix" "my/nix") :test #'string=) "nix")
     ((member language '("sqlite" "sqlite3") :test #'string=) "sqlite")
     ((string= language "sql") "sql")
+    ((string= language "dsq") "dsq")
     ((member language '("emacs-lisp" "elisp") :test #'string=)
      "emacs-lisp")
     (t language)))
@@ -418,6 +422,465 @@ not treated as global; heading inheritance is outside this bounded parser."
                                  "PGPASSWORD" password)))))
       (org-babel-tabular-output output))))
 
+;;; --- ob-dsq ---------------------------------------------------------------
+
+(defstruct org-babel-dsq-source
+  pathname
+  data
+  format)
+
+(defun org-babel-dsq-yes-p (value &optional default)
+  (if value
+      (string= (string-downcase (string-trim '(#\Space #\Tab) value)) "yes")
+      default))
+
+(defun org-babel-dsq-probe-file (pathname)
+  "Return PATHNAME's probe result without exposing native wildcard errors."
+  (ignore-errors (probe-file pathname)))
+
+(defun org-babel-dsq-input-words (value directory)
+  "Split the pinned ob-dsq :input VALUE without invoking a shell.
+
+A whole existing pathname wins before tokenization, which retains the common
+quoted-path-with-spaces case after the generic Babel header decoder removes its
+outer quotes."
+  (let* ((value (string-trim '(#\Space #\Tab) (or value "")))
+         (whole (and (plusp (length value))
+                     (expand-file-name value directory))))
+    (when (zerop (length value))
+      (editor-error "DSQ requires at least one :input"))
+    (when (and whole (org-babel-dsq-probe-file whole))
+      (return-from org-babel-dsq-input-words (list value)))
+    (let ((words nil)
+          (word (make-array 32 :element-type 'character
+                               :adjustable t :fill-pointer 0))
+          (quote nil)
+          (escaped-p nil))
+      (labels ((finish-word ()
+                 (when (plusp (length word))
+                   (push (copy-seq word) words)
+                   (setf (fill-pointer word) 0))))
+        (loop :for character :across value
+              :do
+                 (cond
+                   (escaped-p
+                    (vector-push-extend character word)
+                    (setf escaped-p nil))
+                   ((char= character #\\)
+                    (setf escaped-p t))
+                   (quote
+                    (if (char= character quote)
+                        (setf quote nil)
+                        (vector-push-extend character word)))
+                   ((member character '(#\" #\'))
+                    (setf quote character))
+                   ((member character '(#\Space #\Tab))
+                    (finish-word))
+                   (t
+                    (vector-push-extend character word))))
+        (when escaped-p
+          (vector-push-extend #\\ word))
+        (when quote
+          (editor-error "DSQ :input contains an unterminated quote"))
+        (finish-word))
+      (or (nreverse words)
+          (editor-error "DSQ requires at least one :input")))))
+
+(defun org-babel-dsq-file-size (pathname)
+  (handler-case
+      (with-open-file (stream pathname :direction :input
+                              :element-type '(unsigned-byte 8))
+        (file-length stream))
+    (error () nil)))
+
+(defun org-babel-dsq-regular-input-file-p (pathname)
+  (and (org-babel-dsq-probe-file pathname)
+       (not (uiop:directory-exists-p pathname))
+       (let ((size (org-babel-dsq-file-size pathname)))
+         (and size (<= size *org-babel-dsq-input-limit*)))))
+
+(defun org-babel-dsq-check-file (pathname)
+  (unless (org-babel-dsq-probe-file pathname)
+    (editor-error "DSQ input does not exist: ~a" pathname))
+  (when (uiop:directory-exists-p pathname)
+    (editor-error "DSQ input is a directory: ~a" pathname))
+  (let ((size (org-babel-dsq-file-size pathname)))
+    (unless size
+      (editor-error "DSQ input is not a readable regular file: ~a" pathname))
+    (when (> size *org-babel-dsq-input-limit*)
+      (editor-error "DSQ input exceeds the ~d-byte limit: ~a"
+                    *org-babel-dsq-input-limit* pathname)))
+  pathname)
+
+(defun org-babel-dsq-same-file-p (left right)
+  (and left right
+       (handler-case
+           (equal (truename left) (truename right))
+         (error () nil))))
+
+(defun org-babel-dsq-live-file-buffer (pathname)
+  (find-if (lambda (buffer)
+             (and (buffer-filename buffer)
+                  (org-babel-dsq-same-file-p
+                   (buffer-filename buffer) pathname)))
+           (buffer-list)))
+
+(defun org-babel-dsq-read-org-text (pathname)
+  "Read PATHNAME, preferring the corresponding live Lem buffer."
+  (let ((buffer (org-babel-dsq-live-file-buffer pathname)))
+    (if buffer
+        (progn
+          (when (sops-buffer-active-p buffer)
+            (editor-error "DSQ will not read a plaintext SOPS buffer"))
+          (let ((text (buffer-text buffer)))
+            (when (> (length text) *org-babel-dsq-input-limit*)
+              (editor-error
+               "DSQ Org reference exceeds the configured input limit"))
+            text))
+        (progn
+          (org-babel-dsq-check-file pathname)
+          (handler-case (uiop:read-file-string pathname)
+            (error (condition)
+              (editor-error "Cannot read DSQ Org reference ~a — ~a"
+                            pathname condition)))))))
+
+(defun org-babel-dsq-lines (text)
+  (mapcar (lambda (line) (string-right-trim '(#\Return) line))
+          (uiop:split-string text :separator '(#\Newline))))
+
+(defun org-babel-dsq-blank-line-p (line)
+  (every (lambda (character) (member character '(#\Space #\Tab))) line))
+
+(defun org-babel-dsq-table-line-p (line)
+  (let ((trimmed (string-left-trim '(#\Space #\Tab) line)))
+    (and (plusp (length trimmed)) (char= (char trimmed 0) #\|))))
+
+(defun org-babel-dsq-table-hline-p (line)
+  (let ((trimmed (string-trim '(#\Space #\Tab #\|) line)))
+    (and (plusp (length trimmed))
+         (every (lambda (character)
+                  (member character '(#\- #\+ #\: #\Space #\Tab)))
+                trimmed))))
+
+(defun org-babel-dsq-table-cells (line)
+  "Return the cells in one ordinary Org table LINE."
+  (let* ((line (string-trim '(#\Space #\Tab) line))
+         (start (if (and (plusp (length line))
+                         (char= (char line 0) #\|))
+                    1 0))
+         (end (if (and (> (length line) start)
+                       (char= (char line (1- (length line))) #\|))
+                  (1- (length line)) (length line)))
+         (cells nil)
+         (cell (make-array 32 :element-type 'character
+                              :adjustable t :fill-pointer 0))
+         (escaped-p nil))
+    (labels ((finish-cell ()
+               (push (string-trim '(#\Space #\Tab) (copy-seq cell)) cells)
+               (setf (fill-pointer cell) 0)))
+      (loop :for index :from start :below end
+            :for character := (char line index)
+            :do
+               (cond
+                 (escaped-p
+                  (vector-push-extend character cell)
+                  (setf escaped-p nil))
+                 ((char= character #\\)
+                  (setf escaped-p t))
+                 ((char= character #\|)
+                  (finish-cell))
+                 (t
+                  (vector-push-extend character cell))))
+      (when escaped-p (vector-push-extend #\\ cell))
+      (finish-cell))
+    (nreverse cells)))
+
+(defun org-babel-dsq-csv-cell (value)
+  (format nil "\"~a\""
+          (cl-ppcre:regex-replace-all "\"" (or value "") "\"\"")))
+
+(defun org-babel-dsq-table-csv (lines)
+  (with-output-to-string (output)
+    (dolist (line lines)
+      (when (and (org-babel-dsq-table-line-p line)
+                 (not (org-babel-dsq-table-hline-p line)))
+        (format output "~{~a~^,~}~%"
+                (mapcar #'org-babel-dsq-csv-cell
+                        (org-babel-dsq-table-cells line)))))))
+
+(defun org-babel-dsq-detect-format (data)
+  (let ((trimmed (string-left-trim '(#\Space #\Tab #\Newline #\Return)
+                                   (or data ""))))
+    (cond
+      ((and (plusp (length trimmed))
+            (member (char trimmed 0) '(#\{ #\[)))
+       "json")
+      ((find #\, trimmed) "csv")
+      (t nil))))
+
+(defun org-babel-dsq-valid-format (format)
+  (and format
+       (plusp (length format))
+       (every (lambda (character) (or (alphanumericp character)
+                                      (char= character #\-)))
+              format)))
+
+(defun org-babel-dsq-result-data (lines start)
+  "Return data and a format from a named source block result at START."
+  (let ((index start)
+        (length (length lines)))
+    (loop :while (and (< index length)
+                      (org-babel-dsq-blank-line-p (nth index lines)))
+          :do (incf index))
+    (unless (and (< index length)
+                 (cl-ppcre:scan "(?i)^\\s*#\\+results(?:[^:]*):" (nth index lines)))
+      (editor-error "Named DSQ source input has no adjacent results"))
+    (incf index)
+    (loop :while (and (< index length)
+                      (org-babel-dsq-blank-line-p (nth index lines)))
+          :do (incf index))
+    (cond
+      ((and (< index length) (org-babel-dsq-table-line-p (nth index lines)))
+       (let ((table nil))
+         (loop :while (and (< index length)
+                           (org-babel-dsq-table-line-p (nth index lines)))
+               :do (push (nth index lines) table) (incf index))
+         (values (org-babel-dsq-table-csv (nreverse table)) "csv")))
+      ((and (< index length)
+            (cl-ppcre:scan "^\\s*:(?:\\s|$)" (nth index lines)))
+       (let ((data
+               (with-output-to-string (output)
+                 (loop :while (and (< index length)
+                                   (cl-ppcre:scan "^\\s*:(?:\\s|$)"
+                                                 (nth index lines)))
+                       :for line := (nth index lines)
+                       :for colon := (position #\: line)
+                       :for content-start := (and colon (1+ colon))
+                       :do
+                          (when (and content-start (< content-start (length line))
+                                     (char= (char line content-start) #\Space))
+                            (incf content-start))
+                          (write-line (subseq line content-start) output)
+                          (incf index)))))
+         (values data (org-babel-dsq-detect-format data))))
+      (t
+       (editor-error "Named DSQ source input has no tabular or verbatim result")))))
+
+(defun org-babel-dsq-reference-data (text reference)
+  "Resolve REFERENCE from Org TEXT into data and its detected format."
+  (let* ((lines (org-babel-dsq-lines text))
+         (name-pattern
+           (format nil "(?i)^\\s*#\\+name:\\s*~a(?:\\s|$)"
+                   (cl-ppcre:quote-meta-chars reference)))
+         (name-index
+           (loop :for line :in lines :for index :from 0
+                 :when (cl-ppcre:scan name-pattern line)
+                   :return index)))
+    (unless name-index
+      (editor-error "Unknown DSQ Org reference: ~a" reference))
+    (let ((index (1+ name-index))
+          (length (length lines)))
+      (loop :while (and (< index length)
+                        (org-babel-dsq-blank-line-p (nth index lines)))
+            :do (incf index))
+      (unless (< index length)
+        (editor-error "DSQ Org reference has no data: ~a" reference))
+      (cond
+        ((org-babel-dsq-table-line-p (nth index lines))
+         (let ((table nil))
+           (loop :while (and (< index length)
+                             (org-babel-dsq-table-line-p (nth index lines)))
+                 :do (push (nth index lines) table) (incf index))
+           (values (org-babel-dsq-table-csv (nreverse table)) "csv")))
+        ((cl-ppcre:scan "(?i)^\\s*#\\+begin_src(?:\\s|$)" (nth index lines))
+         (loop :do (incf index)
+               :until (or (>= index length)
+                          (cl-ppcre:scan "(?i)^\\s*#\\+end_src\\s*$"
+                                        (nth index lines))))
+         (when (>= index length)
+           (editor-error "Named DSQ source input has no matching #+end_src"))
+         (org-babel-dsq-result-data lines (1+ index)))
+        ((cl-ppcre:scan "(?i)^\\s*#\\+begin_(?:quote|example)\\s*$"
+                       (nth index lines))
+         (let ((data
+                 (with-output-to-string (output)
+                   (loop :do (incf index)
+                         :until (or (>= index length)
+                                    (cl-ppcre:scan
+                                     "(?i)^\\s*#\\+end_(?:quote|example)\\s*$"
+                                     (nth index lines)))
+                         :do (write-line (nth index lines) output)))))
+           (when (>= index length)
+             (editor-error "Named DSQ literal input has no matching end marker"))
+           (values data (org-babel-dsq-detect-format data))))
+        (t
+         (editor-error "Unsupported DSQ Org reference shape: ~a" reference))))))
+
+(defun org-babel-dsq-reference-location (spec directory)
+  "Return an external Org pathname and reference from SPEC, if present."
+  (loop :for position := (position #\: spec :from-end t)
+          :then (and position (position #\: spec :from-end t :end position))
+        :while position
+        :for file-part := (subseq spec 0 position)
+        :for reference := (subseq spec (1+ position))
+        :for pathname := (expand-file-name file-part directory)
+        :when (and (plusp (length reference))
+                   (org-babel-dsq-regular-input-file-p pathname))
+          :return (values pathname reference)))
+
+(defun org-babel-dsq-source-for-spec (spec directory current-text)
+  (let ((pathname (expand-file-name spec directory)))
+    (when (org-babel-dsq-probe-file pathname)
+      (org-babel-dsq-check-file pathname)
+      (return-from org-babel-dsq-source-for-spec
+        (make-org-babel-dsq-source :pathname pathname))))
+  (let* ((percent (position #\% spec :from-end t))
+         (format (and percent (string-downcase (subseq spec (1+ percent)))))
+         (reference-spec (if percent (subseq spec 0 percent) spec)))
+    (when (and percent (not (org-babel-dsq-valid-format format)))
+      (editor-error "Invalid DSQ reference format: ~a" format))
+    (multiple-value-bind (reference-path reference)
+        (org-babel-dsq-reference-location reference-spec directory)
+      (multiple-value-bind (data detected-format)
+          (if reference-path
+              (org-babel-dsq-reference-data
+               (org-babel-dsq-read-org-text reference-path) reference)
+              (org-babel-dsq-reference-data current-text reference-spec))
+        (let ((effective-format (or format detected-format)))
+          (unless (org-babel-dsq-valid-format effective-format)
+            (editor-error
+             "Cannot detect the format for DSQ reference ~a; append %%FORMAT"
+             reference-spec))
+          (when (and format (string= detected-format "csv")
+                     (not (string= format "csv")))
+            (editor-error "Tabular DSQ references require csv format"))
+          (when (> (length data) *org-babel-dsq-input-limit*)
+            (editor-error "DSQ reference exceeds the configured input limit"))
+          (make-org-babel-dsq-source
+           :data data :format effective-format))))))
+
+(defun org-babel-dsq-call-with-sources (sources function &optional paths)
+  "Call FUNCTION with every prepared source pathname while temps are live."
+  (if (null sources)
+      (funcall function (nreverse paths))
+      (let ((source (first sources)))
+        (if (org-babel-dsq-source-pathname source)
+            (org-babel-dsq-call-with-sources
+             (rest sources) function
+             (cons (org-babel-dsq-source-pathname source) paths))
+            (uiop:with-temporary-file
+                (:pathname pathname :stream stream :direction :output
+                 :element-type 'character
+                 :type (org-babel-dsq-source-format source))
+              (write-string (org-babel-dsq-source-data source) stream)
+              (finish-output stream)
+              (close stream)
+              (org-babel-dsq-call-with-sources
+               (rest sources) function (cons pathname paths)))))))
+
+(defun org-babel-dsq-value-text (value null-value false-value)
+  (cond
+    ((eq value :null) (or null-value "nil"))
+    ((eq value yason:false) (or false-value "false"))
+    ((eq value yason:true) "t")
+    ((null value) "nil")
+    ((stringp value) value)
+    ((numberp value) (princ-to-string value))
+    (t (princ-to-string value))))
+
+(defun org-babel-dsq-table-row (values)
+  (format nil "| ~{~a~^ | ~} |"
+          (mapcar (lambda (value)
+                    (cl-ppcre:regex-replace-all "\\|" value "\\\\vert{}"))
+                  values)))
+
+(defun org-babel-dsq-table-separator (width)
+  (format nil "|~{~a~^+~}|" (make-list width :initial-element "---")))
+
+(defun org-babel-dsq-json-result (output headers)
+  (let* ((rows
+           (handler-case
+               (yason:parse output :object-as :alist
+                            :json-booleans-as-symbols t
+                            :json-nulls-as-keyword t)
+             (error (condition)
+               (editor-error "DSQ returned invalid JSON — ~a" condition))))
+         (rows (if (vectorp rows) (coerce rows 'list) rows))
+         (first-row (first rows)))
+    (unless (and (listp rows)
+                 (or (null rows)
+                     (and (listp first-row)
+                          (every (lambda (row)
+                                   (and (listp row) (every #'consp row)))
+                                 rows))))
+      (editor-error "DSQ result is not an array of objects"))
+    (if (null rows)
+        (make-org-babel-result :text "nil")
+        (let* ((columns (mapcar #'car first-row))
+               (header-p (org-babel-dsq-yes-p
+                          (org-babel-header "header" headers) t))
+               (hlines-p (org-babel-dsq-yes-p
+                          (org-babel-header "hlines" headers) nil))
+               (null-value (org-babel-header "null-value" headers))
+               (false-value (org-babel-header "false-value" headers))
+               (data-rows
+                 (mapcar
+                  (lambda (row)
+                    (org-babel-dsq-table-row
+                     (mapcar
+                      (lambda (column)
+                        (org-babel-dsq-value-text
+                         (cdr (assoc column row :test #'string=))
+                         null-value false-value))
+                      columns)))
+                  rows))
+               (separator (org-babel-dsq-table-separator (length columns)))
+               (lines nil))
+          (when header-p
+            (push (org-babel-dsq-table-row columns) lines)
+            (push separator lines))
+          (loop :for row :in data-rows
+                :for firstp := t :then nil
+                :do
+                   (when (and hlines-p (not firstp)) (push separator lines))
+                   (push row lines))
+          (make-org-babel-result
+           :kind :table
+           :text (format nil "~{~a~^~%~}" (nreverse lines)))))))
+
+(defun org-babel-dsq-result (block headers directory)
+  (let* ((input-value (org-babel-header "input" headers))
+         (specs (org-babel-dsq-input-words input-value directory))
+         (current-text (buffer-text (point-buffer (org-babel-block-begin block))))
+         (sources (mapcar (lambda (spec)
+                            (org-babel-dsq-source-for-spec
+                             spec directory current-text))
+                          specs))
+         (cache-p (org-babel-dsq-yes-p (org-babel-header "cache" headers)))
+         (convert-p (org-babel-dsq-yes-p
+                     (org-babel-header "convert-numbers" headers) t))
+         (result-headers (string-downcase
+                          (or (org-babel-header "results" headers) "table"))))
+    (when (or (search "list" result-headers)
+              (search "raw" result-headers)
+              (search "code" result-headers))
+      (editor-error "This ob-dsq :results presentation is not yet supported: ~a"
+                    result-headers))
+    (org-babel-dsq-call-with-sources
+     sources
+     (lambda (paths)
+       (let* ((arguments
+                (append
+                 (list (uiop:native-namestring (org-babel-program "dsq")))
+                 (when cache-p (list "--cache"))
+                 (when convert-p (list "--convert-numbers"))
+                 (mapcar #'uiop:native-namestring paths)
+                 (list (org-babel-block-body block))))
+              (output (org-babel-success-output arguments directory)))
+         (if (search "verbatim" result-headers)
+             (make-org-babel-result :text output)
+             (org-babel-dsq-json-result output headers)))))))
+
 (defun org-babel-result-mode (headers)
   (let ((value (string-downcase (or (org-babel-header "results" headers)
                                     "replace"))))
@@ -459,6 +922,8 @@ not treated as global; heading inheritance is outside this bounded parser."
        (org-babel-sqlite-result block headers directory))
       ((string= language "sql")
        (org-babel-sql-result block headers directory))
+      ((string= language "dsq")
+       (org-babel-dsq-result block headers directory))
       ((string= language "emacs-lisp")
        (editor-error
         "Emacs Lisp blocks require Emacs; Lem will not evaluate them as Common Lisp"))

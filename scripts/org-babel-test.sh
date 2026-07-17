@@ -12,6 +12,28 @@ export WORKDIR="$root/work"
 export LEM_YATH_ORG_BABEL_REPORT="$root/report"
 mkdir -p "$HOME" "$WORKDIR" "$WORKDIR/subdir"
 
+cat >"$WORKDIR/people weird \$ ;literal.json" <<'EOF'
+[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]
+EOF
+cat >"$WORKDIR/people.json" <<'EOF'
+[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]
+EOF
+cat >"$WORKDIR/languages.csv" <<'EOF'
+person_id,language
+1,Lisp
+2,Rust
+EOF
+cat >"$WORKDIR/irregular.json" <<'EOF'
+[{"id":1,"active":false,"note":null},{"id":2,"active":true,"note":"ready"}]
+EOF
+cat >"$WORKDIR/external.org" <<'EOF'
+#+name: places
+| city   | country |
+|--------+---------|
+| Dublin | Ireland |
+| Vienna | Austria |
+EOF
+
 fixture="$WORKDIR/babel.org"
 fixture_lisp="$(lem-yath_lisp_string "$here/scripts/org-babel-fixture.lisp")"
 session="lem-org-babel-$id"
@@ -44,7 +66,7 @@ mx() {
   tmux_cmd send-keys -t "$session" -l "$command"
   sleep 0.5
   tmux_cmd send-keys -t "$session" Enter
-  sleep 0.5
+  sleep 0.8
 }
 
 goto_block() { mx "lem-yath-test-babel-goto-$1"; }
@@ -53,6 +75,12 @@ report_block() {
   : >"$LEM_YATH_ORG_BABEL_REPORT"
   mx lem-yath-test-babel-report || return 1
   grep '^BLOCK ' "$LEM_YATH_ORG_BABEL_REPORT" | tail -n1
+}
+
+diagnose_dsq() {
+  : >"$LEM_YATH_ORG_BABEL_REPORT"
+  mx lem-yath-test-babel-dsq-diagnostic >/dev/null || return 1
+  grep '^DSQ-DIAGNOSTIC ' "$LEM_YATH_ORG_BABEL_REPORT" | tail -n1
 }
 
 execute_confirmed() {
@@ -111,6 +139,63 @@ touch cancelled-created
 #+begin_src emacs-lisp
 (message "must-not-run")
 #+end_src
+
+* DSQ direct file
+#+begin_src dsq :input "people weird $ ;literal.json"
+select id, name from {} order by id
+#+end_src
+
+#+RESULTS:
+: stale-dsq-file
+
+* DSQ local table reference
+#+name: colors
+|person_id|color|
+|---------+-----|
+|1|blue|
+|2|red|
+
+#+begin_src dsq :input colors :header no :hlines yes
+select color from {} order by person_id
+#+end_src
+
+* DSQ multiple files
+#+begin_src dsq :input people.json languages.csv
+select people.name, languages.language
+from {0} people join {1} languages on people.id = languages.person_id
+order by people.id
+#+end_src
+
+* DSQ external Org reference
+#+begin_src dsq :input external.org:places
+select city from {} order by city
+#+end_src
+
+* DSQ named source result
+#+name: generated-json
+#+begin_src shell
+printf '[{"label":"from-result"}]\n'
+#+end_src
+
+#+RESULTS:
+: [{"label":"from-result"}]
+
+#+begin_src dsq :input generated-json
+select label from {}
+#+end_src
+
+* DSQ value rendering
+#+begin_src dsq :input irregular.json :null-value "?" :false-value "nope"
+select id, active, note from {} order by id
+#+end_src
+
+* DSQ missing reference
+#+begin_src dsq :input missing_reference
+select * from missing_reference
+#+end_src
+
+#+RESULTS:
+: untouched-dsq-failure
 EOF
 
 mkdir -p "$pgsocket"
@@ -142,7 +227,7 @@ if ! lem_wait_for "$session" 'Shell replacement' 40 >/dev/null; then
   fail startup "Babel fixture did not open"
   exit 1
 fi
-sleep 1
+sleep 2
 tmux_cmd send-keys -t "$session" Escape
 sleep 0.25
 
@@ -270,6 +355,128 @@ if lem_wait_for "$session" 'Emacs Lisp blocks require Emacs' 10 >/dev/null; then
   pass emacs-lisp 'Emacs Lisp fails explicitly instead of being mis-evaluated as CL'
 else
   fail emacs-lisp 'unsupported Emacs Lisp did not produce the explicit boundary'
+fi
+
+goto_block dsq-file
+if execute_confirmed && lem_wait_for "$session" 'Executed dsq source block' 20 >/dev/null; then
+  dsq_file_report="$(report_block)"
+  if grep -q 'id' <<<"$dsq_file_report" &&
+     grep -q 'name' <<<"$dsq_file_report" &&
+     { grep -q '1 | Alice' <<<"$dsq_file_report" ||
+       grep -q 'Alice | 1' <<<"$dsq_file_report"; } &&
+     { grep -q '2 | Bob' <<<"$dsq_file_report" ||
+       grep -q 'Bob | 2' <<<"$dsq_file_report"; }; then
+    pass dsq-file 'a metacharacter path ran through exact direct argv with default tables'
+  else
+    fail dsq-file 'DSQ file input or pinned default table rendering was incorrect'
+  fi
+else
+  fail dsq-file 'confirmed DSQ file block did not finish'
+fi
+
+tmux_cmd send-keys -t "$session" u
+sleep 0.4
+goto_block dsq-file
+dsq_undo_report="$(report_block)"
+if grep -q 'result="#+RESULTS:|: stale-dsq-file|' <<<"$dsq_undo_report"; then
+  pass dsq-undo 'DSQ result replacement is one ordinary undo edit'
+else
+  fail dsq-undo 'one undo did not restore the complete prior DSQ result'
+fi
+
+goto_block dsq-table
+if execute_confirmed && lem_wait_for "$session" 'Executed dsq source block' 20 >/dev/null; then
+  dsq_table_report="$(report_block)"
+  if grep -q 'result="#+RESULTS:|| blue |||---||| red |' <<<"$dsq_table_report"; then
+    pass dsq-table 'a named live Org table honored header and hline controls'
+  else
+    fail dsq-table 'named table conversion or DSQ table controls were incorrect'
+  fi
+else
+  diagnose_dsq || true
+  fail dsq-table 'confirmed named-table DSQ block did not finish'
+fi
+
+goto_block dsq-multiple
+if execute_confirmed && lem_wait_for "$session" 'Executed dsq source block' 20 >/dev/null; then
+  dsq_multiple_report="$(report_block)"
+  if { grep -q 'Alice.*Lisp' <<<"$dsq_multiple_report" ||
+       grep -q 'Lisp.*Alice' <<<"$dsq_multiple_report"; } &&
+     { grep -q 'Bob.*Rust' <<<"$dsq_multiple_report" ||
+       grep -q 'Rust.*Bob' <<<"$dsq_multiple_report"; }; then
+    pass dsq-multiple 'multiple JSON and CSV file inputs preserved their argv order'
+  else
+    fail dsq-multiple 'multiple DSQ file inputs or join output were incorrect'
+  fi
+else
+  diagnose_dsq || true
+  fail dsq-multiple 'confirmed multi-input DSQ block did not finish'
+fi
+
+goto_block dsq-external
+if execute_confirmed && lem_wait_for "$session" 'Executed dsq source block' 20 >/dev/null; then
+  dsq_external_report="$(report_block)"
+  if grep -q 'Dublin' <<<"$dsq_external_report" &&
+     grep -q 'Vienna' <<<"$dsq_external_report"; then
+    pass dsq-external 'a cross-file named Org table was converted through a live temp input'
+  else
+    fail dsq-external 'cross-file named Org reference output was incorrect'
+  fi
+else
+  diagnose_dsq || true
+  fail dsq-external 'confirmed external-reference DSQ block did not finish'
+fi
+
+goto_block dsq-result
+if execute_confirmed && lem_wait_for "$session" 'Executed dsq source block' 20 >/dev/null; then
+  dsq_result_report="$(report_block)"
+  if grep -q 'from-result' <<<"$dsq_result_report"; then
+    pass dsq-result 'a named source block result was detected and queried as JSON'
+  else
+    fail dsq-result 'named source result resolution was incorrect'
+  fi
+else
+  diagnose_dsq || true
+  fail dsq-result 'confirmed named-result DSQ block did not finish'
+fi
+
+goto_block dsq-values
+if execute_confirmed && lem_wait_for "$session" 'Executed dsq source block' 20 >/dev/null; then
+  dsq_values_report="$(report_block)"
+  if grep -q 'id' <<<"$dsq_values_report" &&
+     grep -q 'active' <<<"$dsq_values_report" &&
+     grep -q 'note' <<<"$dsq_values_report" &&
+     grep -q '1' <<<"$dsq_values_report" &&
+     grep -q 'nope' <<<"$dsq_values_report" &&
+     grep -q '?' <<<"$dsq_values_report" &&
+     grep -q '2' <<<"$dsq_values_report" &&
+     grep -q 't' <<<"$dsq_values_report" &&
+     grep -q 'ready' <<<"$dsq_values_report"; then
+    pass dsq-values 'false, null, true, strings, and converted numbers use pinned rendering'
+  else
+    fail dsq-values 'DSQ value rendering headers or number conversion were incorrect'
+  fi
+else
+  fail dsq-values 'confirmed value-rendering DSQ block did not finish'
+fi
+
+goto_block dsq-missing
+tmux_cmd send-keys -t "$session" C-c C-c
+if lem_wait_for "$session" 'Execute dsq source block' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" y
+  if lem_wait_for "$session" 'Unknown DSQ Org reference' 10 >/dev/null; then
+    dsq_missing_report="$(report_block)"
+    if grep -q 'result="#+RESULTS:|: untouched-dsq-failure|' \
+        <<<"$dsq_missing_report"; then
+      pass dsq-failure 'invalid inputs fail before mutating the prior result'
+    else
+      fail dsq-failure 'a failed DSQ input changed its existing result'
+    fi
+  else
+    fail dsq-failure 'missing DSQ reference did not fail visibly'
+  fi
+else
+  fail dsq-failure 'DSQ block did not use the configured confirmation boundary'
 fi
 
 goto_block postgres

@@ -99,7 +99,7 @@
           (available-mode "LEM-C-MODE" "C-MODE"))
          ((string= normalized "nix")
           (available-mode "LEM-NIX-MODE" "NIX-MODE"))
-         ((member normalized '("sql" "sqlite") :test #'string=)
+         ((member normalized '("sql" "sqlite" "dsq") :test #'string=)
           (available-mode "LEM-SQL-MODE" "SQL-MODE")))
        'lem/buffer/fundamental-mode:fundamental-mode))))
 

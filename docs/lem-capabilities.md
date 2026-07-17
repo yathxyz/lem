@@ -2664,7 +2664,7 @@ and formula-owning table-column moves abort before mutation.
 
 `C-c C-c` now context-dispatches source blocks through
 `src/org/babel.lisp`. The configured Bash/Shell, Python, C/C++, Nix, SQLite,
-and PostgreSQL SQL paths run with direct argument vectors, the active
+PostgreSQL SQL, and DSQ paths run with direct argument vectors, the active
 Direnv-derived process environment, a 600-second timeout, and independent
 16-MiB source/stdout/stderr bounds. Shell shebangs, Python's configured
 interpreter override, relative `:dir`, SQLite `:db`, and the PostgreSQL
@@ -2672,6 +2672,19 @@ engine/user/password/host/port/database headers are supported. Passwords enter
 only the subprocess environment, never argv or diagnostics assembled by Lem.
 Preamble `header-args` properties use the configured file-wide form; local
 block headers win.
+
+The pinned `ob-dsq` path accepts one or more regular JSON/CSV inputs, including
+metacharacters and spaces without shell parsing, plus local or cross-file
+named Org tables and adjacent results of named source blocks. Named values are
+materialized only as private typed temporary inputs while the direct `dsq`
+process is live. `:cache`, `:convert-numbers`, `:header`, `:hlines`,
+`:null-value`, and `:false-value` retain their pinned defaults and overrides;
+the first returned JSON object's key order defines a finite Org table exactly
+as in the pinned package, and later rows are aligned by key. Each
+file/reference is bounded to 64 MiB, live external Org buffers win over disk,
+and plaintext SOPS buffers fail closed. Arbitrary Elisp-evaluated `:input` and
+`:var` expressions remain intentionally unsupported because Lem does not
+evaluate Emacs Lisp.
 
 The confirmation predicate matches the active Emacs policy: only SQLite and
 Emacs Lisp are exempt inside an existing file below startup-cached `$WORKDIR`.
@@ -2684,7 +2697,8 @@ failure, unsupported languages, SOPS plaintext, `:var`, live `:session`,
 `:async`, and unsupported append/raw/file/drawer result modes fail before
 result mutation. `scripts/org-babel-test.sh` drives the physical chord through
 confirmation, cancellation, undo, Python and C execution, directory and
-no-result headers, trusted SQLite, and a real private PostgreSQL server.
+no-result headers, trusted SQLite, DSQ files and Org references, invalid-input
+preservation, and a real private PostgreSQL server.
 
 `src/org/publish.lisp` supplies the configured HTML export and publishing
 layer without depending on a headless Emacs process. `C-c C-e` opens a
@@ -2732,7 +2746,7 @@ repairs beyond the bounded `d/x/X/< />` and Visual Meta behavior; generic
 Org-element movement, unimplemented list/table Shift-control contexts, and
 richer list/table semantics; mouse calendar selection and Org's exact live
 echo overlay and wider timestamp variants; prefixed live Babel-session
-source editing, variables/sessions and the rest of Babel's
+source editing, Elisp-valued inputs, variables/sessions and the rest of Babel's
 backend/header/result matrix; in-editor LaTeX preview, non-HTML export
 backends, and exact `ox-html` output remain explicit gaps. The display-only
 org-modern terminal subset and initial empty Org scratch are implemented;

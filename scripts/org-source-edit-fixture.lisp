@@ -46,6 +46,8 @@
   "stale-original")
 (define-org-source-edit-test-goto lem-yath-test-source-edit-goto-read-only
   "read-only-original")
+(define-org-source-edit-test-goto lem-yath-test-source-edit-goto-dsq
+  "select name from {}")
 (define-org-source-edit-test-goto lem-yath-test-source-edit-goto-heading
   "Source editing")
 

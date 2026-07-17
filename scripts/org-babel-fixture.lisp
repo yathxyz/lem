@@ -37,6 +37,20 @@
   "message \"must-not-run\"")
 (define-org-babel-test-goto lem-yath-test-babel-goto-postgres
   "select 'pg-ok'")
+(define-org-babel-test-goto lem-yath-test-babel-goto-dsq-file
+  "select id, name from {} order by id")
+(define-org-babel-test-goto lem-yath-test-babel-goto-dsq-table
+  "select color from {} order by person_id")
+(define-org-babel-test-goto lem-yath-test-babel-goto-dsq-multiple
+  "select people.name, languages.language")
+(define-org-babel-test-goto lem-yath-test-babel-goto-dsq-external
+  "select city from {} order by city")
+(define-org-babel-test-goto lem-yath-test-babel-goto-dsq-result
+  "select label from {}")
+(define-org-babel-test-goto lem-yath-test-babel-goto-dsq-values
+  "select id, active, note from {} order by id")
+(define-org-babel-test-goto lem-yath-test-babel-goto-dsq-missing
+  "select * from missing_reference")
 
 (defun org-babel-test-one-line (text)
   (coerce (substitute #\| #\Newline text) 'simple-string))
@@ -53,6 +67,30 @@
            (org-babel-test-one-line (points-to-string start end))
            "NONE")
        (if (buffer-modified-p (current-buffer)) "yes" "no")))))
+
+(define-command lem-yath-test-babel-dsq-diagnostic () ()
+  (let (input specs directory)
+    (handler-case
+      (let* ((block (or (org-babel-block-at-point (current-point) t)
+                        (error "Point is not in an Org source block")))
+             (headers (org-babel-effective-headers block))
+             (result
+               (progn
+                 (setf input (org-babel-header "input" headers)
+                       directory (org-babel-directory headers)
+                       specs (org-babel-dsq-input-words input directory))
+                 (org-babel-dsq-result block headers directory))))
+        (org-babel-test-log
+         "DSQ-DIAGNOSTIC OK kind=~a text=~s"
+         (org-babel-result-kind result)
+         (org-babel-result-text result)))
+      (error (condition)
+        (org-babel-test-log
+         "DSQ-DIAGNOSTIC ERROR input=~s specs=~s directory=~s expanded=~s type=~s message=~a"
+         input specs directory
+         (and directory specs
+              (mapcar (lambda (spec) (expand-file-name spec directory)) specs))
+         (type-of condition) condition)))))
 
 (define-command lem-yath-test-babel-binding-report () ()
   (let ((command (find-keybind (lem-core::parse-keyspec "C-c C-c"))))
