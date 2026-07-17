@@ -121,8 +121,10 @@
        (= 2 (length entry))
        (bounded-persistence-string-p
         (first entry) *persistence-path-size-limit*)
-       (integerp (second entry))
-       (<= 1 (second entry) most-positive-fixnum)))
+       (or (and (integerp (second entry))
+                (<= 1 (second entry) most-positive-fixnum))
+           (bounded-persistence-string-p
+            (second entry) *persistence-path-size-limit*))))
 
 (defun normalize-places (places)
   (if (proper-list-p places)
@@ -131,7 +133,9 @@
              :repeat (* 2 *save-place-limit*)
              :when (valid-place-entry-p entry)
                :collect (list (readable-string-copy (first entry))
-                              (second entry)))
+                              (if (stringp (second entry))
+                                  (readable-string-copy (second entry))
+                                  (second entry))))
        '()
        :test #'string=
        :key #'first
@@ -462,22 +466,50 @@
         (cl-ppcre:scan "^bzr_log\\..*$" name))))
 
 (defun persistent-buffer-path (buffer)
-  (alexandria:when-let ((filename (buffer-filename buffer)))
+  (alexandria:when-let
+      ((filename
+         (or (buffer-filename buffer)
+             (and (mode-active-p
+                   buffer 'lem/directory-mode/mode:directory-mode)
+                  (buffer-directory buffer)))))
     (handler-case
         (let ((pathname (truename filename)))
-          (unless (save-place-excluded-file-p pathname)
+          (unless (and (buffer-filename buffer)
+                       (save-place-excluded-file-p pathname))
             (uiop:native-namestring pathname)))
       (error () nil))))
+
+(defun directory-place-value (buffer)
+  (when (mode-active-p buffer 'lem/directory-mode/mode:directory-mode)
+    (alexandria:when-let
+        ((pathname
+           (lem/directory-mode/internal:get-pathname
+            (buffer-point buffer))))
+      (uiop:native-namestring pathname))))
+
+(defun restore-directory-place (buffer selected-path)
+  "Move BUFFER to its row for SELECTED-PATH, if that entry still exists."
+  (with-point ((row (buffer-start-point buffer)))
+    (loop
+      (alexandria:when-let
+          ((pathname (lem/directory-mode/internal:get-pathname row)))
+        (when (string= selected-path (uiop:native-namestring pathname))
+          (move-point (buffer-point buffer) row)
+          (return selected-path)))
+      (unless (line-offset row 1)
+        (return nil)))))
 
 (defun record-buffer-place (&optional (buffer (current-buffer)))
   "Remember BUFFER's point, omitting point one and transient VCS files."
   (alexandria:when-let ((path (persistent-buffer-path buffer)))
-    (let ((position (position-at-point (buffer-point buffer))))
+    (let ((position
+            (or (directory-place-value buffer)
+                (position-at-point (buffer-point buffer)))))
       (setf *saved-places*
             (remove path *saved-places* :key #'first :test #'string=)
             *forgotten-place-paths*
             (remove path *forgotten-place-paths* :test #'string=))
-      (if (= position 1)
+      (if (and (integerp position) (= position 1))
           (pushnew path *forgotten-place-paths* :test #'string=)
           (push (list path position) *saved-places*))
       (setf *saved-places*
@@ -494,11 +526,15 @@
   (alexandria:when-let* ((path (persistent-buffer-path buffer))
                          (entry (find path *saved-places*
                                       :key #'first :test #'string=)))
-    (let ((point (buffer-point buffer))
-          (position (second entry)))
-      (unless (move-to-position point position)
-        (buffer-end point))
-      position)))
+    (let ((position (second entry)))
+      (if (stringp position)
+          (and (mode-active-p
+                buffer 'lem/directory-mode/mode:directory-mode)
+               (restore-directory-place buffer position))
+          (let ((point (buffer-point buffer)))
+            (unless (move-to-position point position)
+              (buffer-end point))
+            position)))))
 
 (defun persistence-place-snapshot ()
   (copy-tree *saved-places*))
@@ -751,6 +787,10 @@
                       older))
    *saved-kill-ring-limit*))
 
+(defun persistent-place-path-exists-p (path)
+  (or (uiop:file-exists-p path)
+      (uiop:directory-exists-p path)))
+
 (defun merge-persistence-states (newer older)
   (let* ((newer (normalize-persistence-state newer))
          (older (normalize-persistence-state older))
@@ -759,7 +799,7 @@
             (lambda (entry)
               (or (member (first entry) *forgotten-place-paths*
                           :test #'string=)
-                  (not (uiop:file-exists-p (first entry)))))
+                  (not (persistent-place-path-exists-p (first entry)))))
             (merge-mru-list (getf newer :places) (getf older :places)
                             :test #'string= :key #'first
                             :limit *save-place-limit*))))
@@ -1327,13 +1367,18 @@ the visited file byte-for-byte."
 
 (defun persistence-find-file-hook (buffer)
   (initialize-buffer-file-state buffer :force t)
-  (restore-buffer-place buffer))
+  (restore-buffer-place buffer)
+  (setf (buffer-value buffer 'lem-yath-place-restored-p) t))
 
 (defun persistence-kill-buffer-hook (buffer)
   (record-buffer-place buffer))
 
 (defun persistence-switch-buffer-hook (target)
   (record-buffer-place (current-buffer))
+  (unless (buffer-value target 'lem-yath-place-restored-p)
+    (when (mode-active-p target 'lem/directory-mode/mode:directory-mode)
+      (restore-buffer-place target))
+    (setf (buffer-value target 'lem-yath-place-restored-p) t))
   (safe-auto-revert-check-buffer target :force-digest t))
 
 (defun persistence-exit-hook ()

@@ -27,6 +27,7 @@ export LEM_YATH_PERSISTENCE_SOURCE="$here/lem-yath/src/persistence.lisp"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$WORKDIR" \
   "$LEM_HOME" "$(dirname "$LEM_YATH_PERSISTENCE_STATE_FILE")" \
   "$LEM_YATH_PERSISTENCE_TEST_ROOT/auto" \
+  "$LEM_YATH_PERSISTENCE_TEST_ROOT/directory-place" \
   "$LEM_YATH_PERSISTENCE_TEST_ROOT/concurrent"
 chmod 700 "$(dirname "$LEM_YATH_PERSISTENCE_STATE_FILE")"
 : >"$LEM_YATH_PERSISTENCE_TEST_REPORT"
@@ -1094,6 +1095,44 @@ else
   fail stale-snapshot-union 'fresh union verifier did not complete' "$verify_session"
 fi
 lem_stop "$verify_session"
+
+# ---------------------------------------------------------------------------
+# Save Place stores Dired's selected filename, not a fragile rendered offset.
+
+export LEM_YATH_PERSISTENCE_STATE_FILE="$root/directory-place/persistence.sexp"
+rm -rf -- "$(dirname "$LEM_YATH_PERSISTENCE_STATE_FILE")"
+mkdir -m 700 -p "$(dirname "$LEM_YATH_PERSISTENCE_STATE_FILE")"
+printf 'FIRST\n' >"$LEM_YATH_PERSISTENCE_TEST_ROOT/directory-place/first.txt"
+printf 'SELECTED\n' >"$LEM_YATH_PERSISTENCE_TEST_ROOT/directory-place/selected.txt"
+printf 'THIRD\n' >"$LEM_YATH_PERSISTENCE_TEST_ROOT/directory-place/third.txt"
+
+directory_writer="lem-yath-persistence-directory-writer-$id"
+if start_phase "$directory_writer" directory-writer &&
+   invoke_mx "$directory_writer" \
+     lem-yath-test-persistence-directory-write '^DIRECTORY-WRITE ' &&
+   grep -q '^DIRECTORY-WRITE selected=selected\.txt identity=path$' \
+     "$LEM_YATH_PERSISTENCE_TEST_REPORT"; then
+  pass directory-place-write \
+    'directory selection persisted by exact entry identity'
+else
+  fail directory-place-write \
+    'the selected directory row was not stored as a pathname' "$directory_writer"
+fi
+lem_stop "$directory_writer"
+
+directory_reader="lem-yath-persistence-directory-reader-$id"
+if start_phase "$directory_reader" directory-reader &&
+   invoke_mx "$directory_reader" \
+     lem-yath-test-persistence-directory-read '^DIRECTORY-READ ' &&
+   grep -q '^DIRECTORY-READ selected=selected\.txt restored=yes$' \
+     "$LEM_YATH_PERSISTENCE_TEST_REPORT"; then
+  pass directory-place-roundtrip \
+    'fresh process restored the selected directory entry on first visit'
+else
+  fail directory-place-roundtrip \
+    'fresh directory visit did not restore the selected entry' "$directory_reader"
+fi
+lem_stop "$directory_reader"
 
 # ---------------------------------------------------------------------------
 # Prompt allowlisting, live caps, kill-ring physical MRU, and file security.

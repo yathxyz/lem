@@ -232,6 +232,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 - five-second global refresh of externally changed clean files without requiring
   a keypress, stale-save protection
   for dirty buffers, and private cross-process persistence for file positions,
+  selected directory entries,
   bookmarks, reviewed non-secret prompt histories, Vi-aware kills, and separate
   literal and regexp search rings
 - retained branching undo with the configured raised payload budgets and a

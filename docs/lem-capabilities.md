@@ -1098,8 +1098,10 @@ before invoking the Common Lisp reader, and normalize bounded containers in line
 time. Each flush merges state already written by another Lem process.
 It provides:
 
-- up to 600 canonical local-file positions, excluding point one and transient
-  VCS commit-message files;
+- up to 600 canonical local-file positions or exact selected directory entries,
+  excluding point one and transient VCS commit-message files. Directory entry
+  identity restores only on the first visit to a fresh buffer, so later buffer
+  switches retain its live point; a missing entry leaves the normal initial row;
 - a 120-entry live kill ring with the newest 40 entries persisted, retaining
   `:vi-line` and `:vi-block` paste semantics and suppressing only consecutive
   duplicates with identical semantics;
@@ -1111,14 +1113,15 @@ It provides:
   memory-only.
 
 `scripts/persistence-test.sh` drives real ncurses processes and external file
-writers. Its 46 checks include a no-input periodic refresh and cover clean and
+writers. Its 48 checks include a no-input periodic refresh and a fresh-process
+selected-directory-entry round trip, and cover clean and
 dirty reload behavior,
 deletion/recreation, stale-save refusal including a same-metadata 17 MiB file,
 first-save and late-target Save As races, modified quit refusal, fresh-process
 restoration and Vi paste behavior, prompt privacy/live caps, bounded malformed
 and dispatch/evaluation-free state reads, private file modes, failure-safe
 commands/exit, reload-safe timer ownership, and stale concurrent writers. Filesystem
-notifications, directory-buffer save-place, and registered adapters for Lem's
+notifications and registered adapters for Lem's
 non-file list buffers remain gaps; the module exposes a buffer-local stale/revert
 adapter contract for later use.
 

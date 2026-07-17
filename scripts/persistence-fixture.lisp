@@ -126,6 +126,51 @@
 (define-command lem-yath-test-persistence-record-current () ()
   (persistence-test-record-buffer "current" (current-buffer)))
 
+(defun persistence-test-directory-row (buffer basename)
+  (with-point ((row (buffer-start-point buffer)))
+    (loop
+      (alexandria:when-let
+          ((pathname (lem/directory-mode/internal:get-pathname row)))
+        (when (string= basename (file-namestring pathname))
+          (return (copy-point row :temporary))))
+      (unless (line-offset row 1)
+        (return nil)))))
+
+(defun persistence-test-current-directory-entry ()
+  (alexandria:when-let
+      ((pathname
+         (lem/directory-mode/internal:get-pathname (current-point))))
+    (file-namestring pathname)))
+
+(define-command lem-yath-test-persistence-directory-write () ()
+  (let* ((directory (persistence-test-path "directory-place/"))
+         (buffer (lem/directory-mode/internal:directory-buffer directory))
+         (row (persistence-test-directory-row buffer "selected.txt")))
+    (unless row
+      (editor-error "Directory place fixture row is missing"))
+    (switch-to-buffer buffer)
+    (move-point (current-point) row)
+    (record-buffer-place buffer)
+    (flush-persistence-state)
+    (let* ((path (persistent-buffer-path buffer))
+           (entry (find path *saved-places* :key #'first :test #'string=)))
+      (persistence-test-log
+       "DIRECTORY-WRITE selected=~a identity=~a"
+       (persistence-test-current-directory-entry)
+       (if (and entry (stringp (second entry))) "path" "other")))))
+
+(define-command lem-yath-test-persistence-directory-read () ()
+  (let* ((directory (persistence-test-path "directory-place/"))
+         (buffer (lem/directory-mode/internal:directory-buffer directory)))
+    ;; Production restoration occurs in the first switch hook.  Calling the
+    ;; helper here would let the regression pass without testing that route.
+    (switch-to-buffer buffer)
+    (persistence-test-log
+     "DIRECTORY-READ selected=~a restored=~a"
+     (or (persistence-test-current-directory-entry) "none")
+     (persistence-test-yes-no
+      (buffer-value buffer 'lem-yath-place-restored-p)))))
+
 (define-command lem-yath-test-persistence-record-save-state () ()
   (let ((buffer (current-buffer)))
     (persistence-test-log
