@@ -1058,7 +1058,8 @@
      (concatenate
       'string
       "GREP alpha=~a tracked-build=~a sibling=~a ignored=~a matches=~d "
-      "readonly=~a active=~a enter=~a finish=~a abort=~a exit=~a")
+      "readonly=~a active=~a enter=~a finish=~a abort=~a exit=~a "
+      "ex=~a ex-count=~d")
      (project-navigation-test-yes-no alpha)
      (project-navigation-test-yes-no tracked-build)
      (project-navigation-test-yes-no sibling)
@@ -1081,7 +1082,13 @@
        lem/grep::*peek-grep-mode-keymap* "C-c C-k"))
      (project-navigation-test-yes-no
       (project-navigation-test-key-bound-p
-       lem/grep::*peek-grep-mode-keymap* "C-x C-q")))
+       lem/grep::*peek-grep-mode-keymap* "C-x C-q"))
+     (project-navigation-test-yes-no
+      (eq (lem-vi-mode/ex-core::find-ex-command "w")
+          'project-grep-ex-write))
+     (count 'project-grep-ex-write
+            lem-vi-mode/ex-core::*command-table*
+            :key #'second :test #'eq))
     (when *project-navigation-test-grep-writeback-focus-pending*
       (setf *project-navigation-test-grep-writeback-focus-pending* nil)
       (project-navigation-test-focus-grep-writeback))
@@ -1263,6 +1270,9 @@
   "F4" 'lem-yath-test-project-navigation-multiline-guard)
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F4" 'lem-yath-test-project-navigation-submit-gamma)
+
+(register-project-grep-ex-write)
+(register-project-grep-ex-write)
 
 (project-navigation-test-log "READY phase=~a"
                              *project-navigation-test-phase*)

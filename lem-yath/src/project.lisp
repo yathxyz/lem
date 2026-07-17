@@ -1290,6 +1290,24 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
       (project-grep-abort-staged-edits)
       (lem-vi-mode/commands:vi-quit)))
 
+(defun project-grep-ex-write (range filename)
+  "Apply staged grep edits for plain :w, or retain native Ex write."
+  (if (project-grep-edit-active-p)
+      (if (and (null range) (string= filename ""))
+          (project-grep-apply-staged-edits)
+          (editor-error
+           "Staged project grep :w accepts no range or filename"))
+      (lem-vi-mode/ex-command::ex-write range filename t)))
+
+(defun register-project-grep-ex-write ()
+  "Install the context-aware :w handler once across configuration reloads."
+  (setf lem-vi-mode/ex-core::*command-table*
+        (delete 'project-grep-ex-write
+                lem-vi-mode/ex-core::*command-table*
+                :key #'second :test #'eq))
+  (push (list "^(w|write)$" 'project-grep-ex-write)
+        lem-vi-mode/ex-core::*command-table*))
+
 (define-command lem-yath-peek-source-escape () ()
   "Leave a non-Normal Vi state before dismissing a peek-source UI."
   (let ((state (lem-vi-mode/core:current-state)))
@@ -1511,6 +1529,7 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
   "Z Z" 'lem-yath-project-grep-normal-write-quit)
 (define-key lem-vi-mode:*normal-keymap*
   "Z Q" 'lem-yath-project-grep-normal-quit)
+(register-project-grep-ex-write)
 
 ;; Hot reloads must not multiply registration work.
 (remove-hook *find-file-hook* 'register-buffer-project)

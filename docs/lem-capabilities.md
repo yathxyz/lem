@@ -1159,8 +1159,9 @@ history.
   `lem-yath-project-grep` in `src/project.lisp`. Its results open read-only. Normal
   `i` (the effective Evil-Collection grep binding) or `C-c C-p` starts an isolated
   editable stage and highlights changed rows without mutating their sources.
-  `ZZ`, `C-c C-c`/`C-c C-e`, or `C-x C-s` applies non-stale rows to source buffers
-  without saving; `ZQ`/`C-c C-k` aborts, while `C-x C-q` and normal-state Escape
+  `ZZ`, Evil-Collection `:w`, `C-c C-c`/`C-c C-e`, or `C-x C-s` applies
+  non-stale rows to source buffers without saving; `ZQ`/`C-c C-k` aborts, while
+  `C-x C-q` and normal-state Escape
   use wgrep's apply-or-discard exit. Each source file is one cancellable change
   group, and changed-after-grep rows are rejected visibly rather than overwritten.
   Ordinary source-buffer save remains the persistence step. The real ncurses gate
@@ -1170,8 +1171,7 @@ history.
   point-preserving replacement primitive, and
   `patches/lem-peek-source-timer.patch` owns and invalidates preview timers.
   Editable headers/newlines, whole-row deletion, region unmarking, multiline
-  replacement, auto-save, per-row error echo, and Evil-Collection's `:w` finish
-  remap remain outside this bounded port.
+  replacement, auto-save, and per-row error echo remain outside this bounded port.
 - ripgrep: not the default, but trivially `(setf lem/grep:*grep-command* "rg"
   lem/grep:*grep-args* "-nH")`.
 

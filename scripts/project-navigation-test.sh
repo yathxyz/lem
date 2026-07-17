@@ -237,6 +237,16 @@ send_chord() {
   done
 }
 
+send_ex_write() {
+  local session=$1
+  tmux_cmd send-keys -t "$session" -l ':'
+  sleep "$KEY_DELAY"
+  tmux_cmd send-keys -t "$session" -l 'w'
+  sleep "$KEY_DELAY"
+  lem_keys "$session" Enter
+  sleep "$KEY_DELAY"
+}
+
 fixture="$(lem-yath_lisp_string "$here/scripts/project-navigation-fixture.lisp")"
 
 start_phase() {
@@ -542,7 +552,7 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
     before=$(report_count '^GREP ')
     lem_keys "$verify_session" F8
     if wait_report_count '^GREP ' "$((before + 1))" &&
-       grep -q '^GREP alpha=yes tracked-build=yes sibling=no ignored=no matches=2 readonly=yes active=no enter=yes finish=yes abort=yes exit=yes$' \
+       grep -q '^GREP alpha=yes tracked-build=yes sibling=no ignored=no matches=2 readonly=yes active=no enter=yes finish=yes abort=yes exit=yes ex=yes ex-count=1$' \
          "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
       pass spc-p-g-buffer \
         'project grep opens read-only with the pinned staged-edit bindings'
@@ -604,7 +614,7 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
         'Escape did not preserve the staged grep UI in Vi Normal state' \
         "$verify_session"
     fi
-    send_chord "$verify_session" Z Z
+    send_ex_write "$verify_session"
     sleep 0.4
     before=$(report_count '^GREP-WRITEBACK result=')
     lem_keys "$verify_session" F8
@@ -612,16 +622,16 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
        grep -q '^GREP-WRITEBACK result=yes source=yes modified=yes disk=no .* active=no readonly=yes status=DONE$' \
          "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
       pass spc-p-g-stage-apply \
-        'Evil-Collection ZZ applied the staged row without saving it'
+        'Evil-Collection :w applied the staged row without saving it'
     else
       fail spc-p-g-stage-apply \
-        'ZZ did not apply and close the staged transaction safely' \
+        ':w did not apply and close the staged transaction safely' \
         "$verify_session"
     fi
 
     lem_keys "$verify_session" C-x o
     sleep 0.3
-    lem_keys "$verify_session" C-x C-s
+    send_ex_write "$verify_session"
     lem_keys "$verify_session" C-x o
     sleep 0.2
     before=$(report_count '^GREP-WRITEBACK result=')
@@ -630,10 +640,25 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
        grep -q '^GREP-WRITEBACK result=yes source=yes modified=no disk=yes .* active=no readonly=yes status=DONE$' \
          "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
       pass spc-p-g-writeback-save \
-        'saving the source window persisted the grep edit to disk'
+        'native :w fallback saved the source edit to disk'
     else
       fail spc-p-g-writeback-save \
         'the source save did not persist the grep edit cleanly' \
+        "$verify_session"
+    fi
+
+    send_chord "$verify_session" i
+    send_chord "$verify_session" Z Z
+    before=$(report_count '^GREP-WRITEBACK result=')
+    lem_keys "$verify_session" F8
+    if wait_report_count '^GREP-WRITEBACK result=' "$((before + 1))" &&
+       grep -q '^GREP-WRITEBACK result=yes source=yes modified=no disk=yes .* active=no readonly=yes status=DONE$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-stage-zz-empty \
+        'Evil-Collection ZZ closed an unchanged staged transaction'
+    else
+      fail spc-p-g-stage-zz-empty \
+        'ZZ did not close an unchanged staged transaction safely' \
         "$verify_session"
     fi
 
