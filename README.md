@@ -181,7 +181,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   failures do not alter candidate identity or prevent ordinary selection.
   Annotation columns use the pinned 20-column/10-cell Marginalia alignment
   policy for wide and narrow labels, while documentation and path fields use
-  terminal-relative, direction-aware ellipsis
+  terminal-relative, direction-aware ellipsis. Already-open prompt popups
+  reflow after terminal resizing without changing their input or focused item
 - completion candidates keep display, filtering, and insertion text separate;
   final insertion and post-accept callbacks are explicit, tracked replacement
   ranges survive filtering, and stale asynchronous results are rejected

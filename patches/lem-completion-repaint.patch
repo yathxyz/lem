@@ -1,0 +1,37 @@
+--- a/src/ext/completion-mode.lisp
++++ b/src/ext/completion-mode.lisp
+@@ -23 +23,2 @@
+-           :completion-refresh)
++           :completion-refresh
++           :completion-repaint)
+@@ -518,0 +520,11 @@
++(defun completion-repaint ()
++  "Recompute an active completion presentation without moving its focus row.
++
++Unlike `completion-refresh', this is for display-only changes such as a
++terminal resize.  It deliberately reruns the provider so width-dependent
++annotations can be rendered again while the prompt input remains unchanged."
++  (alexandria:when-let ((context *completion-context*))
++    (if (context-local-filtering-p context)
++        (completion-refilter context :keep-focus t)
++        (continue-completion context :keep-focus t))))
++
+@@ -821 +833 @@
+-(defun present-context-items (context items generation)
++(defun present-context-items (context items generation &key keep-focus)
+@@ -840,0 +853 @@
++      :keep-focus keep-focus
+@@ -848 +861 @@
+-(defun completion-refilter (context)
++(defun completion-refilter (context &key keep-focus)
+@@ -855 +868,2 @@
+-     generation)))
++     generation
++     :keep-focus keep-focus)))
+@@ -857 +871 @@
+-(defun continue-completion (context)
++(defun continue-completion (context &key keep-focus)
+@@ -880 +894,2 @@
+-                generation))
++                generation
++                :keep-focus keep-focus))

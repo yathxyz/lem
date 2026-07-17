@@ -8,6 +8,10 @@
 (defparameter *completion-bookmark-context-byte-limit* (* 1024 1024))
 (defparameter *completion-library-metadata-byte-limit* (* 64 1024))
 (defvar *completion-annotation-window-width-override* nil)
+(defvar *completion-annotation-last-display-width* nil)
+(defvar *completion-annotation-resize-ready-p* nil)
+(defvar *completion-annotation-baseline-timer* nil)
+(defvar *completion-annotation-repaint-in-progress-p* nil)
 
 (defstruct (completion-annotation-field
             (:constructor make-completion-annotation-field
@@ -668,6 +672,46 @@ When FROM-LEFT is true, preserve the useful end of paths and locations."
         'completion-annotated-file-function))
 
 (completion-install-prompt-producers)
+
+(defun completion-annotation-establish-resize-baseline ()
+  "Record stable frontend geometry before enabling live popup repaint."
+  (setf *completion-annotation-last-display-width* (display-width)
+        *completion-annotation-resize-ready-p* t
+        *completion-annotation-baseline-timer* nil))
+
+(defun completion-annotation-window-size-change (window)
+  "Repaint an active prompt popup after its terminal width changes."
+  (when (and *completion-annotation-resize-ready-p*
+             (not (floating-window-p window))
+             (not (attached-window-p window)))
+    (let ((width (display-width)))
+      (unless (eql width *completion-annotation-last-display-width*)
+        (setf *completion-annotation-last-display-width* width)
+        (alexandria:when-let*
+            ((context lem/completion-mode::*completion-context*)
+             (prompt-window (lem/prompt-window:current-prompt-window)))
+          (when (and
+                 (not *completion-annotation-repaint-in-progress-p*)
+                 (not (lem/completion-mode::context-automatic-p context))
+                 (lem/completion-mode::context-popup-menu context)
+                 (eq (window-buffer prompt-window)
+                     (lem/completion-mode::context-buffer context)))
+            (let ((*completion-annotation-repaint-in-progress-p* t))
+              (with-current-window prompt-window
+                (lem/completion-mode:completion-repaint)))))))))
+
+(remove-hook *window-size-change-functions*
+             'completion-annotation-window-size-change)
+(when *completion-annotation-baseline-timer*
+  (ignore-errors (stop-timer *completion-annotation-baseline-timer*)))
+(setf *completion-annotation-resize-ready-p* nil
+      *completion-annotation-last-display-width* (display-width)
+      *completion-annotation-baseline-timer*
+      (make-timer #'completion-annotation-establish-resize-baseline
+                  :name "lem-yath completion resize baseline"))
+(add-hook *window-size-change-functions*
+          'completion-annotation-window-size-change)
+(start-timer *completion-annotation-baseline-timer* 100 :repeat nil)
 
 ;;; Recent files -------------------------------------------------------------
 

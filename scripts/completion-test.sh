@@ -97,6 +97,23 @@ capture_prompt_state() {
   return 1
 }
 
+capture_layout_state() {
+  local session=$1 before count
+  before=$(grep -c '^LAYOUT ' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+  before=${before:-0}
+  lem_keys "$session" F9
+  for _ in $(seq 1 40); do
+    count=$(grep -c '^LAYOUT ' "$LEM_YATH_COMPLETION_REPORT" 2>/dev/null || true)
+    count=${count:-0}
+    if [ "$count" -gt "$before" ]; then
+      grep '^LAYOUT ' "$LEM_YATH_COMPLETION_REPORT" | tail -n 1
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 s1="lem-yath-completion-a-$id"
 if start_session "$s1"; then
   if open_query "$s1" lem-yath-test-marginalia-command; then
@@ -168,6 +185,44 @@ if start_session "$s1"; then
     else
       fail marginalia-wide-layout \
         "unexpected 120-column layout: $layout" "$s1"
+    fi
+
+    lem_keys "$s1" Down
+    focus_before_resize=$(capture_prompt_state "$s1" || true)
+    tmux_cmd resize-window -t "$s1" -x 64 -y 30
+    sleep 0.7
+    narrow_live_layout=$(capture_layout_state "$s1" || true)
+    narrow_live_focus=$(capture_prompt_state "$s1" || true)
+    if grep -Fq 'FOCUS=界界界界界界界界界界' \
+         <<<"$focus_before_resize" &&
+       grep -Fq 'FOCUS=界界界界界界界界界界' \
+         <<<"$narrow_live_focus" &&
+       grep -Fq 'width=64 columns=32,32' <<<"$narrow_live_layout" &&
+       grep -Fq 'ABCDEFGHIJKLMNO…' <<<"$narrow_live_layout" &&
+       lem_capture "$s1" | grep -Fq 'Layout:'; then
+      pass marginalia-live-narrow-resize \
+        'an open prompt reflowed narrowly without input or focus changes'
+    else
+      fail marginalia-live-narrow-resize \
+        "live narrow resize changed layout or focus: $narrow_live_layout / $narrow_live_focus" \
+        "$s1"
+    fi
+
+    tmux_cmd resize-window -t "$s1" -x 120 -y 35
+    sleep 0.7
+    wide_live_layout=$(capture_layout_state "$s1" || true)
+    wide_live_focus=$(capture_prompt_state "$s1" || true)
+    if grep -Fq 'FOCUS=界界界界界界界界界界' \
+         <<<"$wide_live_focus" &&
+       grep -Fq 'width=120 columns=32,32' <<<"$wide_live_layout" &&
+       grep -Fq 'ABCDEFGHIJKLMNOPQRSTUVWXYZ012…' <<<"$wide_live_layout" &&
+       ! grep -Fq 'ABCDEFGHIJKLMNO…' <<<"$wide_live_layout"; then
+      pass marginalia-live-wide-resize \
+        'the same open prompt expanded while retaining its selected candidate'
+    else
+      fail marginalia-live-wide-resize \
+        "live wide resize changed layout or focus: $wide_live_layout / $wide_live_focus" \
+        "$s1"
     fi
   else
     fail marginalia-wide-layout \

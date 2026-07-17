@@ -443,12 +443,14 @@ cells, so CJK and other wide text cannot shift the detail column. Supported
 documentation, signature, value, source, buffer-path, and bookmark fields use
 the pinned maximum of 80 cells reduced to half the active terminal width;
 documentation keeps its beginning, while paths keep their useful end. The real
-ncurses gate verifies identical detail columns for narrow and wide labels and
-reopens the same prompt at 64 and 120 columns to prove the field budget changes.
+ncurses gate verifies identical detail columns for narrow and wide labels. It
+also keeps one prompt open while changing the terminal from 120 to 64 columns
+and back, proving that field budgets repaint immediately while prompt input and
+the focused candidate remain unchanged.
 Special file modes, conditional foreign ownership, and generic metadata-failure
 fallback remain source-inspected. Marginalia's unsupported face and package
-categories, per-field semantic faces, remote fields, and repainting an already
-open popup after a bare terminal resize remain outside this approximation.
+categories, per-field semantic faces, and remote fields remain outside this
+approximation.
 
 The active Helpful leader workflows are no longer routed through generic
 apropos. `SPC h k` indexes every currently fbound, package-qualified Lisp symbol
