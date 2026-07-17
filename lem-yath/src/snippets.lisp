@@ -91,7 +91,8 @@
 (defstruct snippet-rendering
   text
   occurrences
-  indent-offsets)
+  indent-offsets
+  auto-next-p)
 
 (defstruct snippet-field
   id
@@ -602,6 +603,146 @@
             :do (incf cursor))
       (values nil nil))))
 
+(defun snippet-parse-literal-choice-expression (expression)
+  "Parse the pinned data-only Yasnippet choice EXPRESSION.
+
+Return its literal strings and whether `yas-auto-next' wraps the choice.  This
+is a bounded character parser, not a Common Lisp or Emacs Lisp reader."
+  (when (> (length expression) (* 64 1024))
+    (return-from snippet-parse-literal-choice-expression (values nil nil)))
+  (let ((index 0)
+        (length (length expression)))
+    (labels
+        ((space-p (character)
+           (find character '(#\Space #\Tab #\Newline #\Return)
+                 :test #'char=))
+         (skip-space ()
+           (loop :while (and (< index length)
+                             (space-p (char expression index)))
+                 :do (incf index)))
+         (expect-character (expected)
+           (skip-space)
+           (unless (and (< index length)
+                        (char= (char expression index) expected))
+             (error "Unexpected literal-choice syntax"))
+           (incf index))
+         (consume-token (token)
+           (skip-space)
+           (unless (and (<= (+ index (length token)) length)
+                        (string= token expression
+                                 :start2 index
+                                 :end2 (+ index (length token))))
+             (error "Unexpected literal-choice token"))
+           (incf index (length token)))
+         (read-string ()
+           (expect-character #\")
+           (let ((value
+                   (with-output-to-string (output)
+                     (loop
+                       (when (>= index length)
+                         (error "Unclosed literal-choice string"))
+                       (let ((character (char expression index)))
+                         (incf index)
+                         (cond
+                           ((char= character #\") (return))
+                           ((char= character #\\)
+                            (when (>= index length)
+                              (error "Incomplete literal-choice escape"))
+                            (let ((escaped (char expression index)))
+                              (incf index)
+                              (write-char
+                               (case escaped
+                                 (#\" #\")
+                                 (#\\ #\\)
+                                 (#\n #\Newline)
+                                 (#\r #\Return)
+                                 (#\t #\Tab)
+                                 (otherwise
+                                  (error "Unsupported literal-choice escape")))
+                               output)))
+                           (t (write-char character output))))))))
+             (when (or (> (length value) 4096)
+                       (find #\Newline value)
+                       (find #\Return value)
+                       (find #\Null value))
+               (error "Unsafe literal-choice value"))
+             value))
+         (read-choices ()
+           (skip-space)
+           (let ((quoted-list-p
+                   (and (< index length)
+                        (char= (char expression index) #\')))
+                 (choices nil)
+                 (total 0))
+             (when quoted-list-p
+               (incf index)
+               (expect-character #\())
+             (loop
+               (skip-space)
+               (when (and quoted-list-p
+                          (< index length)
+                          (char= (char expression index) #\)))
+                 (incf index)
+                 (return))
+               (when (and (not quoted-list-p)
+                          (< index length)
+                          (char= (char expression index) #\)))
+                 (return))
+               (let ((choice (read-string)))
+                 (incf total (length choice))
+                 (when (or (> (length choices) 255)
+                           (> total (* 64 1024)))
+                   (error "Literal-choice set is too large"))
+                 (push choice choices)))
+             (unless choices
+               (error "Literal-choice set is empty"))
+             (nreverse choices)))
+         (read-choice-body ()
+           (consume-token "yas-choose-value")
+           (let ((choices (read-choices)))
+             (expect-character #\))
+             choices))
+         (read-choice-call ()
+           (expect-character #\()
+           (read-choice-body)))
+      (handler-case
+          (progn
+            (expect-character #\()
+            (skip-space)
+            (let ((auto-next-p
+                    (and (<= (+ index (length "yas-auto-next")) length)
+                         (string= "yas-auto-next" expression
+                                  :start2 index
+                                  :end2 (+ index
+                                           (length "yas-auto-next"))))))
+              (let ((choices
+                      (if auto-next-p
+                          (progn
+                            (consume-token "yas-auto-next")
+                            (prog1 (read-choice-call)
+                              (expect-character #\))))
+                          (read-choice-body))))
+                (skip-space)
+                (unless (= index length)
+                  (error "Trailing literal-choice syntax"))
+                (values choices auto-next-p))))
+        (error () (values nil nil))))))
+
+(defun snippet-braced-field-number-at (body index)
+  "Return the numbered field beginning at BODY INDEX, if any."
+  (when (and (< (1+ index) (length body))
+             (char= (char body index) #\$)
+             (char= (char body (1+ index)) #\{))
+    (let ((start (+ index 2))
+          (end (+ index 2)))
+      (loop :while (and (< end (length body))
+                        (digit-char-p (char body end)))
+            :do (incf end))
+      (and (< start end)
+           (< end (length body))
+           (find (char body end) '(#\: #\}) :test #'char=)
+           (parse-integer body :start start :end end)))))
+
 (defun snippet-pure-transform-at (source index)
   "Return a safe transform kind and offset after its field-closing brace."
   (multiple-value-bind (expression after-expression)
@@ -618,36 +759,48 @@
           (values (snippet-safe-transform-kind expression) (1+ cursor)))))))
 
 (defun snippet-safe-transform-reason (body)
-  (loop :with field-depth = 0
+  (loop :with field-stack = nil
         :with index = 0
         :while (< index (length body))
         :for character = (char body index)
         :for unescaped-p = (snippet-unescaped-p body index)
         :do (cond
               ((and unescaped-p
-                    (plusp field-depth)
+                    field-stack
                     (snippet-transform-start-p body index))
-               (multiple-value-bind (kind after-field)
-                   (snippet-pure-transform-at body index)
-                 (let ((before index))
-                   (loop :while (and (plusp before)
-                                     (find (char body (1- before))
-                                           '(#\Space #\Tab #\Newline #\Return)
-                                           :test #'char=))
-                         :do (decf before))
-                   (unless (and kind after-field (plusp before)
-                                (char= (char body (1- before)) #\:))
-                     (return "an unsupported field transform"))
-                   (setf index after-field)
-                   (decf field-depth))))
+               (multiple-value-bind (expression after-expression)
+                   (snippet-transform-expression-at body index)
+                 (multiple-value-bind (choices auto-next-p)
+                     (and expression
+                          (snippet-parse-literal-choice-expression expression))
+                   (if choices
+                       (progn
+                         (when (and auto-next-p
+                                    (not (eql (first field-stack) 1)))
+                           (return "an unsupported yas-auto-next field"))
+                         (setf index after-expression))
+                       (multiple-value-bind (kind after-field)
+                           (snippet-pure-transform-at body index)
+                         (let ((before index))
+                           (loop :while (and (plusp before)
+                                             (find (char body (1- before))
+                                                   '(#\Space #\Tab #\Newline
+                                                     #\Return)
+                                                   :test #'char=))
+                                 :do (decf before))
+                           (unless (and kind after-field (plusp before)
+                                        (char= (char body (1- before)) #\:))
+                             (return "an unsupported field transform"))
+                           (setf index after-field)
+                           (pop field-stack)))))))
               ((and unescaped-p
                     (char= character #\$)
                     (< (1+ index) (length body))
                     (char= (char body (1+ index)) #\{))
-               (incf field-depth)
+               (push (snippet-braced-field-number-at body index) field-stack)
                (incf index))
-              ((and unescaped-p (char= character #\}) (plusp field-depth))
-               (decf field-depth)
+              ((and unescaped-p (char= character #\}) field-stack)
+               (pop field-stack)
                (incf index))
               (t (incf index)))))
 
@@ -919,12 +1072,73 @@
             :do (write-char #\\ output)
           :do (write-char character output))))
 
-(defun snippet-expand-safe-backquotes (body buffer point)
-  (snippet-map-backquotes
-   body
-   (lambda (expression)
-     (snippet-escape-render-literal
-      (snippet-evaluate-backquote expression buffer point)))))
+(defun snippet-expand-safe-choices (body)
+  "Resolve bounded literal Yasnippet choices in BODY without evaluating Lisp."
+  (let ((auto-next-p nil)
+        (field-depth 0))
+    (values
+     (with-output-to-string (output)
+       (loop :with index = 0
+             :with length = (length body)
+             :while (< index length)
+             :for character = (char body index)
+             :for unescaped-p = (snippet-unescaped-p body index)
+             :do (cond
+                   ((and unescaped-p
+                         (plusp field-depth)
+                         (snippet-transform-start-p body index))
+                    (multiple-value-bind (expression after-expression)
+                        (snippet-transform-expression-at body index)
+                      (multiple-value-bind (choices choice-auto-next-p)
+                          (and expression
+                               (snippet-parse-literal-choice-expression
+                                expression))
+                        (if choices
+                            (let ((choice
+                                    (prompt-for-string
+                                     "Choose: "
+                                     :completion-function
+                                     (lambda (input)
+                                       (prescient-filter input choices))
+                                     :test-function
+                                     (lambda (input)
+                                       (member input choices :test #'string=)))))
+                              (write-string
+                               (snippet-escape-render-literal choice) output)
+                              (setf auto-next-p
+                                    (or auto-next-p choice-auto-next-p)
+                                    index after-expression))
+                            (progn
+                              (write-char character output)
+                              (incf index))))))
+                   ((and unescaped-p
+                         (char= character #\$)
+                         (< (1+ index) length)
+                         (char= (char body (1+ index)) #\{))
+                    (incf field-depth)
+                    (write-char character output)
+                    (incf index))
+                   ((and unescaped-p
+                         (char= character #\})
+                         (plusp field-depth))
+                    (decf field-depth)
+                    (write-char character output)
+                    (incf index))
+                   (t
+                    (write-char character output)
+                    (incf index)))))
+     auto-next-p)))
+
+(defun snippet-expand-safe-dynamics (body buffer point)
+  (multiple-value-bind (choices-expanded auto-next-p)
+      (snippet-expand-safe-choices body)
+    (values
+     (snippet-map-backquotes
+      choices-expanded
+      (lambda (expression)
+        (snippet-escape-render-literal
+         (snippet-evaluate-backquote expression buffer point))))
+     auto-next-p)))
 
 (defun snippet-executable-body-reason (body)
   (or (snippet-safe-transform-reason body)
@@ -1139,12 +1353,16 @@
   "Render TEMPLATE to plain text and position records.
 
 Only trusted file templates may use the bounded Yasnippet translation layer."
-  (let* ((source
-           (if (eq (snippet-template-evaluation-policy template)
-                   :safe-yasnippet)
-               (snippet-expand-safe-backquotes
-                (snippet-template-body template) buffer point)
-               (snippet-template-body template)))
+  (let ((auto-next-p nil))
+    (let* ((source
+             (if (eq (snippet-template-evaluation-policy template)
+                     :safe-yasnippet)
+                 (multiple-value-bind (expanded expanded-auto-next-p)
+                     (snippet-expand-safe-dynamics
+                      (snippet-template-body template) buffer point)
+                   (setf auto-next-p expanded-auto-next-p)
+                   expanded)
+                 (snippet-template-body template)))
          (length (length source))
          (output (make-array 128 :element-type 'character
                              :adjustable t :fill-pointer 0))
@@ -1282,10 +1500,11 @@ Only trusted file templates may use the bounded Yasnippet translation layer."
                       (emit character)
                       (incf index)))))))
       (parse-segment 0 nil nil))
-    (make-snippet-rendering
-     :text (coerce output 'string)
-     :occurrences (snippet-resolve-occurrence-identities occurrences)
-     :indent-offsets (nreverse indent-offsets))))
+      (make-snippet-rendering
+       :text (coerce output 'string)
+       :occurrences (snippet-resolve-occurrence-identities occurrences)
+       :indent-offsets (nreverse indent-offsets)
+       :auto-next-p auto-next-p))))
 
 ;;; Session construction and editing ----------------------------------------
 
@@ -1881,7 +2100,10 @@ original text and return NIL."
                             (dolist (point indent-points)
                               (ignore-errors (delete-point point)))))
                         (if fields
-                            (snippet-activate-index session 0)
+                            (progn
+                              (snippet-activate-index session 0)
+                              (when (snippet-rendering-auto-next-p rendering)
+                                (snippet-move-field 1)))
                             (snippet-finish-at-exit session))
                         t)))))
             (error (condition)

@@ -96,9 +96,14 @@
                            (setf largest parsed)))
                  :finally (return largest)))
          (supported (count-if #'snippet-template-supported-p templates))
-         (unsupported (- (length templates) supported)))
+         (unsupported (- (length templates) supported))
+         (choice-templates
+           (remove-if-not
+            (lambda (template)
+              (search "yas-choose-value" (snippet-template-body template)))
+            templates)))
     (snippet-test-report
-     "CORPUS total=~d supported=~d unsupported=~d safe-backquote=~d safe-condition=~d"
+     "CORPUS total=~d supported=~d unsupported=~d safe-backquote=~d safe-condition=~d safe-choice=~d"
      (length templates) supported unsupported
      (count-if
       (lambda (template)
@@ -109,7 +114,15 @@
       (lambda (template)
         (and (snippet-template-supported-p template)
              (snippet-template-condition-policy template)))
-      templates))
+      templates)
+     (count-if #'snippet-template-supported-p choice-templates))
+    (dolist (template choice-templates)
+      (snippet-test-report
+       "CORPUS-CHOICE name=~a supported=~a reason=~a path=~a"
+       (snippet-template-name template)
+       (if (snippet-template-supported-p template) "yes" "no")
+       (or (snippet-template-unsupported-reason template) "none")
+       (snippet-template-pathname template)))
     (dolist (reason (remove-duplicates
                      (remove nil
                              (mapcar #'snippet-template-unsupported-reason
@@ -203,6 +216,61 @@
              (snippet-test-report "DYNAMIC-ORACLE ok=no error=~a" condition)
              nil))
       (delete-buffer buffer))))
+
+(defun snippet-test-literal-choice-oracle ()
+  (labels ((parse (expression)
+             (multiple-value-list
+              (snippet-parse-literal-choice-expression expression)))
+           (refused-p (result)
+             (null (first result))))
+    (let* ((listed
+             (parse "(yas-choose-value '(\"alpha\" \"beta\" \"\"))"))
+           (flat (parse "(yas-choose-value \"one\" \"two\")"))
+           (automatic
+             (parse
+              "(yas-auto-next (yas-choose-value '(\"first\" \"second\")))"))
+           (computed
+             (parse
+              "(yas-choose-value (progn (touch-file) '(\"unsafe\")))"))
+           (trailing
+             (parse "(yas-choose-value '(\"unsafe\")) (touch-file)"))
+           (unknown-escape
+             (parse "(yas-choose-value '(\"bad\\q\"))"))
+           (multiline
+             (parse (format nil "(yas-choose-value '(\"bad~%line\"))")))
+           (empty (parse "(yas-choose-value '())"))
+           (oversized
+             (parse
+              (concatenate
+               'string "(yas-choose-value '(\""
+               (make-string (* 64 1024) :initial-element #\a)
+               "\"))")))
+           (misplaced-auto-next
+             (snippet-safe-transform-reason
+              "${2:$$(yas-auto-next (yas-choose-value '(\"one\" \"two\")))}"))
+           (ok
+             (and (equal listed '(("alpha" "beta" "") nil))
+                  (equal flat '(("one" "two") nil))
+                  (equal automatic '(("first" "second") t))
+                  (refused-p computed)
+                  (refused-p trailing)
+                  (refused-p unknown-escape)
+                  (refused-p multiline)
+                  (refused-p empty)
+                  (refused-p oversized)
+                  (string= misplaced-auto-next
+                           "an unsupported yas-auto-next field"))))
+      (snippet-test-report
+       "CHOICE-ORACLE ok=~a listed=~a flat=~a automatic=~a computed=~a trailing=~a escape=~a multiline=~a empty=~a oversized=~a misplaced-auto=~a"
+       (if ok "yes" "no") (first listed) (first flat) (first automatic)
+       (if (refused-p computed) "refused" "accepted")
+       (if (refused-p trailing) "refused" "accepted")
+       (if (refused-p unknown-escape) "refused" "accepted")
+       (if (refused-p multiline) "refused" "accepted")
+       (if (refused-p empty) "refused" "accepted")
+       (if (refused-p oversized) "refused" "accepted")
+       (or misplaced-auto-next "accepted"))
+      ok)))
 
 (defun snippet-test-switch-to-plain-buffer ()
   (let ((buffer (or (get-buffer "*snippet-test-fundamental*")
@@ -337,6 +405,18 @@
 (define-command lem-yath-test-snippet-transform-setup () ()
   (snippet-test-reset-fundamental "transform"))
 
+(define-command lem-yath-test-snippet-choice-setup () ()
+  (snippet-test-reset-fundamental "literal-choice"))
+
+(define-command lem-yath-test-snippet-choice-abort-setup () ()
+  (snippet-test-reset-fundamental "choice-abort"))
+
+(define-command lem-yath-test-snippet-auto-choice-setup () ()
+  (snippet-test-reset-fundamental "auto-choice"))
+
+(define-command lem-yath-test-snippet-unsafe-choice-setup () ()
+  (snippet-test-reset-fundamental "unsafe-choice"))
+
 (define-command lem-yath-test-snippet-condition-true-setup () ()
   (switch-to-buffer
    (or (get-buffer "*snippet-test-condition-true*")
@@ -462,10 +542,12 @@
 (pushnew 'lem-yath-test-snippet-record-state
          *auto-completion-continue-commands*)
 
+(setf *snippet-test-org-buffer* (current-buffer))
 (snippet-reload)
 (let ((ancestry-ok-p (snippet-test-verify-ancestry)))
   (snippet-test-audit-community-corpus)
   (snippet-test-safe-dynamic-oracle)
+  (snippet-test-literal-choice-oracle)
   (snippet-test-report "ANCESTRY-SUMMARY ok=~a"
                        (if ancestry-ok-p "yes" "no"))
   (snippet-test-report "READY roots=~d ancestry=~a"

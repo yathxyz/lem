@@ -86,6 +86,15 @@ write_snippet "$fixture_snippet_root/fundamental-mode/transform" \
   '${1:Heading}' \
   '${1:$(make-string (string-width yas-text) ?\=)}' \
   '$0'
+write_snippet "$fixture_snippet_root/fundamental-mode/literal-choice" \
+  'literal choice' 'choose' \
+  '${1:$$(yas-choose-value '\''("alpha" "beta" ""))}-$0'
+write_snippet "$fixture_snippet_root/fundamental-mode/auto-choice" \
+  'auto-next literal choice' 'autoch' \
+  '${1:$$(yas-auto-next (yas-choose-value '\''("first" "second")))}:${2:next}:$0'
+write_snippet "$fixture_snippet_root/fundamental-mode/unsafe-choice" \
+  'computed choice refusal' 'badchoice' \
+  '${1:$$(yas-choose-value (progn (touch-file) '\''("unsafe")))}-$0'
 write_snippet "$fixture_snippet_root/lisp-mode/after-mode-change" \
   'after mode change' 'aftermode' '${1:ready}-$0'
 
@@ -238,21 +247,102 @@ if lem_wait_for "$session" 'NORMAL' "$BOOT_TIMEOUT" >/dev/null &&
    wait_report '^ANCESTRY-SUMMARY ok=' "$BOOT_TIMEOUT"; then
   if grep -q '^ANCESTRY-SUMMARY ok=yes$' "$LEM_YATH_SNIPPET_TEST_REPORT" &&
      grep -q \
-       '^CORPUS total=2387 supported=2318 unsupported=69 safe-backquote=62 safe-condition=6$' \
+       '^CORPUS total=2387 supported=2325 unsupported=62 safe-backquote=63 safe-condition=6 safe-choice=7$' \
        "$LEM_YATH_SNIPPET_TEST_REPORT" &&
      grep -q '^DYNAMIC-ORACLE ok=yes ' "$LEM_YATH_SNIPPET_TEST_REPORT" &&
+     grep -q '^CHOICE-ORACLE ok=yes ' "$LEM_YATH_SNIPPET_TEST_REPORT" &&
      wait_report \
        '^READY roots=([2-9]|[1-9][0-9]+) ancestry=yes$' "$BOOT_TIMEOUT"; then
     pass boot \
       "fixture roots, exact ancestry, and pinned corpus counts matched"
   else
     fail boot "one or more snippet ancestry vectors differed"
-    sed -n '/^ANCESTRY /p;/^ANCESTRY-SUMMARY /p;/^CORPUS/p;/^DYNAMIC-ORACLE/p' \
+    sed -n '/^ANCESTRY /p;/^ANCESTRY-SUMMARY /p;/^CORPUS/p;/^DYNAMIC-ORACLE/p;/^CHOICE-ORACLE/p' \
       "$LEM_YATH_SNIPPET_TEST_REPORT" 2>/dev/null || true
     exit 1
   fi
 else
   fail boot "Lem did not load the snippet fixture"
+fi
+
+# Literal `yas-choose-value' data uses the configured completion stack and
+# requires an exact listed value.  The selected value remains field 1 unless
+# the pinned expression explicitly requests `yas-auto-next'.
+if run_mx lem-yath-test-snippet-choice-setup && enter_insert; then
+  send_literal choose
+  lem_keys "$session" Tab
+  if lem_wait_for "$session" 'Choose:' "$WAIT_TIMEOUT" >/dev/null; then
+    send_literal bet
+    lem_keys "$session" Enter
+    sleep 0.4
+    if record_state literal-choice; then
+      assert_state literal-choice literal-choice $'beta-\n' \
+        'active=yes' 'field=1' 'completion=no' 'vi=insert'
+    else
+      fail literal-choice "choice state probe did not run"
+    fi
+  else
+    fail literal-choice "literal choice prompt did not open"
+  fi
+else
+  fail literal-choice "could not prepare literal choice scenario"
+fi
+
+if run_mx lem-yath-test-snippet-choice-abort-setup && enter_insert; then
+  send_literal choose
+  lem_keys "$session" Tab
+  if lem_wait_for "$session" 'Choose:' "$WAIT_TIMEOUT" >/dev/null; then
+    lem_keys "$session" C-g
+    sleep 0.3
+    if record_state choice-abort; then
+      assert_state literal-choice-abort choice-abort 'choose' \
+        'active=no' 'field=none' 'completion=no' 'vi=insert'
+    else
+      fail literal-choice-abort "aborted choice state probe did not run"
+    fi
+  else
+    fail literal-choice-abort "choice prompt did not open for cancellation"
+  fi
+else
+  fail literal-choice-abort "could not prepare choice cancellation"
+fi
+
+if run_mx lem-yath-test-snippet-auto-choice-setup && enter_insert; then
+  send_literal autoch
+  lem_keys "$session" Tab
+  if lem_wait_for "$session" 'Choose:' "$WAIT_TIMEOUT" >/dev/null; then
+    send_literal sec
+    lem_keys "$session" Enter
+    sleep 0.4
+    send_literal changed
+    if record_state auto-choice; then
+      assert_state literal-choice-auto-next auto-choice \
+        $'second:changed:\n' \
+        'active=yes' 'field=2' 'completion=no' 'vi=insert'
+    else
+      fail literal-choice-auto-next "auto-next state probe did not run"
+    fi
+  else
+    fail literal-choice-auto-next "auto-next choice prompt did not open"
+  fi
+else
+  fail literal-choice-auto-next "could not prepare auto-next choice scenario"
+fi
+
+# A computed list is outside the data-only grammar.  It must never prompt or
+# evaluate and must retain its trigger exactly.
+if run_mx lem-yath-test-snippet-unsafe-choice-setup && enter_insert; then
+  send_literal badchoice
+  lem_keys "$session" Tab
+  sleep 0.3
+  if record_state unsafe-choice; then
+    assert_state computed-choice-fail-closed unsafe-choice 'badchoice' \
+      'active=no' 'field=none' 'completion=no'
+  else
+    fail computed-choice-fail-closed "unsafe choice state probe did not run"
+  fi
+else
+  fail computed-choice-fail-closed "could not prepare unsafe choice scenario"
 fi
 
 # The private `jjs' snippet uses the .org filename alias despite Lem's plain

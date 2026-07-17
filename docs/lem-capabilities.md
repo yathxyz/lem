@@ -798,8 +798,8 @@ exact flake-pinned `yasnippet-snippets` commit
 `606ee926df6839243098de6d71332a697518cb86`. That collection contains 2,387
 definitions. Every snippet file is still treated solely as data: a bounded
 semantic translator recognizes exact, audited dynamic forms without invoking a
-Lisp reader or evaluator. The corpus audit classifies 2,318 definitions as
-supported and 69 as explicitly unavailable. The supported set includes 75
+Lisp reader or evaluator. The corpus audit classifies 2,325 definitions as
+supported and 62 as explicitly unavailable. The supported set includes 82
 definitions that previously required dynamic behavior; arbitrary embedded
 Emacs Lisp remains non-executable. The
 configured private corpus contains one snippet, `org-mode/srcblock.snpt`; its
@@ -822,10 +822,16 @@ namespace, and Clojure namespace backquote forms. Pure field mirrors cover case
 conversion, initial capitalization, class-name extraction, display-width
 underlines, numeric increment, comma-list normalization, and the audited
 C/C++/C# conditionals. Six common conditions reproduce the configured shell,
-Go, and JavaScript comment-context behavior. Values are bounded to 1 MiB and
-escaped back into the structural renderer, so filenames or selected text cannot
-inject fields. This policy is attached explicitly to parsed local files; LSP
-templates use a separate literal policy.
+Go, and JavaScript comment-context behavior. Literal data-only
+`yas-choose-value` forms accept either the pinned quoted string list or direct
+string arguments and open a Prescient-filtered `Choose: ` prompt. The pinned
+`yas-auto-next` wrapper advances from the initial choice field after expansion;
+canceling the prompt leaves the trigger and buffer untouched. Choice expressions
+are parsed with strict size and syntax bounds, and computed lists, extra forms,
+newlines, and unknown escapes are refused rather than read or evaluated. Dynamic
+values are escaped back into the structural renderer, so filenames, selected
+text, or choices cannot inject fields. This policy is attached explicitly to
+parsed local files; LSP templates use a separate literal policy.
 
 `Tab` expands a matching trigger or advances the active field; `Shift-Tab`
 moves backward. `C-g` ends the session without deleting its text. At the start
@@ -934,16 +940,17 @@ BibTeX snippets deliberately skip automatic indentation: deterministic template
 text approximates Emacs' intended steady state, not its transient indentation
 calls.
 
-This is not full Yasnippet parity. The remaining 69 definitions comprise 18
-DIX-specific conditions, five unsupported or malformed backquote cases, and 46
-choice, side-effecting, embedded, or mode-specific field transforms. The pinned
+This is not full Yasnippet parity. The remaining 62 definitions comprise 18
+DIX-specific conditions, five unsupported or malformed backquote cases, and 39
+side-effecting, embedded, or mode-specific field transforms. The pinned
 corpus contains no command snippets. Active sessions do not stack because the
 profile retains Yasnippet's `yas-triggers-in-field nil` default, and direct
 snippet key bindings are not installed because the profile configures none.
 Strict TextMate snippet grammar is not implemented. The file-snippet TUI gate
 is `nix run .#snippet-test`; it drives the private snippet, portable field
 grammar, bounded dynamic forms, exact corpus audit, the Prescient selector,
-navigation and editing keys,
+literal choice selection, cancellation, automatic initial-field advance,
+fail-closed computed choices, navigation and editing keys,
 completion/Vi/Paredit precedence,
 indentation, lifecycle cleanup, expansion and field-edit undo/redo revival, and
 a real pinned Python community snippet

@@ -197,9 +197,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   a bounded Yasnippet compatibility engine over the flake-pinned community corpus;
   numbered, anonymous, and nested fields, defaults, mirrors, escapes, safe
   indentation directives, safe date/filename/comment backquotes, common pure
-  field transforms, six context conditions, forward/reverse field navigation,
+  field transforms, six context conditions, literal choice prompts with the
+  pinned initial-field auto-advance behavior, forward/reverse field navigation,
   bounded undo/redo field-session revival, and a Prescient `M-x` insertion
-  prompt are supported for 2,318 definitions; 69 definitions remain
+  prompt are supported for 2,325 definitions; 62 definitions remain
   unavailable, and arbitrary embedded Elisp is never evaluated
 - LSP `insertTextFormat=Snippet` candidates enter the same field-session UI
   after `insertText`, `TextEdit`, or `InsertReplaceEdit` acceptance; direct and
