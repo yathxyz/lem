@@ -59,14 +59,15 @@ the failure is reported once and then silenced until a write succeeds again.")
       (uiop:xdg-data-home "lem/autosave/")))
 
 (defun encode-path (path)
-  "Injectively encode PATH into a single filesystem-safe name component by
-replacing directory separators with #\\! and doubling any literal #\\!. Distinct
-paths never encode to the same string, so their checkpoints never collide."
+  "Injectively encode PATH into a single filesystem-safe name component.
+Every #\\! in the output starts a two-character escape — \"!s\" for #\\/ and
+\"!!\" for a literal #\\! — forming a prefix code, so distinct paths never
+encode to the same string and their checkpoints never collide."
   (with-output-to-string (out)
     (loop :for c :across path
           :do (case c
-                ((#\/ #\\) (write-char #\! out))
-                ((#\!) (write-char #\! out) (write-char #\! out))
+                ((#\/) (write-string "!s" out))
+                ((#\!) (write-string "!!" out))
                 (t (write-char c out))))))
 
 (defun checkpoint-filename (filename)

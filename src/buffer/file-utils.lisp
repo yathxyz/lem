@@ -211,12 +211,14 @@ silently skipped when denied."
   #+sbcl
   (let ((stat (ignore-errors (sb-posix:stat source-path))))
     (when stat
-      (ignore-errors
-       (sb-posix:chmod temp-path (logand (sb-posix:stat-mode stat) #o7777)))
+      ;; chown first: an unprivileged chown() clears setuid/setgid, so the
+      ;; chmod that restores those bits must come after it.
       (ignore-errors
        (sb-posix:chown temp-path
                        (sb-posix:stat-uid stat)
-                       (sb-posix:stat-gid stat)))))
+                       (sb-posix:stat-gid stat)))
+      (ignore-errors
+       (sb-posix:chmod temp-path (logand (sb-posix:stat-mode stat) #o7777)))))
   (values))
 
 (defun open-atomic-temp-stream (temp element-type external-format)
