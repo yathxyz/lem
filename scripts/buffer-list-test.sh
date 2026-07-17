@@ -126,6 +126,21 @@ report_nav() {
   return 1
 }
 
+report_old() {
+  local before attempts=0
+  before=$(grep -c '^OLD ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
+  lem_keys "$session" C-c o
+  while ((attempts < 40)); do
+    if (( $(grep -c '^OLD ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true) > before )); then
+      grep '^OLD ' "$LEM_YATH_BUFFER_LIST_REPORT" | tail -1
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
 report_filter() {
   local before attempts=0
   before=$(grep -c '^FILTER ' "$LEM_YATH_BUFFER_LIST_REPORT" 2>/dev/null || true)
@@ -1192,6 +1207,30 @@ check_star_mark mark-dired mark-dired / buffer-list-mark-dired-hit
 check_star_mark mark-dissociated mark-dissociated e buffer-list-mark-dissociated-hit
 check_star_mark mark-help Help h '*Help*'
 check_star_mark mark-compressed mark-compressed z buffer-list-mark-compressed-hit.GZ
+
+lem_keys "$session" s / U J
+if lem_wait_for "$session" 'Jump to buffer:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'buffer-list-mark-old-hit'
+  lem_keys "$session" Enter d J
+  if lem_wait_for "$session" 'Jump to buffer:' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l 'buffer-list-mark-old-never'
+    lem_keys "$session" Enter d .
+    nav=$(report_nav || true)
+    old=$(report_old || true)
+    if [[ "$nav" == *'buffer-list-mark-old-hit:>'* ]] &&
+       [[ "$nav" == *'buffer-list-mark-old-never:D'* ]] &&
+       [[ "$nav" != *'buffer-list-mark-old-recent:>'* ]] &&
+       [[ "$old" == 'OLD never=no boundary=no after=yes binding=LEM-YATH-BUFFER-LIST-MARK-OLD picker-displayed=yes' ]]; then
+      pass mark-old ". marked only buffers strictly older than 72 hours"
+    else
+      fail mark-old "old-buffer marking or timestamp semantics diverged: $nav / $old"
+    fi
+  else
+    fail mark-old "could not focus the never-displayed fixture"
+  fi
+else
+  fail mark-old "could not focus the old-buffer fixture"
+fi
 
 lem_keys "$session" s / U '*' M
 if lem_wait_for "$session" 'Mark by major mode' 10 >/dev/null; then

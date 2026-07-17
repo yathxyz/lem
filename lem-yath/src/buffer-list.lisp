@@ -3,6 +3,43 @@
 (in-package :lem-yath)
 
 (define-editor-variable buffer-lock-mode nil)
+(define-editor-variable ibuffer-old-time 72
+  "The number of hours before Ibuffer considers a buffer old.")
+
+(defconstant +buffer-list-display-time-key+
+  'lem-yath-buffer-display-time)
+
+(defun buffer-list-buffer-display-time (buffer)
+  "Return BUFFER's last window-display time, or NIL if it was never displayed."
+  (buffer-value buffer +buffer-list-display-time-key+))
+
+(defun (setf buffer-list-buffer-display-time) (time buffer)
+  (setf (buffer-value buffer +buffer-list-display-time-key+) time))
+
+(defun buffer-list-record-display-time (buffer &optional
+                                                 (time (get-universal-time)))
+  "Record TIME as BUFFER's most recent display in a window."
+  (setf (buffer-list-buffer-display-time buffer) time))
+
+(defmethod initialize-instance :around ((window lem-core:window)
+                                        &rest initargs)
+  "Match Emacs's non-NIL display time for a buffer used to create a window."
+  (declare (ignore initargs))
+  ;; An :after method with this specializer would replace Lem's own window
+  ;; initializer.  Run outside the complete standard initialization instead.
+  (let ((initialized-window (call-next-method)))
+    (buffer-list-record-display-time (window-buffer initialized-window))
+    initialized-window))
+
+(defmethod lem-core::set-window-buffer :after
+    (buffer (window lem-core:window))
+  "Match Emacs's `set-window-buffer' update of `buffer-display-time'."
+  (declare (ignore window))
+  (buffer-list-record-display-time buffer))
+
+;; The initial editor window predates the configuration load.
+(dolist (window (window-list))
+  (buffer-list-record-display-time (window-buffer window)))
 
 (defun buffer-list-buffer-locked-p (buffer)
   "Return true when BUFFER has GNU Emacs's default `all' lock."
@@ -892,6 +929,16 @@ Each nonempty group begins with a distinct heading entry."
      "\\.(?:arj|bgz|bz2|gz|lzh|taz|tgz|xz|zip|z)$"
      (namestring filename))))
 
+(defun buffer-list-old-buffer-p (buffer &optional (now (get-universal-time)))
+  "Return true when BUFFER was last displayed over `ibuffer-old-time' hours ago.
+
+Like GNU Ibuffer, a never-displayed buffer is not old and the age comparison is
+strict: a buffer exactly at the threshold is not marked."
+  (alexandria:when-let ((display-time
+                         (buffer-list-buffer-display-time buffer)))
+    (> (- now display-time)
+       (* 60 60 (variable-value 'ibuffer-old-time :global)))))
+
 (define-command lem-yath-buffer-list-mark-modified () ()
   (buffer-list-mark-matching
    (lem/multi-column-list::current-multi-column-list) #'buffer-modified-p))
@@ -934,6 +981,12 @@ Each nonempty group begins with a distinct heading entry."
   (buffer-list-mark-matching
    (lem/multi-column-list::current-multi-column-list)
    #'buffer-list-compressed-file-buffer-p))
+
+(define-command lem-yath-buffer-list-mark-old () ()
+  "Mark visible buffers not displayed in `ibuffer-old-time' hours."
+  (buffer-list-mark-matching
+   (lem/multi-column-list::current-multi-column-list)
+   #'buffer-list-old-buffer-p))
 
 (defun buffer-list-compile-mark-regexp (pattern)
   "Compile PATTERN before any Ibuffer mark is changed."
@@ -3283,6 +3336,8 @@ through later selected buffers without wrapping."
   'lem-yath-buffer-list-mark-compressed-file)
 (define-key *buffer-list-picker-mode-keymap* "* M"
   'lem-yath-buffer-list-mark-by-mode)
+(define-key *buffer-list-picker-mode-keymap* "."
+  'lem-yath-buffer-list-mark-old)
 (define-key *buffer-list-picker-mode-keymap* "% n"
   'lem-yath-buffer-list-mark-by-name-regexp)
 (define-key *buffer-list-picker-mode-keymap* "% m"

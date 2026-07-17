@@ -25,6 +25,9 @@
 (defvar *buffer-list-test-query-read-only* nil)
 (defvar *buffer-list-test-query-expand* nil)
 (defvar *buffer-list-test-process* nil)
+(defvar *buffer-list-test-old* nil)
+(defvar *buffer-list-test-recent* nil)
+(defvar *buffer-list-test-never-displayed* nil)
 
 (define-major-mode buffer-list-test-long-mode ()
     (:name "Long Fixture Mode Name"))
@@ -210,6 +213,27 @@
                     (buffer-name (buffer-list-entry-buffer entry))))))
     (buffer-list-test-log
      "FILTER stack=~{~a~^,+~} visible=~{~a~^,~}" filters visible)))
+
+(define-command lem-yath-test-buffer-list-old-state () ()
+  (let* ((probe (make-buffer "buffer-list-old-boundary-probe"))
+         (now (get-universal-time))
+         (threshold (* 60 60 (variable-value 'ibuffer-old-time :global))))
+    (unwind-protect
+         (progn
+           (setf (buffer-list-buffer-display-time probe) nil)
+           (let ((never (buffer-list-old-buffer-p probe now)))
+             (setf (buffer-list-buffer-display-time probe) (- now threshold))
+             (let ((boundary (buffer-list-old-buffer-p probe now))
+                   (after (buffer-list-old-buffer-p probe (1+ now))))
+               (buffer-list-test-log
+                "OLD never=~a boundary=~a after=~a binding=~a picker-displayed=~a"
+                (if never "yes" "no")
+                (if boundary "yes" "no")
+                (if after "yes" "no")
+                (buffer-list-test-binding ".")
+                (if (buffer-list-buffer-display-time (current-buffer))
+                    "yes" "no")))))
+      (delete-buffer probe))))
 
 (define-command lem-yath-test-buffer-list-create-late-buffer () ()
   (setf *buffer-list-test-late-buffer*
@@ -740,6 +764,20 @@
          'mark-compressed-miss "buffer-list-mark-compressed-miss.txt")))
   (setf (buffer-filename buffer)
         (uiop:getenv "LEM_YATH_BUFFER_LIST_MARK_COMPRESSED_MISS")))
+(setf *buffer-list-test-old*
+      (buffer-list-test-make-buffer
+       'mark-old-hit "buffer-list-mark-old-hit")
+      *buffer-list-test-recent*
+      (buffer-list-test-make-buffer
+       'mark-old-recent "buffer-list-mark-old-recent")
+      *buffer-list-test-never-displayed*
+      (buffer-list-test-make-buffer
+       'mark-old-never "buffer-list-mark-old-never"))
+(let ((now (get-universal-time)))
+  (setf (buffer-list-buffer-display-time *buffer-list-test-old*)
+        (- now (* 73 60 60))
+        (buffer-list-buffer-display-time *buffer-list-test-recent*) now
+        (buffer-list-buffer-display-time *buffer-list-test-never-displayed*) nil))
 (buffer-list-test-make-buffer
  'control (format nil "ctl~%name"))
 (let ((buffer
@@ -865,6 +903,8 @@
   'lem-yath-test-buffer-list-operation-state)
 (define-key *buffer-list-picker-mode-keymap* "C-c l"
   'lem-yath-test-buffer-list-lock-state)
+(define-key *buffer-list-picker-mode-keymap* "C-c o"
+  'lem-yath-test-buffer-list-old-state)
 (define-key *buffer-list-picker-mode-keymap* "F2"
   'lem-yath-test-buffer-list-picker-bindings)
 (define-key *buffer-list-picker-mode-keymap* "F1"

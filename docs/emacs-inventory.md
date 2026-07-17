@@ -232,6 +232,9 @@ shell-command transcript.
 Content filters skip buffers above 16 million characters rather than allocating
 an unbounded copy; Lem also shows package-qualified mode labels to disambiguate
 its Common Lisp mode registry.
+The stock `.` command uses a real last-window-display timestamp and GNU
+Ibuffer's configurable 72-hour default. The comparison is strict, and a buffer
+with no display timestamp is not marked.
 
 ### 1.4 Mode-local bindings
 

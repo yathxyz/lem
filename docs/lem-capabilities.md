@@ -968,7 +968,9 @@ through the ncurses editor.
   editor exit before any teardown mutation;
   `* *`/`* s`, `* m`, `* u`, `* r`, `* /`, `* e`, `* h`, and `* z` mark
   visible special, modified, unsaved, read-only, directory, dissociated, help,
-  or compressed-file buffers;
+  or compressed-file buffers; `.` marks buffers last displayed strictly more
+  than the configurable 72-hour default ago while leaving never-displayed
+  buffers unmarked;
   `{`/`}` cycle ordinary marks, `M/T/R` change marked modified/read-only/name
   state, and `X` buries the focused buffer while retaining its row;
   `gj/gk`, Tab/backtab, `C-j/C-k`, `]]/[[`, and `q` provide row movement, group
@@ -1042,8 +1044,8 @@ through the ncurses editor.
   Regexp replacement expands `\&`, `\1`–`\9`, `\\`, and a per-buffer `\#`
   count. Read-only target sets, invalid regexps or replacement directives, and
   regexps with empty matches fail before mutation.
-  Ibuffer's predicate filters, compound/saved filter operations, age marking,
-  other-frame, view-and-eval, Occur
+  Ibuffer's predicate filters, compound/saved filter operations, other-frame,
+  view-and-eval, Occur
   edit/rename/clone, shell, eval, and print operations are not reproduced.
   Marked-buffer regexp query-replace omits GNU Lisp-evaluated `\,`, per-match
   `\?` editing, zero-width matching, and the advanced `^`, `u/U`, `e/E`, and

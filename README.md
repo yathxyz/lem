@@ -298,7 +298,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   marks visible special, modified, unsaved, read-only, directory, dissociated,
   help, or compressed-file buffers. `* M` marks an exact used major mode, while
   `% n/m/f/g` mark visible rows by name, displayed mode, file, or bounded
-  content regexp; invalid regexps change no marks.
+  content regexp; invalid regexps change no marks. `.` marks buffers whose last
+  window display was strictly more than the configurable 72-hour default ago;
+  buffers never displayed in a window remain unmarked.
   `{`/`}` traverse
   ordinary marks; `M`, `T`, and `R` toggle modified/read-only state or rename
   marked buffers uniquely, `V` confirms once before safely reverting the
