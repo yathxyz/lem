@@ -311,6 +311,15 @@
   body
   selection)
 
+(defstruct jj-restore-state
+  revision
+  from
+  into
+  changes-in
+  fileset
+  restore-descendants
+  ignore-immutable)
+
 (defun jj-split-null-fields (text)
   "Split TEXT at NUL characters without interpreting its contents."
   (let ((start 0)
@@ -816,6 +825,221 @@
   (let ((root (jj-current-root))
         (revision (jj-current-log-revision)))
     (dispatch-jj-revert root revision)))
+
+(defun jj-restore-state-label (value)
+  "Return a bounded popup label for restore VALUE."
+  (if value (completion-bounded-annotation value) "(unset)"))
+
+(defun jj-restore-keymap (state)
+  "Build a Majutsu-style restore popup for STATE."
+  (let* ((keymap (make-keymap :description "JJ Restore"))
+         (revision (jj-restore-state-revision state))
+         (from (jj-restore-state-from state))
+         (into (jj-restore-state-into state))
+         (changes-in (jj-restore-state-changes-in state)))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist
+        (entry
+          (list
+           (list "f" (format nil "from selected row: ~a~a"
+                              revision
+                              (if (equal from revision) " [selected]" "")))
+           (list "t" (format nil "into selected row: ~a~a"
+                              revision
+                              (if (equal into revision) " [selected]" "")))
+           (list "c" (format nil "changes in selected row: ~a~a"
+                              revision
+                              (if (equal changes-in revision)
+                                  " [selected]"
+                                  "")))
+           (list "-" "options: revsets, fileset, descendants, immutable")
+           (list "x" "clear revision selections")
+           (list "r" "restore")
+           (list "q" "cancel")))
+      (destructuring-bind (key description) entry
+        (define-key keymap key 'nop-command)
+        (setf (lem-core::prefix-description
+               (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
+              description)))
+    keymap))
+
+(defun jj-restore-option-keymap (state)
+  "Build the option suffix popup for restore STATE."
+  (let ((keymap (make-keymap :description "JJ Restore options")))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist
+        (entry
+          (list
+           (list "f" (format nil "from revset: ~a"
+                              (jj-restore-state-label
+                               (jj-restore-state-from state))))
+           (list "t" (format nil "into revset: ~a"
+                              (jj-restore-state-label
+                               (jj-restore-state-into state))))
+           (list "c" (format nil "changes-in revset: ~a"
+                              (jj-restore-state-label
+                               (jj-restore-state-changes-in state))))
+           (list "-" (format nil "fileset/path: ~a"
+                              (jj-restore-state-label
+                               (jj-restore-state-fileset state))))
+           (list "d" (format nil "restore descendants: ~:[off~;on~]"
+                              (jj-restore-state-restore-descendants state)))
+           (list "I" (format nil "ignore immutable: ~:[off~;on~]"
+                              (jj-restore-state-ignore-immutable state)))
+           (list "q" "back")))
+      (destructuring-bind (key description) entry
+        (define-key keymap key 'nop-command)
+        (setf (lem-core::prefix-description
+               (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
+              description)))
+    keymap))
+
+(defun jj-restore-select-row (state category)
+  "Toggle STATE's selected revision in restore CATEGORY."
+  (let ((revision (jj-restore-state-revision state)))
+    (ecase category
+      (:from
+       (setf (jj-restore-state-from state)
+             (unless (equal (jj-restore-state-from state) revision) revision)
+             (jj-restore-state-changes-in state) nil))
+      (:into
+       (setf (jj-restore-state-into state)
+             (unless (equal (jj-restore-state-into state) revision) revision)
+             (jj-restore-state-changes-in state) nil))
+      (:changes-in
+       (setf (jj-restore-state-changes-in state)
+             (unless (equal (jj-restore-state-changes-in state) revision)
+               revision)
+             (jj-restore-state-from state) nil
+             (jj-restore-state-into state) nil)))))
+
+(defun jj-restore-set-revset (state root category)
+  "Prompt for and set restore CATEGORY on STATE at ROOT."
+  (let ((revision
+          (jj-prompt-for-revision
+           root
+           (ecase category
+             (:from "Restore from revision or revset: ")
+             (:into "Restore into revision or revset: ")
+             (:changes-in "Restore changes in revision or revset: "))
+           (ecase category
+             (:from 'lem-yath-jj-restore-from)
+             (:into 'lem-yath-jj-restore-into)
+             (:changes-in 'lem-yath-jj-restore-changes-in)))))
+    (ecase category
+      (:from
+       (setf (jj-restore-state-from state) revision
+             (jj-restore-state-changes-in state) nil))
+      (:into
+       (setf (jj-restore-state-into state) revision
+             (jj-restore-state-changes-in state) nil))
+      (:changes-in
+       (setf (jj-restore-state-changes-in state) revision
+             (jj-restore-state-from state) nil
+             (jj-restore-state-into state) nil)))))
+
+(defun jj-restore-read-option (state)
+  "Read one `-' restore option key for STATE."
+  (let ((lem/transient:*transient-popup-delay* 0))
+    (keymap-activate (jj-restore-option-keymap state)))
+  (redraw-display)
+  (prog1
+      (lem-core::keyseq-to-string (list (read-key)))
+    (lem/transient::hide-transient)))
+
+(defun jj-restore-handle-option (state root)
+  "Update restore STATE from one Majutsu-style option at ROOT."
+  (let ((name (jj-restore-read-option state)))
+    (cond
+      ((string= name "f") (jj-restore-set-revset state root :from))
+      ((string= name "t") (jj-restore-set-revset state root :into))
+      ((string= name "c") (jj-restore-set-revset state root :changes-in))
+      ((string= name "-")
+       (let ((fileset
+               (prompt-for-string
+                "Restore fileset or path (empty clears): "
+                :history-symbol 'lem-yath-jj-restore-fileset)))
+         (setf (jj-restore-state-fileset state)
+               (unless (str:blankp fileset) fileset))))
+      ((string= name "d")
+       (setf (jj-restore-state-restore-descendants state)
+             (not (jj-restore-state-restore-descendants state))))
+      ((string= name "I")
+       (setf (jj-restore-state-ignore-immutable state)
+             (not (jj-restore-state-ignore-immutable state))))
+      ((or (string= name "q") (string= name "Escape")) nil)
+      (t (message "No restore option is bound to - ~a" name)))))
+
+(defun jj-restore-arguments (state)
+  "Return direct `jj restore' arguments represented by STATE."
+  (let ((arguments (list "restore")))
+    (when (jj-restore-state-from state)
+      (setf arguments
+            (append arguments
+                    (list "--from" (jj-restore-state-from state)))))
+    (when (jj-restore-state-into state)
+      (setf arguments
+            (append arguments
+                    (list "--into" (jj-restore-state-into state)))))
+    (when (jj-restore-state-changes-in state)
+      (setf arguments
+            (append arguments
+                    (list "--changes-in"
+                          (jj-restore-state-changes-in state)))))
+    (when (jj-restore-state-restore-descendants state)
+      (setf arguments (append arguments '("--restore-descendants"))))
+    (when (jj-restore-state-ignore-immutable state)
+      (setf arguments (append arguments '("--ignore-immutable"))))
+    (when (jj-restore-state-fileset state)
+      (setf arguments
+            (append arguments
+                    (list "--" (jj-restore-state-fileset state)))))
+    arguments))
+
+(defun jj-execute-restore (root state)
+  "Execute restore STATE at ROOT and retain the selected history row."
+  (let ((buffer (current-buffer))
+        (revision (jj-restore-state-revision state)))
+    (run-jj root (jj-restore-arguments state))
+    (render-jj-buffer buffer root)
+    (jj-restore-revision-point buffer revision)
+    (message "Jujutsu restore completed")))
+
+(defun dispatch-jj-restore (root revision)
+  "Configure and execute Majutsu-style restore from history REVISION."
+  (let ((state (make-jj-restore-state :revision revision)))
+    (unwind-protect
+         (loop
+           (let ((lem/transient:*transient-popup-delay* 0))
+             (keymap-activate (jj-restore-keymap state)))
+           (redraw-display)
+           (let* ((key (read-key))
+                  (name (lem-core::keyseq-to-string (list key))))
+             (lem/transient::hide-transient)
+             (cond
+               ((string= name "f") (jj-restore-select-row state :from))
+               ((string= name "t") (jj-restore-select-row state :into))
+               ((string= name "c")
+                (jj-restore-select-row state :changes-in))
+               ((string= name "-") (jj-restore-handle-option state root))
+               ((string= name "x")
+                (setf (jj-restore-state-from state) nil
+                      (jj-restore-state-into state) nil
+                      (jj-restore-state-changes-in state) nil))
+               ((string= name "r")
+                (jj-execute-restore root state)
+                (return))
+               ((or (string= name "q") (string= name "Escape"))
+                (message "Jujutsu restore cancelled")
+                (return))
+               (t (message "No restore action is bound to ~a" name)))))
+      (lem/transient::hide-transient))))
+
+(define-command lem-yath-jj-restore () ()
+  "Open the Majutsu-style restore workflow from the selected revision row."
+  (dispatch-jj-restore (jj-current-root) (jj-current-log-revision)))
 
 (defun jj-rebase-keymap ()
   "Build the focused Majutsu-style rebase popup."
@@ -1891,7 +2115,7 @@
 (define-command lem-yath-jj-help () ()
   "Show the focused Majutsu-compatible Jujutsu command surface."
   (message
-   "Jujutsu: c/C describe/commit, o/O/I/A new, ./[/] working-copy/parent/child, s/S squash/split, r rebase, _ revert, y/Y duplicate, b bookmarks, e edit, u/C-r undo/redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
+   "Jujutsu: c/C describe/commit, o/O/I/A new, ./[/] working-copy/parent/child, s/S squash/split, r rebase, _ revert, R restore, y/Y duplicate, b bookmarks, e edit, u/C-r undo/redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
 
 (define-command lem-yath-jj-quit () ()
   "Quit the current Jujutsu status/log window."
@@ -1931,6 +2155,7 @@
 (define-key *lem-yath-jj-view-keymap* "S" 'lem-yath-jj-split)
 (define-key *lem-yath-jj-view-keymap* "r" 'lem-yath-jj-rebase)
 (define-key *lem-yath-jj-view-keymap* "_" 'lem-yath-jj-revert)
+(define-key *lem-yath-jj-view-keymap* "R" 'lem-yath-jj-restore)
 (define-key *lem-yath-jj-view-keymap* "y" 'lem-yath-jj-duplicate)
 (define-key *lem-yath-jj-view-keymap* "Y" 'lem-yath-jj-duplicate-dwim)
 (define-key *lem-yath-jj-view-keymap* "b" 'lem-yath-jj-bookmark)

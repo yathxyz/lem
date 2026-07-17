@@ -50,12 +50,14 @@ base_change_id=$("$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log \
   --message current >/dev/null
 
 current_description() {
-  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph -r @ \
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+    log --no-graph -r @ \
     --template 'description.first_line()'
 }
 
 current_change_id() {
-  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph -r @ \
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+    log --no-graph -r @ \
     --template change_id
 }
 
@@ -84,12 +86,14 @@ wait_current_change_not() {
 }
 
 visible_description() {
-  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph -r 'all()' \
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+    log --no-graph -r 'all()' \
     --template 'description.first_line() ++ "\n"' | grep -Fxq -- "$1"
 }
 
 revision_count_by_description() {
-  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph -r 'all()' \
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+    log --no-graph -r 'all()' \
     --template 'description.first_line() ++ "\n"' |
     grep -Fxc -- "$1" || true
 }
@@ -107,12 +111,12 @@ wait_revision_count() {
 }
 
 full_description() {
-  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph \
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy log --no-graph \
     -r "$1" --template description
 }
 
 revision_present() {
-  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph \
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy log --no-graph \
     -r "$1" --template change_id >/dev/null 2>&1
 }
 
@@ -124,13 +128,39 @@ revision_has_file() {
       return 0
     fi
   done < <(
-    "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" file list -r "$revision"
+    "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+      file list -r "$revision"
   )
   return 1
 }
 
+wait_revision_has_file() {
+  local revision=$1 path=$2 index=0
+  while ((index < 80)); do
+    if revision_has_file "$revision" "$path"; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+wait_revision_lacks_file() {
+  local revision=$1 path=$2 index=0
+  while ((index < 80)); do
+    if ! revision_has_file "$revision" "$path"; then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
 current_operation_id() {
-  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" op log --no-graph -n 1 \
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+    op log --no-graph -n 1 \
     --template id
 }
 
@@ -147,7 +177,7 @@ wait_revision_absent() {
 }
 
 revision_parent() {
-  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph \
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy log --no-graph \
     -r "($1)-" --template change_id
 }
 
@@ -162,7 +192,8 @@ revision_with_description_parent() {
       return 0
     fi
   done < <(
-    "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log --no-graph -r 'all()' \
+    "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+      log --no-graph -r 'all()' \
       --template 'change_id ++ "\t" ++ description.first_line() ++ "\n"'
   )
   return 1
@@ -181,7 +212,8 @@ wait_revision_parent() {
 }
 
 bookmark_target() {
-  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" bookmark list --quiet "$1" \
+  "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" --ignore-working-copy \
+    bookmark list --quiet "$1" \
     --template 'normal_target.change_id()'
 }
 
@@ -649,6 +681,257 @@ if wait_current_change_id "$initial_working_copy_id" &&
   pass revert-cleanup 'operation restore removed the isolated revert fixture'
 else
   fail revert-cleanup 'revert fixture cleanup did not restore the baseline graph'
+fi
+
+# Restore uses two independent working-copy paths so the gate can distinguish
+# full, fileset-scoped, source, destination, and changes-in operation modes.
+restore_baseline_operation=$(current_operation_id)
+printf 'restore one\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt"
+printf 'restore two\n' >"${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt"
+lem_keys "$session" g r
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" q
+fi
+if [ -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt" ] &&
+   [ -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt" ] &&
+   invoke_report && [[ $(latest_report) == *'description=current '* ]]; then
+  pass restore-cancel 'R q closed the restore popup without mutation'
+else
+  fail restore-cancel 'restore cancellation changed content or the selected row'
+fi
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+lem_wait_for "$session" 'Jujutsu restore completed' 10 >/dev/null || true
+if [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt" ] &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt" ] &&
+   invoke_report && [[ $(latest_report) == *'description=current '* ]]; then
+  pass restore-default 'R r restored the working copy from its parent and retained the row'
+else
+  fail restore-default 'argument-free restore did not discard both working-copy changes'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if wait_revision_has_file "$initial_working_copy_id" restore-one.txt &&
+   wait_revision_has_file "$initial_working_copy_id" restore-two.txt; then
+  pass restore-default-undo 'u restored both discarded working-copy paths'
+else
+  fail restore-default-undo 'default restore was not cleanly undoable'
+fi
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'Restore fileset or path' 10 >/dev/null; then
+  replace_prompt_text 'restore-one.txt'
+fi
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+lem_wait_for "$session" 'Jujutsu restore completed' 10 >/dev/null || true
+if [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt" ] &&
+   [ -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt" ]; then
+  pass restore-fileset 'R -- limited default restore to the prompted path'
+else
+  fail restore-fileset 'fileset restore changed the wrong working-copy paths'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if ! wait_revision_has_file "$initial_working_copy_id" restore-one.txt ||
+   ! wait_revision_has_file "$initial_working_copy_id" restore-two.txt; then
+  fail restore-fileset-undo 'fileset restore was not cleanly undoable'
+fi
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" f
+fi
+if lem_wait_for "$session" 'Restore from revision or revset' 10 >/dev/null; then
+  replace_prompt_text "$base_change_id"
+fi
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+lem_wait_for "$session" 'Jujutsu restore completed' 10 >/dev/null || true
+if [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt" ] &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt" ]; then
+  pass restore-explicit-from 'R - f restored @ from an arbitrary prompted revision'
+else
+  fail restore-explicit-from 'explicit source revset did not restore the working copy'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if ! wait_revision_has_file "$initial_working_copy_id" restore-one.txt ||
+   ! wait_revision_has_file "$initial_working_copy_id" restore-two.txt; then
+  fail restore-explicit-from-undo 'explicit-source restore was not cleanly undoable'
+fi
+
+lem_keys "$session" '['
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" t -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'Restore fileset or path' 10 >/dev/null; then
+  replace_prompt_text 'restore-one.txt'
+fi
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+lem_wait_for "$session" 'Jujutsu restore completed' 10 >/dev/null || true
+if revision_has_file "$base_change_id" restore-one.txt &&
+   revision_has_file "$initial_working_copy_id" restore-one.txt &&
+   invoke_report && [[ $(latest_report) == *'description=base\nbody_line '* ]]; then
+  pass restore-selected-into 'R t restored one path from @ into the selected historical row'
+else
+  fail restore-selected-into 'selected-row destination or point restoration diverged'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if ! wait_revision_lacks_file "$base_change_id" restore-one.txt; then
+  fail restore-selected-into-undo 'historical destination restore was not cleanly undoable'
+fi
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" c x r
+fi
+lem_wait_for "$session" 'Jujutsu restore completed' 10 >/dev/null || true
+if revision_has_file "$base_change_id" 'working copy.txt' &&
+   revision_has_file "$initial_working_copy_id" 'working copy.txt' &&
+   ! revision_has_file "$initial_working_copy_id" restore-one.txt &&
+   ! revision_has_file "$initial_working_copy_id" restore-two.txt; then
+  pass restore-clear 'x cleared changes-in so execution used the working-copy default'
+else
+  fail restore-clear 'clear left a historical changes-in selection active'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if ! wait_revision_has_file "$initial_working_copy_id" restore-one.txt ||
+   ! wait_revision_has_file "$initial_working_copy_id" restore-two.txt; then
+  fail restore-clear-undo 'cleared-selection restore was not cleanly undoable'
+fi
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" c r
+fi
+lem_wait_for "$session" 'Jujutsu restore completed' 10 >/dev/null || true
+if ! revision_has_file "$base_change_id" 'working copy.txt' &&
+   ! revision_has_file "$initial_working_copy_id" 'working copy.txt' &&
+   invoke_report && [[ $(latest_report) == *'description=base\nbody_line '* ]]; then
+  pass restore-changes-in 'R c removed the selected historical change and retained its row'
+else
+  fail restore-changes-in 'selected changes-in restore changed the wrong history'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if ! wait_revision_has_file "$base_change_id" 'working copy.txt' ||
+   ! wait_revision_has_file "$initial_working_copy_id" 'working copy.txt'; then
+  fail restore-changes-in-undo 'historical changes-in restore was not cleanly undoable'
+fi
+
+lem_keys "$session" '.' R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" c
+fi
+if lem_wait_for "$session" 'Restore changes in revision or revset' 10 >/dev/null; then
+  replace_prompt_text 'definitely-no-such-restore-revision'
+fi
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+if lem_wait_for "$session" 'jj restore failed' 10 >/dev/null &&
+   revision_has_file "$initial_working_copy_id" restore-one.txt &&
+   revision_has_file "$initial_working_copy_id" restore-two.txt; then
+  pass restore-refusal 'an invalid changes-in revset surfaced failure without mutation'
+else
+  fail restore-refusal 'invalid restore input changed history or hid failure'
+fi
+
+printf 'preserve through descendant restore\n' \
+  >"${LEM_YATH_JJ_PORCELAIN_ROOT}restore-descendant.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new \
+  --message 'restore descendant child' >/dev/null
+restore_source_id=$initial_working_copy_id
+restore_child_id=$(current_change_id)
+lem_keys "$session" g r
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" c r
+fi
+lem_wait_for "$session" 'Jujutsu restore completed' 10 >/dev/null || true
+if ! revision_has_file "$restore_source_id" restore-descendant.txt &&
+   ! revision_has_file "$restore_child_id" restore-descendant.txt; then
+  pass restore-descendants-default 'ordinary changes-in restore preserved descendant diffs'
+else
+  fail restore-descendants-default 'ordinary restore unexpectedly preserved descendant content'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if ! wait_revision_has_file "$restore_child_id" restore-descendant.txt; then
+  fail restore-descendants-default-undo 'ordinary descendant restore was not undoable'
+fi
+
+lem_keys "$session" R
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" c -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" d
+fi
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" -
+fi
+if lem_wait_for "$session" 'JJ Restore options' 10 >/dev/null; then
+  lem_keys "$session" I
+fi
+if lem_wait_for "$session" 'JJ Restore' 10 >/dev/null; then
+  lem_keys "$session" r
+fi
+lem_wait_for "$session" 'Jujutsu restore completed' 10 >/dev/null || true
+if ! revision_has_file "$restore_source_id" restore-descendant.txt &&
+   revision_has_file "$restore_child_id" restore-descendant.txt; then
+  pass restore-descendants 'R - d preserved descendant content while restoring its ancestor'
+else
+  fail restore-descendants 'restore-descendants did not preserve the child snapshot'
+fi
+lem_keys "$session" u
+invoke_report >/dev/null || true
+if ! wait_revision_has_file "$restore_child_id" restore-descendant.txt; then
+  fail restore-descendants-undo 'descendant-preserving restore was not undoable'
+fi
+
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" op restore \
+  "$restore_baseline_operation" >/dev/null
+lem_keys "$session" g r
+invoke_report >/dev/null || true
+if wait_current_change_id "$initial_working_copy_id" &&
+   wait_revision_absent "$restore_child_id" &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-one.txt" ] &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-two.txt" ] &&
+   [ ! -e "${LEM_YATH_JJ_PORCELAIN_ROOT}restore-descendant.txt" ] &&
+   [[ $(latest_report) == *'description=current rows=3 '* ]]; then
+  pass restore-cleanup 'operation restore removed the isolated restore fixture'
+else
+  fail restore-cleanup 'restore fixture cleanup did not recover the baseline graph'
 fi
 
 lem_keys "$session" c

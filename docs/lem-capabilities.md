@@ -2013,7 +2013,8 @@ working copy, `o` prompts while creating a child, and `O`, `I`, and `A`
 immediately create a child or insert a change before or after the selected row.
 `e` changes the working copy,
 `s` to open a whole-change squash popup, `r` to open a selected-row rebase
-popup, `_` to open a revert popup, `S` to open a partial-patch split view,
+popup, `_` to open a revert popup, `R` to open a restore popup, `S` to open a
+partial-patch split view,
 `u`/`C-r` to undo/redo operations,
 `b` to manage local bookmarks, confirmed `x` to abandon, `d` or Return to
 browse `jj show`, `g r` to refresh, `?` for help, and `q` to unwind first to
@@ -2047,6 +2048,15 @@ insert-after, or insert-before destination; `c` restores the defaults and `_`,
 revsets. Cancellation and invalid sources are non-mutating, successful
 execution retains the selected source row, and packaged `jj` 0.35 receives its
 equivalent `--destination` spelling for Majutsu's newer `--onto` behavior.
+The `R` restore popup preserves Majutsu's log-level default: with no selection,
+`r` restores the working copy from its parent. `f`, `t`, and `c` toggle the
+selected row as `--from`, `--into`, or `--changes-in`; `- f`, `- t`, and `- c`
+instead prompt over annotated history while accepting arbitrary nonblank
+revsets. `- -` supplies one arbitrary fileset or literal path, `- d` preserves
+descendant content, `- I` permits immutable rewrites, and `x` clears all three
+revision selections. From/into selections exclude changes-in exactly as in the
+pinned transient. Execution uses direct argv, reports CLI refusal without
+mutation, refreshes the graph, and retains the initiating row.
 The `S` split view renders the selected row's bounded Git-format diff without
 making it editable. `H` or Space toggles a hunk, `F` toggles its file, a Visual
 selection followed by `R` toggles changed lines within one hunk, and `C` clears
@@ -2083,7 +2093,14 @@ undos, point preservation, and invalid-destination refusal. Revert coverage
 drives popup cancellation, selected-row defaults, prompted onto and
 insert-before placement, exact graph and file-state effects, operation undo,
 point preservation, invalid-source refusal, and isolated fixture restoration.
-Split coverage
+Restore coverage drives cancellation, the argument-free working-copy default,
+one-path fileset scope, explicit source revsets, selected historical destination
+and changes-in modes, selection clearing, ordinary versus content-preserving
+descendant rebases, immutable override transport, exact revision-tree effects,
+row preservation, undo after every mutation, invalid-revset refusal, and
+operation-scoped cleanup. Its tree observers use `--ignore-working-copy` and an
+editor-side event barrier so the acceptance harness cannot create concurrent jj
+operations. Split coverage
 opens and cancels the two-hunk view, rejects an empty selection, checks file,
 hunk, region, destination, and parallel-layout state, physically selects one
 replacement from a two-replacement file, and proves real `jj split` moves only
@@ -2096,7 +2113,8 @@ multi-source/destination rebase selection and
 advanced rebase flags, remote bookmark tracking and advance patterns,
 multi-bookmark operations, multi-source/destination duplicate selection and
 configurable duplicate descriptions, a shared visual multi-selection session
-for revert sources/destinations, binary/conflict split selection,
+for revert sources/destinations, interactive partial-patch restore selection,
+binary/conflict split selection,
 word-level selection, partial changed-line selection for added/deleted files,
 conflict handling, operation log, workspaces, sparse checkout, and Majutsu's
 wider arbitrary-revision/fileset/tool split options remain outside this focused

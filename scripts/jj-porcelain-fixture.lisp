@@ -42,6 +42,7 @@
      ("S" lem-yath-jj-split)
      ("r" lem-yath-jj-rebase)
      ("_" lem-yath-jj-revert)
+     ("R" lem-yath-jj-restore)
      ("y" lem-yath-jj-duplicate)
      ("Y" lem-yath-jj-duplicate-dwim)
      ("b" lem-yath-jj-bookmark)
