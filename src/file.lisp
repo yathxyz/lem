@@ -109,10 +109,39 @@
       (guess-file-mode-from-shebang buffer)
       (guess-file-mode-from-property-line buffer)))
 
+(define-editor-variable large-file-threshold nil
+  "Size in bytes above which a file opens in fundamental mode with syntax
+highlighting and expensive mode hooks disabled, after a confirmation prompt on
+the find-file path. NIL disables the guard and preserves upstream behavior.")
+
+(defvar *inhibit-file-mode-detection* nil
+  "When true, PROCESS-FILE leaves the buffer in fundamental mode instead of
+detecting a major mode, and marks the buffer so that later saves keep skipping
+detection. Bound by the large-file guard while a large file is being opened.")
+
+(defun large-file-size (pathname)
+  "Return PATHNAME's size in bytes when it names an existing regular file larger
+than LARGE-FILE-THRESHOLD, otherwise NIL. Probes the file's length without
+reading its contents."
+  (let ((threshold (variable-value 'large-file-threshold :global)))
+    (when (and threshold
+               (not (uiop:directory-pathname-p pathname))
+               (probe-file pathname))
+      (let ((size (ignore-errors
+                    (with-open-file (in pathname :element-type '(unsigned-byte 8))
+                      (file-length in)))))
+        (when (and size (> size threshold))
+          size)))))
+
 (defun process-file (buffer)
-  (alexandria:when-let (mode (detect-file-mode buffer))
-    (change-buffer-mode buffer mode)
-    (values)))
+  ;; The large-file guard binds *INHIBIT-FILE-MODE-DETECTION* while reading; stamp
+  ;; the buffer so mode detection stays off on later saves too.
+  (when *inhibit-file-mode-detection*
+    (setf (buffer-value buffer 'inhibit-mode-detection) t))
+  (unless (buffer-value buffer 'inhibit-mode-detection)
+    (alexandria:when-let (mode (detect-file-mode buffer))
+      (change-buffer-mode buffer mode)))
+  (values))
 
 ;;;
 (define-editor-variable detect-encoding-scheme :jp

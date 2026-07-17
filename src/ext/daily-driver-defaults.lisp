@@ -27,6 +27,11 @@ cleanly. See SPEC.md, constraint 3.")
 (add-hook (variable-value 'before-save-hook :global t)
           'lem/backup-on-save:backup-on-save)
 
+;;; PI-2: large-file guard. Files above this size open in fundamental mode with
+;;; syntax highlighting and expensive mode hooks off, after a y/n prompt on the
+;;; find-file path. Upstream ships this disabled (threshold NIL).
+(setf (variable-value 'lem-core:large-file-threshold :global) (* 30 1024 1024))
+
 ;;; DS-3: crash-recovery checkpoints. Periodically snapshot modified file-backed
 ;;; buffers to $XDG_DATA_HOME/lem/autosave/ without touching the real file, delete
 ;;; the snapshot on a successful save, and offer recovery on find-file when a

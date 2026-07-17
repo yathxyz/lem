@@ -652,7 +652,10 @@
    :highlight-line)
   ;; file.lisp
   (:export
-   :detect-encoding-scheme)
+   :detect-encoding-scheme
+   :large-file-threshold
+   :large-file-size
+   :*inhibit-file-mode-detection*)
   ;; display/base.lisp
   (:export
    :wrap-line-character

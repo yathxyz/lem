@@ -115,11 +115,33 @@
 (defmethod execute-find-file :before (executor mode pathname)
   (directory-for-file-or-lose pathname))
 
+(defun call-with-large-file-guard (pathname function)
+  "Guard opening PATHNAME against `large-file-threshold'. When PATHNAME is a
+not-yet-open file larger than the threshold, prompt for confirmation: declining
+returns NIL and opens nothing (no half-created buffer); accepting calls FUNCTION
+with mode detection inhibited so the file opens in fundamental mode without
+syntax highlighting or expensive mode hooks. Small or already-open files call
+FUNCTION unchanged."
+  (let ((size (and (not (get-file-buffer (expand-file-name (namestring pathname))))
+                   (large-file-size pathname))))
+    (cond ((null size)
+           (funcall function))
+          ((prompt-for-y-or-n-p
+            (format nil "~A is large (~D MB); open anyway"
+                    (file-namestring pathname)
+                    (round size (* 1024 1024))))
+           (let ((*inhibit-file-mode-detection* t))
+             (funcall function)))
+          (t nil))))
+
 (defmethod execute-find-file (executor mode pathname)
   (handler-case
-      (multiple-value-bind (buffer new-file-p)
-          (find-file-buffer pathname)
-        (values buffer new-file-p))
+      (call-with-large-file-guard
+       pathname
+       (lambda ()
+         (multiple-value-bind (buffer new-file-p)
+             (find-file-buffer pathname)
+           (values buffer new-file-p))))
     (encoding-read-error ()
       (open-external-file pathname))))
 

@@ -70,6 +70,7 @@
                (:file "input")
                (:file "file")
                (:file "revert-buffer")
+               (:file "large-file-guard")
                (:file "save-clobber")
                (:file "eol-roundtrip")
                (:file "atomic-save")
