@@ -206,8 +206,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   UTF-16 ranges are decoded consistently, malformed payloads fail closed, and
   server-supplied backquoted Lisp remains inert
 - Emacs-like daily navigation/editing: region-or-line `M-j`, a persistent
-  300-entry `M-g r` MRU, filterable `C-x C-b`, and asynchronous persistent
-  `M-s f` name search with property-backed Return and persistent q/revisit behavior
+  300-entry `M-g r` MRU, filterable `C-x C-b`, asynchronous persistent
+  `M-s f` name search, and directory-scoped `M-s g` ripgrep with read-only,
+  staged-edit results
 - project.el-style navigation: persistent automatic project MRU, Git-aware
   tracked/untracked file finding, cancellable bounded asynchronous regexp search,
   and arbitrary-directory command dispatch on `SPC p f/g/p`; `SPC SPC` combines

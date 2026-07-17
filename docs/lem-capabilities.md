@@ -1202,8 +1202,12 @@ history.
   `C-c C-k` terminates only the subprocess owned by that `*Find*` request and
   leaves a persistent cancelled result buffer that can be retried with `g`.
 - Grep: upstream `lem/grep:grep` and `lem/grep:project-grep` live in
-  `src/ext/grep.lisp`; the configured `C-x p g`/`SPC p g` route is
-  `lem-yath-project-grep` in `src/project.lisp`. Its results open read-only. Normal
+  `src/ext/grep.lisp`. The configured global `M-s g` prompts with the exact
+  `rg -nS --no-heading ` default, then prompts for a directory and honors
+  ripgrep's smart-case and ignore-file behavior. The configured
+  `C-x p g`/`SPC p g` route is `lem-yath-project-grep` in `src/project.lisp`;
+  it instead searches the project's exact tracked-plus-untracked file set on
+  a cancellable worker. Both routes share the same read-only result UI. Normal
   `i` (the effective Evil-Collection grep binding) or `C-c C-p` starts an isolated
   editable stage and highlights changed rows without mutating their sources.
   `ZZ`, Evil-Collection `:w`, `C-c C-c`/`C-c C-e`, or `C-x C-s` applies
@@ -1211,16 +1215,16 @@ history.
   `C-x C-q` and normal-state Escape
   use wgrep's apply-or-discard exit. Each source file is one cancellable change
   group, and changed-after-grep rows are rejected visibly rather than overwritten.
-  Ordinary source-buffer save remains the persistence step. The real ncurses gate
-  verifies stage isolation, atomic multiline refusal, single-Escape return to
-  Normal, apply, abort, save, and stale-source refusal.
+  Ordinary source-buffer save remains the persistence step. The real ncurses
+  gates verify the global command and directory prompts, smart case, ignores,
+  no-match and invalid-regexp recovery, Normal-state entry, navigation,
+  cancellation, stage isolation, atomic multiline refusal, single-Escape return
+  to Normal, apply, abort, save, and stale-source refusal.
   `patches/lem-grep-writeback.patch` still supplies the
   point-preserving replacement primitive, and
   `patches/lem-peek-source-timer.patch` owns and invalidates preview timers.
   Editable headers/newlines, whole-row deletion, region unmarking, multiline
   replacement, auto-save, and per-row error echo remain outside this bounded port.
-- ripgrep: not the default, but trivially `(setf lem/grep:*grep-command* "rg"
-  lem/grep:*grep-args* "-nH")`.
 
 ### Project-aware finding — `src/commands/project.lisp`
 `project-find-file` (`C-x p f`), `project-switch` (`C-x p p`), `project-root-directory`

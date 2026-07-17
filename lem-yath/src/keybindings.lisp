@@ -196,7 +196,7 @@
 (define-key *global-keymap* "M-g r"
   'lem-yath-find-recent-file)                           ; recentf + Marginalia
 (define-key *global-keymap* "M-s f" 'lem-yath-find-name) ; find-name-dired
-(define-key *global-keymap* "M-s g" 'lem/grep:grep)    ; M-s g grep
+(define-key *global-keymap* "M-s g" 'lem-yath-grep)   ; M-s g grep
 (define-key *global-keymap* "C-x C-b" 'lem-yath-list-buffers) ; grouped ibuffer
 (define-key *global-keymap* "M-g n" 'lem-yath-next-error) ; next-error
 (define-key *global-keymap* "M-g p" 'lem-yath-previous-error) ; previous-error

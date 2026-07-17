@@ -278,6 +278,11 @@
    (namestring (daily-workflows-fixture-path "find-name-ops/")))
   (lem/prompt-window::prompt-execute))
 
+(define-command lem-yath-test-submit-grep-root () ()
+  (lem/prompt-window::replace-prompt-input
+   (namestring (daily-workflows-fixture-path "grep/")))
+  (lem/prompt-window::prompt-execute))
+
 (define-command lem-yath-test-revisit-find-buffer () ()
   "Switch directly to the persistent find result for lifecycle inspection."
   (alexandria:if-let ((buffer (get-buffer *find-name-buffer-name*)))
@@ -312,6 +317,36 @@
         (uiop:parse-native-namestring
          (uiop:getenv "LEM_YATH_DAILY_WORKFLOWS_SLOW_FIND")))
   (daily-workflows-fixture-log "FIND-SLOW READY"))
+
+(define-command lem-yath-test-record-grep-state () ()
+  (let* ((buffer (current-buffer))
+         (text (daily-workflows-fixture-buffer-text))
+         (records (project-grep-edit-records buffer))
+         (root (truename (daily-workflows-fixture-path "grep/")))
+         (directory (ignore-errors (truename lem/grep::*last-directory*))))
+    (daily-workflows-fixture-log
+     (concatenate
+      'string
+      "GREP mode=~a readonly=~a records=~d active=~a "
+      "alpha=~a beta=~a ignored=~a query=~a directory=~a")
+     (if (mode-active-p buffer 'lem/grep::peek-grep-mode) "yes" "no")
+     (if (buffer-read-only-p buffer) "yes" "no")
+     (length records)
+     (if (project-grep-edit-active-p buffer) "yes" "no")
+     (if (search "daily grep needle lower" text) "yes" "no")
+     (if (search "DAILY GREP NEEDLE UPPER" text) "yes" "no")
+     (if (search "ignored grep needle" text) "yes" "no")
+     (if (string= lem/grep::*last-query*
+                  "rg -nS --no-heading needle")
+         "yes" "no")
+     (if (and directory (equal root directory)) "yes" "no"))))
+
+(define-command lem-yath-test-focus-grep-content () ()
+  (let ((point (current-point)))
+    (buffer-start point)
+    (unless (search-forward point "DAILY GREP NEEDLE")
+      (editor-error "No editable global grep result"))
+    (window-see (current-window))))
 
 (define-command lem-yath-test-find-name-buffer-guards () ()
   (let ((collision-rejected-p nil)
@@ -422,15 +457,23 @@
   (define-key keymap "F2" 'lem-yath-test-record-find-name-marks))
 
 (define-key *global-keymap* "F4" 'lem-yath-test-revisit-find-buffer)
+(define-key lem/peek-source:*peek-source-keymap*
+  "F8" 'lem-yath-test-record-grep-state)
+(define-key lem/peek-source:*peek-source-keymap*
+  "F2" 'lem-yath-test-focus-grep-content)
 
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F4" 'lem-yath-test-submit-find-name-root)
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F1" 'lem-yath-test-submit-find-name-ops-root)
+(define-key lem/prompt-window::*prompt-mode-keymap*
+  "F2" 'lem-yath-test-submit-grep-root)
 (define-key lem/completion-mode::*completion-mode-keymap*
   "F4" 'lem-yath-test-submit-find-name-root)
 (define-key lem/completion-mode::*completion-mode-keymap*
   "F1" 'lem-yath-test-submit-find-name-ops-root)
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "F2" 'lem-yath-test-submit-grep-root)
 
 (let ((phase (or (uiop:getenv "LEM_YATH_DAILY_WORKFLOWS_PHASE") "editing")))
   (cond

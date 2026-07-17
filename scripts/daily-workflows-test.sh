@@ -128,6 +128,10 @@ visual_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/visual.txt"
 visual_block_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/visual-block.txt"
 visual_line_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/visual-line-eof.txt"
 lisp_file="$LEM_YATH_DAILY_WORKFLOWS_ROOT/editing/guard.lisp"
+grep_root="$LEM_YATH_DAILY_WORKFLOWS_ROOT/grep"
+grep_source="$grep_root/source.txt"
+grep_alpha="$grep_root/alpha.txt"
+grep_beta="$grep_root/nested/beta.txt"
 find_root="$LEM_YATH_DAILY_WORKFLOWS_ROOT/find-name"
 find_source="$find_root/source.txt"
 find_sentinel="$find_root/INJECTED"
@@ -138,6 +142,12 @@ printf 'prefix TOKEN suffix\n' > "$visual_file"
 printf 'aa11zz\nbb22yy\ncc33xx\n' > "$visual_block_file"
 printf 'first\nomega' > "$visual_line_file"
 printf '(a b c)\n' > "$lisp_file"
+mkdir -p "$grep_root/nested"
+printf 'grep source anchor\n' > "$grep_source"
+printf 'daily grep needle lower\n' > "$grep_alpha"
+printf 'DAILY GREP NEEDLE UPPER\n' > "$grep_beta"
+printf 'ignored grep needle\n' > "$grep_root/ignored.txt"
+printf 'ignored.txt\n' > "$grep_root/.ignore"
 mkdir -p "$find_root/nested" "$find_root/named-dir.match" \
   "$find_ops_root/copy-tree.op" "$find_ops_root/tree.op" "$find_copy_target"
 printf 'FIND OPEN TARGET\n' > "$find_root/00-[.match"
@@ -1066,7 +1076,163 @@ test_find_name() {
 
   lem_stop "$find_session"
 }
+
+test_grep() {
+  local grep_session="lem-yath-daily-grep-$id" before actual screen
+  local grep_selected_current=""
+  if ! start_fixture_session "$grep_session" editing "$grep_source" ||
+     ! lem_wait_for "$grep_session" 'grep source anchor' "$BOOT_TIMEOUT" >/dev/null; then
+    fail grep-boot "could not open the configured grep fixture" "$grep_session"
+    return
+  fi
+
+  send_chord "$grep_session" M-s g
+  if lem_wait_for "$grep_session" 'rg -nS --no-heading' "$WAIT_TIMEOUT" >/dev/null; then
+    screen=$(lem_capture "$grep_session")
+    if grep -Fq 'rg -nS --no-heading ' <<<"$screen"; then
+      pass grep-default-command "M-s g offered the exact configured ripgrep command"
+    else
+      fail grep-default-command "the grep prompt did not retain its trailing input position" "$grep_session"
+    fi
+  else
+    fail grep-default-command "M-s g retained the stale upstream git-grep prompt" "$grep_session"
+  fi
+  tmux_cmd send-keys -t "$grep_session" -l -- needle
+  lem_keys "$grep_session" Enter
+  if lem_wait_for "$grep_session" 'Directory:' "$WAIT_TIMEOUT" >/dev/null; then
+    lem_keys "$grep_session" F2
+  else
+    fail grep-directory-prompt "grep did not request its search directory" "$grep_session"
+  fi
+
+  if lem_wait_for "$grep_session" 'DAILY GREP NEEDLE UPPER' "$WAIT_TIMEOUT" >/dev/null; then
+    before=$(report_count '^GREP ')
+    lem_keys "$grep_session" F8
+    if wait_report_count '^GREP ' "$((before + 1))"; then
+      actual=$(grep '^GREP ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+      if [ "$actual" = 'GREP mode=yes readonly=yes records=2 active=no alpha=yes beta=yes ignored=no query=yes directory=yes' ]; then
+        pass grep-results "smart-case results were scoped, recorded, and read-only"
+      else
+        fail grep-results "unexpected configured grep state: $actual" "$grep_session"
+      fi
+    else
+      fail grep-results "the grep result-state probe did not run" "$grep_session"
+    fi
+  else
+    fail grep-results "global grep did not render both smart-case matches" "$grep_session"
+  fi
+
+  send_chord "$grep_session" i
+  lem_keys "$grep_session" F2
+  send_chord "$grep_session" i
+  tmux_cmd send-keys -t "$grep_session" -l -- X
+  before=$(report_count '^GREP ')
+  lem_keys "$grep_session" F8
+  if wait_report_count '^GREP ' "$((before + 1))"; then
+    actual=$(grep '^GREP ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    if [[ "$actual" == \
+          'GREP mode=yes readonly=no records=2 active=yes alpha=no beta=yes ignored=no query=yes directory=yes' ||
+          "$actual" == \
+          'GREP mode=yes readonly=no records=2 active=yes alpha=yes beta=no ignored=no query=yes directory=yes' ]] &&
+       [ "$(cat "$grep_alpha")" = 'daily grep needle lower' ] &&
+       [ "$(cat "$grep_beta")" = 'DAILY GREP NEEDLE UPPER' ]; then
+      pass grep-staged-edit "i staged a result-row edit without touching its source"
+    else
+      fail grep-staged-edit "global grep bypassed staged editing: $actual" "$grep_session"
+    fi
+  else
+    fail grep-staged-edit "the staged grep-state probe did not run" "$grep_session"
+  fi
+
+  send_chord "$grep_session" Escape
+  send_chord "$grep_session" C-c C-k
+  before=$(report_count '^GREP ')
+  lem_keys "$grep_session" F8
+  if wait_report_count '^GREP ' "$((before + 1))"; then
+    actual=$(grep '^GREP ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    if [ "$actual" = 'GREP mode=yes readonly=yes records=2 active=no alpha=yes beta=yes ignored=no query=yes directory=yes' ] &&
+       [ "$(cat "$grep_alpha")" = 'daily grep needle lower' ]; then
+      pass grep-staged-abort "C-c C-k restored the result and retained the exact source"
+    else
+      fail grep-staged-abort "aborting did not restore the global grep transaction: $actual" "$grep_session"
+    fi
+  else
+    fail grep-staged-abort "the post-abort grep-state probe did not run" "$grep_session"
+  fi
+
+  send_chord "$grep_session" C-n Enter
+  if lem_wait_for "$grep_session" 'daily grep needle lower|DAILY GREP NEEDLE UPPER' "$WAIT_TIMEOUT" >/dev/null; then
+    before=$(report_count '^CURRENT ')
+    lem_keys "$grep_session" F10
+    if wait_report_count '^CURRENT ' "$((before + 1))"; then
+      grep_selected_current=$(grep '^CURRENT ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    else
+      grep_selected_current=
+    fi
+    if [[ "$grep_selected_current" == \
+          'CURRENT name=alpha.txt file=alpha.txt text=daily grep needle lower\n' ||
+          "$grep_selected_current" == \
+          'CURRENT name=beta.txt file=beta.txt text=DAILY GREP NEEDLE UPPER\n' ]]; then
+      pass grep-navigation "C-n and Return visited the other exact source match"
+    else
+      fail grep-navigation "result navigation did not select a matching source" "$grep_session"
+    fi
+  else
+    fail grep-navigation "C-n and Return did not visit a matching source" "$grep_session"
+  fi
+
+  send_chord "$grep_session" M-s g
+  if lem_wait_for "$grep_session" 'rg -nS --no-heading needle' "$WAIT_TIMEOUT" >/dev/null; then
+    lem_keys "$grep_session" C-g
+  fi
+  before=$(report_count '^CURRENT ')
+  lem_keys "$grep_session" F10
+  if wait_report_count '^CURRENT ' "$((before + 1))"; then
+    actual=$(grep '^CURRENT ' "$LEM_YATH_DAILY_WORKFLOWS_REPORT" | tail -1)
+    if [ "$actual" = "$grep_selected_current" ]; then
+      pass grep-cancel "C-g cancelled the command prompt without changing buffers"
+    else
+      fail grep-cancel "prompt cancellation changed the selected source" "$grep_session"
+    fi
+  else
+    fail grep-cancel "the post-cancellation source probe did not run" "$grep_session"
+  fi
+
+  send_chord "$grep_session" M-s g
+  if lem_wait_for "$grep_session" 'rg -nS --no-heading needle' "$WAIT_TIMEOUT" >/dev/null; then
+    send_chord "$grep_session" C-a C-k
+    tmux_cmd send-keys -t "$grep_session" -l -- 'rg -nS --no-heading absent-value'
+    lem_keys "$grep_session" Enter
+  fi
+  if lem_wait_for "$grep_session" 'Directory:' "$WAIT_TIMEOUT" >/dev/null; then
+    lem_keys "$grep_session" F2
+  fi
+  if lem_wait_for "$grep_session" 'No match' "$WAIT_TIMEOUT" >/dev/null; then
+    pass grep-no-match "an empty ripgrep result reported No match without a parser failure"
+  else
+    fail grep-no-match "empty output did not reach the intended No match path" "$grep_session"
+  fi
+
+  send_chord "$grep_session" M-s g
+  if lem_wait_for "$grep_session" 'rg -nS --no-heading absent-value' "$WAIT_TIMEOUT" >/dev/null; then
+    send_chord "$grep_session" C-a C-k
+    tmux_cmd send-keys -t "$grep_session" -l -- "rg -nS --no-heading '['"
+    lem_keys "$grep_session" Enter
+  fi
+  if lem_wait_for "$grep_session" 'Directory:' "$WAIT_TIMEOUT" >/dev/null; then
+    lem_keys "$grep_session" F2
+  fi
+  if lem_wait_for "$grep_session" 'regex parse error|unclosed character class' "$WAIT_TIMEOUT" >/dev/null; then
+    pass grep-invalid-regexp "ripgrep regexp errors remained visible and recoverable"
+  else
+    fail grep-invalid-regexp "an invalid regexp did not report ripgrep's error" "$grep_session"
+  fi
+
+  lem_stop "$grep_session"
+}
+
 test_find_name
+test_grep
 
 echo
 cat "$LEM_YATH_DAILY_WORKFLOWS_REPORT" 2>/dev/null || true

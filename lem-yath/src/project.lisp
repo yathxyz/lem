@@ -1206,10 +1206,12 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
 
 (defun display-project-grep-results (root results)
   "Display project grep RESULTS read-only until staged editing is requested."
-  (let ((records nil))
+  (let ((records nil)
+        (result-buffer nil))
     (lem/peek-source:with-collecting-sources (collector :read-only t)
       (let ((buffer (lem/peek-source:collector-buffer collector)))
-        (setf (buffer-directory buffer) root)
+        (setf result-buffer buffer
+              (buffer-directory buffer) root)
         (loop :for (file line-number content) :in results
               :do
                  (lem/peek-source:with-appending-source
@@ -1247,7 +1249,40 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
               (buffer-value buffer +project-grep-edit-session-key+) nil)
         (add-hook (variable-value 'kill-buffer-hook :buffer buffer)
                   'project-grep-kill-buffer-hook)
-        (project-grep-reset-result-undo buffer)))))
+        (project-grep-reset-result-undo buffer)))
+    ;; `peek-source-mode' is activated while the collector is displayed and
+    ;; replaces modes enabled during collection.  Enable the grep controls
+    ;; afterward so they remain available over edited content as well.
+    (when result-buffer
+      (with-current-buffer result-buffer
+        (lem/grep::peek-grep-mode t)
+        ;; Synchronous global grep displays this buffer before the nested
+        ;; prompt restores its caller state.  Pin the Evil-Collection result
+        ;; UI to Normal just like the asynchronous project-grep path.
+        (setf (lem-vi-mode/core:buffer-state result-buffer)
+              'lem-vi-mode/states:normal)))))
+
+(define-command lem-yath-grep
+    (query &optional (directory (buffer-directory)))
+    ((prompt-for-string ""
+                        :initial-value lem/grep::*last-query*
+                        :history-symbol 'grep)
+     (princ-to-string
+      (prompt-for-directory
+       "Directory: "
+       :directory (if lem/grep::*last-directory*
+                      (princ-to-string lem/grep::*last-directory*)
+                      (buffer-directory)))))
+  "Run the configured grep command with read-only, staged-edit results."
+  (let* ((directory (uiop:ensure-directory-pathname directory))
+         (output (lem/grep::run-grep query directory))
+         (results (unless (str:blankp output)
+                    (lem/grep::parse-grep-result output))))
+    (setf lem/grep::*last-query* query
+          lem/grep::*last-directory* directory)
+    (if results
+        (display-project-grep-results directory results)
+        (editor-error "No match"))))
 
 (define-command lem-yath-project-grep-begin-edit () ()
   (project-grep-begin-edit))

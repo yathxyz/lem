@@ -419,8 +419,7 @@
         (message "JDTLS is already enabled for this buffer.")
         (lem-lsp-mode::lsp-mode t))))
 
-;;; --- project-wide grep prefers ripgrep, as in the Emacs config -------------
+;;; --- configured grep defaults match the Emacs setup ------------------------
 
 (when (executable-find "rg")
-  (setf lem/grep:*grep-command* "rg"
-        lem/grep:*grep-args* "-nH --no-heading"))
+  (lem/grep:change-grep-command "rg" :args "-nS --no-heading"))
