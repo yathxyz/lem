@@ -184,9 +184,8 @@ fall back to Escape."
                             (case (getch)
                               (#.(char-code #\<)
                                  ;;sgr(1006)
-                                 (uiop:symbol-call :lem-mouse-sgr1006
-                                                   :parse-mouse-event
-                                                   #'getch))
+                                 (or (lem-ncurses/mouse:read-sgr-mouse-event #'getch)
+                                     (go :start)))
                               (#.(char-code #\1)
                                  (csi\[1))
                               (#.(char-code #\2)

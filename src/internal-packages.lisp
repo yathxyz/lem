@@ -223,6 +223,7 @@
   ;; mouse.lisp
   (:export
    :mouse-button-down-functions
+   :mouse-mode
    :receive-mouse-button-down
    :receive-mouse-button-up
    :receive-mouse-motion

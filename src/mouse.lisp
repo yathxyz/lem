@@ -26,6 +26,12 @@
 
 (define-editor-variable mouse-button-down-functions '())
 
+(define-editor-variable mouse-mode nil
+  "When non-nil, the frontend reports mouse events to the editor: clicking moves
+point, the wheel scrolls, and separators can be dragged. When nil, the terminal
+keeps native text selection and copy/paste. The terminal frontend honors this
+variable; see the TOGGLE-MOUSE command.")
+
 (deftype mouse-button ()
   '(member :button-1 :button-2 :button-3 :button-4))
 

@@ -15,6 +15,7 @@
                (:file "drawing-object")
                (:file "view")
                (:file "render")
+               (:file "mouse")
                (:file "input")
                (:file "emergency-save")
                (:file "mainloop")

@@ -40,6 +40,12 @@ cleanly. See SPEC.md, constraint 3.")
 ;;; outer terminal's `set-clipboard on` and, inside tmux, `allow-passthrough on`.
 (setf (variable-value 'lem-core:clipboard-osc52 :global) t)
 
+;;; TF-5: terminal mouse support. Enable mouse reporting so clicking moves point
+;;; and the wheel scrolls; the terminal frontend reads MOUSE-MODE at startup and
+;;; emits the xterm enable sequences. Upstream ships this off so the terminal
+;;; keeps native selection by default; TOGGLE-MOUSE flips it at runtime.
+(setf (variable-value 'lem-core:mouse-mode :global) t)
+
 ;;; DS-3: crash-recovery checkpoints. Periodically snapshot modified file-backed
 ;;; buffers to $XDG_DATA_HOME/lem/autosave/ without touching the real file, delete
 ;;; the snapshot on a successful save, and offer recovery on find-file when a
