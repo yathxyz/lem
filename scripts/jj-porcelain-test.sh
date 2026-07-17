@@ -207,6 +207,29 @@ latest_report() {
   grep '^STATE ' "$LEM_YATH_JJ_PORCELAIN_REPORT" | tail -n 1
 }
 
+split_report_count() {
+  grep -c '^SPLIT ' "$LEM_YATH_JJ_PORCELAIN_REPORT" 2>/dev/null || true
+}
+
+invoke_split_report() {
+  local before
+  before=$(split_report_count)
+  lem_keys "$session" F2
+  local index=0
+  while ((index < 80)); do
+    if (( $(split_report_count) > before )); then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
+}
+
+latest_split_report() {
+  grep '^SPLIT ' "$LEM_YATH_JJ_PORCELAIN_REPORT" | tail -n 1
+}
+
 replace_prompt_text() {
   local text=$1
   lem_keys "$session" C-a C-k
@@ -811,6 +834,191 @@ if lem_wait_for "$session" 'jj duplicate failed' 10 >/dev/null &&
   pass duplicate-refusal 'an invalid destination surfaced jj failure without mutation'
 else
   fail duplicate-refusal 'invalid duplicate placement mutated history or lost the source row'
+fi
+
+# Build a content-bearing two-hunk revision so split selection can prove that
+# one replacement moves into a new parent while the other remains behind.
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new \
+  "$rebase_source_id" --message 'split base' >/dev/null
+: >"${LEM_YATH_JJ_PORCELAIN_ROOT}split.txt"
+for line in {1..30}; do
+  printf 'line %d\n' "$line" >>"${LEM_YATH_JJ_PORCELAIN_ROOT}split.txt"
+done
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" status >/dev/null
+split_base_id=$("$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log \
+  --no-graph -r @ --template change_id)
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new \
+  "$split_base_id" --message 'split source' >/dev/null
+sed -i '2s/.*/first changed by split/' \
+  "${LEM_YATH_JJ_PORCELAIN_ROOT}split.txt"
+sed -i '25s/.*/second remains behind/' \
+  "${LEM_YATH_JJ_PORCELAIN_ROOT}split.txt"
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" status >/dev/null
+split_source_id=$("$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log \
+  --no-graph -r @ --template change_id)
+
+lem_keys "$session" g r
+selected_split_source=0
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  if invoke_report &&
+     [[ $(latest_report) == *'kind=log row=yes description=split_source '* ]]; then
+    selected_split_source=1
+    break
+  fi
+  lem_keys "$session" C-k
+done
+if ((selected_split_source)); then
+  pass split-row 'the row map selected the two-hunk split source'
+else
+  fail split-row 'the split source was not reachable through revision navigation'
+fi
+
+lem_keys "$session" S
+if lem_wait_for "$session" 'Jujutsu split:' 10 >/dev/null &&
+   invoke_split_report &&
+   [[ $(latest_split_report) == \
+     'SPLIT kind=split hunks=2 selected=0 partial=0 row=yes keys=yes placement=parent parallel=no' ]]; then
+  pass split-open 'S opened a two-hunk Majutsu-style selection view'
+else
+  fail split-open 'split view, hunk parsing, or local keymap diverged'
+fi
+lem_keys "$session" q
+if lem_wait_for "$session" 'History' 10 >/dev/null &&
+   [ "$(revision_parent "$split_source_id")" = "$split_base_id" ] &&
+   invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=split_source '* ]]; then
+  pass split-cancel 'q restored the exact source row without mutation'
+else
+  fail split-cancel 'split cancellation changed history or lost the source row'
+fi
+
+lem_keys "$session" S
+if lem_wait_for "$session" 'Jujutsu split:' 10 >/dev/null; then
+  lem_keys "$session" s
+fi
+if lem_wait_for "$session" 'Select at least one Jujutsu hunk' 10 >/dev/null &&
+   invoke_split_report &&
+   [[ $(latest_split_report) == *'kind=split hunks=2 selected=0 '* ]]; then
+  pass split-empty-selection 's refused execution without a patch selection'
+else
+  fail split-empty-selection 'an empty split selection did not fail closed'
+fi
+lem_keys "$session" q
+
+lem_keys "$session" S
+if lem_wait_for "$session" 'Jujutsu split:' 10 >/dev/null; then
+  lem_keys "$session" p
+fi
+if invoke_split_report && [[ $(latest_split_report) == *'parallel=yes' ]]; then
+  pass split-parallel-toggle 'p exposed the parallel split layout'
+else
+  fail split-parallel-toggle 'parallel split state did not toggle'
+fi
+lem_keys "$session" p o
+if lem_wait_for "$session" 'Split destination revision or revset:' 10 >/dev/null; then
+  replace_prompt_text "$split_base_id"
+fi
+if invoke_split_report &&
+   [[ $(latest_split_report) == *'placement=destination parallel=no' ]]; then
+  pass split-placement 'o retained the prompted split destination'
+else
+  fail split-placement 'split destination state was not retained'
+fi
+lem_keys "$session" c
+if ! invoke_split_report ||
+   [[ $(latest_split_report) != *'placement=parent parallel=no' ]]; then
+  fail split-placement-reset 'c did not restore existing-parent placement'
+fi
+
+lem_keys "$session" F
+if invoke_split_report &&
+   [[ $(latest_split_report) == *'hunks=2 selected=2 partial=0 '* ]]; then
+  pass split-file-select 'F selected both hunks in the current file'
+else
+  fail split-file-select 'file-level split selection did not cover both hunks'
+fi
+lem_keys "$session" C H
+if invoke_split_report &&
+   [[ $(latest_split_report) == *'hunks=2 selected=1 partial=0 '* ]]; then
+  pass split-hunk-select 'C then H retained only the current hunk'
+else
+  fail split-hunk-select 'clear or whole-hunk selection state diverged'
+fi
+lem_keys "$session" C
+
+# Select the removed+added replacement lines through a physical Visual-Line
+# region. This exercises Majutsu's fine-grained R path, not just whole hunks.
+lem_keys "$session" /
+tmux_cmd send-keys -t "$session" -l '^-line 2$'
+lem_keys "$session" Enter V 2 j R
+if invoke_split_report &&
+   [[ $(latest_split_report) == *'hunks=2 selected=1 partial=1 '* ]]; then
+  pass split-region-select 'R converted a visual replacement into a partial hunk patch'
+else
+  fail split-region-select 'visual changed-line selection was not retained as a partial hunk'
+fi
+
+lem_keys "$session" s
+if lem_wait_for "$session" 'Selected change description' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'selected split'
+  lem_keys "$session" Enter
+fi
+if wait_revision_count 'selected split' 1; then
+  selected_split_id=$split_source_id
+  remaining_split_id=$(
+    revision_with_description_parent \
+      'split source' "$selected_split_id" 'none' || true
+  )
+else
+  selected_split_id=
+  remaining_split_id=
+fi
+if [ -n "$selected_split_id" ] && [ -n "$remaining_split_id" ] &&
+   [ "$(revision_parent "$selected_split_id")" = "$split_base_id" ] &&
+   [ "$("$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" file show \
+       -r "$selected_split_id" 'root:split.txt' | sed -n '2p')" = \
+     'first changed by split' ] &&
+   [ "$("$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" file show \
+       -r "$selected_split_id" 'root:split.txt' | sed -n '25p')" = \
+     'line 25' ] &&
+   [ "$("$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" file show \
+       -r "$remaining_split_id" 'root:split.txt' | sed -n '25p')" = \
+     'second remains behind' ] &&
+   "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" diff --git \
+     -r "$remaining_split_id" | grep -Fq 'second remains behind' &&
+   ! "$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" diff --git \
+     -r "$remaining_split_id" | grep -Fq 'first changed by split' &&
+   lem_wait_for "$session" 'History' 10 >/dev/null &&
+   invoke_report &&
+   [[ $(latest_report) == *'kind=log row=yes description=selected_split '* ]]; then
+  pass split 'S/R/s moved only the selected replacement and restored its change-ID row'
+else
+  fail split 'partial patch content, graph shape, description, or restoration diverged'
+fi
+
+"$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" new \
+  "$remaining_split_id" --message 'empty split source' >/dev/null
+empty_split_id=$("$jj_bin" -R "$LEM_YATH_JJ_PORCELAIN_ROOT" log \
+  --no-graph -r @ --template change_id)
+lem_keys "$session" g r
+selected_empty_split=0
+for _ in 1 2 3 4 5 6; do
+  if invoke_report &&
+     [[ $(latest_report) == *'kind=log row=yes description=empty_split_source '* ]]; then
+    selected_empty_split=1
+    break
+  fi
+  lem_keys "$session" C-k
+done
+if ((selected_empty_split)); then
+  lem_keys "$session" S
+fi
+if lem_wait_for "$session" 'Cannot split an empty Jujutsu revision' 10 >/dev/null &&
+   revision_present "$empty_split_id" &&
+   [ "$(revision_parent "$empty_split_id")" = "$remaining_split_id" ]; then
+  pass split-refusal 'S rejected an empty revision without mutation'
+else
+  fail split-refusal 'empty-revision split did not fail closed'
 fi
 
 lem_keys "$session" q

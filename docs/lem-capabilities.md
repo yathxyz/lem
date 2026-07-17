@@ -2008,7 +2008,7 @@ worktrees. The repository-specific Jujutsu porcelain renders `jj status` plus
 30 row-aware history entries. Its Evil-compatible core uses `C-j`/`C-k` or
 `g j`/`g k` for revisions, `c` to describe, `o` to create a child, `e` to edit,
 `s` to open a whole-change squash popup, `r` to open a selected-row rebase
-popup, `u`/`C-r` to undo/redo operations,
+popup, `S` to open a partial-patch split view, `u`/`C-r` to undo/redo operations,
 `b` to manage local bookmarks, confirmed `x` to abandon, `d` or Return to
 browse `jj show`, `g r` to refresh, `?` for help, and `q` to unwind first to
 history and then the exact source buffer. Local bookmark names render directly
@@ -2033,6 +2033,19 @@ or before a prompted revision. Uppercase `Y` performs the existing-parent
 case immediately. Destination prompts share the annotated Prescient revision
 history, accept arbitrary nonblank revsets, and every successful form keeps
 point on the original revision.
+The `S` split view renders the selected row's bounded Git-format diff without
+making it editable. `H` or Space toggles a hunk, `F` toggles its file, a Visual
+selection followed by `R` toggles changed lines within one hunk, and `C` clears
+the selection. `C-j`/`C-k` and `]`/`[` move between hunks. `o`, `a`, and `b`
+choose an onto/after/before revset, `c` restores the existing parent, and `p`
+toggles jj's parallel layout; `s` or Return prompts for the selected change's
+description and executes, while `q` cancels. Execution gives `jj split` a
+private temporary diff tool that reconstructs the selected patch using direct
+argv and verified sibling `left`/`right` directories. The view refuses empty
+or non-textual revisions, patches over 8 MiB, execution without a selection,
+cross-hunk regions, and partial changed-line selection in newly added or
+deleted files; complete hunks and files remain selectable. Success restores
+the history row by change ID.
 Every subprocess uses direct argv; the history is bounded and refresh preserves
 the selected change ID when that change still exists.
 `scripts/jj-porcelain-test.sh` drives the complete loop through the installed
@@ -2043,16 +2056,23 @@ content-bearing sibling rebase, row restoration, invalid self-destination, and
 the complete local bookmark lifecycle with inline-label and nested-list checks.
 It also drives duplicate-popup cancellation, immediate parent duplication,
 onto/after/before placement, content retention, graph rewrites and fixture
-undos, point preservation, and invalid-destination refusal.
+undos, point preservation, and invalid-destination refusal. Split coverage
+opens and cancels the two-hunk view, rejects an empty selection, checks file,
+hunk, region, destination, and parallel-layout state, physically selects one
+replacement from a two-replacement file, and proves real `jj split` moves only
+that replacement while retaining the remainder and restoring the original
+change-ID row. An empty revision is rejected without mutation.
 The in-editor description prompt is intentionally single-line and refuses an
 existing multiline description rather than truncating it. Majutsu's general
 transient dispatch, multiline description buffer, arbitrary source/destination
 and partial-patch squash, multi-source/destination rebase selection and
 advanced rebase flags, remote bookmark tracking and advance patterns,
 multi-bookmark operations, multi-source/destination duplicate selection and
-configurable duplicate descriptions, split, conflict handling, operation log,
-workspaces, sparse checkout, and partial patch selection remain outside this
-focused approximation.
+configurable duplicate descriptions, binary/conflict split selection,
+word-level selection, partial changed-line selection for added/deleted files,
+conflict handling, operation log, workspaces, sparse checkout, and Majutsu's
+wider arbitrary-revision/fileset/tool split options remain outside this focused
+approximation.
 
 Git status also appends navigable TODO/FIXME rows from tracked, nonbinary
 files. Moving onto a row previews the exact source line and visiting it opens

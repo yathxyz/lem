@@ -6,6 +6,13 @@
 (defvar *lem-yath-jj-root-key* 'lem-yath-jj-root)
 (defvar *lem-yath-jj-view-kind-key* 'lem-yath-jj-view-kind)
 (defvar *lem-yath-jj-revision-key* 'lem-yath-jj-revision)
+(defvar *lem-yath-jj-split-hunks-key* 'lem-yath-jj-split-hunks)
+(defvar *lem-yath-jj-split-hunk-key* 'lem-yath-jj-split-hunk)
+(defvar *lem-yath-jj-split-line-key* 'lem-yath-jj-split-line)
+(defvar *lem-yath-jj-split-origin-key* 'lem-yath-jj-split-origin)
+(defvar *lem-yath-jj-split-placement-key* 'lem-yath-jj-split-placement)
+(defvar *lem-yath-jj-split-destination-key* 'lem-yath-jj-split-destination)
+(defvar *lem-yath-jj-split-parallel-key* 'lem-yath-jj-split-parallel)
 (defvar *lem-yath-git-gutter-synced-mode-key*
   'lem-yath-git-gutter-synced-mode)
 
@@ -275,6 +282,7 @@
         (editor-error "Could not run jj: ~a" condition)))))
 
 (defparameter *jj-log-limit* 30)
+(defparameter *jj-split-diff-limit* (* 8 1024 1024))
 
 (defparameter *jj-log-template*
   (concatenate
@@ -291,6 +299,13 @@
   marker
   description
   bookmarks)
+
+(defstruct jj-split-hunk
+  id
+  file
+  header
+  body
+  selection)
 
 (defun jj-split-null-fields (text)
   "Split TEXT at NUL characters without interpreting its contents."
@@ -367,6 +382,11 @@
     (:name "Jujutsu"
      :keymap *lem-yath-jj-view-keymap*)
   "Majutsu-like navigation and mutation keys for Jujutsu buffers.")
+
+(define-minor-mode lem-yath-jj-split-mode
+    (:name "JJ-Split"
+     :keymap *lem-yath-jj-split-mode-keymap*)
+  "Partial-patch selection keys for a Jujutsu split buffer.")
 
 (defun render-jj-buffer (buffer root)
   "Refresh BUFFER with row-aware Jujutsu data from ROOT."
@@ -767,6 +787,574 @@
   (jj-execute-duplicate
    (jj-current-root) (jj-selected-revision) :parent))
 
+(defun jj-lines-with-endings (text)
+  "Return TEXT as lines while retaining every existing newline."
+  (let ((start 0)
+        (length (length text))
+        (lines '()))
+    (loop :while (< start length)
+          :for newline := (position #\Newline text :start start)
+          :do (if newline
+                  (progn
+                    (push (subseq text start (1+ newline)) lines)
+                    (setf start (1+ newline)))
+                  (progn
+                    (push (subseq text start length) lines)
+                    (setf start length))))
+    (nreverse lines)))
+
+(defun parse-jj-split-hunks (output)
+  "Parse Git-format jj diff OUTPUT into ordered textual hunks."
+  (let ((file nil)
+        (header nil)
+        (body nil)
+        (hunks '())
+        (next-id 1))
+    (labels ((flush-hunk ()
+               (when body
+                 (push (make-jj-split-hunk
+                        :id next-id
+                        :file file
+                        :header (apply #'concatenate 'string
+                                       (nreverse (copy-list header)))
+                        :body (apply #'concatenate 'string
+                                     (nreverse body)))
+                       hunks)
+                 (incf next-id)
+                 (setf body nil))))
+      (dolist (line (jj-lines-with-endings output))
+        (cond
+          ((uiop:string-prefix-p "diff --git " line)
+           (flush-hunk)
+           (setf file
+                 (string-right-trim '(#\Newline #\Return) line)
+                 header (list line)
+                 body nil))
+          ((uiop:string-prefix-p "@@ " line)
+           (unless file
+             (editor-error "Malformed Jujutsu Git diff: hunk before file"))
+           (flush-hunk)
+           (setf body (list line)))
+          (body (push line body))
+          (file (push line header))))
+      (flush-hunk))
+    (nreverse hunks)))
+
+(defun jj-split-hunk-lines (hunk)
+  "Return HUNK body entries as (INDEX LINE)."
+  (loop :for line :in (jj-lines-with-endings (jj-split-hunk-body hunk))
+        :for index :from 0
+        :collect (list index line)))
+
+(defun jj-split-change-line-p (line)
+  "Return whether LINE is an added or removed hunk-body line."
+  (and (plusp (length line))
+       (member (char line 0) '(#\+ #\-) :test #'char=)))
+
+(defun jj-split-hunk-marker (hunk)
+  "Return the display marker for HUNK's selection state."
+  (cond
+    ((eq :all (jj-split-hunk-selection hunk)) "x")
+    ((jj-split-hunk-selection hunk) "*")
+    (t " ")))
+
+(defun jj-split-selected-count (hunks)
+  (count-if #'jj-split-hunk-selection hunks))
+
+(defun jj-split-placement-label (buffer)
+  "Return BUFFER's split placement as a concise label."
+  (let ((placement (buffer-value buffer *lem-yath-jj-split-placement-key*))
+        (destination
+          (buffer-value buffer *lem-yath-jj-split-destination-key*)))
+    (case placement
+      (:destination (format nil "onto ~a" destination))
+      (:after (format nil "after ~a" destination))
+      (:before (format nil "before ~a" destination))
+      (otherwise "existing parent"))))
+
+(defun jj-split-hunk-at-point (&optional (point (current-point)))
+  "Return the split hunk represented at POINT."
+  (alexandria:when-let
+      ((id (text-property-at point *lem-yath-jj-split-hunk-key*)))
+    (find id
+          (buffer-value (current-buffer) *lem-yath-jj-split-hunks-key*)
+          :key #'jj-split-hunk-id)))
+
+(defun jj-restore-split-hunk-point (buffer id)
+  "Restore BUFFER point to split hunk ID."
+  (when id
+    (with-point ((point (buffer-start-point buffer)))
+      (loop
+        (when (eql id
+                   (text-property-at point *lem-yath-jj-split-hunk-key*))
+          (move-point (buffer-point buffer) point)
+          (return t))
+        (unless (line-offset point 1)
+          (return nil))))))
+
+(defun render-jj-split-buffer (buffer)
+  "Render BUFFER's partial split selection without changing its model."
+  (let* ((hunks (buffer-value buffer *lem-yath-jj-split-hunks-key*))
+         (revision (buffer-value buffer *lem-yath-jj-revision-key*))
+         (root (buffer-value buffer *lem-yath-jj-root-key*))
+         (current-id
+           (save-excursion
+             (setf (current-buffer) buffer)
+             (alexandria:when-let ((hunk (jj-split-hunk-at-point)))
+               (jj-split-hunk-id hunk))))
+         (previous-file nil))
+    (with-buffer-read-only buffer nil
+      (erase-buffer buffer)
+      (let ((point (buffer-end-point buffer)))
+        (insert-string
+         point
+         (format nil
+                 "Jujutsu split: ~a~%Revision: ~a~%Selected: ~d/~d hunks  Placement: ~a  Layout: ~a~%~%H/Space hunk, F file, R region, C clear, o/a/b placement, c parent, p parallel, s/RET execute, q cancel~%"
+                 (namestring root)
+                 revision
+                 (jj-split-selected-count hunks)
+                 (length hunks)
+                 (jj-split-placement-label buffer)
+                 (if (buffer-value buffer *lem-yath-jj-split-parallel-key*)
+                     "parallel"
+                     "linear")))
+        (dolist (hunk hunks)
+          (unless (equal previous-file (jj-split-hunk-file hunk))
+            (setf previous-file (jj-split-hunk-file hunk))
+            (insert-string point (format nil "~%~a~%" previous-file)))
+          (with-point ((start point))
+            (insert-string
+             point
+             (format nil "[~a] Hunk ~d~%"
+                     (jj-split-hunk-marker hunk)
+                     (jj-split-hunk-id hunk)))
+            (put-text-property start point *lem-yath-jj-split-hunk-key*
+                               (jj-split-hunk-id hunk)))
+          (dolist (entry (jj-split-hunk-lines hunk))
+            (destructuring-bind (index line) entry
+              (with-point ((start point))
+                (insert-string point line)
+                (put-text-property start point *lem-yath-jj-split-hunk-key*
+                                   (jj-split-hunk-id hunk))
+                (when (jj-split-change-line-p line)
+                  (put-text-property
+                   start point *lem-yath-jj-split-line-key*
+                   (cons (jj-split-hunk-id hunk) index))))))))
+      (buffer-unmark buffer))
+    (setf (buffer-read-only-p buffer) t)
+    (unless (jj-restore-split-hunk-point buffer current-id)
+      (jj-restore-split-hunk-point buffer
+                                   (jj-split-hunk-id (first hunks))))
+    buffer))
+
+(defun jj-split-toggle-hunk-model (hunk)
+  "Toggle whole-HUNK selection."
+  (setf (jj-split-hunk-selection hunk)
+        (unless (jj-split-hunk-selection hunk) :all)))
+
+(define-command lem-yath-jj-split-toggle-hunk () ()
+  "Toggle the complete split hunk at point."
+  (let ((hunk (or (jj-split-hunk-at-point)
+                  (editor-error "No Jujutsu split hunk at point"))))
+    (jj-split-toggle-hunk-model hunk)
+    (render-jj-split-buffer (current-buffer))
+    (message (if (jj-split-hunk-selection hunk)
+                 "Selected split hunk"
+                 "Deselected split hunk"))))
+
+(define-command lem-yath-jj-split-toggle-file () ()
+  "Toggle every split hunk belonging to the file at point."
+  (let* ((hunk (or (jj-split-hunk-at-point)
+                   (editor-error "No Jujutsu split file at point")))
+         (file (jj-split-hunk-file hunk))
+         (hunks
+           (remove-if-not
+            (lambda (candidate)
+              (equal file (jj-split-hunk-file candidate)))
+            (buffer-value (current-buffer) *lem-yath-jj-split-hunks-key*)))
+         (selected-p (every #'jj-split-hunk-selection hunks)))
+    (dolist (candidate hunks)
+      (setf (jj-split-hunk-selection candidate)
+            (unless selected-p :all)))
+    (render-jj-split-buffer (current-buffer))
+    (message (if selected-p
+                 "Deselected split file"
+                 "Selected split file"))))
+
+(defun jj-split-region-entries (buffer)
+  "Return unique (HUNK-ID . LINE-INDEX) entries selected in BUFFER."
+  (unless (buffer-mark-p buffer)
+    (editor-error "No active region in the Jujutsu split diff"))
+  (let ((start (region-beginning buffer))
+        (end (region-end buffer))
+        (entries '()))
+    (when (point= start end)
+      (editor-error "The active split region is empty"))
+    (with-point ((point start))
+      (line-start point)
+      (loop :while (point< point end)
+            :for entry := (text-property-at point
+                                            *lem-yath-jj-split-line-key*)
+            :do (when entry (pushnew entry entries :test #'equal))
+            :while (line-offset point 1)))
+    (unless entries
+      (editor-error "The region contains no changed split lines"))
+    (let ((id (caar entries)))
+      (unless (every (lambda (entry) (eql id (car entry))) entries)
+        (editor-error "A split region must stay within one hunk")))
+    (nreverse entries)))
+
+(define-command lem-yath-jj-split-toggle-region () ()
+  "Use the active region's changed lines as a partial hunk selection."
+  (let* ((buffer (current-buffer))
+         (entries (jj-split-region-entries buffer))
+         (id (caar entries))
+         (indices (mapcar #'cdr entries))
+         (hunk
+           (find id (buffer-value buffer *lem-yath-jj-split-hunks-key*)
+                 :key #'jj-split-hunk-id))
+         (current (jj-split-hunk-selection hunk)))
+    (when (or (search "--- /dev/null" (jj-split-hunk-header hunk))
+              (search "+++ /dev/null" (jj-split-hunk-header hunk)))
+      (editor-error
+       "Select the whole hunk or file when splitting an added or deleted file"))
+    (setf (jj-split-hunk-selection hunk)
+          (cond
+            ((eq current :all) indices)
+            ((every (lambda (index) (member index current)) indices)
+             (set-difference current indices))
+            (t (sort (remove-duplicates (append indices current)) #'<))))
+    (when (and (listp (jj-split-hunk-selection hunk))
+               (null (jj-split-hunk-selection hunk)))
+      (setf (jj-split-hunk-selection hunk) nil))
+    (buffer-mark-cancel buffer)
+    (render-jj-split-buffer buffer)
+    (message "Split region selection updated")))
+
+(define-command lem-yath-jj-split-clear () ()
+  "Clear every patch selection in the current split buffer."
+  (dolist (hunk (buffer-value (current-buffer)
+                              *lem-yath-jj-split-hunks-key*))
+    (setf (jj-split-hunk-selection hunk) nil))
+  (render-jj-split-buffer (current-buffer))
+  (message "Cleared split selections"))
+
+(defun jj-split-move-hunk (direction)
+  "Move to the next split hunk in DIRECTION."
+  (let ((current-id
+          (alexandria:when-let ((hunk (jj-split-hunk-at-point)))
+            (jj-split-hunk-id hunk))))
+    (with-point ((point (current-point)))
+      (loop
+        (unless (line-offset point direction)
+          (editor-error "No more Jujutsu split hunks"))
+        (let ((id (text-property-at point *lem-yath-jj-split-hunk-key*)))
+          (when (and id (not (eql id current-id)))
+            (move-point (current-point) point)
+            (return)))))))
+
+(define-command lem-yath-jj-split-next-hunk () ()
+  (jj-split-move-hunk 1))
+
+(define-command lem-yath-jj-split-previous-hunk () ()
+  (jj-split-move-hunk -1))
+
+(defun jj-split-parse-hunk-header (line)
+  "Parse a Git hunk header LINE into numeric ranges and suffix."
+  (cl-ppcre:register-groups-bind
+      (old-start old-length new-start new-length suffix)
+      ("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@(.*?)(?:\\n)?$"
+       line)
+    (when old-start
+      (list (parse-integer old-start)
+            (parse-integer (or old-length "1"))
+            (parse-integer new-start)
+            (parse-integer (or new-length "1"))
+            (or suffix "")))))
+
+(defun jj-split-format-range (start length)
+  (if (= length 1)
+      (princ-to-string start)
+      (format nil "~d,~d" start length)))
+
+(defun jj-split-partial-hunk-patch (hunk indices)
+  "Build HUNK patch containing only changed lines at INDICES."
+  (let* ((entries (jj-split-hunk-lines hunk))
+         (parsed (jj-split-parse-hunk-header (second (first entries))))
+         (old-length 0)
+         (new-length 0)
+         (has-change nil)
+         (previous-included-p nil)
+         (body '()))
+    (unless parsed
+      (editor-error "Unsupported Jujutsu hunk header"))
+    (dolist (entry (rest entries))
+      (destructuring-bind (index line) entry
+        (let* ((type
+                 (and (plusp (length line))
+                      (case (char line 0)
+                        (#\Space :context)
+                        (#\+ :added)
+                        (#\- :removed)
+                        (#\\ :meta))))
+               (selected-p (member index indices))
+               (included-line nil))
+          (case type
+            (:context
+             (incf old-length)
+             (incf new-length)
+             (setf included-line line
+                   previous-included-p t))
+            (:added
+             (if selected-p
+                 (progn
+                   (incf new-length)
+                   (setf has-change t
+                         included-line line
+                         previous-included-p t))
+                 (setf previous-included-p nil)))
+            (:removed
+             (incf old-length)
+             (incf new-length)
+             (if selected-p
+                 (progn
+                   (decf new-length)
+                   (setf has-change t
+                         included-line line))
+                 (setf included-line
+                       (concatenate 'string " " (subseq line 1))))
+             (setf previous-included-p t))
+            (:meta
+             (when previous-included-p
+               (setf included-line line))))
+          (when included-line (push included-line body)))))
+    (when has-change
+      (destructuring-bind (old-start ignored-old new-start ignored-new suffix)
+          parsed
+        (declare (ignore ignored-old ignored-new))
+        (concatenate
+         'string
+         (format nil "@@ -~a +~a @@~a~%"
+                 (jj-split-format-range old-start old-length)
+                 (jj-split-format-range new-start new-length)
+                 suffix)
+         (apply #'concatenate 'string (nreverse body)))))))
+
+(defun jj-split-hunk-patch (hunk)
+  "Return HUNK's selected patch fragment, or nil."
+  (let ((selection (jj-split-hunk-selection hunk)))
+    (cond
+      ((eq selection :all) (jj-split-hunk-body hunk))
+      ((consp selection) (jj-split-partial-hunk-patch hunk selection))
+      (t nil))))
+
+(defun jj-split-selected-patch (hunks)
+  "Build one Git-format patch from selected HUNKS."
+  (let ((parts '())
+        (previous-file nil))
+    (dolist (hunk hunks)
+      (alexandria:when-let ((patch (jj-split-hunk-patch hunk)))
+        (unless (equal previous-file (jj-split-hunk-file hunk))
+          (push (jj-split-hunk-header hunk) parts)
+          (setf previous-file (jj-split-hunk-file hunk)))
+        (push patch parts)))
+    (when parts
+      (apply #'concatenate 'string (nreverse parts)))))
+
+(defun jj-toml-string (value)
+  "Quote VALUE as a basic TOML string."
+  (with-output-to-string (stream)
+    (write-char #\" stream)
+    (loop :for character :across value
+          :do (case character
+                (#\\ (write-string "\\\\" stream))
+                (#\" (write-string "\\\"" stream))
+                (#\Newline (write-string "\\n" stream))
+                (#\Return (write-string "\\r" stream))
+                (otherwise (write-char character stream))))
+    (write-char #\" stream)))
+
+(defun jj-required-executable (name)
+  (or (executable-find name)
+      (editor-error "The ~a executable is required for partial Jujutsu split"
+                    name)))
+
+(defun jj-split-tool-config (script patch)
+  "Return temporary jj diff-tool configuration for SCRIPT and PATCH."
+  (let* ((program (namestring (jj-required-executable "sh")))
+         (arguments
+           (mapcar #'jj-toml-string
+                   (list (uiop:native-namestring script)
+                         "$left" "$right"
+                         (uiop:native-namestring patch)
+                         (namestring (jj-required-executable "rm"))
+                         (namestring (jj-required-executable "cp"))
+                         (namestring (jj-required-executable "git"))))))
+    (list
+     "--config"
+     (format nil "merge-tools.lem-yath-split.program=~a"
+             (jj-toml-string program))
+     "--config"
+     (format nil "merge-tools.lem-yath-split.edit-args=[~{~a~^,~}]"
+             arguments))))
+
+(defun jj-split-script-text ()
+  "Return the fixed private diff-tool script used by partial split."
+  (format nil
+          "set -eu~%left=$1~%right=$2~%patch=$3~%rm=$4~%cp=$5~%git=$6~%[ -d \"$left\" ]~%[ -d \"$right\" ]~%[ \"${left%/*}\" = \"${right%/*}\" ]~%[ \"${left##*/}\" = left ]~%[ \"${right##*/}\" = right ]~%\"$rm\" -rf -- \"$right\"~%\"$cp\" -a -- \"$left\" \"$right\"~%cd \"$right\"~%\"$git\" apply --recount --unidiff-zero -- \"$patch\"~%"))
+
+(defun jj-split-command-arguments (buffer revision message)
+  "Return non-tool jj split arguments from BUFFER state."
+  (let ((arguments
+          (list "split" "--revision" revision "--message" message))
+        (placement (buffer-value buffer *lem-yath-jj-split-placement-key*))
+        (destination
+          (buffer-value buffer *lem-yath-jj-split-destination-key*)))
+    (when placement
+      (setf arguments
+            (append arguments
+                    (list (ecase placement
+                            (:destination "--destination")
+                            (:after "--insert-after")
+                            (:before "--insert-before"))
+                          destination))))
+    (when (buffer-value buffer *lem-yath-jj-split-parallel-key*)
+      (setf arguments (append arguments '("--parallel"))))
+    arguments))
+
+(defun jj-run-split-with-patch (root arguments patch)
+  "Run jj split ARGUMENTS at ROOT using selected PATCH."
+  (uiop:with-temporary-file
+      (:pathname patch-path :stream patch-stream
+       :direction :output :element-type 'character)
+    (write-string patch patch-stream)
+    (finish-output patch-stream)
+    (close patch-stream)
+    (uiop:with-temporary-file
+        (:pathname script-path :stream script-stream
+         :direction :output :element-type 'character)
+      (write-string (jj-split-script-text) script-stream)
+      (finish-output script-stream)
+      (close script-stream)
+      (run-jj root
+              (append arguments
+                      '("--interactive" "--tool" "lem-yath-split")
+                      (jj-split-tool-config script-path patch-path))))))
+
+(define-command lem-yath-jj-split-execute () ()
+  "Execute the selected partial patch as a Jujutsu split."
+  (let* ((buffer (current-buffer))
+         (root (buffer-value buffer *lem-yath-jj-root-key*))
+         (revision (buffer-value buffer *lem-yath-jj-revision-key*))
+         (origin (buffer-value buffer *lem-yath-jj-split-origin-key*))
+         (patch
+           (jj-split-selected-patch
+            (buffer-value buffer *lem-yath-jj-split-hunks-key*))))
+    (unless patch
+      (editor-error "Select at least one Jujutsu hunk or changed region"))
+    (let ((message
+            (prompt-for-string
+             "Selected change description (optional): "
+             :history-symbol 'lem-yath-jj-split-description)))
+      (jj-run-split-with-patch
+       root (jj-split-command-arguments buffer revision message) patch))
+    (quit-active-window)
+    (when (and origin (not (deleted-buffer-p origin)))
+      (render-jj-buffer origin root)
+      (jj-restore-revision-point origin revision))
+    (message "Jujutsu change split")))
+
+(defun jj-split-set-placement (placement)
+  "Set split PLACEMENT by prompting for a destination revset."
+  (let* ((buffer (current-buffer))
+         (root (buffer-value buffer *lem-yath-jj-root-key*))
+         (prompt
+           (ecase placement
+             (:destination "Split destination revision or revset: ")
+             (:after "Split insert-after revision or revset: ")
+             (:before "Split insert-before revision or revset: ")))
+         (destination
+           (jj-prompt-for-revision
+            root prompt 'lem-yath-jj-split-destination)))
+    (setf (buffer-value buffer *lem-yath-jj-split-placement-key*) placement
+          (buffer-value buffer *lem-yath-jj-split-destination-key*) destination)
+    (render-jj-split-buffer buffer)
+    (message "Jujutsu split placement updated")))
+
+(define-command lem-yath-jj-split-onto () ()
+  (jj-split-set-placement :destination))
+
+(define-command lem-yath-jj-split-after () ()
+  (jj-split-set-placement :after))
+
+(define-command lem-yath-jj-split-before () ()
+  (jj-split-set-placement :before))
+
+(define-command lem-yath-jj-split-parent () ()
+  "Reset split placement to the selected revision's existing parent."
+  (let ((buffer (current-buffer)))
+    (setf (buffer-value buffer *lem-yath-jj-split-placement-key*) nil
+          (buffer-value buffer *lem-yath-jj-split-destination-key*) nil)
+    (render-jj-split-buffer buffer)
+    (message "Jujutsu split will use the existing parent")))
+
+(define-command lem-yath-jj-split-toggle-parallel () ()
+  "Toggle parallel rather than parent/child split layout."
+  (let ((buffer (current-buffer)))
+    (setf (buffer-value buffer *lem-yath-jj-split-parallel-key*)
+          (not (buffer-value buffer *lem-yath-jj-split-parallel-key*)))
+    (render-jj-split-buffer buffer)
+    (message "Jujutsu split layout updated")))
+
+(define-command lem-yath-jj-split-help () ()
+  (message
+   "JJ Split: H/Space hunk, F file, R region, C clear, C-j/C-k hunks, o/a/b placement, c parent, p parallel, s/RET execute, q cancel"))
+
+(define-command lem-yath-jj-split-cancel () ()
+  "Cancel partial split and return to the exact Jujutsu history."
+  (quit-active-window)
+  (message "Jujutsu split cancelled"))
+
+(defun jj-split-buffer-name (root revision)
+  (format nil "*lem-yath-jj-split: ~a:~a*"
+          (namestring (or (ignore-errors (truename root)) root)) revision))
+
+(define-command lem-yath-jj-split () ()
+  "Open a Majutsu-style partial-patch split view for the selected change."
+  (let* ((origin (current-buffer))
+         (root (jj-current-root))
+         (revision (jj-selected-revision))
+         (diff (run-jj root
+                       (list "diff" "--git" "--context" "3"
+                             "--revisions" revision))))
+    (when (> (babel:string-size-in-octets diff :encoding :utf-8)
+             *jj-split-diff-limit*)
+      (editor-error "The Jujutsu split diff exceeds the ~d-byte safety limit"
+                    *jj-split-diff-limit*))
+    (when (str:blankp diff)
+      (editor-error "Cannot split an empty Jujutsu revision"))
+    (let ((hunks (parse-jj-split-hunks diff)))
+      (unless hunks
+        (editor-error
+         "The selected revision has no selectable textual Jujutsu hunks"))
+      (let ((buffer
+              (make-buffer (jj-split-buffer-name root revision)
+                           :directory (namestring root))))
+        (change-buffer-mode buffer 'lem/buffer/fundamental-mode:fundamental-mode)
+        (save-excursion
+          (setf (current-buffer) buffer)
+          (enable-minor-mode 'lem-yath-jj-split-mode))
+        (setf (buffer-value buffer *lem-yath-jj-root-key*) root
+              (buffer-value buffer *lem-yath-jj-view-kind-key*) :split
+              (buffer-value buffer *lem-yath-jj-revision-key*) revision
+              (buffer-value buffer *lem-yath-jj-split-origin-key*) origin
+              (buffer-value buffer *lem-yath-jj-split-hunks-key*) hunks
+              (buffer-value buffer *lem-yath-jj-split-placement-key*) nil
+              (buffer-value buffer *lem-yath-jj-split-destination-key*) nil
+              (buffer-value buffer *lem-yath-jj-split-parallel-key*) nil)
+        (render-jj-split-buffer buffer)
+        (switch-to-buffer buffer)))))
+
 (defun jj-bookmark-names (root)
   "Return the sorted local bookmark names at ROOT."
   (sort
@@ -1009,7 +1597,7 @@
 (define-command lem-yath-jj-help () ()
   "Show the focused Majutsu-compatible Jujutsu command surface."
   (message
-   "Jujutsu: c describe, o new, s squash, r rebase, y/Y duplicate, b bookmarks, e edit, u undo, C-r redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
+   "Jujutsu: c describe, o new, s squash, S split, r rebase, y/Y duplicate, b bookmarks, e edit, u undo, C-r redo, x abandon, d/RET show, C-j/C-k rows, g r refresh, q quit"))
 
 (define-command lem-yath-jj-quit () ()
   "Quit the current Jujutsu status/log window."
@@ -1042,6 +1630,7 @@
 (define-key *lem-yath-jj-view-keymap* "c" 'lem-yath-jj-describe)
 (define-key *lem-yath-jj-view-keymap* "o" 'lem-yath-jj-new)
 (define-key *lem-yath-jj-view-keymap* "s" 'lem-yath-jj-squash)
+(define-key *lem-yath-jj-view-keymap* "S" 'lem-yath-jj-split)
 (define-key *lem-yath-jj-view-keymap* "r" 'lem-yath-jj-rebase)
 (define-key *lem-yath-jj-view-keymap* "y" 'lem-yath-jj-duplicate)
 (define-key *lem-yath-jj-view-keymap* "Y" 'lem-yath-jj-duplicate-dwim)
@@ -1057,6 +1646,36 @@
 (define-key *lem-yath-jj-view-keymap* "]" 'lem-yath-jj-next-revision)
 (define-key *lem-yath-jj-view-keymap* "[" 'lem-yath-jj-previous-revision)
 (define-key *lem-yath-jj-view-keymap* "?" 'lem-yath-jj-help)
+
+(define-key *lem-yath-jj-split-mode-keymap* "H"
+  'lem-yath-jj-split-toggle-hunk)
+(define-key *lem-yath-jj-split-mode-keymap* "Space"
+  'lem-yath-jj-split-toggle-hunk)
+(define-key *lem-yath-jj-split-mode-keymap* "F"
+  'lem-yath-jj-split-toggle-file)
+(define-key *lem-yath-jj-split-mode-keymap* "R"
+  'lem-yath-jj-split-toggle-region)
+(define-key *lem-yath-jj-split-mode-keymap* "C"
+  'lem-yath-jj-split-clear)
+(define-key *lem-yath-jj-split-mode-keymap* "C-j"
+  'lem-yath-jj-split-next-hunk)
+(define-key *lem-yath-jj-split-mode-keymap* "C-k"
+  'lem-yath-jj-split-previous-hunk)
+(define-key *lem-yath-jj-split-mode-keymap* "]"
+  'lem-yath-jj-split-next-hunk)
+(define-key *lem-yath-jj-split-mode-keymap* "["
+  'lem-yath-jj-split-previous-hunk)
+(define-key *lem-yath-jj-split-mode-keymap* "o" 'lem-yath-jj-split-onto)
+(define-key *lem-yath-jj-split-mode-keymap* "a" 'lem-yath-jj-split-after)
+(define-key *lem-yath-jj-split-mode-keymap* "b" 'lem-yath-jj-split-before)
+(define-key *lem-yath-jj-split-mode-keymap* "c" 'lem-yath-jj-split-parent)
+(define-key *lem-yath-jj-split-mode-keymap* "p"
+  'lem-yath-jj-split-toggle-parallel)
+(define-key *lem-yath-jj-split-mode-keymap* "s" 'lem-yath-jj-split-execute)
+(define-key *lem-yath-jj-split-mode-keymap* "Return"
+  'lem-yath-jj-split-execute)
+(define-key *lem-yath-jj-split-mode-keymap* "q" 'lem-yath-jj-split-cancel)
+(define-key *lem-yath-jj-split-mode-keymap* "?" 'lem-yath-jj-split-help)
 
 (defun lem-yath-legit-status-at (directory)
   "Open Legit at the Git root enclosing DIRECTORY."
