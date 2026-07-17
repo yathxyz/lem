@@ -124,6 +124,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   use packaged `qalc` evaluation. GNU Calc's advanced symbolic, matrix,
   programming, graphing, trail, and auxiliary interfaces remain outside the
   bounded everyday-calculator port
+- GNU So Long parity protects newly visited programming, CSS/XML, and
+  fundamental-equivalent files before their ordinary mode machinery runs when
+  any line exceeds 10,000 UTF-8 bytes. The buffer opens wrapped and read-only
+  without parsers, LSP, lint, gutters, DAP, or Paredit; `C-c C-c` restores the
+  original mode and `M-x global-so-long-mode` toggles protection for later
+  visits. Plain-text and document modes retain their ordinary behavior
 - Emacs 31-style asynchronous compilation on `SPC c c`, seeded with its exact
   `make -k -jN` default and launched in the originating buffer's directory and
   Direnv-aware environment; the save prompt includes the configured `d` diff,
@@ -633,6 +639,7 @@ nix run .#editing-test
 nix run .#formatting-test
 nix run .#daily-workflows-test
 nix run .#calc-test
+nix run .#so-long-test
 nix run .#direnv-test
 nix run .#electric-editing-test
 nix run .#ui-parity-test

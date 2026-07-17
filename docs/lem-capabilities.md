@@ -3102,6 +3102,15 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   the exact origin window. This deliberately does not load upstream contrib
   `calc-mode`, whose algebraic line evaluator does not match GNU Calc's RPN
   interaction model (`scripts/calc-test.sh`).
+- **GNU So Long parity (lem-yath, not upstream)**: `src/so-long.lisp`
+  intercepts ordinary file-mode selection for the configured global policy.
+  A programming, CSS/XML, or fundamental-equivalent file with a line strictly
+  over 10,000 UTF-8 bytes enters a wrapped, read-only basic mode before parser,
+  LSP, lint, gutter, DAP, or Paredit activation. `C-c C-c` restores the
+  selected mode and presentation; `M-x global-so-long-mode` toggles subsequent
+  visits. Unlike GNU So Long, Lem performs the guard before original-mode
+  activation and measures decoded text as UTF-8; the action menu and local
+  policy/action customization are not reproduced (`scripts/so-long-test.sh`).
 - **living-canvas / pixel-demo / call-graph**: experimental visual features
   (`#+sbcl lem-living-canvas`; call-graph providers for go/python via tree-sitter).
 - **contrib/ (NOT in the default image)**: `bracket-paren-mode`, upstream

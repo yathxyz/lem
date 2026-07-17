@@ -743,6 +743,7 @@
             daily-workflows-test = mkTestApp "lem-yath-daily-workflows-test" "daily-workflows-test.sh";
             dirvish-test = mkTestAppWithLem lemYath "lem-yath-dirvish-test" "dirvish-test.sh";
             calc-test = mkTestAppWithLem lemYath "lem-yath-calc-test" "calc-test.sh";
+            so-long-test = mkTestAppWithLem lemYath "lem-yath-so-long-test" "so-long-test.sh";
             buffer-list-test = mkTestAppWithLem lemYath "lem-yath-buffer-list-test" "buffer-list-test.sh";
             direnv-test = mkTestApp "lem-yath-direnv-test" "direnv-test.sh";
             project-navigation-test = mkTestApp "lem-yath-project-navigation-test" "project-navigation-test.sh";
@@ -852,6 +853,7 @@
             daily-workflows = mkCheck "daily-workflows" "daily-workflows-test.sh";
             dirvish = mkCheckWithLem lemYath "dirvish" "dirvish-test.sh";
             calc = mkCheckWithLem lemYath "calc" "calc-test.sh";
+            so-long = mkCheckWithLem lemYath "so-long" "so-long-test.sh";
             buffer-list = mkCheckWithLem lemYath "buffer-list" "buffer-list-test.sh";
             direnv = mkCheck "direnv" "direnv-test.sh";
             project-navigation = mkCheck "project-navigation" "project-navigation-test.sh";

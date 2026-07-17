@@ -318,9 +318,10 @@
 
 (defun ensure-configured-language-path-mode (buffer)
   "Apply the pinned modes' filename-regexp and nginx magic associations."
-  (alexandria:when-let ((mode (configured-language-path-mode buffer)))
-    (unless (eq mode (buffer-major-mode buffer))
-      (change-buffer-mode buffer mode))))
+  (unless (so-long-buffer-active-p buffer)
+    (alexandria:when-let ((mode (configured-language-path-mode buffer)))
+      (unless (eq mode (buffer-major-mode buffer))
+        (change-buffer-mode buffer mode)))))
 
 (remove-hook *find-file-hook* 'ensure-configured-language-path-mode)
 ;; Core file association processing runs at 5000.  This narrower regexp/magic

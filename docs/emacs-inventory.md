@@ -665,6 +665,11 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
   and supplies its digit/algebraic-entry, arithmetic, stack, undo, copy/yank,
   angle, precision, and quit keys; the local override makes Escape abort
   recursive digit entry.
+- **so-long**: `global-so-long-mode` on `after-init`, with its uncustomized
+  defaults. A programming, CSS, SGML/XML, or Fundamental-mode file whose line
+  exceeds 10,000 bytes is replaced by read-only, wrapped `so-long-mode`;
+  `C-c C-c` restores the original major mode. The threshold is strictly
+  greater than 10,000 bytes, not characters.
 - **editorconfig**: `editorconfig-mode` on `prog-mode`.
 - **which-key**: enabled globally after a one-second deferred package load; its independent one-second popup delay and the paging, column, separator, replacement, and echo-area settings retain their defaults.
 - **Startup**: early-init disables tool/scroll/menu/blink-cursor bars, silences startup messages, sets `gc-cons-threshold` huge + `file-name-handler-alist nil` for fast init (restored on `emacs-startup-hook`). Native-comp warnings silenced. `inhibit-startup-message`, empty scratch message; the resulting Org `*scratch*` enables `gptel-mode`.

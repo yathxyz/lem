@@ -16,6 +16,7 @@
                (:file "direnv")
                (:file "sops")
                (:file "editing")
+               (:file "so-long")
                (:file "cursor-state")
                (:file "vi")
                (:file "terminal")
