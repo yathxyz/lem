@@ -1,6 +1,7 @@
 (defpackage :lem/common/character/string-width-utils
   (:use :cl)
   (:export :+default-tab-size+
+           :*ambiguous-character-width*
            :control-char
            :wide-char-p
            :char-width
@@ -9,6 +10,11 @@
 (in-package :lem/common/character/string-width-utils)
 
 (defconstant +default-tab-size+ 8)
+
+(defvar *ambiguous-character-width* 1
+  "Display width for East_Asian_Width \"Ambiguous\" characters.
+The default 1 (narrow) preserves legacy behavior; bind or set it to 2 for a
+terminal configured to render ambiguous-width characters as wide (CJK).")
 
 (defparameter *char-replacement*
   (let ((table (make-hash-table)))
@@ -59,6 +65,14 @@
       (lem/common/character/eastasian:eastasian-code-p (char-code char))
       (control-char char)))
 
+(defun zero-width-char-p (char)
+  (declare (character char))
+  (lem/common/character/eastasian:zero-width-code-p (char-code char)))
+
+(defun ambiguous-char-p (char)
+  (declare (character char))
+  (lem/common/character/eastasian:ambiguous-code-p (char-code char)))
+
 (defun char-width (char width &key (tab-size +default-tab-size+))
   (declare (character char) (fixnum width))
   (cond ((char= char #\tab)
@@ -69,8 +83,12 @@
          (loop :for char :across (control-char char)
                :do (setf width (char-width char width :tab-size tab-size)))
          width)
+        ((zero-width-char-p char)
+         width)
         ((wide-char-p char)
          (+ width 2))
+        ((ambiguous-char-p char)
+         (+ width *ambiguous-character-width*))
         (t
          (+ width 1))))
 
