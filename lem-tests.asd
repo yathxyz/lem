@@ -28,7 +28,8 @@
                              (:file "timer")))
                (:module "pbt"
                 :components ((:file "harness")
-                             (:file "harness-test")))
+                             (:file "harness-test")
+                             (:file "baseline-fuzz")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")
