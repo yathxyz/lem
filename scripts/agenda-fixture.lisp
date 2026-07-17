@@ -112,6 +112,16 @@
      (if (buffer-enable-undo-p buffer) "yes" "no")
      (if (agenda-scan-running-p buffer) "yes" "no")
      (if (agenda-refresh-pending-p buffer) "yes" "no"))
+    (agenda-test-log
+     "OPEN-MOTION serial=~d tab=~a shift-return=~a gtab=~a gj=~a gk=~a Cj=~a Ck=~a"
+     serial
+     (agenda-test-command-name "Tab")
+     (agenda-test-command-name "Shift-Return")
+     (agenda-test-command-name "g Tab")
+     (agenda-test-command-name "g j")
+     (agenda-test-command-name "g k")
+     (agenda-test-command-name "C-j")
+     (agenda-test-command-name "C-k"))
     (loop :for directory :in directories
           :for index :from 1
           :do (agenda-test-log "ROOT serial=~d index=~d path=~a"

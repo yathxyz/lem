@@ -1129,6 +1129,54 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
           (when (integerp line)
             (goto-line line))))))
 
+(define-command lem-yath-agenda-goto () ()
+  "Open the current agenda entry in another window, like Evil-Org Tab."
+  (let ((file (or (text-property-at (current-point) :agenda-file)
+                  (text-property-at
+                   (current-point) :agenda-clock-report-file)))
+        (line (or (text-property-at (current-point) :agenda-line)
+                  (text-property-at
+                   (current-point) :agenda-clock-report-line))))
+    (if (null file)
+        (message "No agenda entry on this line.")
+        (let ((buffer (find-file-buffer file)))
+          (when (one-window-p)
+            (split-window-sensibly (current-window)))
+          (switch-to-window (get-next-window (current-window)))
+          (switch-to-buffer buffer)
+          (when (integerp line)
+            (goto-line line))))))
+
+(defun agenda-source-row-p (point)
+  "Return true when POINT names a source-backed agenda or clock-report row."
+  (or (text-property-at point :agenda-file)
+      (text-property-at point :agenda-clock-report-file)))
+
+(defun agenda-find-item-point (origin direction)
+  "Return the next source-backed row from ORIGIN in DIRECTION, if any."
+  (with-point ((point origin))
+    (loop :while (line-offset point direction)
+          :when (agenda-source-row-p point)
+            :return (copy-point point :temporary))))
+
+(defun agenda-move-item (direction count)
+  "Move by COUNT source-backed agenda rows in DIRECTION."
+  (let ((column (point-column (current-point))))
+    (dotimes (_ (max 0 count))
+      (alexandria:if-let
+          ((target (agenda-find-item-point (current-point) direction)))
+        (move-point (current-point) target)
+        (return)))
+    (move-to-column (current-point) column)))
+
+(define-command lem-yath-agenda-next-item (&optional (count 1)) (:universal)
+  "Move to the next source-backed agenda row."
+  (agenda-move-item 1 count))
+
+(define-command lem-yath-agenda-previous-item (&optional (count 1)) (:universal)
+  "Move to the previous source-backed agenda row."
+  (agenda-move-item -1 count))
+
 (define-command lem-yath-agenda-refresh () ()
   "Re-scan the org files and rebuild the agenda buffer."
   (let ((buffer (get-buffer *agenda-buffer-name*)))
@@ -1682,6 +1730,13 @@ suffix."
   (make-keymap :description '*lem-yath-agenda-vi-keymap*))
 
 (define-key *lem-yath-agenda-vi-keymap* "Return" 'lem-yath-agenda-visit)
+(define-key *lem-yath-agenda-vi-keymap* "Tab" 'lem-yath-agenda-goto)
+(define-key *lem-yath-agenda-vi-keymap* "Shift-Return" 'lem-yath-agenda-goto)
+(define-key *lem-yath-agenda-vi-keymap* "g Tab" 'lem-yath-agenda-goto)
+(define-key *lem-yath-agenda-vi-keymap* "g j" 'lem-yath-agenda-next-item)
+(define-key *lem-yath-agenda-vi-keymap* "g k" 'lem-yath-agenda-previous-item)
+(define-key *lem-yath-agenda-vi-keymap* "C-j" 'lem-yath-agenda-next-item)
+(define-key *lem-yath-agenda-vi-keymap* "C-k" 'lem-yath-agenda-previous-item)
 (define-key *lem-yath-agenda-vi-keymap* "g r" 'lem-yath-agenda-refresh)
 (define-key *lem-yath-agenda-vi-keymap* "g R" 'lem-yath-agenda-refresh)
 (define-key *lem-yath-agenda-vi-keymap* "t" 'lem-yath-agenda-todo)

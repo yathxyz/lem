@@ -236,6 +236,7 @@ else
   grep -qF "FILE serial=1 index=2 path=$source_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=3 path=$public_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=4 path=$mcp_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -q '^OPEN-MOTION serial=1 tab=LEM-YATH-AGENDA-GOTO shift-return=LEM-YATH-AGENDA-GOTO gtab=LEM-YATH-AGENDA-GOTO gj=LEM-YATH-AGENDA-NEXT-ITEM gk=LEM-YATH-AGENDA-PREVIOUS-ITEM Cj=LEM-YATH-AGENDA-NEXT-ITEM Ck=LEM-YATH-AGENDA-PREVIOUS-ITEM$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,movetag,parenttag,shared,targettag items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 33 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -1024,6 +1025,45 @@ tmux_cmd send-keys -t "$session" Escape
 sleep 0.2
 tmux_cmd send-keys -t "$session" Space m a
 if lem_wait_for "$session" 'Public visit sentinel' 40 >/dev/null; then
+  : >"$LEM_YATH_AGENDA_REPORT"
+  tmux_cmd send-keys -t "$session" F5 g k F6
+  if wait_report '^POINT mode=LEM-YATH-AGENDA-MODE file=.* line=[0-9]+ text=.*$' &&
+     ! grep -q 'Public visit sentinel' "$LEM_YATH_AGENDA_REPORT"; then
+    tmux_cmd send-keys -t "$session" g j F6
+    if wait_report "^POINT mode=LEM-YATH-AGENDA-MODE file=$public_file line=3 .*Public visit sentinel"; then
+      : >"$LEM_YATH_AGENDA_REPORT"
+      tmux_cmd send-keys -t "$session" 2 g k F6
+      if wait_report '^POINT mode=LEM-YATH-AGENDA-MODE file=.* line=[0-9]+ text=.*$' &&
+         ! grep -q 'Public visit sentinel' "$LEM_YATH_AGENDA_REPORT"; then
+        tmux_cmd send-keys -t "$session" 2 g j F6
+        if wait_report "^POINT mode=LEM-YATH-AGENDA-MODE file=$public_file line=3 .*Public visit sentinel"; then
+          pass item-motion "gk/gj skip decoration and honor Evil counts between source rows"
+        else
+          fail item-motion "counted gj did not return across two source-backed rows"
+        fi
+      else
+        fail item-motion "counted gk did not move across two source-backed rows"
+      fi
+    else
+      fail item-motion "gj did not return to the next source-backed agenda row"
+    fi
+  else
+    fail item-motion "gk did not reach the previous source-backed agenda row"
+  fi
+
+  : >"$LEM_YATH_AGENDA_REPORT"
+  tmux_cmd send-keys -t "$session" F5 Tab
+  if lem_wait_for "$session" 'Public agenda' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" F7
+  fi
+  if wait_report "^SOURCE file=$public_file line=3 mode=ORG-MODE text=\"\\* SOMEDAY Public visit sentinel\"$"; then
+    pass goto-other-window "Tab opened the exact agenda source in another window"
+  else
+    fail goto-other-window "Tab did not open the exact source-backed row"
+  fi
+  tmux_cmd send-keys -t "$session" F8
+  lem_wait_for "$session" 'Public visit sentinel' 10 >/dev/null || true
+
   tmux_cmd send-keys -t "$session" F5
   sleep 0.2
   tmux_cmd send-keys -t "$session" F6

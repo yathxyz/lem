@@ -2591,8 +2591,12 @@ coalesce behind one worker per buffer, generations reject stale results, source
 failures are shown instead of becoming a false empty agenda, and killed buffers
 reject late delivery. Entry lines retain exact source pathname, line, and
 scanned-heading properties. In Vi state, `Return` visits that source, `gr`/`gR`
-refresh, `q` closes
-the explicit popup split, and Evil-Org's `t` opens the configured one-key
+refresh, and `q` closes the explicit popup split. Evil-Org `Tab`, `g Tab`, and
+Shift-Return open the exact source row in the next ordinary window, reusing an
+existing window and splitting only when the agenda is alone. `gj`/`gk` and
+`C-j`/`C-k` move with counts between source-backed agenda or clock-report rows,
+skipping headers, empty sections, status text, and clocktable decoration while
+preserving the current column. Evil-Org's `t` opens the configured one-key
 TODO/NEXT/WAITING/HOLD/SOMEDAY/DONE/CANCELLED selector. A selected state updates
 and immediately saves the source before refreshing. Evil-Org's `K` and `J`
 raise and lower GNU Org's default A/B/C priority cookies: an unprioritized
@@ -2693,7 +2697,8 @@ same-file refile completion/cancellation/hierarchy/persistence/row restoration,
 stale-source refusal, refresh races, unmodified/undo-free generated buffers,
 exact `p` defaults and planning/event replacement, time-range and suffix
 preservation, cancellation and no-date refusal, unsaved disk separation, one
-physical source undo, modified-live-buffer refresh, and cleanup.
+physical source undo, modified-live-buffer refresh, other-window source visits,
+decoration-skipping item motion, and cleanup.
 
 `src/apps/agenda-clock.lisp` preserves the effective Evil/base key shadowing
 rather than assigning one meaning to `I/O`. In Vi state, `I` starts the single

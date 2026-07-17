@@ -591,6 +591,10 @@ the trailing text-ready space. The profile binds no other org-journal command
 - Agenda sources are the top-level `.org` files in the three existing roots above; roam, journal, and other nested trees are not included by those directory entries.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
+- Evil-Org `Tab`, Shift-Return, and `g TAB` run `org-agenda-goto`, opening the
+  exact source marker in another window; Return instead runs
+  `org-agenda-switch-to` in the agenda window. `gj`/`gk` and `C-j`/`C-k` move
+  between source-backed items rather than stopping on agenda decoration.
 - Lem now covers the configured mutation paths exposed by that map: `dd`
   deletes a complete subtree with GNU Org's multi-line confirmation threshold,
   `ce` sets `Effort`, and `H`/`L` move the selected planning or ordinary-event

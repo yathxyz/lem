@@ -484,7 +484,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   explicit opt-in path, and failures stay in `*nodes-org-sync*`
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope, ordinary and repeating active-timestamp events,
-  modal Return/`gr`/q navigation, and Evil-Org-style `t` fast TODO selection plus
+  modal Return/`gr`/q navigation, Evil-Org `Tab`/`g Tab`/Shift-Return source
+  visits in another window, decoration-skipping `gj`/`gk` and `C-j`/`C-k`
+  item motion, and Evil-Org-style `t` fast TODO selection plus
   `J`/`K` GNU Org priority cycling. Evil-Org `dd` and GNU `C-k` durably delete
   complete source subtrees, while `ce`, GNU `e`, and `C-c C-x e` set validated
   Effort properties. Agenda `H`/`L` and the GNU shifted-arrow routes move
