@@ -229,6 +229,7 @@
                              (:file "image-buffer")
                              (:file "backup-on-save")
                              (:file "checkpoint")
+                             (:file "emergency-save")
                              (:file "daily-driver-defaults")))
 
                (:module "ui"

@@ -16,5 +16,6 @@
                (:file "view")
                (:file "render")
                (:file "input")
+               (:file "emergency-save")
                (:file "mainloop")
                (:file "ncurses")))

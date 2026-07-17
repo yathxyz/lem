@@ -30,6 +30,7 @@
         (input-thread (bt2:current-thread)))
     (unwind-protect
          (when (lem-ncurses/term:term-init)
+           (lem-ncurses/emergency-save:install-emergency-save-handlers)
            (let ((*standard-output* (make-broadcast-stream))
                  (*error-output* (make-broadcast-stream))
                  (*terminal-io* (make-broadcast-stream)))
