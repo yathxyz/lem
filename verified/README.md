@@ -15,13 +15,15 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 | `buffer-model.lisp` | VK-1 formal buffer model + `wf-buffer` well-formedness predicate. Certified; also the in-image runtime assertion. |
 | `buffer-edit.lisp` | VK-2 edit primitives (`k-insert`, `k-delete`), shift-markers marker algebra, position algebra, and the five VK-2 obligation groups as certified theorems. |
 | `undo.lisp` | VK-3 undo/redo kernel: edit records, session (history + redo + tick), `k-do-insert`/`k-do-delete`/`k-boundary`/`k-undo-group`/`k-redo-group`/inhibited-edit offset recomputation, and the certified VK-3 obligations. |
+| `codec.lisp` | VK-5 EOL/encoding codec: pure `decode-eol`/`encode-eol` over codepoint lists, mirroring `src/buffer/file.lisp` read/write (post-DS-6); round-trip, no-char-loss and totality theorems. |
 | `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — under 200 lines, every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
 | `README.md` | This file. |
 
 Books are certified in the dependency order pinned in `scripts/run-proofs.sh`
-(`ORDERED_BOOKS` = `hello buffer-model buffer-edit undo`): `buffer-edit` includes
-`buffer-model` and `undo` includes `buffer-edit`, and the alphabetical glob would
-order them wrongly.
+(`ORDERED_BOOKS` = `hello buffer-model buffer-edit undo codec`): `buffer-edit`
+includes `buffer-model`, `undo` includes `buffer-edit`, and `codec` includes
+`buffer-model` (for VK-1 `line-listp`); the alphabetical glob would order them
+wrongly.
 
 ## VK-1 — buffer model + well-formedness
 
@@ -224,12 +226,69 @@ separator element **is** the keyword `:separator` (not a list), so `(car …)`
 crashed on the inhibited path. Fixed to `(eq stored :separator)`; the inhibited
 differential suite is the regression pin.
 
+## VK-5 — EOL/encoding codec
+
+`codec.lisp` models the end-of-line codec as pure functions on codepoint lists,
+mirroring `src/buffer/file.lisp`'s post-DS-6 read/write paths:
+
+- `decode-eol (cs eol) → (mv lines mixed-p)` — `strip-eols` performs the read
+  transform (`%encoding-read`: for `:crlf` drop the CR of each CRLF pair — "strip
+  only when present"; the EOF segment and lone CRs are kept; `:lf`/`:cr` are
+  identity), `split-on-nl` splits on LF, and `crlf-mixed-p` is production's
+  mixed-eol flag (only ever reported for `:crlf`, as in production's `:crlf`
+  branch).
+- `encode-eol (lines eol) → cs` — `join-with` emits each line followed by the
+  uniform EOL sequence (`:crlf`→CR LF, `:lf`→LF, `:cr`→CR), the last line with no
+  trailing separator (`%write-region-to-file`'s `unless eof-p`).
+
+Certified obligations (SPEC-VK VK-5):
+
+1. **Round-trip byte-identity** for single-EOL input, `encode-eol(decode-eol(cs,
+   e), e) = cs`, over the precisely defined `single-eol-clean-p` predicate —
+   `round-trip-lf` (any codepoint list: LF is the split/join separator),
+   `round-trip-cr` (no LF present), `round-trip-crlf` (`crlf-clean-p`: every LF is
+   a CRLF, i.e. not mixed), and the unified `round-trip-single-eol-clean`. Covers
+   LF/CRLF/CR **with and without** a trailing line break (the clean predicate
+   admits both).
+2. **No-character-loss** for arbitrary (mixed) input — `no-char-loss`
+   (`flatten(decode) = strip-eols`, the spec wording) plus the content teeth
+   `no-char-loss-content` (`drop-nl(flatten(decode)) = content-codepoints`: every
+   non-EOL codepoint appears in the output exactly once, in order).
+3. **Totality / well-formedness** — `line-listp-of-decode-lines`: decode always
+   yields a VK-1 `line-listp` (nat-lists, no 10) for codepoint-list input, and
+   `consp-of-decode-lines` (always ≥ 1 line). `decode-eol`/`encode-eol` are
+   **total** by ACL2 admission. The mixed flag is characterized
+   (`crlf-clean-p-iff-not-mixed`; `:lf`/`:cr` never flag mixed).
+
+**Documented scoping deviation (SPEC-VK Constraint 5).** SPEC-VK VK-5 words the
+codec "over octet lists"; this book instead models the EOL layer over **decoded
+codepoints**. Justification: production runs the EOL logic *post-decode* on the
+already-UTF-8-decoded character stream (`%encoding-read`'s `read-line`), and
+modeling raw octets would re-verify SBCL's UTF-8 decoder — which is trust base
+(SBCL itself). The spec's actual intent (DS-6 EOL correctness, no character loss)
+is preserved by the theorems above. The byte-level gap is closed empirically by
+the differential suite, which feeds real UTF-8 byte files through the *production*
+read/write path.
+
+**Shim growth for VK-5:** none. `decode-eol`/`encode-eol` and their exec-path
+callees use only CL homonyms; the whitelist is unchanged. Two symbols
+(`DECODE-EOL`, `ENCODE-EOL`) were added to `*kernel-exports*`.
+
+**Differential acceptance:** `tests/pbt/codec-conformance.lisp` — 300 random
+UTF-8 byte files per run (random EOL mixes incl. lone CR, CRLF, no-trailing-
+newline, interleaved with multibyte/emoji codepoints) opened through the real
+`find-file-buffer` machinery (as `tests/eol-roundtrip.lisp`): the buffer line
+list is compared against `decode-eol` over the same decoded codepoints, the
+mixed-EOL notification against the kernel's mixed flag, and the saved bytes
+against the UTF-8 of `encode-eol`. The `tests/eol-roundtrip.lisp` corpus is a
+fixed regression subset. No divergence found.
+
 ## Proof status
 
 All theorems in every book under `verified/` certify with real ACL2 (no
 `skip-proofs`, `defaxiom`, trust tags, or `:program`-mode kernel functions), and
-no statement was weakened. VK-1 and VK-2 (five obligation groups) are fully
-certified.
+no statement was weakened. VK-1, VK-2 (five obligation groups) and VK-5 (all
+three obligations) are fully certified.
 
 **VK-3.** Certified: obligation 1 for the single recorded **insert**
 (content + points + tick), obligation 2 (`redo ∘ undo = id`, full session), and

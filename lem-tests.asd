@@ -32,7 +32,8 @@
                              (:file "baseline-fuzz")
                              (:file "kernel-model")
                              (:file "kernel-conformance")
-                             (:file "kernel-undo-conformance")))
+                             (:file "kernel-undo-conformance")
+                             (:file "codec-conformance")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")

@@ -154,7 +154,9 @@
                                  "K-DO-INSERT" "K-DO-DELETE" "K-BOUNDARY"
                                  "K-UNDO-GROUP" "K-REDO-GROUP"
                                  "K-RECOMPUTE-OFFSETS"
-                                 "K-DO-INHIBITED-INSERT" "K-DO-INHIBITED-DELETE")
+                                 "K-DO-INHIBITED-INSERT" "K-DO-INHIBITED-DELETE"
+                                 ;; codec.lisp (VK-5)
+                                 "DECODE-EOL" "ENCODE-EOL")
   "ACL2 symbol-names re-exported through :lem/kernel. See header.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
