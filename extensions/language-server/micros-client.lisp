@@ -96,12 +96,32 @@
     (log:debug "socket connected" hostname port)
     socket))
 
+(defun slime-secret ()
+  "Return the first line of ~~/.slime-secret, or NIL if the file does not exist.
+The server side (micros) requires this as the first packet when the file exists."
+  (with-open-file (in (merge-pathnames ".slime-secret" (user-homedir-pathname))
+                      :if-does-not-exist nil)
+    (and in (read-line in nil))))
+
+(defun send-secret (socket)
+  ;; micros' authenticate-client compares the raw packet payload to the
+  ;; secret, so this must not go through write-message (which prin1s).
+  (let ((secret (slime-secret)))
+    (when secret
+      (let ((stream (usocket:socket-stream socket))
+            (octets (micros/backend:string-to-utf8 secret)))
+        (loop :for c :across (format nil "~6,'0x" (length octets))
+              :do (write-byte (char-code c) stream))
+        (write-sequence octets stream)
+        (finish-output stream)))))
+
 (defun create-connection (hostname port)
   (let* ((socket (socket-connect hostname port))
          (connection (make-instance 'connection
                                     :socket socket
                                     :hostname hostname
                                     :port port)))
+    (send-secret socket)
     connection))
 
 (defun message-waiting-p (connection &key (timeout 0))

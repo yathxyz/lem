@@ -138,6 +138,13 @@
 (defmethod (setf connection-value) (value (connection connection) key)
   (setf (getf (connection-plist connection) key) value))
 
+(defun slime-secret ()
+  "Return the first line of ~~/.slime-secret, or NIL if the file does not exist.
+The server side (micros) requires this as the first packet when the file exists."
+  (with-open-file (in (merge-pathnames ".slime-secret" (user-homedir-pathname))
+                      :if-does-not-exist nil)
+    (and in (read-line in nil))))
+
 (defun new-connection (hostname port)
   (log:debug "Connecting to SWANK"
              hostname
@@ -147,6 +154,9 @@
                                     :hostname hostname
                                     :port port
                                     :socket socket)))
+    (let ((secret (slime-secret)))
+      (when secret
+        (send-message-string connection secret)))
     (setup connection)
 
     (when (and (member (connection-hostname connection) '("127.0.0.1" "localhost") :test 'equal)
