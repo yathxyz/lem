@@ -500,8 +500,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   controls one GNU Org-style global clock, while C-z Emacs-state `I/O` starts
   concurrent delegated clocks on the current or bulk-marked rows and closes
   marked clocks—or every open clock across agenda files when nothing is
-  marked. Evil/base mark keys render `>` prefixes and keep live source points
-  across clock insertions and agenda refreshes.
+  marked. Evil-Org `cg` and base-map `J` jump to the clocked agenda row or its
+  source in another window; Evil-Org `cc` and base-map `X` cancel the active
+  clock as an undoable unsaved source edit. Evil/base mark keys render `>`
+  prefixes and keep live source points across clock insertions and agenda
+  refreshes.
 - streaming OpenRouter LLM client plus native Claude/Codex/Grok JSON event
   backends, with source-position Org conversations, tagged assistant/user spans,
   per-buffer session resume, rendered agent activity, guarded request lifecycle,

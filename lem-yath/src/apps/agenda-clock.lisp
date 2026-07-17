@@ -528,6 +528,111 @@ insertions in the same source buffer."
     (save-buffer buffer)
     duration))
 
+(defun agenda-clock-active-row (agenda-buffer active)
+  "Return the first rendered row for ACTIVE in AGENDA-BUFFER."
+  (let ((file (agenda-active-clock-file active))
+        (line
+          (line-number-at-point
+           (agenda-active-clock-heading-point active)))
+        (heading (agenda-active-clock-heading active)))
+    (with-point ((row (buffer-start-point agenda-buffer)))
+      (loop
+        (let ((row-file (text-property-at row :agenda-file)))
+          (when (and row-file
+                     (uiop:pathname-equal row-file file)
+                     (eql (text-property-at row :agenda-line) line)
+                     (string= (or (text-property-at row :agenda-heading) "")
+                              heading))
+            (return (copy-point row :temporary))))
+        (unless (line-offset row 1)
+          (return nil))))))
+
+(define-command lem-yath-agenda-clock-goto () ()
+  "Go to the running clock in the agenda, or visit its source in another window."
+  (if (not (agenda-clock-active-valid-p))
+      (message "No running clock")
+      (let* ((active *agenda-active-clock*)
+             (agenda-buffer (current-buffer))
+             (row
+               (and (mode-active-p agenda-buffer 'lem-yath-agenda-mode)
+                    (agenda-clock-active-row agenda-buffer active))))
+        (if row
+            (move-point (current-point) row)
+            (let* ((heading (agenda-active-clock-heading-point active))
+                   (source-buffer (point-buffer heading)))
+              (move-point (buffer-point source-buffer) heading)
+              (switch-to-window
+               (pop-to-buffer source-buffer :split-action :sensibly))
+              (move-point (current-point) heading))))))
+
+(defun agenda-clock-complete-line-end (point)
+  "Return the end of POINT's complete line, including its newline when present."
+  (with-point ((end point))
+    (if (line-offset end 1)
+        (line-start end)
+        (line-end end))
+    (copy-point end :temporary)))
+
+(defun agenda-clock-cancel-region (clock)
+  "Return the one contiguous source region removed when canceling CLOCK."
+  (with-point ((clock-start clock)
+               (before clock)
+               (after clock))
+    (line-start clock-start)
+    (line-start before)
+    (line-start after)
+    (let ((clock-end (agenda-clock-complete-line-end clock-start))
+          (drawer-start nil)
+          (drawer-end nil))
+      (when (line-offset before -1)
+        (loop
+          (let ((line (agenda-clock-trimmed-line before)))
+            (cond
+              ((string-equal line ":LOGBOOK:")
+               (line-start before)
+               (setf drawer-start (copy-point before :temporary))
+               (return))
+              ((zerop (length line))
+               (unless (line-offset before -1) (return)))
+              (t (return))))))
+      (when (line-offset after 1)
+        (loop
+          (let ((line (agenda-clock-trimmed-line after)))
+            (cond
+              ((string-equal line ":END:")
+               (setf drawer-end (agenda-clock-complete-line-end after))
+               (return))
+              ((zerop (length line))
+               (unless (line-offset after 1) (return)))
+              (t (return))))))
+      (if (and drawer-start drawer-end)
+          (values drawer-start drawer-end)
+          (values (copy-point clock-start :temporary) clock-end)))))
+
+(defun agenda-clock-cancel-active ()
+  "Remove the active clock transactionally without saving its source buffer."
+  (unless (agenda-clock-active-valid-p t)
+    (error "No running clock"))
+  (let* ((active *agenda-active-clock*)
+         (clock (agenda-active-clock-clock-point active))
+         (buffer (point-buffer clock)))
+    (multiple-value-bind (start end) (agenda-clock-cancel-region clock)
+      (with-current-buffer buffer
+        (buffer-undo-boundary buffer)
+        (delete-between-points start end)
+        (buffer-undo-boundary buffer)))
+    (agenda-clock-clear-active)
+    buffer))
+
+(define-command lem-yath-agenda-clock-cancel () ()
+  "Cancel the running clock, retaining the unsaved source edit like GNU Org."
+  (handler-case
+      (progn
+        (agenda-clock-cancel-active)
+        (message "Clock canceled"))
+    (error (condition)
+      (message "Agenda clock cancel failed: ~a" condition))))
+
 (define-command lem-yath-agenda-clock-in () ()
   "Start GNU Org's single global clock on the current agenda item."
   (let ((agenda-buffer (current-buffer))
@@ -734,6 +839,8 @@ valid after an insertion even though the unrefreshed agenda row is numeric."
 ;; Evil-Org motion state.
 (define-key *lem-yath-agenda-vi-keymap* "I" 'lem-yath-agenda-clock-in)
 (define-key *lem-yath-agenda-vi-keymap* "O" 'lem-yath-agenda-clock-out)
+(define-key *lem-yath-agenda-vi-keymap* "c g" 'lem-yath-agenda-clock-goto)
+(define-key *lem-yath-agenda-vi-keymap* "c c" 'lem-yath-agenda-clock-cancel)
 (define-key *lem-yath-agenda-vi-keymap* "m" 'lem-yath-agenda-bulk-toggle)
 (define-key *lem-yath-agenda-vi-keymap* "~" 'lem-yath-agenda-bulk-toggle-all)
 (define-key *lem-yath-agenda-vi-keymap* "*" 'lem-yath-agenda-bulk-mark-all)
@@ -745,6 +852,12 @@ valid after an insertion even though the unrefreshed agenda row is numeric."
   'lem-yath-agenda-clock-in-additional)
 (define-key *lem-yath-agenda-mode-keymap* "O"
   'lem-yath-agenda-clock-out-open-clocks)
+(define-key *lem-yath-agenda-mode-keymap* "J" 'lem-yath-agenda-clock-goto)
+(define-key *lem-yath-agenda-mode-keymap* "X" 'lem-yath-agenda-clock-cancel)
+(define-key *lem-yath-agenda-mode-keymap* "C-c C-x C-j"
+  'lem-yath-agenda-clock-goto)
+(define-key *lem-yath-agenda-mode-keymap* "C-c C-x C-x"
+  'lem-yath-agenda-clock-cancel)
 (define-key *lem-yath-agenda-mode-keymap* "m" 'lem-yath-agenda-bulk-mark)
 (define-key *lem-yath-agenda-mode-keymap* "M-m" 'lem-yath-agenda-bulk-toggle)
 (define-key *lem-yath-agenda-mode-keymap* "*" 'lem-yath-agenda-bulk-mark-all)

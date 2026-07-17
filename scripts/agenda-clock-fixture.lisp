@@ -113,11 +113,20 @@
   (agenda-clock-test-log
    (concatenate
     'string
-    "KEYS state=~a I=~a O=~a m=~a tilde=~a star=~a percent=~a M=~a "
-    "u=~a U=~a M-m=~a M-star=~a")
+    "KEYS state=~a I=~a O=~a cg=~a cc=~a J=~a X=~a plus=~a minus=~a "
+    "control-goto=~a control-cancel=~a m=~a tilde=~a star=~a percent=~a "
+    "M=~a u=~a U=~a M-m=~a M-star=~a")
    (agenda-clock-test-state-name)
    (agenda-clock-test-command-name "I")
    (agenda-clock-test-command-name "O")
+   (agenda-clock-test-command-name "c g")
+   (agenda-clock-test-command-name "c c")
+   (agenda-clock-test-command-name "J")
+   (agenda-clock-test-command-name "X")
+   (agenda-clock-test-command-name "+")
+   (agenda-clock-test-command-name "-")
+   (agenda-clock-test-command-name "C-c C-x C-j")
+   (agenda-clock-test-command-name "C-c C-x C-x")
    (agenda-clock-test-command-name "m")
    (agenda-clock-test-command-name "~")
    (agenda-clock-test-command-name "*")
@@ -127,6 +136,63 @@
    (agenda-clock-test-command-name "U")
    (agenda-clock-test-command-name "M-m")
    (agenda-clock-test-command-name "M-*")))
+
+(defun agenda-clock-test-source-line-count (scanner)
+  (let ((buffer (find-file-buffer (merge-pathnames "clock.org" (workdir))))
+        (count 0))
+    (with-point ((point (buffer-start-point buffer)))
+      (loop
+        (when (ppcre:scan scanner (line-string point))
+          (incf count))
+        (unless (line-offset point 1)
+          (return))))
+    count))
+
+(define-command lem-yath-test-agenda-clock-source-report () ()
+  (let ((buffer (find-file-buffer (merge-pathnames "clock.org" (workdir)))))
+    (agenda-clock-test-log
+     "CLOCK-SOURCE modified=~a open=~d logbook=~d active=~a"
+     (if (buffer-modified-p buffer) "yes" "no")
+     (agenda-clock-test-source-line-count
+      "^\\s*CLOCK: \\[.*\\]\\s*$")
+     (agenda-clock-test-source-line-count "^\\s*:LOGBOOK:\\s*$")
+     (if (agenda-clock-active-valid-p) "yes" "no"))))
+
+(define-command lem-yath-test-agenda-clock-hide-current-row () ()
+  (unless (agenda-row-mark-key-at-point (current-point))
+    (editor-error "No agenda row to hide"))
+  (with-buffer-read-only (current-buffer) nil
+    (with-point ((start (current-point))
+                 (end (current-point)))
+      (line-start start)
+      (if (line-offset end 1)
+          (line-start end)
+          (line-end end))
+      (delete-between-points start end)))
+  (buffer-unmark (current-buffer)))
+
+(define-command lem-yath-test-agenda-clock-location-report () ()
+  (agenda-clock-test-log
+   "CLOCK-LOCATION file=~a line=~d text=~s"
+   (if (buffer-filename (current-buffer))
+       (file-namestring (buffer-filename (current-buffer)))
+       "none")
+   (line-number-at-point (current-point))
+   (line-string (current-point))))
+
+(define-command lem-yath-test-agenda-clock-return-to-agenda () ()
+  (alexandria:if-let ((buffer (get-buffer *agenda-buffer-name*)))
+    (switch-to-buffer buffer)
+    (editor-error "Agenda buffer is missing")))
+
+(define-command lem-yath-test-agenda-clock-visit-source () ()
+  (switch-to-buffer
+   (find-file-buffer (merge-pathnames "clock.org" (workdir))))
+  (agenda-clock-test-log
+   "SOURCE-CONTEXT file=~a state=~a u=~a"
+   (file-namestring (buffer-filename (current-buffer)))
+   (agenda-clock-test-state-name)
+   (agenda-clock-test-command-name "u")))
 
 (define-command lem-yath-test-agenda-clock-report () ()
   (let ((marked-rows 0)
@@ -166,7 +232,17 @@
   (define-key keymap "C-c z h" 'lem-yath-test-agenda-clock-1500)
   (define-key keymap "C-c z i" 'lem-yath-test-agenda-clock-1515)
   (define-key keymap "C-c z s" 'lem-yath-test-agenda-clock-stale)
+  (define-key keymap "C-c z v" 'lem-yath-test-agenda-clock-hide-current-row)
+  (define-key keymap "C-c z o" 'lem-yath-test-agenda-clock-visit-source)
   (define-key keymap "C-c z k" 'lem-yath-test-agenda-clock-keys)
-  (define-key keymap "C-c z r" 'lem-yath-test-agenda-clock-report))
+  (define-key keymap "C-c z r" 'lem-yath-test-agenda-clock-report)
+  (define-key keymap "C-c z x" 'lem-yath-test-agenda-clock-source-report))
+
+(define-key *global-keymap* "C-c z l"
+  'lem-yath-test-agenda-clock-location-report)
+(define-key *global-keymap* "C-c z b"
+  'lem-yath-test-agenda-clock-return-to-agenda)
+(define-key *global-keymap* "C-c z y"
+  'lem-yath-test-agenda-clock-source-report)
 
 (agenda-clock-test-log "READY")

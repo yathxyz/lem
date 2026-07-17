@@ -2672,7 +2672,13 @@ heading section. Emacs-state `O` closes all open clocks at marked headings, or
 all semantic open clocks in every top-level agenda file when no rows are
 marked. New clocks use Org's default `LOGBOOK` placement after planning and a
 property drawer; closed lines retain Org's minute timestamp and space-padded
-`H:MM` duration shape. Every mutation saves its source immediately.
+`H:MM` duration shape. Evil-Org `cg` and the base agenda `J` move to the
+clocked rendered row when present; otherwise they select its exact live source
+heading in another window without destroying the agenda. Evil-Org `cc`, base
+`X`, and the stock control chord cancel the active clock transactionally,
+remove an otherwise empty `LOGBOOK`, and deliberately leave that source edit
+unsaved, matching the user's unadvised GNU Org cancel path. Clock start, stop,
+and delegated mutations continue to save immediately.
 
 The Evil mark surface (`m`, `~`, `*`, `%`, `M`) and base surface (`m`, `M-m`,
 `*`, `M-*`, `%`, `u`, `U`) render Org's `>` prefix. Each rendered occurrence,
@@ -2681,9 +2687,11 @@ point. Marks therefore follow earlier insertions in the same file, remain
 visible across the clock-triggered asynchronous refresh, and still fail closed
 if the target heading itself changes. `scripts/agenda-clock-test.sh` exercises
 the state-specific maps, all/invert/regexp/clear marking, stock switching and
-continuation, duplicate marked targets, shared times, cross-file close,
-source-block decoys, persistence, refresh restoration, live-marker movement,
-and stale unmarked rows in ncurses Lem.
+continuation, in-agenda and other-window clock jumps, cancellation and empty
+drawer removal, exact unsaved/disk separation, one-step physical Vi undo/redo,
+duplicate marked targets, shared times, cross-file close, source-block decoys,
+persistence, refresh restoration, live-marker movement, and stale unmarked
+rows in ncurses Lem.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
@@ -2691,7 +2699,7 @@ presentation, exact scheduled-delay and deadline-prewarning reminder rendering,
 configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive
 sibling/tag commands, the arbitrary `x`/`B` bulk-action dispatcher, clock
-goto/cancel/report commands and prefix variants, custom commands,
+report mode and recent-task/prefix variants, custom commands,
 and the wider org-super-agenda presentation remain explicit gaps.
 
 ---

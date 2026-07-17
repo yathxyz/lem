@@ -107,10 +107,10 @@ send_chord C-z
 send_chord C-c z k
 wait_report_count '^KEYS state=emacs ' 1 || true
 keys_ok=1
-grep -q '^KEYS state=normal I=LEM-YATH-AGENDA-CLOCK-IN O=LEM-YATH-AGENDA-CLOCK-OUT m=LEM-YATH-AGENDA-BULK-TOGGLE tilde=LEM-YATH-AGENDA-BULK-TOGGLE-ALL star=LEM-YATH-AGENDA-BULK-MARK-ALL percent=LEM-YATH-AGENDA-BULK-MARK-REGEXP M=LEM-YATH-AGENDA-BULK-UNMARK-ALL ' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
-grep -q '^KEYS state=emacs I=LEM-YATH-AGENDA-CLOCK-IN-ADDITIONAL O=LEM-YATH-AGENDA-CLOCK-OUT-OPEN-CLOCKS m=LEM-YATH-AGENDA-BULK-MARK .*u=LEM-YATH-AGENDA-BULK-UNMARK U=LEM-YATH-AGENDA-BULK-UNMARK-ALL M-m=LEM-YATH-AGENDA-BULK-TOGGLE M-star=LEM-YATH-AGENDA-BULK-TOGGLE-ALL$' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
+grep -q '^KEYS state=normal I=LEM-YATH-AGENDA-CLOCK-IN O=LEM-YATH-AGENDA-CLOCK-OUT cg=LEM-YATH-AGENDA-CLOCK-GOTO cc=LEM-YATH-AGENDA-CLOCK-CANCEL J=LEM-YATH-AGENDA-PRIORITY-DOWN X=LEM-YATH-STRUCTURAL-DELETE-PREVIOUS-CHAR plus=VI-NEXT-LINE minus=VI-PREVIOUS-LINE control-goto=LEM-YATH-AGENDA-CLOCK-GOTO control-cancel=LEM-YATH-AGENDA-CLOCK-CANCEL ' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
+grep -q '^KEYS state=emacs I=LEM-YATH-AGENDA-CLOCK-IN-ADDITIONAL O=LEM-YATH-AGENDA-CLOCK-OUT-OPEN-CLOCKS cg=SELF-INSERT cc=SELF-INSERT J=LEM-YATH-AGENDA-CLOCK-GOTO X=LEM-YATH-AGENDA-CLOCK-CANCEL plus=LEM-YATH-AGENDA-PRIORITY-UP minus=LEM-YATH-AGENDA-PRIORITY-DOWN control-goto=LEM-YATH-AGENDA-CLOCK-GOTO control-cancel=LEM-YATH-AGENDA-CLOCK-CANCEL m=LEM-YATH-AGENDA-BULK-MARK .*u=LEM-YATH-AGENDA-BULK-UNMARK U=LEM-YATH-AGENDA-BULK-UNMARK-ALL M-m=LEM-YATH-AGENDA-BULK-TOGGLE M-star=LEM-YATH-AGENDA-BULK-TOGGLE-ALL$' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
 if [ "$keys_ok" = 1 ]; then
-  pass state-maps 'I/O and mark keys follow the pinned Evil/base shadowing'
+  pass state-maps 'clock, priority, and mark keys follow pinned Evil/base shadowing'
 else
   fail state-maps 'effective agenda maps differed'
 fi
@@ -148,6 +148,69 @@ send_chord I
 wait_file_pattern '^CLOCK: \[2026-07-12 Sun 12:00\]$' "$work_file" || true
 wait_agenda || true
 stock_shape=1
+
+# Evil-Org uses cg/cc while the underlying agenda map uses J/X. Goto prefers
+# the rendered clock row; cancel removes an otherwise empty LOGBOOK as one
+# unsaved source edit, matching org-clock-cancel rather than the autosaved
+# clock-in/out advice in the user's configuration.
+send_chord C-c z 2
+send_chord c g
+send_chord C-c z r
+wait_report_count '^STATE state=normal .*global=yes point-line=1 ' 1 || stock_shape=0
+send_chord C-c z 2
+send_chord C-z
+send_chord J
+send_chord C-c z r
+wait_report_count '^STATE state=emacs .*global=yes point-line=1 ' 1 || stock_shape=0
+send_chord C-z
+
+send_chord C-c z v
+send_chord c g
+send_chord C-c z l
+wait_report_count '^CLOCK-LOCATION file=clock\.org line=1 text="\* TODO Clock one sentinel"$' 1 || stock_shape=0
+send_chord C-c z b
+send_chord g
+sleep 0.3
+wait_agenda || stock_shape=0
+
+send_chord c c
+lem_wait_for "$session" 'Clock canceled' 10 >/dev/null || stock_shape=0
+send_chord C-c z x
+wait_report_count '^CLOCK-SOURCE modified=yes open=1 logbook=1 active=no$' 1 || stock_shape=0
+[ "$(grep -c '^CLOCK: \[' "$work_file")" = 3 ] || stock_shape=0
+[ "$(grep -c '^:LOGBOOK:$' "$work_file")" = 2 ] || stock_shape=0
+
+send_chord C-c z o
+wait_report_count '^SOURCE-CONTEXT file=clock\.org ' 1 || stock_shape=0
+if grep -q '^SOURCE-CONTEXT file=clock\.org state=emacs ' "$LEM_YATH_AGENDA_CLOCK_REPORT"; then
+  send_chord C-z
+elif ! grep -q '^SOURCE-CONTEXT file=clock\.org state=normal u=VI-UNDO$' "$LEM_YATH_AGENDA_CLOCK_REPORT"; then
+  stock_shape=0
+fi
+send_chord u
+send_chord C-c z y
+wait_report_count '^CLOCK-SOURCE modified=no open=2 logbook=2 active=no$' 1 || stock_shape=0
+send_chord C-r
+send_chord C-c z y
+wait_report_count '^CLOCK-SOURCE modified=yes open=1 logbook=1 active=no$' 2 || stock_shape=0
+send_chord C-c z b
+wait_agenda || stock_shape=0
+
+send_chord C-c z 1
+send_chord I
+sleep 0.3
+wait_agenda || true
+send_chord C-z
+send_chord X
+lem_wait_for "$session" 'Clock canceled' 10 >/dev/null || stock_shape=0
+send_chord C-c z x
+wait_report_count '^CLOCK-SOURCE modified=yes open=1 logbook=1 active=no$' 3 || stock_shape=0
+send_chord C-z
+send_chord C-c z 1
+send_chord I
+sleep 0.3
+wait_agenda || true
+
 awk '
   /^\* TODO Clock one sentinel$/ { in_one=1 }
   /^\* TODO Clock two sentinel$/ { in_one=0 }
@@ -180,7 +243,7 @@ wait_agenda || true
 send_chord C-c z r
 wait_report_count '^STATE state=normal marks=0 rendered=0 global=no ' 1 || stock_shape=0
 if [ "$stock_shape" = 1 ]; then
-  pass stock-clock 'global I/O, drawer ordering, continuation, switch, and save match Org'
+  pass stock-clock 'global clock goto/cancel, drawer shape, continuation, switch, and save match Org'
 else
   fail stock-clock 'stock global clock shape or lifecycle differed'
 fi
