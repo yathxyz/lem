@@ -47,53 +47,32 @@
          (key (char-to-key char)))
     key))
 
-(defparameter +bracketed-paste-end+
-  (coerce (list #.(char-code #\Esc)
-                #.(char-code #\[)
-                #.(char-code #\2)
-                #.(char-code #\0)
-                #.(char-code #\1)
-                #.(char-code #\~))
-          '(simple-array (unsigned-byte 8) (*)))
-  "Byte sequence ESC[201~ that terminates a bracketed paste.")
-
 (defun collect-bracketed-paste (next-byte)
   "Accumulate the raw octets of a bracketed-paste payload.
 NEXT-BYTE is a thunk returning the next input code: a byte 0-255, a negative
 value on timeout, or a keypad-translated keycode >= 256 (e.g. KEY_RESIZE) which
 is ignored because it can never be part of a byte payload. Reading stops at the
 ESC[201~ terminator or on timeout. Any ESC byte inside the payload is literal
-text, not a key. Returns the payload as an adjustable (unsigned-byte 8) vector.
-Pure with respect to terminal I/O, so it is unit-testable with a byte feeder."
-  (let ((bytes (make-array 64 :element-type '(unsigned-byte 8)
-                              :adjustable t :fill-pointer 0))
-        (match 0)
-        (terminator-length (length +bracketed-paste-end+)))
+text, not a key. Returns the payload as an (unsigned-byte 8) vector.
+
+This is a thin I/O driver over the certified kernel state machine
+(verified/input-decode.lisp k-paste-step, SPEC-VK VK-7): the terminator
+matching, partial-match flushing and keycode dropping are the ACL2-verified
+code itself, loaded through verified/shim.lisp."
+  (let ((state (lem/kernel:k-paste-init)))
     (loop
       (let ((code (funcall next-byte)))
-        (cond
-          ((< code 0)
-           ;; timed out before the terminator arrived; stop with what we have.
-           (return))
-          ((> code 255)
-           ;; a translated keycode (e.g. KEY_RESIZE) slipped through; it is not
-           ;; a payload byte, so drop it and keep the (unsigned-byte 8) vector safe.
-           nil)
-          ((= code (aref +bracketed-paste-end+ match))
-           (incf match)
-           (when (= match terminator-length)
-             (return)))
-          (t
-           ;; a partial terminator match failed: the matched bytes were real
-           ;; payload, so flush them and reconsider the current byte.
-           (loop :for i :from 0 :below match
-                 :do (vector-push-extend (aref +bracketed-paste-end+ i) bytes))
-           (if (= code (aref +bracketed-paste-end+ 0))
-               (setf match 1)
-               (progn
-                 (setf match 0)
-                 (vector-push-extend code bytes)))))))
-    bytes))
+        (multiple-value-bind (next-state done)
+            (lem/kernel:k-paste-step state
+                                     (cond ((< code 0) :timeout)
+                                           ((> code 255) (list :code code))
+                                           (t code)))
+          (setf state next-state)
+          (when done (return)))))
+    (let ((payload (lem/kernel:k-paste-payload state)))
+      (make-array (length payload)
+                  :element-type '(unsigned-byte 8)
+                  :initial-contents payload))))
 
 (defun read-bracketed-paste ()
   "Read a bracketed-paste payload after the ESC[200~ introducer.
@@ -117,39 +96,18 @@ afterwards regardless of how the read exits."
       (lambda ()
         (lem:insert-bracketed-paste (lem:current-point) text)))))
 
-(defun decode-csi-modifier (mod)
-  "Decode an xterm CSI modifier parameter into (values shift meta ctrl).
-MOD is the numeric parameter where 1 (or NIL) means no modifier. The encoding
-is 1 + a bitmask of Shift=1, Alt(Meta)=2, Ctrl=4, so 2=Shift, 3=Alt,
-4=Alt+Shift, 5=Ctrl, 6=Ctrl+Shift, 7=Ctrl+Alt, 8=Ctrl+Alt+Shift."
-  (let ((bits (max 0 (- (or mod 1) 1))))
-    (values (logbitp 0 bits)
-            (logbitp 1 bits)
-            (logbitp 2 bits))))
-
-(defparameter +csi-final-syms+
-  '((#\A . "Up") (#\B . "Down") (#\C . "Right") (#\D . "Left")
-    (#\E . "Begin") (#\F . "End") (#\H . "Home")
-    (#\P . "F1") (#\Q . "F2") (#\R . "F3") (#\S . "F4"))
-  "Map a CSI 1;<mod> final byte (A-F/H/P-S) to a lem key sym.")
-
-(defparameter +csi-tilde-syms+
-  '((1 . "Home") (2 . "Insert") (3 . "Delete") (4 . "End")
-    (5 . "PageUp") (6 . "PageDown") (7 . "Home") (8 . "End")
-    (11 . "F1") (12 . "F2") (13 . "F3") (14 . "F4")
-    (15 . "F5") (17 . "F6") (18 . "F7") (19 . "F8")
-    (20 . "F9") (21 . "F10") (23 . "F11") (24 . "F12"))
-  "Map the first parameter of a CSI <n>;<mod>~ sequence to a lem key sym.")
-
-(defun make-modified-key (sym mod)
-  "Build a lem key for SYM with the modifiers encoded in the CSI parameter MOD."
-  (multiple-value-bind (shift meta ctrl) (decode-csi-modifier mod)
-    (make-key :shift shift :meta meta :ctrl ctrl :sym sym)))
-
 (defun csi-param (params index)
   "Return the INDEX-th parameter of the vector PARAMS, or NIL if absent."
   (when (< index (length params))
     (aref params index)))
+
+(defun kernel-key-event->key (event)
+  "Convert a verified-kernel key event record (:key sym shift meta ctrl), whose
+sym is a codepoint list, to a lem key."
+  (make-key :shift (and (lem/kernel:key-ev-shift event) t)
+            :meta (and (lem/kernel:key-ev-meta event) t)
+            :ctrl (and (lem/kernel:key-ev-ctrl event) t)
+            :sym (map 'string #'code-char (lem/kernel:key-ev-sym event))))
 
 (defun decode-csi-key (final params)
   "Decode a CSI sequence into a lem key, or NIL when it is not a key this parser
@@ -157,19 +115,13 @@ recognises (bracketed paste, or an unknown final byte / parameter). FINAL is the
 final byte as a character; PARAMS is a vector of numeric parameters (each NIL
 when the field was empty). Handles the modified cursor/function family
 (ESC[1;<mod><A-F/H/P-S>) and the modified navigation family (ESC[<n>;<mod>~).
-Pure: performs no terminal I/O, so the modifier/sym mapping is unit-testable
-without a live terminal."
-  (case final
-    (#\~
-     (let ((n (or (csi-param params 0) 1)))
-       (unless (= n 200)                ; 200 = bracketed paste, read elsewhere
-         (let ((sym (cdr (assoc n +csi-tilde-syms+))))
-           (when sym
-             (make-modified-key sym (csi-param params 1)))))))
-    (t
-     (let ((sym (cdr (assoc final +csi-final-syms+))))
-       (when sym
-         (make-modified-key sym (csi-param params 1)))))))
+The sym/modifier tables and the decode itself are the certified kernel decoder
+(verified/input-decode.lisp k-decode-csi-key, SPEC-VK VK-7); this wrapper only
+converts characters to codepoints and the kernel key record to a lem key."
+  (let ((event (lem/kernel:k-decode-csi-key (char-code final)
+                                            (coerce params 'list))))
+    (when event
+      (kernel-key-event->key event))))
 
 (defun dispatch-csi (final params)
   "Dispatch a fully-read CSI sequence.

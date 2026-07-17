@@ -17,15 +17,17 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 | `undo.lisp` | VK-3 undo/redo kernel: edit records, session (history + redo + tick), `k-do-insert`/`k-do-delete`/`k-boundary`/`k-undo-group`/`k-redo-group`/inhibited-edit offset recomputation, and the certified VK-3 obligations. |
 | `codec.lisp` | VK-5 EOL/encoding codec: pure `decode-eol`/`encode-eol` over codepoint lists, mirroring `src/buffer/file.lisp` read/write (post-DS-6); round-trip, no-char-loss and totality theorems. |
 | `crash-safety.lisp` | VK-6 crash-safety protocol: operational model of the DS-2 atomic save + DS-3 checkpoint interplay with a crash transition after every step; durability/delete-ordering invariants proved inductive over all reachable states, plus `encode-path` injectivity and checkpoint-name namespace disjointness. |
+| `input-decode.lisp` | VK-7 terminal input decode kernel: `k-decode` over byte/keycode/timeout item lists, the CSI key/modifier decoder and bracketed-paste state machine that production `frontends/ncurses/input.lisp` now delegates to (the first one-source swap), with totality/wf, progress/no-overconsumption, table-wide encode/decode round-trip and paste-reconstruction theorems. |
 | `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — under 200 lines, every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
+| `shim-loader.lisp` | Sole component of the `lem-verified-kernel` ASDF system (`lem-verified-kernel.asd` at the repo root): loads the shim + the books production depends on. **Not a book**; the proof runner skips `shim*.lisp`. |
 | `README.md` | This file. |
 
 Books are certified in the dependency order pinned in `scripts/run-proofs.sh`
-(`ORDERED_BOOKS` = `hello buffer-model buffer-edit undo codec crash-safety`):
-`buffer-edit` includes `buffer-model`, `undo` includes `buffer-edit`, and
-`codec` includes `buffer-model` (for VK-1 `line-listp`); the alphabetical glob
-would order them wrongly (`crash-safety` is self-contained but listed for a
-deterministic order).
+(`ORDERED_BOOKS` = `hello buffer-model buffer-edit undo codec crash-safety
+input-decode`): `buffer-edit` includes `buffer-model`, `undo` includes
+`buffer-edit`, and `codec` includes `buffer-model` (for VK-1 `line-listp`); the
+alphabetical glob would order them wrongly (`crash-safety` and `input-decode`
+are self-contained but listed for a deterministic order).
 
 ## VK-1 — buffer model + well-formedness
 
@@ -386,14 +388,114 @@ unsynced ones), pinning the model's step semantics to reality. Plus
 differential PBT of `encode-path` (kernel vs. production) and fixed
 namespace-dispatch fixtures.
 
+## VK-7 — terminal input decode kernel + ncurses one-source swap
+
+`input-decode.lisp` models the ncurses terminal input decoder as a pure
+function over item lists and is the **first book whose code runs on a
+production code path**: `frontends/ncurses/input.lisp` now delegates its pure
+decision logic to the shim-loaded kernel (via the new `lem-verified-kernel`
+ASDF system, which `lem-ncurses` and `lem-tests` depend on).
+
+**Model.** Input is a list of items: a byte `0..255`, `(:code n)` for a curses
+keypad-translated keycode ≥ 256, or `:timeout` (production getch −1; end of
+the item list is also modeled as a timeout). `k-decode` maps item lists to
+event lists, transcribing `get-event`'s case analysis: key events are records
+`(:key sym shift meta ctrl)` with sym a **codepoint list** (never ACL2
+strings), paste events carry codepoint-list payloads, and `(:char bytes)` /
+`(:meta-char bytes)` / `(:meta-code n)` / `(:curses-key n)` / `(:resize)` /
+`(:abort)` / `(:mouse)` cover the rest.
+
+**One-source swap (Constraint 2).** Production now delegates:
+
+- `decode-csi-key` → `k-decode-csi-key` (+ `k-decode-csi-modifier` inside it):
+  the sym/modifier tables and the whole decode live only in the book;
+  production converts the final-byte char to a codepoint and the kernel key
+  record to a lem key (`kernel-key-event->key`).
+- `collect-bracketed-paste` → a getch driver over `k-paste-init` /
+  `k-paste-step` / `k-paste-payload`: the terminator matching, partial-match
+  flush and keycode-drop logic live only in the book.
+
+The superseded production code (`decode-csi-modifier`, `make-modified-key`,
+`+csi-final-syms+`, `+csi-tilde-syms+`, `+bracketed-paste-end+`, the inline
+matcher loop) is **deleted**. The `lem-ncurses/tests` suites (`csi-decode`,
+`bracketed-paste`) pass **unchanged** against the kernel-backed entry points.
+
+**Boundary with the shell** (each of these remains in
+`frontends/ncurses/input.lisp` and is *modeled* by the book, pinned by PBT,
+but not swapped):
+
+- **UTF-8 assembly**: production assembles multibyte characters in `get-key`,
+  strictly below the CSI layer (CSI bytes are pure ASCII). The byte-counting
+  (`utf8-bytes`) is transcribed as `k-utf8-len` so the list model can consume
+  multibyte groups; validity checking and decoding to a character stay in the
+  shell (babel/SBCL — trust base).
+- **Keycode tables**: the terminfo keycode→key table (`lem-ncurses/key`) is
+  shell data; the model emits `(:curses-key n)` / `(:meta-code n)`.
+- **SGR mouse**: only the stream *consumption* of `read-sgr-mouse-event` is
+  modeled (`k-read-mouse` → `(:mouse)`); its decoding is out of VK-7 scope.
+- **`read-csi` / `get-event` impure weave**: the getch/wtimeout/tagbody
+  skeleton stays in the shell; `k-read-csi`/`k-decode-1`/`k-decode` are its
+  pure mirror.
+
+**Certified obligations** (SPEC-VK VK-7, all five):
+
+1. **Totality + wf** — `k-decode` admits with measure `(len items)` (the
+   "fail closed to Escape" behavior is a termination + `event-listp-of-k-decode`
+   theorem, *unconditional*: any garbage input yields a wf event list).
+2. **Progress / no-overconsumption** — `k-decode-1-progress` (every event
+   consumes ≥ 1 item), `k-decode-1-no-overconsumption` (the remainder is a
+   genuine suffix of the input, `k-suffixp`, for true-list inputs; per-helper
+   suffix lemmas cover every level), `k-decode-event-count`.
+3. **Round-trip** — `k-decode-of-k-encode-key`: decode∘encode = identity for
+   **every** key the table supports, quantified via the recognizer
+   `supported-key-evp` over `all-supported-keys` (23 syms × 8 modifier
+   combinations = 184 keys; proved via an exhaustively *evaluated* ground
+   theorem `all-supported-keys-round-trip` plus a membership lemma).
+4. **Paste reconstruction** — `paste-exact-reconstruction`: for ANY byte
+   payload not containing the full terminator — including payloads with
+   embedded and trailing **proper prefixes** of `ESC[201~` —
+   `collect(P ++ terminator) = P`. (The restart-at-ESC flush is exact for
+   this terminator because ESC occurs only at its first position.)
+5. **Keycodes in pastes** — `paste-drops-codes`: the payload of a stream
+   equals the payload of the same stream with all `(:code n)` items removed —
+   they never corrupt the payload and never abort the paste. Timeout behavior
+   (payload-so-far returned, pending partial match *not* flushed) is
+   production behavior, pinned by the ncurses suite and fixed PBT cases.
+
+**Deviations** (recorded per Constraint 5, also in the book header): non-item
+garbage is dropped one element at a time (unreachable from production;
+totality demands some behavior); a `(:code n)`/`:timeout` inside a UTF-8
+continuation window ends the byte group early (production would store getch's
+raw return into an `(unsigned-byte 8)` vector — a latent type error, not
+transcribable); the paste flush uses an explicit prefix table (`term-prefix`)
+— the unrolling of production's index loop; `k-decode` processes a whole list
+while production reads one event per call.
+
+**Shim growth for VK-7:** none in the whitelist — the exec path uses only CL
+homonyms (`logbitp`, `revappend`, `nth`, `floor`, `mod` are standard CL).
+Twenty-seven symbols added to `*kernel-exports*`. New infrastructure:
+`lem-verified-kernel.asd` + `verified/shim-loader.lisp` (ASDF loader for shim
++ production-needed books; `load-verified-book` load-once semantics make it
+idempotent against tests that load further books ad hoc).
+
+**Differential/PBT acceptance:** `tests/pbt/input-decode-conformance.lisp`
+(main suite) — random item streams (byte soup, truncated CSI, interleaved
+timeouts/keycodes) asserting wf + progress + genuine-tail + no signal;
+encode/decode round-trip PBT over randomly drawn supported keys, singly and
+concatenated; paste reconstruction with embedded terminator prefixes,
+interleaved keycodes, and a 50k-byte payload; fixed regression cases
+transcribed from both ncurses test corpora. The ncurses suite itself
+(`scripts/run-tests.sh lem-ncurses/tests`) is the production-integration gate.
+
 ## Proof status
 
 All theorems in every book under `verified/` certify with real ACL2 (no
 `skip-proofs`, `defaxiom`, trust tags, or `:program`-mode kernel functions), and
 no statement was weakened. VK-1, VK-2 (five obligation groups), VK-5 (all
-three obligations) and VK-6 (all three obligations, with the checkpoint-tear
+three obligations), VK-6 (all three obligations, with the checkpoint-tear
 prefix disjunct and the intra-hash-namespace residue stated explicitly rather
-than over-claimed — see the VK-6 section) are fully certified.
+than over-claimed — see the VK-6 section) and VK-7 (all five obligations) are
+fully certified.
 
 **VK-3.** Certified: obligation 1 for the single recorded **insert**
 (content + points + tick), obligation 2 (`redo ∘ undo = id`, full session), and
@@ -473,9 +575,10 @@ commit exactly like a red rove suite (SPEC-VK Constraint 1). Notes:
   `.port`, `@expansion.lsp`, `.fasl` outputs are git-ignored.
 
 The in-image side is exercised by the rove test `tests/verified-shim.lisp`
-(part of `lem-tests`): it loads `shim.lisp` + `hello.lisp` into the test image and
-calls the certified `k-sq` through the `:lem/kernel` surface — proving the same
-source *certifies in ACL2 and executes in-image*.
+(part of `lem-tests`): the `lem-verified-kernel` system loads `shim.lisp` (plus
+the production-needed books), the test loads `hello.lisp` on top and calls the
+certified `k-sq` through the `:lem/kernel` surface — proving the same source
+*certifies in ACL2 and executes in-image*.
 
 ## Trust base
 

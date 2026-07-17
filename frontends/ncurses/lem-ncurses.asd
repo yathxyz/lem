@@ -3,7 +3,8 @@
                "cl-charms"
                "cl-setlocale"
                "lem/core"
-               "lem/extensions")
+               "lem/extensions"
+               "lem-verified-kernel")
   :serial t
   :components (#+pdcurses(:file "cl-charms-pdcurseswin32")
                (:file "config")

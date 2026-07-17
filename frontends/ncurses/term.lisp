@@ -588,13 +588,13 @@ explicitly given tty."
 (cffi:defcfun "key_defined" :int (definition :string))
 
 (defparameter +modified-key-finals+ "ABCDEFHPQRS"
-  "CSI final bytes for the modified cursor/function family, matching the parser's
-+csi-final-syms+ (ESC[1;<mod><final>).")
+  "CSI final bytes for the modified cursor/function family, matching the verified
+kernel decoder's csi-final-syms table (ESC[1;<mod><final>).")
 
 (defparameter +modified-key-tilde-numbers+
   '(1 2 3 4 5 6 7 8 11 12 13 14 15 17 18 19 20 21 23 24)
   "Leading parameters of the modified navigation/function family (ESC[<n>;<mod>~),
-matching the parser's +csi-tilde-syms+.")
+matching the verified kernel decoder's csi-tilde-syms table.")
 
 (defun disable-modified-key-translation ()
   "Stop ncurses from translating terminfo-known *modified* key escape sequences

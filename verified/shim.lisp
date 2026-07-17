@@ -164,7 +164,19 @@
                                  "ST-CRASHED" "ST-CP-DONE"
                                  "FILE-CONTENT" "FILE-SYNCED"
                                  "PREFIX-P" "TAKE-AT-MOST"
-                                 "ENCODE-PATH")
+                                 "ENCODE-PATH"
+                                 ;; input-decode.lisp (VK-7)
+                                 "K-DECODE" "K-DECODE-1"
+                                 "K-DECODE-CSI-KEY" "K-DECODE-CSI-MODIFIER"
+                                 "K-PASTE-INIT" "K-PASTE-STEP" "K-PASTE-PAYLOAD"
+                                 "K-COLLECT-PASTE" "K-PASTE-TERM"
+                                 "MK-KEY-EV" "KEY-EV-SYM" "KEY-EV-SHIFT"
+                                 "KEY-EV-META" "KEY-EV-CTRL" "KEY-EVP"
+                                 "ESC-KEY-EV" "EVENTP" "EVENT-LISTP"
+                                 "ITEMP" "ITEM-LISTP" "BYTE-LISTP"
+                                 "K-ENCODE-KEY" "ALL-SUPPORTED-KEYS"
+                                 "SUPPORTED-KEY-EVP" "CONTAINS-PASTE-TERM"
+                                 "DROP-CODE-ITEMS")
   "ACL2 symbol-names re-exported through :lem/kernel. See header.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

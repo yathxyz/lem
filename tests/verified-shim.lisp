@@ -2,31 +2,25 @@
 ;;;;
 ;;;; Proves the "one source of truth" contract (SPEC-VK Constraint 2) for the V0
 ;;;; canary: the SAME verified/hello.lisp source that ACL2 certifies via
-;;;; scripts/run-proofs.sh also loads into this SBCL image through
-;;;; verified/shim.lisp and executes, and the value asserted by its certified
-;;;; theorem (defthm k-sq-of-known-value: (k-sq 7) = 49) is reproduced in-image,
-;;;; called through the :lem/kernel re-export surface.
+;;;; scripts/run-proofs.sh also loads into this SBCL image and executes, and the
+;;;; value asserted by its certified theorem (defthm k-sq-of-known-value:
+;;;; (k-sq 7) = 49) is reproduced in-image, called through the :lem/kernel
+;;;; re-export surface.
 ;;;;
-;;;; Symbols in the ACL2 / LEM/KERNEL packages are reached via FIND-SYMBOL rather
-;;;; than reader syntax so this file compiles before those packages exist.
+;;;; The shim itself is loaded by the lem-verified-kernel system (a lem-tests
+;;;; dependency, see lem-verified-kernel.asd); this test only loads the hello
+;;;; canary book on top.  LOAD-VERIFIED-BOOK is load-once per book, so calling
+;;;; it here never double-loads.
 
 (defpackage :lem-tests/verified-shim
   (:use :cl :rove))
 (in-package :lem-tests/verified-shim)
 
-(defun repo-root ()
-  "Repository root: lem-tests.asd lives there, so its source directory is root."
-  (asdf:system-source-directory :lem-tests))
-
 (defun ensure-kernel-loaded ()
-  "Load the dual-load shim and the hello canary book into this image, once.
-Idempotent: safe to call from every test; muffles redefinition warnings."
+  "Load the hello canary book into this image through the shim established by
+the lem-verified-kernel system. Idempotent; muffles redefinition warnings."
   (handler-bind ((warning #'muffle-warning))
-    (unless (find-package "LEM/KERNEL")
-      (load (merge-pathnames "verified/shim.lisp" (repo-root))))
-    (let ((k-sq (find-symbol "K-SQ" "LEM/KERNEL")))
-      (when (or (null k-sq) (not (fboundp k-sq)))
-        (funcall (find-symbol "LOAD-VERIFIED-BOOK" "LEM/KERNEL") "hello")))))
+    (lem/kernel:load-verified-book "hello")))
 
 (deftest verified-shim-dual-load
   (ensure-kernel-loaded)

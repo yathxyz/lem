@@ -1,5 +1,6 @@
 (defsystem "lem-tests"
   :depends-on ("lem/core"
+               "lem-verified-kernel"
                "lem-fake-interface"
                "lem-lisp-syntax"
                "lem-lisp-mode"
@@ -34,7 +35,8 @@
                              (:file "kernel-conformance")
                              (:file "kernel-undo-conformance")
                              (:file "codec-conformance")
-                             (:file "crash-safety-faults")))
+                             (:file "crash-safety-faults")
+                             (:file "input-decode-conformance")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")
