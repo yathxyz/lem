@@ -43,6 +43,18 @@
 (defvar *agenda-status-function* nil
   "Optional function returning a short status suffix for an agenda buffer.")
 
+(defvar *agenda-sections-function* nil
+  "Optional function returning rendered agenda sections for BUFFER and ITEMS.")
+
+(defvar *agenda-header-label-function* nil
+  "Optional function returning BUFFER's date-span label.")
+
+(defvar *agenda-date-range-function* nil
+  "Optional function returning BUFFER's inclusive start and end dates.")
+
+(defvar *agenda-post-render-functions* nil
+  "Functions called with an agenda buffer after a successful render.")
+
 ;;; --- parsing -------------------------------------------------------------
 
 (defstruct (agenda-item (:constructor make-agenda-item))
@@ -57,6 +69,9 @@
 
 (defstruct (agenda-heading-context (:constructor make-agenda-heading-context))
   level title tags category metadata)
+
+(defstruct (agenda-section (:constructor make-agenda-section))
+  key title items date)
 
 (defparameter *heading-scanner*
   (ppcre:create-scanner
@@ -623,12 +638,14 @@ Ordinary active timestamps belong to their containing visible heading."
 (defun done-keyword-p (kw)
   (and kw (member kw *agenda-done-keywords* :test #'string=)))
 
-(defun group-items (items &optional (now (funcall *agenda-now-function*)))
+(defun group-items (items &optional (now (funcall *agenda-now-function*))
+                                   start-date horizon-date)
   "Bucket ITEMS into (overdue today upcoming todos), each a list of items.
 Given the fixed YYYY-MM-DD format, plain string comparison is correct date
 comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
-  (let ((today (today-iso now))
-        (horizon (iso-plus-days *agenda-upcoming-days* now))
+  (let ((today (or start-date (today-iso now)))
+        (horizon (or horizon-date
+                     (iso-plus-days *agenda-upcoming-days* now)))
         (overdue '()) (today-items '()) (upcoming '()) (todos '()))
     (dolist (item items)
       (let ((date (agenda-item-date item))
@@ -658,6 +675,44 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
               (nreverse today-items)
               (stable-sort (nreverse upcoming) #'by-date)
               (nreverse todos)))))
+
+(defun agenda-default-sections
+    (items &optional (now (funcall *agenda-now-function*))
+                     start-date horizon-date)
+  "Return the established grouped summary as renderable sections."
+  (multiple-value-bind (overdue today upcoming todos)
+      (group-items items now start-date horizon-date)
+    (list
+     (make-agenda-section :key :overdue :title "Overdue" :items overdue)
+     (make-agenda-section
+      :key :today
+      :title (if (or (null start-date)
+                     (string= start-date (today-iso now)))
+                 "Today"
+                 (format nil "Selected (~a)" start-date))
+      :items today
+      :date (or start-date (today-iso now)))
+     (make-agenda-section
+      :key :upcoming
+      :title (format nil "Upcoming (~a days)" *agenda-upcoming-days*)
+      :items upcoming)
+     (make-agenda-section :key :todos :title "TODOs" :items todos))))
+
+(defun agenda-effective-sections (buffer items now)
+  (if *agenda-sections-function*
+      (funcall *agenda-sections-function* buffer items now)
+      (agenda-default-sections items now)))
+
+(defun agenda-effective-header-label (buffer now)
+  (if *agenda-header-label-function*
+      (funcall *agenda-header-label-function* buffer now)
+      (today-iso now)))
+
+(defun agenda-effective-date-range (buffer now)
+  "Return BUFFER's inclusive displayed date range."
+  (if *agenda-date-range-function*
+      (funcall *agenda-date-range-function* buffer now)
+      (values (today-iso now) (iso-plus-days *agenda-upcoming-days* now))))
 
 ;;; --- rendering -----------------------------------------------------------
 
@@ -709,10 +764,15 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
           (text-property-at point :agenda-occurrence-index)
           (text-property-at point :agenda-duplicate-index))))
 
-(defun insert-agenda-section (buffer title items duplicate-counts)
+(defun insert-agenda-section (buffer title items duplicate-counts
+                              &optional date key)
   "Insert TITLE and ITEMS with exact source file/line text properties."
   (let ((point (buffer-end-point buffer)))
-    (insert-string point (format nil "~a~%" title))
+    (with-point ((start point))
+      (insert-string point (format nil "~a~%" title))
+      (put-text-property start point :agenda-section-key key)
+      (when date
+        (put-text-property start point :agenda-view-date date)))
     (if (null items)
         (insert-string point (format nil "  (none)~%"))
         (dolist (item items)
@@ -823,42 +883,38 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
     (setf (buffer-value buffer 'lem-yath-agenda-restore-entry) nil)
     (with-buffer-read-only buffer nil
       (erase-buffer buffer)
-      (multiple-value-bind (overdue today upcoming todos)
-          (group-items visible-items now)
+      (let ((sections (agenda-effective-sections buffer visible-items now)))
         (when *agenda-section-transform-function*
-          (setf overdue
-                (funcall *agenda-section-transform-function*
-                         buffer :overdue overdue)
-                today
-                (funcall *agenda-section-transform-function*
-                         buffer :today today)
-                upcoming
-                (funcall *agenda-section-transform-function*
-                         buffer :upcoming upcoming)
-                todos
-                (funcall *agenda-section-transform-function*
-                         buffer :todos todos)))
-        (let ((point (buffer-end-point buffer)))
-          (insert-string
-           point
-           (format nil "Agenda  (~a)~a~%~%"
-                   (today-iso now)
-                   (if *agenda-status-function*
-                       (or (funcall *agenda-status-function* buffer) "")
-                       ""))))
-        (insert-agenda-section buffer "Overdue" overdue duplicate-counts)
-        (insert-agenda-section buffer "Today" today duplicate-counts)
-        (insert-agenda-section
-         buffer (format nil "Upcoming (~a days)" *agenda-upcoming-days*)
-         upcoming duplicate-counts)
-        (insert-agenda-section buffer "TODOs" todos duplicate-counts)
+          (dolist (section sections)
+            (setf (agenda-section-items section)
+                  (funcall *agenda-section-transform-function*
+                           buffer
+                           (agenda-section-key section)
+                           (agenda-section-items section)))))
+        (insert-string
+         (buffer-end-point buffer)
+         (format nil "Agenda  (~a)~a~%~%"
+                 (agenda-effective-header-label buffer now)
+                 (if *agenda-status-function*
+                     (or (funcall *agenda-status-function* buffer) "")
+                     "")))
+        (dolist (section sections)
+          (insert-agenda-section
+           buffer
+           (agenda-section-title section)
+           (agenda-section-items section)
+           duplicate-counts
+           (agenda-section-date section)
+           (agenda-section-key section)))
         (insert-agenda-failures buffer failures)
         (when (and clock-report
                    (buffer-value buffer 'lem-yath-agenda-clockreport-mode)
                    (fboundp 'agenda-clock-insert-report))
           (agenda-clock-insert-report buffer clock-report))))
     (unless (and restore-key (agenda-restore-entry-point buffer restore-key))
-      (buffer-start (buffer-point buffer))))
+      (buffer-start (buffer-point buffer)))
+    (dolist (function *agenda-post-render-functions*)
+      (funcall function buffer)))
   (setf (buffer-read-only-p buffer) t)
   (buffer-unmark buffer)
   (redraw-display))
@@ -907,7 +963,8 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
 (defun agenda-refresh-pending-p (buffer)
   (not (null (buffer-value buffer 'lem-yath-agenda-refresh-pending))))
 
-(defun agenda-scan-worker (buffer generation clock-report-p)
+(defun agenda-scan-worker
+    (buffer generation clock-report-p range-start range-end)
   "Collect agenda items off-thread and marshal one completion event."
   (multiple-value-bind (items failures files)
       (handler-case
@@ -919,7 +976,7 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
                  (fboundp 'agenda-clock-collect-report))
         (multiple-value-bind (report report-failures)
             (handler-case
-                (agenda-clock-collect-report files)
+                (agenda-clock-collect-report files range-start range-end)
               (error (condition)
                 (values nil (list (cons nil condition)))))
           (setf clock-report report
@@ -936,20 +993,24 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
   "Launch GENERATION, maintaining at most one worker for BUFFER."
   (let ((clock-report-p
           (not (null
-                (buffer-value buffer 'lem-yath-agenda-clockreport-mode)))))
-    (setf (buffer-value buffer 'lem-yath-agenda-scan-running) t)
-    (handler-case
-        (bt2:make-thread
-         (lambda ()
-           (agenda-scan-worker buffer generation clock-report-p))
-         :name (format nil "lem-yath/agenda-scan-~d" generation))
-      (error (condition)
-        (setf (buffer-value buffer 'lem-yath-agenda-scan-running) nil
-              (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)
-        (agenda-render-if-current
-         buffer generation nil (list (cons nil condition)))
-        (message "Agenda scan could not start: ~a" condition)
-        nil))))
+                (buffer-value buffer 'lem-yath-agenda-clockreport-mode))))
+        (now (funcall *agenda-now-function*)))
+    (multiple-value-bind (range-start range-end)
+        (agenda-effective-date-range buffer now)
+      (setf (buffer-value buffer 'lem-yath-agenda-scan-running) t)
+      (handler-case
+          (bt2:make-thread
+           (lambda ()
+             (agenda-scan-worker
+              buffer generation clock-report-p range-start range-end))
+           :name (format nil "lem-yath/agenda-scan-~d" generation))
+        (error (condition)
+          (setf (buffer-value buffer 'lem-yath-agenda-scan-running) nil
+                (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)
+          (agenda-render-if-current
+           buffer generation nil (list (cons nil condition)))
+          (message "Agenda scan could not start: ~a" condition)
+          nil)))))
 
 (defun agenda-finish-scan
     (buffer generation items failures &optional clock-report)
@@ -1569,7 +1630,8 @@ suffix."
   (make-keymap :description '*lem-yath-agenda-vi-keymap*))
 
 (define-key *lem-yath-agenda-vi-keymap* "Return" 'lem-yath-agenda-visit)
-(define-key *lem-yath-agenda-vi-keymap* "g" 'lem-yath-agenda-refresh)
+(define-key *lem-yath-agenda-vi-keymap* "g r" 'lem-yath-agenda-refresh)
+(define-key *lem-yath-agenda-vi-keymap* "g R" 'lem-yath-agenda-refresh)
 (define-key *lem-yath-agenda-vi-keymap* "t" 'lem-yath-agenda-todo)
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-s" 'lem-yath-agenda-schedule)
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-d" 'lem-yath-agenda-deadline)

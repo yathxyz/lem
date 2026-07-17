@@ -94,6 +94,7 @@
                              (:file "agenda-mutations")
                              (:file "agenda-bulk")
                              (:file "agenda-filter")
+                             (:file "agenda-view")
                              (:file "citar")
                              (:file "devdocs")
                              (:file "elfeed")

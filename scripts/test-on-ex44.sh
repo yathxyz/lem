@@ -153,6 +153,9 @@ case "$test_name" in
   agenda-filter)
     remote_command='nix run path:$PWD#agenda-filter-test --option max-jobs 2'
     ;;
+  agenda-view)
+    remote_command='nix run path:$PWD#agenda-view-test --option max-jobs 2'
+    ;;
   editing)
     remote_command='nix run path:$PWD#editing-test'
     ;;
@@ -190,7 +193,7 @@ case "$test_name" in
     remote_command='nix run path:$PWD#notmuch-test --option max-jobs 2'
     ;;
   *)
-    echo "Usage: $0 [all|check|compile|compilation|terminal|server|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|llm-backend|llm-http|llm-oauth|llm-workflow|llm-tools|llm-mcp|claude-code|lisp-eval|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|tree-sitter|dap|project-navigation|project-outline|prompt-completion|daily-workflows|direnv|electric-editing|ui-parity|business-visual|cursor-state|snipe|avy|documents|notmuch|interactive|structural|notes|roam|roam-backlinks|org|org-modern|org-download|org-nodes-sync|agenda|agenda-filter|editing]" >&2
+    echo "Usage: $0 [all|check|compile|compilation|terminal|server|boot|completion|completion-lifecycle|auto-completion|actions|llm-keybinding|llm-backend|llm-http|llm-oauth|llm-workflow|llm-tools|llm-mcp|claude-code|lisp-eval|orderless-completion|snippets|lsp-snippets|lsp-project|real-lsp|tree-sitter|dap|project-navigation|project-outline|prompt-completion|daily-workflows|direnv|electric-editing|ui-parity|business-visual|cursor-state|snipe|avy|documents|notmuch|interactive|structural|notes|roam|roam-backlinks|org|org-modern|org-download|org-nodes-sync|agenda|agenda-filter|agenda-view|editing]" >&2
     exit 2
     ;;
 esac

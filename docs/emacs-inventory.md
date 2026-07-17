@@ -603,9 +603,17 @@ the trailing text-ready space. The profile binds no other org-journal command
   custom delegated-clock commands. The latter use bulk-marked rows (or the
   current row for `I`), and unmarked `O` closes open clocks in all agenda files.
 - Evil-Org `cg`/`cc`/`cr` and base `J`/`X`/`R` expose clock goto, cancel, and
-  clock-report mode. Lem's report uses the displayed today-plus-seven-day span,
+  clock-report mode. Lem's report uses the currently displayed agenda span,
   clips closed clocks at both boundaries, and retains source-linked level-one
   and level-two rollups.
+- Evil-Org `gD` exposes day, week, fortnight, month, year, and reset views.
+  `[[`/`]]` move by the current span with counts, `.` returns to today, `gd`
+  reads an Org-style date, and `gr`/`gR` refresh. Week and fortnight views
+  align to Monday when selected through `gD`; `gd` retains the span but starts
+  it on the requested date, matching pinned Org. Non-summary spans show every
+  date, including empty dates, and retain the selected relative date across
+  navigation. The interim bare-`g` Lem refresh is gone because it prevented
+  the configured Evil `g` prefix; C-z Emacs state still exposes base-map `g`.
 - Evil-Org `x` and base `B` expose the bulk-action dispatcher. Lem prompts once
   for TODO, tag addition/removal, schedule, deadline, default archive, or the
   configured same-file refile target, applies it to marked rows (or the current
@@ -617,7 +625,7 @@ the trailing text-ready space. The profile binds no other org-journal command
   and clear operations. Category and top-headline filters toggle from the row
   at point; tag, regexp, and Effort filters support the pinned negative and
   double-prefix accumulation forms. Active filters stack by intersection,
-  remain display-only across `g`, and are visible in the agenda header. `ss`
+  remain display-only across `gr`, and are visible in the agenda header. `ss`
   remains Org's generation-local limiter rather than being conflated with the
   filter stack. Lem derives inherited category and tags, local Effort, and the
   normalized top headline during the asynchronous scan. Arbitrary `/` matcher

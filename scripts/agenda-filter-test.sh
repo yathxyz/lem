@@ -156,14 +156,17 @@ wait_report '^STATE top ' || true
 top_ok=1
 grep -q '^STATE top rows=3 header="Agenda  (2026-07-17)  \[Top:+Alpha root filter sentinel\]' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || top_ok=0
-send_keys g
-lem_wait_for "$session" 'Top:\+Alpha root filter sentinel' 20 >/dev/null || true
-send_keys C-c z 5
-wait_report '^STATE top-refresh ' || true
+send_keys g r
+for _ in $(seq 1 120); do
+  send_keys C-c z 5
+  grep -q '^STATE top-refresh rows=3 header="Agenda  (2026-07-17)  \[Top:+Alpha root filter sentinel\]' \
+    "$LEM_YATH_AGENDA_FILTER_REPORT" 2>/dev/null && break
+  sleep 0.1
+done
 grep -q '^STATE top-refresh rows=3 header="Agenda  (2026-07-17)  \[Top:+Alpha root filter sentinel\]' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || top_ok=0
 if [ "$top_ok" = 1 ]; then
-  pass top-refresh 's^ selected a subtree family and survived g refresh'
+  pass top-refresh 's^ selected a subtree family and survived gr refresh'
 else
   fail top-refresh 'top-headline filtering or refresh persistence differed'
 fi
@@ -258,14 +261,14 @@ wait_report '^STATE limit ' || true
 limit_ok=1
 grep -q '^STATE limit rows=2 header="Agenda  (2026-07-17)  \[Max-entries:2\]' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || limit_ok=0
-send_keys g
+send_keys g r
 wait_agenda || true
 send_keys C-c z L
 wait_report '^STATE limit-refresh ' || true
 grep -q '^STATE limit-refresh rows=7 header="Agenda  (2026-07-17)"' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || limit_ok=0
 if [ "$limit_ok" = 1 ]; then
-  pass temporary-limit 'ss limited one generation and g rebuilt the full view'
+  pass temporary-limit 'ss limited one generation and gr rebuilt the full view'
 else
   fail temporary-limit 'generation-local entry limiting differed'
 fi

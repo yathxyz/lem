@@ -483,7 +483,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   explicit opt-in path, and failures stay in `*nodes-org-sync*`
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope, ordinary and repeating active-timestamp events,
-  modal Return/g/q navigation, and Evil-Org-style `t` fast TODO selection plus
+  modal Return/`gr`/q navigation, and Evil-Org-style `t` fast TODO selection plus
   `J`/`K` GNU Org priority cycling. Evil-Org `dd` and GNU `C-k` durably delete
   complete source subtrees, while `ce`, GNU `e`, and `C-c C-x e` set validated
   Effort properties. Agenda `H`/`L` and the GNU shifted-arrow routes move
@@ -504,7 +504,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   source in another window; Evil-Org `cc` and base-map `X` cancel the active
   clock as an undoable unsaved source edit. Evil-Org `cr` and base-map `R`
   toggle a source-linked, two-level clock report for the displayed agenda
-  horizon. Evil/base mark keys render `>` prefixes and keep live source points
+  horizon. Evil-Org `gD` selects day, week, fortnight, month, year, or reset
+  views; `[[`/`]]` move by that span, `.` returns to today, and `gd` uses the
+  shared Org date reader. Each non-summary view renders one section per date,
+  including empty dates, and clock reports follow the selected range.
+  Evil/base mark keys render `>` prefixes and keep live source points
   across clock insertions and agenda refreshes. Evil-Org `x` and base-map `B`
   dispatch one shared TODO, tag add/remove, schedule, deadline, default archive,
   or same-file refile action across those marks, falling back to the current row
@@ -616,7 +620,7 @@ interaction, and authenticated MCP diff review,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
 roam, roam backlinks, native Org, Org-modern projection, Org image
 capture/download, planning/timestamps, agenda, agenda-clock, and
-agenda-bulk, agenda-filter, and parity-ledger checks. The ledger can also be
+agenda-bulk, agenda-filter, agenda-view, and parity-ledger checks. The ledger can also be
 validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
@@ -693,6 +697,7 @@ nix run .#agenda-test
 nix run .#agenda-clock-test
 nix run .#agenda-bulk-test
 nix run .#agenda-filter-test
+nix run .#agenda-view-test
 nix run .#interactive-test
 nix run .#structural-test
 nix run .#lisp-eval-test
@@ -714,7 +719,7 @@ Pass `check`, `compile`, `compilation`, `terminal`, `server`, `boot`, `completio
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `business-visual`, `cursor-state`, `snipe`, `avy`,
 `documents`, `notmuch`, `interactive`, `structural`, `roam`, `roam-backlinks`,
-`org-modern`, `org-download`, `agenda`, `agenda-filter`, or `notes` to run only
+`org-modern`, `org-download`, `agenda`, `agenda-filter`, `agenda-view`, or `notes` to run only
 that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

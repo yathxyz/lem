@@ -227,7 +227,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT g=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT gr=LEM-YATH-AGENDA-REFRESH gR=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -286,7 +286,7 @@ printf '%s\n' \
   '* Date shift event sentinel <2026-07-14 Tue>--<2026-07-15 Wed>' \
   '* Time shift event sentinel <2026-07-13 Mon 23:30-23:45>' \
   >>"$work_file"
-tmux_cmd send-keys -t "$session" g
+tmux_cmd send-keys -t "$session" g r
 if ! lem_wait_for "$session" 'Effort action sentinel' 40 >/dev/null; then
   fail agenda-mutations-setup "new agenda mutation fixtures did not refresh"
 fi
@@ -940,21 +940,21 @@ if [ "$visit_ok" != 1 ]; then
   exit 1
 fi
 
-# Return to the agenda, mutate a top-level source, and coalesce repeated real g keys.
+# Return to the agenda, mutate a top-level source, and coalesce repeated real gr keys.
 tmux_cmd send-keys -t "$session" F8
 lem_wait_for "$session" 'Overdue work sentinel' 10 >/dev/null || true
 printf '%s\n' '* TODO Refreshed top-level sentinel' >>"$work_file"
-tmux_cmd send-keys -t "$session" g g g
+tmux_cmd send-keys -t "$session" g r g r g r
 if lem_wait_for "$session" 'Refreshed top-level sentinel' 40 >/dev/null; then
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=3$' || true
   if grep -qE '^ENTRY serial=3 section=TODOS .*Refreshed top-level sentinel' "$LEM_YATH_AGENDA_REPORT"; then
-    pass refresh "g rebuilds from changed agenda sources"
+    pass refresh "gr rebuilds from changed agenda sources"
   else
     fail refresh "screen refreshed but source properties were absent"
   fi
 else
-  fail refresh "g did not rebuild the agenda"
+  fail refresh "gr did not rebuild the agenda"
 fi
 
 # One failed root must warn without discarding healthy work/public entries.
@@ -970,7 +970,7 @@ if wait_report '^REPORT-DONE serial=4$' &&
 else
   fail discovery "one failed root erased healthy agenda sources or stayed silent"
 fi
-tmux_cmd send-keys -t "$session" g
+tmux_cmd send-keys -t "$session" g r
 lem_wait_for "$session" 'MCP today sentinel' 40 >/dev/null || true
 
 # A delayed old generation must not overwrite a newer render.

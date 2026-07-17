@@ -71,7 +71,7 @@
      (concatenate
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
-      "return=~a g=~a t=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
+      "return=~a gr=~a gR=~a t=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
       "J=~a K=~a H=~a L=~a dd=~a ce=~a shift-left=~a shift-right=~a "
       "dA=~a da=~a dollar=~a archive=~a refile=~a kill-hooks=~d "
       "modified=~a undo=~a "
@@ -83,7 +83,8 @@
      (length files)
      (agenda-buffer-generation buffer)
      (agenda-test-command-name "Return")
-     (agenda-test-command-name "g")
+     (agenda-test-command-name "g r")
+     (agenda-test-command-name "g R")
      (agenda-test-command-name "t")
      (agenda-test-command-name "C-c C-s")
      (agenda-test-command-name "C-c C-d")

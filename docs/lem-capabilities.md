@@ -2585,7 +2585,7 @@ Scanning runs away from the editor thread. Refresh requests coalesce behind one
 worker per buffer, generations reject stale results, source failures are shown
 instead of becoming a false empty agenda, and killed buffers reject late
 delivery. Entry lines retain exact source pathname, line, and scanned-heading
-properties. In Vi state, `Return` visits that source, `g` refreshes, `q` closes
+properties. In Vi state, `Return` visits that source, `gr`/`gR` refresh, `q` closes
 the explicit popup split, and Evil-Org's `t` opens the configured one-key
 TODO/NEXT/WAITING/HOLD/SOMEDAY/DONE/CANCELLED selector. A selected state updates
 and immediately saves the source before refreshing. Evil-Org's `K` and `J`
@@ -2606,6 +2606,20 @@ agenda sources, removes duplicates, offers an explicit clear row for empty
 input, accepts the current valid expression on Return even while add-tag
 candidates remain visible, and realigns the result to the active terminal tag
 column.
+
+`src/apps/agenda-view.lisp` owns the GNU span policy separately from scanning
+and source mutation. Evil-Org `gD` dispatches day, week, fortnight, month,
+year, and reset views; year retains GNU Org's confirmation. Week and fortnight
+selection align to Monday, month and year selection align to their first day,
+and every non-summary span renders a source-linked section for every date,
+including empty dates. `[[` and `]]` move backward or forward by the current
+span with GNU interactive-prefix counts while retaining the relative selected
+date. `.` selects today, rebuilding the same span type only when necessary,
+and `gd` uses the shared named/relative date reader while preserving the
+current span length. Reset returns to the established grouped summary at the
+date at point; `.` then returns that summary to today, matching the separation
+between GNU Org's reset-view and goto-today commands. Active filters persist
+through these generation-guarded rebuilds.
 
 Evil-Org `dd` deletes the selected complete source subtree; GNU `C-k` reaches
 the same command from Emacs state. The pinned default asks before deleting a
@@ -2679,12 +2693,12 @@ heading in another window without destroying the agenda. Evil-Org `cc`, base
 remove an otherwise empty `LOGBOOK`, and deliberately leave that source edit
 unsaved, matching the user's unadvised GNU Org cancel path. Clock start, stop,
 and delegated mutations continue to save immediately. Evil-Org `cr` and base
-`R` toggle a clocktable derived off-thread from the displayed
-today-plus-seven-day span. It matches Org's default exclusion of the running
+`R` toggle a clocktable derived off-thread from the displayed agenda span. It
+matches Org's default exclusion of the running
 clock, clips closed intervals at both date boundaries, rolls descendant time
 into source-linked headings through reduced level two, and shows per-file and
-all-file totals. Unlike an arbitrary GNU daily/weekly view, its span follows
-the fixed Lem agenda summary.
+all-file totals. Day/week/fortnight/month/year changes and `gd` immediately
+recompute that range instead of retaining stale summary bounds.
 
 The Evil mark surface (`m`, `~`, `*`, `%`, `M`) and base surface (`m`, `M-m`,
 `*`, `M-*`, `%`, `u`, `U`) render Org's `>` prefix. Each rendered occurrence,
@@ -2733,7 +2747,7 @@ toggle off on a second ordinary invocation, and double-prefix accumulate.
 Effort implements Org's default duration units and its inclusive `<`/`>`
 comparison, including the pinned high-effort treatment of missing estimates;
 `_` removes that filter. Different filter types and accumulated clauses compose
-by AND, survive `g` refresh in the current agenda, and appear in the first-line
+by AND, survive `gr` refresh in the current agenda, and appear in the first-line
 status. `S`/`|` clears the filter stack. `ss` deliberately remains Org's
 separate per-section entry/TODO/tag/cumulative-Effort limiter; its result lasts
 for the current scan generation, `C-u ss` removes it, and a source refresh
@@ -2748,16 +2762,24 @@ also compares the Org source byte-for-byte after the session. The arbitrary
 GNU `/` filter expression language, configured tag-group expansion, filter
 presets, and auto-exclusion callbacks are not claimed.
 
+`scripts/agenda-view-test.sh` physically drives the effective `gD`, `[[`,
+`]]`, `.`, `gd`, `gr`, and `gR` routes in ncurses Lem. It proves Monday-aligned
+weeks, exact seven- and fourteen-day spans, calendar month/year boundaries,
+year confirmation, universal counts, selected-date restoration, Org date
+input, state-specific `g` ownership, range-aware clock totals, and byte-identical
+sources.
+
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
 presentation, exact scheduled-delay and deadline-prewarning reminder rendering,
 configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive
 sibling/tag commands, bulk archive-sibling/scatter/arbitrary-function/persistent-
-mark variants, clock recent-task/prefix variants, arbitrary clock-report spans,
+mark variants, clock recent-task/prefix variants, custom numeric report spans,
 general `/` matcher expressions, tag-group/preset/auto-exclusion filtering,
-custom commands, and the wider org-super-agenda presentation remain explicit
-gaps.
+the other `gD` display toggles (time grid, diary, inactive timestamps, follow,
+log, archive, and entry text), `p` timestamp editing, custom commands, and the
+wider org-super-agenda presentation remain explicit gaps.
 
 ---
 

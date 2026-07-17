@@ -225,7 +225,7 @@ send_chord c g
 send_chord C-c z l
 wait_report_count '^CLOCK-LOCATION file=clock\.org line=1 text="\* TODO Clock one sentinel"$' 1 || stock_shape=0
 send_chord C-c z b
-send_chord g
+send_chord g r
 sleep 0.3
 wait_agenda || stock_shape=0
 

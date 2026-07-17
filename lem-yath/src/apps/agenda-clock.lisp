@@ -166,11 +166,12 @@
               (zerop (agenda-clock-report-heading-minutes heading))))
         (nreverse headings))))))
 
-(defun agenda-clock-collect-report (files)
-  "Collect a clock report for Lem's displayed today-plus-seven-day span."
+(defun agenda-clock-collect-report (files &optional start-date end-date)
+  "Collect a clock report for the inclusive displayed agenda span."
   (let* ((now (funcall *agenda-now-function*))
-         (start-date (today-iso now))
-         (end-date (iso-plus-days *agenda-upcoming-days* now))
+         (start-date (or start-date (today-iso now)))
+         (end-date (or end-date
+                       (iso-plus-days *agenda-upcoming-days* now)))
          (exclusive-end-date (iso-date-add-calendar end-date 1 #\d))
          (range-start (agenda-clock-report-date-boundary start-date))
          (range-end (agenda-clock-report-date-boundary exclusive-end-date))
