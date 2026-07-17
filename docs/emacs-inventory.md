@@ -624,6 +624,16 @@ the trailing text-ready space. The profile binds no other org-journal command
   configured agenda mutations, `org-agenda-date-prompt` is absent from
   `yath/org-save-modified-agenda-source-buffers`' advice list, so not saving is
   an intentional property of the effective configuration rather than a gap.
+- Evil-Org motion-state `u` invokes pinned `org-agenda-undo`. Agenda mutations
+  wrapped by `org-with-remote-undo` register the changed live source buffers and
+  undo their newest ordinary buffer group; they do not restore private source
+  snapshots. The configured save advice does not include `org-agenda-undo`, so
+  undoing an autosaved agenda edit leaves disk at the post-command state and the
+  restored live source modified. Bulk dispatch records each processed row
+  separately. Default archive undo restores only the source—the destination was
+  already saved before source deletion—and explicit agenda redo clears the
+  remote-undo list. The custom delegated Emacs-state clock functions bypass
+  `org-with-remote-undo`; stock clock commands use it.
 - Evil-Org `x` and base `B` expose the bulk-action dispatcher. Lem prompts once
   for TODO, tag addition/removal, schedule, deadline, default archive, or the
   configured same-file refile target, applies it to marked rows (or the current

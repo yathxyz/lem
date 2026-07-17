@@ -497,7 +497,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   active delimiters, time ranges, repeaters, and warning suffixes, and leaves
   the source buffer unsaved as configured Emacs does. Agenda refreshes include
   immutable snapshots of modified live Org buffers, so the edit remains visible
-  without exposing editor buffers to the background worker. `ct`/`C-c C-q`
+  without exposing editor buffers to the background worker. Evil-Org `u` undoes
+  the newest registered agenda mutation in its live source buffer without
+  saving: autosaved TODO/priority/planning/tag edits therefore leave disk at the
+  post-command state, bulk actions unwind one source row at a time, and archive
+  undo restores the source while retaining the already-saved archive copy.
+  Explicit `gr` starts a fresh remote-undo history, matching pinned Org.
+  `ct`/`C-c C-q`
   provide completion-backed local-tag
   replacement and clearing. Planning and tag commands persist immediately.
   Evil-Org
@@ -629,7 +635,7 @@ handoff, read-only fetch/GitHub MCP client sessions, integrated Claude Code
 interaction, and authenticated MCP diff review,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
 roam, roam backlinks, native Org, Org-modern projection, Org image
-capture/download, planning/timestamps, agenda, agenda-clock, and
+capture/download, planning/timestamps, agenda, agenda-undo, agenda-clock, and
 agenda-bulk, agenda-filter, agenda-view, and parity-ledger checks. The ledger can also be
 validated directly, and the
 interactive TUI checks are exposed as flake apps:
@@ -704,6 +710,7 @@ nix run .#org-planning-test
 nix run .#org-timestamp-test
 nix run .#org-source-edit-test
 nix run .#agenda-test
+nix run .#agenda-undo-test
 nix run .#agenda-clock-test
 nix run .#agenda-bulk-test
 nix run .#agenda-filter-test
@@ -729,7 +736,7 @@ Pass `check`, `compile`, `compilation`, `terminal`, `server`, `boot`, `completio
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `business-visual`, `cursor-state`, `snipe`, `avy`,
 `documents`, `notmuch`, `interactive`, `structural`, `roam`, `roam-backlinks`,
-`org-modern`, `org-download`, `agenda`, `agenda-filter`, `agenda-view`, or `notes` to run only
+`org-modern`, `org-download`, `agenda`, `agenda-undo`, `agenda-filter`, `agenda-view`, or `notes` to run only
 that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.

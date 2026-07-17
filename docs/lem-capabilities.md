@@ -2660,6 +2660,29 @@ does not include `org-agenda-date-prompt`. Its asynchronous refresh consumes the
 modified live-buffer snapshot, so automatic and later `gr` refreshes show the
 unsaved result while disk remains unchanged.
 
+`src/apps/agenda-undo.lisp` supplies the source-buffer transaction core before
+the agenda mutation modules compile; `src/apps/agenda-undo-command.lisp` adds
+the Evil-Org motion-state `u` command after those modules and their keymaps
+exist. Each successful TODO, priority, planning, tag, delete, Effort, date
+shift, exact `p`, archive, refile, or stock Vi clock mutation records the source
+buffer's actual Lem undo group. A bulk action records one transaction per valid
+target in source order, so repeated `u` unwinds the last processed rows first.
+The configured delegated Emacs-state clock functions remain outside this stack,
+as they do in the pinned Emacs configuration.
+
+Remote undo operates on the source buffer's newest undo node rather than
+restoring a private text snapshot. Consequently, an intervening local source
+edit is the next edit undone, matching `org-with-remote-undo`. The command never
+saves: undoing an autosaved agenda mutation leaves the live source modified
+while disk retains the post-mutation contents, whereas undoing unsaved `p` back
+to its saved node clears the modified flag. Archive undo restores only the live
+source and deliberately retains the destination copy that Org already saved;
+clock undo also invalidates the global runtime tracker when it removes the open
+clock. Every successful undo refreshes from the live source snapshot and
+restores the recorded logical row. Explicit `gr` clears this history before
+rescanning, exactly as pinned `org-agenda-redo` clears
+`org-agenda-undo-list`.
+
 TODO,
 priority, planning, and tag changes save immediately and restore the logical
 agenda row after the asynchronous refresh. A shifted or changed source heading
@@ -2699,6 +2722,11 @@ exact `p` defaults and planning/event replacement, time-range and suffix
 preservation, cancellation and no-date refusal, unsaved disk separation, one
 physical source undo, modified-live-buffer refresh, other-window source visits,
 decoration-skipping item motion, and cleanup.
+`scripts/agenda-undo-test.sh` separately drives the effective `u` binding and
+proves empty-history reporting, newest-first saved TODO/priority undo without a
+disk rewrite, intervening-local-edit ordering, exact unsaved timestamp restoration, per-row bulk ordering,
+source-only archive undo, clock runtime cleanup, and the explicit `gr` history
+boundary in real ncurses Lem.
 
 `src/apps/agenda-clock.lisp` preserves the effective Evil/base key shadowing
 rather than assigning one meaning to `I/O`. In Vi state, `I` starts the single

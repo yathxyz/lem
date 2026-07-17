@@ -63,6 +63,7 @@
              (original-modified-p (buffer-modified-p buffer)))
         (unless (and actual (string= expected-text actual))
           (error "Agenda source subtree changed; refresh before deleting"))
+        (agenda-undo-track-buffer buffer)
         (delete-between-points heading end)
         (handler-case
             (save-buffer buffer)
@@ -100,6 +101,7 @@
   "Confirm when needed, delete the selected Org subtree, save, and refresh."
   (let* ((agenda-buffer (current-buffer))
          (origin (copy-point (current-point) :temporary))
+         (entry-key (agenda-entry-key-at-point origin))
          (file (text-property-at origin :agenda-file))
          (line (text-property-at origin :agenda-line))
          (heading (text-property-at origin :agenda-heading)))
@@ -117,7 +119,10 @@
                                      nonblank-lines buffer-name))))
                   (message "Agenda deletion cancelled")
                   (progn
-                    (agenda-delete-source-subtree file line heading subtree)
+                    (with-agenda-undo-transaction
+                        (agenda-buffer "org-agenda-kill" entry-key)
+                      (agenda-delete-source-subtree
+                       file line heading subtree))
                     (setf (buffer-value agenda-buffer
                                         'lem-yath-agenda-restore-entry)
                           (agenda-kill-neighbor-key
@@ -183,6 +188,7 @@
   (multiple-value-bind (buffer heading)
       (agenda-source-heading-point file line expected-heading "setting Effort")
     (with-current-buffer buffer
+      (agenda-undo-track-buffer buffer)
       (agenda-set-heading-effort heading value)
       (save-buffer buffer)))
   value)
@@ -199,7 +205,9 @@
         (let ((value (prompt-for-string "Effort: ")))
           (handler-case
               (progn
-                (agenda-set-source-effort file line heading value)
+                (with-agenda-undo-transaction
+                    (agenda-buffer "org-agenda-set-effort" entry-key)
+                  (agenda-set-source-effort file line heading value))
                 (setf (buffer-value agenda-buffer
                                     'lem-yath-agenda-restore-entry)
                       entry-key)
@@ -307,6 +315,8 @@
                    (agenda-shift-past-to-today-amount
                     old-date unit amount direction range-p)))
             (handler-case
+                (progn
+                  (agenda-undo-track-buffer buffer)
                 (multiple-value-bind
                       (new-date new-time changed-p first-text ignored-old-date)
                     (agenda-shift-timestamp-token point unit effective)
@@ -320,7 +330,7 @@
                   (save-buffer buffer)
                   (values new-date new-time changed-p
                           (- (agenda-date-ordinal new-date)
-                             (agenda-date-ordinal old-date))))
+                             (agenda-date-ordinal old-date)))))
               (error (condition)
                 (agenda-replace-current-line point old-line)
                 (unless old-modified-p (buffer-unmark buffer))
@@ -356,6 +366,8 @@
                     (agenda-shift-past-to-today-amount
                      old-date unit amount direction nil)))
               (handler-case
+                  (progn
+                    (agenda-undo-track-buffer buffer)
                   (multiple-value-bind
                         (new-date new-time changed-p text ignored-old-date)
                       (agenda-shift-timestamp-token planning unit effective)
@@ -363,7 +375,7 @@
                     (save-buffer buffer)
                     (values new-date new-time changed-p
                             (- (agenda-date-ordinal new-date)
-                               (agenda-date-ordinal old-date))))
+                               (agenda-date-ordinal old-date)))))
                 (error (condition)
                   (agenda-replace-current-line planning old-line)
                   (unless old-modified-p (buffer-unmark buffer))
@@ -414,12 +426,14 @@
            (agenda-date-shift-unit-and-amount argument)
          (handler-case
              (multiple-value-bind (new-date new-time changed-p day-offset)
-                 (if event-p
-                     (agenda-shift-event-source
-                      file line heading timestamp-line timestamp-source-line
-                      timestamp-start timestamp-raw unit amount direction)
-                     (agenda-shift-planning-source
-                      file line heading kind date unit amount direction))
+                 (with-agenda-undo-transaction
+                     (agenda-buffer "org-agenda-do-date" entry-key)
+                   (if event-p
+                       (agenda-shift-event-source
+                        file line heading timestamp-line timestamp-source-line
+                        timestamp-start timestamp-raw unit amount direction)
+                       (agenda-shift-planning-source
+                        file line heading kind date unit amount direction)))
                (declare (ignore new-date))
                (setf *agenda-last-date-shift-unit* unit
                      (buffer-value agenda-buffer
@@ -532,6 +546,7 @@
   (with-current-buffer buffer
     (let ((group nil)
           (accepted-p nil))
+      (agenda-undo-track-buffer buffer)
       (buffer-undo-boundary buffer)
       (setf group (buffer-prepare-change-group buffer))
       (unwind-protect
@@ -625,8 +640,10 @@
                            (agenda-date-prompt-restore-key
                             entry-key old-source-date new-date new-time
                             event-p)))
-                     (agenda-rewrite-source-timestamp
-                      current-buffer current-point current-token text)
+                     (with-agenda-undo-transaction
+                         (agenda-buffer "org-agenda-date-prompt" entry-key)
+                       (agenda-rewrite-source-timestamp
+                        current-buffer current-point current-token text))
                      (setf (buffer-value agenda-buffer
                                          'lem-yath-agenda-restore-entry)
                            restore-key))

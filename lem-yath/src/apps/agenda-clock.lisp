@@ -688,6 +688,7 @@ insertions in the same source buffer."
          (logbook-end (agenda-clock-find-logbook-end heading))
          (clock-point nil))
     (with-current-buffer buffer
+      (agenda-undo-track-buffer buffer)
       (if logbook-end
           (progn
             (setf clock-point (copy-point logbook-end :right-inserting))
@@ -879,6 +880,7 @@ insertions in the same source buffer."
          (buffer (point-buffer clock)))
     (multiple-value-bind (start end) (agenda-clock-cancel-region clock)
       (with-current-buffer buffer
+        (agenda-undo-track-buffer buffer)
         (buffer-undo-boundary buffer)
         (delete-between-points start end)
         (buffer-undo-boundary buffer)))
@@ -887,21 +889,27 @@ insertions in the same source buffer."
 
 (define-command lem-yath-agenda-clock-cancel () ()
   "Cancel the running clock, retaining the unsaved source edit like GNU Org."
-  (handler-case
-      (progn
-        (agenda-clock-cancel-active)
-        (message "Clock canceled"))
-    (error (condition)
-      (message "Agenda clock cancel failed: ~a" condition))))
+  (let ((agenda-buffer (current-buffer))
+        (entry-key (agenda-entry-key-at-point (current-point))))
+    (handler-case
+        (progn
+          (with-agenda-undo-transaction
+              (agenda-buffer "org-agenda-clock-cancel" entry-key)
+            (agenda-clock-cancel-active))
+          (message "Clock canceled"))
+      (error (condition)
+        (message "Agenda clock cancel failed: ~a" condition)))))
 
 (define-command lem-yath-agenda-clock-in () ()
   "Start GNU Org's single global clock on the current agenda item."
   (let ((agenda-buffer (current-buffer))
+        (entry-key (agenda-entry-key-at-point (current-point)))
         (target nil)
         (changed-p nil))
     (unwind-protect
          (handler-case
-             (progn
+             (with-agenda-undo-transaction
+                 (agenda-buffer "org-agenda-clock-in" entry-key)
                (setf target (agenda-clock-target-from-row))
                (agenda-clock-validate-target target t)
                (if (agenda-clock-active-same-target-p target)
@@ -936,17 +944,27 @@ insertions in the same source buffer."
 (define-command lem-yath-agenda-clock-out () ()
   "Stop the GNU Org-style global clock, independent of agenda point."
   (let ((agenda-buffer (current-buffer))
+        (entry-key (agenda-entry-key-at-point (current-point)))
         (restore-target nil))
     (unwind-protect
          (handler-case
-             (progn
+             (with-agenda-undo-transaction
+                 (agenda-buffer "org-agenda-clock-out" entry-key)
                (when (agenda-row-mark-key-at-point (current-point))
                  (setf restore-target (agenda-clock-target-from-row)))
                (let* ((now (agenda-clock-now))
                       (timestamp (agenda-clock-timestamp now))
-                      (duration (agenda-clock-stop-active now)))
-                 (agenda-clock-refresh agenda-buffer restore-target)
-                 (message "Clock stopped at ~a after ~a" timestamp duration)))
+                      (active-buffer
+                        (and *agenda-active-clock*
+                             (point-buffer
+                              (agenda-active-clock-clock-point
+                               *agenda-active-clock*)))))
+                 (when active-buffer
+                   (agenda-undo-track-buffer active-buffer))
+                 (let ((duration (agenda-clock-stop-active now)))
+                   (agenda-clock-refresh agenda-buffer restore-target)
+                   (message "Clock stopped at ~a after ~a"
+                            timestamp duration))))
            (error (condition)
              (message "Agenda clock-out failed: ~a" condition)))
       (agenda-clock-delete-target restore-target))))
@@ -1094,8 +1112,16 @@ valid after an insertion even though the unrefreshed agenda row is numeric."
 
 ;;; --- state-specific bindings --------------------------------------------
 
+(defun agenda-clock-after-remote-undo (record)
+  "Drop a global clock tracker whose source line was removed by RECORD."
+  (declare (ignore record))
+  (when (and *agenda-active-clock*
+             (not (agenda-clock-active-valid-p)))
+    (agenda-clock-clear-active)))
+
 (setf *agenda-row-marked-p-function* #'agenda-bulk-row-marked-p)
 (pushnew 'agenda-bulk-buffer-cleanup *agenda-buffer-cleanup-functions*)
+(pushnew 'agenda-clock-after-remote-undo *agenda-undo-post-functions*)
 
 ;; Evil-Org motion state.
 (define-key *lem-yath-agenda-vi-keymap* "I" 'lem-yath-agenda-clock-in)

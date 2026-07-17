@@ -739,6 +739,7 @@
                 "org-nodes-sync-test.sh";
             org-operator-test = mkTestAppWithLem lemYath "lem-yath-org-operator-test" "org-operator-test.sh";
             agenda-test = mkTestAppWithLem lemYath "lem-yath-agenda-test" "agenda-test.sh";
+            agenda-undo-test = mkTestAppWithLem lemYath "lem-yath-agenda-undo-test" "agenda-undo-test.sh";
             agenda-clock-test = mkTestAppWithLem lemYath "lem-yath-agenda-clock-test" "agenda-clock-test.sh";
             agenda-bulk-test = mkTestAppWithLem lemYath "lem-yath-agenda-bulk-test" "agenda-bulk-test.sh";
             agenda-filter-test =
@@ -855,6 +856,7 @@
             org-nodes-sync = mkCheckWithLem lemYath "org-nodes-sync" "org-nodes-sync-test.sh";
             org-operator = mkCheckWithLem lemYath "org-operator" "org-operator-test.sh";
             agenda = mkCheckWithLem lemYath "agenda" "agenda-test.sh";
+            agenda-undo = mkCheckWithLem lemYath "agenda-undo" "agenda-undo-test.sh";
             agenda-clock = mkCheckWithLem lemYath "agenda-clock" "agenda-clock-test.sh";
             agenda-bulk = mkCheckWithLem lemYath "agenda-bulk" "agenda-bulk-test.sh";
             agenda-filter = mkCheckWithLem lemYath "agenda-filter" "agenda-filter-test.sh";

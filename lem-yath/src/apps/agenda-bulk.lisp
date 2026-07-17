@@ -8,6 +8,8 @@
    "Bulk: [$]archive [A]rch->sib [t]odo [+/-]tag [s]chedule "
    "[d]eadline [r]efile [S]catter [f]unction [q]uit: "))
 
+(defvar *agenda-bulk-undo-label* "org-agenda-bulk-action")
+
 (defun agenda-bulk-action-target-before-p (left right)
   "Order targets by source file and live source position, like GNU Org."
   (let ((left-file
@@ -144,7 +146,11 @@
         (restore-key nil))
     (dolist (target targets)
       (if (agenda-clock-target-valid-p target t)
-          (let ((candidate (funcall function target)))
+          (let ((candidate
+                  (with-agenda-undo-transaction
+                      ((current-buffer) *agenda-bulk-undo-label*
+                       (agenda-clock-target-entry-key target))
+                    (funcall function target))))
             (unless restore-key (setf restore-key candidate))
             (incf processed))
           (incf skipped)))
@@ -209,42 +215,44 @@
 
 (defun agenda-bulk-action-perform (action targets)
   "Prompt for ACTION's shared value and apply it to TARGETS."
-  (case action
-    (:todo
-     (let ((state (agenda-bulk-action-read-todo-state)))
-       (agenda-bulk-action-map
-        targets
-        (lambda (target)
-          (agenda-bulk-action-apply-todo target state)))))
-    (:tag-add
-     (let ((tag (agenda-bulk-action-read-tag "add")))
-       (agenda-bulk-action-map
-        targets
-        (lambda (target)
-          (agenda-bulk-action-apply-tag target tag t)))))
-    (:tag-remove
-     (let ((tag (agenda-bulk-action-read-tag "remove")))
-       (agenda-bulk-action-map
-        targets
-        (lambda (target)
-          (agenda-bulk-action-apply-tag target tag nil)))))
-    ((:schedule :deadline)
-     (let* ((schedule-p (eq action :schedule))
-            (kind (if schedule-p "SCHEDULED" "DEADLINE"))
-            (label (if schedule-p "Schedule date" "Deadline date")))
-       (multiple-value-bind (date selected-p)
-           (agenda-read-date label)
-         (if selected-p
-             (agenda-bulk-action-map
-              targets
-              (lambda (target)
-                (agenda-bulk-action-apply-planning target kind date)))
-             (values 0 0 nil)))))
-    (:archive
-     (agenda-bulk-action-map targets #'agenda-bulk-action-apply-archive))
-    (:refile
-     (agenda-bulk-action-apply-refile targets))
-    (otherwise (values 0 0 nil))))
+  (let ((*agenda-bulk-undo-label*
+          (format nil "org-agenda-bulk-~(~a~)" action)))
+    (case action
+      (:todo
+       (let ((state (agenda-bulk-action-read-todo-state)))
+         (agenda-bulk-action-map
+          targets
+          (lambda (target)
+            (agenda-bulk-action-apply-todo target state)))))
+      (:tag-add
+       (let ((tag (agenda-bulk-action-read-tag "add")))
+         (agenda-bulk-action-map
+          targets
+          (lambda (target)
+            (agenda-bulk-action-apply-tag target tag t)))))
+      (:tag-remove
+       (let ((tag (agenda-bulk-action-read-tag "remove")))
+         (agenda-bulk-action-map
+          targets
+          (lambda (target)
+            (agenda-bulk-action-apply-tag target tag nil)))))
+      ((:schedule :deadline)
+       (let* ((schedule-p (eq action :schedule))
+              (kind (if schedule-p "SCHEDULED" "DEADLINE"))
+              (label (if schedule-p "Schedule date" "Deadline date")))
+         (multiple-value-bind (date selected-p)
+             (agenda-read-date label)
+           (if selected-p
+               (agenda-bulk-action-map
+                targets
+                (lambda (target)
+                  (agenda-bulk-action-apply-planning target kind date)))
+               (values 0 0 nil)))))
+      (:archive
+       (agenda-bulk-action-map targets #'agenda-bulk-action-apply-archive))
+      (:refile
+       (agenda-bulk-action-apply-refile targets))
+      (otherwise (values 0 0 nil)))))
 
 (defun agenda-bulk-action-result-message (processed skipped)
   (message "Acted on ~d ~a~a"

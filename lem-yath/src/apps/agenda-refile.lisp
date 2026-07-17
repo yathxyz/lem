@@ -141,6 +141,7 @@ Return the moved heading's new source line."
                (originally-modified-p (buffer-modified-p buffer)))
           (handler-case
               (progn
+                (agenda-undo-track-buffer buffer)
                 (org-clear-folds buffer)
                 (delete-between-points source source-end)
                 (let ((insertion (org-subtree-end-point target-point)))
@@ -192,8 +193,10 @@ Return the moved heading's new source line."
               (alexandria:when-let
                   ((target (agenda-read-refile-target source-title targets)))
                 (let ((new-line
-                        (agenda-refile-source-subtree
-                         file line heading target)))
+                        (with-agenda-undo-transaction
+                            (agenda-buffer "org-agenda-refile" entry-key)
+                          (agenda-refile-source-subtree
+                           file line heading target))))
                   (setf (buffer-value agenda-buffer
                                       'lem-yath-agenda-restore-entry)
                         (agenda-refile-restored-key entry-key file new-line))

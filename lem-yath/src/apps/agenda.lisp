@@ -1181,7 +1181,10 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
   "Re-scan the org files and rebuild the agenda buffer."
   (let ((buffer (get-buffer *agenda-buffer-name*)))
     (if (and buffer (mode-active-p buffer 'lem-yath-agenda-mode))
-        (agenda-start-scan buffer)
+        (progn
+          (when (fboundp 'agenda-undo-clear)
+            (agenda-undo-clear buffer))
+          (agenda-start-scan buffer))
         (message "No agenda buffer to refresh."))))
 
 (defparameter *agenda-todo-fast-keys*
@@ -1227,6 +1230,7 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
           (error "Agenda source line no longer exists; refresh the agenda"))
         (unless (string= expected-heading (line-string heading))
           (error "Agenda source changed; refresh before editing"))
+        (agenda-undo-track-buffer buffer)
         (org-set-heading-todo-state heading state))
       ;; The Emacs configuration advises `org-agenda-todo' to save its source.
       (save-buffer buffer)))
@@ -1295,6 +1299,7 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
           (unless (and (equal expected-date current-date)
                        (equal expected-extra current-extra))
             (error "Agenda source planning changed; refresh before editing")))
+        (agenda-undo-track-buffer buffer)
         (setf result
               (ecase operation
                 (:set (org-set-planning-field heading kind date))
@@ -1309,6 +1314,7 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
 (defun agenda-change-planning (kind label argument)
   "Prompt for and persist planning KIND on the current agenda entry."
   (let ((agenda-buffer (current-buffer))
+        (entry-key (agenda-entry-key-at-point (current-point)))
         (file (text-property-at (current-point) :agenda-file))
         (line (text-property-at (current-point) :agenda-line))
         (heading (text-property-at (current-point) :agenda-heading))
@@ -1349,9 +1355,14 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
                        (values :set new-date nil chosen-p))))
                 (when (and operation selected-p)
                   (multiple-value-bind (result restore-key)
-                      (agenda-apply-source-planning
-                       file line heading kind old-date old-extra operation
-                       :date date :extra extra)
+                      (with-agenda-undo-transaction
+                          (agenda-buffer
+                           (format nil "org-agenda-~a"
+                                   (string-downcase kind))
+                           entry-key)
+                        (agenda-apply-source-planning
+                         file line heading kind old-date old-extra operation
+                         :date date :extra extra))
                     (setf (buffer-value agenda-buffer
                                         'lem-yath-agenda-restore-entry)
                           restore-key)
@@ -1450,6 +1461,7 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
           (error "Agenda source line no longer exists; refresh the agenda"))
         (unless (string= expected-heading (line-string heading))
           (error "Agenda source changed; refresh before editing"))
+        (agenda-undo-track-buffer buffer)
         (setf priority
               (agenda-next-priority
                (nth-value 2 (agenda-heading-priority-bounds heading))
@@ -1476,8 +1488,10 @@ EXPECTED-HEADING prevents a stale agenda row from changing a different line."
           (message "No agenda entry on this line."))
         (handler-case
             (let ((priority
-                    (agenda-set-source-priority
-                     file line heading direction repeated-p)))
+                    (with-agenda-undo-transaction
+                        (agenda-buffer "org-agenda-priority" entry-key)
+                      (agenda-set-source-priority
+                       file line heading direction repeated-p))))
               (setf *agenda-last-priority-direction* direction
                     *agenda-last-priority-target* target
                     (buffer-value agenda-buffer
@@ -1657,6 +1671,7 @@ suffix."
           (error "Agenda source line no longer exists; refresh the agenda"))
         (unless (string= expected-heading (line-string heading))
           (error "Agenda source changed; refresh before editing"))
+        (agenda-undo-track-buffer buffer)
         (agenda-set-heading-tags heading tags))
       ;; The Emacs configuration advises `org-agenda-set-tags' to save its
       ;; source immediately.
@@ -1675,7 +1690,9 @@ suffix."
         (let ((tags (agenda-read-tags heading)))
           (handler-case
               (progn
-                (agenda-set-source-tags file line heading tags)
+                (with-agenda-undo-transaction
+                    (agenda-buffer "org-agenda-set-tags" entry-key)
+                  (agenda-set-source-tags file line heading tags))
                 (setf (buffer-value agenda-buffer
                                     'lem-yath-agenda-restore-entry)
                       entry-key)
@@ -1705,7 +1722,9 @@ suffix."
           (when selected-p
             (handler-case
                 (progn
-                  (agenda-set-source-todo file line heading state)
+                  (with-agenda-undo-transaction
+                      (agenda-buffer "org-agenda-todo" entry-key)
+                    (agenda-set-source-todo file line heading state))
                   (setf (buffer-value agenda-buffer
                                       'lem-yath-agenda-restore-entry)
                         entry-key)

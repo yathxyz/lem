@@ -368,6 +368,9 @@ subtree, or NIL as the latter value when the subtree reached end of file."
                  (original-modified-p
                    (buffer-modified-p source-buffer)))
             (agenda-archive-append-and-save archive source entry)
+            ;; Pinned `org-with-remote-undo' registers only the agenda source;
+            ;; the already-saved archive copy deliberately remains on undo.
+            (agenda-undo-track-buffer source-buffer)
             (agenda-archive-delete-source-and-save
              source-buffer heading end subtree original-modified-p archive)
             (values archive end-line)))))))
@@ -396,6 +399,7 @@ subtree, or NIL as the latter value when the subtree reached end of file."
   "Archive the agenda subtree at point, optionally asking for confirmation."
   (let* ((agenda-buffer (current-buffer))
          (origin (copy-point (current-point) :temporary))
+         (entry-key (agenda-entry-key-at-point origin))
          (file (text-property-at origin :agenda-file))
          (line (text-property-at origin :agenda-line))
          (heading (text-property-at origin :agenda-heading)))
@@ -408,7 +412,9 @@ subtree, or NIL as the latter value when the subtree reached end of file."
       (t
        (handler-case
            (multiple-value-bind (archive end-line)
-               (agenda-archive-source-subtree file line heading)
+               (with-agenda-undo-transaction
+                   (agenda-buffer "org-agenda-archive" entry-key)
+                 (agenda-archive-source-subtree file line heading))
              (setf (buffer-value agenda-buffer
                                  'lem-yath-agenda-restore-entry)
                    (agenda-archive-neighbor-key
