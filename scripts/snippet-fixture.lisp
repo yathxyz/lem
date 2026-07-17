@@ -195,11 +195,17 @@
                                           "Child")
                                  (string= (snippet-apply-transform
                                            :increment "9") "10")
+                                 (eq (snippet-safe-transform-kind
+                                      "(replace-regexp-in-string \"  *\" \" \" (subst-char-in-string ?, ?  yas-text))")
+                                     :comma-list)
+                                 (string= (snippet-apply-transform
+                                           :comma-list "  one,,two  ")
+                                          " one two ")
                                  (string= (snippet-apply-transform
                                            :private-field "Title")
                                           "_title"))))
                           (snippet-test-report
-                           "DYNAMIC-ORACLE ok=~a jsx=~a comment=~a clojure=~a uuid=~a std=~a upcase=~a before=~a increment=~a private=~a"
+                           "DYNAMIC-ORACLE ok=~a jsx=~a comment=~a clojure=~a uuid=~a std=~a upcase=~a before=~a increment=~a comma=~a private=~a"
                            (if ok "yes" "no") jsx
                            (snippet-test-hex comment)
                            (snippet-clojure-namespace clojure-buffer)
@@ -209,6 +215,9 @@
                            (snippet-apply-transform
                             :before-colon "Child : Parent")
                            (snippet-apply-transform :increment "9")
+                           (snippet-test-hex
+                            (snippet-apply-transform
+                             :comma-list "  one,,two  "))
                            (snippet-apply-transform :private-field "Title"))
                           ok))
                    (delete-buffer clojure-buffer))))
@@ -404,6 +413,9 @@
 
 (define-command lem-yath-test-snippet-transform-setup () ()
   (snippet-test-reset-fundamental "transform"))
+
+(define-command lem-yath-test-snippet-comma-transform-setup () ()
+  (snippet-test-reset-fundamental "comma-transform"))
 
 (define-command lem-yath-test-snippet-choice-setup () ()
   (snippet-test-reset-fundamental "literal-choice"))

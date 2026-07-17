@@ -798,8 +798,8 @@ exact flake-pinned `yasnippet-snippets` commit
 `606ee926df6839243098de6d71332a697518cb86`. That collection contains 2,387
 definitions. Every snippet file is still treated solely as data: a bounded
 semantic translator recognizes exact, audited dynamic forms without invoking a
-Lisp reader or evaluator. The corpus audit classifies 2,325 definitions as
-supported and 62 as explicitly unavailable. The supported set includes 82
+Lisp reader or evaluator. The corpus audit classifies 2,327 definitions as
+supported and 60 as explicitly unavailable. The supported set includes 84
 definitions that previously required dynamic behavior; arbitrary embedded
 Emacs Lisp remains non-executable. The
 configured private corpus contains one snippet, `org-mode/srcblock.snpt`; its
@@ -821,7 +821,10 @@ date/time, user, filename/class-name, comment-delimiter, selection, UUID, C++
 namespace, and Clojure namespace backquote forms. Pure field mirrors cover case
 conversion, initial capitalization, class-name extraction, display-width
 underlines, numeric increment, comma-list normalization, and the audited
-C/C++/C# conditionals. Six common conditions reproduce the configured shell,
+C/C++/C# conditionals. Emacs character literals retain their payload during
+allowlist canonicalization, including the significant `? ` space used by the
+pinned Nix `package url` and `package github` comma-list mirrors. Six common
+conditions reproduce the configured shell,
 Go, and JavaScript comment-context behavior. Literal data-only
 `yas-choose-value` forms accept either the pinned quoted string list or direct
 string arguments and open a Prescient-filtered `Choose: ` prompt. The pinned
@@ -940,8 +943,8 @@ BibTeX snippets deliberately skip automatic indentation: deterministic template
 text approximates Emacs' intended steady state, not its transient indentation
 calls.
 
-This is not full Yasnippet parity. The remaining 62 definitions comprise 18
-DIX-specific conditions, five unsupported or malformed backquote cases, and 39
+This is not full Yasnippet parity. The remaining 60 definitions comprise 18
+DIX-specific conditions, five unsupported or malformed backquote cases, and 37
 side-effecting, embedded, or mode-specific field transforms. The pinned
 corpus contains no command snippets. Active sessions do not stack because the
 profile retains Yasnippet's `yas-triggers-in-field nil` default, and direct

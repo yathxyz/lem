@@ -86,6 +86,9 @@ write_snippet "$fixture_snippet_root/fundamental-mode/transform" \
   '${1:Heading}' \
   '${1:$(make-string (string-width yas-text) ?\=)}' \
   '$0'
+write_snippet "$fixture_snippet_root/fundamental-mode/comma-transform" \
+  'safe comma-list transform' 'csvlist' \
+  '${1:one,two}|${1:$(replace-regexp-in-string "  *" " " (subst-char-in-string ?, ? yas-text))}|$0'
 write_snippet "$fixture_snippet_root/fundamental-mode/literal-choice" \
   'literal choice' 'choose' \
   '${1:$$(yas-choose-value '\''("alpha" "beta" ""))}-$0'
@@ -247,7 +250,7 @@ if lem_wait_for "$session" 'NORMAL' "$BOOT_TIMEOUT" >/dev/null &&
    wait_report '^ANCESTRY-SUMMARY ok=' "$BOOT_TIMEOUT"; then
   if grep -q '^ANCESTRY-SUMMARY ok=yes$' "$LEM_YATH_SNIPPET_TEST_REPORT" &&
      grep -q \
-       '^CORPUS total=2387 supported=2325 unsupported=62 safe-backquote=63 safe-condition=6 safe-choice=7$' \
+       '^CORPUS total=2387 supported=2327 unsupported=60 safe-backquote=63 safe-condition=6 safe-choice=9$' \
        "$LEM_YATH_SNIPPET_TEST_REPORT" &&
      grep -q '^DYNAMIC-ORACLE ok=yes ' "$LEM_YATH_SNIPPET_TEST_REPORT" &&
      grep -q '^CHOICE-ORACLE ok=yes ' "$LEM_YATH_SNIPPET_TEST_REPORT" &&
@@ -434,6 +437,24 @@ if run_mx lem-yath-test-snippet-transform-setup && enter_insert; then
   fi
 else
   fail safe-field-transform "could not prepare field-transform scenario"
+fi
+
+# Emacs Lisp character literals retain their payload during allowlist
+# canonicalization.  The pinned Nix templates use `?,` and `? ` to render a
+# comma-delimited dependency field as a live space-delimited mirror.
+if run_mx lem-yath-test-snippet-comma-transform-setup && enter_insert; then
+  send_literal csvlist
+  lem_keys "$session" Tab
+  send_literal alpha,,beta
+  if record_state comma-transform; then
+    assert_state safe-comma-transform comma-transform \
+      $'alpha,,beta|alpha beta|\n' \
+      'active=yes' 'field=1' 'completion=no'
+  else
+    fail safe-comma-transform "comma-transform state probe did not run"
+  fi
+else
+  fail safe-comma-transform "could not prepare comma-transform scenario"
 fi
 
 # The common prog-mode condition is evaluated from Lem's actual major mode:

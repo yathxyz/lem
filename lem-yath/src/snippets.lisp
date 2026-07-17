@@ -469,17 +469,27 @@
   (with-output-to-string (output)
     (loop :with quoted-p = nil
           :with escaped-p = nil
+          :with character-literal-state = nil
           :for character :across source
           :do (cond
                 (escaped-p
                  (write-char character output)
                  (setf escaped-p nil))
+                (character-literal-state
+                 (write-char character output)
+                 (setf character-literal-state
+                       (and (eq character-literal-state :start)
+                            (char= character #\\)
+                            :escaped)))
                 ((and quoted-p (char= character #\\))
                  (write-char character output)
                  (setf escaped-p t))
                 ((char= character #\")
                  (write-char character output)
                  (setf quoted-p (not quoted-p)))
+                ((and (not quoted-p) (char= character #\?))
+                 (write-char character output)
+                 (setf character-literal-state :start))
                 ((and (not quoted-p)
                       (find character '(#\Space #\Tab #\Newline #\Return)
                             :test #'char=)))
@@ -844,9 +854,8 @@ is a bounded character parser, not a Common Lisp or Emacs Lisp reader."
                                 (cl-ppcre:split "[^[:alnum:]_]+" text)))))
     (:identity text)
     (:comma-list
-     (string-trim '(#\Space #\Tab #\Newline #\Return)
-                  (cl-ppcre:regex-replace-all
-                   "[ ]+" (substitute #\Space #\, text) " ")))
+     (cl-ppcre:regex-replace-all
+      "[ ]+" (substitute #\Space #\, text) " "))
     (:private-field
      (if (zerop (length text)) ""
          (concatenate 'string "_"

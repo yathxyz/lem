@@ -200,7 +200,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   field transforms, six context conditions, literal choice prompts with the
   pinned initial-field auto-advance behavior, forward/reverse field navigation,
   bounded undo/redo field-session revival, and a Prescient `M-x` insertion
-  prompt are supported for 2,325 definitions; 62 definitions remain
+  prompt are supported for 2,327 definitions; 60 definitions remain
   unavailable, and arbitrary embedded Elisp is never evaluated
 - LSP `insertTextFormat=Snippet` candidates enter the same field-session UI
   after `insertText`, `TextEdit`, or `InsertReplaceEdit` acceptance; direct and
