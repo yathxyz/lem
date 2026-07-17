@@ -108,15 +108,37 @@
                              (lem:buffer-text buffer))
                      "journal-title-matches-configured-format")
               (check (= 1 (cl-ppcre:count-matches
-                           "(?m)^\\* 09:30$" (lem:buffer-text buffer)))
+                           "(?m)^\\* 09:30 $" (lem:buffer-text buffer)))
                      "journal-appends-time-heading")
+              (check (alexandria:ends-with-subseq
+                      "* 09:30 " (lem:buffer-text buffer))
+                     "journal-entry-is-ready-for-text")
+              (check (= 8 (lem:point-charpos (lem:buffer-point buffer)))
+                     "journal-point-follows-time-prefix")
               (lem-yath::open-journal-entry time)
               (check (= 1 (cl-ppcre:count-matches
                            "(?m)^#\\+TITLE:" (lem:buffer-text buffer)))
                      "journal-reuse-does-not-duplicate-title")
               (check (= 2 (cl-ppcre:count-matches
-                           "(?m)^\\* 09:30$" (lem:buffer-text buffer)))
-                     "journal-reuse-appends-another-entry"))
+                           "(?m)^\\* 09:30 $" (lem:buffer-text buffer)))
+                     "journal-reuse-appends-another-entry")
+              (check (search (format nil "* 09:30 ~%~%* 09:30 ")
+                             (lem:buffer-text buffer))
+                     "journal-reuse-preserves-entry-separation"))
+
+            (let* ((time (encode-universal-time 0 45 10 12 7 2026))
+                   (path (merge-pathnames "roam/journal/20260712.org"
+                                          (lem-yath::workdir))))
+              (alexandria:write-string-into-file
+               "legacy body" path :if-exists :supersede)
+              (lem-yath::open-journal-entry time)
+              (let ((text (lem:buffer-text (lem:current-buffer))))
+                (check (search (format nil
+                                       "legacy body~%#+TITLE: Sun, 2026-07-12")
+                               text)
+                       "journal-repairs-missing-daily-title")
+                (check (alexandria:ends-with-subseq "* 10:45 " text)
+                       "journal-repaired-file-is-ready-for-text")))
 
             (dolist (keymap (list lem-vi-mode:*normal-keymap*
                                   lem-vi-mode:*visual-keymap*))
@@ -202,6 +224,9 @@
 
 (defun notes-test-fixed-time ()
   (encode-universal-time 0 30 9 10 7 2026))
+
+(defun notes-test-fixed-journal-time ()
+  (encode-universal-time 0 30 9 11 7 2026))
 
 (defun notes-test-fixed-id ()
   "12345678-1234-4123-8123-123456789abc")
@@ -359,8 +384,24 @@
      (notes-test-yes-no (get-file-buffer target))
      (or (org-parse-date-input "sep 15 2026") "none"))))
 
+(define-command lem-yath-test-notes-journal-state () ()
+  (let* ((buffer (current-buffer))
+         (text (buffer-text buffer))
+         (filename (buffer-filename buffer)))
+    (notes-test-report
+     "JOURNAL file=~a title=~d entries=~d ready=~a line=~d column=~d state=~a org=~a"
+     (if filename (file-namestring filename) "none")
+     (notes-test-count "#+TITLE: Sat, 2026-07-11" text)
+     (notes-test-count "* 09:30 " text)
+     (notes-test-yes-no (alexandria:ends-with-subseq "* 09:30 " text))
+     (line-number-at-point (current-point))
+     (point-charpos (current-point))
+     (notes-test-state-name)
+     (notes-test-yes-no (mode-active-p buffer 'org-mode)))))
+
 (setf lem-yath::*org-capture-time-function* #'notes-test-fixed-time
-      lem-yath::*org-capture-id-function* #'notes-test-fixed-id)
+      lem-yath::*org-capture-id-function* #'notes-test-fixed-id
+      lem-yath::*journal-time-function* #'notes-test-fixed-journal-time)
 
 (define-key *global-keymap* "F5" 'lem-yath-test-notes-reset-origin)
 (define-key *global-keymap* "F6" 'lem-yath-test-notes-capture-state)
@@ -368,6 +409,7 @@
 (define-key *global-keymap* "F8" 'lem-yath-test-notes-reload)
 (define-key *global-keymap* "F9" 'lem-yath-test-notes-toggle-occupied-capture)
 (define-key *global-keymap* "F10" 'lem-yath-test-notes-daily-state)
+(define-key *global-keymap* "F11" 'lem-yath-test-notes-journal-state)
 
 (lem-yath-test-notes-reset-origin)
 (notes-test-report "READY boot=~a"

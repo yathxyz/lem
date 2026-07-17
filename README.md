@@ -373,8 +373,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   `[[Title]]`, `[[label|Alias]]`, or `[[ID]]` and opens the same non-inserting
   capture flow for a missing target; ambiguous, escaped, and fenced targets
   fail closed. From Normal state, `C-z C-u C-c C-o` supplies the source
-  package's other-window prefix behavior. Root-level roam dailies and journal
-  entries operate over `$WORKDIR`
+  package's other-window prefix behavior. Root-level roam dailies operate over
+  `$WORKDIR`; Normal or Visual `SPC n j j` opens the configured compact-date
+  journal buffer, retains one exact daily title, and appends a text-ready
+  `* HH:MM ` entry in Normal state
 - `SPC o` opens the configured one-key `i/t/p/r` Org capture selector and an
   editable Org buffer at `%?`. Active Visual text and a local file/line source
   link fill `%i` and `%a`; `C-c C-c` safely inserts and saves the selected

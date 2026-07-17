@@ -251,6 +251,37 @@ else
   fail daily-date 'daily named-date creation, state restoration, or popup cleanup diverged'
 fi
 
+record_key F5 '^ORIGIN ' || fail journal-entry 'could not reset the journal origin'
+lem_keys "$session" Space n j j
+if lem_wait_for "$session" 'TITLE: Sat, 2026-07-11' 10 >/dev/null &&
+   record_key F11 '^JOURNAL ' &&
+   report_is '^JOURNAL ' \
+     'JOURNAL file=20260711.org title=1 entries=1 ready=yes line=3 column=7 state=NORMAL org=yes'; then
+  pass journal-entry 'SPC n j j opened an exact text-ready configured entry'
+else
+  fail journal-entry 'the journal path, title, entry, point, state, or Org mode diverged'
+fi
+
+lem_keys "$session" Space n j j
+if record_key F11 '^JOURNAL ' &&
+   report_is '^JOURNAL ' \
+     'JOURNAL file=20260711.org title=1 entries=2 ready=yes line=5 column=7 state=NORMAL org=yes'; then
+  pass journal-reuse 'repeated SPC n j j reused the title and appended a ready entry'
+else
+  fail journal-reuse 'repeated journal entry creation duplicated or misplaced content'
+fi
+
+record_key F5 '^ORIGIN ' || fail journal-visual 'could not reset the Visual journal origin'
+lem_keys "$session" v e
+lem_keys "$session" Space n j j
+if record_key F11 '^JOURNAL ' &&
+   report_is '^JOURNAL ' \
+     'JOURNAL file=20260711.org title=1 entries=3 ready=yes line=7 column=7 state=NORMAL org=yes'; then
+  pass journal-visual 'Visual SPC n j j reached the same text-ready Normal destination'
+else
+  fail journal-visual 'Visual invocation retained selection state or misplaced the entry'
+fi
+
 if [ "$failed" -ne 0 ]; then
   tail -n 50 "$LEM_YATH_NOTES_REPORT" >&2 || true
   lem_capture "$session" >&2 || true

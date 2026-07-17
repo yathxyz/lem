@@ -94,6 +94,9 @@ The second value is true only when this call changed the buffer."
 
 ;;; --- dailies & journal ------------------------------------------------------
 
+(defvar *journal-time-function* #'get-universal-time
+  "Function returning the time used by `lem-yath-journal-new-entry'.")
+
 (defun decoded-date-strings (&optional (time (get-universal-time)))
   (multiple-value-bind (sec min hour day month year day-of-week)
       (decode-universal-time time)
@@ -137,25 +140,45 @@ Signal an error before constructing a pathname unless DATE is valid YYYY-MM-DD."
   (open-daily-note
    (org-read-date-prompt "Find daily-note" :default-date (org-date-today))))
 
-(defun open-journal-entry (&optional (time (get-universal-time)))
+(defun journal-title (time)
+  (multiple-value-bind (iso compact dow) (decoded-date-strings time)
+    (declare (ignore compact))
+    (format nil "#+TITLE: ~a, ~a" dow iso)))
+
+(defun ensure-journal-title (buffer title)
+  "Append TITLE to BUFFER when its configured daily header is absent."
+  (unless (search title (buffer-text buffer))
+    (move-point (buffer-point buffer) (buffer-end-point buffer))
+    (let ((text (buffer-text buffer)))
+      (when (and (plusp (length text))
+                 (char/= #\newline (char text (1- (length text)))))
+        (insert-string (buffer-point buffer) (string #\newline))))
+    (insert-string (buffer-point buffer) title)))
+
+(defun append-journal-entry (buffer time)
+  "Append the configured current-time entry to BUFFER and leave point ready."
+  (move-point (buffer-point buffer) (buffer-end-point buffer))
+  (let ((text (buffer-text buffer)))
+    (when (and (plusp (length text))
+               (char/= #\newline (char text (1- (length text)))))
+      (insert-string (buffer-point buffer) (string #\newline))))
+  (multiple-value-bind (sec min hour) (decode-universal-time time)
+    (declare (ignore sec))
+    (insert-string (buffer-point buffer)
+                   (format nil "~%* ~2,'0d:~2,'0d " hour min))))
+
+(defun open-journal-entry (&optional (time (funcall *journal-time-function*)))
   "Open TIME's journal file and append its configured time heading."
   (multiple-value-bind (iso compact dow) (decoded-date-strings time)
+    (declare (ignore iso dow))
     (let ((path (merge-pathnames (format nil "journal/~a.org" compact)
                                  (roam-directory))))
       (ensure-directories-exist path)
-      (let ((new (and (not (uiop:probe-file* path))
-                      (not (get-file-buffer path)))))
-        (find-file path)
-        (let ((buffer (current-buffer)))
-          (when new
-            (insert-string (current-point)
-                           (format nil "#+TITLE: ~a, ~a~%" dow iso)))
-          (multiple-value-bind (sec min hour) (decode-universal-time time)
-            (declare (ignore sec))
-            (move-point (buffer-point buffer) (buffer-end-point buffer))
-            (insert-string (buffer-point buffer)
-                           (format nil "~%* ~2,'0d:~2,'0d~%" hour min))))
-        path))))
+      (find-file path)
+      (let ((buffer (current-buffer)))
+        (ensure-journal-title buffer (journal-title time))
+        (append-journal-entry buffer time))
+      path)))
 
 (define-command lem-yath-journal-new-entry () ()
   "New org-journal entry in $WORKDIR/roam/journal/%Y%m%d.org."
