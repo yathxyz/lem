@@ -11,6 +11,9 @@ fi
 count=$((count + 1))
 printf '%s\n' "$count" >"$count_file"
 printf '%s\0' "$@" >"$LEM_YATH_LLM_TOOLS_LOG/curl.$count.argv"
+while IFS= read -r line; do
+  printf '%s\n' "$line"
+done >"$LEM_YATH_LLM_TOOLS_LOG/curl.$count.config"
 
 case "$count" in
   1)

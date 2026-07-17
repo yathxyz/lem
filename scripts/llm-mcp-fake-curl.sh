@@ -8,6 +8,9 @@ count=0
 count=$((count + 1))
 printf '%s' "$count" >"$log/curl.count"
 printf '%s\0' "$@" >"$log/curl.$count.argv"
+while IFS= read -r line; do
+  printf '%s\n' "$line"
+done >"$log/curl.$count.config"
 
 if ((count == 1)); then
   printf '%s\n' \

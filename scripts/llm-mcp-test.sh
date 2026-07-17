@@ -136,17 +136,33 @@ fi
 pass agent-loop 'namespaced fetch tool completed through a second model round'
 
 python3 - "$HOME/mcp-test-log/curl.1.argv" \
-  "$HOME/mcp-test-log/curl.2.argv" <<'PY'
+  "$HOME/mcp-test-log/curl.1.config" \
+  "$HOME/mcp-test-log/curl.2.argv" \
+  "$HOME/mcp-test-log/curl.2.config" <<'PY'
 import json
 import pathlib
 import sys
 
-def body(path):
-    args = pathlib.Path(path).read_bytes().split(b"\0")[:-1]
+def body(argv_path, config_path):
+    args = pathlib.Path(argv_path).read_bytes().split(b"\0")[:-1]
     args = [item.decode() for item in args]
-    return json.loads(args[args.index("-d") + 1])
+    assert args == ["--silent", "--show-error", "--fail-with-body",
+                    "--no-buffer", "--max-time", "300", "--config", "-"]
+    options = {}
+    for line in pathlib.Path(config_path).read_text(encoding="utf-8").splitlines():
+        name, encoded = line.split(" = ", 1)
+        options.setdefault(name, []).append(json.loads(encoded))
+    assert options["request"] == ["POST"]
+    assert options["url"] == ["https://openrouter.ai/api/v1/chat/completions"]
+    assert options["header"] == [
+        "Content-Type: application/json",
+        "Authorization: Bearer test-openrouter-key",
+    ]
+    assert "test-openrouter-key" not in "\0".join(args)
+    return json.loads(options["data-binary"][0])
 
-first, second = map(body, sys.argv[1:])
+first = body(sys.argv[1], sys.argv[2])
+second = body(sys.argv[3], sys.argv[4])
 names = [tool["function"]["name"] for tool in first["tools"]]
 assert names[:5] == ["project_root", "list_project_files", "search_project",
                      "read_project_file", "read_emacs_symbol"]

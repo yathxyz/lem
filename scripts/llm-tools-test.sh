@@ -118,24 +118,35 @@ if [[ $(<"$LEM_YATH_LLM_TOOLS_LOG/curl.count") != 2 ]]; then
 fi
 
 python3 - "$LEM_YATH_LLM_TOOLS_LOG/curl.1.argv" \
+  "$LEM_YATH_LLM_TOOLS_LOG/curl.1.config" \
   "$LEM_YATH_LLM_TOOLS_LOG/curl.2.argv" \
+  "$LEM_YATH_LLM_TOOLS_LOG/curl.2.config" \
   "$LEM_YATH_LLM_TOOLS_PROJECT" <<'PY'
 import json
 import pathlib
 import sys
 
-def body(path):
-    args = pathlib.Path(path).read_bytes().split(b"\0")[:-1]
+def body(argv_path, config_path):
+    args = pathlib.Path(argv_path).read_bytes().split(b"\0")[:-1]
     args = [value.decode() for value in args]
-    assert args[:4] == ["-sN", "https://openrouter.ai/api/v1/chat/completions",
-                       "-H", "Content-Type: application/json"]
-    assert args[4:6] == ["-H", "Authorization: Bearer test-key-not-a-credential"]
-    assert args[6] == "-d"
-    return json.loads(args[7])
+    assert args == ["--silent", "--show-error", "--fail-with-body",
+                    "--no-buffer", "--max-time", "300", "--config", "-"]
+    assert "test-key-not-a-credential" not in "\0".join(args)
+    options = {}
+    for line in pathlib.Path(config_path).read_text(encoding="utf-8").splitlines():
+        name, encoded = line.split(" = ", 1)
+        options.setdefault(name, []).append(json.loads(encoded))
+    assert options["request"] == ["POST"]
+    assert options["url"] == ["https://openrouter.ai/api/v1/chat/completions"]
+    assert options["header"] == [
+        "Content-Type: application/json",
+        "Authorization: Bearer test-key-not-a-credential",
+    ]
+    return json.loads(options["data-binary"][0])
 
-first = body(sys.argv[1])
-second = body(sys.argv[2])
-root = str(pathlib.Path(sys.argv[3]).resolve()) + "/"
+first = body(sys.argv[1], sys.argv[2])
+second = body(sys.argv[3], sys.argv[4])
+root = str(pathlib.Path(sys.argv[5]).resolve()) + "/"
 names = [tool["function"]["name"] for tool in first["tools"]]
 assert names == ["project_root", "list_project_files", "search_project",
                  "read_project_file", "read_emacs_symbol"]
