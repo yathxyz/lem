@@ -12,8 +12,42 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 | File | Role |
 |------|------|
 | `hello.lisp` | Permanent canary book: `k-sq` + two theorems. First thing that goes red if the toolchain breaks. |
+| `buffer-model.lisp` | VK-1 formal buffer model + `wf-buffer` well-formedness predicate. Certified; also the in-image runtime assertion. |
 | `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — under 200 lines, every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
 | `README.md` | This file. |
+
+## VK-1 — buffer model + well-formedness
+
+`buffer-model.lisp` defines the kernel buffer as `(list lines points tick)` and
+`wf-buffer`, an executable predicate capturing every structural invariant
+`src/buffer/internal/check-corruption.lisp` enforces, translated to the codepoint
+representation (text = lists of naturals; a line excludes codepoint 10). It
+certifies `wf-buffer` of the canonical empty buffer plus a set of reuse lemmas
+for VK-2 (each wf component extracted; `find-point` membership; any member of an
+in-bounds point-set is in bounds). The in-image acceptance is the rove test
+`tests/pbt/kernel-model.lisp`: it converts PBT-generated production buffers to the
+model and asserts `check-buffer-corruption` passing ⇒ `wf-buffer` holding (plus
+`buffer-nlines = (len model-lines)`), and that hand-corrupted models are rejected.
+
+**Model decision (deviation from the SPEC-VK VK-1 sketch, recorded per Constraint
+5).** The SPEC-VK VK-1 model sketch lists an `nlines` component. The model here
+has **no `nlines` field**: `nlines` is derived as `(len lines)`. The invariant is
+not lost — the conformance mapper asserts production's cached `buffer-nlines`
+equals `(len model-lines)` at the boundary — but the model has one fewer field
+that could drift. Point kinds are `:left-inserting`/`:right-inserting` only;
+production `:temporary` points are unregistered and out of the model, so only
+registered points are converted and compared.
+
+**Shim whitelist growth.** `buffer-model.lisp` is the first book to use the shim's
+ACL2 base-function whitelist: `natp`, `len`, `true-listp` (each a fresh ACL2-package
+symbol defined with its axiomatic semantics in `shim.lisp`). The exec path
+otherwise uses only CL homonyms; no `std/` function is exec-reachable.
+
+## Proof status
+
+All theorems in every book under `verified/` certify with real ACL2 (no
+`skip-proofs`, `defaxiom`, trust tags, or `:program`-mode kernel functions). No
+theorem is PROOF PENDING.
 
 ## ACL2 toolchain — install and pin
 

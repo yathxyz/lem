@@ -29,7 +29,8 @@
                (:module "pbt"
                 :components ((:file "harness")
                              (:file "harness-test")
-                             (:file "baseline-fuzz")))
+                             (:file "baseline-fuzz")
+                             (:file "kernel-model")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")

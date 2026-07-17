@@ -25,12 +25,13 @@
 ;;;;                             compiler accepts and discards it. Guards are thus
 ;;;;                             not enforced in-image (they are proved in ACL2).
 ;;;;
-;;;; ACL2 BASE-FUNCTION WHITELIST (*kernel-base*): the small set of ACL2 built-ins
-;;;;   (nfix, zp, true-listp, ...) that are ACL2 defuns, do NOT exist in CL, and
-;;;;   are actually used by the exec path of some book. Each is defined here with
-;;;;   its ACL2 semantics and a citation. CURRENTLY EMPTY: hello.lisp uses none.
-;;;;   Anything a book references outside CL and this whitelist fails LOUDLY at
-;;;;   load time (undefined function) -- that is the intended enforcement.
+;;;; ACL2 BASE-FUNCTION WHITELIST: the small set of ACL2 built-ins (natp, len,
+;;;;   true-listp, ...) that are ACL2 defuns, do NOT exist in CL, and are
+;;;;   actually used by the exec path of some book. Each is defined here with its
+;;;;   ACL2 semantics and a citation. Anything a book references outside CL and
+;;;;   this whitelist fails LOUDLY at load time (undefined function) -- that is
+;;;;   the intended enforcement. Current entries (used by buffer-model.lisp):
+;;;;     natp, len, true-listp  (see the ACL2 base-function whitelist section).
 ;;;;
 ;;;; NOT reinterpreted (deliberately): ACL2's own `defun` for the applicative
 ;;;;   subset IS just CL `defun`; we rely on that. Do not add a `defun` macro.
@@ -66,10 +67,25 @@
 (declaim (declaration acl2::xargs))
 
 ;;; ---- ACL2 base-function whitelist ---------------------------------------
-;;; Define ONLY built-ins actually used by some book's exec path. Empty today.
-;;; Template for additions (delete when first real entry lands):
-;;;   ;; nfix: ACL2 axioms.lisp -- (nfix x) = x if (natp x) else 0.
-;;;   (defun acl2::nfix (x) (if (and (integerp x) (<= 0 x)) x 0))
+;;; Define ONLY built-ins actually used by some book's exec path. Each is a
+;;; fresh symbol in the ACL2 package (none of these names exist in CL, so no
+;;; shadowing is needed) matching its ACL2 axiomatic semantics.
+
+;; natp: ACL2 axioms.lisp -- (natp x) = x is a non-negative integer.
+(defun acl2::natp (x)
+  (and (integerp x) (<= 0 x)))
+
+;; len: ACL2 axioms.lisp -- length of the list prefix of x; 0 on an atom.
+(defun acl2::len (x)
+  (if (consp x)
+      (+ 1 (acl2::len (cdr x)))
+      0))
+
+;; true-listp: ACL2 axioms.lisp -- x is a nil-terminated (proper) list.
+(defun acl2::true-listp (x)
+  (if (consp x)
+      (acl2::true-listp (cdr x))
+      (null x)))
 
 ;;; ---- :lem/kernel re-export surface --------------------------------------
 ;;; The in-image callable surface of the certified kernel. Each name is an
@@ -77,7 +93,9 @@
 ;;; lem/kernel:<name>. Interned + exported at shim load so the reader syntax
 ;;; resolves before any book is loaded; the function becomes fbound once the
 ;;; owning book is loaded via LOAD-VERIFIED-BOOK. Extend as kernel books grow.
-(defparameter *kernel-exports* '("K-SQ")
+(defparameter *kernel-exports* '("K-SQ"
+                                 ;; buffer-model.lisp (VK-1)
+                                 "WF-BUFFER" "EMPTY-BUFFER")
   "ACL2 symbol-names re-exported through :lem/kernel. See header.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
