@@ -2583,11 +2583,15 @@ agenda occurrences across the visible horizon. COMMENT and ARCHIVE subtrees,
 drawers, source blocks, and comment lines are excluded, while completed
 headings can still contribute timestamp events as in GNU Org.
 
-Scanning runs away from the editor thread. Refresh requests coalesce behind one
-worker per buffer, generations reject stale results, source failures are shown
-instead of becoming a false empty agenda, and killed buffers reject late
-delivery. Entry lines retain exact source pathname, line, and scanned-heading
-properties. In Vi state, `Return` visits that source, `gr`/`gR` refresh, `q` closes
+Scanning runs away from the editor thread. Before launching a worker, refresh
+captures immutable text snapshots of modified live agenda-file buffers on the
+editor thread; parsing and filter-metadata enrichment therefore see unsaved
+edits without touching mutable editor state off-thread. Refresh requests
+coalesce behind one worker per buffer, generations reject stale results, source
+failures are shown instead of becoming a false empty agenda, and killed buffers
+reject late delivery. Entry lines retain exact source pathname, line, and
+scanned-heading properties. In Vi state, `Return` visits that source, `gr`/`gR`
+refresh, `q` closes
 the explicit popup split, and Evil-Org's `t` opens the configured one-key
 TODO/NEXT/WAITING/HOLD/SOMEDAY/DONE/CANCELLED selector. A selected state updates
 and immediately saves the source before refreshing. Evil-Org's `K` and `J`
@@ -2640,6 +2644,18 @@ ranges cross midnight coherently and explicit date ranges move both endpoints.
 All changes revalidate the exact scanned source line/token, save immediately,
 refresh, and restore the logical occurrence.
 
+Evil-Org `p`, and GNU Org's `>` alias from C-z Emacs state, prompt through the
+shared Org date reader for the exact planning or ordinary-event timestamp
+represented by the row. The command validates the source token both before and
+after the prompt, preserves active/inactive delimiters, optional time ranges,
+repeaters, and warning/delay suffixes, refuses stale or undated rows, and treats
+the replacement as one remote source-buffer undo transaction. A prefix forces
+time input and a double prefix uses the current date and time immediately. This
+particular command deliberately does not save: the configured Emacs save advice
+does not include `org-agenda-date-prompt`. Its asynchronous refresh consumes the
+modified live-buffer snapshot, so automatic and later `gr` refreshes show the
+unsaved result while disk remains unchanged.
+
 TODO,
 priority, planning, and tag changes save immediately and restore the logical
 agenda row after the asynchronous refresh. A shifted or changed source heading
@@ -2675,7 +2691,9 @@ persistence, completion, replacement, clearing, alignment, archive
 confirmation/subtree shape/context/durability, custom-route refusal,
 same-file refile completion/cancellation/hierarchy/persistence/row restoration,
 stale-source refusal, refresh races, unmodified/undo-free generated buffers,
-and cleanup.
+exact `p` defaults and planning/event replacement, time-range and suffix
+preservation, cancellation and no-date refusal, unsaved disk separation, one
+physical source undo, modified-live-buffer refresh, and cleanup.
 
 `src/apps/agenda-clock.lisp` preserves the effective Evil/base key shadowing
 rather than assigning one meaning to `I/O`. In Vi state, `I` starts the single

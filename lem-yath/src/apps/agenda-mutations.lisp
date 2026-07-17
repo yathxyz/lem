@@ -442,6 +442,199 @@
   "Move the selected agenda timestamp later like Evil-Org L."
   (agenda-shift-current-date 1 argument))
 
+(defun agenda-timestamp-token-signature (token)
+  "Return TOKEN's source identity independent of its temporary point."
+  (list (%org-timestamp-token-start token)
+        (%org-timestamp-token-end token)
+        (%org-timestamp-token-active-p token)
+        (%org-timestamp-token-date token)
+        (%org-timestamp-token-time token)
+        (%org-timestamp-token-end-time token)
+        (%org-timestamp-token-extra token)))
+
+(defun agenda-planning-timestamp-target
+    (file line expected-heading kind expected-date)
+  "Return the validated source buffer, point, and planning timestamp token."
+  (multiple-value-bind (buffer heading)
+      (agenda-source-heading-point file line expected-heading
+                                   "changing its timestamp")
+    (with-current-buffer buffer
+      (with-point ((planning heading))
+        (unless (line-offset planning 1)
+          (error "Agenda planning line no longer exists; refresh the agenda"))
+        (let* ((source-line (line-string planning))
+               (start (agenda-planning-timestamp-start source-line kind)))
+          (unless start
+            (error "Cannot find time stamp"))
+          (line-start planning)
+          (character-offset planning start)
+          (let ((token (or (org-timestamp-token-at-point planning)
+                           (error "Cannot find time stamp"))))
+            (unless (string= expected-date
+                             (%org-timestamp-token-date token))
+              (error "Agenda planning date changed; refresh before editing"))
+            (values buffer (copy-point planning :temporary) token)))))))
+
+(defun agenda-event-timestamp-target
+    (file heading-line expected-heading timestamp-line expected-source-line
+     timestamp-start expected-raw)
+  "Return the validated source buffer, point, and ordinary timestamp token."
+  (unless (and (integerp timestamp-line) (plusp timestamp-line)
+               (integerp timestamp-start) (not (minusp timestamp-start))
+               expected-source-line expected-raw)
+    (error "Cannot find time stamp"))
+  (multiple-value-bind (buffer heading)
+      (agenda-source-heading-point file heading-line expected-heading
+                                   "changing its timestamp")
+    (declare (ignore heading))
+    (with-current-buffer buffer
+      (with-point ((point (buffer-start-point buffer)))
+        (unless (or (= timestamp-line 1)
+                    (line-offset point (1- timestamp-line)))
+          (error "Agenda timestamp line no longer exists; refresh the agenda"))
+        (let* ((source-line (line-string point))
+               (raw-end (+ timestamp-start (length expected-raw))))
+          (unless (string= expected-source-line source-line)
+            (error "Agenda timestamp source changed; refresh before editing"))
+          (unless (and (<= raw-end (length source-line))
+                       (string= expected-raw
+                                (subseq source-line timestamp-start raw-end)))
+            (error "Agenda timestamp moved; refresh before editing"))
+          (line-start point)
+          (character-offset point timestamp-start)
+          (values buffer (copy-point point :temporary)
+                  (or (org-timestamp-token-at-point point)
+                      (error "Cannot find time stamp"))))))))
+
+(defun agenda-read-timestamp-replacement (token argument)
+  "Read the replacement for TOKEN using GNU Org's prefix behavior."
+  (let* ((now (funcall *agenda-now-function*))
+         (magnitude (org-prefix-magnitude argument))
+         (immediate-p (= magnitude 16)))
+    (multiple-value-bind (date time end-time)
+        (if immediate-p
+            (multiple-value-bind (second minute hour)
+                (decode-universal-time now)
+              (declare (ignore second))
+              (values (org-planning-today now)
+                      (format nil "~2,'0d:~2,'0d" hour minute)
+                      nil))
+            (org-read-timestamp-values token "Date" now (plusp magnitude)))
+      (values
+       date time
+       (org-timestamp-text
+        date (%org-timestamp-token-active-p token)
+        :time time :end-time end-time
+        :extra (%org-timestamp-token-extra token))))))
+
+(defun agenda-rewrite-source-timestamp (buffer point token text)
+  "Replace TOKEN at POINT as one unsaved remote undo transaction."
+  (with-current-buffer buffer
+    (let ((group nil)
+          (accepted-p nil))
+      (buffer-undo-boundary buffer)
+      (setf group (buffer-prepare-change-group buffer))
+      (unwind-protect
+           (progn
+             (line-start point)
+             (character-offset point (%org-timestamp-token-start token))
+             (delete-character
+              point (- (%org-timestamp-token-end token)
+                       (%org-timestamp-token-start token)))
+             (insert-string point text)
+             (buffer-accept-change-group group)
+             (setf accepted-p t)
+             (buffer-undo-boundary buffer))
+        (unless accepted-p
+          (when (and group (buffer-change-group-active-p group))
+            (ignore-errors (buffer-cancel-change-group group)))))))
+  text)
+
+(defun agenda-date-prompt-restore-key
+    (entry-key old-source-date new-date new-time event-p)
+  "Return the best refreshed row key after changing one source timestamp."
+  (let ((key (copy-list entry-key)))
+    (when key
+      (if event-p
+          (let* ((displayed-date (fourth key))
+                 (offset (and displayed-date
+                              (- (agenda-date-ordinal displayed-date)
+                                 (agenda-date-ordinal old-source-date)))))
+            (setf (fourth key)
+                  (if offset
+                      (agenda-add-calendar new-date offset #\d)
+                      new-date)
+                  (fifth key) new-time))
+          (setf (fourth key) new-date
+                (fifth key) nil)))
+    key))
+
+(defun agenda-date-prompt-target
+    (event-p file line heading kind date timestamp-line
+     timestamp-source-line timestamp-start timestamp-raw)
+  (if event-p
+      (agenda-event-timestamp-target
+       file line heading timestamp-line timestamp-source-line
+       timestamp-start timestamp-raw)
+      (progn
+        (unless (member kind '("SCHEDULED" "DEADLINE") :test #'string=)
+          (error "Cannot find time stamp"))
+        (agenda-planning-timestamp-target file line heading kind date))))
+
+(define-command lem-yath-agenda-date-prompt (argument) (:universal-nil)
+  "Prompt for and change the exact timestamp represented by the agenda row."
+  (let* ((agenda-buffer (current-buffer))
+         (point (current-point))
+         (entry-key (agenda-entry-key-at-point point))
+         (file (text-property-at point :agenda-file))
+         (line (text-property-at point :agenda-line))
+         (heading (text-property-at point :agenda-heading))
+         (kind (text-property-at point :agenda-kind))
+         (date (text-property-at point :agenda-date))
+         (timestamp-line (text-property-at point :agenda-timestamp-line))
+         (timestamp-source-line
+           (text-property-at point :agenda-timestamp-source-line))
+         (timestamp-start (text-property-at point :agenda-timestamp-start))
+         (timestamp-raw (text-property-at point :agenda-timestamp-raw))
+         (event-p (string= (or kind "") "TIMESTAMP")))
+    (cond
+      ((null file) (message "No agenda entry on this line."))
+      ((null date) (message "Cannot find time stamp"))
+      (t
+       (handler-case
+           (multiple-value-bind (buffer source-point token)
+               (agenda-date-prompt-target
+                event-p file line heading kind date timestamp-line
+                timestamp-source-line timestamp-start timestamp-raw)
+             (declare (ignore source-point))
+             (let ((signature (agenda-timestamp-token-signature token))
+                   (old-source-date (%org-timestamp-token-date token)))
+               (multiple-value-bind (new-date new-time text)
+                   (agenda-read-timestamp-replacement token argument)
+                 (multiple-value-bind
+                       (current-buffer current-point current-token)
+                     (agenda-date-prompt-target
+                      event-p file line heading kind date timestamp-line
+                      timestamp-source-line timestamp-start timestamp-raw)
+                   (unless (and (eq buffer current-buffer)
+                                (equal signature
+                                       (agenda-timestamp-token-signature
+                                        current-token)))
+                     (error "Agenda timestamp changed while prompting"))
+                   (let ((restore-key
+                           (agenda-date-prompt-restore-key
+                            entry-key old-source-date new-date new-time
+                            event-p)))
+                     (agenda-rewrite-source-timestamp
+                      current-buffer current-point current-token text)
+                     (setf (buffer-value agenda-buffer
+                                         'lem-yath-agenda-restore-entry)
+                           restore-key))
+                   (agenda-start-scan agenda-buffer)
+                   (message "Time stamp changed to ~a" text)))))
+         (error (condition)
+           (message "Agenda timestamp edit failed: ~a" condition)))))))
+
 (defun agenda-date-shift-post-command ()
   (unless (member (and (this-command) (command-name (this-command)))
                   '(lem-yath-agenda-date-earlier
@@ -454,6 +647,7 @@
 (define-key *lem-yath-agenda-vi-keymap* "c e" 'lem-yath-agenda-set-effort)
 (define-key *lem-yath-agenda-vi-keymap* "H" 'lem-yath-agenda-date-earlier)
 (define-key *lem-yath-agenda-vi-keymap* "L" 'lem-yath-agenda-date-later)
+(define-key *lem-yath-agenda-vi-keymap* "p" 'lem-yath-agenda-date-prompt)
 
 ;; GNU aliases that do not collide with Evil-Org remain reachable in Vi state.
 (dolist (keys '("C-c C-x e"))
@@ -466,6 +660,7 @@
 ;; The base map is exposed in buffer-local Emacs state.
 (define-key *lem-yath-agenda-mode-keymap* "C-k" 'lem-yath-agenda-kill-entry)
 (define-key *lem-yath-agenda-mode-keymap* "e" 'lem-yath-agenda-set-effort)
+(define-key *lem-yath-agenda-mode-keymap* ">" 'lem-yath-agenda-date-prompt)
 (define-key *lem-yath-agenda-mode-keymap* "C-c C-x e"
   'lem-yath-agenda-set-effort)
 (dolist (keys '("Shift-Left" "C-c C-x Left"))

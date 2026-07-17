@@ -23,6 +23,7 @@ source_file="$WORKDIR/source.org"
 work_file="$WORKDIR/same.org"
 public_file="$PUBLIC_ORG_DIR/same.org"
 mcp_file="$PUBLIC_ORG_DIR/mcp/mcp.org"
+timestamp_file="$WORKDIR/timestamp-edit.org"
 archive_file="${work_file}_archive"
 session="lem-agenda-$id"
 FAILED=0
@@ -227,7 +228,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT gr=LEM-YATH-AGENDA-REFRESH gR=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT gr=LEM-YATH-AGENDA-REFRESH gR=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO p=LEM-YATH-AGENDA-DATE-PROMPT schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -836,6 +837,112 @@ else
   sleep 0.3
 fi
 
+run_timestamp_prompt_tests() {
+# Evil-Org p follows the agenda row's exact timestamp marker.  The configured
+# Emacs command deliberately leaves this remote edit unsaved; automatic and
+# manual refreshes must therefore parse the modified live source buffer.
+printf '%s\n' \
+  '* TODO Timestamp prompt planning sentinel' \
+  'SCHEDULED: <2026-07-14 Tue +1w -2d>' \
+  '* Timestamp prompt event sentinel <2026-07-13 Mon 10:00-11:00 +1w -2d>' \
+  '* TODO Timestamp prompt no-date sentinel' \
+  >"$timestamp_file"
+tmux_cmd send-keys -t "$session" g r
+lem_wait_for "$session" 'Timestamp prompt planning sentinel' 40 >/dev/null || true
+tmux_cmd send-keys -t "$session" C-c v p
+if lem_wait_for "$session" 'Date \[2026-07-14\]' 10 >/dev/null; then
+  type_slow '2026-07-16 09:15-10:30'
+  lem_wait_for "$session" 'Date.*2026-07-16 09:15-10:30' 10 >/dev/null || true
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" Enter
+else
+  fail agenda-date-prompt "p did not offer the represented planning timestamp"
+fi
+if lem_wait_for "$session" 'Timestamp prompt planning sentinel.*SCHEDULED 2026-07-16' 40 >/dev/null &&
+   grep -q '^SCHEDULED: <2026-07-14 Tue +1w -2d>$' "$timestamp_file"; then
+  pass agenda-date-prompt "p changed the exact planning token without saving it"
+else
+  fail agenda-date-prompt "p lost the planning row, suffix, or unsaved boundary"
+fi
+tmux_cmd send-keys -t "$session" g r
+sleep 1
+if lem_wait_for "$session" 'Timestamp prompt planning sentinel.*SCHEDULED 2026-07-16' 40 >/dev/null; then
+  pass agenda-live-refresh "gr reads the immutable snapshot of a modified live Org buffer"
+else
+  fail agenda-live-refresh "gr reverted an unsaved live agenda timestamp to disk"
+fi
+
+# The remote edit is one source-buffer undo transaction.  Returning to the
+# agenda and refreshing must reveal the original in-memory timestamp again.
+tmux_cmd send-keys -t "$session" C-c v
+sleep 0.2
+tmux_cmd send-keys -t "$session" F6
+wait_report "^POINT mode=LEM-YATH-AGENDA-MODE file=$timestamp_file line=1 .*Timestamp prompt planning sentinel" || true
+tmux_cmd send-keys -t "$session" Enter
+sleep 0.4
+tmux_cmd send-keys -t "$session" F7
+if wait_report "^SOURCE file=$timestamp_file line=1 mode=ORG-MODE text=\"\\* TODO Timestamp prompt planning sentinel\"$"; then
+  tmux_cmd send-keys -t "$session" C-z
+  sleep 0.2
+  tmux_cmd send-keys -t "$session" C-x u
+  sleep 0.2
+  tmux_cmd send-keys -t "$session" C-z
+  sleep 0.2
+  tmux_cmd send-keys -t "$session" F8
+  lem_wait_for "$session" 'Overdue' 10 >/dev/null || true
+  tmux_cmd send-keys -t "$session" g r
+else
+  fail agenda-date-prompt-undo "Return did not visit the timestamp source row"
+fi
+if lem_wait_for "$session" 'Timestamp prompt planning sentinel.*SCHEDULED 2026-07-14' 40 >/dev/null; then
+  pass agenda-date-prompt-undo "one source undo restored the complete timestamp"
+else
+  fail agenda-date-prompt-undo "the remote replacement was split across undo steps"
+fi
+
+# Cancellation is atomic; an ordinary event edit can replace its time range
+# while preserving repeater/warning syntax and still remain unsaved.
+tmux_cmd send-keys -t "$session" C-c y p
+if lem_wait_for "$session" 'Date \[2026-07-13 10:00-11:00\]' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" Escape
+  sleep 0.3
+  if grep -q '^\* Timestamp prompt event sentinel <2026-07-13 Mon 10:00-11:00 +1w -2d>$' "$timestamp_file"; then
+    pass agenda-date-prompt-cancel "C-g left the exact event token untouched"
+  else
+    fail agenda-date-prompt-cancel "cancelling p changed the event source"
+  fi
+else
+  fail agenda-date-prompt-cancel "event p did not open with its source default"
+fi
+tmux_cmd send-keys -t "$session" p
+if lem_wait_for "$session" 'Date \[2026-07-13 10:00-11:00\]' 10 >/dev/null; then
+  type_slow '2026-07-18 12:30-13:45'
+  lem_wait_for "$session" 'Date.*2026-07-18 12:30-13:45' 10 >/dev/null || true
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" Enter
+fi
+if lem_wait_for "$session" 'Timestamp prompt event sentinel.*EVENT 2026-07-18 12:30' 40 >/dev/null &&
+   grep -q '^\* Timestamp prompt event sentinel <2026-07-13 Mon 10:00-11:00 +1w -2d>$' "$timestamp_file"; then
+  tmux_cmd send-keys -t "$session" g r
+  sleep 1
+  if lem_wait_for "$session" 'Timestamp prompt event sentinel.*EVENT 2026-07-18 12:30' 40 >/dev/null; then
+    pass agenda-date-prompt-event "p preserved event suffixes, refreshed, and stayed unsaved"
+  else
+    fail agenda-date-prompt-event "manual refresh lost the live event edit"
+  fi
+else
+  fail agenda-date-prompt-event "p did not rewrite the event time range in memory"
+fi
+
+tmux_cmd send-keys -t "$session" C-c n p
+if lem_wait_for "$session" 'Cannot find time stamp' 10 >/dev/null &&
+   grep -q '^\* TODO Timestamp prompt no-date sentinel$' "$timestamp_file"; then
+  pass agenda-date-prompt-none "p refuses an undated row without prompting or mutation"
+else
+  fail agenda-date-prompt-none "p treated an undated agenda row as a timestamp"
+fi
+}
+
 # If a live source buffer has shifted since the scan, the stored line must not
 # mutate whichever heading now occupies that location.
 tmux_cmd send-keys -t "$session" F12
@@ -898,6 +1005,8 @@ if wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" se
 else
   fail refile-stale "C-c C-w moved or saved from a stale agenda row"
 fi
+tmux_cmd send-keys -t "$session" C-c z
+sleep 0.2
 
 # q must close the popped agenda and restore the source view.
 tmux_cmd send-keys -t "$session" q
@@ -972,6 +1081,8 @@ else
 fi
 tmux_cmd send-keys -t "$session" g r
 lem_wait_for "$session" 'MCP today sentinel' 40 >/dev/null || true
+
+run_timestamp_prompt_tests
 
 # A delayed old generation must not overwrite a newer render.
 tmux_cmd send-keys -t "$session" F9

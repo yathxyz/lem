@@ -229,14 +229,12 @@
    :timestamp-start (getf spec :start)
    :timestamp-raw (getf spec :raw)))
 
-(defun parse-org-file (path)
-  "Return parsed agenda items and, as a second value, warnings or read errors.
+(defun parse-org-stream (in path)
+  "Return parsed agenda items and, as a second value, parser warnings.
 Only the planning line immediately below a heading is structural.  A heading
 with both SCHEDULED and DEADLINE fields produces one item for each field.
 Ordinary active timestamps belong to their containing visible heading."
-  (handler-case
-      (with-open-file (in path :direction :input :external-format :utf-8)
-         (let ((items '())
+  (let ((items '())
                (warnings '())
                (current nil)
                (current-planned-p nil)
@@ -354,6 +352,15 @@ Ordinary active timestamps belong to their containing visible heading."
                                      (t (emit-events line lineno))))))))))
              (finish-current))
            (values (nreverse items) (nreverse warnings))))
+
+(defun parse-org-file (path &optional (contents nil contents-p))
+  "Parse PATH from disk, or from supplied immutable CONTENTS when present."
+  (handler-case
+      (if contents-p
+          (with-input-from-string (in contents)
+            (parse-org-stream in path))
+          (with-open-file (in path :direction :input :external-format :utf-8)
+            (parse-org-stream in path)))
     (error (condition)
       (values nil (list condition)))))
 
@@ -507,22 +514,35 @@ Ordinary active timestamps belong to their containing visible heading."
                                (setf property-eligible-p nil))))))))))
       table)))
 
-(defun agenda-enrich-filter-metadata (source items)
+(defun agenda-read-source-lines (source &optional (contents nil contents-p))
+  "Return SOURCE lines from disk or supplied immutable CONTENTS."
+  (labels ((read-lines (stream)
+             (loop :for line := (read-line stream nil nil)
+                   :while line :collect line)))
+    (if contents-p
+        (with-input-from-string (stream contents)
+          (read-lines stream))
+        (with-open-file (stream source :direction :input
+                                       :external-format :utf-8)
+          (read-lines stream)))))
+
+(defun agenda-enrich-filter-metadata
+    (source items &optional (contents nil contents-p))
   "Attach source-derived agenda filter metadata to ITEMS."
-  (with-open-file (stream source :direction :input :external-format :utf-8)
-    (let* ((lines (loop :for line := (read-line stream nil nil)
-                        :while line :collect line))
-           (table (agenda-build-filter-metadata lines source)))
-      (dolist (item items items)
-        (alexandria:when-let ((metadata (gethash (agenda-item-line item) table)))
-          (setf (agenda-item-category item)
-                (agenda-item-metadata-category metadata)
-                (agenda-item-tags item)
-                (copy-list (agenda-item-metadata-tags metadata))
-                (agenda-item-effort item)
-                (agenda-item-metadata-effort metadata)
-                (agenda-item-top-headline item)
-                (agenda-item-metadata-top-headline metadata)))))))
+  (let* ((lines (if contents-p
+                    (agenda-read-source-lines source contents)
+                    (agenda-read-source-lines source)))
+         (table (agenda-build-filter-metadata lines source)))
+    (dolist (item items items)
+      (alexandria:when-let ((metadata (gethash (agenda-item-line item) table)))
+        (setf (agenda-item-category item)
+              (agenda-item-metadata-category metadata)
+              (agenda-item-tags item)
+              (copy-list (agenda-item-metadata-tags metadata))
+              (agenda-item-effort item)
+              (agenda-item-metadata-effort metadata)
+              (agenda-item-top-headline item)
+              (agenda-item-metadata-top-headline metadata))))))
 
 ;;; --- date helpers --------------------------------------------------------
 
@@ -919,22 +939,45 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
   (buffer-unmark buffer)
   (redraw-display))
 
-(defun agenda-collect-items ()
-  "Return parsed items, per-source failures, and discovered agenda files."
+(defun agenda-live-file-buffer (file)
+  "Return the live file buffer visiting FILE, without opening a new buffer."
+  (find-if
+   (lambda (buffer)
+     (alexandria:when-let ((pathname (buffer-filename buffer)))
+       (ignore-errors (uiop:pathname-equal pathname file))))
+   (buffer-list)))
+
+(defun agenda-live-source-snapshots (files)
+  "Snapshot modified live FILES on the editor thread for asynchronous scans."
+  (loop :for file :in files
+        :for buffer := (agenda-live-file-buffer file)
+        :when (and buffer (buffer-modified-p buffer))
+          :collect
+          (cons file
+                (points-to-string (buffer-start-point buffer)
+                                  (buffer-end-point buffer)))))
+
+(defun agenda-collect-items (files discovery-failures snapshots)
+  "Return parsed items and failures from immutable scan inputs."
   (handler-case
-      (multiple-value-bind (files discovery-failures) (agenda-org-files)
-        (let ((items '())
-              (failures (reverse discovery-failures)))
-          (dolist (file files)
-            (multiple-value-bind (parsed errors) (parse-org-file file)
+      (let ((items '())
+            (failures (reverse discovery-failures)))
+        (dolist (file files)
+          (let ((snapshot (assoc file snapshots :test #'uiop:pathname-equal)))
+            (multiple-value-bind (parsed errors)
+                (if snapshot
+                    (parse-org-file file (cdr snapshot))
+                    (parse-org-file file))
               (handler-case
-                  (agenda-enrich-filter-metadata file parsed)
+                  (if snapshot
+                      (agenda-enrich-filter-metadata file parsed (cdr snapshot))
+                      (agenda-enrich-filter-metadata file parsed))
                 (error (condition)
                   (push condition errors)))
               (setf items (nconc items parsed))
               (dolist (error errors)
-                (push (cons file error) failures))))
-          (values items (nreverse failures) files)))
+                (push (cons file error) failures)))))
+        (values items (nreverse failures) files))
     (error (condition)
       (values nil (list (cons nil condition)) nil))))
 
@@ -964,11 +1007,12 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
   (not (null (buffer-value buffer 'lem-yath-agenda-refresh-pending))))
 
 (defun agenda-scan-worker
-    (buffer generation clock-report-p range-start range-end)
+    (buffer generation clock-report-p range-start range-end
+     files discovery-failures snapshots)
   "Collect agenda items off-thread and marshal one completion event."
-  (multiple-value-bind (items failures files)
+  (multiple-value-bind (items failures collected-files)
       (handler-case
-          (agenda-collect-items)
+          (agenda-collect-items files discovery-failures snapshots)
         (error (condition)
           (values nil (list (cons nil condition)) nil)))
     (let ((clock-report nil))
@@ -976,7 +1020,8 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
                  (fboundp 'agenda-clock-collect-report))
         (multiple-value-bind (report report-failures)
             (handler-case
-                (agenda-clock-collect-report files range-start range-end)
+                (agenda-clock-collect-report
+                 collected-files range-start range-end)
               (error (condition)
                 (values nil (list (cons nil condition)))))
           (setf clock-report report
@@ -997,20 +1042,27 @@ comparison. Dated DONE/CANCELLED items are dropped from the dated sections."
         (now (funcall *agenda-now-function*)))
     (multiple-value-bind (range-start range-end)
         (agenda-effective-date-range buffer now)
-      (setf (buffer-value buffer 'lem-yath-agenda-scan-running) t)
-      (handler-case
-          (bt2:make-thread
-           (lambda ()
-             (agenda-scan-worker
-              buffer generation clock-report-p range-start range-end))
-           :name (format nil "lem-yath/agenda-scan-~d" generation))
-        (error (condition)
-          (setf (buffer-value buffer 'lem-yath-agenda-scan-running) nil
-                (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)
-          (agenda-render-if-current
-           buffer generation nil (list (cons nil condition)))
-          (message "Agenda scan could not start: ~a" condition)
-          nil)))))
+      (multiple-value-bind (files discovery-failures)
+          (handler-case
+              (agenda-org-files)
+            (error (condition)
+              (values nil (list (cons nil condition)))))
+        (let ((snapshots (agenda-live-source-snapshots files)))
+          (setf (buffer-value buffer 'lem-yath-agenda-scan-running) t)
+          (handler-case
+              (bt2:make-thread
+               (lambda ()
+                 (agenda-scan-worker
+                  buffer generation clock-report-p range-start range-end
+                  files discovery-failures snapshots))
+               :name (format nil "lem-yath/agenda-scan-~d" generation))
+            (error (condition)
+              (setf (buffer-value buffer 'lem-yath-agenda-scan-running) nil
+                    (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)
+              (agenda-render-if-current
+               buffer generation nil (list (cons nil condition)))
+              (message "Agenda scan could not start: ~a" condition)
+              nil)))))))
 
 (defun agenda-finish-scan
     (buffer generation items failures &optional clock-report)

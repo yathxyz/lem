@@ -71,7 +71,7 @@
      (concatenate
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
-      "return=~a gr=~a gR=~a t=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
+      "return=~a gr=~a gR=~a t=~a p=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
       "J=~a K=~a H=~a L=~a dd=~a ce=~a shift-left=~a shift-right=~a "
       "dA=~a da=~a dollar=~a archive=~a refile=~a kill-hooks=~d "
       "modified=~a undo=~a "
@@ -86,6 +86,7 @@
      (agenda-test-command-name "g r")
      (agenda-test-command-name "g R")
      (agenda-test-command-name "t")
+     (agenda-test-command-name "p")
      (agenda-test-command-name "C-c C-s")
      (agenda-test-command-name "C-c C-d")
      (agenda-test-command-name "c t")
@@ -166,6 +167,18 @@
   (move-point (current-point)
               (agenda-test-find-line "Time shift event sentinel")))
 
+(define-command lem-yath-test-agenda-goto-timestamp-planning () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Timestamp prompt planning sentinel")))
+
+(define-command lem-yath-test-agenda-goto-timestamp-event () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Timestamp prompt event sentinel")))
+
+(define-command lem-yath-test-agenda-goto-timestamp-none () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Timestamp prompt no-date sentinel")))
+
 (define-command lem-yath-test-agenda-goto-archive () ()
   (move-point (current-point)
               (handler-case
@@ -197,6 +210,21 @@
            "STALE-SOURCE modified=~a first=~s second=~s"
            (if (buffer-modified-p buffer) "yes" "no")
            first (line-string point)))))))
+
+(define-command lem-yath-test-agenda-clear-stale-source () ()
+  (let ((buffer *agenda-test-stale-source*))
+    (unless buffer
+      (error "No stale agenda source was prepared"))
+    (with-current-buffer buffer
+      (with-point ((start (buffer-start-point buffer))
+                   (end (buffer-start-point buffer)))
+        (unless (string= (line-string start) "# unsaved stale line")
+          (error "Stale agenda fixture line changed"))
+        (unless (line-offset end 1)
+          (error "Stale agenda fixture has no following source line"))
+        (delete-between-points start end))
+      (buffer-unmark buffer))
+    (setf *agenda-test-stale-source* nil)))
 
 (define-command lem-yath-test-agenda-point-report () ()
   (let ((file (text-property-at (current-point) :agenda-file))
@@ -320,6 +348,14 @@
   'lem-yath-test-agenda-goto-date-shift-event)
 (define-key *lem-yath-agenda-vi-keymap* "C-c h"
   'lem-yath-test-agenda-goto-time-shift-event)
+(define-key *lem-yath-agenda-vi-keymap* "C-c v"
+  'lem-yath-test-agenda-goto-timestamp-planning)
+(define-key *lem-yath-agenda-vi-keymap* "C-c y"
+  'lem-yath-test-agenda-goto-timestamp-event)
+(define-key *lem-yath-agenda-vi-keymap* "C-c n"
+  'lem-yath-test-agenda-goto-timestamp-none)
+(define-key *lem-yath-agenda-vi-keymap* "C-c z"
+  'lem-yath-test-agenda-clear-stale-source)
 (define-key *lem-yath-agenda-vi-keymap* "F1"
   'lem-yath-test-agenda-goto-archive)
 (define-key *lem-yath-agenda-vi-keymap* "F3"

@@ -614,6 +614,12 @@ the trailing text-ready space. The profile binds no other org-journal command
   date, including empty dates, and retain the selected relative date across
   navigation. The interim bare-`g` Lem refresh is gone because it prevented
   the configured Evil `g` prefix; C-z Emacs state still exposes base-map `g`.
+- Evil-Org motion-state `p` invokes pinned `org-agenda-date-prompt`; the GNU
+  base-map alias is `>`. It edits the exact planning or ordinary timestamp at
+  the row marker and leaves the source buffer modified. Unlike the other
+  configured agenda mutations, `org-agenda-date-prompt` is absent from
+  `yath/org-save-modified-agenda-source-buffers`' advice list, so not saving is
+  an intentional property of the effective configuration rather than a gap.
 - Evil-Org `x` and base `B` expose the bulk-action dispatcher. Lem prompts once
   for TODO, tag addition/removal, schedule, deadline, default archive, or the
   configured same-file refile target, applies it to marked rows (or the current

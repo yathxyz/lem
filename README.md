@@ -490,8 +490,15 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   Effort properties. Agenda `H`/`L` and the GNU shifted-arrow routes move
   planning or ordinary-event timestamps by days, hours, or five-minute units,
   including ranges and repeated-unit continuation. `C-c C-s`/`C-c C-d` edit
-  planning fields, and `ct`/`C-c C-q` provide completion-backed local-tag
-  replacement and clearing, all with immediate source persistence. Evil-Org
+  planning fields. Evil-Org `p` (or GNU `>` in Emacs state) edits the exact
+  planning or event timestamp through the shared Org date reader, preserves
+  active delimiters, time ranges, repeaters, and warning suffixes, and leaves
+  the source buffer unsaved as configured Emacs does. Agenda refreshes include
+  immutable snapshots of modified live Org buffers, so the edit remains visible
+  without exposing editor buffers to the background worker. `ct`/`C-c C-q`
+  provide completion-backed local-tag
+  replacement and clearing. Planning and tag commands persist immediately.
+  Evil-Org
   `dA` archives a complete
   subtree to Org's default sibling `_archive` file, while `da` confirms first;
   archive metadata and both files are persisted destination-first. GNU Org's
