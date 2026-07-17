@@ -505,7 +505,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   clock as an undoable unsaved source edit. Evil-Org `cr` and base-map `R`
   toggle a source-linked, two-level clock report for the displayed agenda
   horizon. Evil/base mark keys render `>` prefixes and keep live source points
-  across clock insertions and agenda refreshes.
+  across clock insertions and agenda refreshes. Evil-Org `x` and base-map `B`
+  dispatch one shared TODO, tag add/remove, schedule, deadline, default archive,
+  or same-file refile action across those marks, falling back to the current row
+  when none are marked. Marks clear only after a successful supported action.
 - streaming OpenRouter LLM client plus native Claude/Codex/Grok JSON event
   backends, with source-position Org conversations, tagged assistant/user spans,
   per-buffer session resume, rendered agent activity, guarded request lifecycle,

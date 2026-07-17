@@ -92,6 +92,7 @@
                              (:file "agenda-refile")
                              (:file "agenda-clock")
                              (:file "agenda-mutations")
+                             (:file "agenda-bulk")
                              (:file "citar")
                              (:file "devdocs")
                              (:file "elfeed")

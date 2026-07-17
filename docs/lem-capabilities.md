@@ -2700,14 +2700,30 @@ totals, report source links, duplicate marked targets, shared times, cross-file
 close, source-block decoys, persistence, refresh restoration, live-marker
 movement, and stale unmarked rows in ncurses Lem.
 
+`src/apps/agenda-bulk.lisp` adds the effective dispatcher on Evil-Org `x` and
+base-map `B`. It validates every marked live source point before prompting,
+sorts entries by file and source position, and uses the current row when there
+are no explicit marks. One shared choice then applies TODO, one tag addition or
+removal, SCHEDULED, DEADLINE, default archive, or the configured same-file
+level-one refile target to the selected set. Successful actions save through
+the existing mutation backends, refresh once, and clear default marks;
+cancellation, invalid input, unsupported actions, and stale-source refusal keep
+the selection intact. Archive-sibling, scatter, arbitrary Emacs Lisp function
+dispatch, persistent marks, and cross-file refile fail closed rather than
+silently changing semantics. `scripts/agenda-bulk-test.sh` physically drives
+both state maps, marked and current-row dispatch, shared prompts, tag inversion,
+planning-line shape, destructive archive/refile order, unsupported-action mark
+retention, and stale unsaved-source refusal.
+
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
 presentation, exact scheduled-delay and deadline-prewarning reminder rendering,
 configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive
-sibling/tag commands, the arbitrary `x`/`B` bulk-action dispatcher, clock
-recent-task/prefix variants, arbitrary clock-report spans, custom commands,
-and the wider org-super-agenda presentation remain explicit gaps.
+sibling/tag commands, bulk archive-sibling/scatter/arbitrary-function/persistent-
+mark variants, clock recent-task/prefix variants, arbitrary clock-report spans,
+custom commands, and the wider org-super-agenda presentation remain explicit
+gaps.
 
 ---
 

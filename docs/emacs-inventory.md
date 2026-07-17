@@ -606,6 +606,12 @@ the trailing text-ready space. The profile binds no other org-journal command
   clock-report mode. Lem's report uses the displayed today-plus-seven-day span,
   clips closed clocks at both boundaries, and retains source-linked level-one
   and level-two rollups.
+- Evil-Org `x` and base `B` expose the bulk-action dispatcher. Lem prompts once
+  for TODO, tag addition/removal, schedule, deadline, default archive, or the
+  configured same-file refile target, applies it to marked rows (or the current
+  row when unmarked), and clears marks only after success. Archive-sibling,
+  scatter, arbitrary Emacs Lisp functions, persistent marks, and cross-file
+  refile remain explicit divergences.
 
 ### Visuals & babel
 - **org-modern**: `org-modern-mode` on org buffers + `org-modern-agenda` on agenda finalize.
