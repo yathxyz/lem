@@ -58,6 +58,7 @@
                (:file "string-width-utils")
                (:file "syntax-test")
                (:file "syntax-scanner")
+               (:file "long-line-scan")
                (:file "buffer-list-test")
                (:file "keymap")
                (:file "popup-window")

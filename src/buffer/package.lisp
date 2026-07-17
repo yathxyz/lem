@@ -271,6 +271,7 @@
    :after-syntax-scan-hook
    :enable-syntax-highlight
    :enable-syntax-highlight-p
+   :long-line-scan-threshold
    :syntax-scan-region)
   ;; tmlanguage.lisp
   (:export

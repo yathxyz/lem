@@ -298,6 +298,7 @@
                                     start2 nil)
         (setf best (tm-get-best-result best end-result))
         (loop
+          (check-interrupt)
           (cond ((null best)
                  (alexandria:when-let ((rule-name (tm-rule-name rule)))
                    (line:line-add-property (point-line point) start1
@@ -424,22 +425,35 @@
         (tm-best-rule-in-patterns patterns (line-string point) start end)
       (loop
         (unless best (return))
+        (check-interrupt)
         (tm-apply-result point best end)
         (setf best (tm-recompute-results results (line-string point) (point-charpos point) end))))
     (assert (= old-linenumber (line-number-at-point point)))
     (when (and end (< end (point-charpos point)))
       (line-offset point 0 end))))
 
+(defun tm-line-exceeds-scan-threshold-p (point)
+  (let ((threshold (variable-value 'long-line-scan-threshold :default (point-buffer point))))
+    (and threshold
+         (< threshold (line:line-length (point-line point))))))
+
 (defun tm-syntax-scan-line (point)
-  (tm-continue-prev-line point)
-  (tm-scan-line point
-                (tmlanguage-patterns (current-syntax-parser))
-                (point-charpos point)
-                nil)
+  (cond ((tm-line-exceeds-scan-threshold-p point)
+         ;; The line is too long to scan in reasonable time;
+         ;; leave it unhighlighted and reset the context so the
+         ;; following lines are scanned from a fresh state.
+         (set-syntax-context (point-line point) nil))
+        (t
+         (tm-continue-prev-line point)
+         (tm-scan-line point
+                       (tmlanguage-patterns (current-syntax-parser))
+                       (point-charpos point)
+                       nil)))
   (line-offset point 1))
 
 (defun tm-syntax-scan-region (start end)
   (loop
+    (check-interrupt)
     (line:line-clear-property (point-line start) :attribute)
     (unless (tm-syntax-scan-line start)
       (return start))

@@ -1,7 +1,8 @@
 (defpackage :lem/buffer/interrupt
   (:use :cl)
   (:export :without-interrupts
-           :interrupt))
+           :interrupt
+           :check-interrupt))
 (in-package :lem/buffer/interrupt)
 
 (defvar *interrupts-enabled* t)
@@ -22,6 +23,16 @@
            (%without-interrupts
              (setf *interrupted* nil)
              (error 'lem/buffer/errors:editor-interrupt)))))))
+
+(defun check-interrupt ()
+  "Signal `editor-interrupt` if an interrupt request arrived while interrupts
+were deferred by `without-interrupts`.
+Long-running loops inside `without-interrupts` should call this periodically
+so that C-g can abort them promptly."
+  (when *interrupted*
+    (%without-interrupts
+      (setf *interrupted* nil)
+      (error 'lem/buffer/errors:editor-interrupt))))
 
 ;; 別のスレッドから(bt2:interrupt-thread thread #'interrupt)で使う関数
 (defun interrupt (&optional force)

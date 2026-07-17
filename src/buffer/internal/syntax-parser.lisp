@@ -3,6 +3,9 @@
 (define-editor-variable before-syntax-scan-hook nil)
 (define-editor-variable after-syntax-scan-hook nil)
 (define-editor-variable enable-syntax-highlight nil)
+(define-editor-variable long-line-scan-threshold 10000
+  "Lines longer than this many characters are excluded from syntax scanning
+and rendered without highlighting. NIL disables the limit.")
 
 (defparameter *global-syntax-highlight* t)
 
