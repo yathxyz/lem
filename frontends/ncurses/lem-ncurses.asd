@@ -24,5 +24,6 @@
 (defsystem "lem-ncurses/tests"
   :depends-on ("lem-ncurses" "rove")
   :components ((:module "tests"
-                :components ((:file "csi-decode"))))
+                :components ((:file "csi-decode")
+                             (:file "truecolor"))))
   :perform (test-op (op c) (symbol-call :rove '#:run c)))

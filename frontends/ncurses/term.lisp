@@ -55,14 +55,97 @@ so no printf subprocess is forked."
   (write-terminal-string (format nil "~C[?2004l" #\Esc)))
 
 
+;;; direct (24-bit) color support
+;;
+;; When the terminal advertises truecolor, the screen is initialized with a
+;; direct-color terminfo entry (xterm-direct family): there color numbers are
+;; #xRRGGBB values and ncurses itself emits SGR 38;2/48;2, so no palette
+;; register is ever redefined. Colors 0-7 keep their classic ANSI meaning in
+;; direct-color terminfo, hence the nudge in color-to-direct-number.
+;; Direct-color numbers do not fit in init_pair's shorts, so color pairs go
+;; through the ncurses ABI6 extended-pair functions, looked up at runtime
+;; because cl-charms does not wrap them.
+
+(defvar *truecolor-p* nil
+  "True when the curses screen uses a direct-color terminfo entry, so color
+numbers are 24-bit #xRRGGBB values. Set by term-init.")
+
+(defun extended-color-pairs-p ()
+  "True when the linked ncurses exports the ABI6 extended color-pair
+functions (int-sized colors), required for direct-color pairs."
+  (and (cffi:foreign-symbol-pointer "init_extended_pair")
+       (cffi:foreign-symbol-pointer "extended_pair_content")
+       t))
+
+(defun init-extended-pair (pair fg bg)
+  "Call init_extended_pair(3): init_pair with int-sized color values."
+  (cffi:foreign-funcall-pointer
+   (cffi:foreign-symbol-pointer "init_extended_pair") ()
+   :int pair :int fg :int bg :int))
+
+(defun extended-pair-content (pair)
+  "Call extended_pair_content(3): pair_content with int-sized color values."
+  (cffi:with-foreign-objects ((f :int) (b :int))
+    (cffi:foreign-funcall-pointer
+     (cffi:foreign-symbol-pointer "extended_pair_content") ()
+     :int pair :pointer f :pointer b :int)
+    (values (cffi:mem-ref f :int) (cffi:mem-ref b :int))))
+
+(defun colorterm-truecolor-p ()
+  "True when the COLORTERM environment variable advertises 24-bit color."
+  (let ((value (uiop:getenv "COLORTERM")))
+    (and value
+         (member value '("truecolor" "24bit") :test #'string-equal)
+         t)))
+
+(defun truecolor-requested-p ()
+  "True when direct-color output should be attempted at startup: the truecolor
+editor variable is t, or it is :auto and COLORTERM advertises truecolor."
+  (let ((setting (lem:variable-value 'lem-ncurses/config:truecolor :global)))
+    (cond ((eq setting t) t)
+          ((null setting) nil)
+          (t (colorterm-truecolor-p)))))
+
+(defun truecolor-allowed-p ()
+  "True unless the truecolor editor variable forces direct color off."
+  (and (lem:variable-value 'lem-ncurses/config:truecolor :global) t))
+
+(defun direct-terminfo-candidates (term)
+  "Direct-color terminfo entry names to try for TERM, most specific first.
+E.g. \"tmux-256color\" -> (\"tmux-direct\" \"xterm-direct\")."
+  (let ((base (if (uiop:string-suffix-p term "-256color")
+                  (subseq term 0 (- (length term) (length "-256color")))
+                  term)))
+    (remove-duplicates (list (concatenate 'string base "-direct")
+                             "xterm-direct")
+                       :test #'string=
+                       :from-end t)))
+
+(defun color-to-direct-number (color)
+  "Map COLOR to a direct-color number #xRRGGBB. Numbers 0-7 mean the classic
+ANSI colors in direct-color terminfo, so near-black values below 8 are nudged
+to #x000008 (imperceptible) to keep the output palette-independent."
+  (let ((number (+ (* 65536 (lem:color-red color))
+                   (* 256 (lem:color-green color))
+                   (lem:color-blue color))))
+    (if (< number 8)
+        8
+        number)))
+
+(defun direct-number-to-color (number)
+  "Decode a direct-color number #xRRGGBB into a color."
+  (lem:make-color (ldb (byte 8 16) number)
+                  (ldb (byte 8 8) number)
+                  (ldb (byte 8 0) number)))
+
+
 (defvar *colors*)
 
-(defun term-set-color (index r g b &optional (call-init-color t))
-  (when call-init-color
-    (charms/ll:init-color index
-                          (round (* r 1000/255))
-                          (round (* g 1000/255))
-                          (round (* b 1000/255))))
+(defun term-set-color (index r g b)
+  "Record the assumed RGB value of terminal palette register INDEX for the
+256-color quantizer. Never redefines the terminal's palette (no init_color,
+which would leak OSC 4 palette changes into the enclosing session); the table
+simply mirrors the standard xterm-256 palette values."
   (setf (aref *colors* index) (lem:make-color r g b)))
 
 (defun init-colors (n)
@@ -72,7 +155,7 @@ so no printf subprocess is forked."
 
   (let ((counter 0))
     (flet ((add-color (r g b)
-             (term-set-color counter r g b (<= 8 counter))
+             (term-set-color counter r g b)
              (incf counter)))
       (setf *colors* (make-array n))
       (add-color #x00 #x00 #x00)
@@ -343,23 +426,27 @@ so no printf subprocess is forked."
         (+ (* h h) (* s s) (* v v))))))
 
 (defun get-color-rgb (color-1)
+  ;; Registers 0-15 are routinely retuned by user terminal themes, while
+  ;; 16-255 (the 6x6x6 cube and the grayscale ramp) have de-facto standard
+  ;; values. Since the palette is no longer redefined, quantize only into the
+  ;; standard range whenever the full 256-color table is available.
   (let ((min most-positive-fixnum)
-        (best-color)
-        (best-number))
-    (loop :for color-2 :across *colors*
-          :for color-number :from 0
+        (best-number 0)
+        (start (if (<= 256 (length *colors*)) 16 0)))
+    (loop :for color-number :from start :below (length *colors*)
           :do (let ((dist (rgb-to-hsv-distance
                            color-1
-                           color-2)))
+                           (aref *colors* color-number))))
                 (when (< dist min)
                   (setf min dist
-                        best-color color-2
                         best-number color-number))))
     best-number))
 
 (defun get-color-1 (string)
   (alexandria:when-let ((color (lem:parse-color string)))
-    (get-color-rgb color)))
+    (if *truecolor-p*
+        (color-to-direct-number color)
+        (get-color-rgb color))))
 
 (defun get-color (string)
   (let ((color (get-color-1 string)))
@@ -373,7 +460,10 @@ so no printf subprocess is forked."
 
 (defun init-pair (pair-color)
   (incf *pair-counter*)
-  (charms/ll:init-pair *pair-counter* (car pair-color) (cdr pair-color))
+  ;; Direct-color numbers do not fit in init_pair's short arguments.
+  (if *truecolor-p*
+      (init-extended-pair *pair-counter* (car pair-color) (cdr pair-color))
+      (charms/ll:init-pair *pair-counter* (car pair-color) (cdr pair-color)))
   (setf (gethash pair-color *color-pair-table*)
         (charms/ll:color-pair *pair-counter*)))
 
@@ -388,16 +478,20 @@ so no printf subprocess is forked."
                          (get-color bg-color-name)))
            (pair-color (cons fg-color bg-color)))
       (cond ((gethash pair-color *color-pair-table*))
-            ((< *pair-counter* *color-pairs*)
+            ;; attr_t's color-pair field is 8 bits, so COLOR_PAIR(n) can only
+            ;; encode pairs below 256 even when COLOR_PAIRS is larger.
+            ((< *pair-counter* (min *color-pairs* 256))
              (init-pair pair-color))
             (t 0)))))
 
 (defun get-default-colors ()
-  (cffi:with-foreign-pointer (f (cffi:foreign-type-size '(:pointer :short)))
-    (cffi:with-foreign-pointer (b (cffi:foreign-type-size '(:pointer :short)))
-      (charms/ll:pair-content 0 f b)
-      (values (cffi:mem-ref f :short)
-              (cffi:mem-ref b :short)))))
+  (if *truecolor-p*
+      (extended-pair-content 0)
+      (cffi:with-foreign-pointer (f (cffi:foreign-type-size '(:pointer :short)))
+        (cffi:with-foreign-pointer (b (cffi:foreign-type-size '(:pointer :short)))
+          (charms/ll:pair-content 0 f b)
+          (values (cffi:mem-ref f :short)
+                  (cffi:mem-ref b :short))))))
 
 (defun set-default-color (foreground background)
   (let ((fg-color (if foreground (get-color foreground) -1))
@@ -425,9 +519,10 @@ so no printf subprocess is forked."
 
 (defun background-color ()
   (let ((b (nth-value 1 (get-default-colors))))
-    (if (= b -1)
-        (lem:make-color 0 0 0)
-        (aref *colors* b))))
+    (cond ((minusp b) (lem:make-color 0 0 0))
+          ((and *truecolor-p* (<= 8 b)) (direct-number-to-color b))
+          ((< b (length *colors*)) (aref *colors* b))
+          (t (lem:make-color 0 0 0)))))
 
 ;;;
 
@@ -458,11 +553,37 @@ so no printf subprocess is forked."
         (cffi:with-foreign-slots ((ws-row ws-col) ws (:struct winsize))
           (charms/ll:resizeterm ws-row ws-col))))))
 
-(defun term-init-tty (tty-name)
-  (let* ((io (fopen tty-name "r+")))
-    (setf *term-io* io)
-    (cffi:with-foreign-string (term "xterm")
-      (charms/ll:newterm term io io))))
+(defun try-newterm (term-name out-fp in-fp)
+  "Create a curses screen for terminfo entry TERM-NAME. Return true when the
+entry exists and the screen was created; newterm returns NULL otherwise, and
+the caller may retry with another entry."
+  (cffi:with-foreign-string (term term-name)
+    (not (cffi:null-pointer-p (charms/ll:newterm term out-fp in-fp)))))
+
+(defun term-init-screen ()
+  "Create the curses screen. When truecolor output is requested and the linked
+ncurses has extended color pairs, try direct-color terminfo entries first so
+ncurses itself emits SGR 38;2/48;2 (setting *truecolor-p*); otherwise keep the
+default behavior: the terminal's own entry via initscr, or \"xterm\" on an
+explicitly given tty."
+  (let* ((tty-io (when *tty-name*
+                   (setf *term-io* (fopen *tty-name* "r+"))))
+         (out-fp (or tty-io (c-file "stdout")))
+         (in-fp (or tty-io (c-file "stdin")))
+         (term (if *tty-name*
+                   "xterm"
+                   (or (uiop:getenv "TERM") "xterm"))))
+    (cond ((and (truecolor-requested-p)
+                (extended-color-pairs-p)
+                out-fp
+                in-fp
+                (loop :for name :in (direct-terminfo-candidates term)
+                      :thereis (try-newterm name out-fp in-fp)))
+           (setf *truecolor-p* t))
+          (*tty-name*
+           (try-newterm term tty-io tty-io))
+          (t
+           (charms/ll:initscr)))))
 
 (cffi:defcfun "key_defined" :int (definition :string))
 
@@ -500,9 +621,8 @@ global key trie, so it also governs the input pad used for reading."
 
 (defun term-init ()
   (cl-setlocale:set-all-to-native)
-  (if *tty-name*
-      (term-init-tty *tty-name*)
-      (charms/ll:initscr))
+  (setf *truecolor-p* nil)
+  (term-init-screen)
   (when (zerop (charms/ll:has-colors))
     (charms/ll:endwin)
     (write-line "Please execute TERM=xterm-256color and try again.")
@@ -510,6 +630,16 @@ global key trie, so it also governs the input pad used for reading."
   (charms/ll:start-color)
   ;; enable default color code (-1)
   #+win32(charms/ll:use-default-colors)
+  ;; A terminal whose own terminfo already advertises a direct-color palette
+  ;; (e.g. TERM=xterm-direct) is truecolor without switching entries.
+  (when (and (not *truecolor-p*)
+             (truecolor-allowed-p)
+             (extended-color-pairs-p)
+             (<= (ash 1 24) charms/ll:*colors*))
+    (setf *truecolor-p* t))
+  ;; The pair table belongs to the screen (and color mode) just created.
+  (clrhash *color-pair-table*)
+  (setf *pair-counter* 0)
   (init-colors charms/ll:*colors*)
   (set-default-color nil nil)
   (charms/ll:noecho)
@@ -538,13 +668,16 @@ global key trie, so it also governs the input pad used for reading."
   (charms/ll:endwin)
   (charms/ll:delscreen charms/ll:*stdscr*))
 
+(defun c-file (name)
+  "Return the C stdio FILE* global named NAME (e.g. \"stdout\"), or nil."
+  (let ((p (cffi:foreign-symbol-pointer name)))
+    (and p (cffi:mem-ref p :pointer))))
+
 (defun terminal-file-pointer ()
   "Return a C FILE* for the controlling terminal.
-Prefer the tty opened by term-init-tty; otherwise fall back to the C stdout
+Prefer the tty opened by term-init-screen; otherwise fall back to the C stdout
 that ncurses' default screen writes to."
-  (or *term-io*
-      (let ((p (cffi:foreign-symbol-pointer "stdout")))
-        (and p (cffi:mem-ref p :pointer)))))
+  (or *term-io* (c-file "stdout")))
 
 (defun update-cursor-shape (cursor-type)
   "Set the terminal cursor shape via DECSCUSR (ESC[<n> q).
