@@ -44,6 +44,12 @@ Argument VALUE is a boolean, and it will be set to enable/disable the clipboard.
               #+darwin (sbcl-2.0.0-or-later-p)
               #-darwin (not (wsl-p))))))
 
+(define-editor-variable clipboard-osc52 :fallback
+  "How the terminal frontend uses OSC 52 to set the system clipboard.
+`:fallback` (default) emits OSC 52 only when no local clipboard tool
+(wl-copy/xclip/pbcopy/...) is available, which covers a headless ssh box.
+`t` always emits OSC 52 instead of a local tool. `nil` never emits it.")
+
 (defun copy-to-clipboard (string)
   "Save STRING to clipboard, so it lives on top of the stack."
   (lem-if:clipboard-copy (implementation) string))

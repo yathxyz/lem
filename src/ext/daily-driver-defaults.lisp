@@ -32,6 +32,14 @@ cleanly. See SPEC.md, constraint 3.")
 ;;; find-file path. Upstream ships this disabled (threshold NIL).
 (setf (variable-value 'lem-core:large-file-threshold :global) (* 30 1024 1024))
 
+;;; TF-2: OSC 52 clipboard. Always emit OSC 52 from the terminal frontend so a
+;;; kill/copy reaches the local system clipboard over ssh+tmux, where there is no
+;;; local clipboard tool to shell out to. Upstream defaults to :FALLBACK (OSC 52
+;;; only when no local tool works); for the ssh/tmux daily-driver workflow the
+;;; terminal is the clipboard bridge, so make it unconditional. Requires the
+;;; outer terminal's `set-clipboard on` and, inside tmux, `allow-passthrough on`.
+(setf (variable-value 'lem-core:clipboard-osc52 :global) t)
+
 ;;; DS-3: crash-recovery checkpoints. Periodically snapshot modified file-backed
 ;;; buffers to $XDG_DATA_HOME/lem/autosave/ without touching the real file, delete
 ;;; the snapshot on a successful save, and offer recovery on find-file when a

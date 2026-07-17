@@ -55,6 +55,7 @@
                              (:file "var")
                              (:file "socket")
                              (:file "utils")
+                             (:file "osc52")
                              (:module "character"
                               :serial t
                               :components ((:file "icon")

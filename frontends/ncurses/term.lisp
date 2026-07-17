@@ -7,6 +7,7 @@
            :term-init
            :term-finalize
            :term-set-tty
+           :write-terminal-string
            :term-set-color
            ;;win32 patch
            :get-mouse-mode

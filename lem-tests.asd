@@ -69,6 +69,7 @@
                (:file "interp")
                (:file "input")
                (:file "bracketed-paste")
+               (:file "osc52")
                (:file "file")
                (:file "revert-buffer")
                (:file "large-file-guard")

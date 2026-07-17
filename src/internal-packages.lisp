@@ -181,6 +181,7 @@
    :enable-clipboard
    :disable-clipboard
    :enable-clipboard-p
+   :clipboard-osc52
    :copy-to-clipboard
    :get-clipboard-data)
   ;; file.lisp
