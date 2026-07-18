@@ -32,7 +32,7 @@ for arg in "$@"; do
     --rebaseline) REBASELINE=1 ;;
     -h|--help)    usage; exit 0 ;;
     t1|t2|t3)     TIERS+=("$arg") ;;
-    all)          TIERS+=("t1") ;;   # only T1 exists at milestone P0
+    all)          TIERS+=("t1" "t2") ;;   # T1 (P1) + T2 (P2); T3 lands at P3
     *) echo "unknown argument: $arg" >&2; usage; exit 2 ;;
   esac
 done

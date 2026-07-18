@@ -1,0 +1,48 @@
+{
+  "fingerprint": "ex44 | 13th Gen Intel(R) Core(TM) i5-13500 | 20c",
+  "tier": "t2",
+  "commit": "5cd018a9",
+  "timestamp": "20260718193256",
+  "entries":
+  [
+    {
+      "name": "big-file",
+      "unit": "ms/workload",
+      "min": 4686.0,
+      "median": 4744.999,
+      "p90": 4847.999,
+      "consed-per-op": 678769920,
+      "n": 1,
+      "gc-count": 4,
+      "gc-pause-ms": 32.768,
+      "frames": 4976,
+      "band": 0.2
+    },
+    {
+      "name": "long-line",
+      "unit": "ms/workload",
+      "min": 588.001,
+      "median": 610.0,
+      "p90": 667.0,
+      "consed-per-op": 133027360,
+      "n": 1,
+      "gc-count": 1,
+      "gc-pause-ms": 0.0,
+      "frames": 172,
+      "band": 0.2
+    },
+    {
+      "name": "scroll",
+      "unit": "ms/workload",
+      "min": 1233.999,
+      "median": 1272.0,
+      "p90": 1383.999,
+      "consed-per-op": 307392384,
+      "n": 1,
+      "gc-count": 2,
+      "gc-pause-ms": 5.562,
+      "frames": 1652,
+      "band": 0.2
+    }
+  ]
+}

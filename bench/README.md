@@ -82,14 +82,18 @@ bench time — the blobs are **not** committed. Regeneration is byte-identical.
 
 | Corpus | Content |
 |--------|---------|
-| `lisp-500k` | ~500 KB syntactically-valid Common Lisp (deterministic concatenation of whole repo source files) |
+| `lisp-500k` | ~500 KB syntactically-valid Common Lisp — a deterministic concatenation of whole repo source files, **read at the pinned commit `5cd018a9` via `git show` (not the working tree)** so the corpus does not drift when P5 optimizes those files (see Deviations) |
 | `unicode-mixed` | ~100 KB of mixed ASCII / CJK / emoji / combining-mark text |
 | `long-line-200k` | one 200 000-char line (the PI-1 corpus the edit/points benches stress) |
+| `mixed-10m` | ~10 MB realistic multi-line prose+code mix, mixed line lengths, some unicode (the T2 big-file workload corpus, PF-5) |
 
-`lisp-500k` and `unicode-mixed` are the corpora for the width/syntax entries
-that land later; all three are regenerated (and thus validated) on every bench
-run. The bench image loads `:lem/core` only, so `generate.lisp` reproduces
-SplitMix64 locally rather than depending on `tests/pbt/harness.lisp`.
+`lisp-500k` and `unicode-mixed` are the corpora for the width/syntax entries;
+`mixed-10m` (P2) is the big-file workload corpus. All four are regenerated (and
+thus validated) on every bench run. The bench image loads `:lem/core` only, so
+`generate.lisp` reproduces SplitMix64 locally rather than depending on
+`tests/pbt/harness.lisp`. The `lisp-500k` cache filename carries the pin commit
+(`lisp-500k-5cd018a9.lisp`), so bumping the pin invalidates the cache
+automatically.
 
 ## T1 entries
 
@@ -146,6 +150,55 @@ for all (budget-gated for `telemetry`, see Deviations).
 | `redisplay/many-overlay` | 4750.0 | 1736704 | 4 |
 | `telemetry` | 0.00102 | 0 | 50000000 |
 
+## T2 suite structure (PF-5)
+
+`scripts/bench/run-t2.lisp` is the T2 **harness**: the 200×50 recording
+fake-interface, a self-registering workload registry, the median-of-three
+measurement, the JSON schema, and the 20% noise-band gate. It reuses the P1
+harness *patterns* (registry, `sorted-stat`, the PF-3 schema, interleaving, the
+band floor) adapted to whole-session workloads. Workloads live one-per-file
+under `scripts/bench/t2/` (a subdirectory, so the T1 driver's sibling-`*.lisp`
+discovery never loads them) and register via `register-t2-workload`.
+
+Each workload is a scripted editing session driven through **frozen public API**
+(an API-stability canary): commands (`next-page`, `scroll-down`, `find-file-
+buffer`, `move-to-*`, `insert-character`, …) against a genuine current 200×50
+window, forcing a full redisplay per rendered step via `redraw-display :force
+t`. Per workload we report **wall ms** (gated, min/median/p90), **bytes
+consed**, **GC count**, **GC pause total (ms)**, and **frames rendered** (the
+recording interface's `update-display` `:after` frame counter).
+
+| Workload | Session |
+|----------|---------|
+| big-file | open the 10 MB `mixed-10m` corpus via `find-file-buffer`, page through end-to-end (`next-page` until `end-of-buffer`), jump bottom/top |
+| scroll | syntax-scanned `lisp-500k` buffer (real lisp-mode tmlanguage), sustained line-scroll (`scroll-down` ×1500) then page-scroll (`next-page` ×150) over styled text |
+| long-line | 16 KB single line: `character-offset` cursor sweeps, beginning/end-of-line, net-zero edits at 8 positions, wrap-off and wrap-on render passes (×2) |
+
+**Measurement (per the task spec):** median of **three** full executions per
+workload per suite run, `gc :full` before each, **one** warm-up pass discarded,
+timed passes **interleaved** round-robin across workloads (a transient lands on
+≤ 1 rep per workload). Unlike T1, T2 does **not** suppress GC in the timed
+window — GC count and pause total are reported session metrics. The rebaseline
+folds five suite runs; the band is the spread of the five suite medians, floored
+at 20% (as T1 — see Deviations).
+
+### P2 T2 baseline numbers (ex44 / i5-13500 / 20c, commit `5cd018a9`)
+
+Committed baseline medians (`bench/baselines/ex44-…-t2.json`); wall unit is
+ms/workload, band 20% for all. `consed`, `gc`, and `frames` are the per-workload
+medians; `frames` is deterministic (identical every run).
+
+| Workload | median ms | consed B | GC count | GC pause ms | frames |
+|----------|----------:|---------:|---------:|------------:|-------:|
+| `big-file` | 4745 | 678 769 920 | 4 | ~28 | 4976 |
+| `scroll` | 1272 | 307 392 384 | 2 | ~5 | 1652 |
+| `long-line` | 610 | 133 027 360 | 1 | ~0 | 172 |
+
+(Absolute ms track machine load at baseline creation; the gate compares against
+the committed median within the 20% band on a matching fingerprint, so a
+per-machine rebaseline is the honest reset when the platform or its steady-state
+load moves — Constraint 5.)
+
 ## Ledger
 
 Format: one row per baseline creation / rebaseline / OPT-n. Include the
@@ -160,6 +213,8 @@ numbers and the motivating T0/T2 measurement (Constraint 1).
 | 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (P0 review fixes r1) | Rebaseline after widening the telemetry timed window from 1e6 to 5e7 ops (honest ~0.0008 µs/op trend instead of a bimodal 0.001/0.002 quantization artifact) and making the entry budget-gated. No behavior/optimization change to Lem — measurement substrate only. New band is informational for this entry. |
 | 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (PF-4) | Initial baseline for the PF-4 micro suite: `edit` (12 entries) and `points` (3 entries) added to the multi-entry registry, plus the `bench/corpora/` generators. No optimization — new measurement entries only. Gate-stability validated by 11 consecutive PASS runs on a machine under concurrent load (load avg ~4.6). See Deviations for the measurement-hygiene choices (net-zero ops, GC suppression, interleaving, median-of-nine, 20% band floor). |
 | 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (PF-4) | Rebaseline completing Milestone P1: added the `width` (4), `search` (4), `syntax` (1), and `redisplay` (3) entry files to the registry (12 new entries). No optimization — new measurement entries only. Each is deterministic (fixed corpora / fixed-content strings) and sizes its iteration count for a ≥ 10 ms window; validated by 5 consecutive PASS runs. See Deviations for the redisplay long-line size cap (a stack-exhaustion finding), the headless syntax-grammar load, the absent-needle search sweep, and the persistent recording interface. |
+| 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (PF-5, corpus pin) | **No t1 rebaseline needed.** Pinning `lisp-500k` to commit `5cd018a9` via `git show` (was: working-tree `read-file-string`) is byte-for-byte identical at this commit — the six source files are unchanged between the working tree and the pin — verified by regenerating both ways and comparing (`cmp` IDENTICAL). The `syntax/lisp-500k` t1 entry reads the same bytes, so its baseline is untouched; the committed t1 baseline stands. Recorded here per Constraint 6. |
+| 2026-07-18 | ex44 / i5-13500 / 20c | t2 | (PF-5) | **Initial T2 baseline** (Milestone P2): the `run-t2.lisp` macro-session harness + three workloads (`big-file`, `scroll`, `long-line`), the `mixed-10m` corpus generator, and the `lisp-500k` corpus pin. No optimization — new measurement tier only. Validated by 5 consecutive PASS gate runs; all three bands settle at the 20% floor after interleaving. See Deviations for the long-line 16 KB render cap (a tighter restatement of the P1 stack-exhaustion finding), the additive T2 metric fields, the interleaving/long-line sizing hygiene, and the `mixed-10m` corpus. |
 
 ### Optimizations (OPT-n)
 
@@ -315,3 +370,81 @@ the spec.
   harmless: no other T1 entry touches the implementation. `redraw-buffer` is
   called with force=t so every op is a full recompute (not a display-cache hit),
   which is the frame-from-scratch cost the entry means to measure.
+
+### Milestone P2 (T2 macro session replay)
+
+- **`lisp-500k` is pinned to commit `5cd018a9`, read via `git show`** (PF-5, a
+  P1 review-finding fix). The corpus was built from the *working-tree* contents
+  of six repo source files — so it would silently drift under the very P5
+  optimizations that will edit those files, invalidating the syntax/scroll
+  baselines mid-flight. It is now read from the git object store at the fixed
+  pin (`git show 5cd018a9:<path>`), which is independent of the working tree and
+  the index by construction, so two regenerations are always identical *and*
+  unaffected by any working-tree edit (git semantics; verified additionally by
+  wiping the cache and diffing two fresh generations — IDENTICAL). The pin is
+  baked into the cache filename (`lisp-500k-5cd018a9.lisp`), so a pin bump
+  invalidates the cache automatically. At this commit the pinned bytes equal the
+  old working-tree build (the six files are unchanged), so the committed **t1
+  baseline is unaffected** (verified `cmp` IDENTICAL; no t1 rebaseline).
+
+- **`mixed-10m` corpus added** (PF-5). A committed deterministic generator (fixed
+  SplitMix64 seed) produces a ~10 MB document: prose paragraphs, lisp-ish code
+  blocks, blank lines, mixed line lengths, and ~2.5% of words carrying a
+  non-ASCII glyph (accented Latin / Greek / math arrows / CJK), tracked to the
+  byte target as UTF-8. Cached like the others (gitignored), regenerated
+  byte-identically on demand. It is the `big-file` workload's corpus.
+
+- **The `long-line` workload is a 16 KB single line, not 80 KB** (PF-5), and the
+  render cap is **tighter than the P1 redisplay entry's 50 KB** — a sharper
+  restatement of the same stack-exhaustion finding. The task text names an 80 KB
+  line "for any step that renders", but rendering a single text object of that
+  length exhausts the default control stack: the certified clip/wrap layout path
+  (`verified/layout.lisp` `k-obj-width` → `k-sum`) is a **non-tail** fold whose
+  recursion depth equals the line length. Measured on this build driving the
+  **full command path** (`redraw-display` with wrap **on** and the cursor at
+  end-of-line — the deepest case): **23 000 chars render fine, 24 000
+  stack-overflow** (deterministic, since depth = length). That boundary is lower
+  than the P1 `redisplay/long-line` entry's 50 KB because that entry calls
+  `redraw-buffer` directly with the cursor at column 0 and wrap off, a shallower
+  path; the T2 workload exercises the real editing path (redraw-display +
+  wrap-on + cursor-at-end), which recurses deeper. "Workloads must NOT crash" is
+  paramount over the specific 80 KB figure, so **16 KB** is used for a ~30%
+  margin below the 24 000-char cliff. The kernel is **not** fixed here (out of
+  P2 scope); the ≥ ~24 000-char single-object redisplay stays the OPT-candidate
+  the P1 ledger already records.
+
+- **The T2 result schema extends the PF-3 entry with three additive fields**
+  (PF-5). PF-3 defines one entry shape — `{name, unit, min, median, p90,
+  consed-per-op, n}` — for all tiers. T2 keeps it (the gated metric is **wall
+  ms**: `unit` = `"ms/workload"`, `min/median/p90` = wall time, `consed-per-op`
+  = bytes consed per workload, `n` = 1) and adds `gc-count`, `gc-pause-ms`, and
+  `frames` alongside, since PF-5 mandates reporting GC count + pause total and
+  frames rendered. These extra fields are additive metadata (like the baseline
+  `band`); the gate reads only wall-ms. GC count is captured with a transient
+  `*after-gc-hooks*` counter; pause total from the `sb-ext:*gc-run-time*` delta
+  (internal-time-units = microseconds on SBCL, so `/1000` → ms); frames from the
+  recording interface's `update-display` `:after` counter.
+
+- **T2 measurement differs from T1: median-of-three, no GC suppression** (PF-5).
+  Per the P2 task: median of **three** full workload executions per suite run
+  (T1 uses nine), `gc :full` before each, one warm-up pass discarded. Crucially
+  T2 does **not** raise `bytes-consed-between-gcs` to suppress GC (T1 does, to
+  isolate wall time) — GC count and pause total are *reported metrics* of the
+  realistic session, so natural GC behaviour is measured. Two hygiene measures
+  keep the median-of-three gate stable: (1) **interleaving** the three timed
+  passes round-robin across workloads (as T1), so a transient hits ≤ 1 rep per
+  workload rather than clustering on two of a single workload's consecutive
+  reps; (2) **sizing `long-line` to a ~450 ms window** (finer sweep stride, more
+  edit points, the session repeated twice). A single long-line pass runs ~75 ms,
+  small enough that one GC or scheduling hiccup is a > 20% swing that median-of-
+  three cannot reject — an observed intermittent gate failure; the wider window
+  makes noise proportionally small and the entry gates stably at the 20% band.
+
+- **T2 rebaseline folds five suite runs; band floor 20%** (PF-5). Mirroring T1:
+  the band is the spread of the five suite medians as a fraction of the
+  aggregate median, floored at 20% (the same shared-workstation reasoning as the
+  T1 `+bench-band-floor+` deviation above). No budget-gated workloads exist in
+  T2 (the T1 telemetry-budget special case does not apply). Absolute T2 ms track
+  the machine's steady-state load at baseline creation; the gate is median-vs-
+  band on a matching fingerprint, so a per-machine rebaseline is the honest reset
+  when the platform moves (Constraint 5).
