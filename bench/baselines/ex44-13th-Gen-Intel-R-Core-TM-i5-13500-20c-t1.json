@@ -1,19 +1,129 @@
 {
   "fingerprint": "ex44 | 13th Gen Intel(R) Core(TM) i5-13500 | 20c",
   "tier": "t1",
-  "commit": "4e54aa8a",
-  "timestamp": "20260718171037",
+  "commit": "17da381e",
+  "timestamp": "20260718180801",
   "entries":
   [
     {
+      "name": "edit/normal/insert-delete/release",
+      "unit": "us/op",
+      "min": 19.6004,
+      "median": 21.2,
+      "p90": 27.6,
+      "consed-per-op": 2834,
+      "n": 2500,
+      "band": 0.2
+    },
+    {
+      "name": "edit/normal/newline/release",
+      "unit": "us/op",
+      "min": 20.0,
+      "median": 21.6,
+      "p90": 26.8,
+      "consed-per-op": 3131,
+      "n": 2500,
+      "band": 0.2
+    },
+    {
+      "name": "edit/longline/insert-delete/release",
+      "unit": "us/op",
+      "min": 933.3333333333334,
+      "median": 1000.0,
+      "p90": 1300.0,
+      "consed-per-op": 3267732,
+      "n": 30,
+      "band": 0.2
+    },
+    {
+      "name": "edit/longline/newline/release",
+      "unit": "us/op",
+      "min": 1033.3333333333333,
+      "median": 1100.0,
+      "p90": 1500.0333333333333,
+      "consed-per-op": 3702363,
+      "n": 30,
+      "band": 0.2
+    },
+    {
+      "name": "edit/normal/insert-delete/paranoid",
+      "unit": "us/op",
+      "min": 24.0,
+      "median": 24.666666666666668,
+      "p90": 29.333333333333332,
+      "consed-per-op": 5738,
+      "n": 1500,
+      "band": 0.2
+    },
+    {
+      "name": "edit/normal/newline/paranoid",
+      "unit": "us/op",
+      "min": 24.0,
+      "median": 26.0,
+      "p90": 35.5,
+      "consed-per-op": 5980,
+      "n": 2000,
+      "band": 0.2
+    },
+    {
+      "name": "edit/longline/insert-delete/paranoid",
+      "unit": "us/op",
+      "min": 14000.0,
+      "median": 15000.0,
+      "p90": 19500.0,
+      "consed-per-op": 9671824,
+      "n": 2,
+      "band": 0.2
+    },
+    {
+      "name": "edit/longline/newline/paranoid",
+      "unit": "us/op",
+      "min": 12000.0,
+      "median": 13000.0,
+      "p90": 19000.0,
+      "consed-per-op": 10104608,
+      "n": 2,
+      "band": 0.2
+    },
+    {
+      "name": "points/10",
+      "unit": "us/op",
+      "min": 21.2,
+      "median": 22.4,
+      "p90": 29.2,
+      "consed-per-op": 5033,
+      "n": 2500,
+      "band": 0.2
+    },
+    {
+      "name": "points/100",
+      "unit": "us/op",
+      "min": 31.666666666666668,
+      "median": 33.333333333333336,
+      "p90": 36.666666666666664,
+      "consed-per-op": 30228,
+      "n": 1200,
+      "band": 0.2
+    },
+    {
+      "name": "points/1000",
+      "unit": "us/op",
+      "min": 164.0,
+      "median": 176.0,
+      "p90": 292.0,
+      "consed-per-op": 289538,
+      "n": 250,
+      "band": 0.2
+    },
+    {
       "name": "telemetry",
       "unit": "us/op",
-      "min": 0.00077998,
-      "median": 0.00086,
-      "p90": 0.00184,
+      "min": 0.0009,
+      "median": 0.00098,
+      "p90": 0.00112,
       "consed-per-op": 0,
       "n": 50000000,
-      "band": 0.09302325581395349
+      "band": 0.2
     }
   ]
 }

@@ -13,6 +13,10 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/lem-bench-selftest.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 export BENCH_BASELINES_DIR="$TMP/baselines"
 export BENCH_RESULTS_DIR="$TMP/results"
+# The gate mechanism this self-test exercises is the budget gate, whose canary
+# is the telemetry entry; scope to it so the self-test stays fast and does not
+# depend on the (slower, machine-sensitive) us-scale entries.
+export LEM_BENCH_ONLY="telemetry"
 
 echo "[self-test] 1/3 establishing clean baseline in $TMP ..."
 if ! scripts/run-bench.sh --rebaseline t1; then

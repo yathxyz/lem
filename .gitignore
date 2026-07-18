@@ -63,7 +63,9 @@ verified/**/*.port
 verified/**/*@expansion.lsp
 verified/.sys/
 
-# SPEC-PERF bench outputs: baselines/ and corpora/ are committed; per-run
-# results and profiler dumps are not. See bench/README.md and scripts/run-bench.sh.
+# SPEC-PERF bench outputs: baselines/ and the corpus generators are committed;
+# per-run results, profiler dumps, and the generated corpus blobs are not.
+# See bench/README.md and scripts/run-bench.sh.
 bench/results/
 bench/profiles/
+bench/corpora/cache/
