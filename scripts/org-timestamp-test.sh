@@ -15,6 +15,8 @@ mkdir -p "$HOME" "$WORKDIR" "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS"
 
 fixture="$root/timestamps.org"
 cat >"$fixture" <<'EOF'
+#+PROPERTY: COLOR_ALL red "deep blue"
+#+PROPERTY: COLOR_ALL+ green
 * TODO Timestamp task
 Insert active:
 Insert inactive:
@@ -63,6 +65,24 @@ Vertical bracket: <2026-07-18 Sat>
 Vertical readonly: <2026-07-18 Sat>
 * TODO Priority new
 * TODO [#A] Priority high
+* Property parent
+:PROPERTIES:
+:STAGE_ALL: Backlog "In progress" Done :ETC
+:END:
+** Property child
+:PROPERTIES:
+:STAGE: Backlog
+:COLOR: red
+:LOCAL_ALL: red blue
+:LOCAL: green
+:FLAG: [-]
+:FLAG_REVERSE: [-]
+:SOLE_ALL: only
+:SOLE: only
+:MISSING: value
+:READONLY_ALL: one two
+:READONLY: one
+:END:
 EOF
 cp "$fixture" "$root/original.org"
 
@@ -781,6 +801,140 @@ if lem_wait_for "$session" 'Cannot move table cell further' 10 >/dev/null &&
 else
   fail vertical-table-edge 'bottom-edge refusal mutated or aligned the table'
 fi
+
+goto_marker property-stage
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.3
+if snapshot 44 &&
+   grep -q '^:STAGE: In progress$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-44" &&
+   grep -q '^:STAGE: Backlog$' "$fixture"; then
+  pass property-inherit 'inherited _ALL values decode quoted text without saving'
+else
+  fail property-inherit 'inherited or quoted property cycling differed'
+fi
+
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.2
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.3
+if snapshot 45 &&
+   grep -q '^:STAGE: Backlog$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-45"; then
+  pass property-wrap 'forward property cycling wraps and ignores :ETC'
+else
+  fail property-wrap 'forward property cycling did not wrap at the final value'
+fi
+
+tmux_cmd send-keys -t "$session" C-c Left
+sleep 0.3
+if snapshot 46 &&
+   grep -q '^:STAGE: Done$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-46"; then
+  pass property-reverse 'Shift-Left cycles inherited values in reverse'
+else
+  fail property-reverse 'reverse property cycling selected the wrong value'
+fi
+
+tmux_cmd send-keys -t "$session" C-x u
+sleep 0.3
+if snapshot 47 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-47" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-45"; then
+  pass property-undo 'one Emacs undo restores one complete property cycle'
+else
+  fail property-undo 'property cycling was not one undoable editor command'
+fi
+
+goto_marker property-color
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.3
+if snapshot 48 &&
+   grep -q '^:COLOR: deep blue$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-48"; then
+  pass property-file 'file-wide _ALL keywords provide quoted allowed values'
+else
+  fail property-file 'file-wide property allowed values were not inherited'
+fi
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.3
+if snapshot 49 &&
+   grep -q '^:COLOR: green$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-49"; then
+  pass property-append 'file-wide KEY+ values extend the property cycle'
+else
+  fail property-append 'appended file-wide property values were omitted'
+fi
+
+goto_marker property-local
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.3
+if snapshot 50 &&
+   grep -q '^:LOCAL: red$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-50"; then
+  pass property-unlisted 'an unlisted current value enters at the first value'
+else
+  fail property-unlisted 'unlisted property fallback selected the wrong value'
+fi
+
+goto_marker property-flag
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.3
+if snapshot 51 &&
+   grep -q '^:FLAG: \[ \]$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-51"; then
+  pass property-checkbox 'checkbox properties use the GNU unchecked/checked cycle'
+else
+  fail property-checkbox 'checkbox property fallback selected the wrong value'
+fi
+goto_marker property-flag-reverse
+tmux_cmd send-keys -t "$session" C-c Left
+sleep 0.3
+if snapshot 52 &&
+   grep -q '^:FLAG_REVERSE: \[X\]$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-52"; then
+  pass property-checkbox-reverse 'reverse checkbox cycling chooses checked'
+else
+  fail property-checkbox-reverse 'reverse checkbox property fallback differed'
+fi
+
+goto_marker property-missing
+tmux_cmd send-keys -t "$session" C-c Right
+if lem_wait_for "$session" \
+     'Allowed values for this property have not been defined' 10 >/dev/null &&
+   snapshot 53 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-53" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-52"; then
+  pass property-missing 'missing _ALL declarations refuse byte-identically'
+else
+  fail property-missing 'missing allowed values mutated or failed ambiguously'
+fi
+
+goto_marker property-sole
+tmux_cmd send-keys -t "$session" C-c Right
+if lem_wait_for "$session" 'Only one allowed value for this property' \
+     10 >/dev/null &&
+   snapshot 54 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-54" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-53"; then
+  pass property-single 'a sole unchanged value refuses byte-identically'
+else
+  fail property-single 'single-value property handling mutated or differed'
+fi
+
+goto_marker property-read-only
+mx lem-yath-test-org-timestamp-read-only
+lem_wait_for "$session" 'Timestamp buffer read-only' 10 >/dev/null
+tmux_cmd send-keys -t "$session" C-c Right
+if lem_wait_for "$session" 'Org buffer is read-only' 10 >/dev/null &&
+   snapshot 55 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-55" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-54"; then
+  pass property-read-only 'read-only property cycling refuses before mutation'
+else
+  fail property-read-only 'read-only property cycling changed the buffer'
+fi
+mx lem-yath-test-org-timestamp-writable
 
 if [ "$failed" -ne 0 ]; then
   exit 1

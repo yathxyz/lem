@@ -120,6 +120,22 @@
   lem-yath-test-timestamp-goto-list-second "+ second")
 (define-org-timestamp-test-goto
   lem-yath-test-timestamp-goto-table-bottom "| low")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-property-stage ":STAGE: Backlog")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-property-color ":COLOR: red")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-property-local ":LOCAL: green")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-property-flag ":FLAG: [-]")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-property-flag-reverse ":FLAG_REVERSE: [-]")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-property-sole ":SOLE: only")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-property-missing ":MISSING: value")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-property-read-only ":READONLY: one")
 
 (define-command lem-yath-test-org-timestamp-bindings () ()
   (with-open-file (stream (merge-pathnames "bindings"

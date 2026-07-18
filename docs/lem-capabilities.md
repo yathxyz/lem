@@ -2712,7 +2712,14 @@ suffix. At a heading the same keys cycle the configured TODO sequence in the
 corresponding direction and retain the profile's immediate-save behavior. In
 a list they cycle the complete sibling level through GNU Org's configured
 bullet order, including top-level star exclusion, ordered renumbering, and
-the indentation change required by wider bullets. In a table data field they
+the indentation change required by wider bullets. On a property line they
+cycle through the nearest inherited `NAME_ALL` declaration, falling back to
+buffer-wide `#+PROPERTY` values and GNU Org's unchecked/checked cycle for
+checkbox-shaped values. Quoted multiword values, `NAME_ALL+` appends, reverse
+cycling, wraparound, unlisted current values, and the unrestricted `:ETC`
+marker follow GNU Org; edits remain unsaved and undo as one command. Missing
+or malformed declarations, an unchanged single value, and read-only buffers
+refuse before mutation. In a table data field the same horizontal keys
 swap the current cell with its horizontal neighbor, leave formulas attached
 to their table coordinates, and move point with the cell; table edges refuse
 before alignment or mutation. Tab-structured and counter-cookie list levels
@@ -2749,7 +2756,8 @@ replacement, conversion, shifting, CLOCK synchronization, prefix behavior,
 duration repair, open clocks, Normal-state `M-K` endpoint editing, list-level
 bullet conversion, horizontal and vertical table-cell swapping, ordinary
 timestamp field adjustment, priority cycling, direct list-sibling navigation,
-cancellation, read-only and non-CLOCK refusal, undo, persistence boundaries,
+inherited/file-wide property cycling, checkbox fallback, cancellation,
+read-only and non-CLOCK refusal, undo, persistence boundaries,
 successive active/mixed ranges, existing-timestamp ranges, interruption, and
 TODO dispatch through packaged ncurses Lem.
 
@@ -2872,7 +2880,7 @@ consumers would still require a different backend.
 This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
 footnote, nested-special, and malformed text-object contexts; structural
 repairs beyond the bounded `d/x/X/< />` and Visual Meta behavior; generic
-Org-element movement, property/clocktable horizontal Shift-arrow contexts,
+Org-element movement, clocktable horizontal Shift-arrow context,
 and richer list/table semantics; mouse
 calendar selection, Org's exact live echo overlay, and wider timestamp
 variants; prefixed live Babel-session

@@ -740,6 +740,218 @@ still use TARGET as their cursor destination."
              (nth (1- position) *org-todo-keywords*)))
       (car (last *org-todo-keywords*))))
 
+(defun org-property-horizontal-whitespace-p (character)
+  (member character '(#\Space #\Tab)))
+
+(defun org-property-line-fields (point)
+  "Return the name, value, and value bounds of a real property at POINT."
+  (unless (org-inside-block-p point)
+    (let* ((line (line-string point))
+           (length (length line))
+           (first
+             (position-if-not #'org-property-horizontal-whitespace-p line)))
+      (when (and first (char= (char line first) #\:))
+        (let ((second (position #\: line :start (1+ first))))
+          (when (and second (> second (1+ first))
+                     (every
+                      (lambda (character)
+                        (not (org-property-horizontal-whitespace-p character)))
+                      (subseq line (1+ first) second)))
+            (let* ((name (string-upcase (subseq line (1+ first) second)))
+                   (value-start
+                     (loop :for index :from (1+ second) :below length
+                           :unless (org-property-horizontal-whitespace-p
+                                    (char line index))
+                             :return index
+                           :finally (return length)))
+                   (value-end
+                     (loop :for index :downfrom length :above value-start
+                           :unless (org-property-horizontal-whitespace-p
+                                    (char line (1- index)))
+                             :return index
+                           :finally (return value-start))))
+              (unless (member name '("PROPERTIES" "END") :test #'string=)
+                (values name (subseq line value-start value-end)
+                        value-start value-end)))))))))
+
+(defun org-property-planning-line-p (line)
+  (not (null
+        (cl-ppcre:scan
+         "(?i)^\\s*(?:CLOSED|SCHEDULED|DEADLINE):" line))))
+
+(defun org-property-drawer-value (heading name)
+  "Return NAME from HEADING's immediate property drawer."
+  (with-point ((point heading))
+    (unless (line-offset point 1)
+      (return-from org-property-drawer-value nil))
+    (loop :while (org-property-planning-line-p (line-string point))
+          :unless (line-offset point 1)
+            :do (return-from org-property-drawer-value nil))
+    (unless (string-equal
+             ":PROPERTIES:"
+             (string-trim '(#\Space #\Tab) (line-string point)))
+      (return-from org-property-drawer-value nil))
+    (loop :while (line-offset point 1)
+          :for line := (line-string point)
+          :for trimmed := (string-trim '(#\Space #\Tab) line)
+          :do (when (string-equal ":END:" trimmed) (return nil))
+              (multiple-value-bind (property value)
+                  (org-property-line-fields point)
+                (when (and property (string-equal property name))
+                  (return value))))))
+
+(defun org-property-keyword-fields (point)
+  "Return a #+PROPERTY name and value at POINT."
+  (let* ((line (string-left-trim '(#\Space #\Tab) (line-string point)))
+         (prefix "#+PROPERTY:")
+         (prefix-length (length prefix)))
+    (when (and (> (length line) prefix-length)
+               (string-equal prefix (subseq line 0 prefix-length))
+               (org-property-horizontal-whitespace-p
+                (char line prefix-length)))
+      (let* ((name-start
+               (loop :for index :from prefix-length :below (length line)
+                     :unless (org-property-horizontal-whitespace-p
+                              (char line index))
+                       :return index))
+             (name-end
+               (and name-start
+                    (or (position-if #'org-property-horizontal-whitespace-p
+                                     line :start name-start)
+                        (length line)))))
+        (when name-start
+          (values
+           (string-upcase (subseq line name-start name-end))
+           (string-trim '(#\Space #\Tab) (subseq line name-end))))))))
+
+(defun org-property-file-value (name)
+  "Return the effective buffer-wide #+PROPERTY value for NAME."
+  (let ((parts '())
+        (found-p nil)
+        (append-name (concatenate 'string name "+"))
+        (open-block nil))
+    (with-point ((point (buffer-start-point (current-buffer))))
+      (loop
+        (let ((marker (org-block-marker (line-string point))))
+          (cond
+            (open-block
+             (when (and marker (eq (car marker) :end)
+                        (string= (cdr marker) open-block))
+               (setf open-block nil)))
+            ((and marker (eq (car marker) :begin))
+             (setf open-block (cdr marker)))
+            (t
+             (multiple-value-bind (property value)
+                 (org-property-keyword-fields point)
+               (cond
+                 ((and property (string= property name))
+                  (setf parts (list value)
+                        found-p t))
+                 ((and property (string= property append-name))
+                  (setf parts (append parts (list value))
+                        found-p t)))))))
+        (unless (line-offset point 1) (return))))
+    (when found-p
+      (format nil "~{~a~^ ~}" parts))))
+
+(defun org-property-inherited-allowed-value (property)
+  "Return PROPERTY's nearest inherited _ALL declaration."
+  (let ((name (concatenate 'string property "_ALL")))
+    (or (loop :for heading := (org-current-heading-point)
+                :then (org-parent-heading-point heading)
+              :while heading
+              :for value := (org-property-drawer-value heading name)
+              :when value :return value)
+        (org-property-file-value name))))
+
+(defun org-property-read-quoted-value (text start)
+  "Read one safe double-quoted value from TEXT after quote at START."
+  (let ((characters '())
+        (escaped-p nil))
+    (loop :for index :from start :below (length text)
+          :for character := (char text index)
+          :do (cond
+                (escaped-p
+                 (push character characters)
+                 (setf escaped-p nil))
+                ((char= character #\\)
+                 (setf escaped-p t))
+                ((char= character #\")
+                 (return (values (coerce (nreverse characters) 'string)
+                                 (1+ index))))
+                (t
+                 (push character characters)))
+          :finally
+             (editor-error "Malformed quoted Org property allowed value"))))
+
+(defun org-property-allowed-values (text)
+  "Parse TEXT's safe Org _ALL value list without invoking a Lisp reader."
+  (labels ((whitespace-p (character)
+             (member character '(#\Space #\Tab #\Newline #\Return)))
+           (skip-whitespace (index)
+             (loop :while (and (< index (length text))
+                               (whitespace-p (char text index)))
+                   :do (incf index)
+                   :finally (return index))))
+    (loop :with index := 0
+          :with values := '()
+          :do (setf index (skip-whitespace index))
+          :when (>= index (length text))
+            :return (remove ":ETC" (nreverse values) :test #'string=)
+          :do
+             (if (char= (char text index) #\")
+                 (multiple-value-bind (value next)
+                     (org-property-read-quoted-value text (1+ index))
+                   (when (and (< next (length text))
+                              (not (whitespace-p (char text next))))
+                     (editor-error
+                      "Malformed quoted Org property allowed value"))
+                   (push value values)
+                   (setf index next))
+                 (let ((end
+                         (or (position-if #'whitespace-p text :start index)
+                             (length text))))
+                   (when (position #\" text :start index :end end)
+                     (editor-error
+                      "Malformed quoted Org property allowed value"))
+                   (push (subseq text index end) values)
+                   (setf index end))))))
+
+(defun org-cycle-property-allowed-value (forward-p)
+  "Cycle the property at point through its inherited allowed values."
+  (multiple-value-bind (property current value-start value-end)
+      (org-property-line-fields (current-point))
+    (unless property
+      (return-from org-cycle-property-allowed-value nil))
+    (when (buffer-read-only-p (current-buffer))
+      (editor-error "Org buffer is read-only"))
+    (let* ((declaration (org-property-inherited-allowed-value property))
+           (checkbox-p (member current '("[ ]" "[-]" "[X]")
+                               :test #'string=))
+           (values
+             (cond
+               (declaration (org-property-allowed-values declaration))
+               (checkbox-p '("[ ]" "[X]"))
+               (t
+                (editor-error
+                 "Allowed values for this property have not been defined"))))
+           (cycle (if forward-p values (reverse values)))
+           (tail (member current cycle :test #'string=))
+           (next (or (second tail) (first cycle))))
+      (unless next
+        (editor-error
+         "Allowed values for this property have not been defined"))
+      (when (string= next current)
+        (editor-error "Only one allowed value for this property"))
+      (with-point ((point (current-point)))
+        (line-start point)
+        (character-offset point value-start)
+        (delete-character point (- value-end value-start))
+        (insert-string point next)
+        (move-point (current-point) point))
+      (message "Property ~a: ~a" property next)
+      t)))
+
 (defun org-shift-horizontal (forward-p)
   "Apply GNU Org's useful horizontal Shift contexts."
   (cond
@@ -759,6 +971,8 @@ still use TARGET as their cursor destination."
        (message "TODO state: ~a" (or state "none"))))
     ((org-navigation-list-anchor (current-point))
      (org-cycle-list-bullet-at-point forward-p))
+    ((org-property-line-fields (current-point))
+     (org-cycle-property-allowed-value forward-p))
     ((org-table-line-p (current-point))
      (org-table-move-cell-horizontal (if forward-p 1 -1)))
     (t
