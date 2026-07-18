@@ -617,7 +617,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   session at the nearest preceding Assistant boundary and `C-c C-b` selects a
   registered project session. Forks truncate a private Claude JSONL history,
   append its new continuation marker, and update `sessions-index.json`
-  transactionally without touching the source session. Private named presets and
+  transactionally without touching the source session. Native Claude requests
+  run from the originating buffer's canonical Git root, pre-approve the
+  configured Bash/Read/Edit/Write/Glob/Grep/WebFetch/WebSearch/Agent tool set,
+  and pass the first safe owned regular MCP config from project `.mcp.json` or
+  `~/.claude/.mcp.json`. Git roots resolving to `/` or the home directory and
+  symlinked or group/world-writable MCP files fail closed. Private named presets and
   region-or-buffer handoff to Claude or ChatGPT remain in the compact menu; the built-in `quick-lookup`
   preset matches the Emacs startup model, system prompt, temperature, and
   token cap, `project-readonly` opts OpenRouter into the configured five-tool

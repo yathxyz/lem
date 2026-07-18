@@ -3423,6 +3423,17 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   behavior, a real loopback PKCE callback, exact payload/tool histories,
   private persistence, reload, and secret-free argv in a Nix sandbox.
 
+  Native Claude conversation requests resolve the originating source buffer's
+  canonical Git root and launch there, rather than inheriting the shared output
+  buffer or editor process directory. `/` and the home directory are rejected
+  as unsafe roots. Every fresh, resumed, and abortable request receives the
+  configured `Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, `WebFetch`,
+  `WebSearch`, and `Agent` allowlist. A safe owned regular project `.mcp.json`
+  takes precedence over `~/.claude/.mcp.json`; symlinks and group/world-writable
+  files are ignored. The real ncurses backend gate proves all four launched
+  requests use the source Git root and exact argv, plus project precedence,
+  home fallback, and symlink refusal inside a private test home.
+
   Claude Code's result session ID and message UUID are attached to the exact
   completed Assistant span. In an Org LLM conversation, `C-c C-f` uses the
   nearest preceding captured boundary to create the configured Claude Code

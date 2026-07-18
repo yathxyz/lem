@@ -35,8 +35,15 @@ trap 'exit 130' INT TERM
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$LEM_YATH_LLM_FAKE_LOG" \
   "$LEM_YATH_LLM_FAKE_BIN" "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT" \
-  "$LEM_YATH_CLAUDE_PROJECTS_DIR"
+  "$LEM_YATH_CLAUDE_PROJECTS_DIR" "$HOME/.claude"
 git -C "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT" init -q
+git -C "$HOME" init -q
+printf '%s\n' '{"mcpServers":{}}' \
+  >"$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT/.mcp.json"
+chmod 600 "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT/.mcp.json"
+printf '%s\n' '{"mcpServers":{"home":{}}}' >"$HOME/.claude/.mcp.json"
+chmod 600 "$HOME/.claude/.mcp.json"
+ln -s .mcp.json "$HOME/.claude/symlink-mcp.json"
 encoded_project=$(printf '%s' "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT" | tr '/.' '--')
 claude_project_dir="$LEM_YATH_CLAUDE_PROJECTS_DIR/$encoded_project"
 mkdir -p "$claude_project_dir"
@@ -285,16 +292,34 @@ pass claude-fork-rollback 'index failure removed its fork file and retained sess
 
 system='Short, direct answers. Skip extra context unless it changes correctness.'
 composed_prefix=$'System instructions:\nShort, direct answers. Skip extra context unless it changes correctness.\n\nUser message:\n'
+claude_tools=(
+  --allowedTools Bash --allowedTools Read --allowedTools Edit
+  --allowedTools Write --allowedTools Glob --allowedTools Grep
+  --allowedTools WebFetch --allowedTools WebSearch --allowedTools Agent
+)
+claude_mcp=(--mcp-config "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT/.mcp.json")
 
 assert_argv claude-first-argv "$LEM_YATH_LLM_FAKE_LOG/claude.1.argv" \
   -p 'claude prompt' --output-format stream-json --verbose \
-  --append-system-prompt "$system"
+  "${claude_tools[@]}" --append-system-prompt "$system" "${claude_mcp[@]}"
 assert_argv claude-resume-argv "$LEM_YATH_LLM_FAKE_LOG/claude.2.argv" \
   -p 'claude prompt' --output-format stream-json --verbose \
-  --resume claude-session-1 --append-system-prompt "$system"
+  --resume claude-session-1 "${claude_tools[@]}" \
+  --append-system-prompt "$system" "${claude_mcp[@]}"
 assert_argv claude-fresh-argv "$LEM_YATH_LLM_FAKE_LOG/claude.3.argv" \
   -p 'claude prompt' --output-format stream-json --verbose \
-  --append-system-prompt "$system"
+  "${claude_tools[@]}" --append-system-prompt "$system" "${claude_mcp[@]}"
+assert_argv claude-aborted-argv "$LEM_YATH_LLM_FAKE_LOG/claude.4.argv" \
+  -p 'abort prompt' --output-format stream-json --verbose \
+  --resume claude-session-1 "${claude_tools[@]}" \
+  --append-system-prompt "$system" "${claude_mcp[@]}"
+
+for cwd_file in "$LEM_YATH_LLM_FAKE_LOG"/claude.{1,2,3,4}.cwd; do
+  if [ "$(<"$cwd_file")" != "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT" ]; then
+    die claude-project-cwd 'Claude did not inherit the originating Git root'
+  fi
+done
+pass claude-project-cwd 'all Claude requests ran at the originating Git root'
 
 assert_argv codex-first-argv "$LEM_YATH_LLM_FAKE_LOG/codex.1.argv" \
   exec --json -s read-only "${composed_prefix}codex prompt"

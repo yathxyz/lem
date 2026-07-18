@@ -13,6 +13,7 @@ fi
 count=$((count + 1))
 printf '%s\n' "$count" >"$count_file"
 printf '%s\0' "$@" >"$LEM_YATH_LLM_FAKE_LOG/$backend.$count.argv"
+pwd >"$LEM_YATH_LLM_FAKE_LOG/$backend.$count.cwd"
 
 case "$backend" in
   curl)

@@ -34,14 +34,45 @@
   #-sbcl
   nil)
 
+(defun llm-claude-safe-owned-file-p (pathname)
+  #+sbcl
+  (handler-case
+      (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
+        (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
+                sb-posix:s-ifreg)
+             (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+             (zerop (logand (sb-posix:stat-mode stat) #o022))))
+    (error () nil))
+  #-sbcl
+  nil)
+
+(defun llm-claude-unsafe-working-directory-p (pathname)
+  (let ((root (ignore-errors (truename #P"/")))
+        (home (ignore-errors (truename (user-homedir-pathname)))))
+    (or (and root (uiop:pathname-equal pathname root))
+        (and home (uiop:pathname-equal pathname home)))))
+
 (defun llm-claude-project-root (&optional (buffer (current-buffer)))
   (let* ((directory (or (buffer-directory buffer) (uiop:getcwd)))
          (root (and directory
                     (lem-yath-project-root-for-directory directory))))
     (unless root
       (editor-error "Claude session history requires a local Git project"))
-    (or (ignore-errors (truename root))
-        (editor-error "Claude project root is unavailable: ~a" root))))
+    (let ((root
+            (or (ignore-errors (truename root))
+                (editor-error "Claude project root is unavailable: ~a" root))))
+      (when (llm-claude-unsafe-working-directory-p root)
+        (editor-error "Refusing unsafe Claude working directory: ~a" root))
+      root)))
+
+(defun llm-claude-mcp-config-pathname (project-root)
+  "Return the first safe configured Claude MCP file for PROJECT-ROOT."
+  (find-if
+   #'llm-claude-safe-owned-file-p
+   (list (merge-pathnames ".mcp.json"
+                          (uiop:ensure-directory-pathname project-root))
+         (merge-pathnames ".claude/.mcp.json"
+                          (user-homedir-pathname)))))
 
 (defun llm-claude-encoded-project-path (root)
   "Encode ROOT like Claude Code's ~/.claude/projects directory names."

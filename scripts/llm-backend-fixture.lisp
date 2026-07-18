@@ -48,11 +48,23 @@
                (unless condition (incf failures))))
       (check
        (equal
-        (llm-cli-command :claude-code "hello" "claude-session-1")
+        (llm-cli-command
+         :claude-code "hello" "claude-session-1"
+         #P"/safe/project/.mcp.json")
         (list (llm-cli-spec :claude-code) "-p" "hello"
               "--output-format" "stream-json"
               "--verbose" "--resume" "claude-session-1"
-              "--append-system-prompt" *llm-system-message*))
+              "--allowedTools" "Bash"
+              "--allowedTools" "Read"
+              "--allowedTools" "Edit"
+              "--allowedTools" "Write"
+              "--allowedTools" "Glob"
+              "--allowedTools" "Grep"
+              "--allowedTools" "WebFetch"
+              "--allowedTools" "WebSearch"
+              "--allowedTools" "Agent"
+              "--append-system-prompt" *llm-system-message*
+              "--mcp-config" "/safe/project/.mcp.json"))
        "claude-native-resume-argv")
       (check
        (equal
@@ -73,6 +85,43 @@
              "reject-option-shaped-session")
       (check (not (llm-cli-session-id-valid-p (format nil "line~%break")))
              "reject-control-session")
+      (let ((buffer (make-buffer " *Claude Unsafe Root Static*")))
+        (unwind-protect
+             (progn
+               (setf (buffer-directory buffer) (user-homedir-pathname))
+               (check
+                (handler-case
+                    (progn (llm-claude-project-root buffer) nil)
+                  (editor-error () t))
+                "reject-home-as-claude-root"))
+          (delete-buffer buffer)))
+      (let* ((project-root
+               (uiop:ensure-directory-pathname
+                (uiop:getenv "LEM_YATH_LLM_CLAUDE_PROJECT_ROOT")))
+             (project-config (merge-pathnames ".mcp.json" project-root))
+             (home-config
+               (merge-pathnames ".claude/.mcp.json"
+                                (user-homedir-pathname)))
+             (symlink-config
+               (merge-pathnames ".claude/symlink-mcp.json"
+                                (user-homedir-pathname))))
+        (check
+         (uiop:pathname-equal
+          (llm-claude-mcp-config-pathname project-root)
+          project-config)
+         "prefer-project-mcp-config")
+        (check (not (llm-claude-safe-owned-file-p symlink-config))
+               "reject-symlink-mcp-config")
+        #+sbcl
+        (unwind-protect
+             (progn
+               (sb-posix:chmod (uiop:native-namestring project-config) #o666)
+               (check
+                (uiop:pathname-equal
+                 (llm-claude-mcp-config-pathname project-root)
+                 home-config)
+                "fallback-to-home-mcp-config"))
+          (sb-posix:chmod (uiop:native-namestring project-config) #o600)))
       (check (null (llm-cli-parse-event
                     :codex (make-string (1+ *llm-cli-line-limit*)
                                         :initial-element #\x)))
@@ -239,6 +288,11 @@
   (define-key keymap "F9" 'lem-yath-test-llm-new-session)
   (define-key keymap "F10" 'lem-yath-test-llm-claude-session-setup)
   (define-key keymap "F12" 'lem-yath-test-llm-backend-record))
+
+(setf (buffer-directory (current-buffer))
+      (uiop:ensure-directory-pathname
+       (uiop:getenv "LEM_YATH_LLM_CLAUDE_PROJECT_ROOT")))
+(setf (buffer-directory (llm-output-buffer)) (user-homedir-pathname))
 
 (setf *llm-request-finish-functions*
       (remove 'llm-backend-test-finish-metadata

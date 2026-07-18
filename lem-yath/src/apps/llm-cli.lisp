@@ -14,6 +14,11 @@
 (defparameter *llm-cli-command-output-limit* 4000
   "Maximum Codex command output rendered for one activity event.")
 
+(defparameter *llm-claude-allowed-tools*
+  '("Bash" "Read" "Edit" "Write" "Glob" "Grep"
+    "WebFetch" "WebSearch" "Agent")
+  "Tools pre-approved by the active Emacs Claude Code registration.")
+
 (defparameter *llm-cli-session-keys*
   '((:claude-code . lem-yath-llm-claude-code-session-id)
     (:codex . lem-yath-llm-codex-session-id)
@@ -118,7 +123,7 @@
               *llm-system-message* prompt)
       prompt))
 
-(defun llm-cli-command (backend prompt &optional session-id)
+(defun llm-cli-command (backend prompt &optional session-id mcp-config)
   "Build native argv for BACKEND and PROMPT, resuming SESSION-ID when given."
   (when (and session-id (not (llm-cli-session-id-valid-p session-id)))
     (error "Invalid ~a session id" backend))
@@ -129,8 +134,13 @@
        (append (list executable "-p" prompt
                      "--output-format" "stream-json" "--verbose")
                (when session-id (list "--resume" session-id))
+               (loop :for tool :in *llm-claude-allowed-tools*
+                     :append (list "--allowedTools" tool))
                (when (plusp (length *llm-system-message*))
-                 (list "--append-system-prompt" *llm-system-message*))))
+                 (list "--append-system-prompt" *llm-system-message*))
+               (when mcp-config
+                 (list "--mcp-config"
+                       (uiop:native-namestring mcp-config)))))
       (:codex
        (append (list executable "exec")
                (when session-id (list "resume" session-id))
@@ -318,12 +328,21 @@
     (message "~a CLI not found on PATH" (llm-cli-spec backend))
     (return-from llm-cli-stream))
   (let ((buffer (llm-output-buffer))
+        (source (or (and (llm-buffer-live-p *llm-request-source-buffer*)
+                         *llm-request-source-buffer*)
+                    (current-buffer)))
         (visible-prompt (llm-visible-prompt prompt)))
     (when (llm-active-request buffer)
       (message "An LLM request is already running; use M-x lem-yath-llm-abort")
       (return-from llm-cli-stream))
     (let* ((session-id (llm-cli-session-id backend buffer))
-           (command (llm-cli-command backend prompt session-id))
+           (working-directory
+             (and (eq backend :claude-code)
+                  (llm-claude-project-root source)))
+           (mcp-config
+             (and working-directory
+                  (llm-claude-mcp-config-pathname working-directory)))
+           (command (llm-cli-command backend prompt session-id mcp-config))
            (insertion-point
              (llm-prepare-response
               buffer
@@ -332,6 +351,7 @@
                       backend session-id visible-prompt))))
       (handler-case
           (let* ((process (uiop:launch-program command
+                                               :directory working-directory
                                                :output :stream
                                                :error-output :output))
                  (request (llm-register-request
