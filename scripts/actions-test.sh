@@ -55,8 +55,9 @@ printf 'DELETED FILE ACTION TARGET\n' \
   >"$LEM_YATH_ACTIONS_ROOT/deleted-target.txt"
 printf '.' >"$LEM_YATH_ACTIONS_BUFFER"
 
+shell=$(command -v bash)
 printf '%s\n' \
-  '#!/usr/bin/env bash' \
+  "#!$shell" \
   'set -eu' \
   ': "${LEM_YATH_ACTIONS_LAUNCH_REPORT:?}"' \
   'printf "argc=%s arg=%s\\n" "$#" "$1" >>"$LEM_YATH_ACTIONS_LAUNCH_REPORT"' \
