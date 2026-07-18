@@ -490,6 +490,76 @@ interleaved keycodes, and a 50k-byte payload; fixed regression cases
 transcribed from both ncurses test corpora. The ncurses suite itself
 (`scripts/run-tests.sh lem-ncurses/tests`) is the production-integration gate.
 
+## VK-8 — interrupt-delivery protocol model
+
+`interrupt-model.lisp` transcribes `src/buffer/interrupt.lisp` — the
+`*interrupts-enabled*` / `*interrupted*` flags, `without-interrupts`
+enter/exit with the `prev-enabled` save/restore, `check-interrupt` polls, and
+`interrupt` (with and without `force`) — as a total step function over
+states `(enabled stack pending delivered torn)`, with traces as action lists
+`(:enter) (:exit) (:exit-abort) (:poll) (:arrive f)`. Delivery (the
+`editor-interrupt` signal) is an observable effect of `:exit`/`:poll`/
+`:arrive` steps, exactly the three production signal sites. `:exit-abort`
+models a non-local exit unwinding the `without-interrupts` LET (binding
+restored, exit deliver-check skipped) — production reality: every in-region
+delivery itself unwinds enclosing regions through that path.
+
+**Certified obligations** (all quantified over all traces by structural
+induction; see the book header for the full statements):
+
+1. **No lost interrupt (liveness)** — `liveness-no-lost-interrupt`: a trace
+   containing an arrival followed by a poll, or by an abort-free suffix
+   ending re-enabled, contains a delivery. The abort-free proviso is honest:
+   production's deliver-check sits on the normal-return path only, so an
+   error unwinding out of the outermost region carries the pending flag to
+   the next poll / normal exit / enabled arrival.
+2. **No torn state (safety)** — `wf-int` is an inductive invariant;
+   `reachable-never-torn`: no reachable state has a delivery strictly inside
+   a `without-interrupts` region through a non-poll, non-force path;
+   `safety-delivery-inside-critical`: from an in-critical state the only
+   delivering steps are `:poll`, forced `:arrive`, or the outermost `:exit`
+   (which ends the region).
+3. **Nesting** — `nesting-lemma` / `exit-restores-matching-enter`: exit
+   restores the enabled state saved at the matching enter at arbitrary
+   depth, for normal and abort exits alike (the dynamic-binding discipline).
+4. **Force bypass** — `force-arrive-delivers-immediately`: a forced arrive
+   delivers in **every** state (enabled, disabled, nested) — production's
+   force branch signals before any enabled check; non-forced arrives deliver
+   immediately iff enabled, else defer.
+
+**Documented semantics, not over-claimed:** `delivered` counts deliveries —
+two deferred arrivals coalesce into one delivery (`*interrupted*` is a flag,
+not a counter), so exactly-once holds per pending window; the stress suite
+keeps one arrival in flight per run to assert it sharply.
+
+**Differential/PBT/stress acceptance** (`tests/pbt/interrupt-stress.lisp`):
+(a) model PBT — random traces preserve `wf-int` / never set `torn`, balanced
+traces restore enabled + nesting stack (shim-fidelity anchor); (b)
+single-threaded differential — random region/poll/arrive trees executed
+against the **real** production macros, recording the trace as executed
+(abort exits included); replaying it through the model must reproduce the
+delivery count and final flag states exactly; (c) the VK-8 acceptance
+stress test — a worker thread runs instrumented production
+`without-interrupts`/`check-interrupt` cycles while the controller fires one
+real `bt2:interrupt-thread` interrupt per run at randomized times
+(`LEM_INTERRUPT_STRESS_RUNS`, default 1000, ~1 s): exactly-once delivery per
+arrival (with a deterministic pending drain), never inside a critical region
+except at a poll, enabled restoration after every cycle and every run; plus
+a deterministic force test witnessing in-region force delivery. Assertions
+are counters/invariants; synchronization is semaphores/atomics (the only
+sleep is the randomized interrupt-timing jitter, which is load, not
+synchronization). Harness note: delivery counting lives in `handler-case`
+**clauses** — an inner catch unwinds before any outer `handler-bind`
+observer runs, and a signal landing in the observer-establishment window
+would otherwise be silently absorbed (both observed empirically at the
+~1/1000 level before the redesign).
+
+**Trust-base residue** (SPEC-VK standing risks): fidelity of the model to
+SBCL's interrupt machinery — `%without-interrupts` (sb-sys) making
+clear-pending+signal atomic is modeled as one atomic step, and
+`bt2:interrupt-thread`'s own delivery points are below the model. The
+threaded stress suite exists to pin exactly this residue.
+
 ## VK-10 — character/string width algebra + one-source swap
 
 `width.lisp` is the certified width algebra over **codepoints** (VK-1's
@@ -781,7 +851,10 @@ All theorems in every book under `verified/` certify with real ACL2 (no
 no statement was weakened. VK-1, VK-2 (five obligation groups), VK-5 (all
 three obligations), VK-6 (all three obligations, with the checkpoint-tear
 prefix disjunct and the intra-hash-namespace residue stated explicitly rather
-than over-claimed — see the VK-6 section), VK-7 (all five obligations), VK-10
+than over-claimed — see the VK-6 section), VK-7 (all five obligations), VK-8
+(all four obligations — liveness, safety, nesting, force — with the abort-free
+liveness proviso and the deferred-arrival coalescing semantics stated
+explicitly rather than over-claimed, see the VK-8 section), VK-10
 (all four obligations) and VK-11 (all four obligation groups, including the
 blocked-head characterization and the clip/auto-scroll composition) are fully
 certified. **VK-12 has no book by design** (SPEC-VK VK-12): it is verified
