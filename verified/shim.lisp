@@ -202,7 +202,7 @@
                                  ;; interrupt-model.lisp (VK-8)
                                  "INT-INIT" "INT-RUN" "WF-INT"
                                  "IST-ENABLED" "IST-STACK" "IST-PENDING"
-                                 "IST-DELIVERED" "IST-TORN"
+                                 "IST-TORN"
                                  "DELIVER-COUNT" "NET-BALANCED"
                                  ;; layout.lisp (VK-11)
                                  "K-TEXT" "K-OPAQUE"

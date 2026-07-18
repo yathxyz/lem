@@ -110,8 +110,10 @@
 ;;;; bt2:interrupt-thread to pin exactly this residue.
 ;;;;
 ;;;; EXEC PATH (functions the in-image suite tests/pbt/interrupt-stress.lisp
-;;;; calls): int-init, int-step, int-run, wf-int, the ist-* accessors,
-;;;; deliver-count, net-balanced.  All use only CL homonyms plus the already
+;;;; calls): int-init, int-run, wf-int, ist-enabled, ist-stack, ist-pending,
+;;;; ist-torn, deliver-count, net-balanced (ist-delivered is model-internal:
+;;;; tests observe the count via deliver-count, so it is not exported).
+;;;; All use only CL homonyms plus the already
 ;;;; whitelisted natp -- NO shim whitelist growth for VK-8.  ACL2 strings and
 ;;;; characters are never used.
 
@@ -542,3 +544,24 @@
                             (st (int-run (int-init) pre))))
            :in-theory (disable int-run deliver-count int-init int-step
                                deliver-p))))
+
+;; Ground witness (non-vacuity guard for liveness-no-lost-interrupt): both
+;; disjuncts of the liveness hypothesis are satisfiable on concrete traces,
+;; and delivery actually occurs on each.  Certifies by evaluation, so a
+;; future edit that makes the hypothesis unsatisfiable fails certification
+;; here instead of leaving the implication above vacuously true.
+;;   Disjunct 1: an arrival followed by a poll -- pre = nil, post = ((:poll)).
+;;   Disjunct 2: an arrival deferred inside a region, delivered by the
+;;   outermost normal exit -- pre = ((:enter)), post = ((:exit)), which is
+;;   abort-free and ends re-enabled with the pending flag clear.
+(defthm liveness-witness-ground
+  (and ;; disjunct 1 instance: (pre nil) (f nil) (post '((:poll)))
+       (has-poll '((:poll)))
+       (equal (deliver-count (int-init) '((:arrive nil) (:poll))) 1)
+       ;; disjunct 2 instance: (pre '((:enter))) (f nil) (post '((:exit)))
+       (abort-free '((:exit)))
+       (ist-enabled (int-run (int-init) '((:enter) (:arrive nil) (:exit))))
+       (equal (deliver-count (int-init) '((:enter) (:arrive nil) (:exit))) 1)
+       (not (ist-pending (int-run (int-init)
+                                  '((:enter) (:arrive nil) (:exit))))))
+  :rule-classes nil)

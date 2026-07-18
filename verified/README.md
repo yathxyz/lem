@@ -512,7 +512,11 @@ induction; see the book header for the full statements):
    ending re-enabled, contains a delivery. The abort-free proviso is honest:
    production's deliver-check sits on the normal-return path only, so an
    error unwinding out of the outermost region carries the pending flag to
-   the next poll / normal exit / enabled arrival.
+   the next poll / normal exit / enabled arrival. A ground witness theorem
+   (`liveness-witness-ground`, certified by evaluation) pins both hypothesis
+   disjuncts as satisfiable with actual delivery on concrete traces, so a
+   future edit cannot make the implication vacuously true without failing
+   certification.
 2. **No torn state (safety)** — `wf-int` is an inductive invariant;
    `reachable-never-torn`: no reachable state has a delivery strictly inside
    a `without-interrupts` region through a non-poll, non-force path;
