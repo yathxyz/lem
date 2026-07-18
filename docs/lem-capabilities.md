@@ -3427,15 +3427,25 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   by the Emacs configuration. It loads or saves named presets and hands the active region
   (otherwise the complete buffer) to Claude web or ChatGPT normal, search,
   research, or model-hint URLs. Its `m` action opens the same full request menu
-  as direct `SPC g L`. That three-column menu reflects and edits the live
+  as direct `SPC g L`. That four-column menu reflects and edits the live
   system instruction, backend, catalog model, response-token cap, temperature,
   and supported tool policy; loads or saves presets; and exposes additional
   directive/send, send, abort, fresh-session, and request-trace actions. Setting
   controls reopen the menu with their updated values. Blank temperature and
   token inputs select provider defaults, while backend changes clear tool/MCP
-  state that the destination cannot apply. Gptel's external context attachments,
-  alternate response destinations, response variants/rewrite, media, and dry-run
-  query inspection remain unimplemented rather than appearing as inert controls.
+  state that the destination cannot apply. Its response column keeps one-shot
+  `e`, `b`, `g`, and `k` targets for the echo area, exact point in another
+  buffer, an existing or new typed Org LLM session, and the kill ring; `.`
+  restores the ordinary destination. Redirected ownership remains visible to
+  abort from the source buffer, private sinks are removed on completion, and a
+  follow-up sent from the routed session fills the generated `* ` prompt and
+  reconstructs the complete user/assistant/user history. As in gptel, routing
+  the initial exchange changes its display destination without replacing the
+  source buffer's provider context. `J` opens a read-only normalized
+  JSON dry run containing the effective context-expanded messages and request
+  settings but no credentials, headers, or dispatch side effect. Gptel's
+  response variants/rewrite and media controls remain unimplemented rather than
+  appearing as inert controls.
   Handoff context includes
   buffer, mode, file, and non-prompting project metadata; it is capped at
   13,000 characters while retaining the newest text. ChatGPT also receives

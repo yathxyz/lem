@@ -39,11 +39,29 @@
 (defvar *llm-response-origin* nil
   "Point where a conversation response should begin for one dispatch.")
 
+(defvar *llm-request-source-buffer* nil
+  "Buffer that initiated one request when output is redirected elsewhere.")
+
 (defvar *llm-force-inline-output-p* nil
   "Whether one dispatch should stream at point without conversation mode.")
 
+(defvar *llm-response-open-function* 'llm-response-open-conversation
+  "Function that prepares and returns one response insertion point.")
+
 (defvar *llm-response-close-function* 'llm-response-close-now
   "Function captured by one inline request to finish its insertion point.")
+
+(defvar *llm-response-finish-function* nil
+  "Optional callback captured by one request after routing cleanup.")
+
+(defvar *llm-response-destination* nil
+  "One-shot response destination selected by the full LLM menu.")
+
+(defvar *llm-response-destination-buffer-name* nil
+  "Buffer name associated with a one-shot response destination.")
+
+(defvar *llm-response-routing-function* nil
+  "Optional function implementing explicit response destinations.")
 
 (defvar *llm-visible-prompt* nil
   "Unexpanded prompt shown in transcripts and request traces for one dispatch.")
@@ -91,21 +109,26 @@
             (:constructor make-llm-request
                 (buffer process backend
                  &key prompt insertion-point tool-context tools-p
-                   response-close-function)))
+                   source-buffer response-close-function
+                   response-finish-function)))
   "One asynchronous LLM request owned by BUFFER."
   buffer
   process
   backend
   prompt
   insertion-point
+  source-buffer
   tool-context
   tools-p
   response-close-function
+  response-finish-function
   visual-state
   (aborted-p nil)
   (lock (bt2:make-lock :name "lem-yath/llm-request")))
 
 (defparameter *llm-active-request-key* 'lem-yath-llm-active-request)
+(defparameter *llm-forward-request-buffer-key*
+  'lem-yath-llm-forward-request-buffer)
 
 (defvar *llm-request-start-functions* nil
   "Editor-thread callbacks run after a request acquires its buffer.")
@@ -444,6 +467,16 @@ end of the current word or punctuation run."
        (ignore-errors
          (mode-active-p buffer 'lem-yath-llm-conversation-mode))))
 
+(defun llm-forward-request-buffer (&optional (buffer (current-buffer)))
+  "Return BUFFER's live redirected-output buffer, clearing stale state."
+  (when (llm-buffer-live-p buffer)
+    (let ((target (buffer-value buffer *llm-forward-request-buffer-key*)))
+      (if (and (llm-buffer-live-p target) (llm-active-request target))
+          target
+          (progn
+            (setf (buffer-value buffer *llm-forward-request-buffer-key*) nil)
+            nil)))))
+
 (defun llm-output-buffer ()
   (if (llm-buffer-live-p *llm-output-buffer-override*)
       *llm-output-buffer-override*
@@ -458,6 +491,7 @@ end of the current word or punctuation run."
   (let ((current (current-buffer)))
     (cond
       ((llm-active-request current) current)
+      ((llm-forward-request-buffer current))
       ((llm-conversation-buffer-p current)
        (let* ((*llm-output-buffer-override* nil)
               (shared (llm-output-buffer)))
@@ -474,6 +508,16 @@ end of the current word or punctuation run."
     (insert-string (buffer-end-point buffer) string)
     (redraw-display)))
 
+(defun llm-response-open-conversation (origin)
+  "Insert conversation spacing at ORIGIN and return a tracked point."
+  (let ((insertion-point (copy-point origin :left-inserting)))
+    (insert-string insertion-point (format nil "~2%"))
+    insertion-point))
+
+(defun llm-response-open-plain (origin)
+  "Return a tracked response point at ORIGIN without inserting decoration."
+  (copy-point origin :left-inserting))
+
 (defun llm-prepare-response (buffer shared-heading)
   "Present BUFFER and prepare one response insertion point.
 SHARED-HEADING is rendered only for the traditional shared transcript."
@@ -481,14 +525,14 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
       (progn
         (when (buffer-read-only-p buffer)
           (editor-error "Conversation buffer is read only"))
-        (let* ((origin (if (and *llm-response-origin*
-                                (eq buffer
-                                    (point-buffer *llm-response-origin*)))
-                           *llm-response-origin*
-                           (buffer-point buffer)))
-               (insertion-point (copy-point origin :left-inserting)))
-          (insert-string insertion-point (format nil "~2%"))
-          insertion-point))
+        (let ((origin (if (and *llm-response-origin*
+                               (eq buffer
+                                   (point-buffer *llm-response-origin*)))
+                          *llm-response-origin*
+                          (buffer-point buffer))))
+          (funcall (or *llm-response-open-function*
+                       #'llm-response-open-conversation)
+                   origin)))
       (progn
         (pop-to-buffer buffer)
         (llm-buffer-append-now buffer shared-heading)
@@ -513,6 +557,27 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
 
 (defun llm-close-insertion-point-now (insertion-point function)
   (funcall (or function #'llm-response-close-now) insertion-point))
+
+(defun llm-response-close-plain (insertion-point)
+  "Release INSERTION-POINT without adding a following prompt."
+  (when (and insertion-point (alive-point-p insertion-point))
+    (delete-point insertion-point)))
+
+(defun llm-run-response-finish-function (request reason)
+  (alexandria:when-let ((function
+                         (llm-request-response-finish-function request)))
+    (handler-case
+        (funcall function request reason)
+      (error (condition)
+        (log:error "LLM response routing callback failed: ~A" condition)))))
+
+(defun llm-clear-forward-request-buffer (request)
+  (let ((source (llm-request-source-buffer request))
+        (target (llm-request-buffer request)))
+    (when (and (llm-buffer-live-p source)
+               (eq (buffer-value source *llm-forward-request-buffer-key*)
+                   target))
+      (setf (buffer-value source *llm-forward-request-buffer-key*) nil))))
 
 (defun llm-unregistered-response-failure-now
     (buffer insertion-point text)
@@ -569,7 +634,9 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
     (setf (buffer-value (llm-request-buffer request)
                         *llm-active-request-key*)
           nil)
-    (llm-request-release-insertion-point request)))
+    (llm-clear-forward-request-buffer request)
+    (llm-request-release-insertion-point request)
+    (llm-run-response-finish-function request :complete)))
 
 (defun llm-request-append (request string)
   "Append STRING for REQUEST via the editor queue when it is still current."
@@ -599,14 +666,20 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
 (defun llm-register-request
     (buffer process backend &key prompt insertion-point tool-context tools-p)
   "Register and return an asynchronous request for BUFFER."
-  (let ((request (make-llm-request buffer process backend
+  (let* ((source (or *llm-request-source-buffer* buffer))
+         (request (make-llm-request buffer process backend
                                    :prompt prompt
                                    :insertion-point insertion-point
+                                   :source-buffer source
                                    :tool-context tool-context
                                    :tools-p tools-p
                                    :response-close-function
-                                   *llm-response-close-function*)))
+                                   *llm-response-close-function*
+                                   :response-finish-function
+                                   *llm-response-finish-function*)))
     (setf (buffer-value buffer *llm-active-request-key*) request)
+    (when (and (llm-buffer-live-p source) (not (eq source buffer)))
+      (setf (buffer-value source *llm-forward-request-buffer-key*) buffer))
     (llm-run-request-functions *llm-request-start-functions* request)
     request))
 
@@ -671,6 +744,7 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
     (llm-run-request-functions
      *llm-request-finish-functions* request :kill)
     (setf (buffer-value buffer *llm-active-request-key*) nil)
+    (llm-clear-forward-request-buffer request)
     (alexandria:when-let ((process (llm-request-abort-now request)))
       (ignore-errors (uiop:terminate-process process :urgent t))
       (ignore-errors (uiop:close-streams process)))
@@ -888,48 +962,58 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
   (:method ((backend (eql :openrouter)) prompt)
     (llm-stream prompt)))
 
-(defun llm-dispatch-from-current-buffer (function)
+(defun llm-dispatch-from-current-buffer
+    (function &key visible-prompt request-prompt messages)
   "Call FUNCTION with conversation routing for the current buffer.
 Read-only conversations follow gptel by falling back to the shared transcript."
   (let ((buffer (current-buffer)))
     (cond
+      ((and *llm-response-destination* *llm-response-routing-function*)
+       (funcall *llm-response-routing-function*
+                buffer visible-prompt request-prompt messages function))
       ((and (not *llm-force-inline-output-p*)
             (not (llm-conversation-buffer-p buffer)))
-       (funcall function))
+       (funcall function messages))
       ((buffer-read-only-p buffer)
        (if *llm-force-inline-output-p*
            (editor-error "Inline LLM destination is read only")
            (progn
              (message "Conversation is read only; using the shared LLM buffer")
-             (funcall function))))
+             (funcall function messages))))
       (t
        (let ((*llm-output-buffer-override* buffer)
              (*llm-response-origin* (current-point)))
-         (funcall function))))))
+         (funcall function messages))))))
 
 (defun llm-dispatch-prompt-from-current-buffer (prompt messages)
   "Dispatch PROMPT with this buffer's live context and typed MESSAGES.
 Context is sent to the provider but excluded from the visible transcript and
 request trace."
   (let ((source-buffer (current-buffer)))
-    (handler-case
-        (let* ((request-prompt
-                 (llm-context-wrap-prompt source-buffer prompt))
-               (request-messages
-                 (and messages
-                      (llm-conversation-replace-last-user-content
-                       messages request-prompt)))
-               (*llm-visible-prompt* prompt)
-               (*llm-conversation-messages* request-messages))
-          (llm-dispatch-from-current-buffer
-           (lambda ()
-             (llm-backend-stream *llm-backend* request-prompt))))
-      (error (condition)
-        (message "Could not prepare LLM context: ~a" condition)))))
+    (unwind-protect
+         (handler-case
+             (let* ((request-prompt
+                      (llm-context-wrap-prompt source-buffer prompt))
+                    (request-messages
+                      (and messages
+                           (llm-conversation-replace-last-user-content
+                            messages request-prompt)))
+                    (*llm-visible-prompt* prompt)
+                    (*llm-conversation-messages* request-messages))
+               (llm-dispatch-from-current-buffer
+                (lambda (effective-messages)
+                  (let ((*llm-conversation-messages* effective-messages))
+                    (llm-backend-stream *llm-backend* request-prompt)))
+                :visible-prompt prompt
+                :request-prompt request-prompt
+                :messages request-messages))
+           (error (condition)
+             (message "Could not prepare LLM context: ~a" condition)))
+      (setf *llm-response-destination* nil
+            *llm-response-destination-buffer-name* nil))))
 
-(define-command lem-yath-llm-send () ()
-  "Send region (or buffer up to point) to the LLM, streaming the reply
-(gptel-send)."
+(defun llm-current-prompt-data ()
+  "Return the current gptel-style prompt, typed messages, and region flag."
   (multiple-value-bind (start end region-p) (llm-source-bounds)
     (let* ((raw (points-to-string start end))
            (messages
@@ -944,9 +1028,15 @@ request trace."
                        (llm-conversation-last-user-content messages))
                   (llm-render-user-text-for-buffer
                    raw (current-buffer))))))
-      (if (zerop (length text))
-          (message "Nothing to send")
-          (llm-dispatch-prompt-from-current-buffer text messages)))))
+      (values text messages region-p))))
+
+(define-command lem-yath-llm-send () ()
+  "Send region (or buffer up to point) to the LLM, streaming the reply
+(gptel-send)."
+  (multiple-value-bind (text messages) (llm-current-prompt-data)
+    (if (zerop (length text))
+        (message "Nothing to send")
+        (llm-dispatch-prompt-from-current-buffer text messages))))
 
 (define-command lem-yath-llm-ask () ()
   "Prompt for an instruction, prepend it to the region/buffer text, send

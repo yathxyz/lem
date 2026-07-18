@@ -82,6 +82,7 @@
                (:file "llm-conversation")
                (:file "llm-context")
                (:file "llm")
+               (:file "llm-request-ui")
                (:file "llm-models")
                (:file "indent-guides")
                (:file "theme")

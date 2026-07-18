@@ -595,7 +595,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   request menu. Compact `m` opens the full menu; it controls system
   instructions, backend, catalog model, provider-default or explicit
   temperature/token limits, supported tool policy, presets, send/abort/new
-  session, and request tracing. Private named presets and region-or-buffer
+  session, and request tracing. The full menu also keeps gptel's one-shot
+  response destinations: `e` sends the completed response to the echo area,
+  `b` inserts at point in another buffer, `g` creates or extends a typed Org
+  LLM session, `k` copies to the kill ring, and `.` restores the ordinary
+  destination before Return sends. `J` opens a read-only, credential-free
+  normalized JSON preview of the effective prompt, context, messages, model,
+  limits, tools, and destination without dispatching. Private named presets and region-or-buffer
   handoff to Claude or ChatGPT remain in the compact menu; the built-in `quick-lookup`
   preset matches the Emacs startup model, system prompt, temperature, and
   token cap, `project-readonly` opts OpenRouter into the configured five-tool

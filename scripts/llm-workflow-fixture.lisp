@@ -7,6 +7,11 @@
 (defvar *llm-workflow-context-messages* nil)
 (defvar *llm-workflow-capture-prompt* nil)
 (defvar *llm-workflow-capture-buffer* nil)
+(defvar *llm-workflow-routing-dispatches* 0)
+(defvar *llm-workflow-routing-prompt* nil)
+(defvar *llm-workflow-routing-messages* nil)
+(defparameter *llm-workflow-routing-target-name* "*llm-route-target*")
+(defparameter *llm-workflow-routing-session-name* "*llm-route-session*")
 
 (defmethod llm-backend-stream
     ((backend (eql :lem-yath-context-test)) prompt)
@@ -30,6 +35,22 @@
           *llm-workflow-capture-buffer* buffer)
     (llm-request-complete-now
      request (format nil "CAPTURE-RESPONSE-SENTINEL~%"))))
+
+(defmethod llm-backend-stream
+    ((backend (eql :lem-yath-routing-test)) prompt)
+  (declare (ignore backend))
+  (let* ((buffer (llm-output-buffer))
+         (insertion-point
+           (llm-prepare-response buffer "UNEXPECTED-SHARED-ROUTING"))
+         (request
+           (llm-register-request
+            buffer nil :lem-yath-routing-test
+            :prompt (llm-visible-prompt prompt)
+            :insertion-point insertion-point)))
+    (incf *llm-workflow-routing-dispatches*)
+    (setf *llm-workflow-routing-prompt* prompt
+          *llm-workflow-routing-messages* *llm-conversation-messages*)
+    (llm-request-complete-now request "ROUTED-RESPONSE-SENTINEL")))
 
 (setf *llm-handoff-browser-commands*
       (list (uiop:getenv "LEM_YATH_LLM_WORKFLOW_BROWSER"))
@@ -65,6 +86,9 @@
 
 (defun llm-workflow-killring-head ()
   (or (lem/common/killring:peek-killring-item (current-killring) 0) ""))
+
+(defun llm-workflow-one-line (text)
+  (substitute #\| #\Newline (or text "none")))
 
 (define-command lem-yath-test-llm-workflow-static () ()
   (let ((failures 0))
@@ -103,6 +127,19 @@
       (multiple-value-bind (command reopen-p) (llm-full-menu-action "-")
         (check (and (eq command 'lem-yath-llm-context-menu) reopen-p)
                "full-menu-context-dispatch"))
+      (check
+       (and (eq (nth-value 0 (llm-full-menu-action "e"))
+                'lem-yath-llm-response-echo)
+            (nth-value 1 (llm-full-menu-action "e"))
+            (eq (nth-value 0 (llm-full-menu-action "b"))
+                'lem-yath-llm-response-buffer)
+            (eq (nth-value 0 (llm-full-menu-action "g"))
+                'lem-yath-llm-response-conversation)
+            (eq (nth-value 0 (llm-full-menu-action "k"))
+                'lem-yath-llm-response-kill-ring)
+            (eq (nth-value 0 (llm-full-menu-action "J"))
+                'lem-yath-llm-inspect-request-json))
+       "gptel-response-and-dry-run-dispatch")
       (check (and (eq (llm-context-menu-command "r")
                       'lem-yath-llm-context-add-region)
                   (eq (llm-context-menu-command "b")
@@ -239,6 +276,45 @@
                (setf (buffer-value *llm-workflow-source-buffer*
                                    *llm-context-buffer-key*) nil))
           (delete-buffer other)))
+      (let ((target (make-buffer "*llm-forward-static*"))
+            (source *llm-workflow-source-buffer*))
+        (unwind-protect
+             (let* ((*llm-request-source-buffer* source)
+                    (request
+                      (llm-register-request
+                       target nil :lem-yath-routing-test
+                       :prompt "forward-static")))
+               (check (and (eq target (llm-forward-request-buffer source))
+                           (eq target (llm-current-output-buffer)))
+                      "redirected-request-source-lookup")
+               (llm-request-complete-now request nil)
+               (check (null (llm-forward-request-buffer source))
+                      "redirected-request-source-cleanup"))
+          (when (member target (buffer-list) :test #'eq)
+            (delete-buffer target))))
+      (let* ((target (make-buffer " *llm-abort-redirect-static*"
+                                  :enable-undo-p nil))
+             (source *llm-workflow-source-buffer*)
+             (kill-before (llm-workflow-killring-head)))
+        (unwind-protect
+             (let ((*llm-request-source-buffer* source)
+                   (*llm-response-finish-function*
+                     (llm-redirect-response-finish-function
+                      :kill-ring target :lem-yath-routing-test)))
+               (insert-string (buffer-start-point target) "PARTIAL-RESPONSE")
+               (let ((request
+                       (llm-register-request
+                        target nil :lem-yath-routing-test
+                        :prompt "abort-redirect")))
+                 (llm-request-abort-now request)
+                 (llm-request-complete-now request "[request aborted]")
+                 (check
+                  (and (not (llm-buffer-live-p target))
+                       (string= kill-before (llm-workflow-killring-head))
+                       (null (llm-forward-request-buffer source)))
+                  "redirected-abort-no-copy")))
+          (when (llm-buffer-live-p target)
+            (delete-buffer target))))
       (llm-workflow-log "SUMMARY STATIC ~a failures=~d"
                         (if (zerop failures) "PASS" "FAIL") failures))))
 
@@ -322,6 +398,100 @@
                       (if (buffer-modified-p buffer) "yes" "no"))
     (switch-to-buffer *llm-workflow-source-buffer*)))
 
+(define-command lem-yath-test-llm-workflow-routing-setup () ()
+  (switch-to-buffer *llm-workflow-source-buffer*)
+  (setf (buffer-read-only-p *llm-workflow-source-buffer*) nil
+        *llm-backend* :lem-yath-routing-test
+        *llm-model* "routing-model"
+        *llm-workflow-routing-dispatches* 0
+        *llm-workflow-routing-prompt* nil
+        *llm-workflow-routing-messages* nil)
+  (buffer-mark-cancel *llm-workflow-source-buffer*)
+  (erase-buffer *llm-workflow-source-buffer*)
+  (insert-string (buffer-start-point *llm-workflow-source-buffer*)
+                 "ROUTING-PROMPT")
+  (buffer-end (buffer-point *llm-workflow-source-buffer*))
+  (dolist (name (list *llm-workflow-routing-target-name*
+                      *llm-workflow-routing-session-name*))
+    (alexandria:when-let ((buffer (get-buffer name)))
+      (when (member buffer (buffer-list) :test #'eq)
+        (delete-buffer buffer))))
+  (let ((target (make-buffer *llm-workflow-routing-target-name*)))
+    (insert-string (buffer-start-point target) "LEFTRIGHT")
+    (buffer-start (buffer-point target))
+    (character-offset (buffer-point target) 4))
+  (llm-workflow-log "ROUTING ready"))
+
+(define-command lem-yath-test-llm-workflow-routing-followup () ()
+  (let ((session (get-buffer *llm-workflow-routing-session-name*)))
+    (unless (and session (llm-conversation-buffer-p session))
+      (editor-error "Routing session is unavailable"))
+    (switch-to-buffer session)
+    (setf (buffer-read-only-p session) nil
+          *llm-backend* :lem-yath-routing-test
+          *llm-model* "routing-model")
+    (buffer-mark-cancel session)
+    (buffer-end (buffer-point session))
+    (insert-string (buffer-point session) "ROUTING-FOLLOWUP"))
+  (llm-workflow-log "ROUTING followup-ready"))
+
+(define-command lem-yath-test-llm-workflow-routing-record () ()
+  (let* ((kill (llm-workflow-killring-head))
+         (target (get-buffer *llm-workflow-routing-target-name*))
+         (target-text
+           (and target
+                (points-to-string (buffer-start-point target)
+                                  (buffer-end-point target))))
+         (session (get-buffer *llm-workflow-routing-session-name*))
+         (session-text
+           (and session
+                (points-to-string (buffer-start-point session)
+                                  (buffer-end-point session))))
+         (hidden
+           (find-if
+            (lambda (buffer)
+              (alexandria:starts-with-subseq
+               " *lem-yath-llm-redirect-" (buffer-name buffer)))
+            (buffer-list)))
+         (roles
+           (format nil "~{~a~^,~}"
+                   (mapcar #'llm-message-role
+                           *llm-workflow-routing-messages*))))
+    (llm-workflow-log
+     "ROUTING dispatches=~d prompt=~a roles=~a kill=~a target=~a session-mode=~a session=~a hidden=~a"
+     *llm-workflow-routing-dispatches*
+     *llm-workflow-routing-prompt*
+     roles
+     kill
+     (llm-workflow-one-line target-text)
+     (if (and session (llm-conversation-buffer-p session)) "yes" "no")
+     (llm-workflow-one-line session-text)
+     (if hidden "yes" "no"))))
+
+(define-command lem-yath-test-llm-workflow-preview-record () ()
+  (let* ((buffer (current-buffer))
+         (text (points-to-string (buffer-start-point buffer)
+                                 (buffer-end-point buffer)))
+         (json (handler-case (yason:parse text) (error () nil)))
+         (messages (and json (gethash "messages" json)))
+         (message-list (llm-json-elements messages))
+         (last-message (car (last message-list))))
+    (llm-workflow-log
+     "PREVIEW mode=~a readonly=~a dry=~a backend=~a prompt=~a dispatches=~d"
+     (if (mode-active-p buffer 'lem-yath-llm-request-preview-mode) "yes" "no")
+     (if (buffer-read-only-p buffer) "yes" "no")
+     (if (and json (eq (gethash "dry_run" json) t)) "yes" "no")
+     (or (and json (gethash "backend" json)) "none")
+     (or (and (hash-table-p last-message)
+              (gethash "content" last-message))
+         "none")
+     *llm-workflow-routing-dispatches*)
+    (llm-workflow-log
+     "PREVIEW secrets=~a"
+     (if (or (search "Authorization" text :test #'char-equal)
+             (search "api_key" text :test #'char-equal))
+         "present" "absent"))))
+
 (define-command lem-yath-test-llm-workflow-record () ()
   (let* ((preset-file (llm-preset-pathname))
          (preset-directory (uiop:pathname-directory-pathname preset-file))
@@ -353,10 +523,14 @@
                       lem-vi-mode:*visual-keymap*))
   (define-key keymap "F2" 'lem-yath-test-llm-workflow-static)
   (define-key keymap "F3" 'lem-yath-test-llm-workflow-settings)
+  (define-key keymap "F4" 'lem-yath-test-llm-workflow-routing-followup)
   (define-key keymap "F5" 'lem-yath-test-llm-workflow-region)
   (define-key keymap "F6" 'lem-yath-test-llm-workflow-long)
   (define-key keymap "F7" 'lem-yath-test-llm-workflow-capture-setup)
   (define-key keymap "F8" 'lem-yath-test-llm-workflow-capture-record)
+  (define-key keymap "F9" 'lem-yath-test-llm-workflow-routing-setup)
+  (define-key keymap "F10" 'lem-yath-test-llm-workflow-routing-record)
+  (define-key keymap "F11" 'lem-yath-test-llm-workflow-preview-record)
   (define-key keymap "F12" 'lem-yath-test-llm-workflow-record))
 
 (llm-workflow-log "READY")

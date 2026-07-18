@@ -241,6 +241,122 @@ fi
 send_key q
 pass compact-to-full 'compact m followed the configured Emacs route to full settings'
 
+send_key F9
+if ! wait_report_count '^ROUTING ready$' 1; then
+  die response-routing-setup 'the response-routing fixture was not prepared'
+fi
+send_key Space
+send_key g
+send_key L
+send_key k
+if ! lem_wait_for "$session" 'Response to: kill-ring' "$WAIT_TIMEOUT" >/dev/null; then
+  die kill-ring-destination 'the full menu did not retain the one-shot kill-ring target'
+fi
+send_key Enter
+send_key F10
+if ! wait_report_count '^ROUTING dispatches=1 prompt=ROUTING-PROMPT .*kill=ROUTED-RESPONSE-SENTINEL .* hidden=no$' 1; then
+  die kill-ring-response 'the response was not copied exactly or its private sink leaked'
+fi
+pass kill-ring-response 'physical k then Return copied one response and cleaned its sink'
+
+send_key F9
+wait_report_count '^ROUTING ready$' 2 ||
+  die echo-routing-setup 'the echo routing fixture was not reset'
+send_key Space
+send_key g
+send_key L
+send_key e
+send_key Enter
+if ! lem_wait_for "$session" 'response: ROUTED-RESPONSE-SENTINEL' "$WAIT_TIMEOUT" >/dev/null; then
+  die echo-response 'the echo-area destination did not display the completed response'
+fi
+send_key F10
+if ! wait_report_count '^ROUTING dispatches=1 prompt=ROUTING-PROMPT .* hidden=no$' 2; then
+  die echo-response-cleanup 'the echo response did not complete exactly once and clean its sink'
+fi
+pass echo-response 'physical e then Return displayed one response without a transcript'
+
+send_key F9
+wait_report_count '^ROUTING ready$' 3 ||
+  die buffer-routing-setup 'the buffer routing fixture was not reset'
+send_key Space
+send_key g
+send_key L
+send_key b
+if ! lem_wait_for "$session" 'Output to buffer:' "$WAIT_TIMEOUT" >/dev/null; then
+  die buffer-destination-prompt 'the gptel-style b destination did not prompt for a buffer'
+fi
+send_literal '*llm-route-target*'
+send_key Enter
+if ! lem_wait_for "$session" 'Response to: buffer \*llm-route-target\*' "$WAIT_TIMEOUT" >/dev/null; then
+  die buffer-destination 'the selected response buffer was not retained by the menu'
+fi
+send_key Enter
+if ! lem_wait_for "$session" 'LEFTROUTED-RESPONSE-SENTINELRIGHT' "$WAIT_TIMEOUT" >/dev/null; then
+  die buffer-response 'the response was not inserted at the target buffer point'
+fi
+send_key F10
+if ! wait_report_count '^ROUTING dispatches=1 prompt=ROUTING-PROMPT .*target=LEFTROUTED-RESPONSE-SENTINELRIGHT .*hidden=no$' 1; then
+  die buffer-response-contract 'buffer routing changed source text, placement, or ownership'
+fi
+pass buffer-response 'physical b inserted at the exact point in another buffer'
+
+send_key F9
+wait_report_count '^ROUTING ready$' 4 ||
+  die session-routing-setup 'the LLM-session routing fixture was not reset'
+send_key Space
+send_key g
+send_key L
+send_key g
+if ! lem_wait_for "$session" 'Existing or new LLM session:' "$WAIT_TIMEOUT" >/dev/null; then
+  die session-destination-prompt 'the gptel-style g destination did not prompt for a session'
+fi
+send_literal '*llm-route-session*'
+send_key Enter
+if ! lem_wait_for "$session" 'Response to: LLM session \*llm-route-session\*' "$WAIT_TIMEOUT" >/dev/null; then
+  die session-destination 'the selected LLM session was not retained by the menu'
+fi
+send_key Enter
+if ! lem_wait_for "$session" 'ROUTED-RESPONSE-SENTINEL' "$WAIT_TIMEOUT" >/dev/null; then
+  die session-response 'the routed LLM session did not receive the response'
+fi
+send_key F10
+if ! wait_report_count '^ROUTING dispatches=1 prompt=ROUTING-PROMPT roles= kill=.*session-mode=yes session=\* ROUTING-PROMPT|+ROUTED-RESPONSE-SENTINEL|+\*  hidden=no$' 1; then
+  die session-response-contract 'the routed exchange changed source context or was not a reusable typed conversation'
+fi
+pass session-response 'physical g created a reusable Org LLM conversation'
+
+send_key F4
+if ! wait_report_count '^ROUTING followup-ready$' 1; then
+  die session-followup-setup 'the existing-session follow-up was not prepared'
+fi
+send_key C-c
+send_key Enter
+send_key F10
+if ! wait_report_count '^ROUTING dispatches=2 prompt=ROUTING-FOLLOWUP roles=user,assistant,user .*session-mode=yes session=\* ROUTING-PROMPT|+ROUTED-RESPONSE-SENTINEL|+\* ROUTING-FOLLOWUP|+ROUTED-RESPONSE-SENTINEL|+\*  hidden=no$' 1; then
+  die session-followup-contract 'the existing session did not reconstruct and extend all typed turns'
+fi
+pass session-followup 'C-c Return continued the routed session with typed history and no stray prompt'
+
+send_key F9
+wait_report_count '^ROUTING ready$' 5 ||
+  die preview-setup 'the request-preview fixture was not reset'
+send_key Space
+send_key g
+send_key L
+send_key J
+if ! lem_wait_for "$session" '"dry_run": true' "$WAIT_TIMEOUT" >/dev/null ||
+   ! lem_wait_for "$session" '"backend": "lem-yath-routing-test"' "$WAIT_TIMEOUT" >/dev/null; then
+  die request-preview 'J did not open a normalized JSON request preview'
+fi
+send_key F11
+if ! wait_report_count '^PREVIEW mode=yes readonly=yes dry=yes backend=lem-yath-routing-test prompt=ROUTING-PROMPT dispatches=0$' 1 ||
+   ! wait_report_count '^PREVIEW secrets=absent$' 1; then
+  die request-preview-contract 'preview mutated, dispatched, or omitted the effective prompt'
+fi
+send_key q
+pass request-preview 'physical J opened a read-only credential-free dry run without dispatch'
+
 send_key F7
 if ! wait_report_count '^CAPTURE ready$' 1; then
   die capture-setup 'the daily LLM capture fixture was not prepared'

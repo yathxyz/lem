@@ -729,7 +729,7 @@
            (llm-menu-display-keymap
             "Request parameters"
             (list
-             (list "b" (format nil "backend: ~(~a~)" *llm-backend*))
+             (list "B" (format nil "backend: ~(~a~)" *llm-backend*))
              (list "m" (format nil "model: ~a" *llm-model*))
              (list "c" (format nil "response tokens: ~a"
                                 (or *llm-max-tokens* "API default")))
@@ -740,6 +740,14 @@
                                     (if *llm-use-tools* "on" "off")
                                     "unsupported")))))
            (llm-menu-display-keymap
+            (format nil "Response to: ~a"
+                    (llm-response-destination-label))
+            '(("." "current/default")
+              ("e" "echo area")
+              ("b" "other buffer")
+              ("g" "LLM session")
+              ("k" "kill-ring")))
+           (llm-menu-display-keymap
             "Actions and diagnostics"
             (list
              (list "j" "send")
@@ -749,6 +757,7 @@
              (list "-" (format nil "context sources: ~d"
                                 (llm-context-count)))
              (list "I" "inspect request context")
+             (list "J" "inspect next request (JSON)")
              (list "x" (format nil "request tracing: ~:[off~;on~]"
                                 (and (boundp '*llm-request-trace-enabled*)
                                      (symbol-value
@@ -767,17 +776,23 @@
                   ("d" lem-yath-llm-ask nil)
                   ("@" lem-yath-llm-load-preset t)
                   ("S" lem-yath-llm-save-preset t)
-                  ("b" lem-yath-llm-set-backend t)
+                  ("B" lem-yath-llm-set-backend t)
                   ("m" lem-yath-llm-set-model t)
                   ("c" lem-yath-llm-set-max-tokens t)
                   ("T" lem-yath-llm-set-temperature t)
                   ("t" lem-yath-llm-toggle-tools t)
+                  ("." lem-yath-llm-response-current t)
+                  ("e" lem-yath-llm-response-echo t)
+                  ("b" lem-yath-llm-response-buffer t)
+                  ("g" lem-yath-llm-response-conversation t)
+                  ("k" lem-yath-llm-response-kill-ring t)
                   ("j" lem-yath-llm-send nil)
                   ("Return" lem-yath-llm-send nil)
                   ("n" lem-yath-llm-new-session nil)
                   ("a" lem-yath-llm-abort nil)
                   ("-" lem-yath-llm-context-menu t)
                   ("I" lem-yath-llm-context-inspect nil)
+                  ("J" lem-yath-llm-inspect-request-json nil)
                   ("x" lem-yath-llm-request-trace-toggle t)
                   ("L" lem-yath-llm-request-trace-open nil))
                 :test #'string=)))
@@ -785,25 +800,27 @@
 
 (define-command lem-yath-llm-full-menu () ()
   "Show the supported request settings and lifecycle actions from gptel-menu."
-  (unwind-protect
-       (loop
-         (let ((lem/transient:*transient-popup-delay* 0))
-           (keymap-activate (llm-full-menu-keymap)))
-         (redraw-display)
-         (let* ((key (read-key))
-                (name (lem-core::keyseq-to-string (list key))))
-           (lem/transient::hide-transient)
-           (cond
-             ((or (string= name "q") (string= name "Escape")) (return))
-             (t
-              (multiple-value-bind (command reopen-p)
-                  (llm-full-menu-action name)
-                (if command
-                    (progn
-                      (call-command command nil)
-                      (unless reopen-p (return)))
-                    (message "No full LLM action is bound to ~a" name)))))))
-    (lem/transient::hide-transient)))
+  (let ((*llm-response-destination* nil)
+        (*llm-response-destination-buffer-name* nil))
+    (unwind-protect
+         (loop
+           (let ((lem/transient:*transient-popup-delay* 0))
+             (keymap-activate (llm-full-menu-keymap)))
+           (redraw-display)
+           (let* ((key (read-key))
+                  (name (lem-core::keyseq-to-string (list key))))
+             (lem/transient::hide-transient)
+             (cond
+               ((or (string= name "q") (string= name "Escape")) (return))
+               (t
+                (multiple-value-bind (command reopen-p)
+                    (llm-full-menu-action name)
+                  (if command
+                      (progn
+                        (call-command command nil)
+                        (unless reopen-p (return)))
+                      (message "No full LLM action is bound to ~a" name)))))))
+      (lem/transient::hide-transient))))
 
 (defun llm-menu-keymap ()
   (let ((keymap (make-keymap :description
