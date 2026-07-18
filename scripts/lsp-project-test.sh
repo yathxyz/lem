@@ -227,6 +227,13 @@ record_workspace_state() {
   wait_report_count '^STATE label=manual ' "$((before + 1))"
 }
 
+record_progress_state() {
+  local before
+  before=$(report_count '^PROGRESS ')
+  invoke_mx lem-yath-test-lsp-record-progress || return 1
+  wait_report_count '^PROGRESS ' "$((before + 1))"
+}
+
 wait_session_dead() {
   local timeout=${1:-20} index=0
   while ((index < timeout * 4)); do
@@ -316,6 +323,147 @@ if record_workspace_state; then
   fi
 else
   fail same-root-routing 'could not record project A workspace state'
+fi
+
+if invoke_mx lem-yath-test-lsp-progress-begin &&
+   wait_event_count PROGRESS_CREATE_RESPONSE \
+     "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" 1 &&
+   lem_wait_for "$session" 'LSP 10%' 10 >/dev/null &&
+   record_progress_state; then
+  progress_state=$(grep '^PROGRESS ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$progress_state" = \
+       'PROGRESS percentage=10 reports=1 timers=0 status=yes rendered=yes' ]; then
+    pass lsp-progress-begin \
+      'server-created progress appears in every attached buffer modeline'
+  else
+    fail lsp-progress-begin "unexpected begin state: $progress_state"
+  fi
+else
+  fail lsp-progress-begin \
+    'workDoneProgress/create or the initial modeline report failed'
+fi
+
+if invoke_mx lem-yath-test-lsp-progress-report &&
+   wait_event_count PROGRESS_TRIGGER 'kind=report' 1 &&
+   lem_wait_for "$session" 'LSP 37%' 10 >/dev/null &&
+   record_progress_state; then
+  progress_state=$(grep '^PROGRESS ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$progress_state" = \
+       'PROGRESS percentage=37 reports=1 timers=0 status=yes rendered=yes' ]; then
+    pass lsp-progress-report 'progress reports refresh the visible percentage'
+  else
+    fail lsp-progress-report "unexpected report state: $progress_state"
+  fi
+else
+  fail lsp-progress-report 'the deterministic progress report was not rendered'
+fi
+
+if invoke_mx lem-yath-test-lsp-progress-second-begin &&
+   wait_event_count PROGRESS_CREATE_RESPONSE \
+     "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" 2 &&
+   lem_wait_for "$session" 'LSP 50%' 10 >/dev/null &&
+   record_progress_state; then
+  progress_state=$(grep '^PROGRESS ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$progress_state" = \
+       'PROGRESS percentage=50 reports=2 timers=0 status=yes rendered=yes' ]; then
+    pass lsp-progress-aggregate \
+      'simultaneous server tasks render their aggregate percentage'
+  else
+    fail lsp-progress-aggregate \
+      "unexpected aggregate state: $progress_state"
+  fi
+else
+  fail lsp-progress-aggregate \
+    'the second work-done token was not created or aggregated'
+fi
+
+if invoke_mx lem-yath-test-lsp-progress-omit-percentage &&
+   wait_event_count PROGRESS_TRIGGER 'kind=report-no-percentage' 1 &&
+   lem_wait_for "$session" 'LSP 63%' 10 >/dev/null &&
+   record_progress_state; then
+  progress_state=$(grep '^PROGRESS ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$progress_state" = \
+       'PROGRESS percentage=63 reports=2 timers=0 status=yes rendered=yes' ]; then
+    pass lsp-progress-optional-percentage \
+      'a percentage-free report leaves its token out of the numeric aggregate'
+  else
+    fail lsp-progress-optional-percentage \
+      "unexpected optional-percentage state: $progress_state"
+  fi
+else
+  fail lsp-progress-optional-percentage \
+    'a valid percentage-free report did not match Eglot aggregation'
+fi
+
+if ! invoke_mx lem-yath-test-lsp-progress-restore-percentage ||
+   ! wait_event_count PROGRESS_TRIGGER 'kind=report' 2 ||
+   ! lem_wait_for "$session" 'LSP 50%' 10 >/dev/null; then
+  fail lsp-progress-aggregate-restore \
+    'the primary percentage could not rejoin the aggregate'
+fi
+
+if invoke_mx lem-yath-test-lsp-progress-second-end &&
+   wait_event_count PROGRESS_TRIGGER 'kind=second-end' 1 &&
+   lem_wait_for "$session" 'LSP 68%' 10 >/dev/null &&
+   record_progress_state; then
+  progress_state=$(grep '^PROGRESS ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$progress_state" = \
+       'PROGRESS percentage=68 reports=2 timers=1 status=yes rendered=yes' ]; then
+    pass lsp-progress-token-isolation \
+      'one completed token remains independent during its grace period'
+  else
+    fail lsp-progress-token-isolation \
+      "unexpected isolated-token state: $progress_state"
+  fi
+else
+  fail lsp-progress-token-isolation \
+    'the second completion did not retain the first active token'
+fi
+
+sleep 2.3
+if lem_wait_for "$session" 'LSP 37%' 10 >/dev/null &&
+   record_progress_state; then
+  progress_state=$(grep '^PROGRESS ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$progress_state" = \
+       'PROGRESS percentage=37 reports=1 timers=0 status=yes rendered=yes' ]; then
+    pass lsp-progress-token-expiry \
+      'the completed token expires without removing the active token'
+  else
+    fail lsp-progress-token-expiry \
+      "unexpected token-expiry state: $progress_state"
+  fi
+else
+  fail lsp-progress-token-expiry \
+    'the active token did not remain after its completed peer expired'
+fi
+
+if invoke_mx lem-yath-test-lsp-progress-end &&
+   wait_event_count PROGRESS_TRIGGER 'kind=end' 1 &&
+   lem_wait_for "$session" 'LSP 100%' 10 >/dev/null &&
+   record_progress_state; then
+  progress_state=$(grep '^PROGRESS ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$progress_state" = \
+       'PROGRESS percentage=100 reports=1 timers=1 status=yes rendered=yes' ]; then
+    pass lsp-progress-end 'completion remains visibly at 100% during its grace period'
+  else
+    fail lsp-progress-end "unexpected end state: $progress_state"
+  fi
+else
+  fail lsp-progress-end 'the deterministic progress completion was not rendered'
+fi
+
+sleep 2.3
+if ! lem_capture "$session" | grep -Fq 'LSP 100%' &&
+   record_progress_state; then
+  progress_state=$(grep '^PROGRESS ' "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$progress_state" = \
+       'PROGRESS percentage=none reports=0 timers=0 status=yes rendered=yes' ]; then
+    pass lsp-progress-expiry 'completion and its timer disappear after two seconds'
+  else
+    fail lsp-progress-expiry "unexpected expiry state: $progress_state"
+  fi
+else
+  fail lsp-progress-expiry 'completed progress remained visible or unrecordable'
 fi
 
 if invoke_mx lem-yath-test-lsp-open-project-b &&

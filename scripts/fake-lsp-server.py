@@ -131,6 +131,28 @@ class FixtureServer:
     def response(self, request_id: object, result: object) -> dict[str, Any]:
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
+    def progress_notification(
+        self,
+        kind: str,
+        percentage: int | None = None,
+        token: str = "fixture-index",
+    ) -> dict[str, Any]:
+        value: dict[str, Any] = {"kind": kind}
+        if kind == "begin":
+            value["title"] = "Indexing fixture"
+            value["message"] = "Starting"
+        elif kind == "report":
+            value["message"] = "Scanning"
+        elif kind == "end":
+            value["message"] = "Finished"
+        if percentage is not None:
+            value["percentage"] = percentage
+        return {
+            "jsonrpc": "2.0",
+            "method": "$/progress",
+            "params": {"token": token, "value": value},
+        }
+
     def error(
         self, request_id: object, code: int, message: str
     ) -> dict[str, Any]:
@@ -188,6 +210,24 @@ class FixtureServer:
         method = message.get("method")
         params = message.get("params") or {}
         request_id = message.get("id")
+
+        if method is None and request_id in {
+            "fixture-progress-create",
+            "fixture-progress-secondary-create",
+        }:
+            token = (
+                "fixture-index"
+                if request_id == "fixture-progress-create"
+                else "fixture-secondary"
+            )
+            self.log(
+                "PROGRESS_CREATE_RESPONSE",
+                result=message.get("result"),
+                token=token,
+            )
+            return self.progress_notification(
+                "begin", 10 if token == "fixture-index" else 63, token
+            )
 
         if method == "initialize":
             self.root_uri = str(params.get("rootUri") or "")
@@ -380,6 +420,42 @@ class FixtureServer:
         if method == "$/cancelRequest":
             self.log("CANCEL_REQUEST", request_id=params.get("id", ""))
             return None
+
+        if method == "lem-yath/progressBegin":
+            self.log("PROGRESS_TRIGGER", kind="begin")
+            return {
+                "jsonrpc": "2.0",
+                "id": "fixture-progress-create",
+                "method": "window/workDoneProgress/create",
+                "params": {"token": "fixture-index"},
+            }
+
+        if method == "lem-yath/progressReport":
+            self.log("PROGRESS_TRIGGER", kind="report")
+            return self.progress_notification("report", 37)
+
+        if method == "lem-yath/progressReportNoPercentage":
+            self.log("PROGRESS_TRIGGER", kind="report-no-percentage")
+            return self.progress_notification("report")
+
+        if method == "lem-yath/progressSecondBegin":
+            self.log("PROGRESS_TRIGGER", kind="second-begin")
+            return {
+                "jsonrpc": "2.0",
+                "id": "fixture-progress-secondary-create",
+                "method": "window/workDoneProgress/create",
+                "params": {"token": "fixture-secondary"},
+            }
+
+        if method == "lem-yath/progressSecondEnd":
+            self.log("PROGRESS_TRIGGER", kind="second-end")
+            return self.progress_notification(
+                "end", token="fixture-secondary"
+            )
+
+        if method == "lem-yath/progressEnd":
+            self.log("PROGRESS_TRIGGER", kind="end")
+            return self.progress_notification("end")
 
         if method == "shutdown":
             self.log("SHUTDOWN", delay_ms=self.shutdown_delay_ms)

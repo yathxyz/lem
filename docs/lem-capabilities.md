@@ -1787,9 +1787,13 @@ This is intentionally partial parity with Emacs `csharp-mode`/
 `csharp-ts-mode`: tree-sitter supplies highlighting, but the native mode and
 C-like indentation remain in control rather than reproducing the full
 tree-sitter major-mode semantics. Lem-yath acknowledges dynamic file-watch
-registration and work-done progress creation so conforming servers can
-continue, but it does not provide filesystem notifications or render a
-progress UI.
+registration so conforming servers can continue, but it does not provide
+filesystem notifications. It advertises work-done progress, accepts server
+progress-token creation, and tracks at most 64 simultaneous reports per
+workspace. Every attached buffer renders the Eglot-style aggregate percentage
+in its right modeline; completed tokens remain at 100% for two seconds, expire
+independently, and are cleared with the workspace. Eglot's graphical modeline
+hover text for task titles and messages has no ncurses counterpart.
 
 GDScript files use a native `gdscript-mode` with the pinned `.gd`, comment,
 tab-width-4 indentation, and programming-mode behavior. The packaged GDScript

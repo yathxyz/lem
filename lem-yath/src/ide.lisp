@@ -539,6 +539,46 @@
         (message "JDTLS is already enabled for this buffer.")
         (lem-lsp-mode::lsp-mode t))))
 
+;;; --- Eglot-style work-done progress -------------------------------------
+
+(defun lsp-work-done-progress-modeline (window)
+  (let* ((buffer (window-buffer window))
+         (workspace (buffer-value buffer 'lem-lsp-mode::lsp-workspace))
+         (percentage
+           (and workspace
+                (lem-lsp-mode::workspace-progress-percentage workspace))))
+    (if percentage
+        (values (format nil " LSP ~d% " percentage)
+                (if (eq window (current-window))
+                    'lem-core::modeline-minor-modes-attribute
+                    'lem-core::inactive-modeline-minor-modes-attribute)
+                :right)
+        "")))
+
+(defun lsp-progress-modeline-attached (buffer workspace)
+  (declare (ignore workspace))
+  (modeline-add-status-list 'lsp-work-done-progress-modeline buffer))
+
+(defun lsp-progress-modeline-detached (buffer workspace)
+  (declare (ignore workspace))
+  (modeline-remove-status-list 'lsp-work-done-progress-modeline buffer))
+
+(defun configure-lsp-progress-modeline ()
+  (remove-hook lem-lsp-mode::*lsp-buffer-attached-hook*
+               'lsp-progress-modeline-attached)
+  (remove-hook lem-lsp-mode::*lsp-buffer-detached-hook*
+               'lsp-progress-modeline-detached)
+  (add-hook lem-lsp-mode::*lsp-buffer-attached-hook*
+            'lsp-progress-modeline-attached)
+  (add-hook lem-lsp-mode::*lsp-buffer-detached-hook*
+            'lsp-progress-modeline-detached)
+  (dolist (buffer (buffer-list))
+    (modeline-remove-status-list 'lsp-work-done-progress-modeline buffer)
+    (when (buffer-value buffer 'lem-lsp-mode::lsp-workspace)
+      (modeline-add-status-list 'lsp-work-done-progress-modeline buffer))))
+
+(configure-lsp-progress-modeline)
+
 ;;; --- configured grep defaults match the Emacs setup ------------------------
 
 (when (executable-find "rg")

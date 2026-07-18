@@ -382,6 +382,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
   deduplication and timeout, explicit buffer ownership with save-as migration,
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,
+  Eglot-style aggregate work-done percentages in every attached buffer's
+  modeline with independent two-second completion expiry,
   and a one-prompt `SPC p s` workspace-symbol search with Consult's minimum
   input, debounce/throttle timing, annotated kind groups, project-scoped
   fan-out across every active language server, progressive score-ranked

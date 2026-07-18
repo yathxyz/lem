@@ -169,7 +169,7 @@
 +    :initarg :key
 +    :initform nil
 +    :accessor workspace-key)
-@@ -176,0 +196,28 @@
+@@ -176,0 +196,34 @@
 +   (state
 +    :initarg :state
 +    :initform :starting
@@ -198,6 +198,12 @@
 +    :initarg :configuration
 +    :initform nil
 +    :accessor workspace-configuration)
++   (progress-reports
++    :initform (make-hash-table :test 'equal)
++    :accessor workspace-progress-reports)
++   (progress-removal-timers
++    :initform (make-hash-table :test 'equal)
++    :accessor workspace-progress-removal-timers)
 @@ -183,4 +230,13 @@
 -  (make-instance 'workspace
 -                 :spec spec
@@ -327,7 +333,7 @@
 +        (when (and errorp (buffer-language-id buffer))
 +          (error "Buffer ~A is not attached to an LSP workspace."
 +                 (buffer-name buffer))))))
-@@ -252,2 +384,42 @@
+@@ -252,2 +390,51 @@
 -  (loop :for workspace-list :being :each :hash-value :in *workspace-list-per-language-id*
 -        :append (workspace-list-workspaces workspace-list)))
 +  (loop :for workspace-list :being :each :hash-value
@@ -361,12 +367,21 @@
 +    (ignore-errors (spinner:stop-loading-spinner spinner))
 +    (setf (workspace-startup-spinner workspace) nil)))
 +
++(defun stop-workspace-progress (workspace)
++  (maphash (lambda (token timer)
++             (declare (ignore token))
++             (ignore-errors (stop-timer timer)))
++           (workspace-progress-removal-timers workspace))
++  (clrhash (workspace-progress-removal-timers workspace))
++  (clrhash (workspace-progress-reports workspace)))
++
 +(defun dispose-workspace (workspace)
 +  (unless (member (workspace-state workspace) '(:stopping :disposed))
 +    (let ((initialized-p (eq :ready (workspace-state workspace))))
 +      (remove-workspace workspace)
 +      (setf (workspace-state workspace) :stopping)
 +      (stop-workspace-startup workspace)
++      (stop-workspace-progress workspace)
 +      (dolist (buffer (copy-list (workspace-buffers workspace)))
 +        (detach-lsp-buffer buffer workspace :notify initialized-p))
 +      (setf (workspace-pending-continuations workspace) nil)

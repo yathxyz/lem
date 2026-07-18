@@ -140,6 +140,62 @@
 (defvar *lsp-project-test-pending-workspace* nil)
 (defvar *lsp-project-test-slow-buffer* nil)
 
+(defun lsp-project-test-progress-workspace ()
+  (or (and *lsp-project-test-a-one*
+           (buffer-value *lsp-project-test-a-one*
+                         'lem-lsp-mode::lsp-workspace))
+      (editor-error "Project A has no LSP workspace")))
+
+(defun lsp-project-test-send-progress-trigger (method)
+  (let* ((workspace (lsp-project-test-progress-workspace))
+         (client (lem-lsp-mode::workspace-client workspace)))
+    (jsonrpc:notify
+     (lem-language-client/client:client-connection client)
+     method
+     (lem-lsp-base/type:make-lsp-map))))
+
+(define-command lem-yath-test-lsp-progress-begin () ()
+  (lsp-project-test-send-progress-trigger "lem-yath/progressBegin"))
+
+(define-command lem-yath-test-lsp-progress-report () ()
+  (lsp-project-test-send-progress-trigger "lem-yath/progressReport"))
+
+(define-command lem-yath-test-lsp-progress-omit-percentage () ()
+  (lsp-project-test-send-progress-trigger
+   "lem-yath/progressReportNoPercentage"))
+
+(define-command lem-yath-test-lsp-progress-restore-percentage () ()
+  (lsp-project-test-send-progress-trigger "lem-yath/progressReport"))
+
+(define-command lem-yath-test-lsp-progress-second-begin () ()
+  (lsp-project-test-send-progress-trigger "lem-yath/progressSecondBegin"))
+
+(define-command lem-yath-test-lsp-progress-second-end () ()
+  (lsp-project-test-send-progress-trigger "lem-yath/progressSecondEnd"))
+
+(define-command lem-yath-test-lsp-progress-end () ()
+  (lsp-project-test-send-progress-trigger "lem-yath/progressEnd"))
+
+(define-command lem-yath-test-lsp-record-progress () ()
+  (let* ((buffer *lsp-project-test-a-one*)
+         (workspace (lsp-project-test-progress-workspace))
+         (reports (lem-lsp-mode::workspace-progress-reports workspace))
+         (timers (lem-lsp-mode::workspace-progress-removal-timers workspace))
+         (percentage
+           (lem-lsp-mode::workspace-progress-percentage workspace))
+         (text (lsp-work-done-progress-modeline (current-window)))
+         (expected-text
+           (if percentage (format nil " LSP ~d% " percentage) "")))
+    (lsp-project-test-report
+     "PROGRESS percentage=~a reports=~d timers=~d status=~a rendered=~a"
+     (or percentage "none")
+     (hash-table-count reports)
+     (hash-table-count timers)
+     (lsp-project-test-yes-no
+      (member 'lsp-work-done-progress-modeline
+              (buffer-value buffer 'lem-core::modeline-status-list)))
+     (lsp-project-test-yes-no (equal text expected-text)))))
+
 (defun lsp-project-test-report (control &rest arguments)
   (with-open-file (stream *lsp-project-test-report-path*
                           :direction :output
@@ -317,6 +373,11 @@
                 (lem-lsp-base/utils:uri-to-pathname
                  "file://remote.example/source.lisp")))
              "remote-file-authority-is-rejected")
+      (let* ((capabilities (lem-lsp-mode::client-capabilities))
+             (window (lsp:client-capabilities-window capabilities)))
+        (check (eq t (lsp:window-client-capabilities-work-done-progress
+                      window))
+               "work-done-progress-is-advertised"))
       (check (uiop:pathname-equal
               #P"/tmp/localhost.lisp"
               (lem-lsp-base/utils:uri-to-pathname
