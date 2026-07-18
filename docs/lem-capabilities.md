@@ -2583,14 +2583,19 @@ in the active Evil-Org text-object theme: `ae/ie`, `aE/iE`, `ar/ir`, and
 `aR/iR` in operator-pending and Visual states. The bounded model covers inline
 markup, bracket/plain links, timestamps, table cells, paragraphs and rows,
 flat matched blocks, point-sensitive simple unordered items/lists, tables with
-associated formulas, headline elements, sections, and heading ancestry. It
+associated formulas, matched property/LOGBOOK/generic drawers with
+node-property, CLOCK, and paragraph children, headline elements, sections,
+and heading ancestry. Supported inline objects remain available in generic
+drawer prose, CLOCK lines expose timestamps, and property values remain
+opaque like pinned Org. It
 preserves Evil-Org's characterwise versus linewise
 register/Visual shapes, original-point count anchoring, ancestry climbing,
 owned post-blank, and reverse or repeated Visual expansion without taking
 ownership of normal `a/i`, stock `aw/iw`, surround, or operator Snipe. Ordered,
 tab-structured, or continuation-list contexts fail object, element, and
-greater-element requests closed. Recognized drawers, orphan-property lines,
-and nested or unclosed block roots fail all four families closed; recognized
+greater-element requests closed. Empty drawer interiors, orphan-property
+lines, malformed or unclosed drawers, and nested or unclosed block roots fail
+the unavailable families closed; recognized
 unsupported or ambiguous inline/cell syntax fails object requests closed; and empty
 leaf-item or inner-subtree ranges abort. These aborts occur before mutation and
 preserve text, registers, and an existing Visual selection. Type-mismatched

@@ -128,6 +128,83 @@
           :unless (line-offset point 1)
             :return nil)))
 
+(defun %org-make-drawer-boundary (start end-marker name)
+  "Return a matched drawer boundary from START through END-MARKER."
+  (let* ((property-p (string= name "PROPERTIES"))
+         (raw-inner-start (%org-line-after start))
+         (inner-start
+           (with-point ((point raw-inner-start))
+             (unless property-p
+               (loop :while (and (point< point end-marker)
+                                  (cl-ppcre:scan
+                                   "^\\s*$" (line-string point)))
+                     :do (unless (line-offset point 1) (return))))
+             (and (point< point end-marker)
+                  (copy-point point :temporary))))
+         (core-end (%org-line-after end-marker))
+         (outer-end (%org-expand-blank-lines core-end)))
+    (%make-org-boundary
+     (copy-point start :temporary)
+     outer-end
+     inner-start
+     (and inner-start (copy-point end-marker :temporary))
+     :character
+     (if property-p :property-drawer :drawer))))
+
+(defun %org-drawer-boundary-at (origin)
+  "Return the complete matched Org drawer containing ORIGIN.
+
+Drawer-looking lines inside a matched drawer are content until its `:END:'.
+Drawer markers inside a typed Org block remain literal.  Unclosed drawers
+return NIL so callers retain the existing fail-closed boundary."
+  (with-point ((point (buffer-start-point (point-buffer origin)))
+               (target origin))
+    (line-start target)
+    (loop :with open-start := nil
+          :with open-name := nil
+          :with target-in-open-p := nil
+          :with open-block-type := nil
+          :for line := (line-string point)
+          :for block-marker := (org-block-marker line)
+          :for drawer-marker := (%org-drawer-marker line)
+          :do
+             (when (and open-start (same-line-p point target))
+               (setf target-in-open-p t))
+             (cond
+               (open-block-type
+                (when (and block-marker
+                           (eq (car block-marker) :end)
+                           (string= (cdr block-marker) open-block-type))
+                  (setf open-block-type nil)))
+               (open-start
+                (when (eq drawer-marker :end)
+                  (when target-in-open-p
+                    (return (%org-make-drawer-boundary
+                             open-start point open-name)))
+                  (setf open-start nil
+                        open-name nil
+                        target-in-open-p nil)))
+               ((and block-marker (eq (car block-marker) :begin))
+                (setf open-block-type (cdr block-marker)))
+               ((and drawer-marker (not (eq drawer-marker :end)))
+                (setf open-start (copy-point point :temporary)
+                      open-name drawer-marker
+                      target-in-open-p (same-line-p point target))))
+          :unless (line-offset point 1)
+            :return nil)))
+
+(defun %org-drawer-inline-kind (point drawer)
+  "Return :FULL, :TIMESTAMP, or NIL for inline parsing inside DRAWER."
+  (let ((line (line-string point)))
+    (cond
+      ((eq (%org-boundary-node-type drawer) :property-drawer) nil)
+      ((or (same-line-p point (%org-boundary-start drawer))
+           (and (%org-boundary-inner-end drawer)
+                (same-line-p point (%org-boundary-inner-end drawer))))
+       nil)
+      ((cl-ppcre:scan "(?i)^\\s*CLOCK:" line) :timestamp)
+      (t :full))))
+
 (defun %org-special-line-p (point)
   "Whether POINT is on syntax this conservative model does not own."
   (let ((line (line-string point)))
@@ -422,30 +499,35 @@ cannot fall through to a paragraph or section after an inner end marker."
            (%org-inline-candidate-end container))))
 
 (defun %org-line-object-candidates (point)
-  (unless (or (%org-unclosed-block-at-p point)
-              (org-inside-block-p point)
-              (%org-inside-drawer-p point)
-              (%org-special-line-p point))
-    (let* ((line (line-string point))
-           (links (%org-link-candidates line))
-           (plain-links
-             (remove-if
-              (lambda (plain-link)
-                (find-if (lambda (link)
+  (let* ((drawer (%org-drawer-boundary-at point))
+         (drawer-kind (and drawer (%org-drawer-inline-kind point drawer))))
+    (unless (or (%org-unclosed-block-at-p point)
+                (org-inside-block-p point)
+                (and drawer (null drawer-kind))
+                (and (null drawer) (%org-special-line-p point)))
+      (let ((line (line-string point)))
+        (if (eq drawer-kind :timestamp)
+            (%org-timestamp-candidates line)
+            (let* ((links (%org-link-candidates line))
+                   (plain-links
+                     (remove-if
+                      (lambda (plain-link)
+                        (find-if
+                         (lambda (link)
                            (%org-inline-contained-by-p plain-link link))
                          links))
-              (%org-plain-link-candidates line))))
-      (append
-       links
-       plain-links
-       (%org-timestamp-candidates line)
-       (%org-inline-delimited-candidates line #\~ :code)
-       (%org-inline-delimited-candidates line #\= :verbatim)
-       (%org-inline-delimited-candidates line #\* :bold)
-       (%org-inline-delimited-candidates line #\/ :italic)
-       (%org-inline-delimited-candidates line #\_ :underline)
-       (%org-inline-delimited-candidates line #\+ :strike-through)
-       (%org-table-cell-candidates point)))))
+                      (%org-plain-link-candidates line))))
+              (append
+               links
+               plain-links
+               (%org-timestamp-candidates line)
+               (%org-inline-delimited-candidates line #\~ :code)
+               (%org-inline-delimited-candidates line #\= :verbatim)
+               (%org-inline-delimited-candidates line #\* :bold)
+               (%org-inline-delimited-candidates line #\/ :italic)
+               (%org-inline-delimited-candidates line #\_ :underline)
+               (%org-inline-delimited-candidates line #\+ :strike-through)
+               (%org-table-cell-candidates point))))))))
 
 (defun %org-inline-span (candidate)
   (- (%org-inline-candidate-end candidate)
@@ -560,8 +642,8 @@ cannot fall through to a paragraph or section after an inner end marker."
 (defun %org-boundary-scan-barrier-p (point)
   "Whether forward text-object discovery must stop at POINT."
   (or (%org-unclosed-block-at-p point)
-      (%org-inside-drawer-p point)
-      (%org-special-line-p point)
+      (and (%org-special-line-p point)
+           (null (%org-drawer-boundary-at point)))
       (%org-list-continuation-context-p point)
       (and (org-list-item-line-p point)
            (not (%org-current-list-item point)))))
@@ -897,16 +979,105 @@ is a paragraph."
        (owned (%org-table-boundary previous :kind :character))
        (owned (%org-paragraph-boundary previous))))))
 
+(defun %org-drawer-line-element-boundary (origin node-type)
+  "Return one complete drawer child line at ORIGIN as NODE-TYPE."
+  (with-point ((start origin)
+               (inner-end origin))
+    (line-start start)
+    (line-end inner-end)
+    (%make-org-boundary
+     (copy-point start :temporary)
+     (%org-line-after start)
+     (copy-point start :temporary)
+     (copy-point inner-end :temporary)
+     :character node-type)))
+
+(defun %org-drawer-paragraph-line-p (point)
+  "Whether POINT is an ordinary paragraph line inside a valid drawer."
+  (let ((line (line-string point)))
+    (and (not (cl-ppcre:scan "^\\s*$" line))
+         (null (%org-drawer-marker line))
+         (null (org-block-marker line))
+         (not (org-heading-line-p point))
+         (not (org-table-line-p point))
+         (null (org-navigation-list-anchor point))
+         (not (cl-ppcre:scan
+               "(?i)^\\s*(?:SCHEDULED|DEADLINE|CLOSED|CLOCK):" line))
+         (not (cl-ppcre:scan "^\\s*#" line)))))
+
+(defun %org-drawer-paragraph-boundary (origin drawer)
+  "Return the paragraph child at ORIGIN, bounded by DRAWER contents."
+  (let ((contents-start (%org-boundary-inner-start drawer))
+        (contents-end (%org-boundary-inner-end drawer)))
+    (when (and contents-start contents-end
+               (%org-drawer-paragraph-line-p origin))
+      (with-point ((start origin)
+                   (end origin))
+        (line-start start)
+        (line-start end)
+        (loop :while
+                (with-point ((previous start))
+                  (and (line-offset previous -1)
+                       (not (point< previous contents-start))
+                       (%org-drawer-paragraph-line-p previous)
+                       (progn (move-point start previous) t))))
+        (loop :while
+                (with-point ((next end))
+                  (and (line-offset next 1)
+                       (point< next contents-end)
+                       (%org-drawer-paragraph-line-p next)
+                       (progn (move-point end next) t))))
+        (let* ((core-end (%org-line-after end))
+               (expanded (%org-expand-blank-lines core-end))
+               (outer-end
+                 (if (point< contents-end expanded)
+                     (copy-point contents-end :temporary)
+                     expanded)))
+          (%make-org-boundary
+           (copy-point start :temporary) outer-end
+           (copy-point start :temporary) core-end
+           :character :paragraph))))))
+
+(defun %org-drawer-element-at-point (origin drawer)
+  "Return the GNU Org child element at ORIGIN inside DRAWER."
+  (let ((start (%org-boundary-start drawer))
+        (contents-end (%org-boundary-inner-end drawer))
+        (node-type (%org-boundary-node-type drawer))
+        (line (line-string origin)))
+    (cond
+      ((or (same-line-p origin start)
+           (and contents-end (same-line-p origin contents-end)))
+       drawer)
+      ((eq node-type :property-drawer)
+       (unless (cl-ppcre:scan "^\\s*$" line)
+         (%org-drawer-line-element-boundary origin :node-property)))
+      ((cl-ppcre:scan "(?i)^\\s*CLOCK:" line)
+       (%org-drawer-line-element-boundary origin :clock))
+      ((cl-ppcre:scan
+        "(?i)^\\s*(?:SCHEDULED|DEADLINE|CLOSED):" line)
+       (%org-drawer-line-element-boundary origin :planning))
+      ((%org-table-formula-line-p line)
+       (%org-table-element-boundary origin))
+      ((cl-ppcre:scan "(?i)^\\s*#\\+[A-Za-z0-9_]+:" line)
+       (%org-drawer-line-element-boundary origin :keyword))
+      ((org-table-line-p origin)
+       (%org-table-element-boundary origin))
+      ((org-navigation-list-anchor origin)
+       (%org-list-element-boundary origin))
+      (t
+       (%org-drawer-paragraph-boundary origin drawer)))))
+
 (defun %org-element-at-point (origin)
   (or (%org-block-boundary-at origin)
       (and (not (%org-unclosed-block-at-p origin))
-           (not (%org-inside-drawer-p origin))
-           (or (and (org-heading-line-p origin)
-                    (%org-heading-boundary origin :kind :character))
-               (%org-table-element-boundary origin)
-               (%org-list-element-boundary origin)
-               (%org-postblank-element-boundary origin)
-               (%org-paragraph-boundary origin)))))
+           (alexandria:if-let ((drawer (%org-drawer-boundary-at origin)))
+             (%org-drawer-element-at-point origin drawer)
+             (or (and (org-heading-line-p origin)
+                      (%org-heading-boundary origin :kind :character))
+                 (%org-table-element-boundary origin)
+                 (%org-list-element-boundary origin)
+                 (%org-postblank-element-boundary origin)
+                 (%org-paragraph-boundary origin))))))
 
 (defun %org-next-element (origin)
   (with-point ((point origin))
@@ -935,10 +1106,12 @@ is a paragraph."
          kind :headline)))))
 
 (defun %org-section-boundary (origin)
-  (let ((block (%org-block-boundary-at origin)))
-    (unless (or (%org-inside-drawer-p origin)
-                (%org-unclosed-block-at-p origin)
-                (and (%org-special-line-p origin) (null block))
+  (let ((block (%org-block-boundary-at origin))
+        (drawer (%org-drawer-boundary-at origin)))
+    (unless (or (%org-unclosed-block-at-p origin)
+                (and (%org-special-line-p origin)
+                     (null block)
+                     (null drawer))
                 (%org-list-continuation-context-p origin)
                 (org-heading-line-p origin))
       (alexandria:if-let ((heading (org-current-heading-point origin)))
@@ -994,7 +1167,16 @@ is a paragraph."
                          :test #'string=)))))))
 
 (defun %org-greater-chain (origin)
-  (let ((block (%org-block-boundary-at origin)))
+  (let ((block (%org-block-boundary-at origin))
+        (drawer (%org-drawer-boundary-at origin)))
+    (when drawer
+      (setf (%org-boundary-kind drawer) :line)
+      (return-from %org-greater-chain
+        (append
+         (list drawer)
+         (alexandria:when-let ((section (%org-section-boundary origin)))
+           (list section))
+         (%org-heading-ancestors origin))))
     (when (or (%org-inside-drawer-p origin)
               (%org-unclosed-block-at-p origin)
               (%org-list-continuation-context-p origin)
@@ -1039,16 +1221,18 @@ is a paragraph."
                     (%org-heading-ancestors origin)))))))
 
 (defun %org-subtree-boundary (origin count)
-  (unless (or (%org-inside-drawer-p origin)
-              (%org-unclosed-block-at-p origin)
+  (let ((drawer (%org-drawer-boundary-at origin)))
+    (unless (or (and (%org-inside-drawer-p origin) (null drawer))
+                (%org-unclosed-block-at-p origin)
               (and (%org-special-line-p origin)
-                   (null (%org-block-boundary-at origin))))
-    (alexandria:when-let ((heading (org-current-heading-point origin)))
-      ;; Evil-Org saturates an over-large subtree count at the root heading.
-      (dotimes (_ (1- count))
-        (alexandria:when-let ((parent (org-parent-heading-point heading)))
-          (setf heading parent)))
-      (%org-heading-boundary heading))))
+                     (null (%org-block-boundary-at origin))
+                     (null drawer)))
+      (alexandria:when-let ((heading (org-current-heading-point origin)))
+        ;; Evil-Org saturates an over-large subtree count at the root heading.
+        (dotimes (_ (1- count))
+          (alexandria:when-let ((parent (org-parent-heading-point heading)))
+            (setf heading parent)))
+        (%org-heading-boundary heading)))))
 
 ;;; --- public boundary API -------------------------------------------------
 

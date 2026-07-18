@@ -496,6 +496,40 @@ write_fixtures() {
     >"$WORKDIR/orphan-under-heading.org"
   printf '%s\n' '* H' ':MY-DRAWER:' ':ID: value' ':END:' 'KEEP' '* S' \
     >"$WORKDIR/hyphen-drawer.org"
+  printf '%s\n' '* H' ':MY-DRAWER:' ':ID: value' ':END:' 'KEEP' '* S' \
+    >"$WORKDIR/drawer-element.org"
+  printf '%s\n' '* H' ':MY-DRAWER:' ':ID: value' ':END:' 'KEEP' '* S' \
+    >"$WORKDIR/drawer-greater.org"
+  printf '%s\n' '* H' ':MY-DRAWER:' ':ID: value' ':END:' 'KEEP' '* S' \
+    >"$WORKDIR/drawer-inner-greater.org"
+  printf '%s\n' '* H' ':PROPERTIES:' ':ID: value' ':END:' 'KEEP' '* S' \
+    >"$WORKDIR/property-drawer-element.org"
+  printf '%s\n' '* H' ':PROPERTIES:' ':ID: value' ':END:' 'KEEP' '* S' \
+    >"$WORKDIR/property-drawer-greater.org"
+  printf '%s\n' '* H' ':MY-DRAWER:' ':ID: value' ':END:' 'KEEP' '* S' \
+    >"$WORKDIR/drawer-subtree.org"
+  printf '%s\n' \
+    '* H' \
+    ':LOGBOOK:' \
+    'CLOCK: [2026-07-14 Tue 09:00]--[2026-07-14 Tue 10:00] =>  1:00' \
+    ':END:' \
+    'KEEP' \
+    '* S' >"$WORKDIR/drawer-clock-element.org"
+  printf '%s\n' \
+    '* H' \
+    ':LOGBOOK:' \
+    'CLOCK: [2026-07-14 Tue 09:00]--[2026-07-14 Tue 10:00] =>  1:00' \
+    ':END:' \
+    'KEEP' \
+    '* S' >"$WORKDIR/drawer-clock-object.org"
+  printf '%s\n' '* H' ':NOTES:' 'note ~code~ tail' ':END:' 'KEEP' '* S' \
+    >"$WORKDIR/drawer-inline-object.org"
+  printf '%s\n' '* H' ':PROPERTIES:' ':NOTE: *bold* value' ':END:' 'KEEP' '* S' \
+    >"$WORKDIR/property-drawer-object.org"
+  printf '%s\n' '* H' ':LOGBOOK:' ':END:' 'KEEP' '* S' \
+    >"$WORKDIR/empty-drawer.org"
+  printf '%s\n' '* H' ':LOGBOOK:' 'CLOCK: [2026-07-14 Tue 09:00]' 'KEEP' \
+    '* S' >"$WORKDIR/unclosed-drawer.org"
   printf '%s\n' \
     '#+begin_src text' \
     'before' \
@@ -2461,17 +2495,146 @@ if start_case hyphen-drawer "$WORKDIR/hyphen-drawer.org" 'MY-DRAWER'; then
   send_keys "$CASE_SESSION" 2 j
   if operate_and_record hyphen-drawer "$CASE_SESSION" d a e; then
     assert_state hyphen-drawer-ae hyphen-drawer "$CASE_SESSION" \
-      'text=* H\n:MY-DRAWER:\n:ID: value\n:END:\nKEEP\n* S\n bytes=' \
+      'text=* H\n:MY-DRAWER:\n:END:\nKEEP\n* S\n bytes=' \
+      'register=:ID: value\n register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case drawer-element "$WORKDIR/drawer-element.org" 'MY-DRAWER'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record drawer-element "$CASE_SESSION" d a E; then
+    assert_state drawer-element-aE drawer-element "$CASE_SESSION" \
+      'text=* H\n:MY-DRAWER:\n:END:\nKEEP\n* S\n bytes=' \
+      'register=:ID: value\n register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case drawer-greater "$WORKDIR/drawer-greater.org" 'MY-DRAWER'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record drawer-greater "$CASE_SESSION" d a r; then
+    assert_state drawer-greater-ar drawer-greater "$CASE_SESSION" \
+      'text=* H\nKEEP\n* S\n bytes=' \
+      'register=:MY-DRAWER:\n:ID: value\n:END:\n register-type=line' \
+      'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case drawer-inner-greater \
+     "$WORKDIR/drawer-inner-greater.org" 'MY-DRAWER'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record drawer-inner-greater "$CASE_SESSION" d i r; then
+    assert_state drawer-inner-greater-ir drawer-inner-greater \
+      "$CASE_SESSION" \
+      'text=* H\n:MY-DRAWER:\n:END:\nKEEP\n* S\n bytes=' \
+      'register=:ID: value\n register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case property-drawer-element \
+     "$WORKDIR/property-drawer-element.org" 'PROPERTIES'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record property-drawer-element "$CASE_SESSION" d a E; then
+    assert_state property-drawer-element-aE property-drawer-element \
+      "$CASE_SESSION" \
+      'text=* H\n:PROPERTIES:\n:END:\nKEEP\n* S\n bytes=' \
+      'register=:ID: value\n register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case property-drawer-greater \
+     "$WORKDIR/property-drawer-greater.org" 'PROPERTIES'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record property-drawer-greater "$CASE_SESSION" d a r; then
+    assert_state property-drawer-greater-ar property-drawer-greater \
+      "$CASE_SESSION" \
+      'text=* H\nKEEP\n* S\n bytes=' \
+      'register=:PROPERTIES:\n:ID: value\n:END:\n register-type=line' \
+      'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case drawer-subtree "$WORKDIR/drawer-subtree.org" 'MY-DRAWER'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record drawer-subtree "$CASE_SESSION" d a R; then
+    assert_state drawer-subtree-aR drawer-subtree "$CASE_SESSION" \
+      'text=* S\n bytes=' \
+      'register=* H\n:MY-DRAWER:\n:ID: value\n:END:\nKEEP\n register-type=line' \
+      'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case drawer-clock-element \
+     "$WORKDIR/drawer-clock-element.org" 'CLOCK:'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record drawer-clock-element "$CASE_SESSION" d a E; then
+    assert_state drawer-clock-element-aE drawer-clock-element \
+      "$CASE_SESSION" \
+      'text=* H\n:LOGBOOK:\n:END:\nKEEP\n* S\n bytes=' \
+      'register=CLOCK: [2026-07-14 Tue 09:00]--[2026-07-14 Tue 10:00] =>  1:00\n register-type=char' \
+      'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case drawer-clock-object \
+     "$WORKDIR/drawer-clock-object.org" 'CLOCK:'; then
+  send_keys "$CASE_SESSION" 2 j 1 0 l
+  if operate_and_record drawer-clock-object "$CASE_SESSION" d a e; then
+    assert_state drawer-clock-object-ae drawer-clock-object \
+      "$CASE_SESSION" \
+      'text=* H\n:LOGBOOK:\nCLOCK: --[2026-07-14 Tue 10:00] =>  1:00\n:END:\nKEEP\n* S\n bytes=' \
+      'register=[2026-07-14 Tue 09:00] register-type=char' \
+      'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case drawer-inline-object \
+     "$WORKDIR/drawer-inline-object.org" 'code'; then
+  send_keys "$CASE_SESSION" 2 j 7 l
+  if operate_and_record drawer-inline-object "$CASE_SESSION" d a e; then
+    assert_state drawer-inline-object-ae drawer-inline-object \
+      "$CASE_SESSION" \
+      'text=* H\n:NOTES:\nnote tail\n:END:\nKEEP\n* S\n bytes=' \
+      'register=~code~  register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case property-drawer-object \
+     "$WORKDIR/property-drawer-object.org" 'bold'; then
+  send_keys "$CASE_SESSION" 2 j 9 l
+  if operate_and_record property-drawer-object "$CASE_SESSION" d a e; then
+    assert_state property-drawer-object-ae property-drawer-object \
+      "$CASE_SESSION" \
+      'text=* H\n:PROPERTIES:\n:END:\nKEEP\n* S\n bytes=' \
+      'register=:NOTE: *bold* value\n register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case empty-drawer "$WORKDIR/empty-drawer.org" 'LOGBOOK'; then
+  send_keys "$CASE_SESSION" j
+  if operate_and_record empty-drawer "$CASE_SESSION" d i r; then
+    assert_state empty-drawer-ir empty-drawer "$CASE_SESSION" \
+      'text=* H\n:LOGBOOK:\n:END:\nKEEP\n* S\n bytes=' \
       'register= register-type=none' 'modified=no'
   fi
-  if operate_and_record hyphen-drawer "$CASE_SESSION" d a E; then
-    assert_state hyphen-drawer-aE hyphen-drawer "$CASE_SESSION" \
-      'text=* H\n:MY-DRAWER:\n:ID: value\n:END:\nKEEP\n* S\n bytes=' \
-      'register= register-type=none' 'modified=no'
-  fi
-  if operate_and_record hyphen-drawer "$CASE_SESSION" d a r; then
-    assert_state hyphen-drawer-ar hyphen-drawer "$CASE_SESSION" \
-      'text=* H\n:MY-DRAWER:\n:ID: value\n:END:\nKEEP\n* S\n bytes=' \
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case unclosed-drawer "$WORKDIR/unclosed-drawer.org" 'CLOCK:'; then
+  send_keys "$CASE_SESSION" 2 j
+  if operate_and_record unclosed-drawer "$CASE_SESSION" d a r; then
+    assert_state unclosed-drawer-ar unclosed-drawer "$CASE_SESSION" \
+      'text=* H\n:LOGBOOK:\nCLOCK: [2026-07-14 Tue 09:00]\nKEEP\n* S\n bytes=' \
       'register= register-type=none' 'modified=no'
   fi
   stop_case "$CASE_SESSION"
