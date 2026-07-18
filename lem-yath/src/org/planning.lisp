@@ -19,7 +19,8 @@
 
 (defstruct (%org-timestamp-token
             (:constructor %make-org-timestamp-token))
-  start end active-p date time end-time extra)
+  start end active-p date time end-time extra
+  date-start time-start end-time-start)
 
 (defun org-date-weekday-name (date)
   (multiple-value-bind (year month day) (iso-date-components date)
@@ -365,15 +366,15 @@ is not changed."
                     (subseq text (1+ separator))))))
     (values start end (and start (or (null separator) end)))))
 
-(defun org-timestamp-token-at-point (&optional (point (current-point)))
-  "Return the ordinary Org timestamp containing or ending at POINT."
+(defun org-timestamp-tokens-on-line (&optional (point (current-point)))
+  "Return the valid ordinary Org timestamps on POINT's line."
   (let ((line (line-string point))
-        (column (point-charpos point))
-        (offset 0))
+        (offset 0)
+        tokens)
     (loop
       (multiple-value-bind (start end starts ends)
           (ppcre:scan *org-timestamp-scanner* line :start offset)
-        (unless start (return nil))
+        (unless start (return (nreverse tokens)))
         (let* ((opening (org-timestamp-match-part line starts ends 0))
                (date (org-timestamp-match-part line starts ends 1))
                (time-text (org-timestamp-match-part line starts ends 2))
@@ -393,13 +394,25 @@ is not changed."
           (when (and (or active-p inactive-p)
                      (valid-iso-date-p date)
                      (or (null time-text) time)
-                     (or (null end-time-text) end-time)
-                     (<= start column end))
-            (return
+                     (or (null end-time-text) end-time))
+            (push
               (%make-org-timestamp-token
                :start start :end end :active-p active-p :date date
-               :time time :end-time end-time :extra extra))))
+               :time time :end-time end-time :extra extra
+               :date-start (aref starts 1)
+               :time-start (aref starts 2)
+               :end-time-start (aref starts 3))
+              tokens)))
         (setf offset (max (1+ start) end))))))
+
+(defun org-timestamp-token-at-point (&optional (point (current-point)))
+  "Return the ordinary Org timestamp containing or ending at POINT."
+  (let ((column (point-charpos point)))
+    (find-if (lambda (token)
+               (<= (%org-timestamp-token-start token)
+                   column
+                   (%org-timestamp-token-end token)))
+             (org-timestamp-tokens-on-line point))))
 
 (defun org-timestamp-text (date active-p &key time end-time extra)
   (let ((opening (if active-p #\< #\[))
@@ -593,6 +606,186 @@ is not changed."
       (org-replace-timestamp-token token text)
       (message "~a" text)
       t)))
+
+;;; --- CLOCK timestamp adjustment -----------------------------------------
+
+(defparameter *org-clock-minute-step* 5
+  "Minute step used by GNU Org's unprefixed Shift-Control clock commands.")
+
+(defun org-clock-line-p (&optional (point (current-point)))
+  (not (null (ppcre:scan "(?i)^\\s*CLOCK:" (line-string point)))))
+
+(defun org-clock-prefix-count (argument)
+  (typecase argument
+    (integer argument)
+    (null 1)
+    (t 4)))
+
+(defun org-clock-token-unit (token column)
+  "Return the GNU Org timestamp unit selected at COLUMN in TOKEN."
+  (let ((date-start (%org-timestamp-token-date-start token))
+        (time-start (%org-timestamp-token-time-start token))
+        (end-time-start (%org-timestamp-token-end-time-start token)))
+    (cond
+      ((or (< column date-start)
+           (>= column (1- (%org-timestamp-token-end token))))
+       nil)
+      ((< column (+ date-start 4)) :year)
+      ((and (>= column (+ date-start 5))
+            (< column (+ date-start 7)))
+       :month)
+      ((and end-time-start (>= column end-time-start)) nil)
+      ((or (null time-start) (< column time-start)) :day)
+      ((< column (+ time-start 2)) :hour)
+      (t :minute))))
+
+(defun org-clock-token-universal-time (token)
+  (alexandria:when-let ((clock (%org-timestamp-token-time token)))
+    (multiple-value-bind (year month day)
+        (iso-date-components (%org-timestamp-token-date token))
+      (let ((hour (parse-integer clock :start 0 :end 2))
+            (minute (parse-integer clock :start 3 :end 5)))
+        (encode-universal-time 0 minute hour day month year 0)))))
+
+(defun org-clock-calendar-shift-time (time count unit)
+  "Shift TIME by calendar month or year, normalizing overflow like Org."
+  (multiple-value-bind (second minute hour day month year)
+      (decode-universal-time time 0)
+    (declare (ignore second))
+    (multiple-value-bind (target-year target-month)
+        (ecase unit
+          (:month
+           (let ((zero-month (+ (* year 12) (1- month) count)))
+             (values (floor zero-month 12) (1+ (mod zero-month 12)))))
+          (:year (values (+ year count) month)))
+      (unless (plusp target-year)
+        (editor-error "CLOCK timestamp leaves the supported date range"))
+      (+ (encode-universal-time 0 minute hour 1 target-month target-year 0)
+         (* (1- day) 86400)))))
+
+(defun org-clock-shift-time (time unit count)
+  (ecase unit
+    (:minute (+ time (* count 60)))
+    (:hour (+ time (* count 3600)))
+    (:day (+ time (* count 86400)))
+    ((:month :year) (org-clock-calendar-shift-time time count unit))))
+
+(defun org-clock-effective-count (time unit direction argument)
+  (if (and (eq unit :minute) (null argument))
+      (let* ((minute (nth-value 1 (decode-universal-time time 0)))
+             (remainder (mod minute *org-clock-minute-step*)))
+        (if (plusp direction)
+            (if (zerop remainder)
+                *org-clock-minute-step*
+                (- *org-clock-minute-step* remainder))
+            (if (zerop remainder)
+                (- *org-clock-minute-step*)
+                (- remainder))))
+      (* direction (org-clock-prefix-count argument))))
+
+(defun org-clock-token-text-for-time (token time)
+  (multiple-value-bind (second minute hour day month year)
+      (decode-universal-time time 0)
+    (declare (ignore second))
+    (org-timestamp-text
+     (format nil "~4,'0d-~2,'0d-~2,'0d" year month day)
+     (%org-timestamp-token-active-p token)
+     :time (format nil "~2,'0d:~2,'0d" hour minute)
+     :end-time (%org-timestamp-token-end-time token)
+     :extra (%org-timestamp-token-extra token))))
+
+(defun org-replace-string-span (text start end replacement)
+  (concatenate 'string (subseq text 0 start) replacement (subseq text end)))
+
+(defun org-clock-line-duration (start end)
+  (let* ((seconds (- end start))
+         (negative-p (minusp seconds))
+         (magnitude (abs seconds))
+         (hours (floor magnitude 3600))
+         (minutes (floor (mod magnitude 3600) 60)))
+    (if negative-p
+        (format nil "-~d:~2,'0d" hours minutes)
+        (format nil "~2d:~2,'0d" hours minutes))))
+
+(defun org-clock-line-with-duration (line start end)
+  (let ((base
+          (string-right-trim
+           '(#\Space #\Tab)
+           (ppcre:regex-replace
+            "\\s+=>\\s+[-+]?[0-9]+:[0-9]{2}\\s*$" line ""))))
+    (format nil "~a => ~a" base (org-clock-line-duration start end))))
+
+(defun org-replace-current-line (text column)
+  (with-point ((start (current-point))
+               (end (current-point)))
+    (line-start start)
+    (line-end end)
+    (delete-between-points start end)
+    (insert-string start text)
+    (move-point (current-point) start)
+    (character-offset (current-point) (min column (length text)))))
+
+(defun org-shift-clock-at-point (direction argument &key synchronous-p)
+  "Shift the CLOCK timestamp unit at point in DIRECTION.
+
+When SYNCHRONOUS-P is true, move both endpoints of a closed CLOCK by the
+selected endpoint's actual delta, preserving its duration.  A lone open CLOCK
+timestamp follows GNU Org's documented fallback and moves by itself."
+  (unless (org-clock-line-p)
+    (editor-error "Not at a CLOCK log"))
+  (let* ((column (point-charpos (current-point)))
+         (line (line-string (current-point)))
+         (tokens (org-timestamp-tokens-on-line))
+         (selected
+           (find-if (lambda (token)
+                      (<= (%org-timestamp-token-start token)
+                          column
+                          (%org-timestamp-token-end token)))
+                    tokens)))
+    (unless selected
+      (editor-error "Not at a CLOCK timestamp"))
+    (unless (and (<= 1 (length tokens) 2)
+                 (every (lambda (token)
+                          (and (not (%org-timestamp-token-active-p token))
+                               (%org-timestamp-token-time token)
+                               (null (%org-timestamp-token-end-time token))))
+                        tokens))
+      (editor-error "Unsupported CLOCK timestamp shape; line unchanged"))
+    (let* ((unit (org-clock-token-unit selected column))
+           (selected-time (org-clock-token-universal-time selected)))
+      (unless unit
+        (editor-error "Place point on a CLOCK date or time field"))
+      (when (buffer-read-only-p (current-buffer))
+        (editor-error "Org buffer is read-only"))
+      (let* ((count (org-clock-effective-count
+                     selected-time unit direction argument))
+             (shifted-time (org-clock-shift-time selected-time unit count))
+             (delta (- shifted-time selected-time))
+             (new-times
+               (mapcar (lambda (token)
+                         (let ((time (org-clock-token-universal-time token)))
+                           (if (or (eq token selected)
+                                   (and synchronous-p (= (length tokens) 2)))
+                               (+ time delta)
+                               time)))
+                       tokens))
+             (replacement line))
+        (loop :for token :in (reverse tokens)
+              :for time :in (reverse new-times)
+              :do (setf replacement
+                         (org-replace-string-span
+                          replacement
+                          (%org-timestamp-token-start token)
+                          (%org-timestamp-token-end token)
+                          (org-clock-token-text-for-time token time))))
+        (when (= (length tokens) 2)
+          (setf replacement
+                (org-clock-line-with-duration
+                 replacement (first new-times) (second new-times))))
+        (org-replace-current-line replacement column)
+        (message "CLOCK timestamp shifted ~a"
+                 (org-clock-token-text-for-time selected shifted-time))
+        t))))
 
 (define-command lem-yath-org-timestamp (argument) (:universal-nil)
   "Insert or update an active Org timestamp."

@@ -768,6 +768,32 @@ still use TARGET as their cursor destination."
   "Move a timestamp earlier or a heading to its previous TODO state."
   (org-shift-horizontal nil))
 
+(defun org-shift-todo-keyword-set ()
+  "Apply GNU Org's next/previous TODO-set command for this profile.
+
+The effective configuration has one keyword set, so either direction leaves
+the heading text unchanged."
+  (unless (org-heading-line-p (current-point))
+    (editor-error "Not at an Org heading"))
+  (message "Keyword-Set 1/1: ~{~a~^ ~}" *org-todo-keywords*)
+  t)
+
+(define-command lem-yath-org-shiftcontrolleft () ()
+  "Switch to the previous configured TODO set."
+  (org-shift-todo-keyword-set))
+
+(define-command lem-yath-org-shiftcontrolright () ()
+  "Switch to the next configured TODO set."
+  (org-shift-todo-keyword-set))
+
+(define-command lem-yath-org-shiftcontrolup (argument) (:universal-nil)
+  "Move a CLOCK timestamp unit later and preserve a closed clock's duration."
+  (org-shift-clock-at-point 1 argument :synchronous-p t))
+
+(define-command lem-yath-org-shiftcontroldown (argument) (:universal-nil)
+  "Move a CLOCK timestamp unit earlier and preserve a closed clock's duration."
+  (org-shift-clock-at-point -1 argument :synchronous-p t))
+
 ;;; --- checkboxes and lists -------------------------------------------------
 
 (defvar *org-recursive-block-list-navigation-p* nil
@@ -1782,19 +1808,19 @@ The second value is the length of SECOND in its new leading position."
     (t (message "This command requires a table, heading, or list item"))))
 
 (define-command lem-yath-org-shiftmetaup () ()
-  "Delete the current table row, or drag the literal line upward."
+  "Delete a table row, adjust a CLOCK timestamp, or drag a line upward."
   (cond
     ((org-table-line-p (current-point)) (org-table-delete-row))
     ((cl-ppcre:scan "(?i)^\\s*CLOCK:" (line-string (current-point)))
-     (message "CLOCK timestamp adjustment is not implemented; line unchanged"))
+     (org-shift-clock-at-point 1 nil :synchronous-p nil))
     (t (org-drag-current-line -1))))
 
 (define-command lem-yath-org-shiftmetadown () ()
-  "Insert a table row above point, or drag the literal line downward."
+  "Insert a table row, adjust a CLOCK timestamp, or drag a line downward."
   (cond
     ((org-table-line-p (current-point)) (org-table-insert-row t))
     ((cl-ppcre:scan "(?i)^\\s*CLOCK:" (line-string (current-point)))
-     (message "CLOCK timestamp adjustment is not implemented; line unchanged"))
+     (org-shift-clock-at-point -1 nil :synchronous-p nil))
     (t (org-drag-current-line 1))))
 
 ;;; --- links ---------------------------------------------------------------
@@ -3087,6 +3113,10 @@ matching the active Emacs terminal profile.")
   (define-key keymap "M-L" 'lem-yath-org-shiftmetaright)
   (define-key keymap "M-K" 'lem-yath-org-shiftmetaup)
   (define-key keymap "M-J" 'lem-yath-org-shiftmetadown)
+  (define-key keymap "C-Shift-h" 'lem-yath-org-shiftcontrolleft)
+  (define-key keymap "C-Shift-l" 'lem-yath-org-shiftcontrolright)
+  (define-key keymap "C-Shift-k" 'lem-yath-org-shiftcontrolup)
+  (define-key keymap "C-Shift-j" 'lem-yath-org-shiftcontroldown)
   (define-key keymap "<" 'lem-yath-org-shift-left)
   (define-key keymap ">" 'lem-yath-org-shift-right))
 
@@ -3143,3 +3173,10 @@ matching the active Emacs terminal profile.")
 (define-key *org-mode-keymap* "Shift-Right" 'lem-yath-org-context-shift-right)
 (define-key *org-mode-keymap* "C-c Left" 'lem-yath-org-context-shift-left)
 (define-key *org-mode-keymap* "C-c Right" 'lem-yath-org-context-shift-right)
+;; Ctrl-Shift letters collapse to plain Ctrl letters in traditional terminals.
+;; Keep the exact Evil-Org bindings above and expose a non-conflicting ncurses
+;; spelling instead of stealing C-h/j/k/l from their existing commands.
+(define-key *org-mode-keymap* "C-c H" 'lem-yath-org-shiftcontrolleft)
+(define-key *org-mode-keymap* "C-c L" 'lem-yath-org-shiftcontrolright)
+(define-key *org-mode-keymap* "C-c K" 'lem-yath-org-shiftcontrolup)
+(define-key *org-mode-keymap* "C-c J" 'lem-yath-org-shiftcontroldown)

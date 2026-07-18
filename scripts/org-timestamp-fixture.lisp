@@ -27,6 +27,12 @@
        (line-end point)
        (move-point (current-point) point))))
 
+(defmacro define-org-timestamp-test-goto-field (name text backward)
+  `(define-command ,name () ()
+     (let ((point (org-timestamp-test-find ,text)))
+       (character-offset point (- ,backward))
+       (move-point (current-point) point))))
+
 (define-org-timestamp-test-goto lem-yath-test-timestamp-goto-heading
   "Timestamp task")
 (define-org-timestamp-test-goto-line-end lem-yath-test-timestamp-goto-active
@@ -57,6 +63,28 @@
 (define-org-timestamp-test-goto-line-end
   lem-yath-test-timestamp-goto-range-cancelled
   "Range cancelled:")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-clock-heading "Clock shifts")
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-clock-minute "10:01" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-clock-hour "Sat 12" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-clock-prefix "14:00" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-clock-month "2024-01" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-clock-day "CLOCK: [2026-07-20" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-clock-year "2020" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-clock-open "16:00" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-clock-meta "19:30" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-clock-read-only "20:00" 1)
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-outside-clock "Outside clock shift")
 
 (define-command lem-yath-test-org-timestamp-bindings () ()
   (with-open-file (stream (merge-pathnames "bindings"
@@ -65,7 +93,9 @@
                           :if-does-not-exist :create
                           :if-exists :supersede)
     (dolist (keys '("C-c ." "C-c !" "C-c Left" "C-c Right" "C-x u"
-                    "Shift-Left" "Shift-Right"))
+                    "Shift-Left" "Shift-Right"
+                    "C-Shift-h" "C-Shift-l" "C-Shift-k" "C-Shift-j"
+                    "C-c H" "C-c L" "C-c K" "C-c J"))
       (format stream "~a ~a~%" keys
               (if (string= keys "C-x u")
                   (lem-vi-mode/core:with-state *lem-yath-emacs-state*

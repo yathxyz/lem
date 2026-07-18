@@ -2521,7 +2521,10 @@ and context-dispatched Meta editing. `M-h/l` changes one heading or list item
 and moves a table column, while falling back to prose-word motion. `M-k/j`
 moves heading/simple unordered-list trees or table rows. `M-H/L` uses complete
 subtree/list-tree scope or deletes/inserts a table column;
-`M-K/J` deletes/inserts a table row or drags one literal non-CLOCK line.
+In Normal state, `M-K/J` deletes/inserts a table row, adjusts the selected timestamp endpoint
+on a CLOCK line, or drags one literal non-CLOCK line. CLOCK endpoint edits
+recompute the duration suffix; cross-entry `org-clock-history` coupling remains
+outside the bounded in-buffer model.
 In Visual state, `M-h/l` changes every selected heading or contiguous list
 zone and retains the selection; table-column dispatch follows GNU Org's
 expanded moving endpoint. `M-k/j` moves consecutive selected sibling
@@ -2701,11 +2704,24 @@ At a timestamp, `Shift-Left`/`Shift-Right` and terminal-safe `C-c Left`/
 `C-c Right` move its date while preserving delimiter type, time range, and
 suffix. At a heading the same keys cycle the configured TODO sequence in the
 corresponding direction and retain the profile's immediate-save behavior.
-The focused `scripts/org-timestamp-test.sh` resolves all six production keys
-and drives insertion, replacement, conversion, shifting, prefix behavior,
-cancellation, read-only refusal, undo, persistence boundaries, successive
-active/mixed ranges, existing-timestamp ranges, interruption, and TODO dispatch
-through packaged ncurses Lem.
+The active Evil-Org additional map is also reproduced: `C-Shift-h/l` select
+the previous/next TODO keyword set (a stable no-op with this profile's single
+set), while `C-Shift-k/j` adjust the date or time field under point on a CLOCK
+line. Closed clocks move both endpoints by the same actual delta and repair the
+duration; open clocks move their lone timestamp. Cursor-selected year, month,
+day/weekday, hour, and minute fields follow the pinned Org oracle, including
+five-minute unprefixed rounding, exact numeric prefixes, calendar overflow,
+and midnight rollover. Traditional ncurses terminals cannot distinguish
+Ctrl-Shift letters from Ctrl letters, so `C-c H/L/K/J` expose the same four
+commands without stealing existing `C-h/j/k/l` behavior.
+
+The focused `scripts/org-timestamp-test.sh` resolves the ordinary, exact
+Evil-Org, and terminal-fallback production keys and drives insertion,
+replacement, conversion, shifting, CLOCK synchronization, prefix behavior,
+duration repair, open clocks, Normal-state `M-K` endpoint editing, cancellation, read-only
+and non-CLOCK refusal, undo, persistence boundaries, successive active/mixed
+ranges, existing-timestamp ranges, interruption, and TODO dispatch through
+packaged ncurses Lem.
 
 `src/org/source-editing.lisp` supplies GNU Org's source-edit workflow on
 `C-c '`. A bounded source body opens without block delimiters in a dedicated

@@ -29,6 +29,19 @@ Range mixed:
 Range existing: <2026-07-10 Fri +1w>
 Range interrupted:
 Range cancelled:
+* TODO Clock shifts
+:LOGBOOK:
+CLOCK: [2026-07-18 Sat 10:01]--[2026-07-18 Sat 11:31] =>  9:99
+CLOCK: [2026-07-18 Sat 12:00]--[2026-07-18 Sat 13:30] =>  1:30
+CLOCK: [2026-07-18 Sat 14:00]--[2026-07-18 Sat 15:30] =>  1:30
+CLOCK: [2024-01-31 Wed 10:00]--[2024-01-31 Wed 11:30] =>  1:30
+CLOCK: [2026-07-20 Mon 08:00]--[2026-07-20 Mon 09:30] =>  1:30
+CLOCK: [2020-02-29 Sat 10:00]--[2020-02-29 Sat 11:30] =>  1:30
+CLOCK: [2026-07-18 Sat 16:00]
+CLOCK: [2026-07-18 Sat 18:00]--[2026-07-18 Sat 19:30] =>  1:30
+CLOCK: [2026-07-18 Sat 20:00]--[2026-07-18 Sat 21:30] =>  1:30
+:END:
+Outside clock shift
 EOF
 cp "$fixture" "$root/original.org"
 
@@ -86,8 +99,16 @@ if mx lem-yath-test-org-timestamp-bindings &&
    grep -q '^C-c Right LEM-YATH-ORG-CONTEXT-SHIFT-RIGHT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^C-x u UNDO$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^Shift-Left LEM-YATH-ORG-CONTEXT-SHIFT-LEFT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
-   grep -q '^Shift-Right LEM-YATH-ORG-CONTEXT-SHIFT-RIGHT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings"; then
-  pass bindings 'stock timestamp and horizontal-shift chords resolve'
+   grep -q '^Shift-Right LEM-YATH-ORG-CONTEXT-SHIFT-RIGHT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-Shift-h LEM-YATH-ORG-SHIFTCONTROLLEFT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-Shift-l LEM-YATH-ORG-SHIFTCONTROLRIGHT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-Shift-k LEM-YATH-ORG-SHIFTCONTROLUP$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-Shift-j LEM-YATH-ORG-SHIFTCONTROLDOWN$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-c H LEM-YATH-ORG-SHIFTCONTROLLEFT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-c L LEM-YATH-ORG-SHIFTCONTROLRIGHT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-c K LEM-YATH-ORG-SHIFTCONTROLUP$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-c J LEM-YATH-ORG-SHIFTCONTROLDOWN$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings"; then
+  pass bindings 'stock, Evil-Org, and terminal-fallback timestamp chords resolve'
 else
   fail bindings 'one or more stock chords did not resolve'
 fi
@@ -360,6 +381,144 @@ if snapshot 16 &&
   pass range-cancelled 'cancelled timestamp command breaks succession'
 else
   fail range-cancelled 'cancellation left a stale range continuation'
+fi
+
+goto_marker clock-heading
+tmux_cmd send-keys -t "$session" C-c L
+tmux_cmd send-keys -t "$session" C-c H
+sleep 0.3
+if snapshot 17 &&
+   grep -q '^\* TODO Clock shifts$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-17"; then
+  pass todo-set 'next/previous set leave the sole TODO keyword set unchanged'
+else
+  fail todo-set 'Shift-Control TODO-set behavior changed the sole keyword set'
+fi
+
+goto_marker clock-minute
+tmux_cmd send-keys -t "$session" C-c K
+sleep 0.3
+if snapshot 18 &&
+   grep -q '^CLOCK: \[2026-07-18 Sat 10:05\]--\[2026-07-18 Sat 11:35\] =>  1:30$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-18"; then
+  pass clock-minute 'unprefixed Shift-Control rounds forward and preserves duration'
+else
+  fail clock-minute 'synchronous minute rounding or duration repair differed'
+fi
+
+tmux_cmd send-keys -t "$session" C-x u
+sleep 0.3
+if snapshot 19 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-19" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-17"; then
+  pass clock-undo 'one Emacs undo restores both endpoints and the duration suffix'
+else
+  fail clock-undo 'synchronous CLOCK adjustment was not one undo transaction'
+fi
+
+goto_marker clock-hour
+tmux_cmd send-keys -t "$session" C-c K
+sleep 0.3
+if snapshot 20 &&
+   grep -q '^CLOCK: \[2026-07-18 Sat 13:00\]--\[2026-07-18 Sat 14:30\] =>  1:30$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-20"; then
+  pass clock-hour 'cursor-selected hour shifts both endpoints by one hour'
+else
+  fail clock-hour 'hour-unit selection or synchronous shift differed'
+fi
+
+goto_marker clock-prefix
+tmux_cmd send-keys -t "$session" C-u 3 C-c K
+sleep 0.3
+if snapshot 21 &&
+   grep -q '^CLOCK: \[2026-07-18 Sat 14:03\]--\[2026-07-18 Sat 15:33\] =>  1:30$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-21"; then
+  pass clock-prefix 'numeric prefix uses exact minutes without five-minute rounding'
+else
+  fail clock-prefix 'prefixed CLOCK adjustment ignored or rounded the prefix'
+fi
+
+goto_marker clock-month
+tmux_cmd send-keys -t "$session" C-c K
+sleep 0.3
+if snapshot 22 &&
+   grep -q '^CLOCK: \[2024-03-02 Sat 10:00\]--\[2024-03-02 Sat 11:30\] =>  1:30$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-22"; then
+  pass clock-calendar 'month overflow matches the pinned GNU Org oracle'
+else
+  fail clock-calendar 'calendar-unit overflow differed from GNU Org'
+fi
+
+goto_marker clock-day
+tmux_cmd send-keys -t "$session" C-c K
+sleep 0.3
+goto_marker clock-year
+tmux_cmd send-keys -t "$session" C-c K
+sleep 0.3
+if snapshot 23 &&
+   grep -q '^CLOCK: \[2026-07-21 Tue 08:00\]--\[2026-07-21 Tue 09:30\] =>  1:30$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-23" &&
+   grep -q '^CLOCK: \[2021-03-01 Mon 10:00\]--\[2021-03-01 Mon 11:30\] =>  1:30$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-23"; then
+  pass clock-date-fields 'day and leap-year fields match pinned Org rollover'
+else
+  fail clock-date-fields 'day or year cursor-unit adjustment differed'
+fi
+
+goto_marker clock-open
+tmux_cmd send-keys -t "$session" C-c K
+sleep 0.3
+if snapshot 24 &&
+   grep -q '^CLOCK: \[2026-07-18 Sat 16:05\]$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-24"; then
+  pass clock-open 'a lone running CLOCK timestamp follows Org documented fallback'
+else
+  fail clock-open 'open CLOCK adjustment crashed or changed the wrong field'
+fi
+
+tmux_cmd send-keys -t "$session" C-c J
+sleep 0.3
+if snapshot 25 &&
+   grep -q '^CLOCK: \[2026-07-18 Sat 16:00\]$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-25"; then
+  pass clock-down 'Shift-Control down reverses the rounded minute adjustment'
+else
+  fail clock-down 'downward CLOCK adjustment changed the wrong unit or direction'
+fi
+
+goto_marker clock-meta
+tmux_cmd send-keys -t "$session" M-K
+sleep 0.3
+if snapshot 26 &&
+   grep -q '^CLOCK: \[2026-07-18 Sat 18:00\]--\[2026-07-18 Sat 19:35\] =>  1:35$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-26"; then
+  pass clock-meta 'M-K adjusts only the selected endpoint and recomputes duration'
+else
+  fail clock-meta 'Shift-Meta CLOCK endpoint adjustment remained unavailable'
+fi
+
+goto_marker clock-read-only
+mx lem-yath-test-org-timestamp-read-only
+tmux_cmd send-keys -t "$session" C-c K
+if lem_wait_for "$session" 'Org buffer is read-only' 10 >/dev/null; then
+  pass clock-read-only 'CLOCK commands refuse before mutating a read-only line'
+else
+  fail clock-read-only 'read-only CLOCK adjustment did not fail closed'
+fi
+mx lem-yath-test-org-timestamp-writable
+if snapshot 27 &&
+   grep -q '^CLOCK: \[2026-07-18 Sat 20:00\]--\[2026-07-18 Sat 21:30\] =>  1:30$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-27"; then
+  pass clock-read-only-state 'read-only refusal leaves the CLOCK byte-identical'
+else
+  fail clock-read-only-state 'read-only refusal altered CLOCK text'
+fi
+
+goto_marker outside-clock
+tmux_cmd send-keys -t "$session" C-c K
+if lem_wait_for "$session" 'Not at a CLOCK log' 10 >/dev/null; then
+  pass clock-context 'Shift-Control clock adjustment refuses outside CLOCK logs'
+else
+  fail clock-context 'non-CLOCK context did not report a bounded refusal'
 fi
 
 if [ "$failed" -ne 0 ]; then
