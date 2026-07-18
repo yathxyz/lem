@@ -772,6 +772,112 @@ still use TARGET as their cursor destination."
   "Move a timestamp earlier or a heading to its previous TODO state."
   (org-shift-horizontal nil))
 
+(defvar *org-last-priority-direction* nil)
+(defvar *org-last-priority-buffer* nil)
+(defvar *org-last-priority-line* nil)
+
+(defun org-heading-priority-bounds (heading)
+  "Return priority cookie bounds and value on HEADING."
+  (multiple-value-bind (start end registers register-ends)
+      (cl-ppcre:scan
+       (format nil "^\\*+\\s+(?:~a\\s+)?(\\[#([A-Z])\\])(?:\\s+|$)"
+               *org-todo-keyword-pattern*)
+       (line-string heading))
+    (declare (ignore start end))
+    (when (and registers (aref registers 0))
+      (values (aref registers 0)
+              (aref register-ends 0)
+              (aref (line-string heading) (aref registers 1))))))
+
+(defun org-set-heading-priority (heading priority)
+  "Set HEADING's A/B/C priority cookie, or remove it when PRIORITY is NIL."
+  (multiple-value-bind (cookie-start cookie-end old-priority)
+      (org-heading-priority-bounds heading)
+    (with-point ((point heading))
+      (line-start point)
+      (cond
+        (old-priority
+         (character-offset point cookie-start)
+         (if priority
+             (progn
+               (character-offset point 2)
+               (delete-character point 1)
+               (insert-character point priority))
+             (let* ((line (line-string heading))
+                    (delete-length
+                      (+ (- cookie-end cookie-start)
+                         (if (and (< cookie-end (length line))
+                                  (eql (char line cookie-end) #\Space))
+                             1 0))))
+               (delete-character point delete-length))))
+        (priority
+         (multiple-value-bind (todo-start todo-end todo-state)
+             (org-heading-todo-bounds heading)
+           (declare (ignore todo-start))
+           (if todo-state
+               (progn
+                 (character-offset point todo-end)
+                 (insert-string point (format nil " [#~c]" priority)))
+               (multiple-value-bind (start end)
+                   (cl-ppcre:scan "^\\*+\\s+" (line-string heading))
+                 (declare (ignore start))
+                 (character-offset point end)
+                 (insert-string point (format nil "[#~c] " priority))))))))
+    (org-align-current-heading-tags heading)
+    priority))
+
+(defun org-next-heading-priority (current direction repeated-p)
+  "Return the configured GNU Org priority step from CURRENT."
+  (if current
+      (ecase direction
+        (:up (case current (#\A nil) (#\B #\A) (#\C #\B)))
+        (:down (case current (#\A #\B) (#\B #\C) (#\C nil))))
+      (if repeated-p
+          (ecase direction (:up #\C) (:down #\A))
+          #\B)))
+
+(defun org-change-heading-priority (direction)
+  "Move the current heading priority in DIRECTION without saving."
+  (alexandria:if-let ((heading (org-current-heading-point)))
+    (let* ((line (line-number-at-point heading))
+           (repeated-p
+             (and (eq direction *org-last-priority-direction*)
+                  (eq (current-buffer) *org-last-priority-buffer*)
+                  (eql line *org-last-priority-line*)))
+           (current (nth-value 2 (org-heading-priority-bounds heading)))
+           (priority (org-next-heading-priority current direction repeated-p)))
+      (when (buffer-read-only-p (current-buffer))
+        (editor-error "Org buffer is read-only"))
+      (org-set-heading-priority heading priority)
+      (setf *org-last-priority-direction* direction
+            *org-last-priority-buffer* (current-buffer)
+            *org-last-priority-line* line)
+      (message "Priority ~a" (or priority "removed"))
+      t)
+    (editor-error "Not at an Org heading")))
+
+(defun org-shift-vertical (direction argument)
+  "Apply GNU Org's useful vertical Shift contexts."
+  (cond
+    ((org-timestamp-token-at-point)
+     (org-shift-timestamp-field-at-point direction argument))
+    ((org-heading-line-p (current-point))
+     (org-change-heading-priority (if (plusp direction) :up :down)))
+    ((org-navigation-list-anchor (current-point))
+     (org-navigate-list-item direction))
+    ((org-table-line-p (current-point))
+     (org-table-move-cell-vertical (- direction)))
+    (t
+     (editor-error "No vertically shiftable Org context at point"))))
+
+(define-command lem-yath-org-context-shift-up (argument) (:universal-nil)
+  "Increase a timestamp field, priority, or table cell; move to a prior item."
+  (org-shift-vertical 1 argument))
+
+(define-command lem-yath-org-context-shift-down (argument) (:universal-nil)
+  "Decrease a timestamp field, priority, or table cell; move to a next item."
+  (org-shift-vertical -1 argument))
+
 (defun org-shift-todo-keyword-set ()
   "Apply GNU Org's next/previous TODO-set command for this profile.
 
@@ -1092,6 +1198,20 @@ source blocks on the ordinary Evil path."
           :while sibling
           :do (push sibling siblings)
           :finally (return (nreverse siblings)))))
+
+(defun org-navigate-list-item (direction)
+  "Move to the direct list sibling selected by DIRECTION."
+  (alexandria:if-let ((item (org-navigation-list-anchor (current-point))))
+    (alexandria:if-let
+        ((target (if (plusp direction)
+                     (org-list-previous-sibling item)
+                     (org-list-next-sibling item))))
+      (progn
+        (move-point (current-point) target)
+        (line-start (current-point))
+        t)
+      (editor-error "On ~:[last~;first~] list item" (plusp direction)))
+    (editor-error "Not in an Org list item")))
 
 (defun org-list-bullet-bounds (item)
   "Return ITEM's bullet columns and normalized bullet name."
@@ -2500,6 +2620,54 @@ The second value is the length of SECOND in its new leading position."
       (message "Table cell moved ~:[left~;right~]" (plusp direction))
       t)))
 
+(defun org-table-data-row-target (lines row direction)
+  "Return the next data-row index from ROW in DIRECTION."
+  (loop :for candidate := (+ row direction) :then (+ candidate direction)
+        :while (< -1 candidate (length lines))
+        :unless (org-table-separator-line-p (nth candidate lines))
+          :return candidate))
+
+(defun org-table-move-cell-vertical (direction)
+  "Swap the current data cell one row in DIRECTION, skipping rules."
+  (unless (member direction '(-1 1))
+    (error "Invalid vertical table direction: ~s" direction))
+  (when (buffer-read-only-p (current-buffer))
+    (editor-error "Org buffer is read-only"))
+  (when (org-table-separator-line-p (line-string (current-point)))
+    (editor-error "Place point in a table data cell"))
+  (multiple-value-bind (raw-start raw-end) (org-table-bounds)
+    (unless raw-start
+      (editor-error "No table at point"))
+    (let* ((lines (org-table-row-lines raw-start raw-end))
+           (row (- (line-number-at-point (current-point))
+                   (line-number-at-point raw-start)))
+           (target (org-table-data-row-target lines row direction))
+           (cell (max 1 (org-table-cell-index))))
+      (unless target
+        (editor-error "Cannot move table cell further"))
+      (when (> cell (length (org-table-cells (nth target lines))))
+        (editor-error "Target table row has no matching cell"))))
+  (org-table-align)
+  (multiple-value-bind (start end) (org-table-bounds)
+    (let* ((lines (org-table-row-lines start end))
+           (row (- (line-number-at-point (current-point))
+                   (line-number-at-point start)))
+           (target (org-table-data-row-target lines row direction))
+           (cell (max 1 (org-table-cell-index)))
+           (source-cells (org-table-cells (nth row lines)))
+           (target-cells (org-table-cells (nth target lines))))
+      (rotatef (nth (1- cell) source-cells)
+               (nth (1- cell) target-cells))
+      (setf (nth row lines)
+            (org-table-raw-data-line
+             (org-table-row-indentation (nth row lines)) source-cells)
+            (nth target lines)
+            (org-table-raw-data-line
+             (org-table-row-indentation (nth target lines)) target-cells))
+      (org-table-rewrite-lines lines target cell)
+      (message "Table cell moved ~:[up~;down~]" (plusp direction))
+      t)))
+
 (defun org-table-transform-columns (transform target-cell)
   (multiple-value-bind (raw-start raw-end) (org-table-bounds)
     (unless (org-table-data-column-count
@@ -3258,6 +3426,8 @@ matching the active Emacs terminal profile.")
   (define-key keymap "C-Shift-l" 'lem-yath-org-shiftcontrolright)
   (define-key keymap "C-Shift-k" 'lem-yath-org-shiftcontrolup)
   (define-key keymap "C-Shift-j" 'lem-yath-org-shiftcontroldown)
+  (define-key keymap "Shift-Up" 'lem-yath-org-context-shift-up)
+  (define-key keymap "Shift-Down" 'lem-yath-org-context-shift-down)
   (define-key keymap "<" 'lem-yath-org-shift-left)
   (define-key keymap ">" 'lem-yath-org-shift-right))
 
@@ -3312,8 +3482,12 @@ matching the active Emacs terminal profile.")
 (define-key *org-mode-keymap* "C-Shift-Return" 'lem-yath-org-insert-todo-heading)
 (define-key *org-mode-keymap* "Shift-Left" 'lem-yath-org-context-shift-left)
 (define-key *org-mode-keymap* "Shift-Right" 'lem-yath-org-context-shift-right)
+(define-key *org-mode-keymap* "Shift-Up" 'lem-yath-org-context-shift-up)
+(define-key *org-mode-keymap* "Shift-Down" 'lem-yath-org-context-shift-down)
 (define-key *org-mode-keymap* "C-c Left" 'lem-yath-org-context-shift-left)
 (define-key *org-mode-keymap* "C-c Right" 'lem-yath-org-context-shift-right)
+(define-key *org-mode-keymap* "C-c Up" 'lem-yath-org-context-shift-up)
+(define-key *org-mode-keymap* "C-c Down" 'lem-yath-org-context-shift-down)
 ;; Ctrl-Shift letters collapse to plain Ctrl letters in traditional terminals.
 ;; Keep the exact Evil-Org bindings above and expose a non-conflicting ncurses
 ;; spelling instead of stealing C-h/j/k/l from their existing commands.
@@ -3321,3 +3495,15 @@ matching the active Emacs terminal profile.")
 (define-key *org-mode-keymap* "C-c L" 'lem-yath-org-shiftcontrolright)
 (define-key *org-mode-keymap* "C-c K" 'lem-yath-org-shiftcontrolup)
 (define-key *org-mode-keymap* "C-c J" 'lem-yath-org-shiftcontroldown)
+
+(defun org-priority-post-command ()
+  "Forget repeated priority state after any other command."
+  (unless (member (and (this-command) (command-name (this-command)))
+                  '(lem-yath-org-context-shift-up
+                    lem-yath-org-context-shift-down))
+    (setf *org-last-priority-direction* nil
+          *org-last-priority-buffer* nil
+          *org-last-priority-line* nil)))
+
+(remove-hook *post-command-hook* 'org-priority-post-command)
+(add-hook *post-command-hook* 'org-priority-post-command)

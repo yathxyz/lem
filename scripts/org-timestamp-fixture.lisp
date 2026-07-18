@@ -91,6 +91,35 @@
   lem-yath-test-timestamp-goto-table-first "| left")
 (define-org-timestamp-test-goto
   lem-yath-test-timestamp-goto-table-last "right |")
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-vertical-year "Vertical year: <2020" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-vertical-month "Vertical month: <2024-01" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-vertical-day "Vertical day: <2026-07-20" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-vertical-hour
+  "Vertical hour: <2026-07-18 Sat 23" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-vertical-minute "Vertical minute: <2026-07-18 Sat 10:01" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-vertical-end
+  "Vertical end: <2026-07-18 Sat 10:00-11:31" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-vertical-prefix
+  "Vertical prefix: <2026-07-18 Sat 14:00" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-vertical-bracket "Vertical bracket: <" 1)
+(define-org-timestamp-test-goto-field
+  lem-yath-test-timestamp-goto-vertical-readonly "Vertical readonly: <2026" 1)
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-priority-new "Priority new")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-priority-high "Priority high")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-list-second "+ second")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-table-bottom "| low")
 
 (define-command lem-yath-test-org-timestamp-bindings () ()
   (with-open-file (stream (merge-pathnames "bindings"
@@ -98,8 +127,9 @@
                           :direction :output
                           :if-does-not-exist :create
                           :if-exists :supersede)
-    (dolist (keys '("C-c ." "C-c !" "C-c Left" "C-c Right" "C-x u"
-                    "Shift-Left" "Shift-Right"
+    (dolist (keys '("C-c ." "C-c !" "C-c Left" "C-c Right"
+                    "C-c Up" "C-c Down" "C-x u"
+                    "Shift-Left" "Shift-Right" "Shift-Up" "Shift-Down"
                     "C-Shift-h" "C-Shift-l" "C-Shift-k" "C-Shift-j"
                     "C-c H" "C-c L" "C-c K" "C-c J"))
       (format stream "~a ~a~%" keys
@@ -123,6 +153,17 @@
                        (buffer-end-point (current-buffer)))
      stream))
   (message "Timestamp snapshot ~d" *org-timestamp-test-snapshot*))
+
+(define-command lem-yath-test-org-timestamp-point () ()
+  (with-open-file (stream (merge-pathnames "point"
+                                           (org-timestamp-test-directory))
+                          :direction :output
+                          :if-does-not-exist :create
+                          :if-exists :supersede)
+    (format stream "column=~d line=~a~%"
+            (point-charpos (current-point))
+            (line-string (current-point))))
+  (message "Timestamp point captured"))
 
 (define-command lem-yath-test-org-timestamp-read-only () ()
   (setf (buffer-read-only-p (current-buffer)) t)

@@ -694,6 +694,117 @@ is not changed."
      :end-time (%org-timestamp-token-end-time token)
      :extra (%org-timestamp-token-extra token))))
 
+(defun org-timestamp-token-field (token column)
+  "Return the GNU Org timestamp field selected at COLUMN in TOKEN."
+  (let ((start (%org-timestamp-token-start token))
+        (end (%org-timestamp-token-end token))
+        (date-start (%org-timestamp-token-date-start token))
+        (time-start (%org-timestamp-token-time-start token))
+        (end-time-start (%org-timestamp-token-end-time-start token)))
+    (cond
+      ((or (= column start) (= column (1- end))) :bracket)
+      ((or (< column date-start) (>= column end)) nil)
+      ((< column (+ date-start 4)) :year)
+      ((and (>= column (+ date-start 5))
+            (< column (+ date-start 7)))
+       :month)
+      ((and end-time-start (>= column end-time-start))
+       (cond
+         ((< column (+ end-time-start 2)) :end-hour)
+         ((< column (+ end-time-start 5)) :end-minute)
+         (t nil)))
+      ((or (null time-start) (< column time-start)) :day)
+      ((< column (+ time-start 2)) :hour)
+      ((< column (+ time-start 5)) :minute)
+      (t nil))))
+
+(defun org-timestamp-token-time-or-midnight (token)
+  "Return TOKEN's start as universal time, defaulting to midnight."
+  (multiple-value-bind (year month day)
+      (iso-date-components (%org-timestamp-token-date token))
+    (let ((clock (%org-timestamp-token-time token)))
+      (encode-universal-time
+       0
+       (if clock (parse-integer clock :start 3 :end 5) 0)
+       (if clock (parse-integer clock :start 0 :end 2) 0)
+       day month year 0))))
+
+(defun org-clock-string-shift (clock unit count)
+  "Shift CLOCK's hour or minute by COUNT, wrapping inside one day."
+  (let* ((hour (parse-integer clock :start 0 :end 2))
+         (minute (parse-integer clock :start 3 :end 5))
+         (total (+ (* hour 60) minute
+                   (* count (if (eq unit :hour) 60 1))))
+         (wrapped (mod total (* 24 60))))
+    (format nil "~2,'0d:~2,'0d" (floor wrapped 60) (mod wrapped 60))))
+
+(defun org-timestamp-token-text-for-time
+    (token time &key end-time active-p)
+  "Render TOKEN around TIME while preserving its bounded syntax."
+  (multiple-value-bind (second minute hour day month year)
+      (decode-universal-time time 0)
+    (declare (ignore second))
+    (org-timestamp-text
+     (format nil "~4,'0d-~2,'0d-~2,'0d" year month day)
+     (if (null active-p)
+         (%org-timestamp-token-active-p token)
+         active-p)
+     :time (and (%org-timestamp-token-time token)
+                (format nil "~2,'0d:~2,'0d" hour minute))
+     :end-time (if (null end-time)
+                   (%org-timestamp-token-end-time token)
+                   end-time)
+     :extra (%org-timestamp-token-extra token))))
+
+(defun org-shift-timestamp-field-at-point (direction argument)
+  "Shift the ordinary timestamp field at point in DIRECTION."
+  (let* ((column (point-charpos (current-point)))
+         (token (org-timestamp-token-at-point))
+         (field (and token (org-timestamp-token-field token column))))
+    (unless token
+      (editor-error "Not at an Org timestamp"))
+    (unless field
+      (editor-error "Place point on a supported timestamp field"))
+    (when (buffer-read-only-p (current-buffer))
+      (editor-error "Org buffer is read-only"))
+    (let ((text
+            (cond
+              ((eq field :bracket)
+               (org-timestamp-text
+                (%org-timestamp-token-date token)
+                (not (%org-timestamp-token-active-p token))
+                :time (%org-timestamp-token-time token)
+                :end-time (%org-timestamp-token-end-time token)
+                :extra (%org-timestamp-token-extra token)))
+              ((member field '(:end-hour :end-minute))
+               (let* ((unit (if (eq field :end-hour) :hour :minute))
+                      (clock (%org-timestamp-token-end-time token))
+                      (base
+                        (encode-universal-time
+                         0 (parse-integer clock :start 3 :end 5)
+                         (parse-integer clock :start 0 :end 2)
+                         1 1 2000 0))
+                      (count (org-clock-effective-count
+                              base unit direction argument)))
+                 (org-timestamp-token-text-for-time
+                  token (org-timestamp-token-time-or-midnight token)
+                  :end-time (org-clock-string-shift clock unit count))))
+              (t
+               (let* ((time (org-timestamp-token-time-or-midnight token))
+                      (unit field)
+                      (count (org-clock-effective-count
+                              time unit direction argument))
+                      (shifted (org-clock-shift-time time unit count))
+                      (end-time (%org-timestamp-token-end-time token)))
+                 (when (and end-time (member unit '(:hour :minute)))
+                   (setf end-time (org-clock-string-shift
+                                   end-time unit count)))
+                 (org-timestamp-token-text-for-time
+                  token shifted :end-time end-time))))))
+      (org-replace-timestamp-token token text)
+      (message "~a" text)
+      t)))
+
 (defun org-replace-string-span (text start end replacement)
   (concatenate 'string (subseq text 0 start) replacement (subseq text end)))
 

@@ -49,8 +49,20 @@ Outside clock shift
 - second
 Horizontal table:
 | left | middle | right |
+|------+--------+-------|
 | low  | center | high  |
 #+TBLFM: $3=$1
+Vertical year: <2020-02-29 Sat>
+Vertical month: <2024-01-31 Wed>
+Vertical day: <2026-07-20 Mon>
+Vertical hour: <2026-07-18 Sat 23:00-23:30>
+Vertical minute: <2026-07-18 Sat 10:01-11:31>
+Vertical end: <2026-07-18 Sat 10:00-11:31>
+Vertical prefix: <2026-07-18 Sat 14:00-15:30>
+Vertical bracket: <2026-07-18 Sat>
+Vertical readonly: <2026-07-18 Sat>
+* TODO Priority new
+* TODO [#A] Priority high
 EOF
 cp "$fixture" "$root/original.org"
 
@@ -106,9 +118,13 @@ if mx lem-yath-test-org-timestamp-bindings &&
    grep -q '^C-c ! LEM-YATH-ORG-TIMESTAMP-INACTIVE$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^C-c Left LEM-YATH-ORG-CONTEXT-SHIFT-LEFT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^C-c Right LEM-YATH-ORG-CONTEXT-SHIFT-RIGHT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-c Up LEM-YATH-ORG-CONTEXT-SHIFT-UP$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^C-c Down LEM-YATH-ORG-CONTEXT-SHIFT-DOWN$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^C-x u UNDO$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^Shift-Left LEM-YATH-ORG-CONTEXT-SHIFT-LEFT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^Shift-Right LEM-YATH-ORG-CONTEXT-SHIFT-RIGHT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^Shift-Up LEM-YATH-ORG-CONTEXT-SHIFT-UP$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
+   grep -q '^Shift-Down LEM-YATH-ORG-CONTEXT-SHIFT-DOWN$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^C-Shift-h LEM-YATH-ORG-SHIFTCONTROLLEFT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^C-Shift-l LEM-YATH-ORG-SHIFTCONTROLRIGHT$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
    grep -q '^C-Shift-k LEM-YATH-ORG-SHIFTCONTROLUP$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/bindings" &&
@@ -597,6 +613,173 @@ if lem_wait_for "$session" 'Cannot move table cell further' 10 >/dev/null &&
   pass table-edge 'edge movement refuses before changing or aligning the table'
 else
   fail table-edge 'edge refusal mutated the table or did not report failure'
+fi
+
+goto_marker vertical-year
+tmux_cmd send-keys -t "$session" C-c Up
+sleep 0.3
+if snapshot 34 &&
+   grep -q '^Vertical year: <2021-03-01 Mon>$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-34"; then
+  pass vertical-year 'Shift-Up changes the selected year with GNU overflow'
+else
+  fail vertical-year 'ordinary timestamp year movement differed'
+fi
+
+goto_marker vertical-month
+tmux_cmd send-keys -t "$session" C-c Up
+sleep 0.2
+goto_marker vertical-day
+tmux_cmd send-keys -t "$session" C-c Down
+sleep 0.2
+goto_marker vertical-hour
+tmux_cmd send-keys -t "$session" C-c Up
+sleep 0.2
+goto_marker vertical-end
+tmux_cmd send-keys -t "$session" C-c Up
+sleep 0.2
+goto_marker vertical-prefix
+tmux_cmd send-keys -t "$session" C-u 3 C-c Up
+sleep 0.3
+if snapshot 35 &&
+   grep -q '^Vertical month: <2024-03-02 Sat>$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-35" &&
+   grep -q '^Vertical day: <2026-07-19 Sun>$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-35" &&
+   grep -q '^Vertical hour: <2026-07-19 Sun 00:00-00:30>$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-35" &&
+   grep -q '^Vertical end: <2026-07-18 Sat 10:00-11:35>$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-35" &&
+   grep -q '^Vertical prefix: <2026-07-18 Sat 14:03-15:33>$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-35"; then
+  pass vertical-fields 'month/day/hour/end-only/prefix shifts match GNU Org'
+else
+  fail vertical-fields 'one or more ordinary timestamp field shifts differed'
+fi
+
+goto_marker vertical-minute
+tmux_cmd send-keys -t "$session" C-c Up
+sleep 0.3
+if snapshot 36 &&
+   grep -q '^Vertical minute: <2026-07-18 Sat 10:05-11:35>$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-36"; then
+  pass vertical-minute 'minute rounding moves both ends of an ordinary range'
+else
+  fail vertical-minute 'ordinary timestamp minute rounding or range repair differed'
+fi
+
+tmux_cmd send-keys -t "$session" C-c Down
+sleep 0.3
+if snapshot 37 &&
+   grep -q '^Vertical minute: <2026-07-18 Sat 10:00-11:30>$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-37"; then
+  pass vertical-down 'Shift-Down rounds backward and preserves range duration'
+else
+  fail vertical-down 'ordinary timestamp downward rounding differed'
+fi
+
+goto_marker vertical-bracket
+tmux_cmd send-keys -t "$session" C-c Up
+sleep 0.3
+if snapshot 38 &&
+   grep -q '^Vertical bracket: \[2026-07-18 Sat\]$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-38"; then
+  pass vertical-bracket 'Shift-Up on a bracket toggles timestamp activity'
+else
+  fail vertical-bracket 'timestamp bracket dispatch did not toggle delimiter type'
+fi
+
+goto_marker vertical-readonly
+mx lem-yath-test-org-timestamp-read-only
+lem_wait_for "$session" 'Timestamp buffer read-only' 10 >/dev/null
+tmux_cmd send-keys -t "$session" C-c Up
+if lem_wait_for "$session" 'Org buffer is read-only' 10 >/dev/null &&
+   snapshot 39 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-39" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-38"; then
+  pass vertical-read-only 'ordinary timestamp shifting refuses before mutation'
+else
+  fail vertical-read-only 'read-only ordinary timestamp changed or did not refuse'
+fi
+mx lem-yath-test-org-timestamp-writable
+lem_wait_for "$session" 'Timestamp buffer writable' 10 >/dev/null
+
+goto_marker priority-new
+tmux_cmd send-keys -t "$session" C-c Up
+sleep 0.2
+tmux_cmd send-keys -t "$session" C-c Up
+sleep 0.3
+goto_marker priority-high
+tmux_cmd send-keys -t "$session" C-c Down
+sleep 0.3
+if snapshot 40 &&
+   grep -q '^\* TODO \[#A\] Priority new$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-40" &&
+   grep -q '^\* TODO \[#B\] Priority high$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-40" &&
+   grep -q '^\* TODO Priority new$' "$fixture" &&
+   grep -q '^\* TODO \[#A\] Priority high$' "$fixture"; then
+  pass vertical-priority 'A/B/C priority steps match Org and remain unsaved'
+else
+  fail vertical-priority 'heading priority stepping or persistence differed'
+fi
+
+goto_marker list-second
+tmux_cmd send-keys -t "$session" C-c Up
+sleep 0.3
+mx lem-yath-test-org-timestamp-point
+if lem_wait_for "$session" 'Timestamp point captured' 10 >/dev/null &&
+   grep -q '^column=0 line=+ first$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/point"; then
+  pass vertical-list-up 'Shift-Up navigates to the previous direct sibling'
+else
+  fail vertical-list-up 'list navigation did not land at the prior sibling BOL'
+fi
+tmux_cmd send-keys -t "$session" C-c Down
+sleep 0.3
+mx lem-yath-test-org-timestamp-point
+if lem_wait_for "$session" 'Timestamp point captured' 10 >/dev/null &&
+   grep -q '^column=0 line=+ second$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/point"; then
+  pass vertical-list-down 'Shift-Down returns to the next direct sibling'
+else
+  fail vertical-list-down 'list navigation did not land at the next sibling BOL'
+fi
+
+goto_marker table-first
+tmux_cmd send-keys -t "$session" C-c Down
+sleep 0.3
+if snapshot 41 &&
+   grep -q '^| low  | middle | right |$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-41" &&
+   grep -q '^| left | center | high  |$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-41" &&
+   grep -q '^#+TBLFM: \$3=\$1$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-41"; then
+  pass vertical-table 'Shift-Down swaps cells across a horizontal rule'
+else
+  fail vertical-table 'vertical table-cell movement or hline skipping differed'
+fi
+
+tmux_cmd send-keys -t "$session" C-x u
+sleep 0.3
+if snapshot 42 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-42" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-40"; then
+  pass vertical-table-undo 'one Emacs undo restores both table rows'
+else
+  fail vertical-table-undo 'vertical table movement split into multiple undo steps'
+fi
+
+goto_marker table-bottom
+tmux_cmd send-keys -t "$session" C-c Down
+if lem_wait_for "$session" 'Cannot move table cell further' 10 >/dev/null &&
+   snapshot 43 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-43" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-42"; then
+  pass vertical-table-edge 'bottom-edge movement refuses byte-identically'
+else
+  fail vertical-table-edge 'bottom-edge refusal mutated or aligned the table'
 fi
 
 if [ "$failed" -ne 0 ]; then
