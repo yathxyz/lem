@@ -12,21 +12,22 @@
 ;;;;
 ;;;; PRODUCTION SOURCES TRANSCRIBED (production is the spec):
 ;;;;   * Atomic save: src/buffer/file-utils.lisp `write-file-atomically'
-;;;;     (lines 242-285).  Step sequence: create temp (open-atomic-temp-stream,
+;;;;     (lines 243-291).  Step sequence: create temp (open-atomic-temp-stream,
 ;;;;     :if-exists :error), write temp (funcall writer), fsync temp
 ;;;;     (fsync-stream: finish-output + sb-posix:fsync, then close), preserve
 ;;;;     metadata (chown/chmod -- no content effect), rename temp over target
 ;;;;     (sb-posix:rename), plus the unwind-protect cleanup that deletes the
 ;;;;     temp when the rename never committed (the :save-abort action).
 ;;;;   * Checkpoint write: src/ext/checkpoint.lisp
-;;;;     `write-string-to-file-atomically' (lines 88-105).  Step sequence:
-;;;;     create temp (:if-exists :supersede), write temp (write-string +
-;;;;     finish-output -- NOTE: finish-output flushes to the OS, it is NOT an
-;;;;     fsync; the checkpoint temp is never synced), rename temp over the
-;;;;     checkpoint file, plus its unwind-protect temp cleanup (:cp-abort).
+;;;;     `write-string-to-file-atomically' (lines 88-112).  Step sequence:
+;;;;     create temp (:if-exists :supersede), write temp (write-string),
+;;;;     fsync temp (fsync-stream: finish-output + sb-posix:fsync, then
+;;;;     close -- added by VK-4 hardening; before it the checkpoint temp was
+;;;;     never synced), rename temp over the checkpoint file, plus its
+;;;;     unwind-protect temp cleanup (:cp-abort).
 ;;;;   * Checkpoint delete on save: src/ext/checkpoint.lisp
-;;;;     `delete-checkpoint-on-save' (lines 210-212), registered on the global
-;;;;     after-save-hook (line 249).  HOOK ORDERING, VERIFIED IN PRODUCTION:
+;;;;     `delete-checkpoint-on-save' (lines 217-219), registered on the global
+;;;;     after-save-hook (line 256).  HOOK ORDERING, VERIFIED IN PRODUCTION:
 ;;;;     src/buffer/file.lisp `call-with-write-hook' (lines 182-186) runs
 ;;;;     after-save hooks strictly AFTER the writer function returns, and
 ;;;;     `write-file-atomically' returns normally only after sb-posix:rename
@@ -54,18 +55,17 @@
 ;;;;       production does not do; ext4/xfs/btrfs metadata journaling provides
 ;;;;       it.  Documented as trust base.
 ;;;;
-;;;; THE HONEST CHECKPOINT RESIDUE (production gap, documented -- NOT fixed
-;;;; here, per the VK-6 charter).  Axioms A2/A3 are applied UNIFORMLY: rename
-;;;; carries the temp's synced flag onto the target name.  The save path
-;;;; fsyncs its temp before rename, so the renamed-in target is durable and
-;;;; the target theorem below is unconditional.  The checkpoint writer only
-;;;; finish-outputs (never fsyncs), so a crash after the checkpoint rename can
-;;;; leave the checkpoint file torn to a prefix of the new checkpoint content
-;;;; (data-vs-rename reordering on power loss).  The theorems state exactly
-;;;; that: a reachable checkpoint is the old checkpoint, the new checkpoint,
-;;;; or -- only in a crash state -- a prefix of what a checkpoint write was
-;;;; installing.  Adding one fsync to `write-string-to-file-atomically' would
-;;;; strengthen the prefix disjunct to equality.
+;;;; CHECKPOINT DURABILITY (the former VK-6 residue, CLOSED by VK-4
+;;;; hardening).  Axioms A2/A3 are applied UNIFORMLY: rename carries the
+;;;; temp's synced flag onto the target name.  BOTH writers now fsync their
+;;;; temp before rename -- the save path always did; the checkpoint writer
+;;;; gained its fsync in VK-4 hardening (before that, a crash after the
+;;;; checkpoint rename could leave the checkpoint torn to a prefix of the
+;;;; new content, and the theorems carried a crash-state prefix disjunct).
+;;;; A renamed-in checkpoint is therefore durable and the recoverability
+;;;; theorem below states EQUALITY in every reachable state, crash states
+;;;; included.  The only file that can still tear is the initial CP0
+;;;; checkpoint when its durability parameter says it was never synced.
 ;;;;
 ;;;; SCENARIO MODELED.  One target file (content OLD, durable), one pending
 ;;;; save (content NEW), a checkpoint file initially present holding CP0 (the
@@ -91,11 +91,11 @@
 ;;;; was modified, the edits are recoverable iff the checkpoint file holds the
 ;;;; complete CPC: on the next find-file, checkpoint-newer-than-file-p offers
 ;;;; it and recover-buffer-from-checkpoint restores CPC
-;;;; (src/ext/checkpoint.lisp:160-208).  The theorems: in every reachable
-;;;; state where a checkpoint write has committed (cp-done) and the save has
-;;;; not renamed, the target is OLD and the checkpoint file is present holding
-;;;; CPC exactly (non-crash states) or at worst a prefix of CPC (crash states
-;;;; -- the fsync residue above).
+;;;; (src/ext/checkpoint.lisp:169-215).  The theorem: in EVERY reachable
+;;;; state -- crash states included -- where a checkpoint write has committed
+;;;; (cp-done) and the save has not renamed, the target is OLD and the
+;;;; checkpoint file is present holding CPC exactly (the fsync-before-rename
+;;;; durability above).
 ;;;;
 ;;;; REPRESENTATION.  File contents are opaque to the model (in practice VK-1
 ;;;; codepoint lists; the theorems only compare them and take prefixes, so no
@@ -168,7 +168,7 @@
 ;;   4 save-pc    -- 0 start, 1 temp-created, 2 temp-written, 3 temp-synced,
 ;;                   4 metadata-done, 5 renamed, 6 checkpoint-deleted (done),
 ;;                   7 aborted (unwind-protect cleanup ran)
-;;   5 cp-pc      -- 0 idle, 1 temp-created, 2 temp-written
+;;   5 cp-pc      -- 0 idle, 1 temp-created, 2 temp-written, 3 temp-synced
 ;;   6 crashed    -- boolean; once t, no protocol step fires (terminal)
 ;;   7 cp-done    -- ghost flag: some checkpoint rename has committed
 ;;   8 old        -- parameter: initial target content
@@ -281,8 +281,7 @@
                       (st-cp-done st) (st-old st) (st-new st) (st-cpc st)
                       (st-cp0 st))
                st))
-          ;; write-string + finish-output: data handed to the OS but NEVER
-          ;; fsync'd -- the temp stays unsynced (the production gap).
+          ;; (write-string string out): temp now holds CPC, still unsynced.
           ((eq name :cp-write-temp)
            (if (equal (st-cp-pc st) 1)
                (mk-st (st-target st) (st-save-temp st)
@@ -290,16 +289,27 @@
                       (st-save-pc st) 2 (st-crashed st) (st-cp-done st)
                       (st-old st) (st-new st) (st-cpc st) (st-cp0 st))
                st))
-          ;; sb-posix:rename: checkpoint name now carries the unsynced record.
-          ((eq name :cp-rename)
+          ;; fsync-stream (+ close): checkpoint temp data reaches stable
+          ;; storage (the VK-4 hardening step that closed the VK-6 residue).
+          ((eq name :cp-fsync-temp)
            (if (equal (st-cp-pc st) 2)
+               (mk-st (st-target st) (st-save-temp st)
+                      (mk-file (file-content (st-cp-temp st)) t)
+                      (st-checkpoint st) (st-save-pc st) 3 (st-crashed st)
+                      (st-cp-done st) (st-old st) (st-new st) (st-cpc st)
+                      (st-cp0 st))
+               st))
+          ;; sb-posix:rename: checkpoint name now carries the SYNCED record
+          ;; (this is where fsync-before-rename earns the durable checkpoint).
+          ((eq name :cp-rename)
+           (if (equal (st-cp-pc st) 3)
                (mk-st (st-target st) (st-save-temp st) nil (st-cp-temp st)
                       (st-save-pc st) 0 (st-crashed st) t
                       (st-old st) (st-new st) (st-cpc st) (st-cp0 st))
                st))
           ;; unwind-protect temp cleanup of the checkpoint writer.
           ((eq name :cp-abort)
-           (if (member (st-cp-pc st) '(1 2))
+           (if (member (st-cp-pc st) '(1 2 3))
                (mk-st (st-target st) (st-save-temp st) nil (st-checkpoint st)
                       (st-save-pc st) 0 (st-crashed st) (st-cp-done st)
                       (st-old st) (st-new st) (st-cpc st) (st-cp0 st))
@@ -356,25 +366,39 @@
        (not (equal (st-cp-pc st) 2))
        (and (consp (st-cp-temp st))
             (equal (file-content (st-cp-temp st)) (st-cpc st))))
+   ;; I6b: (not crashed) and cp-pc 3 => checkpoint temp holds CPC, synced --
+   ;; exactly what :cp-rename installs as the checkpoint (mirrors I5).
+   (or (st-crashed st)
+       (not (equal (st-cp-pc st) 3))
+       (and (consp (st-cp-temp st))
+            (equal (file-content (st-cp-temp st)) (st-cpc st))
+            (equal (file-synced (st-cp-temp st)) t)))
    ;; I7: a present checkpoint is never junk: the old checkpoint, the new
-   ;; checkpoint, or (crash states only) a torn prefix of either.
+   ;; checkpoint, or (crash states only) a torn prefix of the OLD checkpoint.
+   ;; A renamed-in NEW checkpoint is fsync'd and can never tear.
    (or (atom (st-checkpoint st))
        (equal (file-content (st-checkpoint st)) (st-cp0 st))
        (equal (file-content (st-checkpoint st)) (st-cpc st))
        (and (st-crashed st)
-            (or (prefix-p (file-content (st-checkpoint st)) (st-cp0 st))
-                (prefix-p (file-content (st-checkpoint st)) (st-cpc st)))))
+            (prefix-p (file-content (st-checkpoint st)) (st-cp0 st))))
+   ;; I7s: unsynced checkpoint data is pre-existing: only the initial CP0
+   ;; checkpoint (cp0-synced = nil) can be unsynced -- every checkpoint the
+   ;; writer installs was fsync'd before its rename.
+   (or (atom (st-checkpoint st))
+       (equal (file-synced (st-checkpoint st)) t)
+       (equal (file-content (st-checkpoint st)) (st-cp0 st))
+       (and (st-crashed st)
+            (prefix-p (file-content (st-checkpoint st)) (st-cp0 st))))
    ;; I8: checkpoint-deletion ordering: the checkpoint is absent ONLY in the
    ;; post-delete state -- which I3 pins to target = NEW.
    (or (consp (st-checkpoint st))
        (equal (st-save-pc st) 6))
    ;; I9: once a checkpoint write committed (cp-done) a present checkpoint
-   ;; holds CPC -- torn at worst to a prefix of CPC in crash states.
+   ;; holds CPC exactly, durably -- in crash states too (the fsync).
    (or (not (st-cp-done st))
        (atom (st-checkpoint st))
-       (equal (file-content (st-checkpoint st)) (st-cpc st))
-       (and (st-crashed st)
-            (prefix-p (file-content (st-checkpoint st)) (st-cpc st))))))
+       (and (equal (file-content (st-checkpoint st)) (st-cpc st))
+            (equal (file-synced (st-checkpoint st)) t)))))
 
 ;;; ===========================================================================
 ;;; Inductiveness: cs-inv holds in every reachable state (incl. crash states)
@@ -478,9 +502,10 @@
 
 ;;; ===========================================================================
 ;;; Checkpoint integrity: a present checkpoint is the old checkpoint, the new
-;;; checkpoint, or -- ONLY in a crash state -- a prefix of the new checkpoint
-;;; content (the documented production residue: the checkpoint writer never
-;;; fsyncs, so its renamed-in data may tear at power loss).
+;;; checkpoint, or -- ONLY in a crash state -- a prefix of the OLD checkpoint
+;;; content (possible only when the pre-existing CP0 checkpoint was never
+;;; synced).  A checkpoint the writer installed is fsync'd before its rename
+;;; (VK-4 hardening) and can never tear: no prefix-of-CPC disjunct remains.
 ;;; ===========================================================================
 
 (defthm crash-safety-checkpoint-never-junk
@@ -495,14 +520,10 @@
                         (cs-run (cs-init old new cpc cp0 cp0-synced) acts)))
                       cpc)
                (and (st-crashed (cs-run (cs-init old new cpc cp0 cp0-synced) acts))
-                    (or (prefix-p (file-content
-                                   (st-checkpoint
-                                    (cs-run (cs-init old new cpc cp0 cp0-synced) acts)))
-                                  cp0)
-                        (prefix-p (file-content
-                                   (st-checkpoint
-                                    (cs-run (cs-init old new cpc cp0 cp0-synced) acts)))
-                                  cpc)))))
+                    (prefix-p (file-content
+                               (st-checkpoint
+                                (cs-run (cs-init old new cpc cp0 cp0-synced) acts)))
+                              cp0))))
   :rule-classes nil
   :hints (("Goal"
            :use ((:instance cs-inv-of-reachable))
@@ -510,18 +531,17 @@
 
 ;;; ===========================================================================
 ;;; Recoverability -- the precise meaning of "old + checkpoint" (obligation 1's
-;;; third disjunct).  In every reachable state where a checkpoint write has
-;;; committed and the save has not renamed:
+;;; third disjunct).  In EVERY reachable state -- crash states included --
+;;; where a checkpoint write has committed and the save has not renamed:
 ;;;   * the target still holds OLD,
 ;;;   * the checkpoint file is present, and
-;;;   * it holds CPC exactly in non-crash states; in crash states at worst a
-;;;     prefix of CPC (the missing-fsync residue -- see header).
+;;;   * it holds CPC EXACTLY (the fsync-before-rename added by VK-4 hardening;
+;;;     before it, crash states admitted only "a prefix of CPC", and a
+;;;     separate no-crash theorem carried the equality).
 ;;; ===========================================================================
 
-(defthm crash-safety-recoverable-no-crash
-  (implies (and (not (st-crashed
-                      (cs-run (cs-init old new cpc cp0 cp0-synced) acts)))
-                (st-cp-done (cs-run (cs-init old new cpc cp0 cp0-synced) acts))
+(defthm crash-safety-recoverable-any-state
+  (implies (and (st-cp-done (cs-run (cs-init old new cpc cp0 cp0-synced) acts))
                 (not (equal (st-save-pc
                              (cs-run (cs-init old new cpc cp0 cp0-synced) acts))
                             5))
@@ -538,29 +558,6 @@
                         (st-checkpoint
                          (cs-run (cs-init old new cpc cp0 cp0-synced) acts)))
                        cpc)))
-  :rule-classes nil
-  :hints (("Goal"
-           :use ((:instance cs-inv-of-reachable))
-           :in-theory (disable cs-run cs-inv-of-reachable))))
-
-(defthm crash-safety-recoverable-any-state
-  (implies (and (st-cp-done (cs-run (cs-init old new cpc cp0 cp0-synced) acts))
-                (not (equal (st-save-pc
-                             (cs-run (cs-init old new cpc cp0 cp0-synced) acts))
-                            5))
-                (not (equal (st-save-pc
-                             (cs-run (cs-init old new cpc cp0 cp0-synced) acts))
-                            6)))
-           (and (equal (file-content
-                        (st-target
-                         (cs-run (cs-init old new cpc cp0 cp0-synced) acts)))
-                       old)
-                (consp (st-checkpoint
-                        (cs-run (cs-init old new cpc cp0 cp0-synced) acts)))
-                (prefix-p (file-content
-                           (st-checkpoint
-                            (cs-run (cs-init old new cpc cp0 cp0-synced) acts)))
-                          cpc)))
   :rule-classes nil
   :hints (("Goal"
            :use ((:instance cs-inv-of-reachable))

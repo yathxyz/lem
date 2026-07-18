@@ -300,8 +300,8 @@ machinery as an ACL2 small-step operational model: an abstract filesystem
 state (target file, save temp, checkpoint temp, checkpoint file — each a
 `(content synced-p)` record — plus per-protocol pcs), the step sequences
 transcribed from production (`write-file-atomically`,
-src/buffer/file-utils.lisp:242-285; `write-string-to-file-atomically`,
-src/ext/checkpoint.lisp:88-105; `delete-checkpoint-on-save` on the
+src/buffer/file-utils.lisp:243-291; `write-string-to-file-atomically`,
+src/ext/checkpoint.lisp:88-112; `delete-checkpoint-on-save` on the
 after-save hook), and a **crash transition enabled after every step**. The
 invariant `cs-inv` is proved inductive over the step relation
 (`cs-inv-of-reachable`), so every theorem quantifies over **all** reachable
@@ -343,13 +343,15 @@ Certified obligations (SPEC-VK VK-6):
    with a base-36 digit codepoint, so the two namespaces (dispatched on the
    200-char threshold, checkpoint.lisp:81) can never collide.
 
-**"Recoverable", precisely** (`crash-safety-recoverable-no-crash` /
-`-any-state`): in every reachable state where a checkpoint write has committed
-and the save has not renamed, the target still holds old-content, the
-checkpoint file is present, and it holds the checkpointed edits **exactly** in
-non-crash states — in crash states at worst a **prefix** of them (next
-paragraph). Recovery is then production's find-file offer
-(`maybe-offer-recovery` → `recover-buffer-from-checkpoint`).
+**"Recoverable", precisely** (`crash-safety-recoverable-any-state`): in
+**every** reachable state — crash states included — where a checkpoint write
+has committed and the save has not renamed, the target still holds
+old-content, the checkpoint file is present, and it holds the checkpointed
+edits **exactly** (next paragraph). Recovery is then production's find-file
+offer (`maybe-offer-recovery` → `recover-buffer-from-checkpoint`). Before the
+VK-4 hardening fsync this equality held only in non-crash states (the former
+`crash-safety-recoverable-no-crash`, now deleted as subsumed) and crash
+states admitted a prefix tear.
 
 **Filesystem axioms (trust base).** The crash transition is *defined* by:
 POSIX rename atomicity (a name maps to the whole old or whole new file, never
@@ -361,21 +363,24 @@ suffix lands in an earlier protocol state, all of which the theorems already
 cover). These axioms are the definition of `tear-file`/`:crash` in the book,
 not `defaxiom`s; they are what we trust about the OS/filesystem below Lem.
 
-**Production durability gap, documented (not fixed here — VK-6 charter).** The
-save path fsyncs its temp before rename, so the renamed-in target is durable
-and obligation 1 is unconditional. The checkpoint writer
-(`write-string-to-file-atomically`) only `finish-output`s — **it never
-fsyncs** — so on power loss a filesystem that reorders data vs. rename may
-leave the checkpoint file torn to a prefix of the new checkpoint (that is
-exactly the crash-state prefix disjunct in the theorems; the model applies
-the fsync axiom uniformly, carrying the temp's synced flag through rename).
-One `fsync` added to the checkpoint writer would strengthen the prefix
-disjunct to equality. Also documented: intra-hash-namespace collisions
-(`sxhash` is not injective) remain possible for two ≥200-char-encoding paths
-with equal hashes and equal tails, and the namespace-disjointness guarantee
-is conditional on paths being absolute (production guarantees that:
-`buffer-filename` comes from `expand-file-name` and `checkpoint-filename`
-tries `truename` first).
+**Production durability gap: found by VK-6 (documented, per its charter),
+closed by VK-4 hardening.** The save path always fsynced its temp before
+rename, so the renamed-in target is durable and obligation 1 was
+unconditional from the start. The checkpoint writer
+(`write-string-to-file-atomically`) originally only `finish-output`ed — it
+never fsynced — so on power loss a filesystem that reorders data vs. rename
+could leave the checkpoint file torn to a prefix of the new checkpoint; the
+VK-6 theorems stated exactly that as a crash-state prefix disjunct. VK-4
+hardening added the one `fsync` (`fsync-stream`, the same helper the save
+path uses), the model gained the corresponding `:cp-fsync-temp` step, and
+the theorems were **strengthened to equality**: a renamed-in checkpoint can
+no longer tear (only the pre-existing `CP0` checkpoint can, when its
+durability parameter says it was never synced). Still documented:
+intra-hash-namespace collisions (`sxhash` is not injective) remain possible
+for two ≥200-char-encoding paths with equal hashes and equal tails, and the
+namespace-disjointness guarantee is conditional on paths being absolute
+(production guarantees that: `buffer-filename` comes from `expand-file-name`
+and `checkpoint-filename` tries `truename` first).
 
 **Shim growth for VK-6:** none in the whitelist — the exec path (`cs-init`,
 `cs-step`, `cs-run`, `cs-inv`, accessors, `prefix-p`, `take-at-most`,
@@ -386,7 +391,7 @@ tries `truename` first).
 driver executes the real syscall sequence (step-faithful transcription: same
 syscalls, same order, same open flags; checkpoint path from the real
 `checkpoint-filename`) against a tmpdir, stopping after k steps for every
-k = 0..9. Stopping **is** the crash model (power loss / lying fsyncs are
+k = 0..10. Stopping **is** the crash model (power loss / lying fsyncs are
 covered by the axioms above, not testable from userland). At every kill point
 the on-disk state is asserted against the VK-6 invariant AND against the
 kernel model's predicted state (exact for synced/absent files, prefix for
@@ -677,30 +682,28 @@ model PBT of the four timer theorem groups plus a simulated-clock
 differential reusing `tests/common/timer.lisp`'s `testing-timer-manager`:
 random schedules across multiple idle periods, comparing production's
 sleep/fire/bookkeeping decisions (including `last-time` refresh semantics)
-against the kernel per tick. No divergence beyond the documented double-fire
-bug below.
+against the kernel per tick. No divergence.
 
-**Production bug found by VK-9 (documented, not fixed here — the VK-3/VK-6
-charter precedent; the deterministic reproducer
-`timer-double-fire-reproducer` in `tests/pbt/event-queue-stress.lisp` is the
-record).** `update-idle-timers` (src/common/timer.lisp) computes
+**Production bug found by VK-9, fixed by VK-4 hardening (the deterministic
+regression `timer-double-fire-regression` in
+`tests/pbt/event-queue-stress.lisp` is the record and the pin).**
+`update-idle-timers` (src/common/timer.lisp) computes
 `updating-timers`/`updating-idle-timers` with `remove-if-not`, whose result
 may share structure with its input (CLHS-permitted; SBCL shares the maximal
-tail), and then `nconc`s `updating-idle-timers` onto
-`*processed-idle-timer-list*` **before** `(mapc #'call-timer-function
-updating-timers)`. Whenever the last due timer in `*idle-timer-list*` order
-is a repeat timer and the processed list is non-empty, the `nconc` splices
-the processed list onto the very list `mapc` is about to walk — **re-firing
-every already-processed repeat idle timer in the same idle period** (extra
-funcalls only; the list bookkeeping ends correct, which is why the bug is
-latent). The kernel model states the intended implementation-independent
-semantics (a repeat idle timer fires at most once per idle period); the
-differential accepts production's double-fire outcome exactly under its
-envelope condition (some fired timer repeat ∧ processed non-empty — the
-precise trigger depends on production's `set-difference`-scrambled internal
-list order, which is unobservable), and asserts the exact clean outcome
-everywhere else. A one-line fix would be `(mapc #'call-timer-function
-updating-timers)` before the list surgery, or `append` instead of `nconc`.
+tail), and then spliced `updating-idle-timers` onto
+`*processed-idle-timer-list*` with `nconc` **before** `(mapc
+#'call-timer-function updating-timers)`. Whenever the last due timer in
+`*idle-timer-list*` order was a repeat timer and the processed list was
+non-empty, the `nconc` spliced the processed list onto the very list `mapc`
+was about to walk — **re-firing every already-processed repeat idle timer in
+the same idle period** (extra funcalls only; the list bookkeeping ended
+correct, which is why the bug was latent). The VK-4 hardening fix is the
+minimal one: `append` instead of `nconc`, leaving the walked list unshared
+and everything else identical. Production now matches the kernel model's
+implementation-independent semantics (a repeat idle timer fires at most once
+per idle period) **unconditionally**, and the differential asserts exact
+per-tick fired-set equality — the former double-fire acceptance envelope is
+removed.
 
 ## VK-10 — character/string width algebra + one-source swap
 
@@ -1132,17 +1135,39 @@ case restored to the clip differential inputs. Perf sanity: the three
 layout-heavy suites (layout-conformance / redisplay-cache /
 screen-projection) run at pre-swap wall time (≈20/150/500 ms), and the
 wrapping redraw loop converts objects once per logical line per frame.
-Remaining brief items 5 (checkpoint fsync) and 6 (idle-timer double-fire) are
-candidate hardening, not part of this swap.
+
+### VK-4 hardening (milestone-brief items 5, 6): DONE
+
+The two candidate-hardening findings landed after the swaps:
+
+- **Checkpoint writer fsync (VK-6 residue, closed).**
+  `write-string-to-file-atomically` (src/ext/checkpoint.lisp) now calls the
+  save path's own `fsync-stream` (newly exported from
+  `lem/buffer/file-utils`) before its rename. The crash-safety model gained
+  the `:cp-fsync-temp` step, its invariant the matching synced conjuncts,
+  and the theorems were strengthened: `crash-safety-recoverable-any-state`
+  now states **equality** (checkpoint holds the checkpointed edits exactly,
+  crash states included), `crash-safety-checkpoint-never-junk` lost its
+  prefix-of-CPC disjunct, and the subsumed
+  `crash-safety-recoverable-no-crash` was deleted. The fault-injection
+  driver executes the new fsync step and its kill point (k = 0..10). See
+  the VK-6 section.
+- **Idle-timer double-fire (VK-9 finding, fixed).** `update-idle-timers`
+  uses `append` instead of `nconc` for the processed-list splice; the
+  reproducer is inverted into `timer-double-fire-regression` (single-fire
+  asserted) and the VK-9 timer differential now demands exact per-tick
+  fired-set equality. See the VK-9 section.
 
 ## Proof status
 
 All theorems in every book under `verified/` certify with real ACL2 (no
 `skip-proofs`, `defaxiom`, trust tags, or `:program`-mode kernel functions), and
 no statement was weakened. VK-1, VK-2 (five obligation groups), VK-5 (all
-three obligations), VK-6 (all three obligations, with the checkpoint-tear
-prefix disjunct and the intra-hash-namespace residue stated explicitly rather
-than over-claimed — see the VK-6 section), VK-7 (all five obligations), VK-8
+three obligations), VK-6 (all three obligations — the crash-state
+checkpoint-tear prefix disjunct was *strengthened to equality* once VK-4
+hardening added the checkpoint fsync, and the intra-hash-namespace residue
+stays stated explicitly rather than over-claimed — see the VK-6 section),
+VK-7 (all five obligations), VK-8
 (all four obligations — liveness, safety, nesting, force — with the abort-free
 liveness proviso and the deferred-arrival coalescing semantics stated
 explicitly rather than over-claimed, see the VK-8 section), VK-9 (all four
@@ -1269,3 +1294,68 @@ trusting, unproven, is:
 the strongest guarantee available per subsystem and is explicit about the
 residue. Per-milestone decisions that qualify a claim (e.g. the VK-3.3 tick
 decision) are recorded here as they land.
+
+## SPEC-VK status
+
+The milestone is complete: every book certifies, every suite is green, and
+the one-source swaps are the code running in the daily-driver binary. This
+section is the closing summary; the per-item sections above hold the detail.
+
+### Per-item status
+
+| Item | Book | Proof | Running in production | Acceptance suites |
+|------|------|-------|----------------------|-------------------|
+| VK-1 buffer model | `buffer-model.lisp` | certified | model backs the VK-4 edit engine; `wf-buffer` is the `:paranoid` assertion | kernel-model |
+| VK-2 edit primitives | `buffer-edit.lisp` | certified (all 5 obligation groups) | **swapped** — marker relocation + offset algebra are kernel calls (VK-4) | kernel-conformance (10k), baseline-fuzz (10k) |
+| VK-3 undo/redo | `undo.lisp` | certified core; **3 theorems PROOF PENDING** (below); tick claim refuted, documented | loaded in-image; recording semantics stays in the shell, certified statement rides along | kernel-undo-conformance STRICT (1500) + INHIBITED (1000) |
+| VK-4 shell swap | — (imperative shell) | n/a (shell is trust base) | **the edit engine**: `:release`/`:paranoid`/`:conformance` modes; perf at parity | edit-engine-modes + all V1 suites |
+| VK-5 EOL codec | `codec.lisp` | certified (all 3 obligations) | not swapped (modeled); production read/write pinned differentially | codec-conformance, eol-roundtrip corpus |
+| VK-6 crash safety | `crash-safety.lisp` | certified; **strengthened to equality** by the VK-4 hardening fsync | checkpoint writer + atomic save transcribed; fsync now in production | crash-safety-faults (kill points 0..10) |
+| VK-7 input decode | `input-decode.lisp` | certified (all 5 obligations) | **swapped** — ncurses CSI decode + bracketed paste are kernel calls | input-decode-conformance, lem-ncurses/tests |
+| VK-8 interrupts | `interrupt-model.lisp` | certified (all 4 obligations) | modeled (production macros stay; stress-bridged) | interrupt-stress (1000 real interrupts) |
+| VK-9 event queue + idle timers | `event-queue-model.lisp` | certified (all 4 + timer theorems) | modeled; double-fire bug found and **fixed** (VK-4 hardening) | event-queue-stress (threaded), timer differential |
+| VK-10 width algebra | `width.lisp` + `eastasian-data.lisp` | certified (all 4 obligations) | **swapped** — `char-width`/`string-width`/`wide-index` are kernel calls | width-conformance, width-vectors corpus |
+| VK-11 line layout | `layout.lisp` | certified (all 4 obligation groups) | **swapped** — wrap/clip are shells over `k-wrap-row`/`k-clip` (VK-4) | layout-conformance |
+| VK-12 screen/cache | — (no book by design) | n/a — kernel-as-oracle PBT | the redisplay pipeline under test is production | redisplay-cache, screen-projection |
+
+All gates: `scripts/run-proofs.sh` (12 books, the hello canary included),
+`scripts/run-tests.sh` (main rove suite), `scripts/run-tests.sh
+lem-ncurses/tests`.
+
+### Trust base (recap)
+
+Full statement in the [Trust base](#trust-base) section above: SBCL, ACL2,
+the ~200-line dual-load shim, the imperative shell (conformance-tested, not
+proven), the OS/filesystem below Lem (made explicit as the VK-6 axioms), and
+concurrency-model fidelity (stress-bridged, VK-8/VK-9). Certification host ≠
+execution host (ACL2's SBCL 2.6.5 vs. Lem's 2.5.10) — allowed, the sources
+are one.
+
+### Remaining PROOF PENDING (VK-3 — PBT-pinned, never silent)
+
+1. **Obligation 1, group generalization + delete case** — undo of a recorded
+   *group* / *delete* restores content (pinned by the STRICT suite).
+2. **Obligation 2, group generalization + delete case** — same scope for
+   `redo ∘ undo = id`.
+3. **Obligation 4, full inhibition-free cross-op bounds invariant** (the
+   inhibit-path version is refuted, documented in the VK-3 section).
+
+### Production bugs: found and fixed
+
+| Bug | Found by | Fixed in | Record |
+|-----|----------|----------|--------|
+| `map-wrapping-line` infinite loop at window width ≤ 2 (width-2 glyph stalls the wrap-offset scan) | VK-12 | VK-4 | regression tests in `tests/window.lisp`; VK-12 section |
+| Clip straddle rebuild of multi-char `:control` objects produced a wrong object (latent) | VK-11 | VK-4 layout swap | clip differential inputs restored; VK-11 section |
+| Idle-timer double-fire: `nconc` splice re-fired processed repeat timers in the same idle period | VK-9 | VK-4 hardening | `timer-double-fire-regression`; VK-9 section |
+| Checkpoint writer never fsynced: renamed-in checkpoint could tear to a prefix on power loss | VK-6 | VK-4 hardening | crash-safety theorems strengthened to equality; VK-6 section |
+| Kernel-side: `recompute-edit-offset` crashed on separator elements (inhibited path) | VK-3 | VK-3 | INHIBITED suite is the pin; VK-3 section |
+
+### Production bugs / refuted claims: found and documented (not fixed)
+
+| Finding | Found by | Record |
+|---------|----------|--------|
+| `buffer-modified-p` false-clean hazard: tick = 0 does not imply content matches the last save (unsound as a save-safety oracle under undo-below-unmark / inhibited edits) | VK-3.3 | reproducers in the VK-3 section |
+| Undo drift on the inhibit path: a stored position can exceed the shrunk buffer mid-group; `move-to-position` silently mis-places the edit | VK-3 | VK-3 section (obligation 4 refutation) |
+| Intra-hash-namespace checkpoint-name collisions (`sxhash` not injective, ≥ 200-char encodings with equal tails) | VK-6 | VK-6 section |
+| ncurses UTF-8 assembly: a keycode/timeout inside a continuation window would store a non-octet into an `(unsigned-byte 8)` vector (latent type error, unreachable today) | VK-7 | VK-7 deviations |
+| Spec refutation (production is the spec): a terminal `:resize` burst yields **two** updates, not one; buried bursts yield zero | VK-9 | VK-9 section, `coalescing-ground-witness` |

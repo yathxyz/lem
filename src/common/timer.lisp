@@ -255,7 +255,14 @@
 
     (setf *idle-timer-list* (set-difference *idle-timer-list* deleting-timers))
     (setf *idle-timer-list* (set-difference *idle-timer-list* updating-idle-timers))
-    (setf *processed-idle-timer-list* (nconc updating-idle-timers *processed-idle-timer-list*))
+    ;; APPEND, not nconc: UPDATING-IDLE-TIMERS may share its tail with
+    ;; UPDATING-TIMERS (remove-if-not is allowed to share structure, and SBCL
+    ;; shares the maximal tail), so an nconc here spliced the processed list
+    ;; onto the very list the mapc below is about to walk, re-firing every
+    ;; already-processed repeat idle timer in the same idle period (the VK-9
+    ;; double-fire finding, fixed by VK-4 hardening; regression pinned by
+    ;; timer-double-fire-regression in tests/pbt/event-queue-stress.lisp).
+    (setf *processed-idle-timer-list* (append updating-idle-timers *processed-idle-timer-list*))
 
     (dolist (timer updating-timers)
       (unless (timer-repeat-p timer)

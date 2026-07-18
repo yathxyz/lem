@@ -161,25 +161,25 @@
 ;;;; timers; the differential suite therefore compares fired/remaining/
 ;;;; processed as id-sets per tick, plus (ms, last) per id.
 ;;;;
-;;;; PRODUCTION BUG FOUND BY THIS ITEM (documented, not fixed here -- the
-;;;; VK-3/VK-6 charter precedent; reproducer pinned in
-;;;; tests/pbt/event-queue-stress.lisp `timer-double-fire-reproducer').
+;;;; PRODUCTION BUG FOUND BY THIS ITEM, FIXED BY VK-4 HARDENING (regression
+;;;; pinned in tests/pbt/event-queue-stress.lisp `timer-double-fire-regression').
 ;;;; update-idle-timers' UPDATING-TIMERS / UPDATING-IDLE-TIMERS are
 ;;;; remove-if-not results, which MAY SHARE structure with their input
-;;;; (CLHS-permitted; SBCL shares the maximal tail).  The
+;;;; (CLHS-permitted; SBCL shares the maximal tail).  The pre-fix
 ;;;;   (setf *processed-idle-timer-list*
 ;;;;         (nconc updating-idle-timers *processed-idle-timer-list*))
-;;;; runs BEFORE (mapc #'call-timer-function updating-timers), so whenever
-;;;; the last due timer in *idle-timer-list* order is a repeat timer and the
-;;;; processed list is non-empty, the nconc splices the processed list onto
-;;;; UPDATING-TIMERS' final cons and mapc RE-FIRES every already-processed
+;;;; ran BEFORE (mapc #'call-timer-function updating-timers), so whenever
+;;;; the last due timer in *idle-timer-list* order was a repeat timer and the
+;;;; processed list was non-empty, the nconc spliced the processed list onto
+;;;; UPDATING-TIMERS' final cons and mapc RE-FIRED every already-processed
 ;;;; repeat timer in the same idle period (extra funcalls only; the list
-;;;; bookkeeping ends correct).  The kernel model states the intended,
-;;;; implementation-independent semantics -- kt-fired fires each due timer
-;;;; exactly once per tick, a repeat timer at most once per idle period --
-;;;; and the differential accepts production's double-fire outcome exactly
-;;;; under its envelope condition (some fired timer repeat AND processed
-;;;; non-empty), the precise trigger being unobservable from outside.
+;;;; bookkeeping ended correct).  The fix (src/common/timer.lisp) uses
+;;;; APPEND instead of nconc, leaving the walked list unshared: production
+;;;; now matches this model's single-fire semantics -- kt-fired fires each
+;;;; due timer exactly once per tick, a repeat timer at most once per idle
+;;;; period -- UNCONDITIONALLY, and the differential asserts exact per-tick
+;;;; equality of the fired sets (the double-fire acceptance envelope is
+;;;; removed).
 ;;;;
 ;;;; EXEC PATH (functions the in-image suite tests/pbt/event-queue-stress.lisp
 ;;;; calls): eq-init, eq-step, eq-run, eq-drain, wf-eq, eqs-queue, eqs-enq-log,

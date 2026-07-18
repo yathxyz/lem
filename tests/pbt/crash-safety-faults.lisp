@@ -13,14 +13,16 @@
 ;;;; The driver is a step-faithful transcription of the production functions
 ;;;; (same syscalls, same order, same open flags), because the production
 ;;;; functions are single opaque calls that cannot be stopped mid-flight:
-;;;;   steps 1-3: src/ext/checkpoint.lisp write-string-to-file-atomically
-;;;;              (lines 88-105): open temp (:if-exists :supersede),
-;;;;              write-string + finish-output + close, sb-posix:rename.
-;;;;   steps 4-8: src/buffer/file-utils.lisp write-file-atomically (242-285):
+;;;;   steps 1-4: src/ext/checkpoint.lisp write-string-to-file-atomically
+;;;;              (lines 88-112): open temp (:if-exists :supersede),
+;;;;              write-string, fsync-stream (finish-output + sb-posix:fsync)
+;;;;              + close, sb-posix:rename.  (The fsync step was added by
+;;;;              VK-4 hardening, closing the VK-6 prefix-tear residue.)
+;;;;   steps 5-9: src/buffer/file-utils.lisp write-file-atomically (243-291):
 ;;;;              open temp (:if-exists :error), writer, fsync-stream
 ;;;;              (finish-output + sb-posix:fsync) + close,
 ;;;;              preserve-file-metadata (chown/chmod), sb-posix:rename.
-;;;;   step 9:    src/ext/checkpoint.lisp delete-checkpoint (138-145), the
+;;;;   step 10:   src/ext/checkpoint.lisp delete-checkpoint (145-152), the
 ;;;;              after-save-hook (file.lisp:182-186 orders it strictly after
 ;;;;              the rename commits).
 ;;;; The checkpoint file path comes from the REAL production
@@ -110,7 +112,7 @@
 
 ;; Model actions, in 1:1 correspondence (same order) with the driver steps.
 (defparameter *model-actions*
-  '(:cp-create-temp :cp-write-temp :cp-rename
+  '(:cp-create-temp :cp-write-temp :cp-fsync-temp :cp-rename
     :save-create-temp :save-write-temp :save-fsync-temp
     :save-metadata :save-rename :save-delete-checkpoint))
 
@@ -158,36 +160,40 @@ of failed check names (NIL = all green)."
     (unwind-protect
          (let ((steps
                  (list
-                  ;; 1 :cp-create-temp -- checkpoint.lisp:92-100
+                  ;; 1 :cp-create-temp -- checkpoint.lisp:103-107
                   (lambda ()
                     (setf cp-stream (open cp-temp :direction :output
                                                   :if-exists :supersede
                                                   :if-does-not-exist :create
                                                   :external-format :utf-8)))
-                  ;; 2 :cp-write-temp -- checkpoint.lisp:101-102 (+ stream close
-                  ;; on with-open-file exit; note: finish-output, NO fsync)
+                  ;; 2 :cp-write-temp -- checkpoint.lisp:108 (buffered; the
+                  ;; data reaches the OS only at the fsync step, as in production)
+                  (lambda () (write-string *cpc* cp-stream))
+                  ;; 3 :cp-fsync-temp -- fsync-stream, checkpoint.lisp:109 +
+                  ;; file-utils.lisp:187-192 (finish-output + fsync, then close
+                  ;; on with-open-file exit)
                   (lambda ()
-                    (write-string *cpc* cp-stream)
                     (finish-output cp-stream)
+                    (sb-posix:fsync (sb-sys:fd-stream-fd cp-stream))
                     (close cp-stream))
-                  ;; 3 :cp-rename -- checkpoint.lisp:103
+                  ;; 4 :cp-rename -- checkpoint.lisp:110
                   (lambda () (sb-posix:rename cp-temp cp-path))
-                  ;; 4 :save-create-temp -- file-utils.lisp:224-230, 267
+                  ;; 5 :save-create-temp -- file-utils.lisp:225-231, 273
                   (lambda ()
                     (setf save-stream (open save-temp :direction :output
                                                       :if-exists :error
                                                       :if-does-not-exist :create)))
-                  ;; 5 :save-write-temp -- file-utils.lisp:269 (buffered; the
+                  ;; 6 :save-write-temp -- file-utils.lisp:275 (buffered; the
                   ;; data reaches the OS only at the fsync step, as in production)
                   (lambda () (write-string *new* save-stream))
-                  ;; 6 :save-fsync-temp -- fsync-stream, file-utils.lisp:186-191,
-                  ;; 270-271 (finish-output + fsync, then close)
+                  ;; 7 :save-fsync-temp -- fsync-stream, file-utils.lisp:187-192,
+                  ;; 276-277 (finish-output + fsync, then close)
                   (lambda ()
                     (finish-output save-stream)
                     (sb-posix:fsync (sb-sys:fd-stream-fd save-stream))
                     (close save-stream))
-                  ;; 7 :save-metadata -- preserve-file-metadata,
-                  ;; file-utils.lisp:206-222, 275 (chown before chmod)
+                  ;; 8 :save-metadata -- preserve-file-metadata,
+                  ;; file-utils.lisp:207-223, 281 (chown before chmod)
                   (lambda ()
                     (let ((stat (ignore-errors (sb-posix:stat target))))
                       (when stat
@@ -198,9 +204,9 @@ of failed check names (NIL = all green)."
                         (ignore-errors
                          (sb-posix:chmod save-temp
                                          (logand (sb-posix:stat-mode stat) #o7777))))))
-                  ;; 8 :save-rename -- file-utils.lisp:278
+                  ;; 9 :save-rename -- file-utils.lisp:284
                   (lambda () (sb-posix:rename save-temp target))
-                  ;; 9 :save-delete-checkpoint -- checkpoint.lisp:138-145 via the
+                  ;; 10 :save-delete-checkpoint -- checkpoint.lisp:145-152 via the
                   ;; after-save hook (file.lisp:182-186: strictly after rename)
                   (lambda () (uiop:delete-file-if-exists cp-path)))))
            (assert (= (length steps) (length *model-actions*)))
@@ -244,7 +250,7 @@ of failed check names (NIL = all green)."
 (deftest crash-safety-fault-injection
   (ensure-kernel-loaded)
   ;; Every kill point k: crash after k real steps, k = 0 (nothing ran) through
-  ;; 9 (the full protocol committed).
+  ;; 10 (the full protocol committed).
   (loop :for k :from 0 :to (length *model-actions*)
         :do (let ((failed (run-kill-point k)))
               (ok (null failed)

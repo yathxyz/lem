@@ -11,6 +11,7 @@
            :virtual-probe-file
            :with-open-virtual-file
            :*atomic-save*
+           :fsync-stream
            :write-file-atomically))
 (in-package :lem/buffer/file-utils)
 

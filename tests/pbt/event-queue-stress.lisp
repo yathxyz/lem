@@ -62,16 +62,15 @@
 ;;;;      production prunes with SET-DIFFERENCE, whose order is unspecified
 ;;;;      (see the book header's order caveat).
 ;;;;
-;;;;      PRODUCTION BUG FOUND (pinned by `timer-double-fire-reproducer',
-;;;;      documented not fixed): update-idle-timers can RE-FIRE
-;;;;      already-processed repeat idle timers within the same idle period
-;;;;      through remove-if-not structure sharing + nconc (mechanism in the
-;;;;      reproducer's comment and the book header).  The differential
-;;;;      accepts the clean and the double-fire outcome under the exact
-;;;;      envelope condition (some fired timer is repeat AND the processed
-;;;;      list is non-empty), because the trigger depends on production's
-;;;;      unobservable internal list order; bookkeeping is asserted exactly
-;;;;      in both cases.
+;;;;      PRODUCTION BUG FOUND BY VK-9, FIXED BY VK-4 HARDENING (regression
+;;;;      pinned by `timer-double-fire-regression'): update-idle-timers could
+;;;;      RE-FIRE already-processed repeat idle timers within the same idle
+;;;;      period through remove-if-not structure sharing + nconc (mechanism
+;;;;      in the regression test's comment and the book header).  The fix
+;;;;      (append instead of nconc, src/common/timer.lisp) makes production
+;;;;      match the kernel's single-fire semantics unconditionally; the
+;;;;      differential asserts exact per-tick equality of the fired id sets
+;;;;      (the former double-fire acceptance envelope is removed).
 
 (defpackage :lem-tests/pbt/event-queue-stress
   (:use :cl
@@ -592,31 +591,14 @@ values."
         (let* ((prod-fired-p (lem/common/timer:update-idle-timers))
                (prod-fired (sort (copy-list (car fired-cell)) #'<))
                (model-fired (kcall "KT-FIRED" model tick))
-               (fired-ids (sort (model-ids model-fired) #'<))
-               (processed-ids (sort (model-ids model-processed) #'<))
-               ;; The DOCUMENTED PRODUCTION DOUBLE-FIRE (see the book header
-               ;; and `timer-double-fire-reproducer' below): when the last
-               ;; due timer in production's internal list order is a repeat
-               ;; timer and the processed list is non-empty,
-               ;; update-idle-timers' nconc splices the processed list onto
-               ;; the very list mapc is about to fire, re-firing every
-               ;; already-processed timer.  Production's internal order is
-               ;; unobservable (set-difference scrambles it), so under this
-               ;; envelope condition both the clean and the double-fire
-               ;; outcomes are legitimate production behavior; the list
-               ;; bookkeeping after the tick is identical either way and
-               ;; stays exactly asserted below.
-               (double-fire-possible
-                 (and (consp model-processed)
-                      (loop :for tm :in model-fired
-                            :thereis (third (find (kcall "KTIMER-ID" tm)
-                                                  specs :key #'first))))))
+               (fired-ids (sort (model-ids model-fired) #'<)))
+          ;; Exact single-fire equality: production matches the kernel's
+          ;; fired set on every tick.  (VK-9 found a double-fire here --
+          ;; nconc splicing the processed list onto the list mapc walks --
+          ;; and the differential carried an acceptance envelope for it;
+          ;; the VK-4 hardening fix removed the bug and the envelope.)
           (unless (and (eq (and prod-fired-p t) (consp model-fired))
-                       (or (equal prod-fired fired-ids)
-                           (and double-fire-possible
-                                (equal prod-fired
-                                       (sort (append fired-ids processed-ids)
-                                             #'<)))))
+                       (equal prod-fired fired-ids))
             (return-from run-idle-period (list nil nil :fired)))
           (setf model-processed
                 (append model-processed (kcall "KT-PROCESSED" model tick)))
@@ -667,22 +649,23 @@ divergence keyword."
               (setf survivors new-survivors)))
           nil)))))
 
-(deftest timer-double-fire-reproducer
-  ;; PRODUCTION BUG FOUND BY THIS ITEM (documented, not fixed here -- the
-  ;; VK-3/VK-6 precedent; this test is the record).  In update-idle-timers
-  ;; (src/common/timer.lisp), UPDATING-TIMERS / UPDATING-IDLE-TIMERS are
-  ;; remove-if-not results that MAY SHARE list structure with their input
-  ;; (CLHS-permitted; SBCL shares the maximal tail -- verified on SBCL
-  ;; 2.5.10).  The subsequent
+(deftest timer-double-fire-regression
+  ;; PRODUCTION BUG FOUND BY VK-9, FIXED BY VK-4 HARDENING; this test is the
+  ;; regression pin (it was the double-fire reproducer before the fix).  In
+  ;; update-idle-timers (src/common/timer.lisp), UPDATING-TIMERS /
+  ;; UPDATING-IDLE-TIMERS are remove-if-not results that MAY SHARE list
+  ;; structure with their input (CLHS-permitted; SBCL shares the maximal
+  ;; tail -- verified on SBCL 2.5.10).  The pre-fix
   ;;   (setf *processed-idle-timer-list*
   ;;         (nconc updating-idle-timers *processed-idle-timer-list*))
-  ;; therefore splices the processed list onto UPDATING-TIMERS' final cons
-  ;; whenever the last due timer (in *idle-timer-list* order) is a repeat
-  ;; timer -- and the later (mapc #'call-timer-function updating-timers)
-  ;; walks the splice, RE-FIRING every already-processed repeat timer in the
-  ;; same idle period.  The list bookkeeping ends correct; only the extra
-  ;; funcalls are wrong.  Deterministic reproducer: A (10ms, repeat) fires
-  ;; and is parked; when B (20ms, repeat) fires later, A fires AGAIN.
+  ;; spliced the processed list onto UPDATING-TIMERS' final cons whenever
+  ;; the last due timer (in *idle-timer-list* order) was a repeat timer --
+  ;; and the later (mapc #'call-timer-function updating-timers) walked the
+  ;; splice, RE-FIRING every already-processed repeat timer in the same
+  ;; idle period.  The fix uses APPEND, leaving the walked list unshared.
+  ;; Deterministic scenario: A (10ms, repeat) fires and is parked; when B
+  ;; (20ms, repeat) fires later, A must NOT fire again (single-fire, the
+  ;; kernel model's semantics -- verified/event-queue-model.lisp).
   (let ((fired '()))
     (lem/common/timer:with-timer-manager
         (make-instance 'lem-tests/timer::testing-timer-manager)
@@ -702,11 +685,10 @@ divergence keyword."
           (setf lem-tests/timer::*current-time* 25)
           (setf fired '())
           (lem/common/timer:update-idle-timers)
-          (ok (equal (sort (copy-list fired) #'string< :key #'symbol-name)
-                     '(:a :b))
-              "BUG PINNED: B's firing at t=25 re-fires the already-processed A")
-          ;; the bookkeeping is nevertheless correct: nothing left idle,
-          ;; both repeat timers parked exactly once
+          (ok (equal fired '(:b))
+              "single-fire: B fires alone at t=25; the parked A does not re-fire")
+          ;; and the bookkeeping stays correct: nothing left idle, both
+          ;; repeat timers parked exactly once
           (ok (null lem/common/timer::*idle-timer-list*)
               "idle list drained")
           (ok (= 2 (length lem/common/timer::*processed-idle-timer-list*))
