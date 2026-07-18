@@ -119,9 +119,14 @@ objects; points below the region get the uniform linum renumber."
            (let ((region-points (copy-list (line:line-points (point-line point)))))
              (materialize-kernel-points
               region-points
-              (lem/kernel:shift-points-insert
-               (kernel-point-tuples region-points linum)
-               1 charpos offset-line offset-char)
+              ;; Iterate the certified per-point map (mapcar is iterative in
+              ;; SBCL): identical semantics to the book's shift-points-insert
+              ;; list recursion, but O(1) control stack however many points
+              ;; the region holds (overlay-heavy buffers register thousands).
+              (mapcar (lambda (tuple)
+                        (lem/kernel:shift-point-insert
+                         tuple 1 charpos offset-line offset-char))
+                      (kernel-point-tuples region-points linum))
               linum
               (point-line point))))
           ((or (> 0 offset-line)
@@ -141,9 +146,12 @@ objects; points below the region get the uniform linum renumber."
                (renumber-points-below buffer (+ linum j) offset-line))
              (materialize-kernel-points
               region-points
-              (lem/kernel:shift-points-delete
-               (kernel-point-tuples region-points linum)
-               1 charpos j oc)
+              ;; Same iterative materialization of the certified per-point map
+              ;; as the insert branch (O(1) stack; see comment there).
+              (mapcar (lambda (tuple)
+                        (lem/kernel:shift-point-delete
+                         tuple 1 charpos j oc))
+                      (kernel-point-tuples region-points linum))
               linum
               (point-line point)))))))
 

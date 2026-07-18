@@ -25,10 +25,12 @@
   ;;         includes `eastasian-data' via the shim's include-book, so loading
   ;;         `width' pulls the table book too)
   ;;   VK-4  kernel-backed edit engine (src/buffer/internal/buffer-insert.lisp
-  ;;         calls the buffer-edit point maps + wf-buffer/k-insert/k-delete in
-  ;;         the checking modes; src/buffer/internal/edit.lisp calls the offset
-  ;;         algebra). `buffer-edit' includes `buffer-model'; `undo' includes
-  ;;         `buffer-edit'; all three listed explicitly as the VK-4 kernel.
+  ;;         calls the buffer-edit per-point maps + wf-buffer/k-insert/k-delete
+  ;;         in the checking modes; src/buffer/internal/edit.lisp calls the
+  ;;         offset algebra). `buffer-edit' includes `buffer-model'.
+  ;;         The `undo' book is deliberately NOT loaded here: production's undo
+  ;;         recording stays in the shell and calls nothing in it (tests load
+  ;;         it on demand via load-verified-book).
   ;;   VK-11 line layout (src/display/physical-line.lisp wraps and clips
   ;;         through k-wrap-row/k-clip since the VK-4 layout swap)
   (let ((load-book (find-symbol "LOAD-VERIFIED-BOOK" "LEM/KERNEL")))
@@ -36,5 +38,4 @@
     (funcall load-book "width")
     (funcall load-book "layout")
     (funcall load-book "buffer-model")
-    (funcall load-book "buffer-edit")
-    (funcall load-book "undo")))
+    (funcall load-book "buffer-edit")))

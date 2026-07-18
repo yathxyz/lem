@@ -79,9 +79,15 @@ next line because it is at the end of width."
           :do ;; A glyph at START alone can exceed the width goal (goal <= 1
               ;; with a width-2 glyph), making wide-index return its own start
               ;; index; advancing by at least one char keeps the scan
-              ;; terminating -- the certified layout kernel's k-wrap is proved
-              ;; total under exactly this no-progress case (SPEC-VK VK-4,
-              ;; k-wrap-row-blocked), production's scan must be too.
+              ;; terminating (pre-VK-4 this looped forever). NOTE: in this
+              ;; blocked regime (body-width 1-2) the scan and the renderer
+              ;; deliberately diverge: the scan advances one char per row so
+              ;; wrapping-offset/cursor-y stay finite, while the certified
+              ;; k-wrap (k-wrap-row-blocked) never places the oversized glyph
+              ;; and emits marker-only rows to the height budget. Row counts
+              ;; disagree only in 1-2-column windows -- unreachable on real
+              ;; terminals; the render side is pinned by
+              ;; projection-wrap-blocked-narrow.
               (when (<= i start)
                 (setq i (1+ start))
                 (when (<= (length string) i)

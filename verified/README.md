@@ -1090,8 +1090,9 @@ baseline-fuzz suites now pin the shell's materialization.
 ### Perf (VK-4 acceptance: >1.5× on the hot path is a blocker)
 
 Median µs/op via the buffer primitives, undo on, 8 extra registered points
-(`bench-edit.lisp` methodology: 2000×60-char buffer edited at line 1000, and
-the PI-1 200KB single-line corpus edited at char 100k):
+(`scripts/bench-edit.lisp` — load it in a lem-loaded image to re-measure;
+methodology: 2000×60-char buffer edited at line 1000, and the PI-1 200KB
+single-line corpus edited at char 100k):
 
 | scenario | op | before | after (:release) | after (:paranoid) |
 |---|---|---|---|---|
@@ -1110,17 +1111,25 @@ the 200KB single-line corpus: slow but comfortably inside PI-1's 100 ms echo
 bound (SPEC-VK allows the checking modes to be slow; the default build stays
 at production speed). The shim's `len` was made iterative (semantics
 identical) because ACL2's recursive definition overflows the control stack on
-200K-codepoint lines; the book functions on the paranoid/conformance paths are
-tail-recursive and compile to loops.
+200K-codepoint lines. Of the book functions on the checking paths, only the
+deep-list predicates (`linep`, `points-in-bounds-p` — AND-tail position) and
+the rewritten `len` compile to loops; `k-take`/`k-drop`/`k-flatten`/`split-lf`
+are cons-building non-tail recursions exercised only on bounded inputs
+(region point lists; tests-only conformance buffers). On the hot `:release`
+path the shell iterates the certified *per-point* maps (`shift-point-insert`/
+`-delete`) with `mapcar`, so marker relocation uses O(1) control stack
+regardless of how many points a region registers (overlay-heavy buffers can
+register thousands).
 
 ### Shim growth for VK-4
 
-Two names added to the `:lem/kernel` export surface (`SHIFT-POINTS-INSERT`,
-`SHIFT-POINTS-DELETE` — now called by production); no new constructs, no
-whitelist changes. `verified/shim-loader.lisp` now loads `buffer-model`,
-`buffer-edit` and `undo` at image load (production calls the buffer-edit point
-maps and offset algebra on every edit; `undo` rides along as the certified
-statement of the recording semantics the shell keeps).
+Two names added to the `:lem/kernel` export surface (`SHIFT-POINT-INSERT`,
+`SHIFT-POINT-DELETE` — the per-point maps production iterates on every edit);
+no new constructs, no whitelist changes. `verified/shim-loader.lisp` now loads
+`buffer-model` and `buffer-edit` at image load (production calls the
+buffer-edit per-point maps and offset algebra on every edit; the `undo` book
+is deliberately not loaded — production's undo recording stays in the shell
+and calls nothing in it, and tests load it on demand).
 
 ### VK-4 layout obligations (milestone-brief items 1, 3, 4): DONE
 
@@ -1284,7 +1293,12 @@ trusting, unproven, is:
 5. **ncurses / libc / the OS kernel** — everything below Lem. For VK-6 this
    is made explicit as the filesystem axioms defining the crash transition
    (rename atomicity, fsync durability, unsynced-data prefix tearing, ordered
-   durable metadata — see the VK-6 section).
+   durable metadata — see the VK-6 section). Note that production's
+   `fsync-stream` is best-effort: it wraps `sb-posix:fsync` in
+   `ignore-errors`, so a *failed* fsync (e.g. EIO) is swallowed and the
+   rename proceeds — a userland-swallowed fsync error voids axiom A2 (fsync
+   durability) for that file. The durability theorems assume the fsync
+   succeeded.
 6. **Concurrency-model fidelity** — for the event-loop/interrupt work (V4), the
    theorems hold of an ACL2 interleaving model; whether that model faithfully
    captures SBCL's real thread/interrupt semantics (e.g. interrupts landing in

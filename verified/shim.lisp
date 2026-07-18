@@ -176,7 +176,7 @@
                                  "K-FLATTEN"
                                  "K-SHIFT-POSITION-INSERT" "K-SHIFT-POSITION-DELETE"
                                  ;; VK-4 shell swap: region point relocation
-                                 "SHIFT-POINTS-INSERT" "SHIFT-POINTS-DELETE"
+                                 "SHIFT-POINT-INSERT" "SHIFT-POINT-DELETE"
                                  ;; undo.lisp (VK-3)
                                  "MK-EDIT" "EDIT-INVERT" "MK-SESSION"
                                  "SN-BUFFER" "SN-HISTORY" "SN-REDO"
