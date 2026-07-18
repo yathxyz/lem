@@ -22,7 +22,7 @@ export LEM_YATH_PERSISTENCE_STATE_FILE="$root/state/persistence.sexp"
 default_state_file="$LEM_YATH_PERSISTENCE_STATE_FILE"
 export LEM_YATH_PERSISTENCE_TEST_ROOT="$root/fixture/"
 export LEM_YATH_PERSISTENCE_TEST_REPORT="$root/report"
-export LEM_YATH_PERSISTENCE_SOURCE="$here/lem-yath/src/persistence.lisp"
+export LEM_YATH_PERSISTENCE_SOURCE="${LEM_YATH_PERSISTENCE_SOURCE:-$here/lem-yath/src/persistence.lisp}"
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$WORKDIR" \
   "$LEM_HOME" "$(dirname "$LEM_YATH_PERSISTENCE_STATE_FILE")" \
