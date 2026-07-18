@@ -1368,7 +1368,7 @@ the visited file byte-for-byte."
         (funcall revert buffer))
       :reverted)))
 
-(defun safe-auto-revert-check-buffer (buffer &key force-digest)
+(defun safe-auto-revert-check-buffer (buffer &key force-digest notification)
   "Refresh one clean stale BUFFER, never replacing dirty or missing content."
   (when (or (deleted-buffer-p buffer) (buffer-temporary-p buffer))
     (return-from safe-auto-revert-check-buffer :skipped))
@@ -1384,7 +1384,13 @@ the visited file byte-for-byte."
       (return-from safe-auto-revert-check-buffer :path-changed))
     (let ((current
             (file-state-signature
-             path :digest (or force-digest (eq buffer (current-buffer))))))
+             path
+             :digest (or force-digest notification
+                         (eq buffer (current-buffer)))
+             ;; An inotify event is stronger evidence than a periodic stat.
+             ;; Hash the complete file so a same-metadata rewrite above the
+             ;; ordinary background digest cap cannot be missed.
+             :full-digest notification)))
       (when (file-signatures-equal-p baseline current)
         (return-from safe-auto-revert-check-buffer :unchanged))
       (case (first current)
@@ -1445,10 +1451,37 @@ the visited file byte-for-byte."
       (>= (- (get-internal-real-time) *last-auto-revert-check-time*)
           (* *safe-auto-revert-interval* internal-time-units-per-second))))
 
+(defun safe-auto-revert-file-paths ()
+  (loop :for buffer :in (buffer-list)
+        :for path := (and (not (deleted-buffer-p buffer))
+                          (not (buffer-temporary-p buffer))
+                          (buffer-file-path-key buffer))
+        :when path :collect path))
+
+(defun safe-auto-revert-reconcile-watches ()
+  (file-notify-reconcile (safe-auto-revert-file-paths)))
+
+(defun safe-auto-revert-notification (path)
+  "Check every live buffer visiting PATH after a filesystem notification."
+  (dolist (buffer (buffer-list))
+    (when (and (not (deleted-buffer-p buffer))
+               (not (buffer-temporary-p buffer))
+               (alexandria:when-let
+                   ((buffer-path (buffer-file-path-key buffer)))
+                 (string= buffer-path path)))
+      (handler-case
+          (safe-auto-revert-check-buffer
+           buffer :force-digest t :notification t)
+        (error (condition)
+          (ignore-errors
+            (message "External-change check failed for ~a: ~a"
+                     (buffer-name buffer) condition)))))))
+
 (defun safe-auto-revert-check-all (&key force)
-  "Check every live buffer, bypassing the five-second throttle when FORCE."
+  "Run the configured global safety scan, bypassing its throttle with FORCE."
   (when (or force (auto-revert-check-due-p))
     (setf *last-auto-revert-check-time* (get-internal-real-time))
+    (safe-auto-revert-reconcile-watches)
     (loop :for buffer :in (buffer-list)
           :collect
           (handler-case
@@ -1469,7 +1502,7 @@ the visited file byte-for-byte."
   nil)
 
 (defun start-safe-auto-revert-timer ()
-  "Poll clean file and adapter-backed buffers at Emacs' five-second cadence."
+  "Run Emacs' five-second safety scan alongside prompt notifications."
   (stop-safe-auto-revert-timer)
   (let (timer)
     (setf timer
@@ -1564,7 +1597,10 @@ the visited file byte-for-byte."
                  buffer (list :post-save-mismatch)
                  "~a changed while being saved; keeping the buffer modified")
                 (editor-error
-                 "Saved file no longer matches the live buffer")))))))
+                 "Saved file no longer matches the live buffer"))))))
+    ;; WRITE-FILE can change the visited pathname.  Reconcile the complete set
+    ;; so the old parent watch is released when no other buffer needs it.
+    (safe-auto-revert-reconcile-watches))
 
 (defun persistence-after-sync-hook (buffer)
   "Refresh tracking after any core/LSP caller synchronizes from disk."
@@ -1574,11 +1610,23 @@ the visited file byte-for-byte."
 
 (defun persistence-find-file-hook (buffer)
   (initialize-buffer-file-state buffer :force t)
+  (safe-auto-revert-reconcile-watches)
   (restore-buffer-place buffer)
   (setf (buffer-value buffer 'lem-yath-place-restored-p) t))
 
 (defun persistence-kill-buffer-hook (buffer)
-  (record-buffer-place buffer))
+  (record-buffer-place buffer)
+  (alexandria:when-let* ((service *file-notify-service*)
+                         (path (buffer-file-path-key buffer)))
+    (unless (some
+             (lambda (other)
+               (and (not (eq other buffer))
+                    (not (deleted-buffer-p other))
+                    (alexandria:when-let
+                        ((other-path (buffer-file-path-key other)))
+                      (string= path other-path))))
+             (buffer-list))
+      (ignore-errors (file-notify-remove-path service path)))))
 
 (defun persistence-switch-buffer-hook (target)
   (record-buffer-place (current-buffer))
@@ -1590,6 +1638,7 @@ the visited file byte-for-byte."
 
 (defun persistence-exit-hook ()
   (stop-safe-auto-revert-timer)
+  (stop-file-notify-service)
   (call-persistence-safely #'flush-persistence-state "exit save"))
 
 (defun persistence-post-command-hook ()
@@ -1612,6 +1661,8 @@ the visited file byte-for-byte."
 (remove-hook *pre-command-hook* 'lem-core/commands/file::ask-revert-buffer)
 (remove-hook *pre-command-hook* 'safe-auto-revert-check-all)
 (add-hook *pre-command-hook* 'safe-auto-revert-check-all 5000)
+(start-file-notify-service #'safe-auto-revert-notification)
+(safe-auto-revert-reconcile-watches)
 (start-safe-auto-revert-timer)
 
 (remove-hook (variable-value 'before-save-hook :global t)

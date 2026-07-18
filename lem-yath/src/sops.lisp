@@ -177,6 +177,11 @@ contain secret material and is never included in a Lem diagnostic."
         (setf (buffer-value buffer 'lem-yath-sops-decrypt-failed) nil)
         (sops-activate-buffer buffer)
         (lem/buffer/file:update-changed-disk-date buffer)
+        ;; Custom reverts must publish the same synchronization lifecycle as
+        ;; core file reloads.  Persistence can then advance its ciphertext
+        ;; baseline before a queued inotify event arrives, avoiding a redundant
+        ;; second decrypt and message replacement.
+        (run-hooks lem-core/commands/file:*after-sync-buffer-hook* buffer)
         t)
       (progn
         (sops-protect-failed-buffer buffer)

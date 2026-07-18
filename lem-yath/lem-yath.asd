@@ -126,6 +126,7 @@
                (:file "llm-capture")
                (:file "business-visual")
                (:file "bookmarks")
+               (:file "file-notify")
                (:file "persistence")
                (:file "vundo")
                (:static-file "compilation-guardian.py")

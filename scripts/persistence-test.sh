@@ -27,6 +27,7 @@ export LEM_YATH_PERSISTENCE_SOURCE="${LEM_YATH_PERSISTENCE_SOURCE:-$here/lem-yat
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$WORKDIR" \
   "$LEM_HOME" "$(dirname "$LEM_YATH_PERSISTENCE_STATE_FILE")" \
   "$LEM_YATH_PERSISTENCE_TEST_ROOT/auto" \
+  "$LEM_YATH_PERSISTENCE_TEST_ROOT/notify-extra" \
   "$LEM_YATH_PERSISTENCE_TEST_ROOT/directory-auto" \
   "$LEM_YATH_PERSISTENCE_TEST_ROOT/directory-place" \
   "$LEM_YATH_PERSISTENCE_TEST_ROOT/concurrent"
@@ -183,6 +184,7 @@ main_file="$LEM_YATH_PERSISTENCE_TEST_ROOT/auto/main.txt"
 delete_file="$LEM_YATH_PERSISTENCE_TEST_ROOT/auto/delete.txt"
 background_file="$LEM_YATH_PERSISTENCE_TEST_ROOT/auto/background.txt"
 custom_file="$LEM_YATH_PERSISTENCE_TEST_ROOT/auto/custom.txt"
+notify_extra_file="$LEM_YATH_PERSISTENCE_TEST_ROOT/notify-extra/extra.txt"
 main_stamp="$root/main.timestamp"
 delete_stamp="$root/delete.timestamp"
 background_stamp="$root/background.timestamp"
@@ -191,6 +193,7 @@ printf 'CLEAN-ONE\nsteady-line\n' >"$main_file"
 printf 'DELETE-ONE\n' >"$delete_file"
 printf 'BACKGROUND-ONE\n' >"$background_file"
 printf 'CUSTOM-DISK-ONE\n' >"$custom_file"
+printf 'NOTIFY-EXTRA\n' >"$notify_extra_file"
 touch -r "$main_file" "$main_stamp"
 touch -r "$delete_file" "$delete_stamp"
 touch -r "$background_file" "$background_stamp"
@@ -204,23 +207,28 @@ else
 fi
 
 if press_and_wait "$auto_session" F9 '^HOOK ' &&
-   grep -q '^HOOK dangerous=0 safe=1 timer=yes api=yes$' \
+   grep -Eq \
+     '^HOOK dangerous=0 safe=1 timer=yes api=yes notify=yes paths=[2-9][0-9]* directories=[1-9][0-9]* threads=1$' \
      "$LEM_YATH_PERSISTENCE_TEST_REPORT"; then
-  pass hook-idempotence 'two reloads left one safe hook and one live periodic timer'
+  pass hook-idempotence \
+    'two reloads left one safe hook, timer, and notification service'
 else
-  fail hook-idempotence 'hook, timer ownership, or public API contract diverged' "$auto_session"
+  fail hook-idempotence \
+    'hook, timer, notification ownership, or public API contract diverged' \
+    "$auto_session"
 fi
 
-# A clean current buffer must update without any key event.  Capture-pane only
-# observes ncurses output, so seeing the replacement proves the regular timer
-# ran rather than the pre-command fallback.
+# The fixture moved the fallback interval to one minute.  A clean current
+# buffer appearing promptly without a key event therefore proves inotify
+# delivery rather than either the timer or pre-command fallback.
 printf 'CLEAN-IDLE\nsteady-line\n' >"$main_file"
 touch -r "$main_stamp" "$main_file"
-if lem_wait_for "$auto_session" 'CLEAN-IDLE' "$((WAIT_TIMEOUT + 5))" \
+if lem_wait_for "$auto_session" 'CLEAN-IDLE' "$WAIT_TIMEOUT" \
      >/dev/null; then
-  pass periodic-no-input 'a clean external rewrite appeared without a keypress'
+  pass notify-no-input \
+    'a clean external rewrite appeared promptly without polling or a keypress'
 else
-  fail periodic-no-input 'the periodic scanner did not refresh an idle buffer' \
+  fail notify-no-input 'the notification service did not refresh an idle buffer' \
     "$auto_session"
 fi
 
@@ -230,12 +238,14 @@ printf 'CLEAN-TWO\nsteady-line\n' >"$main_file"
 touch -r "$main_stamp" "$main_file"
 if ! same_file_time "$main_stamp" "$main_file"; then
   fail same-mtime-fixture 'the test could not preserve the original timestamp'
-elif press_and_wait "$auto_session" F6 '^BUFFER phase=auto ';
+elif lem_wait_for "$auto_session" 'CLEAN-TWO' "$WAIT_TIMEOUT" >/dev/null &&
+     press_and_wait "$auto_session" F5 '^BUFFER phase=auto ';
 then
   clean_state=$(last_line '^BUFFER phase=auto ')
-  if [[ "$clean_state" == *'label=check-current file=main.txt text=CLEAN-TWO\nsteady-line\n modified=no '* &&
+  if [[ "$clean_state" == *'label=current file=main.txt text=CLEAN-TWO\nsteady-line\n modified=no '* &&
         "$clean_state" == *' line=2 column=2 '* ]]; then
-    pass clean-same-mtime 'a clean same-mtime rewrite loaded and preserved line/column'
+    pass clean-same-mtime \
+      'notification loaded a same-mtime rewrite and preserved line/column'
   else
     fail clean-same-mtime "unexpected clean state: $clean_state" "$auto_session"
   fi
@@ -332,7 +342,7 @@ if invoke_mx "$auto_session" lem-yath-test-persistence-open-delete \
      '^OPEN label=delete ' &&
    lem_wait_for "$auto_session" 'DELETE-ONE' "$WAIT_TIMEOUT" >/dev/null; then
   rm -f "$delete_file"
-  if press_and_wait "$auto_session" F6 '^BUFFER phase=auto ';
+  if press_and_wait "$auto_session" F5 '^BUFFER phase=auto ';
   then
     missing_state=$(last_line '^BUFFER phase=auto ')
     if [[ "$missing_state" == *'file=delete.txt text=DELETE-ONE\n modified=no '* &&
@@ -347,12 +357,14 @@ if invoke_mx "$auto_session" lem-yath-test-persistence-open-delete \
 
   printf 'DELETE-TWO\n' >"$delete_file"
   touch -r "$delete_stamp" "$delete_file"
-  if press_and_wait "$auto_session" F6 '^BUFFER phase=auto ';
+  if lem_wait_for "$auto_session" 'DELETE-TWO' "$WAIT_TIMEOUT" >/dev/null &&
+     press_and_wait "$auto_session" F5 '^BUFFER phase=auto ';
   then
     recreated_state=$(last_line '^BUFFER phase=auto ')
     if [[ "$recreated_state" == *'file=delete.txt text=DELETE-TWO\n modified=no '* &&
           "$recreated_state" == *' exists=yes' ]]; then
-      pass recreate-reloads 'recreation reloaded despite matching the original timestamp'
+      pass recreate-reloads \
+        'directory notification reloaded recreation despite the original timestamp'
     else
       fail recreate-reloads "unexpected recreated state: $recreated_state" "$auto_session"
     fi
@@ -371,6 +383,39 @@ if press_and_wait "$auto_session" F7 '^GLOBAL ' &&
   pass global-noncurrent 'forced global scan refreshed a non-current clean buffer'
 else
   fail global-noncurrent 'the background buffer remained stale' "$auto_session"
+fi
+
+if invoke_mx "$auto_session" lem-yath-test-persistence-notify-lifecycle \
+     '^NOTIFY-LIFECYCLE ' &&
+   grep -q \
+     '^NOTIFY-LIFECYCLE path-add=1 directory-add=1 open-live=1 open-watched=yes paths-restored=yes directories-restored=yes after-live=1 after-watched=no before-live=1$' \
+     "$LEM_YATH_PERSISTENCE_TEST_REPORT"; then
+  pass notify-lifecycle \
+    'opening and killing a buffer added then released its distinct directory watch'
+else
+  fail notify-lifecycle \
+    'notification buffer ownership or kernel-directory teardown diverged' \
+    "$auto_session"
+fi
+
+if invoke_mx "$auto_session" lem-yath-test-persistence-use-polling \
+     '^POLLING ' &&
+   grep -q '^POLLING paths=0 directories=0 live=0 threads=0 timer=yes$' \
+     "$LEM_YATH_PERSISTENCE_TEST_REPORT"; then
+  printf 'DELETE-THREE\n' >"$delete_file"
+  touch -r "$delete_stamp" "$delete_file"
+  if lem_wait_for "$auto_session" 'DELETE-THREE' "$WAIT_TIMEOUT" >/dev/null; then
+    pass polling-fallback \
+      'stopping notifications released resources and the timer still refreshed clean files'
+  else
+    fail polling-fallback \
+      'the clean buffer did not refresh after notification shutdown' \
+      "$auto_session"
+  fi
+else
+  fail polling-fallback \
+    'notification shutdown did not expose a clean zero-resource polling state' \
+    "$auto_session"
 fi
 
 if invoke_mx "$auto_session" lem-yath-test-persistence-setup-custom-dirty \

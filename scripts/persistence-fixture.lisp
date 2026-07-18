@@ -97,6 +97,14 @@
   (and *safe-auto-revert-timer*
        (not (timer-expired-p *safe-auto-revert-timer*))))
 
+(defun persistence-test-file-notify-state ()
+  (multiple-value-list (file-notify-service-state)))
+
+(defun persistence-test-file-notify-thread-count ()
+  (count-if (lambda (thread)
+              (equal "lem-yath/file-notify" (bt2:thread-name thread)))
+            (bt2:all-threads)))
+
 (defun persistence-test-dangerous-hook-count ()
   (count 'lem-core/commands/file::ask-revert-buffer
          *pre-command-hook*
@@ -107,6 +115,8 @@
   (every #'fboundp
          '(safe-auto-revert-check-buffer
            safe-auto-revert-check-all
+           file-notify-service-state
+           stop-file-notify-service
            persistence-state-pathname
            load-persistence-state
            flush-persistence-state
@@ -116,12 +126,70 @@
 (define-command lem-yath-test-persistence-reload-and-record-hooks () ()
   (load *persistence-test-source*)
   (load *persistence-test-source*)
-  (persistence-test-log
-   "HOOK dangerous=~d safe=~d timer=~a api=~a"
-   (persistence-test-dangerous-hook-count)
-   (persistence-test-safe-hook-count)
-   (persistence-test-yes-no (persistence-test-safe-timer-live-p))
-   (persistence-test-yes-no (persistence-test-api-present-p))))
+  ;; A one-minute test interval makes prompt idle refresh conclusive evidence
+  ;; of inotify delivery rather than the periodic fallback.
+  (setf *safe-auto-revert-interval* 60
+        *last-auto-revert-check-time* (get-internal-real-time))
+  (start-safe-auto-revert-timer)
+  (safe-auto-revert-reconcile-watches)
+  (destructuring-bind (paths directories live)
+      (persistence-test-file-notify-state)
+    (persistence-test-log
+     (concatenate
+      'string
+      "HOOK dangerous=~d safe=~d timer=~a api=~a "
+      "notify=~a paths=~d directories=~d threads=~d")
+     (persistence-test-dangerous-hook-count)
+     (persistence-test-safe-hook-count)
+     (persistence-test-yes-no (persistence-test-safe-timer-live-p))
+     (persistence-test-yes-no (persistence-test-api-present-p))
+     (persistence-test-yes-no (= live 1))
+     paths directories
+     (persistence-test-file-notify-thread-count))))
+
+(define-command lem-yath-test-persistence-notify-lifecycle () ()
+  (destructuring-bind (paths-before directories-before live-before)
+      (persistence-test-file-notify-state)
+    (let* ((pathname (persistence-test-path "notify-extra/extra.txt"))
+           (buffer (find-file-buffer pathname)))
+      (safe-auto-revert-reconcile-watches)
+      (destructuring-bind (paths-open directories-open live-open)
+          (persistence-test-file-notify-state)
+        (let ((watched-open (file-notify-path-watched-p pathname)))
+          (kill-buffer buffer)
+          (destructuring-bind (paths-after directories-after live-after)
+              (persistence-test-file-notify-state)
+            (persistence-test-log
+             (concatenate
+              'string
+              "NOTIFY-LIFECYCLE path-add=~d directory-add=~d "
+              "open-live=~d open-watched=~a paths-restored=~a "
+              "directories-restored=~a after-live=~d after-watched=~a "
+              "before-live=~d")
+             (- paths-open paths-before)
+             (- directories-open directories-before)
+             live-open
+             (persistence-test-yes-no watched-open)
+             (persistence-test-yes-no (= paths-after paths-before))
+             (persistence-test-yes-no
+              (= directories-after directories-before))
+             live-after
+             (persistence-test-yes-no
+              (file-notify-path-watched-p pathname))
+             live-before)))))))
+
+(define-command lem-yath-test-persistence-use-polling () ()
+  (stop-file-notify-service)
+  (setf *safe-auto-revert-interval* 1
+        *last-auto-revert-check-time* nil)
+  (start-safe-auto-revert-timer)
+  (destructuring-bind (paths directories live)
+      (persistence-test-file-notify-state)
+    (persistence-test-log
+     "POLLING paths=~d directories=~d live=~d threads=~d timer=~a"
+     paths directories live
+     (persistence-test-file-notify-thread-count)
+     (persistence-test-yes-no (persistence-test-safe-timer-live-p)))))
 
 (define-command lem-yath-test-persistence-record-current () ()
   (persistence-test-record-buffer "current" (current-buffer)))

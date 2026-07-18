@@ -1103,15 +1103,24 @@ through the ncurses editor.
 
 ### Configured persistence and safe external changes (verified)
 
-`lem-yath/src/persistence.lisp` replaces pinned Lem's unsafe current-buffer
-pre-command reverter with a reload-owned regular timer at Emacs's five-second
-cadence. The same throttled scanner remains on pre-command and buffer-selection
-paths as a latency and safety fallback. Timer callbacks execute on Lem's editor
-thread, and stale callbacks from a source reload lose ownership before they can
-touch a buffer. Clean,
-readable file buffers reload transactionally after metadata changes; the current
-or explicitly selected buffer also uses a content digest up to 16 MiB, so a
-same-size rewrite with the same mtime is detected in that range. Dirty, deleted, unreadable, and
+`lem-yath/src/file-notify.lisp` and `lem-yath/src/persistence.lisp` replace
+pinned Lem's unsafe current-buffer pre-command reverter with bounded Linux
+inotify watches shared by parent directory. Ordinary local file changes are
+delivered to Lem's editor thread promptly, including same-metadata rewrites and
+delete/recreate or atomic-replacement events. Each notification verifies a full
+content digest before reloading. Matching the configured Emacs default
+(`auto-revert-avoid-polling` remains nil), a reload-owned regular timer also
+keeps the global five-second safety scan; symlinks, watch allocation failures,
+invalidated directories, non-Linux hosts, and explicit non-file adapters rely
+on that scan exclusively. The same throttled
+scanner remains on pre-command and buffer-selection paths as a latency and
+safety fallback. Notification descriptors, threads, file ownership, and shared
+directory watches are released on buffer kill, Save As, configuration reload,
+reader failure, and editor exit. Timer callbacks and notification deliveries
+execute on Lem's editor thread, and stale callbacks from a source reload lose
+ownership before they can touch a buffer. Clean, readable file buffers reload
+transactionally after verified changes; periodic checks digest the current or
+explicitly selected buffer up to 16 MiB. Dirty, deleted, unreadable, and
 failed-decode buffers retain their live text. Transactional reload snapshots are
 capped at 64 MiB so a huge or sparse file cannot force an editor-sized allocation;
 larger changed files are retained for deliberate external handling. A before-save guard asks before a
