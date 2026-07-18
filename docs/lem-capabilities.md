@@ -3350,6 +3350,17 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   `scripts/llm-backend-test.sh` drives these transports through real ncurses
   Lem with fake executables and no credentials.
 
+  Claude thinking, tool use, and tool results render in the configured
+  `#+begin_cc_thinking`, `#+begin_cc_tool`, and
+  `#+begin_cc_tool_result` Org forms. Stream insertion attaches semantic text
+  properties, and completion builds display-only hidden-line ranges: thinking
+  and tool results always collapse, while tool blocks collapse only when they
+  span more than eight lines. The begin line and a terminal ellipsis remain
+  visible. `C-c C-t` in a conversation independently toggles every tool-result
+  block; if the buffer has none, it dispatches the ordinary Org TODO command.
+  Folding never removes or rewrites provider-visible text, and mode disable,
+  buffer deletion, or source reload disposes its markers and overlays.
+
   OpenRouter model selection uses the configured account catalog rather than a
   free-form prompt. Lem loads a bounded JSON cache from
   `$XDG_CACHE_HOME/lem-yath/openrouter/models.json` before interaction, falls
@@ -3463,7 +3474,9 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   project-session history selection. Tool values are comma-separated, retain
   Claude/MCP permission-pattern syntax, and reject controls or oversized lists.
   The physical gate proves inheritance, nearest-ancestor precedence, exact
-  argv/cwd/MCP selection, and matching private session-directory encoding.
+  argv/cwd/MCP selection, matching private session-directory encoding,
+  semantic block bytes, automatic collapse policy, and a physical two-way
+  `C-c C-t` result toggle.
 
   `SPC g l` opens the compact three-column Presets/Handoff/Advanced menu used
   by the Emacs configuration. It loads or saves named presets and hands the active region

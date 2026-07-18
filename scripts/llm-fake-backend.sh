@@ -39,7 +39,7 @@ case "$backend" in
     done
     printf '%s\n' \
       '{"type":"not-valid"' \
-      "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"thinking\",\"thinking\":\"checked context\"},{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{\"file_path\":\"safe.lisp\"}},{\"type\":\"text\",\"text\":\"Claude answer $count\"}]}}" \
+      "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"thinking\",\"thinking\":\"checked context\"},{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{\"file_path\":\"safe.lisp\",\"detail\":\"one\\ntwo\\nthree\\nfour\\nfive\\nsix\\nseven\\neight\\nnine\"}},{\"type\":\"text\",\"text\":\"Claude answer $count\"}]}}" \
       '{"type":"user","message":{"content":[{"type":"tool_result","content":"read ok","is_error":false}]}}' \
       "{\"type\":\"result\",\"session_id\":\"$session_id\",\"uuid\":\"claude-message-boundary\",\"is_error\":false}"
     ;;

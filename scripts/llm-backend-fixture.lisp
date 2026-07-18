@@ -29,8 +29,79 @@
 (defun llm-backend-test-contains-p (needle)
   (not (null (search needle (llm-backend-test-text)))))
 
+(defun llm-backend-test-claude-block-state (kind)
+  (let ((blocks
+          (remove-if-not
+           (lambda (block) (eq (llm-claude-block-kind block) kind))
+           (llm-claude-buffer-blocks (current-buffer)))))
+    (cond ((null blocks) "none")
+          ((every #'llm-claude-block-hidden-range blocks) "hidden")
+          ((notany #'llm-claude-block-hidden-range blocks) "shown")
+          (t "mixed"))))
+
 (defun llm-backend-test-argv (argv)
   (format nil "~{~a~^|~}" argv))
+
+(defun llm-backend-test-claude-fold-contract-p ()
+  (let ((buffer (make-buffer " *Claude Block Static*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (change-buffer-mode buffer 'org-mode)
+           (lem-yath-llm-conversation-mode t)
+           (let* ((event
+                    (llm-cli-parse-event
+                     :claude-code
+                     (concatenate
+                      'string
+                      "{\"type\":\"assistant\",\"message\":{\"content\":["
+                      "{\"type\":\"thinking\",\"thinking\":\"inspect\"},"
+                      "{\"type\":\"tool_use\",\"name\":\"Read\","
+                      "\"input\":{\"file_path\":\"safe.lisp\"}}]}}")))
+                  (text (getf event :text))
+                  (semantic-blocks (getf event :blocks))
+                  (start (copy-point (buffer-end-point buffer)
+                                     :right-inserting)))
+             (unwind-protect
+                  (progn
+                    (insert-string (buffer-end-point buffer) text
+                                   'lem-yath-llm-role :assistant)
+                    (llm-cli-mark-claude-blocks start semantic-blocks))
+               (delete-point start))
+             (llm-claude-refresh-buffer buffer)
+             (let* ((blocks (llm-claude-buffer-blocks buffer))
+                    (thinking (find :thinking blocks
+                                    :key #'llm-claude-block-kind))
+                    (tool (find :tool blocks
+                                :key #'llm-claude-block-kind)))
+               (llm-backend-test-log
+                "STATIC BLOCK DETAIL count=~d thinking-lines=~a thinking-hidden=~a tool-lines=~a tool-hidden=~a"
+                (length blocks)
+                (and thinking (llm-claude-block-line-count thinking))
+                (if (and thinking
+                         (llm-claude-block-hidden-range thinking))
+                    "yes" "no")
+                (and tool (llm-claude-block-line-count tool))
+                (if (and tool (llm-claude-block-hidden-range tool))
+                    "yes" "no"))
+               (and (= (length blocks) 2)
+                    thinking tool
+                    (llm-claude-block-hidden-range thinking)
+                    (null (llm-claude-block-hidden-range tool))))))
+      (delete-buffer buffer))))
+
+(defun llm-backend-test-claude-toggle-org-fallback-p ()
+  (let ((buffer (make-buffer " *Claude Toggle Org Fallback*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (change-buffer-mode buffer 'org-mode)
+           (lem-yath-llm-conversation-mode t)
+           (insert-string (buffer-end-point buffer) "* Heading")
+           (buffer-start (buffer-point buffer))
+           (lem-yath-llm-claude-toggle-tool-results)
+           (string= (points-to-string (buffer-start-point buffer)
+                                      (buffer-end-point buffer))
+                    "* TODO Heading"))
+      (delete-buffer buffer))))
 
 (defun llm-backend-test-finish-metadata (request reason)
   (declare (ignore reason))
@@ -66,6 +137,10 @@
               "--append-system-prompt" *llm-system-message*
               "--mcp-config" "/safe/project/.mcp.json"))
        "claude-native-resume-argv")
+      (check (llm-backend-test-claude-fold-contract-p)
+             "claude-fold-contract")
+      (check (llm-backend-test-claude-toggle-org-fallback-p)
+             "claude-toggle-org-fallback")
       (check
        (equal
         (llm-cli-command :codex "hello" "codex-thread-1")
@@ -158,6 +233,24 @@
              "bound-event-line")
       (check (null (llm-cli-parse-event :claude-code "{bad"))
              "ignore-malformed-event")
+      (let* ((event
+               (llm-cli-parse-event
+                :claude-code
+                (concatenate
+                 'string
+                 "{\"type\":\"assistant\",\"message\":{\"content\":["
+                 "{\"type\":\"thinking\",\"thinking\":\"inspect\"},"
+                 "{\"type\":\"tool_use\",\"name\":\"Read\","
+                 "\"input\":{\"file_path\":\"safe.lisp\"}}]}}")))
+             (text (getf event :text))
+             (blocks (getf event :blocks)))
+        (check (and (equal (mapcar #'first blocks) '(:thinking :tool))
+                    (search "#+begin_cc_thinking" text)
+                    (search "#+end_cc_thinking" text)
+                    (search "#+begin_cc_tool Read" text)
+                    (search "file_path: safe.lisp" text)
+                    (search "#+end_cc_tool" text))
+               "claude-semantic-org-blocks"))
       (check
        (equal
         (getf (llm-cli-parse-event
@@ -185,7 +278,12 @@
                       (lem-core::prefix-suffix
                        (lem-core::keymap-find
                         *lem-yath-llm-conversation-mode-keymap*
-                        (lem-core::parse-keyspec "C-c C-b")))))
+                        (lem-core::parse-keyspec "C-c C-b"))))
+                  (eq 'lem-yath-llm-claude-toggle-tool-results
+                      (lem-core::prefix-suffix
+                       (lem-core::keymap-find
+                        *lem-yath-llm-conversation-mode-keymap*
+                        (lem-core::parse-keyspec "C-c C-t")))))
              "claude-conversation-bindings")
       (check (and (eq 'lem-yath-llm-new-session
                       (leader-binding-command
@@ -373,7 +471,7 @@
      (concatenate
       'string
       "STATE active=~a openrouter=~a claude1=~a claude2=~a claude3=~a auto5=~a auto-order=~a auto-repeat-safe=~a property6=~a "
-      "thinking=~a tool=~a tool-result=~a codex1=~a codex2=~a "
+      "thinking=~a tool=~a tool-result=~a blocks-thinking=~a blocks-tool=~a blocks-result=~a block-raw=~a codex1=~a codex2=~a "
       "command=~a file=~a grok1=~a grok2=~a aborted=~a "
       "claude-id=~a codex-id=~a grok-id=~a claude-branch=~a claude-boundary=~a selected-backend=~a")
      (if (llm-active-request buffer) "yes" "no")
@@ -398,8 +496,22 @@
                                    (buffer-end-point (current-buffer)))))
        (if (search "Claude answer 6" text) "yes" "no"))
      (if (llm-backend-test-contains-p "checked context") "yes" "no")
-     (if (llm-backend-test-contains-p "Claude tool: `Read`") "yes" "no")
-     (if (llm-backend-test-contains-p "Claude tool result") "yes" "no")
+     (if (llm-backend-test-contains-p "#+begin_cc_tool Read") "yes" "no")
+     (if (llm-backend-test-contains-p "#+begin_cc_tool_result") "yes" "no")
+     (llm-backend-test-claude-block-state :thinking)
+     (llm-backend-test-claude-block-state :tool)
+     (llm-backend-test-claude-block-state :tool-result)
+     (let ((text (points-to-string (buffer-start-point (current-buffer))
+                                   (buffer-end-point (current-buffer)))))
+       (if (and (search "#+begin_cc_thinking" text)
+                (search "#+end_cc_thinking" text)
+                (search "#+begin_cc_tool Read" text)
+                (search "nine" text)
+                (search "#+end_cc_tool" text)
+                (search "#+begin_cc_tool_result" text)
+                (search "read ok" text)
+                (search "#+end_cc_tool_result" text))
+           "yes" "no"))
      (if (llm-backend-test-contains-p "Codex answer 1") "yes" "no")
      (if (llm-backend-test-contains-p "Codex answer 2") "yes" "no")
      (if (llm-backend-test-contains-p "[Codex command completed; exit 0] pwd")

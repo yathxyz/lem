@@ -69,7 +69,9 @@
   "Buffer-local predicate consumed by Lem's display and vertical movement."
   (with-point ((line point))
     (line-start line)
-    (not (null (org-hidden-range-at-point line)))))
+    (or (not (null (org-hidden-range-at-point line)))
+        (and (fboundp 'llm-claude-line-hidden-p)
+             (llm-claude-line-hidden-p line)))))
 
 (defun org-make-hidden-range (start end)
   (when (point< start end)
@@ -252,11 +254,21 @@
             (org-hidden-range-at-point (current-point)))
        (org-clear-folds buffer)
        (redraw-display))
+      ((and (mode-active-p buffer 'org-mode)
+            (fboundp 'llm-claude-hidden-block-at-point)
+            (llm-claude-hidden-block-at-point (current-point)))
+       (llm-claude-show-block
+        (llm-claude-hidden-block-at-point (current-point)))
+       (redraw-display))
       ((and (org-buffer-folds buffer)
             (not (mode-active-p buffer 'org-mode)))
        ;; Major-mode changes clear the hidden-line editor variable before this
        ;; hook runs; dispose the now-stale marker/ellipsis objects as well.
-       (org-clear-folds buffer)))))
+       (org-clear-folds buffer))
+      ((and (fboundp 'llm-claude-buffer-blocks)
+            (llm-claude-buffer-blocks buffer)
+            (not (llm-conversation-buffer-p buffer)))
+       (llm-claude-clear-blocks buffer)))))
 
 (remove-hook *post-command-hook* 'org-reveal-point-after-command)
 (add-hook *post-command-hook* 'org-reveal-point-after-command)

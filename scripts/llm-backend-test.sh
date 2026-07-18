@@ -332,10 +332,22 @@ if ! wait_report_count \
 fi
 send_key C-c
 send_key Enter
-if ! wait_state 'property6=yes .*claude-branch=claude-session-1'; then
+if ! wait_state 'property6=yes .*blocks-thinking=hidden blocks-tool=hidden blocks-result=hidden block-raw=yes .*claude-branch=claude-session-1'; then
   die claude-properties 'heading-local Claude request did not complete'
 fi
 pass claude-properties 'inherited CC_CWD and nearest CC_ALLOWED_TOOLS reached dispatch'
+
+send_key C-c
+send_key C-t
+if ! wait_state 'blocks-thinking=hidden blocks-tool=hidden blocks-result=shown block-raw=yes'; then
+  die claude-block-toggle 'C-c C-t did not reveal every tool-result block'
+fi
+send_key C-c
+send_key C-t
+if ! wait_state 'blocks-thinking=hidden blocks-tool=hidden blocks-result=hidden block-raw=yes'; then
+  die claude-block-toggle 'the second C-c C-t did not hide tool-result blocks'
+fi
+pass claude-block-toggle 'physical C-c C-t toggled results without changing transcript bytes'
 
 fork_count_before=$(find "$claude_project_dir" -maxdepth 1 -name '*.jsonl' -type f | wc -l)
 printf '{malformed\n' >"$claude_project_dir/sessions-index.json"

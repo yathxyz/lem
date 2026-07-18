@@ -118,6 +118,7 @@
                              (:file "claude-bridge")
                              (:file "claude-code")))
                (:file "llm-claude-sessions")
+               (:file "llm-claude-blocks")
                (:file "llm-codex-models")
                (:file "llm-trace")
                (:file "llm-capture")

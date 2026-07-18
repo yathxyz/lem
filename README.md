@@ -628,7 +628,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   properties override the process/session directory and tool list at the
   current heading, matching the Emacs backend. Git roots resolving to `/` or
   the home directory, invalid property paths/tool lists, and symlinked or
-  group/world-writable MCP files fail closed. Private named presets and
+  group/world-writable MCP files fail closed. Claude activity uses the same
+  `#+begin_cc_thinking`, `#+begin_cc_tool`, and
+  `#+begin_cc_tool_result` Org blocks as the Emacs backend. Completed thinking
+  and tool-result blocks collapse without changing transcript text; tool blocks
+  collapse only above the configured eight-line threshold. Conversation-local
+  `C-c C-t` toggles every tool result and retains ordinary Org TODO behavior
+  when no Claude result block exists. Private named presets and
   region-or-buffer handoff to Claude or ChatGPT remain in the compact menu; the built-in `quick-lookup`
   preset matches the Emacs startup model, system prompt, temperature, and
   token cap, `project-readonly` opts OpenRouter into the configured five-tool

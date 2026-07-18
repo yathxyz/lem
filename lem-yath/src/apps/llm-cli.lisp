@@ -207,40 +207,87 @@
          (llm-cli-json-string value)))
     (t (princ-to-string value))))
 
+(defparameter *llm-cli-claude-block-property*
+  'lem-yath-llm-claude-block)
+
+(defun llm-cli-indent-block-value (value)
+  (with-output-to-string (stream)
+    (write-string "  " stream)
+    (loop :for character :across value
+          :do (write-char character stream)
+              (when (char= character #\Newline)
+                (write-string "  " stream)))))
+
+(defun llm-cli-claude-tool-input-lines (input)
+  (when (hash-table-p input)
+    (loop :for key :being :the :hash-keys :of input
+          :using (hash-value value)
+          :for text := (llm-cli-value-text value)
+          :collect (if (find #\Newline text)
+                       (format nil "~a:~%~a" key
+                               (llm-cli-indent-block-value text))
+                       (format nil "~a: ~a" key text)))))
+
 (defun llm-cli-claude-tool-use (block)
-  (format nil "~%~%> Claude tool: `~a`~%~%```json~%~a~%```~%"
+  (format nil "~%#+begin_cc_tool ~a~%~{~a~%~}#+end_cc_tool~%"
           (or (llm-cli-json-get block "name") "unknown")
-          (llm-cli-json-string (or (llm-cli-json-get block "input")
-                                   (make-hash-table :test #'equal)))))
+          (llm-cli-claude-tool-input-lines
+           (llm-cli-json-get block "input"))))
+
+(defun llm-cli-claude-tool-result (block)
+  (format nil "~%#+begin_cc_tool_result~:[~; ERROR~]~%~a~%#+end_cc_tool_result~%"
+          (not (null (llm-cli-json-get block "is_error")))
+          (llm-cli-value-text (llm-cli-json-get block "content"))))
+
+(defun llm-cli-claude-block-end-offset (text end)
+  "Exclude a trailing newline from one semantic Claude block span."
+  (if (and (plusp (length text))
+           (char= (char text (1- (length text))) #\Newline))
+      (1- end)
+      end))
 
 (defun llm-cli-claude-content (content)
-  (with-output-to-string (stream)
-    (dolist (block (llm-cli-sequence-list content))
-      (let ((type (llm-cli-json-get block "type")))
-        (cond
-          ((string= type "text")
-           (write-string (or (llm-cli-json-get block "text") "") stream))
-          ((string= type "thinking")
-           (format stream "~%~%<details><summary>Thinking</summary>~%~%~a~%~%</details>~%"
-                   (or (llm-cli-json-get block "thinking") "")))
-          ((string= type "tool_use")
-           (write-string (llm-cli-claude-tool-use block) stream))
-          ((string= type "tool_result")
-           (format stream "~%~%> Claude tool result~:[~; (error)~]~%~%```text~%~a~%```~%"
-                   (not (null (llm-cli-json-get block "is_error")))
-                   (llm-cli-value-text (llm-cli-json-get block "content")))))))))
+  "Return rendered CONTENT and semantic block offsets as a second value."
+  (let ((parts '())
+        (blocks '())
+        (offset 0))
+    (labels ((emit (text &optional kind)
+               (let ((start offset))
+                 (push text parts)
+                 (incf offset (length text))
+                 (when kind
+                   (push (list kind start
+                               (llm-cli-claude-block-end-offset text offset))
+                         blocks)))))
+      (dolist (block (llm-cli-sequence-list content))
+        (let ((type (llm-cli-json-get block "type")))
+          (cond
+            ((string= type "text")
+             (emit (or (llm-cli-json-get block "text") "")))
+            ((string= type "thinking")
+             (emit (format nil "~%#+begin_cc_thinking~%~a~%#+end_cc_thinking~%"
+                           (or (llm-cli-json-get block "thinking") ""))
+                   :thinking))
+            ((string= type "tool_use")
+             (emit (llm-cli-claude-tool-use block) :tool))
+            ((string= type "tool_result")
+             (emit (llm-cli-claude-tool-result block) :tool-result)))))
+      (values (apply #'concatenate 'string (nreverse parts))
+              (nreverse blocks)))))
 
 (defun llm-cli-claude-event (json)
   (let ((type (llm-cli-json-get json "type")))
     (cond
       ((string= type "assistant")
-       (list :text
-             (llm-cli-claude-content
-              (llm-cli-json-get (llm-cli-json-get json "message") "content"))))
+       (multiple-value-bind (text blocks)
+           (llm-cli-claude-content
+            (llm-cli-json-get (llm-cli-json-get json "message") "content"))
+         (list :text text :blocks blocks)))
       ((string= type "user")
-       (list :text
-             (llm-cli-claude-content
-              (llm-cli-json-get (llm-cli-json-get json "message") "content"))))
+       (multiple-value-bind (text blocks)
+           (llm-cli-claude-content
+            (llm-cli-json-get (llm-cli-json-get json "message") "content"))
+         (list :text text :blocks blocks)))
       ((string= type "content_block_delta")
        (let ((delta (llm-cli-json-get json "delta")))
          (when (string= (llm-cli-json-get delta "type") "text_delta")
@@ -252,6 +299,17 @@
                          (or (llm-cli-json-get json "result")
                              "Claude Code returned an error"))))
       (t nil))))
+
+(defun llm-cli-mark-claude-blocks (start blocks)
+  "Attach semantic BLOCKS, whose offsets are relative to START."
+  (dolist (block blocks)
+    (destructuring-bind (kind from-offset to-offset) block
+      (with-point ((from start)
+                   (to start))
+        (when (and (character-offset from from-offset)
+                   (character-offset to to-offset)
+                   (point< from to))
+          (put-text-property from to *llm-cli-claude-block-property* kind))))))
 
 (defun llm-cli-truncate-command-output (output)
   (if (> (length output) *llm-cli-command-output-limit*)
@@ -326,11 +384,21 @@
        (when (llm-request-current-p request)
          (let ((buffer (llm-request-buffer request))
                (text (getf event :text))
+               (blocks (getf event :blocks))
                (session-id (getf event :session-id))
                (message-id (getf event :message-id))
                (error-text (getf event :error)))
            (when (stringp text)
-             (llm-request-insert-now request text))
+             (if (and blocks (llm-request-conversation-p request))
+                 (let ((start
+                         (copy-point (llm-request-insertion-point request)
+                                     :right-inserting)))
+                   (unwind-protect
+                        (progn
+                          (llm-request-insert-now request text)
+                          (llm-cli-mark-claude-blocks start blocks))
+                     (delete-point start)))
+                 (llm-request-insert-now request text)))
            (when session-id
              (llm-cli-store-session-id buffer backend session-id)
              (setf (llm-request-provider-session-id request) session-id))
