@@ -148,6 +148,7 @@
                (:file "command-line-arguments")
                (:file "tabbar-config")
                (:file "lem")
+               (:file "metrics")
 
                (:file "color-theme")
 

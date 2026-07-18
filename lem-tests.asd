@@ -75,6 +75,7 @@
                (:module "tree-sitter"
                 :components ((:file "main")))
                (:file "killring")
+               (:file "metrics")
                (:file "string-width-utils")
                (:file "syntax-test")
                (:file "syntax-scanner")
