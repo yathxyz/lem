@@ -42,7 +42,8 @@
                              (:file "layout-conformance")
                              (:file "redisplay-cache")
                              (:file "screen-projection")
-                             (:file "interrupt-stress")))
+                             (:file "interrupt-stress")
+                             (:file "event-queue-stress")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")

@@ -20,17 +20,20 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 | `input-decode.lisp` | VK-7 terminal input decode kernel: `k-decode` over byte/keycode/timeout item lists, the CSI key/modifier decoder and bracketed-paste state machine that production `frontends/ncurses/input.lisp` now delegates to (the first one-source swap), with totality/wf, progress/no-overconsumption, table-wide encode/decode round-trip and paste-reconstruction theorems. |
 | `eastasian-data.lisp` | VK-10 East-Asian width tables as a certified constant book: `k-wide-code-p`/`k-ambiguous-code-p`/`k-zero-code-p`, generated (`scripts/gen-eastasian.lisp acl2`) as balanced binary-search decision trees recognizing exactly production's `*eastasian-full*`/`*eastasian-ambiguous*`/`*zero-width*` codepoints (same UCD parse). |
 | `width.lisp` | VK-10 character/string width algebra: `k-char-width` (per-codepoint), `k-string-width`, `k-wide-index` that production `src/common/character/string-width-utils.lisp` now delegates to, with the additivity/fold, prefix-monotonicity, tab-stop and wide-index Galois theorems. |
+| `interrupt-model.lisp` | VK-8 interrupt-delivery protocol model: `without-interrupts`/`check-interrupt`/`interrupt` as a total step function over traces, with the liveness/safety/nesting/force obligations certified over all interleavings. |
+| `layout.lisp` | VK-11 line-layout kernel: `k-wrap`/`k-clip`/`k-scroll-adjust` transcribing `separate-objects-by-width`/`clip-objects-to-display-range`, with content-preservation, width-bound, termination and clip/auto-scroll theorems. |
+| `event-queue-model.lisp` | VK-9 event-queue + idle-timer model: producer/consumer traces over the `concurrent-queue` with `receive-event`'s exact dispatch (`:resize` coalescing, thunk execution), plus the `get-next-timer-timing-ms`/`update-idle-timers` arithmetic over a virtual ms clock; no-loss/FIFO/coalescing/consumer-only-thunks and sleep-bound/fires-iff-overdue theorems. |
 | `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — ~200 lines (exports list is the only thing that grows), every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
 | `shim-loader.lisp` | Sole component of the `lem-verified-kernel` ASDF system (`lem-verified-kernel.asd` at the repo root): loads the shim + the books production depends on. **Not a book**; the proof runner skips `shim*.lisp`. |
 | `README.md` | This file. |
 
 Books are certified in the dependency order pinned in `scripts/run-proofs.sh`
 (`ORDERED_BOOKS` = `hello buffer-model buffer-edit undo codec crash-safety
-input-decode eastasian-data width`): `buffer-edit` includes `buffer-model`,
-`undo` includes `buffer-edit`, `codec` includes `buffer-model` (for VK-1
-`line-listp`), and `width` includes `eastasian-data`; the alphabetical glob
-would order them wrongly (`crash-safety` and `input-decode` are self-contained
-but listed for a deterministic order).
+input-decode eastasian-data width layout interrupt-model event-queue-model`):
+`buffer-edit` includes `buffer-model`, `undo` includes `buffer-edit`, `codec`
+includes `buffer-model` (for VK-1 `line-listp`), and `width` includes
+`eastasian-data`; the alphabetical glob would order them wrongly (the other
+books are self-contained but listed for a deterministic order).
 
 ## VK-1 — buffer model + well-formedness
 
@@ -564,6 +567,137 @@ clear-pending+signal atomic is modeled as one atomic step, and
 `bt2:interrupt-thread`'s own delivery points are below the model. The
 threaded stress suite exists to pin exactly this residue.
 
+## VK-9 — event queue & cross-thread handoff + idle-timer arithmetic
+
+`event-queue-model.lisp` models the editor event queue — production's
+`concurrent-queue` (src/common/queue.lisp: a lock + condition variable around
+a FIFO list) driven by `send-event` producers ({input thread, timer thread,
+background jobs}; the timer thread injects thunks via `send-timer-notification`,
+src/lem.lisp) and the single `receive-event` consumer (src/event-queue.lisp,
+transcribed **exactly**, including the `:resize` coalescing test and the
+funcall of functionp/symbolp events) — plus the idle-timer arithmetic of
+src/common/timer.lisp (`get-next-timer-timing-ms` / `update-idle-timers`) as
+pure functions over a virtual millisecond clock.
+
+**Model.** Queue entries are `(producer item)` with items `:resize`,
+`(:thunk tag)`, `(:event tag)` (returned to the caller) or `:null` (an
+enqueued NIL). One `:dequeue` step = one iteration of `receive-event`'s loop
+= one pop under the queue lock, so producer enqueues interleave freely
+between steps and trace quantification covers every interleaving and every
+receive-event call segmentation. Ghost fields log every enqueue and dequeue;
+`updates` counts `update-on-display-resized` calls and `thunks` logs
+executed-thunk order.
+
+**Certified obligations** (SPEC-VK VK-9, over all traces by structural
+induction):
+
+1. **No event loss** — `wf-eq` is an inductive invariant pinning
+   `enq-log = deq-log ++ queue`: dequeues are a prefix of enqueues
+   (`dequeues-are-a-prefix-of-enqueues`) and after a drain `deq-log =
+   enq-log` (`drained-no-loss`) — every enqueued event is dequeued exactly
+   once, in global FIFO order. (Coalescing drops the resize *effect*, never
+   the event, so the equality is exact, not modulo-coalescing.)
+2. **Per-producer FIFO** — `per-producer-fifo`(+`-drained`): each producer's
+   dequeued subsequence is a prefix of (after a drain: equal to) its
+   enqueued subsequence.
+3. **Resize coalescing, production's exact rule** — `resize-step-exact`: a
+   dequeued `:resize` triggers `update-on-display-resized` **iff at most one
+   event remains in the queue after the pop** (`(>= 1 (event-queue-length))`).
+   Over a drain (`drain-updates-exact` via `eq-resize-tail-count`): resizes
+   with ≥ 2 events still queued behind them — interleaved enqueues included —
+   coalesce silently (`events-behind-suppress-coalescing`), and a terminal
+   burst of n resizes yields `(min n 2)` updates (`terminal-burst-updates`).
+   **Deviation record (Constraint 5):** the spec's "a burst of N consecutive
+   `:resize` events yields exactly one processed resize" is **REFUTED** by
+   production for every N ≥ 2 — the last *two* pops of a terminal burst each
+   see ≤ 1 remaining, so such a burst yields exactly **two** update calls
+   (ground witness `coalescing-ground-witness`; pinned against live
+   production by the fixed differential vector `[:resize :resize] → 2`), and
+   a burst buried behind ≥ 2 events yields **zero**. Production is the spec;
+   the theorems state the exact rule and no "exactly one" claim is made.
+4. **Thunks execute only in consumer steps** —
+   `non-dequeue-steps-execute-nothing` (an enqueue never funcalls, never
+   updates) and `thunks-run-in-dequeue-order` (the executed-thunk log equals
+   the thunk subsequence of the dequeue log). That dequeue steps happen only
+   on the editor thread is production's single-consumer discipline —
+   trust-base residue outside the model, pinned by the threaded stress suite
+   asserting every thunk ran on the consumer thread.
+
+**Idle-timer arithmetic** (`kt-next-timing`, `kt-fired`, `kt-remaining`,
+`kt-processed`, `kt-expired`; clocks are naturals in ms — production's
+`get-microsecond-time` returns internal-real-time scaled to ms despite its
+name; dueness is **strict** `<`):
+
+- `kt-min-next-lower-bound` / `kt-never-sleeps-past-due`: the computed sleep
+  never extends past any timer's due time, and nothing fires at any wake
+  time ≤ now + next-timing — sleeping exactly `get-next-timer-timing-ms`
+  cannot skip a firing.
+- `kt-wakeup-fires-iff-something-overdue`: a wakeup fires **iff** the clock
+  is strictly past the earliest due time (iff next-timing < 0 at the wake
+  time) — no busy-wake with nothing due, stated to the ms:
+  `kt-deadline-wakeup-fires-nothing` (waking *at* the deadline fires
+  nothing; production's `(<= ms 0)` branch then loops — a busy window
+  bounded by the 1 ms clock granularity) and
+  `kt-first-tick-after-deadline-fires`.
+- Partition theorems: every timer lands in exactly one of fired/remaining,
+  every fired timer in exactly one of expired/processed. Transcribed
+  oddities documented in the book header: fired **repeat** timers are parked
+  in `*processed-idle-timer-list*` with `last-time` *unchanged* (refreshed
+  only by the next idle period's `start-idle-timers`), the dead-store of
+  `last-time` on deleted one-shot timers, and the `set-difference` order
+  caveat (the differential compares per-tick sets, not order).
+
+**Shim growth for VK-9:** none in the whitelist (exec path is CL homonyms +
+`natp`/`len`). Twenty-five symbols added to `*kernel-exports*`. The book is
+not in `shim-loader.lisp` (production does not call it; the test suite loads
+it via `load-verified-book`).
+
+**Differential/PBT/stress acceptance** (`tests/pbt/event-queue-stress.lisp`):
+(a) model PBT — random traces preserve `wf-eq`, log decomposition, FIFO and
+drain-coalescing counts; (b) single-threaded differential — random and fixed
+enqueue/receive scripts through the **real** `send-event`/`receive-event`
+over a real `concurrent-queue` (with `update-on-display-resized` patched to
+a counter, test-only, restored in an unwind-protect — the real one needs a
+live editor) must match the kernel model observable-for-observable; the
+fixed vectors pin the exact coalescing rule including the burst-of-two → 2
+case; (c) the VK-9 threaded stress test — 4 real producer threads × 150
+tagged events each (+ randomized `:resize` bursts) against one real
+`receive-event` consumer, asserting **deterministic** invariants only:
+exact-once arrival + per-producer FIFO by tags, thunks on the consumer
+thread only, updates ≤ enqueued resizes with ≥ 1 guaranteed by a
+deterministic sentinel resize (enqueued after all producers join, it is the
+queue's last entry, so its pop must process), full drain; no sleeps
+(yields are interleaving load), 60 s guards, seeded via `LEM_PBT_SEED`,
+run count via `LEM_EVENT_QUEUE_STRESS_RUNS` (default 8); (d) timer suites —
+model PBT of the four timer theorem groups plus a simulated-clock
+differential reusing `tests/common/timer.lisp`'s `testing-timer-manager`:
+random schedules across multiple idle periods, comparing production's
+sleep/fire/bookkeeping decisions (including `last-time` refresh semantics)
+against the kernel per tick. No divergence beyond the documented double-fire
+bug below.
+
+**Production bug found by VK-9 (documented, not fixed here — the VK-3/VK-6
+charter precedent; the deterministic reproducer
+`timer-double-fire-reproducer` in `tests/pbt/event-queue-stress.lisp` is the
+record).** `update-idle-timers` (src/common/timer.lisp) computes
+`updating-timers`/`updating-idle-timers` with `remove-if-not`, whose result
+may share structure with its input (CLHS-permitted; SBCL shares the maximal
+tail), and then `nconc`s `updating-idle-timers` onto
+`*processed-idle-timer-list*` **before** `(mapc #'call-timer-function
+updating-timers)`. Whenever the last due timer in `*idle-timer-list*` order
+is a repeat timer and the processed list is non-empty, the `nconc` splices
+the processed list onto the very list `mapc` is about to walk — **re-firing
+every already-processed repeat idle timer in the same idle period** (extra
+funcalls only; the list bookkeeping ends correct, which is why the bug is
+latent). The kernel model states the intended implementation-independent
+semantics (a repeat idle timer fires at most once per idle period); the
+differential accepts production's double-fire outcome exactly under its
+envelope condition (some fired timer repeat ∧ processed non-empty — the
+precise trigger depends on production's `set-difference`-scrambled internal
+list order, which is unobservable), and asserts the exact clean outcome
+everywhere else. A one-line fix would be `(mapc #'call-timer-function
+updating-timers)` before the list surgery, or `append` instead of `nconc`.
+
 ## VK-10 — character/string width algebra + one-source swap
 
 `width.lisp` is the certified width algebra over **codepoints** (VK-1's
@@ -858,7 +992,12 @@ prefix disjunct and the intra-hash-namespace residue stated explicitly rather
 than over-claimed — see the VK-6 section), VK-7 (all five obligations), VK-8
 (all four obligations — liveness, safety, nesting, force — with the abort-free
 liveness proviso and the deferred-arrival coalescing semantics stated
-explicitly rather than over-claimed, see the VK-8 section), VK-10
+explicitly rather than over-claimed, see the VK-8 section), VK-9 (all four
+queue obligations plus the idle-timer sleep/wakeup theorems — with the
+"exactly one update per resize burst" claim stated as production's exact
+≤-1-remaining rule instead, the spec's naive phrasing being refuted by
+production itself: terminal bursts process twice, buried bursts not at all —
+see the VK-9 section), VK-10
 (all four obligations) and VK-11 (all four obligation groups, including the
 blocked-head characterization and the clip/auto-scroll composition) are fully
 certified. **VK-12 has no book by design** (SPEC-VK VK-12): it is verified

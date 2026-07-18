@@ -207,7 +207,18 @@
                                  ;; layout.lisp (VK-11)
                                  "K-TEXT" "K-OPAQUE"
                                  "K-WRAP" "K-WRAP-ROW" "K-CLIP"
-                                 "K-SCROLL-ADJUST")
+                                 "K-SCROLL-ADJUST"
+                                 ;; event-queue-model.lisp (VK-9)
+                                 "EQ-INIT" "EQ-STEP" "EQ-RUN" "EQ-DRAIN"
+                                 "WF-EQ"
+                                 "EQS-QUEUE" "EQS-ENQ-LOG" "EQS-DEQ-LOG"
+                                 "EQS-UPDATES" "EQS-THUNKS"
+                                 "MK-ENTRY" "ENTRY-PRODUCER" "ENTRY-ITEM"
+                                 "EQ-BY-PRODUCER" "EQ-THUNK-TAGS"
+                                 "EQM-PREFIXP" "EQ-RESIZE-TAIL-COUNT"
+                                 "MK-KTIMER" "KTIMER-ID" "KTIMER-LAST"
+                                 "KT-NEXT-TIME" "KT-NEXT-TIMING"
+                                 "KT-FIRED" "KT-REMAINING" "KT-PROCESSED")
   "ACL2 symbol-names re-exported through :lem/kernel. See header.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
