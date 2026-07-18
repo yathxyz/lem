@@ -114,6 +114,8 @@
   (:export
    :*inhibit-read-only*
    :*inhibit-modification-hooks*
+   :*edit-engine-mode*
+   :edit-engine-conformance-error
    :before-change-functions
    :after-change-functions)
   ;; point.lisp

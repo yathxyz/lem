@@ -38,14 +38,17 @@
                             (edit-string edit))))))
 
 (defun compute-edit-offset (dest src)
-  (ecase (edit-kind src)
-    ((:insert-string)
-     (when (<= (edit-position src) (edit-position dest))
-       (incf (edit-position dest) (length (edit-string src)))))
-    ((:delete-string)
-     (when (< (edit-position src)
-              (edit-position dest))
-       (setf (edit-position dest)
-             (max 1 (- (edit-position dest) (length (edit-string src)))))
-       (when (< (edit-position dest) (edit-position src))
-         (setf (edit-position dest) (edit-position src)))))))
+  "Shift DEST's recorded position past the untracked edit SRC. The arithmetic
+is the certified kernel's offset algebra (SPEC-VK VK-4;
+verified/buffer-edit.lisp `k-shift-position-insert' / `k-shift-position-delete',
+proved position-tracking by `k-shift-position-*-tracks-content')."
+  (setf (edit-position dest)
+        (ecase (edit-kind src)
+          ((:insert-string)
+           (lem/kernel:k-shift-position-insert (edit-position dest)
+                                               (edit-position src)
+                                               (length (edit-string src))))
+          ((:delete-string)
+           (lem/kernel:k-shift-position-delete (edit-position dest)
+                                               (edit-position src)
+                                               (length (edit-string src)))))))

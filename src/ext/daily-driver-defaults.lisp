@@ -51,3 +51,14 @@ cleanly. See SPEC.md, constraint 3.")
 ;;; the snapshot on a successful save, and offer recovery on find-file when a
 ;;; newer snapshot survives a crash. Upstream ships this off.
 (lem/checkpoint:checkpoint-mode t)
+
+;;; SPEC-VK VK-4: paranoid edit engine. The kernel-backed edit engine's mode is
+;;; a BUILD-time default, not a load-time flip (tests and plain builds must stay
+;;; :release), so it is wired where the image is built rather than here:
+;;; `scripts/daily-driver-update.sh` sets LEM_PARANOID=1, which makes
+;;; `scripts/build-ncurses.lisp` push :lem-paranoid onto *features* before
+;;; compiling, and `lem/buffer/internal:*edit-engine-mode*` then defaults to
+;;; :paranoid (per-edit certified wf-buffer checks on the edited region).
+;;; Toggle: drop LEM_PARANOID from daily-driver-update.sh (or build plain
+;;; `make ncurses`) once the VK-4 swap has soaked; runtime escape hatch:
+;;; (setf lem/buffer/internal:*edit-engine-mode* :release).

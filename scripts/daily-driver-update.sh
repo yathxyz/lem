@@ -7,5 +7,8 @@ cd "$(dirname "$0")/.."
 git fetch upstream --tags
 git pull --rebase origin main
 qlot install
-make ncurses
+# SPEC-VK VK-4: the daily-driver image runs the kernel-backed edit engine in
+# :paranoid mode (per-edit certified wf-buffer region checks) until the shell
+# swap has soaked. Drop LEM_PARANOID=1 for a :release image.
+LEM_PARANOID=1 make ncurses
 echo "lem rebuilt: $(ls -lh lem | awk '{print $5, $9}')"

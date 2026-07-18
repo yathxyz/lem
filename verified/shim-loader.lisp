@@ -24,6 +24,14 @@
   ;;   VK-10 width algebra (src/common/character/string-width-utils.lisp; `width'
   ;;         includes `eastasian-data' via the shim's include-book, so loading
   ;;         `width' pulls the table book too)
+  ;;   VK-4  kernel-backed edit engine (src/buffer/internal/buffer-insert.lisp
+  ;;         calls the buffer-edit point maps + wf-buffer/k-insert/k-delete in
+  ;;         the checking modes; src/buffer/internal/edit.lisp calls the offset
+  ;;         algebra). `buffer-edit' includes `buffer-model'; `undo' includes
+  ;;         `buffer-edit'; all three listed explicitly as the VK-4 kernel.
   (let ((load-book (find-symbol "LOAD-VERIFIED-BOOK" "LEM/KERNEL")))
     (funcall load-book "input-decode")
-    (funcall load-book "width")))
+    (funcall load-book "width")
+    (funcall load-book "buffer-model")
+    (funcall load-book "buffer-edit")
+    (funcall load-book "undo")))

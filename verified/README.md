@@ -986,6 +986,126 @@ production edges the suites deliberately steer around:
   rendering** are out of scope for fake-interface (the ncurses monospace model),
   matching the VK-10/VK-11 non-goals.
 
+## VK-4 — shell swap: kernel-backed edit engine (core)
+
+Production `src/buffer/internal/buffer-insert.lisp` is restructured as an
+imperative shell over the certified VK-2 kernel: `insert-string/point` /
+`delete-char/point` keep their hooks, read-only checks, interrupt masking and
+undo recording, but marker relocation — the drift-prone heart of the old
+`shift-markers` — is now computed by the certified kernel and materialized onto
+the production point objects. `compute-edit-offset`
+(`src/buffer/internal/edit.lisp`) is likewise swapped onto the certified
+`k-shift-position-insert` / `k-shift-position-delete`.
+
+### Locality boundary (designed first; the conformance mode pins it)
+
+For an edit at origin `(L, C)`:
+
+- **Region lines.** Insert: the target line `L` plus the `offset-line` lines a
+  multi-line payload creates (post-surgery they are `L .. L+offset-line`).
+  Delete: the touched lines `L .. L+j` (`j` = merges), which after surgery have
+  collapsed into the single merged line `L`.
+- **Region points.** The registered points on the region lines: for same-line
+  edits, `line-points` of the target line (production cases 1/3 touched exactly
+  these); for deletes that crossed lines, every registered point with cached
+  `linum ∈ [L, L+j]` collected from `buffer-points` (their `line-points` entries
+  were wiped by `line-free` during the merge — exactly the set production case 4
+  relocated).
+- **Kernel call.** The region points are converted to kernel point records with
+  region-relative linum (`plinum − L + 1`) and passed to the certified
+  `shift-points-insert` / `shift-points-delete` (verified/buffer-edit.lisp — the
+  very point maps `k-insert` / `k-delete` are defined by, certified wf- and
+  inverse-preserving) with the edit at region coordinates `(1, C)` and the
+  offsets `(offset-line, offset-char)` production's surgery loop always
+  computed. The kernel's answer comes back in the same order and is
+  materialized: `charpos` written, and `point-change-line` onto
+  `line-next-n(target, klinum−1)` when the kernel moved the point across lines.
+- **Outside the region.** Points on lines *below* the region get the uniform
+  linum renumber (`± offset-line`) — the same `buffer-points` tail walk
+  production performed inside shift-markers cases 2 and 4; their charpos/line
+  are untouched by construction. Points above the region are untouched.
+- **Line content.** Line strings and text properties are materialized by the
+  same `line:insert-string` / `line:insert-newline` / `line:delete-region` /
+  `line:merge-with-next-line` surgery as before. The certified content laws
+  `k-flatten-of-k-insert` and `content-of-k-delete` (verified/buffer-edit.lisp)
+  state that the kernel's content answer *is* this splice/excision, so string
+  surgery is the O(edit-span) materialization of the kernel's content result —
+  properties (not modelled by the kernel) ride along as the CLOS-adapter
+  payload, and the naive codepoint-list materialization is what :paranoid /
+  :conformance check against. This keeps the hot path at production's own
+  constant factor (see the perf table below); a full per-edit
+  codepoint-list round-trip measured 10–20× on the PI-1 200KB-line corpus,
+  which the VK-4 acceptance forbids (>1.5× is a blocker).
+
+### Modes
+
+- `:release` (default) — the path above; no per-edit checking.
+- `:paranoid` — after every mutation, assert the certified `wf-buffer` on the
+  affected-region model (region lines as codepoint lists + region points +
+  synthetic start/end/buffer-point records), check every region point's cached
+  linum against the line it is registered on, and check no registered point of
+  the buffer references a freed line. Violations signal `corruption-warning`
+  (absorbing `check-buffer-corruption`'s role, which had no production callers).
+  Enabled by pushing `:lem-paranoid` onto `*features*` before the image build —
+  `scripts/build-ncurses.lisp` pushes it when the `LEM_PARANOID` env var is set,
+  and the daily-driver build (`scripts/daily-driver-update.sh`) sets
+  `LEM_PARANOID=1` until the swap has soaked (toggle: remove it there, or build
+  plain `make ncurses` for a release image). Runtime toggle:
+  `lem/buffer/internal:*edit-engine-mode*`.
+- `:conformance` (tests only) — every mutation is additionally mirrored through
+  the FULL `k-insert` / `k-delete` on the FULL buffer model (every line, every
+  registered point in `buffer-points` order) and compared field-for-field:
+  lines, `(linum charpos kind)` of every point, cached nlines, and the deleted
+  payload against the killring string. Any locality-boundary mistake —
+  mis-collected region, missed renumber, bad materialization — is a
+  field-for-field mismatch by construction. The model tick is excluded:
+  `buffer-modify` runs outside the mirrored mutation and its ±1 semantics is
+  VK-3's, pinned by kernel-undo-conformance.
+
+Suites: `tests/pbt/edit-engine-modes.lisp` (10k-step V0-5 fuzz under
+`:paranoid` + teeth, fuzz under `:conformance`); the pre-existing
+kernel-conformance (10k), kernel-undo-conformance STRICT+INHIBITED and
+baseline-fuzz suites now pin the shell's materialization.
+
+### Perf (VK-4 acceptance: >1.5× on the hot path is a blocker)
+
+Median µs/op via the buffer primitives, undo on, 8 extra registered points
+(`bench-edit.lisp` methodology: 2000×60-char buffer edited at line 1000, and
+the PI-1 200KB single-line corpus edited at char 100k):
+
+| scenario | op | before | after (:release) | after (:paranoid) |
+|---|---|---|---|---|
+| normal 2000×60 | insert-char | 12.0 | 11.0 | 25.0 |
+| normal 2000×60 | delete-char | 11.0 | 12.0 | 25.0 |
+| normal 2000×60 | newline split+join | 21.0 | 22.0 | 28.0 |
+| 200KB single line | insert-char | 405 | 405 | 7 675 |
+| 200KB single line | delete-char | 365 | 390 | 7 960 |
+| 200KB single line | newline split+join | 630 | 630 | 12 360 |
+
+`:release` is within measurement noise of the pre-swap engine on both corpora
+(the 200KB delete-char delta reproduces in either direction across runs).
+`:paranoid` — the certified region `wf-buffer` walks the region's codepoint
+list per registered point — is ~2× on normal buffers and ~8–12 ms/keystroke on
+the 200KB single-line corpus: slow but comfortably inside PI-1's 100 ms echo
+bound (SPEC-VK allows the checking modes to be slow; the default build stays
+at production speed). The shim's `len` was made iterative (semantics
+identical) because ACL2's recursive definition overflows the control stack on
+200K-codepoint lines; the book functions on the paranoid/conformance paths are
+tail-recursive and compile to loops.
+
+### Shim growth for VK-4
+
+Two names added to the `:lem/kernel` export surface (`SHIFT-POINTS-INSERT`,
+`SHIFT-POINTS-DELETE` — now called by production); no new constructs, no
+whitelist changes. `verified/shim-loader.lisp` now loads `buffer-model`,
+`buffer-edit` and `undo` at image load (production calls the buffer-edit point
+maps and offset algebra on every edit; `undo` rides along as the certified
+statement of the recording semantics the shell keeps).
+
+The remaining VK-4 obligations (layout swap of VK-11, width≤2 wrap loop fix,
+clip straddle rebuild, fsync, idle-timer double-fire — see the milestone brief)
+are follow-ups on top of this core swap.
+
 ## Proof status
 
 All theorems in every book under `verified/` certify with real ACL2 (no

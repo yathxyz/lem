@@ -31,6 +31,8 @@
                 :components ((:file "harness")
                              (:file "harness-test")
                              (:file "baseline-fuzz")
+                             (:file "edit-engine-modes"
+                              :depends-on ("harness" "baseline-fuzz"))
                              (:file "kernel-model")
                              (:file "kernel-conformance")
                              (:file "kernel-undo-conformance")

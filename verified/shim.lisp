@@ -145,10 +145,15 @@
   (and (integerp x) (<= 0 x)))
 
 ;; len: ACL2 axioms.lisp -- length of the list prefix of x; 0 on an atom.
+;; Iterative (not ACL2's recursive definition, which is not tail-recursive and
+;; overflows the control stack on the 200K-codepoint lines the VK-4 :paranoid
+;; region checks feed it); semantics identical on every input.
 (defun acl2::len (x)
-  (if (consp x)
-      (+ 1 (acl2::len (cdr x)))
-      0))
+  (let ((n 0))
+    (loop :while (consp x)
+          :do (setf x (cdr x))
+              (incf n))
+    n))
 
 ;; true-listp: ACL2 axioms.lisp -- x is a nil-terminated (proper) list.
 (defun acl2::true-listp (x)
@@ -170,6 +175,8 @@
                                  "K-POSITION" "K-POINT-AT-POSITION"
                                  "K-FLATTEN"
                                  "K-SHIFT-POSITION-INSERT" "K-SHIFT-POSITION-DELETE"
+                                 ;; VK-4 shell swap: region point relocation
+                                 "SHIFT-POINTS-INSERT" "SHIFT-POINTS-DELETE"
                                  ;; undo.lisp (VK-3)
                                  "MK-EDIT" "EDIT-INVERT" "MK-SESSION"
                                  "SN-BUFFER" "SN-HISTORY" "SN-REDO"
