@@ -236,6 +236,59 @@ bench-image debug-policy change needed. The `big-file` hotspots are the
 here as the first data point for the P4 hotspot ranking, not acted on (P5 must
 not start before the P4 grounding report).
 
+## T3 suite structure (PF-7)
+
+`scripts/bench/e2e/` is the end-to-end tmux harness — the real ncurses `./lem`
+binary driven from outside, no in-image bench code (the frozen API is exercised
+exactly as a user's terminal would). Files:
+
+- `driver.sh` — sourceable tmux driver. **Constraint 7 is structural:** every
+  run uses a UNIQUE PRIVATE socket (`tmux -L lem-e2e-$$-$RANDOM$RANDOM`), never
+  the default server; the editor runs with `HOME`/`XDG_*`/`LEM_HOME` redirected
+  into an `mktemp` sandbox so it reads/writes nothing of the user's real config;
+  the cleanup trap (EXIT/INT/TERM) kills only that private-socket server, removes
+  only its own socket file, and deletes only its own sandbox. Primitives:
+  `lem_start` (launch `./lem` in a 200×50 pane via a generated `printf %q`
+  launcher, so the `--eval` form's parens/quotes never fight tmux), `lem_keys`,
+  `lem_type`, `lem_capture`, `lem_wait_for`, `lem_stop`, `lem_metrics_json`.
+- `common.sh` — result emission (`ENTRY`/`BUDGET`/`TREND` TSV lines) + stats.
+- `startup.sh` — startup-to-ready: time from `exec` to a `--eval`-drawn sentinel
+  in `capture-pane`. Cold = first run of the batch; warm = median of 5.
+- `keystroke.sh` — the four PF-7 scenarios (below), corpora generated into the
+  sandbox by reusing `bench/corpora/generate.lisp`.
+- `parse-metrics.js` — extracts the PF-2 stage percentiles from the exit dump
+  (node; jq is unavailable). Reads the per-stage histograms directly and merges
+  the per-command histograms with the same log2 upper-edge estimator
+  `histogram-percentile` uses.
+- `run-t3.sh` — orchestrator invoked by `scripts/run-bench.sh t3`: one sandbox,
+  runs startup + keystroke, writes the PF-3-schema JSON to `bench/results/`
+  (gitignored), prints the budget table, exits nonzero ONLY on a hard-budget
+  violation or a harness failure.
+
+| Scenario | Session | Hard budget |
+|----------|---------|-------------|
+| plain | 120 paced inserts into a fresh scratch buffer | in-image keystroke p95 < 10 ms |
+| bigfile | 120 paced inserts into the 10 MB `mixed-10m` corpus file | < 30 ms |
+| longline | 120 paced inserts into a **16 KB** single line | < 30 ms |
+| scroll | 120 paced `next-line` (Down) through the 10 MB file | < 30 ms |
+
+Keys are driven **one at a time** (~25 ms apart), because redisplay coalesces
+while the input queue is non-empty (`interp.lisp`: `(when (= 0
+(event-queue-length)) (redraw-display))`) — pacing makes each keystroke paint,
+so the keystroke (t₄−t₁) histogram gets ~one sample per key. Each scenario
+verifies the screen actually changed, exits cleanly (`C-x C-c`, then `y` for a
+file-backed modified buffer) so the metrics dump fires, and cross-checks the
+PF-2 dump. The **pipeline-wrapping proof** (the loud-FAIL condition PF-7 asks
+for) is the **queue-wait sample count**: every event the ncurses frontend wraps
+records one queue-wait sample on dequeue, so `queue-wait_count >= N` proves the
+wrapping is intact (a broken wrap reads ~0). Wall numbers (single key → poll
+`capture-pane` until it changes, 20×) are TREND-only and never gate.
+
+**T3 keeps NO committed baseline** — a noisy wall tier has no band gate, so
+`--rebaseline t3` is not applicable (`run-bench.sh` short-circuits it) and the
+only hard gates are the in-image PF-2 keystroke p95 budgets and the warm-startup
+budget. T3's trend history is the ledger rows below.
+
 ## Ledger
 
 Format: one row per baseline creation / rebaseline / OPT-n. Include the
@@ -253,6 +306,17 @@ numbers and the motivating T0/T2 measurement (Constraint 1).
 | 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (PF-5, corpus pin) | **No t1 rebaseline needed.** Pinning `lisp-500k` to commit `5cd018a9` via `git show` (was: working-tree `read-file-string`) is byte-for-byte identical at this commit — the six source files are unchanged between the working tree and the pin — verified by regenerating both ways and comparing (`cmp` IDENTICAL). The `syntax/lisp-500k` t1 entry reads the same bytes, so its baseline is untouched; the committed t1 baseline stands. Recorded here per Constraint 6. |
 | 2026-07-18 | ex44 / i5-13500 / 20c | t2 | (PF-5) | **Initial T2 baseline** (Milestone P2): the `run-t2.lisp` macro-session harness + three workloads (`big-file`, `scroll`, `long-line`), the `mixed-10m` corpus generator, and the `lisp-500k` corpus pin. No optimization — new measurement tier only. Validated by 5 consecutive PASS gate runs; all three bands settle at the 20% floor after interleaving. See Deviations for the long-line 16 KB render cap (a tighter restatement of the P1 stack-exhaustion finding), the additive T2 metric fields, the interleaving/long-line sizing hygiene, and the `mixed-10m` corpus. |
 | 2026-07-18 | ex44 / i5-13500 / 20c | t2 | (PF-5, +4 workloads) | **T2 rebaseline** completing the PF-5 workload set: added `isearch`, `undo-storm`, `overlay-heavy`, and `lisp-edit` (one file each under `scripts/bench/t2/`), so all seven PF-5 workloads now exist. No optimization — new measurement workloads only; each drives frozen public API + existing internals (an API-stability canary). The pre-existing `big-file`/`scroll`/`long-line` medians shift down slightly (4745→4234, 1272→1075, 610→488) because the interleaved suite is now seven-way, not three-way — the honest per-machine reset (Constraint 5), not a regression. Rebaseline folds five suite runs; all bands settle at the 20% floor. Validated by 5 consecutive PASS gate runs. See Deviations for the headless-isearch driving choice, the undo-storm canary-in-setup + trailing-undo replay, the overlay-heavy net-zero edits, and the lisp-edit `calc-indent-default` + undo-restore choices. |
+
+### T3 trend history (PF-7)
+
+T3 has no committed baseline; each run's headline numbers are recorded here as a
+trend row (Constraint 5: matching fingerprint only). Wall numbers are coarse
+(~5–10 ms tmux resolution) and never gate; the in-image columns are the
+PF-2-derived hard budgets.
+
+| Date | Fingerprint | Commit | Startup warm (ms) | plain p95 | bigfile p95 | longline p95 | scroll p95 | Notes |
+|------|-------------|--------|-------------------|-----------|-------------|--------------|------------|-------|
+| 2026-07-18 | ex44 / i5-13500 / 20c | 8fbbb171 | **190** (cold 190) | **1.0** (wall 6.2) | **1.0** (wall 6.3) | **16.4** (wall 40.7) | **2.0** (wall 6.7) | First T3 baseline row (Milestone P3, PF-7). All budgets PASS: warm startup 190 ms ≪ 2 s; plain keystroke p95 1.0 ms < 10 ms; bigfile/scroll 1–2 ms and longline 16.4 ms all < 30 ms. In-image ms are log2-bucket p95 estimates (us upper-edge / 1000); "wall" = coarse `capture-pane` trend p50. `longline` is the pathological one both in-image (p50 8.2 ms, redisplay-dominated: the certified `k-sum`/`k-obj-width` non-tail width fold over the 16 KB line) and wall (~41 ms) — corroborating signals. queue-wait sample count 142–143 ≥ 120 per scenario (pipeline wrapping proven). No optimization — new measurement tier only. |
 
 ### Optimizations (OPT-n)
 
@@ -561,3 +625,77 @@ the spec.
   corpus base, since the corpus insert was not recorded), and each edit re-scans
   only the few lines it touched (`syntax-scan-region`), never the whole 500 KB
   buffer (a full re-scan per edit would be ~116 ms × the edit count).
+
+### Milestone P3 (T3 end-to-end harness)
+
+- **The keystroke `longline` scenario is a 16 KB single line, not PF-7's
+  "200 KB line"** (PF-7). This is the same stack-exhaustion cliff the P1
+  `redisplay/long-line` entry and the P2 `long-line` workload already record: a
+  single text object ≳ 24 000 chars overflows the default control stack in the
+  certified clip/wrap layout path (`verified/layout.lisp` `k-obj-width` →
+  `k-sum`, a non-tail width fold whose recursion depth equals the line length).
+  16 KB keeps the ~30% margin below the ~24 000-char cliff that the T2 long-line
+  workload uses, so the scenario exercises the genuine long-line redisplay cost
+  (its p50 is 8 ms, redisplay-dominated) without crashing the driven editor. The
+  kernel is not fixed here (out of P3 scope); the ≥ ~24 000-char single-object
+  redisplay remains the OPT-candidate the P1/P2 ledger already records.
+
+- **Keys are driven ONE AT A TIME (~25 ms apart), not in fast bursts** (PF-7).
+  PF-7 says "small sleep between bursts so the editor keeps up". The editor
+  coalesces redisplay while input is pending (`interp.lisp`: redisplay only when
+  `(= 0 (event-queue-length))`), which is the *correct* editor behaviour and the
+  real keystroke-to-paint story — but a 20-key burst then paints once, so the
+  end-to-end keystroke (t₄−t₁) histogram records ~1 sample per burst, not per
+  key (measured: a 20-key burst → 4 keystroke samples). Pacing one key per
+  ~25 ms lets the queue drain and each key paint, yielding ~one keystroke sample
+  per key (measured: 120 keys → ~135 samples incl. the 20 wall-trend keys). This
+  changes nothing about the editor; it is how a human types, and it is what makes
+  the p95 a per-keystroke number.
+
+- **The pipeline-wrapping proof is the queue-wait sample count, not the
+  keystroke count** (PF-7). PF-7 asks the harness to FAIL loudly if "sample count
+  … < ~N — the pipeline wrapping is broken". The definitive wrapping signal is
+  `queue-wait_count`: `send-input-event` (ncurses) wraps every key in a
+  `pipeline-event`, and `receive-event` records exactly one queue-wait sample per
+  wrapped event on dequeue — so `queue-wait_count >= N` proves the wrap end to
+  end (a broken wrap reads ~0), independent of redisplay coalescing. The harness
+  hard-FAILs on `queue-wait_count < N` and additionally requires the keystroke
+  paint count ≥ N/2 (a meaningful-p95 floor). The keystroke count alone would be
+  the wrong gate: coalescing legitimately lowers it below N.
+
+- **`LEM_HOME` is exported WITH a trailing slash** (PF-7, a bring-up finding).
+  `(lem-home)` feeds `LEM_HOME` straight into `(merge-pathnames "metrics/"
+  (lem-home))`; a value without a trailing slash parses as a *file* pathname
+  whose final component `merge-pathnames` then strips, landing the metrics dump
+  in the *parent* of the intended `lem-home` (observed: `$ROOT/metrics/` instead
+  of `$ROOT/lem-home/metrics/`). The sandbox exports `LEM_HOME=$ROOT/lem-home/`
+  so the dump lands where the harness reads it. This is a harness-side sandbox
+  detail, not a Lem change (the frozen API is untouched).
+
+- **"Cold" startup is the first run of the batch, not a dropped-page-cache cold
+  start** (PF-7). PF-7 wants cold (first run) and warm (repeat) recorded
+  separately. A true cold-cache start needs `echo 3 >
+  /proc/sys/vm/drop_caches` (root); the harness records the first launch of the
+  batch as "cold" and the median of the next 5 as "warm". On the daily-driver
+  machine the ~415 MB image is already in the page cache from the build, so cold
+  and warm read nearly identical (both ~190 ms) — honest for a warm working set,
+  and the warm budget (< 2 s) is what PF-7 hard-gates.
+
+- **In-image p95 is a log2-bucket estimate** (PF-7, a standing histogram
+  caveat). The gated keystroke p95 comes from the T0 log2 histogram, so it is the
+  upper edge of the crossing bucket (a power-of-two microsecond value): e.g. a
+  true p95 of 9 ms reports as 16 384 µs (16.4 ms), and 20 ms reports as 32 768 µs
+  (32.8 ms). This is the bounded error `metrics-report` already flags and is
+  acceptable for a budget check (it never *under*-reports); the coarse wall
+  trend is recorded alongside as an independent corroborating signal (and for
+  `longline` the two agree: in-image p95 16.4 ms, wall p95 ~41 ms — both the
+  clear pathological outlier). Budgets are "initial, revisable with a ledger
+  entry" per PF-7; the current five all pass with margin.
+
+- **T3 has no committed baseline; `run-bench.sh --rebaseline t3` is a
+  documented no-op** (PF-7). Unlike T1/T2, a noisy wall tier has no meaningful
+  band gate, so there is no `bench/baselines/*-t3.json`. `run-bench.sh` prints a
+  short "not applicable" notice for `--rebaseline t3` and suppresses the generic
+  "Rebaselined" epilogue when no gated tier was actually rebaselined. T3's trend
+  history lives in the ledger's *T3 trend history* table above (Constraint 6:
+  trends recorded in the ledger, not a committed baseline file).

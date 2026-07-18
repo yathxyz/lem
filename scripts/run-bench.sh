@@ -71,7 +71,31 @@ TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 MODE="measure"; [ "$REBASELINE" -eq 1 ] && MODE="rebaseline"
 
 rc=0
+DID_REBASELINE=0
 for tier in "${TIERS[@]}"; do
+  # T3 (SPEC-PERF PF-7) is the end-to-end tmux tier: no sbcl driver, no
+  # committed baseline (a noisy wall tier has no band gate -- its trend history
+  # lives in the bench/README.md ledger), so `--rebaseline t3' is not
+  # applicable.  It hard-fails only on in-image budget violations or a harness
+  # failure; wall numbers are trend-only.
+  if [ "$tier" = "t3" ]; then
+    if [ "$REBASELINE" -eq 1 ]; then
+      echo "== tier t3: no committed baseline (trend-only); --rebaseline not applicable."
+      echo "   Record T3 trend numbers as a ledger row in bench/README.md instead. =="
+      continue
+    fi
+    echo "== bench tier=t3 mode=$MODE fingerprint=[$FINGERPRINT] =="
+    LEM_BENCH_TIER="t3" \
+    LEM_BENCH_FINGERPRINT="$FINGERPRINT" \
+    LEM_BENCH_FP_SLUG="$FP_SLUG" \
+    LEM_BENCH_TIMESTAMP="$TIMESTAMP" \
+    LEM_BENCH_RESULTS_DIR="$RESULTS_DIR" \
+    "$ROOT/scripts/bench/e2e/run-t3.sh"
+    tier_rc=$?
+    [ "$tier_rc" -ne 0 ] && rc="$tier_rc"
+    continue
+  fi
+
   DRIVER="$ROOT/scripts/bench/run-$tier.lisp"
   if [ ! -f "$DRIVER" ]; then
     echo "== tier $tier: no driver ($DRIVER) yet, skipping ==" >&2
@@ -94,9 +118,10 @@ for tier in "${TIERS[@]}"; do
        --load "$DRIVER"
   tier_rc=$?
   [ "$tier_rc" -ne 0 ] && rc="$tier_rc"
+  [ "$REBASELINE" -eq 1 ] && DID_REBASELINE=1
 done
 
-if [ "$REBASELINE" -eq 1 ]; then
+if [ "$DID_REBASELINE" -eq 1 ]; then
   echo
   echo "Rebaselined. Constraint 6: record the rebaseline rationale as a ledger"
   echo "entry in bench/README.md before committing the new baseline."
