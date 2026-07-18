@@ -396,7 +396,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   Java, with Python and Java deliberately enabled manually: rust-analyzer,
   pyright, harper-ls, csharp-ls,
   flake-aware nixd, gopls, terraform-ls, and JDTLS, plus the Rust toolchain
-  required by rust-analyzer
+  required by rust-analyzer. Rust, Python, Markdown, C#, Nix, Go, and Terraform
+  use the configured project.el Git root, including merged submodules and
+  separate linked worktrees, with their language marker as a non-Git fallback;
+  Go and Terraform use Eglot's stdio commands rather than upstream TCP specs
 - a Dape-compatible DAP client on the stock `C-x C-a` prefix, with global
   source, conditional, hit-count, log, and function breakpoints; threads,
   stacks, scopes, variables, watches, evaluation and REPL buffers; stepping,

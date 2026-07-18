@@ -672,7 +672,10 @@ rollback, query history, one-Return navigation and `C-o`, explicit cancellation,
 out-of-order stale-response rejection, project-stable incremental routing,
 project-only restart, idle retention/reuse/explicit stop,
 bounded shutdown with forced disposal, graceful exit on responsive paths,
-old-process death, and editor-exit cleanup. Static contracts
+old-process death, and editor-exit cleanup. Its main fixture subclasses the
+same configured Eglot project spec, while static Go and Terraform buffers prove
+their exact non-Git marker and buffer-directory fallbacks, project.el-style
+submodule merging, and linked-worktree separation. Static contracts
 cover exact and glob root markers, `.git/` directory fallback, filesystem-root
 termination, safe URI conversion, spec-instance-stable keys, fileless guards, global Lisp-v2
 connection selection/restart, and both leader states.
@@ -1747,8 +1750,15 @@ notifications remain outside this implementation.
 Lem-yath adds automatic C# support for `.cs` and `.csx`: its native
 `csharp-mode` supplies C-like indentation and a bounded TextMate fallback,
 while `src/tree-sitter.lisp` automatically installs the packaged C# parser and
-highlight query in eligible buffers. A `csharp-ls` spec is rooted at the
-nearest `.sln`, `.csproj`, or `.git` marker. The packaged server uses stdio and
+highlight query in eligible buffers. Rust, manual Python, Markdown, C#, Nix,
+Go, and Terraform share the configured Eglot project policy: prefer the
+containing Git root, because the Emacs early init restricts project.el to Git,
+merge Git submodules into their parent as project.el does, keep linked worktrees
+separate, then retain the language marker as a useful non-Git fallback. Go runs `gopls`
+over stdio with no Lem-only initialization options, and Terraform runs
+`terraform-ls serve` over stdio, matching Eglot rather than their upstream Lem
+TCP specs. A `csharp-ls` spec falls back to the nearest `.sln` or `.csproj`
+outside Git. The packaged server uses stdio and
 LSP 3.17 pull diagnostics;
 full reports feed the same diagnostic overlays as push diagnostics, unchanged
 reports preserve them, stale responses are discarded, and server refresh
@@ -1797,6 +1807,11 @@ Customize the server command at runtime: redefine the spec, or set the relevant
 defvars (some configs expose them, e.g. erlang `*lsp-erlang-server-command*`).
 
 ### Languages that ship a WORKING spec (verified active, loaded via each mode's asd):
+
+This table describes upstream Lem. The installed lem-yath configuration
+replaces the Go and Terraform entries with `gopls` and `terraform-ls serve`
+stdio specs and applies the configured Git-project policy described above.
+
 | Language | language-id | command | mode | config file |
 |---|---|---|---|---|
 | Go | go | `gopls serve -port …` (TCP) | `lem-go-mode:go-mode` | `go-mode/lsp-config.lisp` |

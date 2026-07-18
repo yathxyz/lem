@@ -62,15 +62,22 @@ fi
 
 mkdir -p "$HOME" "$LEM_HOME" "$XDG_CACHE_HOME" "$WORKDIR" \
   "$HOME/proj/nix" \
-  "$LEM_YATH_REAL_LSP_FIXTURES/rust/src" \
-  "$LEM_YATH_REAL_LSP_FIXTURES/python" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/rust/.git" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/rust/crate/src" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/python/.git" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/python/package" \
   "$LEM_YATH_REAL_LSP_FIXTURES/markdown/.git" \
-  "$LEM_YATH_REAL_LSP_FIXTURES/csharp" \
-  "$LEM_YATH_REAL_LSP_FIXTURES/nix" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/markdown/docs" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/csharp/.git" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/csharp/app" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/nix/.git" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/nix/flake" \
   "$LEM_YATH_REAL_LSP_FIXTURES/java/src/main/java/example" \
-  "$LEM_YATH_REAL_LSP_FIXTURES/go" \
-  "$LEM_YATH_REAL_LSP_FIXTURES/terraform/.git"
-ln -s "$LEM_YATH_REAL_LSP_FIXTURES/nix" "$HOME/proj/nix/computer"
+  "$LEM_YATH_REAL_LSP_FIXTURES/go/.git" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/go/module" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/terraform/.git" \
+  "$LEM_YATH_REAL_LSP_FIXTURES/terraform/environment"
+ln -s "$LEM_YATH_REAL_LSP_FIXTURES/nix/flake" "$HOME/proj/nix/computer"
 : >"$LEM_YATH_REAL_LSP_REPORT"
 
 printf '%s\n' \
@@ -78,27 +85,27 @@ printf '%s\n' \
   'name = "lem_yath_lsp_fixture"' \
   'version = "0.1.0"' \
   'edition = "2021"' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/rust/Cargo.toml"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/rust/crate/Cargo.toml"
 printf '%s\n' 'fn main() {}' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/rust/src/main.rs"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/rust/crate/src/main.rs"
 
 printf '%s\n' \
   '[project]' \
   'name = "lem-yath-lsp-fixture"' \
   'version = "0.1.0"' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/python/pyproject.toml"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/python/package/pyproject.toml"
 printf '%s\n' 'value: int = 1' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/python/main.py"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/python/package/main.py"
 
 printf '%s\n' '# Real LSP fixture' '' 'This sentence is deliberately small.' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/markdown/README.md"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/markdown/docs/README.md"
 printf '%s\n' \
   '<Project Sdk="Microsoft.NET.Sdk">' \
   '  <PropertyGroup>' \
   '    <TargetFramework>net9.0</TargetFramework>' \
   '  </PropertyGroup>' \
   '</Project>' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/csharp/Fixture.csproj"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/csharp/app/Fixture.csproj"
 printf '%s\n' \
   'namespace Fixture;' \
   '' \
@@ -106,7 +113,7 @@ printf '%s\n' \
   '{' \
   '    public MissingType Value { get; set; }' \
   '}' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/csharp/Main.cs"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/csharp/app/Main.cs"
 printf '%s\n' \
   '<project xmlns="http://maven.apache.org/POM/4.0.0">' \
   '  <modelVersion>4.0.0</modelVersion>' \
@@ -122,7 +129,7 @@ printf '%s\n' \
   '  public static void main(String[] args) {}' \
   '}' \
   >"$LEM_YATH_REAL_LSP_FIXTURES/java/src/main/java/example/Main.java"
-printf '%s\n' '{ }' >"$LEM_YATH_REAL_LSP_FIXTURES/nix/default.nix"
+printf '%s\n' '{ }' >"$LEM_YATH_REAL_LSP_FIXTURES/nix/flake/default.nix"
 printf '%s\n' \
   '{' \
   "  inputs.nixpkgs.url = \"path:${LEM_YATH_REAL_LSP_NIXPKGS_SOURCE}\";" \
@@ -131,23 +138,22 @@ printf '%s\n' \
   '    homeConfigurations.yanni.options = { };' \
   '  };' \
   '}' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/nix/flake.nix"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/nix/flake/flake.nix"
 
 printf '%s\n' 'module example.com/lem-yath-lsp-fixture' '' 'go 1.25' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/go/go.mod"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/go/module/go.mod"
 printf '%s\n' 'package main' '' 'func main() {}' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/go/main.go"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/go/module/main.go"
 
 printf '%s\n' \
   'terraform {' \
   '  required_version = ">= 1.0"' \
   '}' \
-  >"$LEM_YATH_REAL_LSP_FIXTURES/terraform/main.tf"
+  >"$LEM_YATH_REAL_LSP_FIXTURES/terraform/environment/main.tf"
 
 required_programs=(
   "LEM_YATH_REAL_LSP_RUST_ANALYZER:rust-analyzer"
   "LEM_YATH_REAL_LSP_PYRIGHT:pyright-langserver"
-  "LEM_YATH_REAL_LSP_HARPER:harper-ls"
   "LEM_YATH_REAL_LSP_CSHARP:csharp-ls"
   "LEM_YATH_REAL_LSP_NIXD:nixd"
   "LEM_YATH_REAL_LSP_JDTLS:jdtls"
@@ -271,7 +277,7 @@ invoke_mx() {
 }
 
 fixture="$(lem-yath_lisp_string "$here/scripts/real-lsp-fixture.lisp")"
-startup_file="$LEM_YATH_REAL_LSP_FIXTURES/rust/src/main.rs"
+startup_file="$LEM_YATH_REAL_LSP_FIXTURES/rust/crate/src/main.rs"
 expected_fixture_state='FIXTURE ready=yes boot=yes cases=8 command-line-file=yes command-line-workspace=yes lem-home=yes caller-evals=yes'
 
 # LEM_BIN must be the installed lem-yath wrapper.  It loads its own immutable

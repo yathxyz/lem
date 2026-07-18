@@ -31,6 +31,7 @@ export WORKDIR="$root/work"
 export LEM_YATH_LSP_TEST_PROJECT_A="$root/project-a/"
 export LEM_YATH_LSP_TEST_PROJECT_B="$root/project-b/"
 export LEM_YATH_LSP_TEST_GIT_ROOT="$root/git-root/"
+export LEM_YATH_LSP_TEST_STANDALONE_ROOT="$root/standalone/"
 export LEM_YATH_LSP_TEST_TIMEOUT_ROOT="$root/timeout-root/"
 export LEM_YATH_LSP_TEST_PENDING_ROOT="$root/pending-root/"
 export LEM_YATH_LSP_TEST_SLOW_ROOT="$root/slow-root/"
@@ -45,11 +46,27 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR" \
   "$LEM_YATH_LSP_TEST_PROJECT_B/.git" \
   "$LEM_YATH_LSP_TEST_GIT_ROOT/.git" \
   "$LEM_YATH_LSP_TEST_GIT_ROOT/nested" \
+  "$LEM_YATH_LSP_TEST_STANDALONE_ROOT/go/src" \
+  "$LEM_YATH_LSP_TEST_STANDALONE_ROOT/terraform" \
+  "$LEM_YATH_LSP_TEST_STANDALONE_ROOT/super/.git/modules/submodule" \
+  "$LEM_YATH_LSP_TEST_STANDALONE_ROOT/super/submodule/src" \
+  "$LEM_YATH_LSP_TEST_STANDALONE_ROOT/worktree" \
   "$LEM_YATH_LSP_TEST_TIMEOUT_ROOT" \
   "$LEM_YATH_LSP_TEST_PENDING_ROOT" \
   "$LEM_YATH_LSP_TEST_SLOW_ROOT"
 : >"$LEM_YATH_LSP_TEST_EVENTS"
 : >"$LEM_YATH_LSP_TEST_REPORT"
+
+: >"$LEM_YATH_LSP_TEST_STANDALONE_ROOT/go/go.mod"
+: >"$LEM_YATH_LSP_TEST_STANDALONE_ROOT/go/src/main.go"
+: >"$LEM_YATH_LSP_TEST_STANDALONE_ROOT/terraform/main.tf"
+printf '%s\n' 'gitdir: ../.git/modules/submodule' \
+  >"$LEM_YATH_LSP_TEST_STANDALONE_ROOT/super/submodule/.git"
+: >"$LEM_YATH_LSP_TEST_STANDALONE_ROOT/super/submodule/go.mod"
+: >"$LEM_YATH_LSP_TEST_STANDALONE_ROOT/super/submodule/src/main.go"
+printf '%s\n' 'gitdir: /tmp/main/.git/worktrees/fixture' \
+  >"$LEM_YATH_LSP_TEST_STANDALONE_ROOT/worktree/.git"
+: >"$LEM_YATH_LSP_TEST_STANDALONE_ROOT/worktree/main.tf"
 
 for project in "$LEM_YATH_LSP_TEST_PROJECT_A" "$LEM_YATH_LSP_TEST_PROJECT_B"; do
   : >"$project/.lsp-fixture-root"

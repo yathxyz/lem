@@ -13,7 +13,8 @@
 (defparameter *real-lsp-test-cases*
   (vector
    (list :id "rust"
-         :directory "rust/"
+         :directory "rust/crate/"
+         :expected-root "rust/"
          :file "src/main.rs"
          :mode 'lem-rust-mode:rust-mode
          :spec-class 'lem-yath-rust-spec
@@ -22,7 +23,8 @@
          :command '("rust-analyzer")
          :program-environment "LEM_YATH_REAL_LSP_RUST_ANALYZER")
    (list :id "python"
-         :directory "python/"
+         :directory "python/package/"
+         :expected-root "python/"
          :file "main.py"
          :mode 'lem-python-mode:python-mode
          :spec-class 'lem-yath-python-spec
@@ -32,7 +34,8 @@
          :program-environment "LEM_YATH_REAL_LSP_PYRIGHT"
          :manual t)
    (list :id "nix"
-         :directory "nix/"
+         :directory "nix/flake/"
+         :expected-root "nix/"
          :file "default.nix"
          :mode 'lem-nix-mode:nix-mode
          :spec-class 'lem-yath-nix-spec
@@ -41,7 +44,8 @@
          :command '("nixd")
          :program-environment "LEM_YATH_REAL_LSP_NIXD")
    (list :id "markdown"
-         :directory "markdown/"
+         :directory "markdown/docs/"
+         :expected-root "markdown/"
          :file "README.md"
          :mode 'lem-markdown-mode:markdown-mode
          :spec-class 'lem-yath-markdown-spec
@@ -50,7 +54,8 @@
          :command '("harper-ls" "--stdio")
          :program-environment "LEM_YATH_REAL_LSP_HARPER")
    (list :id "csharp"
-         :directory "csharp/"
+         :directory "csharp/app/"
+         :expected-root "csharp/"
          :file "Main.cs"
          :mode 'csharp-mode
          :spec-class 'lem-yath-csharp-spec
@@ -69,22 +74,24 @@
          :program-environment "LEM_YATH_REAL_LSP_JDTLS"
          :manual t)
    (list :id "go"
-         :directory "go/"
+         :directory "go/module/"
+         :expected-root "go/"
          :file "main.go"
          :mode 'lem-go-mode:go-mode
-         :spec-class 'lem-go-mode/lsp-config::go-spec
+         :spec-class 'lem-yath-go-spec
          :language-id "go"
-         :connection-mode :tcp
-         :command '("gopls" "serve" "-port" "41357")
+         :connection-mode :stdio
+         :command '("gopls")
          :program-environment "LEM_YATH_REAL_LSP_GOPLS")
    (list :id "terraform"
-         :directory "terraform/"
+         :directory "terraform/environment/"
+         :expected-root "terraform/"
          :file "main.tf"
          :mode 'lem-terraform-mode:terraform-mode
-         :spec-class 'lem-terraform-mode/lsp-config::terraform-spec
+         :spec-class 'lem-yath-terraform-spec
          :language-id "terraform"
-         :connection-mode :tcp
-         :command '("terraform-ls" "serve" "-port" "41357")
+         :connection-mode :stdio
+         :command '("terraform-ls" "serve")
          :program-environment "LEM_YATH_REAL_LSP_TERRAFORM_LS")))
 
 (defparameter *real-lsp-test-prerequisites*
@@ -182,6 +189,11 @@
 (defun real-lsp-test-case-root (case)
   (merge-pathnames (getf case :directory) *real-lsp-test-fixture-root*))
 
+(defun real-lsp-test-case-expected-root (case)
+  (merge-pathnames (or (getf case :expected-root)
+                       (getf case :directory))
+                   *real-lsp-test-fixture-root*))
+
 (defun real-lsp-test-case-file (case)
   (merge-pathnames (getf case :file) (real-lsp-test-case-root case)))
 
@@ -256,21 +268,10 @@
     (flet ((check (condition label)
              (unless condition (push label failures))))
       (cond
-        ((string= id "go")
-         (check (hash-table-p options) "go-options-map")
-         (when (hash-table-p options)
-           (check (eq t (gethash "completeUnimported" options))
-                  "go-complete-unimported")
-           (check (string= "fuzzy" (gethash "matcher" options ""))
-                  "go-matcher")))
         ((string= id "nix")
          (check (hash-table-p options) "nix-options-map")
          (when (hash-table-p options)
-           (let* ((root
-                    (string-right-trim
-                     "/"
-                     (namestring
-                      (lem-lsp-mode::workspace-root-pathname workspace))))
+           (let* ((root (nixd-flake-root))
                   (nixpkgs (gethash "nixpkgs" options))
                   (formatting (gethash "formatting" options))
                   (option-sources (gethash "options" options)))
@@ -338,7 +339,8 @@
              (client (real-lsp-test-current-client current))
              (spec (lem-lsp-mode::workspace-spec workspace))
              (expected-mode (getf case :mode))
-             (expected-root (truename (real-lsp-test-case-root case)))
+             (expected-root
+               (truename (real-lsp-test-case-expected-root case)))
              (connection-mode (getf case :connection-mode))
              (command (real-lsp-test-spec-command spec connection-mode))
              (program (first command))

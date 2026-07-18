@@ -59,7 +59,9 @@
      :mode-hook *lem-yath-lsp-symbol-peer-test-mode-hook*))
 
 (lem-lsp-mode:define-language-spec
-    (lem-yath-lsp-project-test-spec lem-yath-lsp-project-test-mode)
+    (lem-yath-lsp-project-test-spec lem-yath-lsp-project-test-mode
+                                    :parent-spec
+                                    lem-yath-eglot-project-spec)
   :language-id "lem-yath-project-fixture"
   :root-uri-patterns '(".lsp-fixture-root")
   :command (lsp-project-test-server-command
@@ -327,6 +329,61 @@
         (check (equal (lem-lsp-mode::make-workspace-key left root)
                       (lem-lsp-mode::make-workspace-key right root))
                "workspace-key-survives-spec-reload"))
+      (let* ((root (uiop:ensure-directory-pathname
+                    (uiop:getenv "LEM_YATH_LSP_TEST_STANDALONE_ROOT")))
+             (go-root (merge-pathnames "go/" root))
+             (terraform-root (merge-pathnames "terraform/" root))
+             (super-root (merge-pathnames "super/" root))
+             (submodule-root (merge-pathnames "super/submodule/" root))
+             (worktree-root (merge-pathnames "worktree/" root))
+             (go-buffer (make-buffer "*lsp-go-root-static-check*"
+                                     :temporary t))
+             (terraform-buffer
+               (make-buffer "*lsp-terraform-root-static-check*"
+                            :temporary t))
+             (submodule-buffer
+               (make-buffer "*lsp-submodule-root-static-check*"
+                            :temporary t))
+             (worktree-buffer
+               (make-buffer "*lsp-worktree-root-static-check*"
+                            :temporary t)))
+        (unwind-protect
+             (progn
+               (setf (buffer-filename go-buffer)
+                     (merge-pathnames "src/main.go" go-root)
+                     (buffer-filename terraform-buffer)
+                     (merge-pathnames "main.tf" terraform-root)
+                     (buffer-filename submodule-buffer)
+                     (merge-pathnames "src/main.go" submodule-root)
+                     (buffer-filename worktree-buffer)
+                     (merge-pathnames "main.tf" worktree-root))
+               (check (uiop:pathname-equal
+                       (truename go-root)
+                       (lem-lsp-mode::compute-root-pathname
+                        (make-instance 'lem-yath-go-spec) go-buffer))
+                      "configured-go-non-git-marker-fallback")
+               (check (uiop:pathname-equal
+                       (truename terraform-root)
+                       (lem-lsp-mode::compute-root-pathname
+                        (make-instance 'lem-yath-terraform-spec)
+                        terraform-buffer))
+                      "configured-terraform-non-git-directory-fallback")
+               (check (uiop:pathname-equal
+                       (truename super-root)
+                       (lem-lsp-mode::compute-root-pathname
+                        (make-instance 'lem-yath-go-spec)
+                        submodule-buffer))
+                      "configured-git-submodule-merges-into-parent")
+               (check (uiop:pathname-equal
+                       (truename worktree-root)
+                       (lem-lsp-mode::compute-root-pathname
+                        (make-instance 'lem-yath-terraform-spec)
+                        worktree-buffer))
+                      "configured-git-worktree-remains-separate"))
+          (delete-buffer go-buffer)
+          (delete-buffer terraform-buffer)
+          (delete-buffer submodule-buffer)
+          (delete-buffer worktree-buffer)))
       (let ((buffer (make-buffer "*lsp-fileless-static-check*")))
         (unwind-protect
              (progn

@@ -9,7 +9,94 @@
 
 (in-package :lem-yath)
 
-(lem-lsp-mode:define-language-spec (lem-yath-rust-spec lem-rust-mode:rust-mode)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defclass lem-yath-eglot-project-spec (lem-lsp-mode/spec::spec) ()))
+
+(defparameter *git-marker-byte-limit* 4096)
+
+(defun read-git-marker (root)
+  "Read ROOT's .git marker through one bounded, verified descriptor."
+  (let ((descriptor nil)
+        (stream nil)
+        (marker (merge-pathnames ".git" root)))
+    (unwind-protect
+         (handler-case
+             (progn
+               (setf descriptor
+                     (sb-posix:open
+                      (uiop:native-namestring marker)
+                      (logior sb-posix:o-rdonly sb-posix:o-nonblock
+                              sb-posix:o-nofollow)))
+               (let* ((stat (sb-posix:fstat descriptor))
+                      (size (sb-posix:stat-size stat)))
+                 (unless (and (= (logand (sb-posix:stat-mode stat)
+                                          sb-posix:s-ifmt)
+                                   sb-posix:s-ifreg)
+                              (<= size *git-marker-byte-limit*))
+                   (return-from read-git-marker nil))
+                 (let ((fd descriptor))
+                   (setf stream
+                         (sb-sys:make-fd-stream
+                          fd :input t :element-type '(unsigned-byte 8)
+                          :buffering :full
+                          :name (uiop:native-namestring marker))
+                         descriptor nil)
+                   (let ((octets
+                           (make-array size :element-type '(unsigned-byte 8)))
+                         (count 0))
+                     (loop :while (< count size)
+                           :for next := (read-sequence octets stream
+                                                      :start count)
+                           :do (when (= next count)
+                                 (return-from read-git-marker nil))
+                               (setf count next))
+                     (sb-ext:octets-to-string
+                      octets :external-format :utf-8)))))
+           (error () nil))
+      (when stream
+        (ignore-errors (close stream :abort t)))
+      (when descriptor
+        (ignore-errors (sb-posix:close descriptor))))))
+
+(defun git-submodule-marker-p (root)
+  "Return true when ROOT's bounded .git file identifies a Git submodule."
+  (alexandria:when-let ((marker (read-git-marker root)))
+    (not
+     (null
+      (cl-ppcre:scan
+       "\\Agitdir:[ \\t]+[^\\r\\n]*/\\.git/(?:worktrees/[^/\\r\\n]+/)?modules/"
+       marker)))))
+
+(defun configured-eglot-git-root (directory)
+  "Return project.el's configured Git root for DIRECTORY."
+  (labels ((walk (start)
+             (alexandria:when-let ((root (find-up start ".git")))
+               (if (git-submodule-marker-p root)
+                   (let ((parent
+                           (uiop:pathname-parent-directory-pathname root)))
+                     (if (uiop:pathname-equal root parent)
+                         root
+                         (or (walk parent) root)))
+                   root))))
+    (walk directory)))
+
+(defun configured-eglot-project-root (buffer)
+  "Return BUFFER's Git project root, matching the configured project.el backend."
+  (alexandria:when-let*
+      ((directory (ignore-errors (buffer-directory buffer)))
+       (root (configured-eglot-git-root directory)))
+    (uiop:ensure-directory-pathname
+     (or (ignore-errors (truename root)) root))))
+
+(defmethod lem-lsp-mode::compute-root-pathname
+    ((spec lem-yath-eglot-project-spec) buffer)
+  (declare (ignore spec))
+  (or (configured-eglot-project-root buffer)
+      (call-next-method)))
+
+(lem-lsp-mode:define-language-spec
+    (lem-yath-rust-spec lem-rust-mode:rust-mode
+                        :parent-spec lem-yath-eglot-project-spec)
   :language-id "rust"
   :root-uri-patterns '("Cargo.toml")
   :command '("rust-analyzer")
@@ -22,7 +109,7 @@
 ;; from python-mode, so Flycheck remains authoritative unless Eglot is enabled
 ;; manually.
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defclass lem-yath-python-spec (lem-lsp-mode/spec::spec) ()
+  (defclass lem-yath-python-spec (lem-yath-eglot-project-spec) ()
     (:default-initargs
      :language-id "python"
      :root-uri-patterns '("pyproject.toml" "setup.py" "requirements.txt" "poetry.lock")
@@ -38,7 +125,9 @@
       ((hook (mode-hook-variable 'lem-python-mode:python-mode)))
     (remove-hook (symbol-value hook) 'lem-lsp-mode::enable-lsp-mode)))
 
-(lem-lsp-mode:define-language-spec (lem-yath-markdown-spec lem-markdown-mode:markdown-mode)
+(lem-lsp-mode:define-language-spec
+    (lem-yath-markdown-spec lem-markdown-mode:markdown-mode
+                            :parent-spec lem-yath-eglot-project-spec)
   :language-id "markdown"
   :root-uri-patterns '(".git")
   :command '("harper-ls" "--stdio")
@@ -46,7 +135,9 @@
   :readme-url "https://writewithharper.com/"
   :connection-mode :stdio)
 
-(lem-lsp-mode:define-language-spec (lem-yath-csharp-spec csharp-mode)
+(lem-lsp-mode:define-language-spec
+    (lem-yath-csharp-spec csharp-mode
+                          :parent-spec lem-yath-eglot-project-spec)
   :language-id "csharp"
   :root-uri-patterns '(".sln" ".csproj" ".git")
   :command '("csharp-ls")
@@ -293,7 +384,9 @@
         :when (executable-find candidate)
           :return candidate))
 
-(lem-lsp-mode:define-language-spec (lem-yath-nix-spec lem-nix-mode:nix-mode)
+(lem-lsp-mode:define-language-spec
+    (lem-yath-nix-spec lem-nix-mode:nix-mode
+                       :parent-spec lem-yath-eglot-project-spec)
   :language-id "nix"
   :root-uri-patterns '("flake.nix" "flake.lock" "default.nix" "shell.nix")
   :command '("nixd")
@@ -325,6 +418,28 @@
                    (when options
                      (list "options" (apply #'lem-lsp-base/type:make-lsp-map
                                             options)))))))
+
+;;; --- configured Eglot stdio specs ---------------------------------------
+
+(lem-lsp-mode:define-language-spec
+    (lem-yath-go-spec lem-go-mode:go-mode
+                      :parent-spec lem-yath-eglot-project-spec)
+  :language-id "go"
+  :root-uri-patterns '("go.mod")
+  :command '("gopls")
+  :install-command "nix profile install nixpkgs#gopls"
+  :readme-url "https://go.dev/gopls/"
+  :connection-mode :stdio)
+
+(lem-lsp-mode:define-language-spec
+    (lem-yath-terraform-spec lem-terraform-mode:terraform-mode
+                             :parent-spec lem-yath-eglot-project-spec)
+  :language-id "terraform"
+  :root-uri-patterns '()
+  :command '("terraform-ls" "serve")
+  :install-command "nix profile install nixpkgs#terraform-ls"
+  :readme-url "https://github.com/hashicorp/terraform-ls"
+  :connection-mode :stdio)
 
 ;;; --- Java / eglot-java ---------------------------------------------------
 

@@ -144,13 +144,14 @@
 +  (run-server-using-mode (spec-connection-mode spec)
 +                         spec
 +                         :directory directory))
-@@ -145,0 +152,7 @@
-+(defun compute-root-pathname (spec buffer)
-+  (let ((root (language-mode:find-root-directory
-+               (buffer-directory buffer)
-+               (spec-root-uri-patterns spec))))
-+    (uiop:ensure-directory-pathname
-+     (or (ignore-errors (truename root)) root))))
+@@ -145,0 +152,8 @@
++(defgeneric compute-root-pathname (spec buffer)
++  (:method (spec buffer)
++    (let ((root (language-mode:find-root-directory
++                 (buffer-directory buffer)
++                 (spec-root-uri-patterns spec))))
++      (uiop:ensure-directory-pathname
++       (or (ignore-errors (truename root)) root)))))
 +
 @@ -147,3 +160 @@
 -  (pathname-to-uri
