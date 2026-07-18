@@ -80,6 +80,7 @@
                (:file "llm-tools")
                (:file "llm-mcp")
                (:file "llm-conversation")
+               (:file "llm-context")
                (:file "llm")
                (:file "llm-models")
                (:file "indent-guides")

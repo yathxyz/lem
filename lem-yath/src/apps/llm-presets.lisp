@@ -669,6 +669,44 @@
               label)))
     keymap))
 
+(defun llm-context-menu-keymap ()
+  (let ((keymap
+          (llm-menu-display-keymap
+           (format nil "Request context: ~d source~:p" (llm-context-count))
+           '(("r" "add active region")
+             ("b" "add buffer")
+             ("f" "add file or directory")
+             ("d" "remove all context")
+             ("e" "add configured Emacs Lisp tree")
+             ("q" "cancel")))))
+    (setf (lem/transient::keymap-show-p keymap) t)
+    keymap))
+
+(defun llm-context-menu-command (key)
+  (cdr (assoc key
+              '(("r" . lem-yath-llm-context-add-region)
+                ("b" . lem-yath-llm-context-add-buffer)
+                ("f" . lem-yath-llm-context-add-file)
+                ("d" . lem-yath-llm-context-clear)
+                ("e" . vile-config/add-elisp-to-gptel-context))
+              :test #'string=)))
+
+(define-command lem-yath-llm-context-menu () ()
+  "Dispatch gptel-compatible -r, -b, -f, and -d context actions."
+  (unwind-protect
+       (progn
+         (let ((lem/transient:*transient-popup-delay* 0))
+           (keymap-activate (llm-context-menu-keymap)))
+         (redraw-display)
+         (let* ((key (read-key))
+                (name (lem-core::keyseq-to-string (list key))))
+           (lem/transient::hide-transient)
+           (unless (or (string= name "q") (string= name "Escape"))
+             (alexandria:if-let ((command (llm-context-menu-command name)))
+               (call-command command nil)
+               (message "No LLM context action is bound to -~a" name)))))
+    (lem/transient::hide-transient)))
+
 (defun llm-full-menu-keymap ()
   (let ((keymap
           (make-keymap
@@ -708,6 +746,9 @@
              (list "Return" "send")
              (list "n" "new conversation")
              (list "a" "abort request")
+             (list "-" (format nil "context sources: ~d"
+                                (llm-context-count)))
+             (list "I" "inspect request context")
              (list "x" (format nil "request tracing: ~:[off~;on~]"
                                 (and (boundp '*llm-request-trace-enabled*)
                                      (symbol-value
@@ -735,6 +776,8 @@
                   ("Return" lem-yath-llm-send nil)
                   ("n" lem-yath-llm-new-session nil)
                   ("a" lem-yath-llm-abort nil)
+                  ("-" lem-yath-llm-context-menu t)
+                  ("I" lem-yath-llm-context-inspect nil)
                   ("x" lem-yath-llm-request-trace-toggle t)
                   ("L" lem-yath-llm-request-trace-open nil))
                 :test #'string=)))

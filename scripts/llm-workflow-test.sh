@@ -37,6 +37,28 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$root/bin" "$root/private" \
 chmod 700 "$root/private"
 : >"$LEM_YATH_LLM_WORKFLOW_REPORT"
 printf 'initial context\n' >"$source_file"
+printf '%s\n' \
+  "((emacs-lisp-mode ." \
+  "  ((eval . (local-set-key (kbd \"C-c i\") #'consult-outline))" \
+  "   (outline-regexp . \";;;\")" \
+  "   (lexical-binding . t)" \
+  "   (eval . (defun vile-config/add-elisp-to-gptel-context nil" \
+  "             (interactive)" \
+  "             (mapcar #'gptel-add-file" \
+  "                     (list" \
+  "                      (expand-file-name \"./early-init.el\" user-emacs-directory)" \
+  "                      (expand-file-name \"./init.el\" user-emacs-directory)" \
+  "                      (expand-file-name \"./lisp/\" user-emacs-directory))))))))" \
+  >"$root/project/.dir-locals.el"
+mkdir -p "$root/project/lisp/.hidden"
+printf 'EARLY-CONTEXT-SENTINEL\n' >"$root/project/early-init.el"
+printf 'INIT-CONTEXT-SENTINEL\n' >"$root/project/init.el"
+printf 'LISP-A-CONTEXT-SENTINEL\n' >"$root/project/lisp/init-a.el"
+printf 'LISP-B-CONTEXT-SENTINEL\n' >"$root/project/lisp/init-b.el"
+printf 'HIDDEN-CONTEXT-SENTINEL\n' >"$root/project/lisp/.hidden/hidden.el"
+printf '\0binary\n' >"$root/project/lisp/binary.bin"
+printf 'lisp/ignored-secret.el\n' >"$root/project/.gitignore"
+printf 'IGNORED-CONTEXT-SENTINEL\n' >"$root/project/lisp/ignored-secret.el"
 git -C "$root/project" init -q
 
 bash_bin=$(command -v bash)
@@ -170,6 +192,36 @@ if ! wait_report_count 'STATE current=custom backend=OPENROUTER model=openrouter
   die full-menu-state 'full-menu controls did not update live request settings'
 fi
 pass direct-full-menu 'SPC g L changed supported live request settings'
+
+send_key Space
+send_key g
+send_key L
+send_literal '-'
+if ! lem_wait_for "$session" 'add configured Emacs Lisp tree' "$WAIT_TIMEOUT" >/dev/null; then
+  die context-submenu 'full-menu - did not open the gptel-style context actions'
+fi
+send_key e
+if ! lem_wait_for "$session" 'context sources: 4' "$WAIT_TIMEOUT" >/dev/null; then
+  die emacs-context-helper 'the audited Emacs helper did not add exactly four text files'
+fi
+send_key I
+if ! lem_wait_for "$session" 'EARLY-CONTEXT-SENTINEL' "$WAIT_TIMEOUT" >/dev/null ||
+   ! lem_wait_for "$session" 'LISP-B-CONTEXT-SENTINEL' "$WAIT_TIMEOUT" >/dev/null; then
+  die context-inspect 'the context inspector did not render attached live files'
+fi
+send_key Space
+send_key b
+send_key k
+send_key Space
+send_key g
+send_key L
+send_literal '-'
+send_key d
+if ! lem_wait_for "$session" 'context sources: 0' "$WAIT_TIMEOUT" >/dev/null; then
+  die context-clear 'full-menu -d did not clear buffer-local request context'
+fi
+send_key q
+pass request-context 'physical -e, inspect, and -d context workflow passed'
 
 send_key Space
 send_key g

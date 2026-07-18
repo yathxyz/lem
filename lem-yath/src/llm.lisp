@@ -39,6 +39,13 @@
 (defvar *llm-response-origin* nil
   "Point where a conversation response should begin for one dispatch.")
 
+(defvar *llm-visible-prompt* nil
+  "Unexpanded prompt shown in transcripts and request traces for one dispatch.")
+
+(defun llm-visible-prompt (request-prompt)
+  "Return the user-visible prompt corresponding to REQUEST-PROMPT."
+  (or *llm-visible-prompt* request-prompt))
+
 (defvar *lem-yath-llm-conversation-mode-keymap*
   (make-keymap :description '*lem-yath-llm-conversation-mode-keymap*))
 
@@ -784,6 +791,7 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
 (defun llm-stream (prompt)
   (let* ((key (llm-api-key))
          (model *llm-model*)
+         (visible-prompt (llm-visible-prompt prompt))
          (system *llm-system-message*)
          (temperature *llm-temperature*)
          (max-tokens *llm-max-tokens*)
@@ -808,14 +816,14 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
                 (llm-prepare-response
                  buffer
                  (format nil "~%## User (~a)~%~%~a~%~%## Assistant~%~%"
-                         model prompt)))
+                         model visible-prompt)))
               (request nil))
           (handler-case
               (progn
                 (setf request
                       (llm-register-request
                        buffer nil :openrouter
-                       :prompt prompt
+                       :prompt visible-prompt
                        :insertion-point insertion-point
                        :tool-context tool-context :tools-p tools-p))
                 (llm-start-request-thread
@@ -879,6 +887,26 @@ Read-only conversations follow gptel by falling back to the shared transcript."
              (*llm-response-origin* (current-point)))
          (funcall function))))))
 
+(defun llm-dispatch-prompt-from-current-buffer (prompt messages)
+  "Dispatch PROMPT with this buffer's live context and typed MESSAGES.
+Context is sent to the provider but excluded from the visible transcript and
+request trace."
+  (let ((source-buffer (current-buffer)))
+    (handler-case
+        (let* ((request-prompt
+                 (llm-context-wrap-prompt source-buffer prompt))
+               (request-messages
+                 (and messages
+                      (llm-conversation-replace-last-user-content
+                       messages request-prompt)))
+               (*llm-visible-prompt* prompt)
+               (*llm-conversation-messages* request-messages))
+          (llm-dispatch-from-current-buffer
+           (lambda ()
+             (llm-backend-stream *llm-backend* request-prompt))))
+      (error (condition)
+        (message "Could not prepare LLM context: ~a" condition)))))
+
 (define-command lem-yath-llm-send () ()
   "Send region (or buffer up to point) to the LLM, streaming the reply
 (gptel-send)."
@@ -898,9 +926,7 @@ Read-only conversations follow gptel by falling back to the shared transcript."
                    raw (current-buffer))))))
       (if (zerop (length text))
           (message "Nothing to send")
-          (let ((*llm-conversation-messages* messages))
-            (llm-dispatch-from-current-buffer
-             (lambda () (llm-backend-stream *llm-backend* text))))))))
+          (llm-dispatch-prompt-from-current-buffer text messages)))))
 
 (define-command lem-yath-llm-ask () ()
   "Prompt for an instruction, prepend it to the region/buffer text, send
@@ -924,12 +950,5 @@ Read-only conversations follow gptel by falling back to the shared transcript."
                (prompt
                  (if (zerop (length source))
                      instruction
-                     (format nil "~a~2%~a" instruction source)))
-               (dispatch-messages
-                 (and messages
-                      (llm-conversation-replace-last-user-content
-                       messages prompt))))
-          (let ((*llm-conversation-messages* dispatch-messages))
-            (llm-dispatch-from-current-buffer
-             (lambda ()
-               (llm-backend-stream *llm-backend* prompt)))))))))
+                     (format nil "~a~2%~a" instruction source))))
+          (llm-dispatch-prompt-from-current-buffer prompt messages))))))

@@ -359,6 +359,7 @@
     (return-from llm-http-stream))
   (let* ((buffer (llm-output-buffer))
          (model *llm-model*)
+         (visible-prompt (llm-visible-prompt prompt))
          (system *llm-system-message*)
          (temperature *llm-temperature*)
          (max-tokens *llm-max-tokens*)
@@ -370,9 +371,9 @@
              (llm-prepare-response
               buffer
               (format nil "~%## User (~a / ~a)~%~%~a~%~%## Assistant~%~%"
-                      (llm-http-provider-name provider) model prompt)))
+                      (llm-http-provider-name provider) model visible-prompt)))
            (request (llm-register-request
-                     buffer nil provider :prompt prompt
+                     buffer nil provider :prompt visible-prompt
                      :insertion-point insertion-point)))
       (llm-start-request-thread
        request

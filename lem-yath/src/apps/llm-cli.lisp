@@ -312,7 +312,8 @@
   (unless (llm-cli-available-p backend)
     (message "~a CLI not found on PATH" (llm-cli-spec backend))
     (return-from llm-cli-stream))
-  (let ((buffer (llm-output-buffer)))
+  (let ((buffer (llm-output-buffer))
+        (visible-prompt (llm-visible-prompt prompt)))
     (when (llm-active-request buffer)
       (message "An LLM request is already running; use M-x lem-yath-llm-abort")
       (return-from llm-cli-stream))
@@ -323,14 +324,14 @@
               buffer
               (format nil
                       "~%## User (~a~:[~; resume~])~%~%~a~%~%## Assistant~%~%"
-                      backend session-id prompt))))
+                      backend session-id visible-prompt))))
       (handler-case
           (let* ((process (uiop:launch-program command
                                                :output :stream
                                                :error-output :output))
                  (request (llm-register-request
                            buffer process backend
-                           :prompt prompt
+                           :prompt visible-prompt
                            :insertion-point insertion-point)))
             (llm-start-request-thread
              request

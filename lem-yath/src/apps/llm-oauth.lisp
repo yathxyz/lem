@@ -982,6 +982,7 @@
 (defun llm-oauth-stream (backend prompt)
   (let ((buffer (llm-output-buffer))
         (model *llm-model*)
+        (visible-prompt (llm-visible-prompt prompt))
         (system *llm-system-message*)
         (temperature *llm-temperature*)
         (max-tokens *llm-max-tokens*)
@@ -1002,7 +1003,7 @@
                         (ecase backend
                           (:chatgpt-codex "ChatGPT Codex")
                           (:grok-oauth "Grok OAuth"))
-                        model prompt)))
+                        model visible-prompt)))
              (history (llm-oauth-history backend buffer))
              (messages
                (ecase backend
@@ -1040,7 +1041,7 @@
                     (llm-oauth-buffer-id buffer *llm-oauth-cache-keys*)))
              (request
                (llm-register-request
-                buffer nil backend :prompt prompt
+                buffer nil backend :prompt visible-prompt
                 :insertion-point insertion-point
                 :tool-context tool-context :tools-p tools-p)))
         (llm-start-request-thread

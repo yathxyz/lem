@@ -2,6 +2,16 @@
 
 (defvar *llm-workflow-report* (uiop:getenv "LEM_YATH_LLM_WORKFLOW_REPORT"))
 (defvar *llm-workflow-source-buffer* (current-buffer))
+(defvar *llm-workflow-context-prompt* nil)
+(defvar *llm-workflow-context-visible-prompt* nil)
+(defvar *llm-workflow-context-messages* nil)
+
+(defmethod llm-backend-stream
+    ((backend (eql :lem-yath-context-test)) prompt)
+  (declare (ignore backend))
+  (setf *llm-workflow-context-prompt* prompt
+        *llm-workflow-context-visible-prompt* (llm-visible-prompt prompt)
+        *llm-workflow-context-messages* *llm-conversation-messages*))
 
 (setf *llm-handoff-browser-commands*
       (list (uiop:getenv "LEM_YATH_LLM_WORKFLOW_BROWSER"))
@@ -60,6 +70,20 @@
       (multiple-value-bind (command reopen-p) (llm-full-menu-action "j")
         (check (and (eq command 'lem-yath-llm-send) (not reopen-p))
                "full-menu-send-dispatch"))
+      (multiple-value-bind (command reopen-p) (llm-full-menu-action "-")
+        (check (and (eq command 'lem-yath-llm-context-menu) reopen-p)
+               "full-menu-context-dispatch"))
+      (check (and (eq (llm-context-menu-command "r")
+                      'lem-yath-llm-context-add-region)
+                  (eq (llm-context-menu-command "b")
+                      'lem-yath-llm-context-add-buffer)
+                  (eq (llm-context-menu-command "f")
+                      'lem-yath-llm-context-add-file)
+                  (eq (llm-context-menu-command "d")
+                      'lem-yath-llm-context-clear)
+                  (eq (llm-context-menu-command "e")
+                      'vile-config/add-elisp-to-gptel-context))
+             "gptel-context-key-sequences")
       (check (and (null (llm-menu-temperature-value ""))
                   (= (llm-menu-temperature-value "1.25") 1.25d0)
                   (not (llm-menu-temperature-valid-p "2.1"))
@@ -96,6 +120,95 @@
       (check (and (not (llm-preset-name-valid-p ""))
                   (not (llm-preset-name-valid-p (format nil "bad~%name"))))
              "reject-invalid-preset-names")
+      (let ((other (make-buffer "*llm-context-other*")))
+        (unwind-protect
+             (progn
+               (setf (buffer-value *llm-workflow-source-buffer*
+                                   *llm-context-buffer-key*) nil)
+               (insert-string (buffer-start-point other)
+                              "CONTEXT-TRANSPORT-SENTINEL")
+               (llm-context-add-source
+                *llm-workflow-source-buffer*
+                (make-llm-context-source
+                 :kind :region :label "fixture region"
+                 :value (points-to-string (buffer-start-point other)
+                                          (buffer-end-point other))))
+               (erase-buffer other)
+               (insert-string (buffer-start-point other)
+                              "MUTATED-AFTER-SNAPSHOT")
+               (check (and (= (llm-context-count
+                               *llm-workflow-source-buffer*) 1)
+                           (zerop (llm-context-count other)))
+                      "context-is-buffer-local")
+               (let* ((messages
+                        (list (llm-json-object
+                               "role" "user" "content" "visible prompt")))
+                      (*llm-backend* :lem-yath-context-test))
+                 (setf *llm-workflow-context-prompt* nil
+                       *llm-workflow-context-visible-prompt* nil
+                       *llm-workflow-context-messages* nil)
+                 (llm-dispatch-prompt-from-current-buffer
+                  "visible prompt" messages)
+                 (check
+                  (and (search "visible prompt" *llm-workflow-context-prompt*)
+                       (search "Request context:"
+                               *llm-workflow-context-prompt*)
+                       (search "CONTEXT-TRANSPORT-SENTINEL"
+                               *llm-workflow-context-prompt*)
+                       (string= *llm-workflow-context-visible-prompt*
+                                "visible prompt")
+                       (string=
+                        (llm-conversation-last-user-content
+                         *llm-workflow-context-messages*)
+                        *llm-workflow-context-prompt*))
+                  "context-transport-hidden-from-transcript"))
+               (let ((rendered
+                       (llm-context-render *llm-workflow-source-buffer*)))
+                 (check (and (search "CONTEXT-TRANSPORT-SENTINEL" rendered)
+                             (not (search "MUTATED-AFTER-SNAPSHOT" rendered)))
+                        "region-context-snapshot"))
+               (let ((root (llm-context-emacs-config-root
+                            *llm-workflow-source-buffer*)))
+                 (check root "audited-emacs-helper-recognized")
+                 (when root
+                   (let* ((file (merge-pathnames "early-init.el" root))
+                          (original (llm-context-read-file file)))
+                     (unwind-protect
+                          (progn
+                            (setf (buffer-value *llm-workflow-source-buffer*
+                                                *llm-context-buffer-key*) nil)
+                            (llm-context-add-path
+                             *llm-workflow-source-buffer* file)
+                            (with-open-file
+                                (stream file :direction :output
+                                             :if-exists :supersede)
+                              (write-line "LIVE-FILE-CONTEXT-SENTINEL" stream))
+                            (check
+                             (search "LIVE-FILE-CONTEXT-SENTINEL"
+                                     (llm-context-render
+                                      *llm-workflow-source-buffer*))
+                             "file-context-read-live"))
+                       (with-open-file
+                           (stream file :direction :output
+                                        :if-exists :supersede)
+                         (write-string original stream))))))
+               (setf (buffer-value *llm-workflow-source-buffer*
+                                   *llm-context-buffer-key*)
+                     (list
+                      (make-llm-context-source
+                       :kind :region :label "oversized"
+                       :value (make-string
+                               (1+ *llm-context-total-byte-limit*)
+                               :initial-element #\x))))
+               (check
+                (handler-case
+                    (progn
+                      (llm-context-render *llm-workflow-source-buffer*) nil)
+                  (error () t))
+                "context-total-byte-limit")
+               (setf (buffer-value *llm-workflow-source-buffer*
+                                   *llm-context-buffer-key*) nil))
+          (delete-buffer other)))
       (llm-workflow-log "SUMMARY STATIC ~a failures=~d"
                         (if (zerop failures) "PASS" "FAIL") failures))))
 
