@@ -654,11 +654,14 @@ Certified obligations (SPEC-VK VK-11):
 
 **Production swap DEFERRED to VK-4 (differential adapter is tests-only).**
 `separate-objects-by-width` / `clip-objects-to-display-range` live in
-frontend-generic core display code shared by SDL2, whose `lem-if:object-width`
-is a surface-metrics measurement: the halving re-measure is exactly how SDL2
-obtains accurate sub-object widths, and a char-granular kernel adapter would
-either change SDL2 behavior (precomputed per-char widths) or fork the shared
-hot path per frontend. Neither is a low-risk ncurses-only swap, so per the
+frontend-generic core display code shared by SDL2, and `lem-if:object-width`
+dispatches per implementation. In this fork SDL2 measures *text* objects
+cell-aligned (`text-cell-width` = `string-width` × display cell width,
+deliberately mirroring ncurses semantics), so a per-char width decomposition
+for SDL2 text is likely feasible; but `image-object` still measures by
+`sdl2:surface-width`, and rerouting the shared hot path through a kernel
+adapter is a cross-frontend change either way. Not a low-risk ncurses-only
+swap, so per the
 spec's incremental-swap philosophy the kernel + theorems land now, pinned to
 production by the mandatory differential suite, and the production delegation
 rides the VK-4 shell swap (which already owns the "swap the running editor
