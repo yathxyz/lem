@@ -65,6 +65,11 @@ driver. Corpora come from `bench/corpora/generate.lisp` (below).
 - `edit.lisp` — edit latency (was `scripts/bench-edit.lisp`, now deleted; see
   Deviations).
 - `points.lisp` — marker relocation vs. registered-point count.
+- `width.lisp` — `string-width` over ASCII / CJK / emoji / mixed corpora.
+- `search.lisp` — forward/backward, literal/regexp search over the large buffer.
+- `syntax.lisp` — tmlanguage syntax scan over `lisp-500k` (real lisp-mode grammar).
+- `redisplay.lisp` — full redisplay compute of a 200×50 frame through the
+  recording fake-interface (plain / long-line / many-overlay).
 
 Each entry rebuilds a fresh fixture per timed section (`:setup`), sizes its own
 iteration count for a ≥ 10 ms window, and reports µs/op **and** bytes-consed/op.
@@ -93,16 +98,53 @@ SplitMix64 locally rather than depending on `tests/pbt/harness.lisp`.
 | telemetry | PF-1 record path (`histogram-record`, inline hot-path primitive) | **Budget-gated:** < 1 µs/op and 0 bytes consed/op (Constraint 4, permanent). Exempt from the median-band regression gate — see Deviations. |
 | edit/`{normal,longline}`/`{insert-delete,newline}`/`{release,paranoid}` | edit latency: a keystroke round-trip (insert+delete) and a split+join, on a 2000×60 buffer and the 200 KB line, in both edit-engine modes | median-band |
 | points/`{10,100,1000}` | marker relocation with N registered points on the edited line | median-band |
+| width/`{ascii,cjk,emoji,mixed}` | `lem:string-width` (kernel-backed) over a 4000-char class string (ascii/cjk/emoji) or the `unicode-mixed` corpus | median-band |
+| search/`{forward,backward}`-`{literal,regexp}` | frozen `search-*` over the `lisp-500k` buffer, absent needle (full sweep) | median-band |
+| syntax/lisp-500k | `syntax-scan-region` over `lisp-500k` with the real lisp-mode tmlanguage grammar | median-band |
+| redisplay/`{plain,long-line,many-overlay}` | force full redisplay compute of a 200×50 frame through the recording fake-interface | median-band |
 
 **Paranoid tax** (`:paranoid` median ÷ `:release` median, from the current
 baseline) — the SPEC-VK soak-decision datum: normal buffer ~1.2×
-(insert-delete 24.7/21.2, newline 26.0/21.6); 200 KB line ~12–15×
-(insert-delete 15000/1000, newline 13000/1100). Consistent with the VK-4
+(insert-delete 27.3/22.8, newline 28.5/23.6); 200 KB line ~13–16×
+(insert-delete 17000/1067, newline 15000/1167). Consistent with the VK-4
 acceptance table (the certified region `wf-buffer` walks the line's codepoints
 per edit, so the tax scales with line length).
 
-The remaining PF-4 entries (width, search, syntax, redisplay) are not in this
-milestone slice.
+All seven PF-4 entry families now exist (telemetry, edit, points, width, search,
+syntax, redisplay); Milestone P1 is complete.
+
+### P1 baseline numbers (ex44 / i5-13500 / 20c, commit `07253058`)
+
+Committed baseline medians (`bench/baselines/ex44-…-t1.json`). Every entry
+reports µs/op **and** bytes-consed/op over `n` ops per timed section; band 20%
+for all (budget-gated for `telemetry`, see Deviations).
+
+| Entry | median µs/op | consed B/op | n |
+|-------|-------------:|------------:|--:|
+| `edit/normal/insert-delete/release` | 22.8 | 3015 | 2500 |
+| `edit/normal/newline/release` | 23.6 | 3134 | 2500 |
+| `edit/longline/insert-delete/release` | 1066.7 | 3269421 | 30 |
+| `edit/longline/newline/release` | 1166.7 | 3702513 | 30 |
+| `edit/normal/insert-delete/paranoid` | 27.3 | 5732 | 1500 |
+| `edit/normal/newline/paranoid` | 28.5 | 5996 | 2000 |
+| `edit/longline/insert-delete/paranoid` | 17000.0 | 9671824 | 2 |
+| `edit/longline/newline/paranoid` | 15000.0 | 10104608 | 2 |
+| `points/10` | 24.0 | 5046 | 2500 |
+| `points/100` | 40.0 | 30228 | 1200 |
+| `points/1000` | 204.0 | 289406 | 250 |
+| `width/ascii` | 122.2 | 0 | 180 |
+| `width/cjk` | 105.6 | 0 | 180 |
+| `width/emoji` | 111.1 | 0 | 180 |
+| `width/mixed` | 1666.7 | 0 | 12 |
+| `search/forward-literal` | 11500.0 | 7684096 | 2 |
+| `search/backward-literal` | 13000.0 | 8929280 | 2 |
+| `search/forward-regexp` | 7666.7 | 0 | 3 |
+| `search/backward-regexp` | 8000.0 | 0 | 3 |
+| `syntax/lisp-500k` | 116000.0 | 16416768 | 1 |
+| `redisplay/plain` | 457.1 | 112347 | 35 |
+| `redisplay/long-line` | 7000.0 | 2071200 | 4 |
+| `redisplay/many-overlay` | 4750.0 | 1736704 | 4 |
+| `telemetry` | 0.00102 | 0 | 50000000 |
 
 ## Ledger
 
@@ -117,6 +159,7 @@ numbers and the motivating T0/T2 measurement (Constraint 1).
 | 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (PF-3) | Initial baseline: `telemetry` entry established with the bench runner. No optimization — this is the substrate landing (SPEC-PERF PF-3). |
 | 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (P0 review fixes r1) | Rebaseline after widening the telemetry timed window from 1e6 to 5e7 ops (honest ~0.0008 µs/op trend instead of a bimodal 0.001/0.002 quantization artifact) and making the entry budget-gated. No behavior/optimization change to Lem — measurement substrate only. New band is informational for this entry. |
 | 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (PF-4) | Initial baseline for the PF-4 micro suite: `edit` (12 entries) and `points` (3 entries) added to the multi-entry registry, plus the `bench/corpora/` generators. No optimization — new measurement entries only. Gate-stability validated by 11 consecutive PASS runs on a machine under concurrent load (load avg ~4.6). See Deviations for the measurement-hygiene choices (net-zero ops, GC suppression, interleaving, median-of-nine, 20% band floor). |
+| 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (PF-4) | Rebaseline completing Milestone P1: added the `width` (4), `search` (4), `syntax` (1), and `redisplay` (3) entry files to the registry (12 new entries). No optimization — new measurement entries only. Each is deterministic (fixed corpora / fixed-content strings) and sizes its iteration count for a ≥ 10 ms window; validated by 5 consecutive PASS runs. See Deviations for the redisplay long-line size cap (a stack-exhaustion finding), the headless syntax-grammar load, the absent-needle search sweep, and the persistent recording interface. |
 
 ### Optimizations (OPT-n)
 
@@ -205,3 +248,70 @@ the spec.
   mechanism it proves is the budget gate, whose canary is the telemetry entry,
   and scoping keeps the self-test fast and independent of the slower,
   load-sensitive µs entries.
+
+- **The `redisplay/long-line` buffer is 50 KB, not 200 KB** (PF-4), and this is
+  a *finding*, not just a sizing choice. PF-4 names a "200 KB long-line" buffer
+  (the same corpus the edit/points entries stress). Redisplaying a single text
+  object of ≳ 100 000 characters **exhausts the default control stack**: the
+  certified clip/wrap path (`src/display/physical-line.lisp` →
+  `verified/layout.lisp` `k-clip` / `k-wrap-row`) computes an object's total
+  width with `k-obj-width` → `k-sum`, a **non-tail** left fold over the object's
+  entire per-character width list, so its recursion depth equals the line
+  length. Empirically on this build (default SBCL control stack) a plain single
+  line renders fine at 50 000 chars and stack-overflows by 100 000 — and the
+  built `lem` binary uses the same default stack (its `save-lisp-and-die` sets
+  no larger one), so this is the real editor's limit, not a bench artifact. No
+  production display-level long-line cap exists (unlike syntax scanning's
+  `long-line-scan-threshold`), and no existing test renders a line this long, so
+  the limitation was latent. The redisplay entry therefore uses a 50 KB single
+  line (first 50 000 chars of the `long-line-200k` corpus, wrap off) — well below
+  the boundary, gate-stable, and still exercising the single-huge-object clip
+  path that dominates the cost. The 200 KB single-object redisplay is **not**
+  benchmarked (it would crash the suite); it is recorded here as an
+  OPT-candidate for P4/P5: making `k-sum`/`k-obj-width` (or the object-width
+  path feeding the layout kernel) non-recursive would lift the cap. Measuring
+  under an artificially enlarged stack was rejected — it would report a number
+  the shipping editor cannot actually achieve.
+
+- **`syntax` loads `extensions/lisp-mode/grammar.lisp` directly, not the whole
+  `lem-lisp-mode` system** (PF-4). PF-4 wants the "tmlanguage path" over a large
+  Lisp file in a lisp-mode buffer. The real grammar
+  (`lem-lisp-mode/grammar:make-tmlanguage-lisp`) lives in a file that depends
+  only on `lem/core` + cl-ppcre, both already in the bench image; loading it
+  directly gives the *actual* lisp-mode tmlanguage (dozens of match/region
+  patterns) without dragging in `lem-lisp-mode`'s heavy transitive deps
+  (usocket / micros / lsp), which the `:lem/core`-only bench image does not
+  otherwise pull. This is the headless-scan setup `tests/long-line-scan.lisp`
+  uses, but against the real grammar rather than a synthetic one. (Loading it
+  prints one benign `redefining GET-FEATURES` warning — the grammar file defines
+  a default method the bench never overrides.)
+
+- **`search` sweeps an ABSENT needle over the whole buffer** (PF-4). Searching
+  for a needle that occurs would stop at a corpus-content-dependent line, making
+  the number fragile to any corpus change. An absent needle forces the frozen
+  `search-*` to visit every line (the deterministic worst case) and, on failure,
+  `search-step` restores the point to its origin, so the op is net-zero and the
+  buffer/point state is invariant across repetitions — gate-stable, and a
+  faithful measure of the per-line scan cost that dominates a miss (and the tail
+  of a hit). Note the regexp entries cons 0 B/op while the literal entries cons
+  megabytes: the regexp path scans over `line-string` (the stored line, no copy)
+  whereas the literal path builds a fresh `points-to-string` per line.
+
+- **`width` ascii/cjk/emoji strings are fixed-content, not corpus files** (PF-4).
+  `string-width` is a pure function, so a deterministic 4000-char string cycling
+  a fixed codepoint pool (no RNG, no committed blob) is a byte-identical input
+  every run — the same determinism guarantee as a committed corpus, with less
+  git weight. The `mixed` class does use the committed `unicode-mixed` corpus
+  (the realistic all-branches string). The op accumulates the returned widths so
+  the width call cannot be elided as dead code.
+
+- **`redisplay` installs a persistent recording interface at load time** (PF-4).
+  The recording fake-interface is normally entered via the dynamically-scoped
+  `with-recording-interface`, but the driver calls each entry's `:setup` and
+  `:op` in separate, unscoped calls, so a dynamic scope cannot span them. The
+  entry instead sets `lem-core::*implementation*` to a
+  `recording-fake-interface` once at load and calls `setup-first-frame` (exactly
+  what `invoke-frontend` does for a real frontend). This is process-global, but
+  harmless: no other T1 entry touches the implementation. `redraw-buffer` is
+  called with force=t so every op is a full recompute (not a display-cache hit),
+  which is the frame-from-scratch cost the entry means to measure.
