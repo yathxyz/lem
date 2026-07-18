@@ -21,6 +21,7 @@ bench/
 ```bash
 scripts/run-bench.sh t1                 # measure + gate against baseline
 scripts/run-bench.sh --rebaseline t1    # regenerate the baseline (needs a ledger entry)
+scripts/run-bench.sh t2 --profile <workload>  # sb-sprof one T2 workload (PF-6)
 scripts/bench/self-test.sh              # prove the gate catches a regression
 ```
 
@@ -209,6 +210,31 @@ the pre-existing three shift slightly under seven-way interleaving).
 the committed median within the 20% band on a matching fingerprint, so a
 per-machine rebaseline is the honest reset when the platform or its steady-state
 load moves — Constraint 5.)
+
+## T2 profiler (PF-6)
+
+```bash
+scripts/run-bench.sh t2 --profile <workload>
+```
+
+Runs ONE named workload under `sb-sprof` (`:cpu` mode) instead of
+measuring/gating, writes a flat + call-graph report to
+`bench/profiles/<workload>-<timestamp>.txt` (gitignored), and prints the top-15
+flat frames to stdout. The sample interval is 1000 Hz and the workload is
+replayed until ≥ 2.5 s of wall time has elapsed, so even the shortest workload
+clears the PF-6 ≥ 1000-sample bar with margin (a fast workload just replays more
+times). Every P5 optimization item (OPT-n) attaches the before-profile that
+motivated it (PF-6 / PF-10).
+
+**PF-6 done-when (profile attributes ≥ 90 % of samples to named frames).**
+Verified on `big-file`: 4153 samples, only **0.6 % "elsewhere"** (foreign /
+unattributed) — i.e. **> 99 %** of samples land in named Lisp frames, so the
+`:lem/core` image ships enough debug info for useful profiles with **no**
+bench-image debug-policy change needed. The `big-file` hotspots are the
+`string-width` kernel path (`ACL2::K-CHAR-WIDTH`, `icon-code-p`, `wide-index`,
+`ACL2::K-SUM`, …) driving full-frame redisplay over the 10 MB buffer — recorded
+here as the first data point for the P4 hotspot ranking, not acted on (P5 must
+not start before the P4 grounding report).
 
 ## Ledger
 

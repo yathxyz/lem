@@ -23,20 +23,36 @@ ROOT="$(pwd)"
 
 usage() {
   echo "usage: scripts/run-bench.sh [--rebaseline] <t1|t2|t3|all> ..." >&2
+  echo "       scripts/run-bench.sh t2 --profile <workload>   # SPEC-PERF PF-6" >&2
 }
 
 REBASELINE=0
+PROFILE_WORKLOAD=""
 TIERS=()
-for arg in "$@"; do
-  case "$arg" in
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --rebaseline) REBASELINE=1 ;;
+    --profile)                            # PF-6: profile one t2 workload
+      shift
+      [ "$#" -gt 0 ] || { echo "--profile requires a workload name" >&2; usage; exit 2; }
+      PROFILE_WORKLOAD="$1" ;;
     -h|--help)    usage; exit 0 ;;
-    t1|t2|t3)     TIERS+=("$arg") ;;
+    t1|t2|t3)     TIERS+=("$1") ;;
     all)          TIERS+=("t1" "t2") ;;   # T1 (P1) + T2 (P2); T3 lands at P3
-    *) echo "unknown argument: $arg" >&2; usage; exit 2 ;;
+    *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
   esac
+  shift
 done
 if [ "${#TIERS[@]}" -eq 0 ]; then usage; exit 2; fi
+
+# --profile is a T2-only mode (SPEC-PERF PF-6) that profiles a single workload
+# under sb-sprof instead of measuring/gating.
+if [ -n "$PROFILE_WORKLOAD" ]; then
+  if [ "${#TIERS[@]}" -ne 1 ] || [ "${TIERS[0]}" != "t2" ]; then
+    echo "--profile <workload> is only valid with the single tier 't2'" >&2
+    usage; exit 2
+  fi
+fi
 
 # --- fingerprint (hostname + CPU model + core count) ------------------------
 FP_HOST="$(hostname)"
@@ -69,6 +85,8 @@ for tier in "${TIERS[@]}"; do
   LEM_BENCH_TIMESTAMP="$TIMESTAMP" \
   LEM_BENCH_RESULTS_DIR="$RESULTS_DIR" \
   LEM_BENCH_BASELINES_DIR="$BASELINES_DIR" \
+  LEM_BENCH_PROFILES_DIR="$ROOT/bench/profiles" \
+  LEM_BENCH_PROFILE="$PROFILE_WORKLOAD" \
   sbcl --dynamic-space-size 4GiB --noinform --no-sysinit --no-userinit \
        --non-interactive \
        --load .qlot/setup.lisp \

@@ -357,6 +357,73 @@ fraction of the aggregate median, floored at +bench-band-floor+."
                          :band (max +bench-band-floor+ spread)))))
 
 ;;;; ------------------------------------------------------------------
+;;;; Profiling (SPEC-PERF PF-6): one workload under sb-sprof
+;;;; ------------------------------------------------------------------
+;;;;
+;;;; `scripts/run-bench.sh t2 --profile <workload>' sets LEM_BENCH_PROFILE and
+;;;; routes here: run ONE named workload under sb-sprof (:cpu mode), write a flat
+;;;; + call-graph report to bench/profiles/<workload>-<timestamp>.txt (gitignored),
+;;;; and print the top-15 flat frames to stdout.  Every P5 optimization item
+;;;; attaches the before-profile that motivated it (PF-6).
+
+(require :sb-sprof)
+
+(defparameter +profile-sample-interval+ 0.001d0
+  "sb-sprof CPU sample interval (1000 Hz): fine enough that even the shortest
+workload reaches >=1000 samples within the min-runtime loop below.")
+
+(defparameter +profile-min-seconds+ 2.5d0
+  "Minimum profiled wall time.  At 1000 Hz this yields >=1000 samples (PF-6
+requires >=1000) with comfortable margin for samples missed during GC; a fast
+workload is simply replayed until this much time has elapsed.")
+
+(defun profile-report-path (profiles-dir workload timestamp)
+  (merge-pathnames (format nil "~A-~A.txt" workload timestamp)
+                   (uiop:ensure-directory-pathname profiles-dir)))
+
+(defun call-workload-run (wl state)
+  "Run WL once with the same fresh command-flag context the timed path uses."
+  (let ((lem-core::*last-flags* nil)
+        (lem-core::*curr-flags* nil))
+    (funcall (t2-workload-run wl) state)))
+
+(defun bench-profile (workload-name profiles-dir timestamp)
+  "Profile the single workload WORKLOAD-NAME under sb-sprof :cpu and write its
+reports.  Returns the report pathname."
+  (let ((wl (find workload-name *t2-workloads*
+                  :key #'t2-workload-name :test #'string=)))
+    (unless wl
+      (error "unknown workload for --profile: ~A (have: ~{~A~^, ~})"
+             workload-name (mapcar #'t2-workload-name *t2-workloads*)))
+    (let ((state (funcall (t2-workload-setup wl))))
+      (call-workload-run wl state)             ; warm-up (fault in, JIT-free but caches warm)
+      (sb-sprof:reset)
+      (sb-sprof:start-profiling :mode :cpu :sample-interval +profile-sample-interval+)
+      (let ((t0 (get-internal-real-time))
+            (reps 0))
+        (loop :do (call-workload-run wl state)
+                  (incf reps)
+              :while (< (/ (float (- (get-internal-real-time) t0) 1d0)
+                           (float internal-time-units-per-second 1d0))
+                        +profile-min-seconds+))
+        (sb-sprof:stop-profiling)
+        (let ((path (profile-report-path profiles-dir workload-name timestamp)))
+          (ensure-directories-exist path)
+          (with-open-file (out path :direction :output
+                                    :if-exists :supersede :if-does-not-exist :create)
+            (format out "sb-sprof :cpu profile of T2 workload ~A~%~
+                         sample-interval ~,4F s, ~D replay(s), >=~,1F s wall~%~%"
+                    workload-name +profile-sample-interval+ reps +profile-min-seconds+)
+            (format out "==== FLAT ====~%")
+            (sb-sprof:report :type :flat :stream out)
+            (format out "~%==== CALL GRAPH ====~%")
+            (sb-sprof:report :type :graph :stream out))
+          (format t "~&~%Profile written: ~A (~D replay(s))~%~%" path reps)
+          (format t "Top-15 flat frames:~%")
+          (sb-sprof:report :type :flat :max 15 :stream *standard-output*)
+          path)))))
+
+;;;; ------------------------------------------------------------------
 ;;;; Main
 ;;;; ------------------------------------------------------------------
 
@@ -382,8 +449,15 @@ fraction of the aggregate median, floored at +bench-band-floor+."
          (timestamp (or (bench-getenv "LEM_BENCH_TIMESTAMP") "00000000000000"))
          (results-dir (or (bench-getenv "LEM_BENCH_RESULTS_DIR") "bench/results"))
          (baselines-dir (or (bench-getenv "LEM_BENCH_BASELINES_DIR") "bench/baselines"))
+         (profiles-dir (or (bench-getenv "LEM_BENCH_PROFILES_DIR") "bench/profiles"))
+         (profile-workload (bench-getenv "LEM_BENCH_PROFILE"))
          (commit (bench-commit)))
+    (declare (ignorable commit results-dir))
     (cond
+      (profile-workload
+       ;; SPEC-PERF PF-6: profile ONE workload; no measure/gate.
+       (bench-profile profile-workload profiles-dir timestamp)
+       (uiop:quit 0))
       ((string= mode "rebaseline")
        (format t "~&Rebaselining ~A (~D suite runs)...~%" tier +t2-rebaseline-suites+)
        (let* ((runs (loop :repeat +t2-rebaseline-suites+ :collect (t2-run-one-suite)))
