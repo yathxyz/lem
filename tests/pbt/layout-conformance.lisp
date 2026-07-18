@@ -1,7 +1,12 @@
 ;;;; tests/pbt/layout-conformance.lisp -- SPEC-VK VK-11 differential + property acceptance.
 ;;;;
-;;;; Pins the certified layout kernel (verified/layout.lisp, loaded through
-;;;; verified/shim.lisp) against production two ways:
+;;;; Since the VK-4 layout swap, production `separate-objects-by-width' /
+;;;; `clip-objects-to-display-range' ARE thin shells over the certified kernel
+;;;; (verified/layout.lisp via the CLOS<->kernel adapter in
+;;;; src/display/physical-line.lisp).  This suite therefore pins the ADAPTER --
+;;;; the CLOS -> kernel-record -> CLOS round trip (per-char width decomposition,
+;;;; tag-identity reuse, explode/clip rebuilds, marker attachment) -- against
+;;;; the raw kernel, two ways:
 ;;;;
 ;;;;   1. DIFFERENTIAL: random drawing-object lists (narrow/wide/emoji runs,
 ;;;;      mixed-width runs, tabs, control characters, zero-width combining
@@ -16,16 +21,13 @@
 ;;;;
 ;;;;      Deliberate input restrictions, mirroring documented deviations
 ;;;;      (verified/layout.lisp header, verified/README.md VK-11):
-;;;;        * clip inputs use uniform-per-char-width runs only: production's
-;;;;          total/len per-char approximation is exact precisely there (the
-;;;;          ncurses reality); the kernel is char-exact everywhere.
-;;;;        * clip inputs exclude multi-char :control-typed objects:
-;;;;          production's straddle rebuild calls make-object-with-type with
-;;;;          type :control on a substring of the ALREADY-replaced string
-;;;;          ("^A"), which maps to a NIL string -- a production edge case the
-;;;;          real pipeline cannot reach (control objects are single-column
-;;;;          pairs at fixed positions only reachable whole).  Wrap inputs DO
-;;;;          include them (explode re-derives the char-type, which is safe).
+;;;;        * clip inputs now INCLUDE multi-char :control-typed objects and
+;;;;          mixed-width runs: the pre-swap clip approximated per-char width
+;;;;          as total/len and rebuilt a straddled :control object through
+;;;;          make-object-with-type on the ALREADY-replaced string ("^A" ->
+;;;;          NIL string); the swapped clip walks exact per-char widths
+;;;;          (k-clip-chars) and rebuilds content-correctly, so both former
+;;;;          exclusions are lifted (SPEC-VK VK-4, milestone-brief item 4).
 ;;;;        * tab objects are single tabs: the real pipeline never builds
 ;;;;          multi-char raw-tab text objects (tabs are expanded/replaced
 ;;;;          before drawing objects exist), and exploding one through
@@ -43,8 +45,7 @@
 ;;;; Internal-symbol access (contract.yml internal_symbol_rule): the functions
 ;;;; under differential test -- `separate-objects-by-width',
 ;;;; `clip-objects-to-display-range', `make-object-with-type', `object-width'
-;;;; -- are deliberately unexported display internals (the VK-11 production
-;;;; swap is deferred to VK-4; see verified/README.md), so this suite must
+;;;; -- are deliberately unexported display internals, so this suite must
 ;;;; reach them via `lem-core::', exactly as other white-box tests do.
 
 (defpackage :lem-tests/pbt/layout-conformance
@@ -154,12 +155,10 @@
   (loop :repeat (rng-range rng min-len max-len)
         :collect (rng-element rng pool)))
 
-(defun random-object-spec (rng &key clip-safe)
+(defun random-object-spec (rng)
   "One object spec: (KIND CODES). KIND :opaque has no codes; KIND :control
 codes are the RAW control codepoint (object built via make-object-with-type)."
-  (let ((kind (rng-element rng (if clip-safe
-                                   #(:narrow :wide :zero :tab :opaque)
-                                   #(:narrow :wide :zero :mixed :tab :control :opaque)))))
+  (let ((kind (rng-element rng #(:narrow :wide :zero :mixed :tab :control :opaque))))
     (ecase kind
       (:narrow (list :narrow (random-run rng *narrow-pool* 1 6)))
       (:wide (list :wide (random-run rng *wide-pool* 1 3)))
@@ -170,11 +169,11 @@ codes are the RAW control codepoint (object built via make-object-with-type)."
       (:control (list :control (list (rng-below rng 9))))
       (:opaque (list :opaque nil)))))
 
-(defun gen-object-specs (&key clip-safe (max-objects 7))
+(defun gen-object-specs (&key (max-objects 7))
   (make-generator
    :sample (lambda (rng)
              (loop :repeat (rng-below rng (1+ max-objects))
-                   :collect (random-object-spec rng :clip-safe clip-safe)))
+                   :collect (random-object-spec rng)))
    :shrink (lambda (specs)
              (when (cdr specs)
                (list (butlast specs) (cdr specs))))))
@@ -281,7 +280,7 @@ the wrap-line-character letter object, and no unwrapped row did)."
 
 (deftest clip-differential
   (ensure-kernel-loaded)
-  (for-all ((specs (gen-object-specs :clip-safe t))
+  (for-all ((specs (gen-object-specs))
             (start-x (gen-integer :min 0 :max 30))
             (range (gen-integer :min 0 :max 30)))
     (with-layout-env (buffer)

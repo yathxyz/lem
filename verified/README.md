@@ -854,37 +854,47 @@ Certified obligations (SPEC-VK VK-11):
   contain marker objects — a row was wrapped iff the returned rest is non-nil,
   and the adapter/test re-attaches the marker there. The differential suite
   asserts production's marker is exactly where the kernel's row boundaries say.
-- **Char granularity with exact per-char widths.** Production
-  `clip-objects-to-display-range` approximates per-char width as total/len;
+- **Char granularity with exact per-char widths.** The pre-swap
+  `clip-objects-to-display-range` approximated per-char width as total/len;
   that is exact precisely for uniform-per-char-width runs — which is what the
-  ncurses pipeline produces — and exists for SDL2 surface metrics, out of scope
-  per the spec's monospace non-goal. `k-clip-chars` walks the exact per-char
-  width list instead. For wrapping there is no such gap: production re-measures
-  each half with `string-width`, which equals the sum of the recorded per-char
-  widths for every object the pipeline builds (no raw multi-char tab runs reach
-  drawing objects; a tab run's deltas from column 0 are all tab-size anyway).
+  ncurses pipeline produces — and existed for SDL2 surface metrics, out of
+  scope per the spec's monospace non-goal. `k-clip-chars` walks the exact
+  per-char width list instead, and since the VK-4 layout swap production clips
+  through it (the approximation is gone). For wrapping there was no such gap:
+  each half's width is the sum of the recorded per-char widths for every
+  object the pipeline builds (no raw multi-char tab runs reach drawing
+  objects; a tab run's deltas from column 0 are all tab-size anyway).
 
-**Production swap DEFERRED to VK-4 (differential adapter is tests-only).**
-`separate-objects-by-width` / `clip-objects-to-display-range` live in
-frontend-generic core display code shared by SDL2, and `lem-if:object-width`
-dispatches per implementation. In this fork SDL2 measures *text* objects
-cell-aligned (`text-cell-width` = `string-width` × display cell width,
-deliberately mirroring ncurses semantics), so a per-char width decomposition
-for SDL2 text is likely feasible; but `image-object` still measures by
-`sdl2:surface-width`, and rerouting the shared hot path through a kernel
-adapter is a cross-frontend change either way. Not a low-risk ncurses-only
-swap, so per the
-spec's incremental-swap philosophy the kernel + theorems land now, pinned to
-production by the mandatory differential suite, and the production delegation
-rides the VK-4 shell swap (which already owns the "swap the running editor
-onto the kernel" risk budget). The adapter that converts CLOS drawing objects
-↔ kernel records (ncurses width semantics) lives in the test suite.
+**Production swap DONE (VK-4; was deferred out of VK-11).**
+`separate-objects-by-width` / `clip-objects-to-display-range`
+(src/display/physical-line.lisp) are now thin shells over `k-wrap-row` /
+`k-clip`, through the promoted CLOS↔kernel adapter in the same file: a text
+object crosses as `(:text codes widths tag)` with the CLOS object riding in
+the opaque `tag` slot, per-char widths decomposed as `string-width` deltas ×
+the cell scale (`object-width` / `string-width` — 1 on ncurses; the display
+cell width for this fork's cell-aligned SDL2 text, with a uniform-split
+fallback for the non-cell-aligned SDL2 folder/emoji fixed advances);
+`image-object` and every other non-text object stays on `lem-if:object-width`
+as an `(:opaque width tag)` record. Wrapping preserves production's stall
+behavior for an oversized single-codepoint text object — never placed,
+marker-only rows until the height budget runs out — as characterized by the
+certified `k-wrap-row-blocked`. A row object whose codes still cover its
+tag's whole string is returned by identity (no allocation, caches intact);
+exploded fragments are rebuilt exactly as the old `explode-object` did
+(`make-object-with-type`, re-derived char-type). The wrapping redraw loop
+(`redraw-logical-line-when-line-wrapping`) iterates `k-wrap-row` on kernel
+records directly — objects convert once per logical line per frame, not once
+per remaining row. Clip straddle fragments are rebuilt **content-correctly**
+(same class/attribute/type, substring verbatim), fixing the latent VK-11
+finding (b): the old rebuild called `make-object-with-type :control` on the
+already-replaced string ("^A"), mapping its substring to a NIL string.
 
-**Shim growth for VK-11:** none — no new constructs, no whitelist changes (the
-exec path uses only CL homonyms + `natp`/`len`/`true-listp`). Six symbols added
-to `*kernel-exports*` (`K-TEXT`, `K-OPAQUE`, `K-WRAP`, `K-WRAP-ROW`, `K-CLIP`,
-`K-SCROLL-ADJUST`). `layout` is *not* in `shim-loader.lisp` (production does
-not call it yet — VK-4); the test suite loads it via `load-verified-book`.
+**Shim growth for VK-11/VK-4 layout swap:** none — no new constructs, no
+whitelist changes (the exec path uses only CL homonyms +
+`natp`/`len`/`true-listp`). Six symbols in `*kernel-exports*` (`K-TEXT`,
+`K-OPAQUE`, `K-WRAP`, `K-WRAP-ROW`, `K-CLIP`, `K-SCROLL-ADJUST`). `layout` is
+loaded by `shim-loader.lisp` (production wraps and clips through it since the
+VK-4 swap).
 
 **Differential/PBT acceptance:** `tests/pbt/layout-conformance.lisp` — random
 drawing-object lists (narrow/wide/emoji runs, mixed-width Greek+CJK runs,
@@ -893,11 +903,12 @@ objects) with view widths down to 1 and row budgets down to 1, through
 production `separate-objects-by-width` (iterated with the redraw loop's height
 cutoff) vs `k-wrap` — comparing row break positions, per-row contents,
 per-object widths, marker placement and the leftover — and through production
-`clip-objects-to-display-range` vs `k-clip` (uniform-width runs; multi-char
-control objects excluded from clip inputs because production's straddle
-rebuild of an already-replaced control string maps to a NIL string — an edge
-the real pipeline cannot reach). Plus property tests of all four theorem
-groups on random kernel inputs. No divergence.
+`clip-objects-to-display-range` vs `k-clip`. Since the swap the suite pins the
+ADAPTER round trip rather than an independent implementation, and the two
+former clip-input exclusions are lifted: multi-char control objects (the
+straddle rebuild is content-correct now) and mixed-width runs (production
+clips char-exactly now). Plus property tests of all four theorem groups on
+random kernel inputs. No divergence.
 
 ## VK-12 — screen-matches-buffer & cache soundness (PBT, **no book**)
 
@@ -976,12 +987,18 @@ production edges the suites deliberately steer around:
   printable ASCII and derives the expansion from the kernel, while raw tabs are
   excluded from the mixed wide/control/zero-width lines. A production quirk
   (`src/display/logical-line.lisp`), recorded not papered over.
-- **Window width ≤ 2 under line-wrap infinite-loops in production.**
-  `map-wrapping-line` scans with goal `body-width - 1`; when that is ≤ 1 a
-  width-2 glyph makes `wide-index` return its own start index, so the
-  wrap-offset scan (reached from scroll / cursor-y) never advances. The suites
-  keep window width ≥ 4 (a real terminal never renders a 1–2-column window); the
-  edge is noted here as a finding, out of VK-12's PBT scope to fix.
+- **Window width ≤ 2 under line-wrap: FIXED (VK-4).** `map-wrapping-line`
+  scans with goal `body-width - 1`; when that is ≤ 1 a width-2 glyph made
+  `wide-index` return its own start index, so the wrap-offset scan (reached
+  from scroll / cursor-y) never advanced — an infinite loop. The VK-4 fix
+  advances at least one char per stalled step (matching the certified
+  kernel's proved-terminating `k-wrap`; regression tests in
+  `tests/window.lisp`). The cache suite now exercises widths down to 1, and
+  the projection suite pins the narrow regime directly: at view-width ≤ 2 an
+  oversized glyph is never placed (`k-wrap-row-blocked`) and only marker rows
+  are emitted to the height cutoff (`projection-wrap-blocked-narrow`); the
+  content-preservation wrap property keeps its semantic floor of 3, below
+  which content is legitimately dropped by the certified stall.
 - **Floating windows, SDL2 surface-metric per-char widths and multi-cursor
   rendering** are out of scope for fake-interface (the ncurses monospace model),
   matching the VK-10/VK-11 non-goals.
@@ -1102,9 +1119,21 @@ whitelist changes. `verified/shim-loader.lisp` now loads `buffer-model`,
 maps and offset algebra on every edit; `undo` rides along as the certified
 statement of the recording semantics the shell keeps).
 
-The remaining VK-4 obligations (layout swap of VK-11, width≤2 wrap loop fix,
-clip straddle rebuild, fsync, idle-timer double-fire — see the milestone brief)
-are follow-ups on top of this core swap.
+### VK-4 layout obligations (milestone-brief items 1, 3, 4): DONE
+
+On top of the core edit-engine swap: the VK-11 layout swap landed
+(`separate-objects-by-width` / `clip-objects-to-display-range` are shells over
+`k-wrap-row` / `k-clip`; see the VK-11 section for the adapter design and the
+preserved `k-wrap-row-blocked` stall), the `map-wrapping-line` width≤2
+infinite loop is fixed with regression tests and the VK-12 suites' width
+floors lowered (see the VK-12 section), and the clip straddle rebuild of
+multi-char `:control` objects is content-correct with the formerly excluded
+case restored to the clip differential inputs. Perf sanity: the three
+layout-heavy suites (layout-conformance / redisplay-cache /
+screen-projection) run at pre-swap wall time (≈20/150/500 ms), and the
+wrapping redraw loop converts objects once per logical line per frame.
+Remaining brief items 5 (checkpoint fsync) and 6 (idle-timer double-fire) are
+candidate hardening, not part of this swap.
 
 ## Proof status
 

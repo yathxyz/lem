@@ -193,6 +193,43 @@
         ;; Cleanup
         (lem:delete-window window)))))
 
+;;; Regression (SPEC-VK VK-4, milestone-brief item 3): the line-wrap boundary
+;;; scan must terminate on a window narrower than a glyph.  map-wrapping-line
+;;; scans with goal = body-width - 1; with body-width 2 a width-2 glyph made
+;;; wide-index return its own start index, so the scan (reached from scroll /
+;;; window-cursor-y) never advanced -- an infinite loop.  The fix advances at
+;;; least one char per stalled step, matching the certified layout kernel's
+;;; proved-terminating k-wrap (verified/layout.lisp k-wrap-row-blocked).
+(deftest narrow-window-wrap-scan-terminates
+  (lem:with-current-buffers ()
+    (with-fake-interface ()
+      (let* ((buffer (lem:make-buffer "narrow-wrap" :temporary t))
+             (window (lem-core::make-window buffer 0 0 2 5 nil)))
+        (setf (lem:variable-value 'lem:line-wrap :buffer buffer) t)
+        (lem:insert-string (lem:buffer-point buffer) "中中中")
+        ;; Width-2 glyphs at goal 1: every char is its own virtual row; the
+        ;; stalled scan is forced forward one char at a time (pre-fix: hangs).
+        (let ((boundaries '()))
+          (lem-core::map-wrapping-line window "中中中"
+                                       (lambda (i) (push i boundaries)))
+          (ok (equal '(1 2) (nreverse boundaries))))
+        (ok (= 2 (lem-core::window-wrapping-offset
+                  window
+                  (lem:buffer-start-point buffer)
+                  (lem:buffer-end-point buffer))))))))
+
+;;; Sanity: the fix must not move boundaries the old scan produced.
+(deftest narrow-window-wrap-scan-normal-boundaries
+  (lem:with-current-buffers ()
+    (with-fake-interface ()
+      (let* ((buffer (lem:make-buffer "narrow-wrap-normal" :temporary t))
+             (window (lem-core::make-window buffer 0 0 3 5 nil)))
+        (setf (lem:variable-value 'lem:line-wrap :buffer buffer) t)
+        (let ((boundaries '()))
+          (lem-core::map-wrapping-line window "abcd"
+                                       (lambda (i) (push i boundaries)))
+          (ok (equal '(2) (nreverse boundaries))))))))
+
 (deftest floating-window/pixel-bounds-partial
   (lem:with-current-buffers ()
     (with-fake-interface ()

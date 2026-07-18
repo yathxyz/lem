@@ -298,38 +298,127 @@
                          attribute
                          (char-type character)))
 
+;;; CLOS <-> kernel-record adapter (SPEC-VK VK-4 layout swap).
+;;;
+;;; The wrapping and clipping algorithms below run on the ACL2-certified layout
+;;; kernel (verified/layout.lisp, loaded through verified/shim.lisp): a drawing
+;;; object crosses into the kernel as `(:text codes widths tag)' -- codepoint
+;;; list + aligned per-char width list -- or `(:opaque width tag)' for
+;;; unbreakable non-text objects, with TAG the CLOS object itself, carried
+;;; verbatim as the opaque payload the kernel theorems ignore.  Certified
+;;; obligations backing this path: content preservation
+;;; (k-wrap-preserves-contents), the row width bound (k-wrap-rows-fit /
+;;; k-wrap-rows-all-lt), termination (k-wrap-row's explode-tree measure; the
+;;; oversized single-codepoint stall production exhibits is characterized by
+;;; k-wrap-row-blocked and reproduced, bounded by the redraw height budget),
+;;; and clip correctness (k-clip-width-bound, k-clip-keeps-fully-visible).
+;;; Differential pin: tests/pbt/layout-conformance.lisp.
+
+(defun text-object-char-widths (string width)
+  "Per-char width decomposition of a text object, in the units of WIDTH
+\(= object-width).  Frontends measure text cell-aligned -- ncurses object-width
+is string-width, SDL2 text-cell-width is string-width x display cell width --
+so each char contributes its string-width delta times the cell scale.  For the
+degenerate non-cell-aligned SDL2 specials (folder/emoji fixed advances) the
+width is spread uniformly with the remainder on the last char, keeping the sum
+\(the kernel's placement-relevant quantity) exact."
+  (let ((len (length string)))
+    (cond ((zerop len) nil)
+          ((zerop width) (make-list len :initial-element 0))
+          (t
+           (let ((column-width (string-width string)))
+             (if (and (plusp column-width) (zerop (mod width column-width)))
+                 (loop :with cell := (floor width column-width)
+                       :with column := 0
+                       :for character :across string
+                       :collect (let ((next (char-width character column)))
+                                  (prog1 (* cell (- next column))
+                                    (setf column next))))
+                 (multiple-value-bind (quotient remainder) (floor width len)
+                   (append (make-list (1- len) :initial-element quotient)
+                           (list (+ quotient remainder))))))))))
+
+(defun kernel-display-object (object)
+  "Kernel record for a drawing OBJECT; the object itself rides in the tag."
+  (if (typep object 'text-object)
+      (let ((string (text-object-string object)))
+        (lem/kernel:k-text (map 'list #'char-code string)
+                           (text-object-char-widths string (object-width object))
+                           object))
+      (lem/kernel:k-opaque (object-width object) object)))
+
+(defun kernel-object-to-clos (kernel-object)
+  "Drawing object for KERNEL-OBJECT after wrapping.  A text record whose codes
+still cover its tag's whole string IS that object (identity preserved: widths,
+cached surfaces and attributes untouched); an exploded fragment is rebuilt
+exactly as production's explode-object did -- make-object-with-type on the
+substring with the run's attribute and the re-derived char-type."
+  (if (eq (first kernel-object) :text)
+      (destructuring-bind (codes widths object) (rest kernel-object)
+        (declare (ignore widths))
+        (if (= (length codes) (length (text-object-string object)))
+            object
+            (let ((string (map 'string #'code-char codes)))
+              (make-object-with-type string
+                                     (text-object-attribute object)
+                                     (char-type (char string 0))))))
+      (third kernel-object)))
+
+(defun kernel-clipped-object-to-clos (kernel-object)
+  "Drawing object for KERNEL-OBJECT after clipping.  Straddle fragments are
+rebuilt CONTENT-CORRECTLY: the visible substring verbatim with the original
+object's class, attribute, type and cursor flag.  (The previous rebuild called
+make-object-with-type with the object's :control/:zero-width type, re-applying
+the control-char replacement to the ALREADY-replaced string -- for a straddled
+\"^A\" control object that maps \"^\" to NIL: a latent content corruption,
+now fixed; see tests/pbt/layout-conformance.lisp.)"
+  (if (eq (first kernel-object) :text)
+      (destructuring-bind (codes widths object) (rest kernel-object)
+        (declare (ignore widths))
+        (if (= (length codes) (length (text-object-string object)))
+            object
+            (let ((string (map 'string #'code-char codes)))
+              (if (typep object 'line-end-object)
+                  (make-instance 'line-end-object
+                                 :string string
+                                 :attribute (text-object-attribute object)
+                                 :type (text-object-type object)
+                                 :within-cursor (text-object-within-cursor-p object)
+                                 :offset (line-end-object-offset object))
+                  (make-instance (class-of object)
+                                 :string string
+                                 :attribute (text-object-attribute object)
+                                 :type (text-object-type object)
+                                 :within-cursor (text-object-within-cursor-p object))))))
+      (third kernel-object)))
+
+(defun kernel-wrap-row (kernel-objects view-width buffer)
+  "One physical row via the certified k-wrap-row.  Values: the row as drawing
+objects with the wrap marker appended exactly when the row wrapped (the kernel
+abstracts the marker as the row boundary: rest non-nil), and the KERNEL-record
+leftover for the next row -- kept in kernel form so the redraw loop converts
+each object once per frame instead of once per remaining row."
+  (multiple-value-bind (kernel-row kernel-rest)
+      (lem/kernel:k-wrap-row kernel-objects view-width 0)
+    (let ((row (mapcar #'kernel-object-to-clos kernel-row)))
+      (values (if kernel-rest
+                  (nconc row
+                         (list (make-letter-object
+                                (variable-value 'wrap-line-character :default buffer)
+                                (variable-value 'wrap-line-attribute :default buffer))))
+                  row)
+              kernel-rest))))
+
 (defun separate-objects-by-width (objects view-width buffer)
-  (flet ((explode-object (text-object)
-           (check-type text-object text-object)
-           (let* ((string (text-object-string text-object))
-                  (char-type (char-type (char string 0)))
-                  (n (floor (length string) 2)))
-             (loop :for part-string :in (list (subseq string 0 n)
-                                              (subseq string n))
-                   :unless (alexandria:emptyp part-string)
-                   :collect (make-object-with-type
-                             part-string
-                             (text-object-attribute text-object) char-type)))))
-    (let ((wrap-line-character (variable-value 'wrap-line-character :default buffer))
-          (wrap-line-attribute (variable-value 'wrap-line-attribute :default buffer)))
-      (loop :with total-width := 0
-            :and physical-line-objects := '()
-            :for object := (pop objects)
-            :while object
-            :do (cond ((and (typep object 'text-object)
-                            (<= view-width (+ total-width (object-width object))))
-                       (cond ((< 1 (length (text-object-string object)))
-                              (setf objects (nconc (explode-object object) objects)))
-                             (t
-                              (push object objects)
-                              (push (make-letter-object wrap-line-character
-                                                        wrap-line-attribute)
-                                    physical-line-objects)
-                              (return (values (nreverse physical-line-objects) objects)))))
-                      (t
-                       (incf total-width (object-width object))
-                       (push object physical-line-objects)))
-            :finally (return (nreverse physical-line-objects))))))
+  "Split OBJECTS into one physical row of at most VIEW-WIDTH columns and the
+leftover, via the certified layout kernel (verified/layout.lisp k-wrap-row).
+An oversized single-codepoint text object at the start of a row is never
+placed: the row is emitted with only the wrap marker and the object pushed
+back (the certified k-wrap-row-blocked stall, bounded by the caller's height
+budget), exactly as the pre-swap imperative loop behaved."
+  (multiple-value-bind (row kernel-rest)
+      (kernel-wrap-row (mapcar #'kernel-display-object objects) view-width buffer)
+    (values row (mapcar #'kernel-object-to-clos kernel-rest))))
 
 (defun render-line (view x y objects height)
   (lem-if:render-line (implementation) view x y objects height))
@@ -558,13 +647,18 @@ over the top-level spine and tolerant of improper (dotted) lists."
                                                left-side-width)
   (let* ((left-side-characters (loop :for obj :in left-side-objects
                                      :when (typep obj 'text-object)
-                                     :sum (length (text-object-string obj)))))
-    (multiple-value-bind (first-line-objects rest-line-objects)
-        (separate-objects-by-width (create-drawing-objects logical-line)
-                                   (- (window-view-width window) left-side-width)
-                                   (window-buffer window))
+                                     :sum (length (text-object-string obj))))
+         (view-width (- (window-view-width window) left-side-width))
+         (buffer (window-buffer window)))
+    ;; The row loop runs on KERNEL records (converted once per logical line);
+    ;; only each emitted row is materialized back to drawing objects, so a
+    ;; long logical line costs O(line) per frame, not O(line x visible rows).
+    (multiple-value-bind (first-line-objects rest-kernel-objects)
+        (kernel-wrap-row (mapcar #'kernel-display-object
+                                 (create-drawing-objects logical-line))
+                         view-width buffer)
       (let ((wrapped-left-side-objects
-              (when rest-line-objects
+              (when rest-kernel-objects
                 (copy-list (compute-wrap-left-area-content
                             *active-modes*
                             left-side-width
@@ -581,10 +675,8 @@ over the top-level spine and tolerant of improper (dotted) lists."
               (incf total-height height)
               (unless (< y (window-height window))
                 (return)))
-            (setf (values objects rest-line-objects)
-                  (separate-objects-by-width rest-line-objects
-                                             (- (window-view-width window) left-side-width)
-                                             (window-buffer window))))
+            (setf (values objects rest-kernel-objects)
+                  (kernel-wrap-row rest-kernel-objects view-width buffer)))
           total-height)))))
 
 (defun find-cursor-object (objects)
@@ -608,53 +700,15 @@ over the top-level spine and tolerant of improper (dotted) lists."
         :collect object))
 
 (defun clip-objects-to-display-range (objects start-x end-x)
-  "Extract and clip objects to [start-x, end-x). Only explodes text-objects
-that straddle a boundary; fully-visible objects pass through unchanged.
-For straddling text-objects, computes per-character width from the object's
-total width / length (exact for monospace fonts) to find the visible substring,
-creating zero temporary letter-objects."
-  (let ((result '())
-        (x 0))
-    (dolist (object objects)
-      (let* ((w (object-width object))
-             (obj-end (+ x w)))
-        (cond
-          ;; Fully before visible range - skip
-          ((<= obj-end start-x) nil)
-          ;; Fully after visible range - done
-          ((<= end-x x) (return))
-          ;; Fully within visible range - include as-is (no allocation)
-          ((and (<= start-x x) (<= obj-end end-x))
-           (push object result))
-          ;; Straddles boundary and is a text-object - extract visible substring
-          ;; Uses total-width/length to compute per-char width (exact for monospace,
-          ;; the font type Lem uses). No letter-object creation needed.
-          ((typep object 'text-object)
-           (let* ((string (text-object-string object))
-                  (len (length string))
-                  (per-char-width (if (> len 0) (/ w len) 0))
-                  (char-x x)
-                  (start-idx nil)
-                  (end-idx 0))
-             (loop :for i :from 0 :below len
-                   :do (cond
-                         ((>= char-x end-x) (return))
-                         ((and (<= start-x char-x)
-                               (<= (+ char-x per-char-width) end-x))
-                          (when (null start-idx) (setf start-idx i))
-                          (setf end-idx (1+ i))))
-                       (incf char-x per-char-width))
-             ;; Create one text-object for the visible substring
-             (when start-idx
-               (push (make-object-with-type
-                      (subseq string start-idx end-idx)
-                      (text-object-attribute object)
-                      (text-object-type object))
-                     result))))
-          ;; Non-text objects straddling boundary - include
-          (t (push object result)))
-        (incf x w)))
-    (nreverse result)))
+  "Extract and clip OBJECTS to [start-x, end-x) via the certified layout
+kernel (verified/layout.lisp k-clip).  Fully-visible objects pass through
+unchanged (same object, no allocation); a text object straddling a boundary
+is replaced by the sub-run of its fully-visible chars, selected over the
+EXACT per-char widths (the certified k-clip-chars walk; the pre-swap code
+approximated per-char width as total/len) and rebuilt content-correctly."
+  (mapcar #'kernel-clipped-object-to-clos
+          (lem/kernel:k-clip (mapcar #'kernel-display-object objects)
+                             0 start-x end-x)))
 
 (defun redraw-logical-line-when-horizontal-scroll (window
                                                    y

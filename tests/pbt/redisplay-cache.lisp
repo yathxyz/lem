@@ -126,12 +126,11 @@ production ops never signal for clamped requests, so this never rejects."
                                 s))))
                  (1 (list :delete (rng-below rng 120) (rng-range rng 1 6)))
                  (2 (list :scroll (rng-range rng -3 3)))
-                 ;; Width >= 4: a window narrower than the widest glyph (width 2)
-                 ;; makes production's wrap-offset scan (map-wrapping-line, goal =
-                 ;; body-width - 1) unable to advance under line-wrap -- an
-                 ;; infinite loop at window width <= 2 that a real terminal never
-                 ;; reaches.  Documented in verified/README.md VK-12.
-                 (3 (list :resize (rng-range rng 4 24) (rng-range rng 1 14)))
+                 ;; Widths down to 1 are exercised since the VK-4 fix of the
+                 ;; map-wrapping-line width<=2 infinite loop (the wrap-offset
+                 ;; scan now advances at least one char per stalled step; see
+                 ;; tests/window.lisp narrow-window-wrap-scan-terminates).
+                 (3 (list :resize (rng-range rng 1 24) (rng-range rng 1 14)))
                  (4 (list :redraw))
                  (5 (list :redraw))))
      :shrink (lambda (op)
@@ -150,12 +149,12 @@ production ops never signal for clamped requests, so this never rejects."
 (defun gen-geometry ()
   (make-generator
    :sample (lambda (rng)
-             (list (rng-range rng 4 24)          ; width (>= 4, see gen-cache-op)
+             (list (rng-range rng 1 24)          ; width (down to 1, see gen-cache-op)
                    (rng-range rng 1 14)          ; height
                    (rng-boolean rng)))           ; line-wrap
    :shrink (lambda (g)
              (destructuring-bind (w h wrap) g
-               (append (when (> w 4) (list (list 4 h wrap)))
+               (append (when (> w 1) (list (list 1 h wrap)))
                        (when (> h 1) (list (list w 1 wrap)))
                        (when wrap (list (list w h nil))))))))
 

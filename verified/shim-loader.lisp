@@ -29,9 +29,12 @@
   ;;         the checking modes; src/buffer/internal/edit.lisp calls the offset
   ;;         algebra). `buffer-edit' includes `buffer-model'; `undo' includes
   ;;         `buffer-edit'; all three listed explicitly as the VK-4 kernel.
+  ;;   VK-11 line layout (src/display/physical-line.lisp wraps and clips
+  ;;         through k-wrap-row/k-clip since the VK-4 layout swap)
   (let ((load-book (find-symbol "LOAD-VERIFIED-BOOK" "LEM/KERNEL")))
     (funcall load-book "input-decode")
     (funcall load-book "width")
+    (funcall load-book "layout")
     (funcall load-book "buffer-model")
     (funcall load-book "buffer-edit")
     (funcall load-book "undo")))

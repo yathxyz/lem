@@ -218,8 +218,12 @@ budget is ~2-3 min).")
 
 (defun gen-wrap-line (&key (max-length 40))
   ;; Same repertoire as gen-mixed-line: every codepoint has display width <= 2,
-  ;; and with view-width >= 4 no single codepoint is ever wider than the view,
-  ;; so nothing is dropped (the unbreakable-blocked case is excluded by design).
+  ;; and with view-width >= 3 no single codepoint is ever at least as wide as
+  ;; the view, so nothing is dropped.  Width 3 is the SEMANTIC floor for this
+  ;; property, not a scan-termination workaround: at view-width <= 2 a width-2
+  ;; glyph is never placed at all (the certified k-wrap-row-blocked stall) and
+  ;; content preservation on screen legitimately fails -- that regime is pinned
+  ;; by projection-wrap-blocked-narrow below.
   (gen-mixed-line :max-length max-length))
 
 (defun strip-row-markers (rows wrap-char)
@@ -248,7 +252,7 @@ the private-use range -> \"\\N\"), so a trailing #\\ is NOT reliably a marker."
           (wrap-char (lem:variable-value 'lem:wrap-line-character
                                          :default (lem:current-buffer))))
       (for-all ((line (gen-wrap-line))
-                (view-width (gen-integer :min 4 :max 12)))
+                (view-width (gen-integer :min 3 :max 12)))
         (let* ((expected (project-line line))
                ;; Tall enough that every physical row fits (no height cutoff).
                (rows (render-lines (list line) view-width 400 t))
@@ -260,6 +264,58 @@ the private-use range -> \"\\N\"), so a trailing #\\ is NOT reliably a marker."
                ;; view (k-wrap-rows-all-lt, the ncurses zero-opaque corollary).
                (every (lambda (content) (< (lem:string-width content) view-width))
                       contents)))))))
+
+;;; ------------------------------------------------------------------
+;;; 3b. Narrow views (width 1-2): the certified blocked-stall regime.
+;;;     A glyph at least as wide as the view is NEVER placed (verified
+;;;     k-wrap-row-blocked): rows carry one glyph each up to the first
+;;;     blocking glyph, then only wrap markers until the height budget runs
+;;;     out.  Reachable at all since the VK-4 fix of the map-wrapping-line
+;;;     width<=2 infinite loop (this test renders where production used to
+;;;     hang on the scroll/cursor-y scan).
+;;; ------------------------------------------------------------------
+
+(defun narrow-safe-char-p (ch wrap-char)
+  "Exclude chars whose projection contains the wrap-marker glyph (e.g. U+001C
+-> \"^\\\"), which would be indistinguishable from a stripped marker."
+  (not (find wrap-char (project-line (string ch)))))
+
+(defun blocked-prefix (projected view-width)
+  "Values: the longest prefix of PROJECTED whose glyphs each fit a row of
+VIEW-WIDTH columns, and whether a blocking glyph (width >= view-width, never
+placed per k-wrap-row-blocked) cut the prefix short."
+  (loop :for i :from 0 :below (length projected)
+        :when (<= view-width (lem:char-width (char projected i) 0))
+        :return (values (subseq projected 0 i) t)
+        :finally (return (values projected nil))))
+
+(deftest projection-wrap-blocked-narrow
+  (with-recording-interface ()
+    (let ((*num-tests* *projection-tests*)
+          (wrap-char (lem:variable-value 'lem:wrap-line-character
+                                         :default (lem:current-buffer)))
+          (view-height 30))
+      (for-all ((raw-line (gen-mixed-line :max-length 12))
+                (view-width (gen-integer :min 1 :max 2)))
+        (let ((line (remove-if-not (lambda (ch) (narrow-safe-char-p ch wrap-char))
+                                   raw-line)))
+          (multiple-value-bind (prefix blocked-p)
+              (blocked-prefix (project-line line) view-width)
+            ;; At these widths every placed row holds exactly ONE glyph (a
+            ;; second width->=1 glyph always reaches the view width), so the
+            ;; prefix length is also the number of content rows.
+            (let* ((rows (render-lines (list line) view-width view-height t))
+                   (texts (loop :for (y . cells) :in rows
+                                :collect (remove wrap-char
+                                                 (recording-cells-text cells)))))
+              (and (= (length rows)
+                      (if blocked-p view-height (max 1 (length prefix))))
+                   (string= (apply #'concatenate 'string texts) prefix)
+                   ;; Certified row bound on screen: marker-stripped content
+                   ;; strictly narrower than the view (k-wrap-rows-all-lt).
+                   (every (lambda (content)
+                            (< (lem:string-width content) view-width))
+                          texts)))))))))
 
 ;;; ------------------------------------------------------------------
 ;;; 4. Cursor screen-column consistency (CURRENT window, no wrap).

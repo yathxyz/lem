@@ -76,7 +76,17 @@ next line because it is at the end of width."
           :and width := (1- (window-body-width window))
           :for i := (wide-index string width :start start :tab-size tab-size)
           :while i
-          :do (funcall fn i)
+          :do ;; A glyph at START alone can exceed the width goal (goal <= 1
+              ;; with a width-2 glyph), making wide-index return its own start
+              ;; index; advancing by at least one char keeps the scan
+              ;; terminating -- the certified layout kernel's k-wrap is proved
+              ;; total under exactly this no-progress case (SPEC-VK VK-4,
+              ;; k-wrap-row-blocked), production's scan must be too.
+              (when (<= i start)
+                (setq i (1+ start))
+                (when (<= (length string) i)
+                  (return)))
+              (funcall fn i)
               (setq start i))))
 
 (defun window-wrapping-offset (window start-point end-point)
