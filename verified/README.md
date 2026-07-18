@@ -581,10 +581,14 @@ pure functions over a virtual millisecond clock.
 
 **Model.** Queue entries are `(producer item)` with items `:resize`,
 `(:thunk tag)`, `(:event tag)` (returned to the caller) or `:null` (an
-enqueued NIL). One `:dequeue` step = one iteration of `receive-event`'s loop
-= one pop under the queue lock, so producer enqueues interleave freely
-between steps and trace quantification covers every interleaving and every
-receive-event call segmentation. Ghost fields log every enqueue and dequeue;
+enqueued NIL). One `:dequeue` step = one iteration of `receive-event`'s loop.
+Production acquires the queue lock twice per iteration (pop, then
+`event-queue-length` for the `:resize` check), so an enqueue can land
+mid-iteration — but a tail-enqueue between pop and check commutes with the
+head-pop (same dequeued entry, same observed length), mapping every
+production interleaving to a model trace with identical observables; producer
+enqueues otherwise interleave freely between steps, so trace quantification
+covers every interleaving and every receive-event call segmentation. Ghost fields log every enqueue and dequeue;
 `updates` counts `update-on-display-resized` calls and `thunks` logs
 executed-thunk order.
 

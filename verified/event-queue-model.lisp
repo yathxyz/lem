@@ -45,10 +45,16 @@
 ;;;; nil timeout.  Recorded, excluded from the item alphabet.
 ;;;;
 ;;;; STEP GRANULARITY.  One :dequeue step = one iteration of receive-event's
-;;;; loop = one pop under the queue lock (production holds the lock per
-;;;; dequeue only, so producer enqueues interleave freely BETWEEN iterations
-;;;; -- exactly the model's traces, where (:enqueue p item) actions appear at
-;;;; any point between (:dequeue) actions).  A receive-event CALL is a maximal
+;;;; loop.  Production acquires the queue lock TWICE per iteration (once for
+;;;; the pop, once for the event-queue-length call in the :resize check), so
+;;;; an enqueue can land mid-iteration between pop and length check -- the
+;;;; iteration is NOT atomic.  The atomic-step model is nevertheless complete:
+;;;; a tail-enqueue landing between the head-pop and the length check commutes
+;;;; with the pop (same dequeued entry, same length observed at the check), so
+;;;; it maps to the model trace with that (:enqueue p item) placed before the
+;;;; (:dequeue) -- every production interleaving has a model trace with
+;;;; identical observables.  Producer enqueues otherwise interleave freely
+;;;; BETWEEN iterations, exactly the model's traces.  A receive-event CALL is a maximal
 ;;;; run of :dequeue steps ending at a returned event / :null / empty-queue
 ;;;; timeout; the call boundary carries no queue state, so all theorems
 ;;;; quantify over dequeue steps and cover every call segmentation.
