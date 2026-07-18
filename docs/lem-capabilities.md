@@ -2538,9 +2538,12 @@ subtrees, or transposes any other selection by complete logical lines while
 keeping the selection on the text that moved. Visual Block retains Block state.
 The shifted `M-H/L/K/J` commands reproduce GNU Org's expanded-endpoint
 dispatch and exit Visual state only after a successful edit; region lists
-include continuation and child lines. Top-level promotion, unsafe ordered or
-tab-structured lists, and CLOCK-line dragging
-fail byte-identically with the selection intact. Type-matched source blocks,
+include continuation and child lines. Visual `M-K/J` adjusts only the CLOCK
+timestamp endpoint under the moving end of the selection and recomputes a
+closed clock's duration. Forward and reverse selections share that behavior,
+and the edit is one undo transaction. Top-level promotion, unsafe ordered or
+tab-structured lists, and unsupported CLOCK positions or shapes fail
+byte-identically with the selection intact. Type-matched source blocks,
 including mismatched nested end markers, are excluded from heading, list, and
 table dispatch; literal `M-K/J` line dragging remains available.
 

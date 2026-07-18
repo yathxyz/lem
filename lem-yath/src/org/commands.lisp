@@ -2030,9 +2030,9 @@ selection byte-for-byte."
             (if (minusp direction)
                 (org-table-delete-row)
                 (org-table-insert-row t)))
-           ((cl-ppcre:scan "(?i)^\\s*CLOCK:" (line-string context))
-            (message "CLOCK timestamp adjustment is not implemented; line unchanged")
-            nil)
+           ((org-clock-line-p)
+            (org-shift-clock-at-point
+             (- direction) nil :synchronous-p nil))
            (t
             (org-drag-current-line direction))))
        :deactivate t))))

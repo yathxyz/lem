@@ -411,6 +411,12 @@ write_fixtures() {
   printf '%s\n' 'zero' 'one' 'two' 'three' \
     >"$WORKDIR/visual-shift-meta-lines.org"
   printf '%s\n' \
+    'CLOCK: [2026-07-14 Tue 09:00]--[2026-07-14 Tue 10:00] =>  1:00' \
+    >"$WORKDIR/visual-shift-meta-clock-up.org"
+  printf '%s\n' \
+    'CLOCK: [2026-07-14 Tue 09:00]--[2026-07-14 Tue 10:00] =>  1:00' \
+    >"$WORKDIR/visual-shift-meta-clock-down.org"
+  printf '%s\n' \
     '[[file:target.org][described link]] tail' \
     >"$WORKDIR/link-outer.org"
   printf '%s\n' \
@@ -1554,6 +1560,52 @@ if start_case visual-shift-meta-line-down-context \
   else
     fail visual-shift-meta-line-down-context \
       "shifted downward line command did not use the expanded endpoint" \
+      "$CASE_SESSION"
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case visual-shift-meta-clock-up \
+     "$WORKDIR/visual-shift-meta-clock-up.org" 'CLOCK:'; then
+  send_keys "$CASE_SESSION" v 2 6 l M-K
+  if lem_wait_for "$CASE_SESSION" 'NORMAL' "$WAIT_TIMEOUT" >/dev/null &&
+     record_state visual-shift-meta-clock-up "$CASE_SESSION"; then
+    assert_state visual-shift-meta-clock-up \
+      visual-shift-meta-clock-up "$CASE_SESSION" \
+      'text=CLOCK: [2026-07-14 Tue 09:05]--[2026-07-14 Tue 10:00] =>  0:55\n bytes=' \
+      'state=normal selection=none' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    if record_state visual-shift-meta-clock-up "$CASE_SESSION"; then
+      assert_state visual-shift-meta-clock-up-undo \
+        visual-shift-meta-clock-up "$CASE_SESSION" \
+        'text=CLOCK: [2026-07-14 Tue 09:00]--[2026-07-14 Tue 10:00] =>  1:00\n bytes=' \
+        'state=normal selection=none' 'modified=no'
+    else
+      fail visual-shift-meta-clock-up-undo \
+        "Visual CLOCK adjustment did not undo" "$CASE_SESSION"
+    fi
+  else
+    record_state visual-shift-meta-clock-up "$CASE_SESSION" || true
+    fail visual-shift-meta-clock-up \
+      "forward Visual CLOCK adjustment did not exit Visual state" \
+      "$CASE_SESSION"
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case visual-shift-meta-clock-down \
+     "$WORKDIR/visual-shift-meta-clock-down.org" 'CLOCK:'; then
+  send_keys "$CASE_SESSION" 5 0 l v 2 4 h M-J
+  if lem_wait_for "$CASE_SESSION" 'NORMAL' "$WAIT_TIMEOUT" >/dev/null &&
+     record_state visual-shift-meta-clock-down "$CASE_SESSION"; then
+    assert_state visual-shift-meta-clock-down \
+      visual-shift-meta-clock-down "$CASE_SESSION" \
+      'text=CLOCK: [2026-07-14 Tue 08:55]--[2026-07-14 Tue 10:00] =>  1:05\n bytes=' \
+      'state=normal selection=none' 'modified=yes'
+  else
+    record_state visual-shift-meta-clock-down "$CASE_SESSION" || true
+    fail visual-shift-meta-clock-down \
+      "reverse Visual CLOCK adjustment did not exit Visual state" \
       "$CASE_SESSION"
   fi
   stop_case "$CASE_SESSION"
