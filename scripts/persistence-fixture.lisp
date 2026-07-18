@@ -576,7 +576,8 @@
 
 (define-command lem-yath-test-persistence-concurrent () ()
   (let ((label (persistence-test-concurrent-label)))
-    (if label
+    (cond
+      (label
         (progn
           (lem/common/history:add-history
            (lem/prompt-window::get-history 'lem-yath-citar)
@@ -590,8 +591,9 @@
           (persistence-test-log
            "CONCURRENT-WRITE phase=~a position=~d"
            *persistence-test-phase*
-           (position-at-point (current-point))))
-        (progn
+           (position-at-point (current-point)))))
+      ((string= *persistence-test-phase* "concurrent-verify")
+       (progn
           (load-persistence-state)
           (let* ((a-buffer
                    (find-file-buffer
@@ -611,7 +613,66 @@
              (mapcar #'persistence-test-encode
                      (persistence-test-prompt-history))
              (persistence-test-killring-length)
-             (persistence-test-killring-entries)))))))
+             (persistence-test-killring-entries)))))
+      ((string= *persistence-test-phase* "clear-seed")
+       (let ((old-path
+               (uiop:native-namestring
+                (persistence-test-path "concurrent/old-place.txt"))))
+         (setf *saved-places* (list (list old-path 2))
+               *literal-search-history* '("old-literal")
+               *regexp-search-history* '("old-regexp"))
+         (lem/common/history:add-history
+          (lem/prompt-window::get-history 'lem-yath-citar) "old-prompt")
+         (lem/common/killring:push-killring-item
+          (current-killring) "old-kill")
+         (flush-persistence-state :record-places nil)
+         (persistence-test-log "CLEAR-SEED written=yes")))
+      ((string= *persistence-test-phase* "clear-writer")
+       (setf *saved-places* '()
+             *literal-search-history* '()
+             *regexp-search-history* '())
+       (restore-kill-ring '())
+       (restore-prompt-histories
+        (list (list (prompt-symbol-key 'lem-yath-citar) '())))
+       (flush-persistence-state :record-places nil)
+       (persistence-test-log "CLEAR-WRITER written=yes"))
+      ((string= *persistence-test-phase* "clear-stale")
+       (let ((new-path
+               (uiop:native-namestring
+                (persistence-test-path "concurrent/new-place.txt"))))
+         (push (list new-path 3) *saved-places*)
+         (add-search-history "new-literal" nil)
+         (add-search-history "new-regexp" t)
+         (lem/common/history:add-history
+          (lem/prompt-window::get-history 'lem-yath-citar) "new-prompt")
+         (lem/common/killring:push-killring-item
+          (current-killring) "new-kill")
+         (flush-persistence-state :record-places nil)
+         (persistence-test-log "CLEAR-STALE written=yes")))
+      ((string= *persistence-test-phase* "clear-verify")
+       (let* ((places (persistence-place-snapshot))
+              (old-path
+                (uiop:native-namestring
+                 (persistence-test-path "concurrent/old-place.txt")))
+              (new-path
+                (uiop:native-namestring
+                 (persistence-test-path "concurrent/new-place.txt"))))
+         (persistence-test-log
+          (concatenate
+           'string
+           "CLEAR-VERIFY old-place=~a new-place=~a prompts=~{~a~^|~} "
+           "literal=~{~a~^|~} regexp=~{~a~^|~} kills=~{~a~^|~}")
+          (persistence-test-yes-no
+           (find old-path places :key #'first :test #'string=))
+          (persistence-test-yes-no
+           (find new-path places :key #'first :test #'string=))
+          (mapcar #'persistence-test-encode
+                  (persistence-test-prompt-history))
+          (mapcar #'persistence-test-encode *literal-search-history*)
+          (mapcar #'persistence-test-encode *regexp-search-history*)
+          (persistence-test-killring-entries))))
+      (t
+       (editor-error "Unknown persistence concurrency phase")))))
 
 (dolist (keymap (list *global-keymap*
                       lem-vi-mode:*normal-keymap*

@@ -244,7 +244,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   for dirty buffers, and private cross-process persistence for file positions,
   selected directory entries,
   bookmarks, reviewed non-secret prompt histories, Vi-aware kills, and separate
-  literal and regexp search rings
+  literal and regexp search rings; baseline-aware merging preserves independent
+  additions without letting a stale editor resurrect entries cleared elsewhere
 - retained branching undo with the configured raised payload budgets and a
   three-row Unicode Vundo UI on `SPC u`; live previews support branch, stem,
   counted and saved-node navigation, mark/diff, save, rollback, and accept

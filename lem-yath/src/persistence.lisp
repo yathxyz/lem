@@ -32,6 +32,8 @@
 (defvar *last-persistence-save-time* 0)
 (defvar *last-persistence-failure-time* nil)
 (defvar *persistence-failure-reported-p* nil)
+(defvar *persistence-state-baseline* nil
+  "Normalized state last applied to this process from shared storage.")
 (defvar *last-auto-revert-check-time* nil)
 (defvar *safe-auto-revert-timer* nil)
 (defvar *isearch-history-position* nil)
@@ -764,45 +766,119 @@
 (defun prompt-history-value (key histories)
   (second (find key histories :key #'first :test #'equal)))
 
-(defun merge-prompt-histories (newer older)
+(defun merge-three-way-mru-list
+    (live disk baseline &key (test #'equal) limit)
+  "Merge one MRU list without reviving entries removed by either writer.
+
+An unchanged local list follows DISK exactly.  Otherwise additions made since
+BASELINE are unioned, while a baseline entry survives only when both LIVE and
+DISK still contain it.  This makes intentional removals stable across stale
+processes without discarding independent concurrent additions."
+  (cond
+    ((equal live baseline)
+     (if limit (take-list disk limit) disk))
+    ((equal disk baseline)
+     (if limit (take-list live limit) live))
+    (t
+     (let ((merged (merge-mru-list live disk :test test)))
+       (setf merged
+             (remove-if-not
+              (lambda (entry)
+                (or (not (member entry baseline :test test))
+                    (and (member entry live :test test)
+                         (member entry disk :test test))))
+              merged))
+       (if limit (take-list merged limit) merged)))))
+
+(defun merge-prompt-histories (newer older baseline)
   (let ((keys
-          (merge-mru-list (mapcar #'first newer) (mapcar #'first older)
+          (merge-mru-list (mapcar #'first newer)
+                          (mapcar #'first older)
                           :test #'equal)))
     (mapcar
      (lambda (key)
        (list key
-             (merge-mru-list
+             (merge-three-way-mru-list
               (prompt-history-value key newer)
               (prompt-history-value key older)
+              (prompt-history-value key baseline)
               :test #'string=
               :limit *prompt-history-limit*)))
      keys)))
 
-(defun merge-kill-ring-state (newer older)
+(defun merge-kill-ring-state (newer older baseline)
   ;; Preserve duplicates already present in a process's live ring, while only
   ;; appending entries learned from another process when they are not present.
-  (take-list
-   (append newer
-           (remove-if (lambda (entry) (member entry newer :test #'equal))
-                      older))
-   *saved-kill-ring-limit*))
+  (cond
+    ((equal newer baseline) (take-list older *saved-kill-ring-limit*))
+    ((equal older baseline) (take-list newer *saved-kill-ring-limit*))
+    (t
+     (take-list
+      (remove-if-not
+       (lambda (entry)
+         (or (not (member entry baseline :test #'equal))
+             (and (member entry newer :test #'equal)
+                  (member entry older :test #'equal))))
+       (append newer
+               (remove-if (lambda (entry)
+                            (member entry newer :test #'equal))
+                          older)))
+      *saved-kill-ring-limit*))))
+
+(defun place-state-table (places)
+  (let ((table (make-hash-table :test #'equal)))
+    (dolist (entry places table)
+      (setf (gethash (first entry) table) entry))))
+
+(defun merge-place-state (live disk baseline)
+  "Apply local place changes since BASELINE over the latest DISK state."
+  (let* ((baseline-table (place-state-table baseline))
+         (live-table (place-state-table live))
+         (result-table (place-state-table disk)))
+    (maphash
+     (lambda (path baseline-entry)
+       (multiple-value-bind (live-entry live-p) (gethash path live-table)
+         (cond
+           ((not live-p)
+            (remhash path result-table))
+           ((not (equal live-entry baseline-entry))
+            (setf (gethash path result-table) live-entry)))))
+     baseline-table)
+    (maphash
+     (lambda (path live-entry)
+       (unless (gethash path baseline-table)
+         (setf (gethash path result-table) live-entry)))
+     live-table)
+    (let ((order (if (equal live baseline)
+                     (merge-mru-list disk live :key #'first)
+                     (merge-mru-list live disk :key #'first))))
+      (loop :for candidate :in order
+            :for path = (first candidate)
+            :for entry = (gethash path result-table)
+            :when entry
+              :collect entry))))
 
 (defun persistent-place-path-exists-p (path)
   (or (uiop:file-exists-p path)
       (uiop:directory-exists-p path)))
 
-(defun merge-persistence-states (newer older)
+(defun merge-persistence-states (newer older &optional baseline)
   (let* ((newer (normalize-persistence-state newer))
          (older (normalize-persistence-state older))
+         (baseline
+           (normalize-persistence-state
+            (or baseline *persistence-state-baseline*)))
          (places
            (remove-if
             (lambda (entry)
               (or (member (first entry) *forgotten-place-paths*
                           :test #'string=)
                   (not (persistent-place-path-exists-p (first entry)))))
-            (merge-mru-list (getf newer :places) (getf older :places)
-                            :test #'string= :key #'first
-                            :limit *save-place-limit*))))
+            (take-list
+             (merge-place-state (getf newer :places)
+                                (getf older :places)
+                                (getf baseline :places))
+             *save-place-limit*))))
     (list :version *persistence-format-version*
           :bookmarks
           (merge-bookmark-persistence-state
@@ -811,18 +887,24 @@
           :places places
           :kill-ring
           (merge-kill-ring-state (getf newer :kill-ring)
-                                 (getf older :kill-ring))
+                                 (getf older :kill-ring)
+                                 (getf baseline :kill-ring))
           :literal-searches
-          (merge-mru-list (getf newer :literal-searches)
-                          (getf older :literal-searches)
-                          :test #'string= :limit *search-ring-limit*)
+          (merge-three-way-mru-list
+           (getf newer :literal-searches)
+           (getf older :literal-searches)
+           (getf baseline :literal-searches)
+           :test #'string= :limit *search-ring-limit*)
           :regexp-searches
-          (merge-mru-list (getf newer :regexp-searches)
-                          (getf older :regexp-searches)
-                          :test #'string= :limit *search-ring-limit*)
+          (merge-three-way-mru-list
+           (getf newer :regexp-searches)
+           (getf older :regexp-searches)
+           (getf baseline :regexp-searches)
+           :test #'string= :limit *search-ring-limit*)
           :prompt-histories
           (merge-prompt-histories (getf newer :prompt-histories)
-                                  (getf older :prompt-histories)))))
+                                  (getf older :prompt-histories)
+                                  (getf baseline :prompt-histories)))))
 
 (defun collect-persistence-state ()
   (list :version *persistence-format-version*
@@ -852,9 +934,11 @@
   "Safely load bookmarks, places, rings, and prompt histories from disk."
   (call-with-persistence-lock
    (lambda ()
-     (apply-persistence-state (read-persistence-state-file)
-                              :restore-live-kill-ring t
-                              :restore-bookmarks t)))
+     (let ((state (read-persistence-state-file)))
+       (apply-persistence-state state
+                                :restore-live-kill-ring t
+                                :restore-bookmarks t)
+       (setf *persistence-state-baseline* (copy-tree state)))))
   (setf *persistence-loaded-p* t
         *last-persistence-save-time* (get-internal-real-time))
   t)
@@ -865,16 +949,23 @@
     (record-all-buffer-places))
   (call-with-persistence-lock
    (lambda ()
-     (let ((merged
+     (let* ((live (collect-persistence-state))
+            (merged
              (merge-persistence-states
-              (collect-persistence-state)
+              live
               (read-persistence-state-file))))
        (write-persistence-state-file merged)
        ;; Pull merged bookmark/place/search/prompt state into this process.
        ;; Rebuilding the kill ring would disturb yank-pop rotation mid-session.
        (apply-persistence-state merged
                                 :restore-live-kill-ring nil
-                                :restore-bookmarks t))))
+                                :restore-bookmarks t)
+       ;; The merged kill ring is deliberately not installed because doing so
+       ;; would disturb yank-pop rotation.  Baseline only the ring this process
+       ;; actually retains; every other category now reflects MERGED live.
+       (setf *persistence-state-baseline* (copy-tree merged)
+             (getf *persistence-state-baseline* :kill-ring)
+             (copy-tree (getf live :kill-ring))))))
   (setf *forgotten-place-paths* '()
         *last-persistence-save-time* (get-internal-real-time))
   t)
@@ -1578,3 +1669,9 @@ the visited file byte-for-byte."
     (initialize-buffer-file-state buffer)
     (when first-load
       (restore-buffer-place buffer))))
+
+;; A source reload into a process started before baseline tracking already has
+;; the last loaded state live.  Capture it once instead of treating every live
+;; entry as a new addition on the first subsequent flush.
+(unless *persistence-state-baseline*
+  (setf *persistence-state-baseline* (collect-persistence-state)))

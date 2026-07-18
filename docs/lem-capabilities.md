@@ -1121,6 +1121,11 @@ creation. Reads bind `*read-eval*` to false, accept exactly one aggregate
 byte-bounded, versioned form from one descriptor, reject dispatch/evaluation syntax
 before invoking the Common Lisp reader, and normalize bounded containers in linear
 time. Each flush merges state already written by another Lem process.
+Places and history categories use the last state actually applied to the live
+process as a three-way baseline: independent additions are retained, unchanged
+local entries follow newer disk updates or removals, and a stale process cannot
+resurrect a cleared place, prompt, search, or kill entry. The live kill ring is
+not rebuilt during a flush, so yank-pop rotation remains undisturbed.
 It provides:
 
 - up to 600 canonical local-file positions or exact selected directory entries,
@@ -1138,7 +1143,7 @@ It provides:
   memory-only.
 
 `scripts/persistence-test.sh` drives real ncurses processes and external file
-writers. Its 51 checks include no-input periodic file and directory refresh,
+writers. Its 55 checks include no-input periodic file and directory refresh,
 retention of a directory selection, cursor column, and marks, and a fresh-process
 selected-directory-entry round trip. They cover clean and
 dirty reload behavior,
@@ -1146,7 +1151,9 @@ deletion/recreation, stale-save refusal including a same-metadata 17 MiB file,
 first-save and late-target Save As races, modified quit refusal, fresh-process
 restoration and Vi paste behavior, prompt privacy/live caps, bounded malformed
 and dispatch/evaluation-free state reads, private file modes, failure-safe
-commands/exit, reload-safe timer ownership, and stale concurrent writers.
+commands/exit, reload-safe timer ownership, stale concurrent additions, and a
+clear-then-stale-write sequence across three editor processes for every shared
+place/history category.
 Filesystem notifications and adapters for Lem's other non-file list buffers
 remain gaps; the module exposes a buffer-local stale/revert adapter contract for
 those modes.

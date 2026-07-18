@@ -1098,6 +1098,65 @@ fi
 lem_stop "$verify_session"
 
 # ---------------------------------------------------------------------------
+# A stale process must not resurrect entries intentionally cleared elsewhere.
+
+rm -f "$LEM_YATH_PERSISTENCE_STATE_FILE" \
+  "$LEM_YATH_PERSISTENCE_STATE_FILE.lock"
+printf 'old\n' >"$LEM_YATH_PERSISTENCE_TEST_ROOT/concurrent/old-place.txt"
+printf 'new\n' >"$LEM_YATH_PERSISTENCE_TEST_ROOT/concurrent/new-place.txt"
+
+clear_seed="lem-yath-persistence-clear-seed-$id"
+if start_phase "$clear_seed" clear-seed &&
+   press_and_wait "$clear_seed" F12 '^CLEAR-SEED '; then
+  pass clear-seed 'seeded every shared place and history category'
+else
+  fail clear-seed 'could not seed the shared persistence state' "$clear_seed"
+fi
+lem_stop "$clear_seed"
+
+clear_stale="lem-yath-persistence-clear-stale-$id"
+clear_writer="lem-yath-persistence-clear-writer-$id"
+if start_phase "$clear_stale" clear-stale &&
+   start_phase "$clear_writer" clear-writer; then
+  pass clear-concurrent-boot 'two processes loaded the same seeded baseline'
+else
+  fail clear-concurrent-boot 'clear concurrency processes did not initialize' \
+    "$clear_stale"
+fi
+
+if press_and_wait "$clear_writer" F12 '^CLEAR-WRITER ' &&
+   press_and_wait "$clear_stale" F12 '^CLEAR-STALE '; then
+  pass clear-concurrent-writes 'clear committed before the stale process added new state'
+else
+  fail clear-concurrent-writes 'clear/stale writes did not both flush' "$clear_stale"
+fi
+lem_stop "$clear_writer"
+lem_stop "$clear_stale"
+
+clear_verify="lem-yath-persistence-clear-verify-$id"
+if start_phase "$clear_verify" clear-verify &&
+   press_and_wait "$clear_verify" F12 '^CLEAR-VERIFY '; then
+  clear_state=$(last_line '^CLEAR-VERIFY ')
+  if [[ "$clear_state" == *'old-place=no new-place=yes '* &&
+        "$clear_state" == *'prompts=new-prompt '* &&
+        "$clear_state" == *'literal=new-literal '* &&
+        "$clear_state" == *'regexp=new-regexp '* &&
+        "$clear_state" == *'kills=new-kill[]'* &&
+        "$clear_state" != *'old-prompt'* &&
+        "$clear_state" != *'old-literal'* &&
+        "$clear_state" != *'old-regexp'* &&
+        "$clear_state" != *'old-kill'* ]]; then
+    pass clear-no-resurrection 'fresh process saw new additions but no cleared entries'
+  else
+    fail clear-no-resurrection "cleared state was resurrected: $clear_state" \
+      "$clear_verify"
+  fi
+else
+  fail clear-no-resurrection 'fresh clear verifier did not complete' "$clear_verify"
+fi
+lem_stop "$clear_verify"
+
+# ---------------------------------------------------------------------------
 # Save Place stores Dired's selected filename, not a fragile rendered offset.
 
 export LEM_YATH_PERSISTENCE_STATE_FILE="$root/directory-place/persistence.sexp"
