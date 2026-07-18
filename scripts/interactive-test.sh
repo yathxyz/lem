@@ -560,6 +560,8 @@ S18="lem-yath-it18-$id"
 if boot_with_file "$S18" "$ORGFIX" '\* Heading' "18-org-id"; then
   send_chord "$S18" "Space" "m" "I"
   sleep 0.6
+  tmux_cmd send-keys -t "$S18" Escape
+  sleep "$KEY_DELAY"
   tmux_cmd send-keys -t "$S18" "j"
   sleep "$KEY_DELAY"
   org_screen="$(lem_capture "$S18")"

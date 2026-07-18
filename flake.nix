@@ -32,6 +32,8 @@
               ./patches/lem-completion-lifecycle.patch
               ./patches/lem-completion-detail-accessor.patch
               ./patches/lem-transient-delay-race.patch
+              ./patches/lem-idle-timer-initial-time.patch
+              ./patches/lem-emergency-checkpoint-mode.patch
               ./patches/lem-transient-bottom-restore.patch
               ./patches/lem-project-lsp-workspaces.patch
               ./patches/lem-lsp-buffer-lifecycle-hooks.patch

@@ -39,7 +39,7 @@ index add39e7..ba73ff3 100644
 
  (defun check-line-fingerprint (window y fingerprint)
    "Check if the fingerprint for line at Y matches. Returns cached height or NIL."
-@@ -555,13 +556,16 @@ over the top-level spine and tolerant of improper (dotted) lists.
+@@ -644,10 +645,13 @@ over the top-level spine and tolerant of improper (dotted) lists.
                                                 y
                                                 logical-line
                                                 left-side-objects
@@ -48,26 +48,12 @@ index add39e7..ba73ff3 100644
 +                                               right-side-width)
    (let* ((left-side-characters (loop :for obj :in left-side-objects
                                       :when (typep obj 'text-object)
-                                      :sum (length (text-object-string obj)))))
-     (multiple-value-bind (first-line-objects rest-line-objects)
-         (separate-objects-by-width (create-drawing-objects logical-line)
--                                   (- (window-view-width window) left-side-width)
-+                                   (- (window-view-width window)
-+                                      left-side-width
-+                                      right-side-width)
-                                    (window-buffer window))
-       (let ((wrapped-left-side-objects
-               (when rest-line-objects
-@@ -583,7 +587,9 @@ over the top-level spine and tolerant of improper (dotted) lists.
-                 (return)))
-             (setf (values objects rest-line-objects)
-                   (separate-objects-by-width rest-line-objects
--                                             (- (window-view-width window) left-side-width)
-+                                             (- (window-view-width window)
-+                                                left-side-width
-+                                                right-side-width)
-                                              (window-buffer window))))
-           total-height)))))
+                                      :sum (length (text-object-string obj))))
+-         (view-width (- (window-view-width window) left-side-width))
++         (view-width (- (window-view-width window)
++                        left-side-width
++                        right-side-width))
+          (buffer (window-buffer window)))
 
 @@ -660,11 +666,13 @@ creating zero temporary letter-objects.
                                                     y

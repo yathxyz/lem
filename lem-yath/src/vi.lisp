@@ -7,6 +7,14 @@
 
 (lem-vi-mode:vi-mode)
 
+;; A long terminal ESC ambiguity window makes fast Escape-then-motion input
+;; become a Meta chord.  Keep Vim state changes responsive while retaining
+;; enough time for terminal-generated Alt/modified-key byte sequences.
+(let* ((package (find-package "LEM-NCURSES/CONFIG"))
+       (escape-delay (and package (find-symbol "ESCAPE-DELAY" package))))
+  (when escape-delay
+    (setf (variable-value escape-delay :global) 50)))
+
 ;; Match Evil's `evil-respect-visual-line-mode': the buffer-local wrapping
 ;; switch changes Vi's screen/logical line policy instead of only changing
 ;; rendering.

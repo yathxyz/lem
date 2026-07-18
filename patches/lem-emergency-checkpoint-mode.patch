@@ -1,0 +1,16 @@
+diff --git a/src/ext/emergency-save.lisp b/src/ext/emergency-save.lisp
+index 8de8b11..bc874dd 100644
+--- a/src/ext/emergency-save.lisp
++++ b/src/ext/emergency-save.lisp
+@@ -14,7 +14,10 @@
+ (defun emergency-checkpoint ()
+   "Best-effort checkpoint of every modified file-backed buffer, reusing the DS-3
+ checkpoint mechanism. Intended to run from a terminating-signal handler on a dying
+ process: it never signals (a failure to checkpoint one buffer must not prevent the
+ process from exiting) and returns NIL."
+-  (ignore-errors (lem/checkpoint:checkpoint-modified-buffers))
++  (when (some (lambda (buffer)
++                (mode-active-p buffer 'lem/checkpoint:checkpoint-mode))
++              (buffer-list))
++    (ignore-errors (lem/checkpoint:checkpoint-modified-buffers)))
+   nil)

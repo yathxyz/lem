@@ -34,15 +34,15 @@ index 32d3863..bdd0709 100644
 +             (setf (buffer-filename buffer) filename
 +                   (variable-value 'find-file-literally :buffer buffer)
 +                   (not (null (getf *find-file-read-options* :literal))))
-@@ -101 +110,7 @@
--                         (insert-file-contents (buffer-start-point buffer) filename))))
+@@ -145 +154,7 @@
+-                           (insert-file-contents (buffer-start-point buffer) filename)
 +                           (insert-file-contents
 +                            (buffer-start-point buffer) filename
 +                            :external-format
 +                            (getf *find-file-read-options* :external-format
 +                                  *default-external-format*)
 +                            :end-of-line
-+                            (getf *find-file-read-options* :end-of-line :auto)))))
++                            (getf *find-file-read-options* :end-of-line :auto))
 @@ -108,2 +123,3 @@
 -           (run-hooks *find-file-hook* buffer)
 -           (values buffer t)))))

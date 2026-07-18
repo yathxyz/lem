@@ -15,6 +15,7 @@ esac
 export HOME="$root/home"
 export XDG_CACHE_HOME="$root/cache"
 export XDG_STATE_HOME="$root/state-home"
+export XDG_DATA_HOME="$root/data-home"
 export WORKDIR="$root/work"
 export LEM_HOME="$root/lem-home/"
 export LEM_YATH_COMPLETION_STATE_FILE="$root/completion-ranking.sexp"
@@ -24,7 +25,8 @@ export LEM_YATH_PERSISTENCE_TEST_ROOT="$root/fixture/"
 export LEM_YATH_PERSISTENCE_TEST_REPORT="$root/report"
 export LEM_YATH_PERSISTENCE_SOURCE="${LEM_YATH_PERSISTENCE_SOURCE:-$here/lem-yath/src/persistence.lisp}"
 
-mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$WORKDIR" \
+mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$XDG_DATA_HOME" \
+  "$WORKDIR" \
   "$LEM_HOME" "$(dirname "$LEM_YATH_PERSISTENCE_STATE_FILE")" \
   "$LEM_YATH_PERSISTENCE_TEST_ROOT/auto" \
   "$LEM_YATH_PERSISTENCE_TEST_ROOT/notify-extra" \
@@ -492,15 +494,17 @@ if start_phase "$autosave_session" autosave "$autosave_file" &&
     write_policy=$(last_line '^WRITE-POLICY ')
     sidecars=$(find "$autosave_dir" -mindepth 1 -maxdepth 1 \
       ! -name 'autosave.txt' -print)
+    checkpoints=$(find "$XDG_DATA_HOME" -type f -print)
     if [ "$write_policy" = \
-         'WRITE-POLICY auto-save=no input-hook=0 timer=no backups=no modified=yes' ] &&
+         'WRITE-POLICY auto-save=no input-hook=0 timer=no backups=no checkpoint=no checkpoint-hook=0 checkpoint-timer=no modified=yes' ] &&
        cmp -s "$autosave_file" "$autosave_expected" &&
-       [ -z "$sidecars" ]; then
+       [ -z "$sidecars" ] && [ -z "$checkpoints" ]; then
       pass no-implicit-writes \
         '300 typed keys plus idle wait changed no disk bytes or sidecars'
     else
       fail no-implicit-writes \
-        "policy=[$write_policy] sidecars=[$sidecars]" "$autosave_session"
+        "policy=[$write_policy] sidecars=[$sidecars] checkpoints=[$checkpoints]" \
+        "$autosave_session"
     fi
   else
     fail no-implicit-writes 'the write-policy probe did not run' "$autosave_session"

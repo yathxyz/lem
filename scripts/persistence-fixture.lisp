@@ -397,12 +397,17 @@
    (concatenate
     'string
     "WRITE-POLICY auto-save=~a input-hook=~d timer=~a backups=~a "
+    "checkpoint=~a checkpoint-hook=~d checkpoint-timer=~a "
     "modified=~a")
    (persistence-test-yes-no
     (mode-active-p (current-buffer) 'lem/auto-save:auto-save-mode))
    (count 'lem/auto-save::count-keys *input-hook* :key #'car :test #'eq)
    (persistence-test-yes-no lem/auto-save::*timer*)
    (persistence-test-yes-no lem/auto-save:*make-backup-files*)
+   (persistence-test-yes-no
+    (mode-active-p (current-buffer) 'lem/checkpoint:checkpoint-mode))
+   (count 'lem/checkpoint::count-keys *input-hook* :key #'car :test #'eq)
+   (persistence-test-yes-no lem/checkpoint::*timer*)
    (persistence-test-yes-no (buffer-modified-p (current-buffer)))))
 
 (define-command lem-yath-test-persistence-check-current () ()

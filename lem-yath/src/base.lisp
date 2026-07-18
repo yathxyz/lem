@@ -166,6 +166,31 @@ ON-EXIT, if given, is called on the editor thread with the exit code."
 
 ;;; --- boot report (consumed by scripts/boot-test.sh) -----------------------
 
+(defun boot-idle-timer-initialized-p ()
+  "Verify immediate and recovered idle-timer deadlines."
+  (handler-case
+      (let* ((lem/common/timer::*timer-manager*
+               (make-instance 'lem/common/timer:timer-manager))
+             (lem/common/timer::*idle-timer-list* nil)
+             (lem/common/timer::*processed-idle-timer-list* nil)
+             (timer (lem/common/timer:make-idle-timer
+                     (lambda ()) :name "boot timer probe")))
+        (unwind-protect
+             (progn
+               (lem/common/timer:start-timer timer 100)
+               (let ((started-last-time
+                       (slot-value timer 'lem/common/timer::last-time)))
+                 ;; Simulate a timer restored from an image before its manager
+                 ;; existed; the deadline query must recover it as well.
+                 (setf (slot-value timer 'lem/common/timer::last-time) nil)
+                 (and (numberp started-last-time)
+                      (numberp
+                       (lem/common/timer:get-next-timer-timing-ms))
+                      (numberp
+                       (slot-value timer 'lem/common/timer::last-time)))))
+          (lem/common/timer:stop-timer timer)))
+    (error () nil)))
+
 (defun write-boot-report (path)
   "Write a machine-checkable report of the boot state to PATH."
   (with-open-file (s path :direction :output
@@ -181,6 +206,8 @@ ON-EXIT, if given, is called on the editor thread with the exit code."
       (format s "leader-bindings: ~a~%"
               (and (fboundp 'evil-leader-bindings-ok-p)
                    (evil-leader-bindings-ok-p)))
+      (format s "idle-timer-deadline: ~a~%"
+              (boot-idle-timer-initialized-p))
       (dolist (entry '(("rust-spec" lem-rust-mode:rust-mode)
                        ("nix-spec" lem-nix-mode:nix-mode)
                        ("python-spec" lem-python-mode:python-mode)

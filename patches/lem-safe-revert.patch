@@ -219,10 +219,6 @@ index f7bc8bc..51ef69b 100644
 +        (alexandria:if-let (fn (revert-buffer-function buffer))
 +          (funcall fn buffer)
 +          (sync-buffer-with-file-content buffer))))))
-@@ -385 +525,2 @@
--    (when (changed-disk-p (current-buffer))
-+    (when (and (not (buffer-modified-p (current-buffer)))
-+               (changed-disk-p (current-buffer)))
 diff --git a/src/commands/window.lisp b/src/commands/window.lisp
 index f12b83d..1d6a50e 100644
 --- a/src/commands/window.lisp

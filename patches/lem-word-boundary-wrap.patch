@@ -136,40 +136,43 @@ index b2397a4..c081f0a 100644
            :do (funcall fn i)
                (setq start i))))
 diff --git a/src/display/physical-line.lisp b/src/display/physical-line.lisp
-index add39e7..f331d19 100644
 --- a/src/display/physical-line.lisp
 +++ b/src/display/physical-line.lisp
-@@ -298,33 +298,98 @@
-                          attribute
-                          (char-type character)))
-
-+(defun word-wrappable-objects-string (objects)
-+  "Return the displayed text represented by OBJECTS, or NIL when an object
-+cannot safely participate in character-based word wrapping."
+@@ -392,22 +392,89 @@
+                                  :within-cursor (text-object-within-cursor-p object))))))
+       (third kernel-object)))
+-
++
++(defun kernel-word-wrappable-string (kernel-objects)
++  "Return the displayed text in KERNEL-OBJECTS when it maps to characters."
 +  (block invalid
 +    (with-output-to-string (stream)
-+      (dolist (object objects)
-+        (cond ((typep object 'line-end-object)
++      (dolist (kernel-object kernel-objects)
++        (ecase (first kernel-object)
++          (:text
++           (destructuring-bind (codes widths object) (rest kernel-object)
++             (declare (ignore widths))
++             (when (typep object 'line-end-object)
 +               (return-from invalid nil))
-+              ((typep object 'text-object)
-+               (write-string (text-object-string object) stream))
-+              ((typep object '(or void-object
-+                                  eol-cursor-object
-+                                  extend-to-eol-object)))
-+              (t
-+               (return-from invalid nil)))))))
++             (dolist (code codes)
++               (write-char (code-char code) stream))))
++          (:opaque
++           (let ((object (third kernel-object)))
++             (unless (typep object '(or void-object
++                                        eol-cursor-object
++                                        extend-to-eol-object))
++               (return-from invalid nil)))))))))
 +
-+(defun word-boundary-view-width (objects view-width buffer)
-+  "Reduce VIEW-WIDTH so the physical row ends at the same word boundary used
-+by virtual-line navigation.  The ordinary width splitter remains the fallback
-+for long words and drawing objects without a text mapping."
++(defun kernel-word-boundary-view-width (kernel-objects view-width buffer)
++  "Reduce VIEW-WIDTH to the preferred complete-word row boundary."
 +  (unless (variable-value 'line-wrap-at-word-boundary :default buffer)
-+    (return-from word-boundary-view-width view-width))
++    (return-from kernel-word-boundary-view-width view-width))
 +  (let* ((character-width (lem-if:get-char-width (implementation)))
 +         (view-columns (floor view-width character-width)))
 +    (when (<= view-columns 1)
-+      (return-from word-boundary-view-width view-width))
-+    (alexandria:when-let ((string (word-wrappable-objects-string objects)))
++      (return-from kernel-word-boundary-view-width view-width))
++    (alexandria:when-let
++        ((string (kernel-word-wrappable-string kernel-objects)))
 +      (multiple-value-bind (boundary word-boundary-p)
 +          (wrapping-line-break-index
 +           string
@@ -186,58 +189,54 @@ index add39e7..f331d19 100644
 +                   (* (1+ content-columns) character-width)))
 +            (min view-width word-view-width)))))))
 +
++(defun wrap-padding-object (width)
++  (let ((columns (floor width (lem-if:get-char-width (implementation)))))
++    (when (plusp columns)
++      (make-object-with-type
++       (make-string columns :initial-element #\Space)
++       nil
++       (char-type #\Space)))))
++
+ (defun kernel-wrap-row (kernel-objects view-width buffer)
+   "One physical row via the certified k-wrap-row.  Values: the row as drawing
+ objects with the wrap marker appended exactly when the row wrapped (the kernel
+ abstracts the marker as the row boundary: rest non-nil), and the KERNEL-record
+ leftover for the next row -- kept in kernel form so the redraw loop converts
+ each object once per frame instead of once per remaining row."
+-  (multiple-value-bind (kernel-row kernel-rest)
+-      (lem/kernel:k-wrap-row kernel-objects view-width 0)
+-    (let ((row (mapcar #'kernel-object-to-clos kernel-row)))
+-      (values (if kernel-rest
+-                  (nconc row
+-                         (list (make-letter-object
+-                                (variable-value 'wrap-line-character :default buffer)
+-                                (variable-value 'wrap-line-attribute :default buffer))))
+-                  row)
+-              kernel-rest))))
++  (let* ((original-view-width view-width)
++         (word-view-width
++           (kernel-word-boundary-view-width kernel-objects view-width buffer))
++         (view-width (or word-view-width view-width))
++         (padding-width
++           (if word-view-width
++               (- original-view-width word-view-width)
++               0)))
++    (multiple-value-bind (kernel-row kernel-rest)
++        (lem/kernel:k-wrap-row kernel-objects view-width 0)
++      (let ((row (mapcar #'kernel-object-to-clos kernel-row)))
++        (values (if kernel-rest
++                    (nconc row
++                           (alexandria:when-let
++                               ((padding (wrap-padding-object padding-width)))
++                             (list padding))
++                           (list (make-letter-object
++                                  (variable-value 'wrap-line-character
++                                                  :default buffer)
++                                  (variable-value 'wrap-line-attribute
++                                                  :default buffer))))
++                    row)
++                kernel-rest)))))
+-
++
  (defun separate-objects-by-width (objects view-width buffer)
--  (flet ((explode-object (text-object)
-+  (flet ((wrap-padding-object (width)
-+           (let ((columns
-+                   (floor width
-+                          (lem-if:get-char-width (implementation)))))
-+             (when (plusp columns)
-+               (make-object-with-type
-+                (make-string columns :initial-element #\Space)
-+                nil
-+                (char-type #\Space)))))
-+         (explode-object (text-object)
-            (check-type text-object text-object)
-            (let* ((string (text-object-string text-object))
-                   (char-type (char-type (char string 0)))
-                   (n (floor (length string) 2)))
-              (loop :for part-string :in (list (subseq string 0 n)
-                                               (subseq string n))
-                    :unless (alexandria:emptyp part-string)
-                    :collect (make-object-with-type
-                              part-string
-                              (text-object-attribute text-object) char-type)))))
--    (let ((wrap-line-character (variable-value 'wrap-line-character :default buffer))
-+    (let* ((original-view-width view-width)
-+           (word-view-width
-+             (word-boundary-view-width objects view-width buffer))
-+           (view-width (or word-view-width view-width))
-+           (wrap-padding-width
-+             (if word-view-width
-+                 (- original-view-width word-view-width)
-+                 0))
-+           (wrap-line-character
-+             (variable-value 'wrap-line-character :default buffer))
--          (wrap-line-attribute (variable-value 'wrap-line-attribute :default buffer)))
-+           (wrap-line-attribute
-+             (variable-value 'wrap-line-attribute :default buffer)))
-       (loop :with total-width := 0
-             :and physical-line-objects := '()
-             :for object := (pop objects)
-             :while object
-             :do (cond ((and (typep object 'text-object)
-                             (<= view-width (+ total-width (object-width object))))
-                        (cond ((< 1 (length (text-object-string object)))
-                               (setf objects (nconc (explode-object object) objects)))
-                              (t
-                               (push object objects)
-+                              (alexandria:when-let
-+                                  ((padding (wrap-padding-object wrap-padding-width)))
-+                                (push padding physical-line-objects))
-                               (push (make-letter-object wrap-line-character
-                                                         wrap-line-attribute)
-                                     physical-line-objects)
-                               (return (values (nreverse physical-line-objects) objects)))))
-                       (t
-                        (incf total-width (object-width object))
+   "Split OBJECTS into one physical row of at most VIEW-WIDTH columns and the

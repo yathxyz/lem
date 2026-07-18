@@ -26,17 +26,14 @@ diff --git a/src/buffer/internal/buffer-insert.lisp b/src/buffer/internal/buffer
 index ef32948..eed20a3 100644
 --- a/src/buffer/internal/buffer-insert.lisp
 +++ b/src/buffer/internal/buffer-insert.lisp
-@@ -28,2 +28,4 @@
+@@ -28,2 +28,5 @@
 -      (prog1 (funcall function)
 -        (buffer-modify buffer)))))
-+      (let ((result (funcall function)))
-+        (when (and (stringp result) (plusp (length result)))
-+          (buffer-modify buffer))
-+        result))))
-@@ -118 +120,2 @@
--                           (setf start (1+ pos))))))))
-+                           (setf start (1+ pos))))))
-+        string))
++      (let ((end-position (position-at-point (buffer-end-point buffer))))
++        (unwind-protect
++             (funcall function)
++          (unless (= end-position (position-at-point (buffer-end-point buffer)))
++            (buffer-modify buffer)))))))
 @@ -188,13 +191,15 @@
 -  (let ((buffer (point-buffer point)))
 -    (cond ((buffer-enable-undo-p buffer)
@@ -1102,9 +1099,9 @@ index b6e067f..3209d9c 100644
 --- a/src/commands/file.lisp
 +++ b/src/commands/file.lisp
 @@ -367,2 +367 @@
--     (write-to-file buffer (buffer-filename buffer))
--     (buffer-unmark buffer)
-+     (write-to-file buffer (buffer-filename buffer) t)
+-       (write-to-file buffer (buffer-filename buffer))
+-       (buffer-unmark buffer)
++       (write-to-file buffer (buffer-filename buffer) t)
 @@ -486 +485,4 @@
 -               (buffer-unmark buffer)
 +               ;; A verified reload establishes a new root.  The erase and

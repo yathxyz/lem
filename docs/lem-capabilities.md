@@ -1131,6 +1131,12 @@ before user-facing single/project buffer kills. Save As asks before replacing
 any existing target, including an unvisited file, and MCP deletion refuses a
 modified buffer instead of discarding it remotely.
 
+The profile also keeps the configured Emacs no-auto-write policy complete on
+the refreshed fork: Lem auto-save and crash-recovery checkpoint modes are off,
+and terminating-signal emergency checkpoints respect that opt-out. Editing,
+idle waits, and SIGHUP teardown therefore create no backup, lock, auto-save, or
+checkpoint sidecars.
+
 The same module writes `(lem-home)/state/persistence.sexp` through an
 exclusively created same-directory temporary file under an interprocess lock.
 The directory is mode `0700`; state, lock, and temporary files are `0600` from
@@ -2711,6 +2717,21 @@ swap the current cell with its horizontal neighbor, leave formulas attached
 to their table coordinates, and move point with the cell; table edges refuse
 before alignment or mutation. Tab-structured and counter-cookie list levels
 fail closed rather than risk lossy repair.
+
+`Shift-Up`/`Shift-Down` and terminal-safe `C-c Up`/`C-c Down` provide the
+corresponding vertical context dispatch. On ordinary timestamps they adjust
+the cursor-selected year, month, day, hour, or minute, with GNU Org's calendar
+overflow, midnight rollover, five-minute unprefixed rounding, exact numeric
+prefixes, and start/end range coupling; an end-time field changes only that
+endpoint, and either delimiter toggles active/inactive syntax. On headings the
+same keys cycle the default A/B/C priority sequence, including GNU Org's
+first-step and repeated wrap through no priority, without saving. In lists
+they navigate to the previous or next direct sibling at column zero. In table
+data cells they swap contents with the data row above or below, skip horizontal
+rules, retain formulas at their coordinates, and move point with the cell.
+Missing siblings, table edges, unsupported fields, and read-only mutations
+fail before changing the buffer.
+
 The active Evil-Org additional map is also reproduced: `C-Shift-h/l` select
 the previous/next TODO keyword set (a stable no-op with this profile's single
 set), while `C-Shift-k/j` adjust the date or time field under point on a CLOCK
@@ -2726,10 +2747,11 @@ The focused `scripts/org-timestamp-test.sh` resolves the ordinary, exact
 Evil-Org, and terminal-fallback production keys and drives insertion,
 replacement, conversion, shifting, CLOCK synchronization, prefix behavior,
 duration repair, open clocks, Normal-state `M-K` endpoint editing, list-level
-bullet conversion, table-cell swapping, cancellation, read-only and
-non-CLOCK refusal, undo, persistence boundaries, successive active/mixed
-ranges, existing-timestamp ranges, interruption, and TODO dispatch through
-packaged ncurses Lem.
+bullet conversion, horizontal and vertical table-cell swapping, ordinary
+timestamp field adjustment, priority cycling, direct list-sibling navigation,
+cancellation, read-only and non-CLOCK refusal, undo, persistence boundaries,
+successive active/mixed ranges, existing-timestamp ranges, interruption, and
+TODO dispatch through packaged ncurses Lem.
 
 `src/org/source-editing.lisp` supplies GNU Org's source-edit workflow on
 `C-c '`. A bounded source body opens without block delimiters in a dedicated
@@ -2850,8 +2872,8 @@ consumers would still require a different backend.
 This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
 footnote, nested-special, and malformed text-object contexts; structural
 repairs beyond the bounded `d/x/X/< />` and Visual Meta behavior; generic
-Org-element movement, vertical Shift-arrow dispatch and property/clocktable
-horizontal Shift-arrow contexts, and richer list/table semantics; mouse
+Org-element movement, property/clocktable horizontal Shift-arrow contexts,
+and richer list/table semantics; mouse
 calendar selection, Org's exact live echo overlay, and wider timestamp
 variants; prefixed live Babel-session
 source editing, Elisp-valued inputs, variables/sessions and the rest of Babel's

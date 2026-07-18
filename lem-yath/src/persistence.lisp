@@ -1647,9 +1647,11 @@ the visited file byte-for-byte."
 ;;; --- activation -----------------------------------------------------------
 
 ;; The configured Emacs disables all automatic/backup writes.  Lem's optional
-;; auto-save mode writes directly to the visited file, so force it off.
+;; auto-save mode writes directly to the visited file, while the daily-driver
+;; checkpoint mode writes recovery sidecars.  Force both off.
 (setf lem/auto-save:*make-backup-files* nil)
 (ignore-errors (lem/auto-save:auto-save-mode nil))
+(ignore-errors (lem/checkpoint:checkpoint-mode nil))
 
 ;; Match Emacs' live minibuffer-history cap independently of the smaller,
 ;; default-deny set of histories eligible for persistence.
