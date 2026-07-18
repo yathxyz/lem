@@ -23,6 +23,9 @@ scripts/run-bench.sh t1                 # measure + gate against baseline
 scripts/run-bench.sh --rebaseline t1    # regenerate the baseline (needs a ledger entry)
 scripts/run-bench.sh t2 --profile <workload>  # sb-sprof one T2 workload (PF-6)
 scripts/bench/self-test.sh              # prove the gate catches a regression
+scripts/run-bench.sh t3                 # T3 end-to-end (startup + keystroke); fast, no soak
+LEM_T3_SOAK=1 scripts/run-bench.sh t3   # ...plus the optional 30-min soak + leak check (PF-8)
+scripts/bench/e2e/soak-self-test.sh     # prove the leak detector catches an injected leak (PF-8)
 ```
 
 Baselines are per-machine. Every result carries a fingerprint (hostname + CPU
@@ -289,6 +292,61 @@ wrapping is intact (a broken wrap reads ~0). Wall numbers (single key → poll
 only hard gates are the in-image PF-2 keystroke p95 budgets and the warm-startup
 budget. T3's trend history is the ledger rows below.
 
+## T3 soak + leak detection (PF-8)
+
+An optional soak stage lives beside the keystroke harness and drives the SAME
+real ncurses `./lem` binary in the SAME sandboxed private-socket tmux
+(Constraint 7 stays structural). Off by default so the standard `t3` stays fast;
+`LEM_T3_SOAK=1 scripts/run-bench.sh t3` appends it, and it also runs standalone.
+
+- `soak.sh` — a key-driven editing loop for `LEM_SOAK_SECONDS` (default 1800),
+  cycling key analogs of the PF-5 workload actions against the opened 10 MB
+  `mixed-10m` file: page (`C-v`/`M-v`), scroll (`Down`/`Up`), isearch a common
+  needle and abort, insert + `Backspace` + `M-x undo`/`redo`. Each active burst
+  is followed by an **idle rest** (`SOAK_REST_SECONDS`, default 12 s > the 10 s
+  metrics sample period) so the in-image heap idle-timer actually fires and the
+  exit dump carries `dynamic-usage` samples across the run. Two independent
+  memory signals are captured: **external RSS** (sampled from
+  `/proc/<pane_pid>/status` every 10 s into a `t_seconds,rss_bytes` CSV, with no
+  dependence on in-image state) and **in-image `dynamic-usage`** (the metrics
+  heap ring). On completion the editor exits cleanly so the metrics dump fires;
+  the CSV, a copy of the dump, and the analysis text are preserved under
+  `bench/results/` (gitignored).
+- `analyze-soak.mjs` — the detector (node; jq unavailable). Reads the CSV + dump
+  and flags a leak only when **BOTH** signals grow past a threshold (default
+  1 MB/min):
+  - **`dynamic-usage` growth = the FLOOR trend.** Raw `dynamic-usage` sawtooths
+    ±hundreds of MB with the GC cycle, so its least-squares fit is meaningless;
+    the RETAINED memory is the lower envelope (the post-GC troughs). We take the
+    MINIMUM of the first half vs the second half (a reading can never fall below
+    the live set, so the min is a safe, never-spuriously-low floor estimate) and
+    report the floor's growth rate. This is the sensitive, GC-noise-free
+    discriminator: measured flat (~305 MB, ~0.1 MB/min) across a clean editing
+    soak, and rising under a leak.
+  - **RSS growth = a robust median-of-halves rate.** SBCL munmaps memory back to
+    the OS after full GCs, so RSS sawtooths downward and a least-squares slope
+    over a short window is dominated by whichever munmap lands in it (measured: a
+    clean run's second-half LS slope swung to −47 MB/min). The median of the
+    second half minus the median of the first half, over their time separation,
+    cannot be flipped by those outliers.
+  - **Verdict:** `LEAK SUSPECT` (exit 1) iff RSS-rate AND DU-floor-rate both
+    exceed the threshold; `CLEAN` (exit 0) otherwise; `INSUFFICIENT DATA`
+    (exit 2) if either signal has < 4 points per half. `GC pause p99` is also
+    reported from the dump.
+- `soak-self-test.sh` — the PF-8 done-when ("catches a deliberately-injected
+  leak"). Runs the short soak (default 200 s) twice: a LEAK arm whose `--eval`
+  installs a repeating **idle** timer that pushes a 4 MiB array onto a global
+  list every second of idle (a pure test-side injection — NO source changes),
+  and a CLEAN arm with no injection. Asserts the LEAK arm flags (exit 1) and the
+  CLEAN arm does not (exit 0).
+
+The soak verdict is a **trend, not a gate**: like all T3 wall/soak numbers only
+the in-image keystroke/startup budgets ever hard-fail, so a genuine leak suspect
+on the real soak is recorded as a P4 backlog candidate (below), not a red
+commit. `soak.sh`'s own exit code IS the verdict (that is what the self-test
+asserts); the `run-t3.sh` wiring reports it loudly but never flips the tier's
+exit.
+
 ## Ledger
 
 Format: one row per baseline creation / rebaseline / OPT-n. Include the
@@ -317,6 +375,17 @@ PF-2-derived hard budgets.
 | Date | Fingerprint | Commit | Startup warm (ms) | plain p95 | bigfile p95 | longline p95 | scroll p95 | Notes |
 |------|-------------|--------|-------------------|-----------|-------------|--------------|------------|-------|
 | 2026-07-18 | ex44 / i5-13500 / 20c | 8fbbb171 | **190** (cold 190) | **1.0** (wall 6.2) | **1.0** (wall 6.3) | **16.4** (wall 40.7) | **2.0** (wall 6.7) | First T3 baseline row (Milestone P3, PF-7). All budgets PASS: warm startup 190 ms ≪ 2 s; plain keystroke p95 1.0 ms < 10 ms; bigfile/scroll 1–2 ms and longline 16.4 ms all < 30 ms. In-image ms are log2-bucket p95 estimates (us upper-edge / 1000); "wall" = coarse `capture-pane` trend p50. `longline` is the pathological one both in-image (p50 8.2 ms, redisplay-dominated: the certified `k-sum`/`k-obj-width` non-tail width fold over the 16 KB line) and wall (~41 ms) — corroborating signals. queue-wait sample count 142–143 ≥ 120 per scenario (pipeline wrapping proven). No optimization — new measurement tier only. |
+
+### T3 soak history (PF-8)
+
+Soak is trend-only (no committed baseline; matching fingerprint only). Each full
+soak records RSS start/end + median-of-halves rate, the `dynamic-usage` floor
+trend, GC pause p99, and the verdict. Artifacts (CSV, dump copy, analysis) are
+under `bench/results/` (gitignored).
+
+| Date | Fingerprint | Commit | Duration | RSS start→end (med rate) | DU floor rate | GC pause p99 | Verdict | Notes |
+|------|-------------|--------|----------|--------------------------|---------------|--------------|---------|-------|
+| 2026-07-18 | ex44 / i5-13500 / 20c | fd0e83a6 | 30 min (1800 s) | 659→692 MB med-of-halves, **2.20 MB/min** (raw first/last 411→777 MB; 181 samples) | 305→345 MB, **2.61 MB/min** (130 samples) | 131.1 ms (348 GCs) | **LEAK SUSPECT** | First full soak (Milestone P3, PF-8), against the real ncurses `./lem` at `fd0e83a6`, cycling key analogs of the seven PF-5 workload actions over the 10 MB `mixed-10m` file with 12 s idle rests. **Trend-only, NOT a commit gate** (PF-8, like all T3 wall/soak numbers — only the in-image keystroke/startup budgets ever hard-fail). Both signals clear the 1 MB/min threshold so the detector flags: recorded here as a **P4 backlog candidate** (leak triage — P5/optimization must wait for the P4 grounding report, so it is NOT investigated or fixed here). The DU floor (retained-memory lower envelope) rising ~40 MB over 30 min is the sensitive signal; RSS corroborates. To triage at P4: heap still reaching steady working set over the run vs. genuine per-burst retention. The detector *itself* is validated by `soak-self-test.sh` (200 s ×2 arms): CLEAN arm → CLEAN (exit 0, DU floor 0.02 MB/min, RSS −33 MB/min munmap dip correctly not flagged), injected-leak arm → LEAK SUSPECT (exit 1, DU floor 26.25 MB/min) — so PF-8's done-when (one full soak recorded + analyzed **and** the detector catches a deliberately-injected leak) is satisfied. Artifacts (CSV, dump copy, analysis) under `bench/results/` (gitignored); sandbox + private tmux socket torn down by the harness trap. |
 
 ### Optimizations (OPT-n)
 
@@ -699,3 +768,60 @@ the spec.
   "Rebaselined" epilogue when no gated tier was actually rebaselined. T3's trend
   history lives in the ledger's *T3 trend history* table above (Constraint 6:
   trends recorded in the ledger, not a committed baseline file).
+
+- **The soak "`dynamic-usage` growth" signal is the FLOOR (post-GC trough)
+  trend, not a raw least-squares fit** (PF-8). PF-8 says "flags monotonic heap
+  growth (linear fit over the second half ... RSS and `dynamic-usage`)". Measured
+  reality on this editor: idle-timer `dynamic-usage` sawtooths ±hundreds of MB
+  per GC cycle (a clean editing soak swings ~305↔530 MB), so a least-squares fit
+  over raw samples catches whichever GC phase the ~10 s sampling lands on and
+  false-flags a flat run. The retained memory is the lower envelope, so the
+  detector compares the MINIMUM of the first half vs the second half (a
+  `dynamic-usage` reading can never be below the live set, so the min is a safe
+  floor estimate that never spuriously undershoots) and flags on the floor's
+  growth rate. This is the honest reading of "monotonic heap growth" for a
+  generational collector; measured ~0.1 MB/min on a clean soak, cleanly rising
+  under an injected leak.
+
+- **The soak "RSS growth" signal is a robust median-of-halves rate, not a
+  least-squares slope** (PF-8). SBCL munmaps memory back to the OS after full
+  GCs, so external RSS sawtooths downward; a least-squares slope over the second
+  half is dominated by whichever munmap falls in it (measured: a clean run's
+  second-half LS slope swung to −47 MB/min while total RSS was flat). The
+  detector uses `median(2nd half) − median(1st half)` over their time
+  separation, which those outlier dips cannot flip.
+
+- **On a SHORT run, RSS alone cannot discriminate a leak; the DU floor is the
+  discriminator and RSS is the required corroboration** (PF-8). Warm-up arena
+  growth (~250 MB as the 10 MB file loads and the heap reaches working size)
+  dominates RSS on a short run and is present with or without a leak, so RSS's
+  short-run growth does not separate the two. The verdict therefore ANDs the
+  sensitive, GC-noise-free DU-floor rate with the RSS rate: a clean run is
+  vetoed by its flat DU floor regardless of RSS noise, and a leak must move
+  BOTH. Consequently the leak-detector self-test injects a deliberately LARGE
+  leak (4 MiB per idle second, hundreds of MB) so it clears the RSS noise
+  unambiguously and exercises the full "RSS AND DU" gate — the magnitude proves
+  the mechanism; the far more sensitive DU floor is what catches a small real
+  leak on the 30-min soak.
+
+- **The injected self-test leak is an IDLE timer, not a regular timer** (PF-8).
+  A regular timer firing every second keeps the editor from ever being idle for
+  the metrics heap idle-timer's 10 s period, starving the very `dynamic-usage`
+  samples the detector reads (measured: 2 samples over a 200 s run). An idle
+  timer is serviced during the idle rests alongside the metrics sampler (idle
+  timers fire without leaving the idle loop), so the leak grows AND the heap
+  ring still samples it.
+
+- **The soak verdict is a trend, never a commit gate** (PF-8, consistent with
+  PF-7). The optional `LEM_T3_SOAK=1` stage reports the verdict loudly but never
+  flips `run-t3.sh`'s exit; only the in-image keystroke/startup budgets hard-fail
+  in T3. A genuine leak suspect on the real soak is recorded as a P4 backlog
+  candidate (with its data), not fixed here and not a red commit — PF-8's
+  done-when is "one full soak recorded and analyzed" plus "the detector catches
+  an injected leak", both satisfied without gating on the noisy wall tier.
+
+- **The soak's `longline`-class pathology is avoided; the soak edits the 10 MB
+  file, not a >24 000-char single line** (PF-8, inheriting the P1/P2/P3 cliff).
+  The soak workload never constructs a single line past the ~24 000-char
+  redisplay stack-exhaustion cliff (it edits within the `mixed-10m` corpus and
+  inserts short strings), so the 30-min run cannot hit the known crash.

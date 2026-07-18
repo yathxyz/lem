@@ -27,6 +27,8 @@ source "$HERE/common.sh"
 source "$HERE/startup.sh"
 # shellcheck source=./keystroke.sh
 source "$HERE/keystroke.sh"
+# shellcheck source=./soak.sh
+source "$HERE/soak.sh"
 
 RESULTS_DIR="${LEM_BENCH_RESULTS_DIR:-$E2E_REPO_ROOT/bench/results}"
 FP_SLUG="${LEM_BENCH_FP_SLUG:-standalone}"
@@ -41,6 +43,24 @@ E2E_KV="$LEM_E2E_ROOT/results.kv"
 HARNESS_RC=0
 e2e_startup_run   || HARNESS_RC=1
 e2e_keystroke_run || HARNESS_RC=1
+
+# Optional soak stage (SPEC-PERF PF-8), off by default so the standard t3 stays
+# fast.  `LEM_T3_SOAK=1' runs a LEM_SOAK_SECONDS soak (default 30 min) + leak
+# analysis in the same sandbox.  The verdict is reported loudly but treated as a
+# TREND, not a gate: like all T3 wall/soak numbers, only the in-image
+# keystroke/startup budgets ever hard-fail (a genuine leak suspect is a P4
+# backlog candidate to record in the ledger, per PF-8 -- not a red commit).
+if [ "${LEM_T3_SOAK:-0}" = "1" ]; then
+  echo
+  echo "== optional soak stage (LEM_T3_SOAK=1) =="
+  SOAK_RC=0
+  e2e_soak_run || SOAK_RC=$?
+  case "$SOAK_RC" in
+    0) echo "soak: VERDICT CLEAN (trend-only; not a gate)" ;;
+    1) echo "soak: VERDICT LEAK SUSPECT -- record as a P4 backlog candidate (trend-only; not a gate)" ;;
+    *) echo "soak: INSUFFICIENT DATA / harness issue (rc=$SOAK_RC; trend-only; not a gate)" ;;
+  esac
+fi
 
 mkdir -p "$RESULTS_DIR"
 RESULT_JSON="$RESULTS_DIR/${FP_SLUG}-t3-${TIMESTAMP}.json"
