@@ -774,7 +774,8 @@ cannot fall through to a paragraph or section after an inner end marker."
   (or (%org-unclosed-block-at-p point)
       (and (%org-special-line-p point)
            (null (%org-drawer-boundary-at point)))
-      (%org-list-continuation-context-p point)
+      (and (%org-list-continuation-context-p point)
+           (not (%org-supported-list-context-p point)))
       (and (org-list-item-line-p point)
            (not (%org-current-list-item point)))))
 
@@ -911,13 +912,37 @@ cannot fall through to a paragraph or section after an inner end marker."
       (with-point ((point item))
         (line-start point)
         (loop :while (point< point end)
-              :for line := (line-string point)
-              :unless (and (plusp (length line))
-                           (%org-safe-unordered-item-p point))
+              :when (org-list-line-structural-tab-p point)
+                :return nil
+              :when (and (org-list-item-line-p point)
+                         (not (%org-safe-unordered-item-p point)))
                 :return nil
               :unless (line-offset point 1)
                 :return t
               :finally (return t))))))
+
+(defun %org-list-owner-item (origin)
+  "Return the nearest list item whose parsed tree owns ORIGIN."
+  (if (org-list-item-line-p origin)
+      (with-point ((item origin))
+        (line-start item)
+        (copy-point item :temporary))
+      (with-point ((point origin)
+                   (target origin))
+        (line-start point)
+        (line-start target)
+        (loop :while (line-offset point -1)
+              :when (org-heading-line-p point)
+                :return nil
+              :when (org-list-item-line-p point)
+                :do (alexandria:when-let
+                        ((end (org-list-item-tree-end point)))
+                      (when (point< target end)
+                        (return (copy-point point :temporary))))))))
+
+(defun %org-supported-list-context-p (origin)
+  (alexandria:when-let ((item (%org-list-owner-item origin)))
+    (%org-safe-list-tree-p item)))
 
 (defun %org-current-list-item (origin)
   (with-point ((item origin))
@@ -925,47 +950,53 @@ cannot fall through to a paragraph or section after an inner end marker."
     (and (%org-safe-list-tree-p item)
          (copy-point item :temporary))))
 
+(defun %org-list-paragraph-origin (origin item)
+  "Return the non-blank paragraph line owning ORIGIN within ITEM."
+  (with-point ((point origin))
+    (line-start point)
+    (loop :while (cl-ppcre:scan "^\\s*$" (line-string point))
+          :do (unless (and (line-offset point -1)
+                           (not (point< point item)))
+                (return-from %org-list-paragraph-origin nil)))
+    (when (or (same-line-p point item)
+              (not (org-navigation-structural-line-p point)))
+      (copy-point point :temporary))))
+
 (defun %org-list-point-context (origin)
   "Return ORIGIN's pinned Org list context, item, and text column.
 
 Org classifies absolute BOL as the containing plain list, even before an
 indented bullet.  The prefix after BOL is an item; actual non-empty item text
-is a paragraph."
-  (with-point ((item origin))
-    (line-start item)
-    (when (%org-safe-list-tree-p item)
-      (multiple-value-bind (indent content-column text-column)
-          (org-list-item-columns item)
-        (declare (ignore indent content-column))
-        (when text-column
-          (let ((column (point-charpos origin))
-                (line-length (length (line-string item))))
-            (values
-             (cond
-               ((and (zerop column)
-                     (null (org-list-previous-sibling item)))
-                :plain-list)
-               ((and (< text-column line-length)
-                     (>= column text-column))
-                :paragraph)
-               (t :item))
-             (copy-point item :temporary)
-             text-column)))))))
+is a paragraph.  Continuation lines retain the paragraph of their owning
+item."
+  (alexandria:when-let ((owner (%org-list-owner-item origin)))
+    (with-point ((item owner))
+      (when (%org-safe-list-tree-p item)
+        (multiple-value-bind (indent content-column text-column)
+            (org-list-item-columns item)
+          (declare (ignore indent content-column))
+          (when text-column
+            (let ((column (point-charpos origin))
+                  (line-length (length (line-string item))))
+              (values
+               (cond
+                 ((not (same-line-p origin item))
+                  (when (%org-list-paragraph-origin origin item)
+                    :paragraph))
+                 ((and (zerop column)
+                       (null (org-list-previous-sibling item)))
+                  :plain-list)
+                 ((and (< text-column line-length)
+                       (>= column text-column))
+                  :paragraph)
+                 (t :item))
+               (copy-point item :temporary)
+               text-column))))))))
 
 (defun %org-list-continuation-context-p (origin)
   "Whether ORIGIN is non-list body text owned by an earlier list item."
-  (unless (org-list-item-line-p origin)
-    (with-point ((point origin)
-                 (target origin))
-      (line-start point)
-      (line-start target)
-      (loop :while (line-offset point -1)
-            :for line := (line-string point)
-            :until (or (zerop (length line)) (org-heading-line-p point))
-            :when (org-list-item-line-p point)
-              :do (let ((end (org-list-item-tree-end point)))
-                    (when (and end (point< target end))
-                      (return t)))))))
+  (and (not (org-list-item-line-p origin))
+       (not (null (%org-list-owner-item origin)))))
 
 (defun %org-list-item-boundary (item)
   (when (%org-safe-list-tree-p item)
@@ -990,15 +1021,50 @@ is a paragraph."
              (and inner-start (copy-point end :temporary))
              :character :list-item)))))))
 
-(defun %org-list-paragraph-boundary (item text-column)
-  (when (and (%org-safe-list-tree-p item)
-             text-column
-             (< text-column (length (line-string item))))
-    (let ((start (%org-line-point item text-column))
-          (end (%org-line-after item)))
-      (%make-org-boundary
-       start end (copy-point start :temporary) (copy-point end :temporary)
-       :character :paragraph))))
+(defun %org-list-paragraph-boundary (item text-column origin)
+  (alexandria:when-let
+      ((paragraph-origin (%org-list-paragraph-origin origin item)))
+    (when (and (%org-safe-list-tree-p item)
+               text-column
+               (< text-column (length (line-string item))))
+      (alexandria:when-let ((tree-end (org-list-item-tree-end item)))
+        (with-point ((start paragraph-origin)
+                     (last paragraph-origin))
+          (line-start start)
+          (line-start last)
+          (if (same-line-p start item)
+              (move-point start (%org-line-point item text-column))
+              (loop
+                (with-point ((previous start))
+                  (unless (and (line-offset previous -1)
+                               (not (point< previous item)))
+                    (return))
+                  (cond
+                    ((same-line-p previous item)
+                     (move-point start (%org-line-point item text-column))
+                     (return))
+                    ((or (cl-ppcre:scan
+                          "^\\s*$" (line-string previous))
+                         (org-navigation-structural-line-p previous))
+                     (return))
+                    (t (move-point start previous))))))
+          (loop
+            (with-point ((next last))
+              (unless (and (line-offset next 1)
+                           (point< next tree-end)
+                           (not (cl-ppcre:scan
+                                 "^\\s*$" (line-string next)))
+                           (not (org-navigation-structural-line-p next)))
+                (return))
+              (move-point last next)))
+          (let* ((inner-end (%org-line-after last))
+                 (outer-end (%org-expand-blank-lines inner-end)))
+            (when (point< tree-end outer-end)
+              (move-point outer-end tree-end))
+            (%make-org-boundary
+             start outer-end
+             (copy-point start :temporary) (copy-point inner-end :temporary)
+             :character :paragraph)))))))
 
 (defun %org-parent-list-item (item)
   (let ((indent (nth-value 0 (org-list-item-columns item))))
@@ -1041,7 +1107,7 @@ is a paragraph."
     (case context
       (:plain-list (%org-plain-list-boundary item :kind :character))
       (:item (%org-list-item-boundary item))
-      (:paragraph (%org-list-paragraph-boundary item text-column)))))
+      (:paragraph (%org-list-paragraph-boundary item text-column origin)))))
 
 (defun %org-paragraph-line-p (point)
   (let ((line (line-string point)))
@@ -1243,7 +1309,8 @@ is a paragraph."
                 (and (%org-special-line-p origin)
                      (null block)
                      (null drawer))
-                (%org-list-continuation-context-p origin)
+                (and (%org-list-continuation-context-p origin)
+                     (not (%org-supported-list-context-p origin)))
                 (org-heading-line-p origin))
       (alexandria:if-let ((heading (org-current-heading-point origin)))
         (let ((start (%org-line-after heading))
@@ -1310,7 +1377,8 @@ is a paragraph."
          (%org-heading-ancestors origin))))
     (when (or (%org-inside-drawer-p origin)
               (%org-unclosed-block-at-p origin)
-              (%org-list-continuation-context-p origin)
+              (and (%org-list-continuation-context-p origin)
+                   (not (%org-supported-list-context-p origin)))
               (and (%org-special-line-p origin) (null block))
               (and (org-list-item-line-p origin)
                    (not (%org-current-list-item origin))))

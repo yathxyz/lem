@@ -465,7 +465,25 @@ write_fixtures() {
   printf '%s\n' \
     '- item' \
     '  continuation body' \
-    '- next' >"$WORKDIR/unsafe-continuation.org"
+    '- next' >"$WORKDIR/continuation-list.org"
+  printf '%s\n' \
+    '- parent' \
+    '  parent continuation' \
+    '  - child' \
+    '    child continuation' \
+    '- sibling' >"$WORKDIR/continuation-nested.org"
+  printf '%s\n' \
+    '- first paragraph' \
+    '' \
+    '  second paragraph' \
+    '  second continuation' \
+    '- next' >"$WORKDIR/continuation-blank-paragraph.org"
+  printf '%s\n' \
+    '1. item' \
+    '   continuation body' \
+    '2. next' >"$WORKDIR/unsafe-ordered-continuation.org"
+  printf '%s\n' '- item' $'\tcontinuation body' '- next' \
+    >"$WORKDIR/unsafe-tabbed-continuation.org"
   printf '%s\n' \
     '#+begin_src text' \
     'body without end' >"$WORKDIR/unsafe-unclosed.org"
@@ -2808,11 +2826,155 @@ if start_case unsafe-tabbed "$WORKDIR/unsafe-tabbed.org" 'tabbed item'; then
   stop_case "$CASE_SESSION"
 fi
 
-if start_case unsafe-continuation "$WORKDIR/unsafe-continuation.org" \
+if start_case continuation-list "$WORKDIR/continuation-list.org" \
      'continuation body'; then
-  send_keys "$CASE_SESSION" j
-  assert_unsafe_context unsafe-continuation "$CASE_SESSION" \
-    'text=- item\n  continuation body\n- next\n bytes='
+  if operate_and_record continuation-list "$CASE_SESSION" y a E; then
+    assert_state continuation-list-bol-aE continuation-list \
+      "$CASE_SESSION" \
+      'register=- item\n  continuation body\n- next\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j 0
+  if operate_and_record continuation-list "$CASE_SESSION" y a e; then
+    assert_state continuation-list-body-ae continuation-list \
+      "$CASE_SESSION" \
+      'register=item\n  continuation body\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j 0
+  if operate_and_record continuation-list "$CASE_SESSION" y i e; then
+    assert_state continuation-list-body-ie continuation-list \
+      "$CASE_SESSION" \
+      'register=item\n  continuation body\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j 0
+  if operate_and_record continuation-list "$CASE_SESSION" y a E; then
+    assert_state continuation-list-body-aE continuation-list \
+      "$CASE_SESSION" \
+      'register=item\n  continuation body\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j 0
+  if operate_and_record continuation-list "$CASE_SESSION" y a r; then
+    assert_state continuation-list-body-ar continuation-list \
+      "$CASE_SESSION" \
+      'register=- item\n  continuation body\n register-type=line' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j 0
+  if operate_and_record continuation-list "$CASE_SESSION" y i r; then
+    assert_state continuation-list-body-ir continuation-list \
+      "$CASE_SESSION" \
+      'register=item\n  continuation body\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j 0
+  if operate_and_record continuation-list "$CASE_SESSION" d a r; then
+    assert_state continuation-list-body-dar continuation-list \
+      "$CASE_SESSION" \
+      'text=- next\n bytes=' \
+      'register=- item\n  continuation body\n register-type=line' \
+      'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state continuation-list "$CASE_SESSION"
+    assert_state continuation-list-body-dar-undo continuation-list \
+      "$CASE_SESSION" \
+      'text=- item\n  continuation body\n- next\n bytes=' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case continuation-nested "$WORKDIR/continuation-nested.org" \
+     'child continuation'; then
+  send_keys "$CASE_SESSION" j 0
+  if operate_and_record continuation-nested "$CASE_SESSION" y a e; then
+    assert_state continuation-parent-body-ae continuation-nested \
+      "$CASE_SESSION" \
+      'register=parent\n  parent continuation\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 3 j 0
+  if operate_and_record continuation-nested "$CASE_SESSION" y a e; then
+    assert_state continuation-child-body-ae continuation-nested \
+      "$CASE_SESSION" \
+      'register=child\n    child continuation\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 3 j 0
+  if operate_and_record continuation-nested "$CASE_SESSION" y a r; then
+    assert_state continuation-child-body-ar continuation-nested \
+      "$CASE_SESSION" \
+      'register=  - child\n    child continuation\n register-type=line' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 3 j 0
+  if operate_and_record continuation-nested "$CASE_SESSION" 3 y a r; then
+    assert_state continuation-child-count-ar continuation-nested \
+      "$CASE_SESSION" \
+      'register=- parent\n  parent continuation\n  - child\n    child continuation\n register-type=line' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case continuation-blank-paragraph \
+     "$WORKDIR/continuation-blank-paragraph.org" 'second continuation'; then
+  send_keys "$CASE_SESSION" 2 l
+  if operate_and_record continuation-blank-paragraph \
+       "$CASE_SESSION" y a e; then
+    assert_state continuation-blank-first-ae \
+      continuation-blank-paragraph "$CASE_SESSION" \
+      'register=first paragraph\n\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 2 l
+  if operate_and_record continuation-blank-paragraph \
+       "$CASE_SESSION" y i e; then
+    assert_state continuation-blank-first-ie \
+      continuation-blank-paragraph "$CASE_SESSION" \
+      'register=first paragraph\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j 0
+  if operate_and_record continuation-blank-paragraph \
+       "$CASE_SESSION" y a e; then
+    assert_state continuation-owned-blank-ae \
+      continuation-blank-paragraph "$CASE_SESSION" \
+      'register=first paragraph\n\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0
+  send_keys "$CASE_SESSION" 2 j 0
+  if operate_and_record continuation-blank-paragraph \
+       "$CASE_SESSION" y a e; then
+    assert_state continuation-blank-paragraph-ae \
+      continuation-blank-paragraph "$CASE_SESSION" \
+      'register=  second paragraph\n  second continuation\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 2 j 0
+  if operate_and_record continuation-blank-paragraph \
+       "$CASE_SESSION" y a r; then
+    assert_state continuation-blank-paragraph-ar \
+      continuation-blank-paragraph "$CASE_SESSION" \
+      'register=- first paragraph\n\n  second paragraph\n  second continuation\n register-type=line' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case unsafe-ordered-continuation \
+     "$WORKDIR/unsafe-ordered-continuation.org" 'continuation body'; then
+  send_keys "$CASE_SESSION" j 0
+  assert_unsafe_context unsafe-ordered-continuation "$CASE_SESSION" \
+    'text=1. item\n   continuation body\n2. next\n bytes='
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case unsafe-tabbed-continuation \
+     "$WORKDIR/unsafe-tabbed-continuation.org" 'continuation body'; then
+  send_keys "$CASE_SESSION" j 0
+  assert_unsafe_context unsafe-tabbed-continuation "$CASE_SESSION" \
+    'text=- item\n\tcontinuation body\n- next\n bytes='
   stop_case "$CASE_SESSION"
 fi
 
