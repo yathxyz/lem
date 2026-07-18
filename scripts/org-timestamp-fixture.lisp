@@ -85,6 +85,12 @@
   lem-yath-test-timestamp-goto-clock-read-only "20:00" 1)
 (define-org-timestamp-test-goto
   lem-yath-test-timestamp-goto-outside-clock "Outside clock shift")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-list-continuation "shift continuation")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-table-first "| left")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-table-last "right |")
 
 (define-command lem-yath-test-org-timestamp-bindings () ()
   (with-open-file (stream (merge-pathnames "bindings"

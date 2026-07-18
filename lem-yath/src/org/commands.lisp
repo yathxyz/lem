@@ -757,8 +757,12 @@ still use TARGET as their cursor destination."
        (when (buffer-filename (current-buffer))
          (save-buffer (current-buffer)))
        (message "TODO state: ~a" (or state "none"))))
+    ((org-navigation-list-anchor (current-point))
+     (org-cycle-list-bullet-at-point forward-p))
+    ((org-table-line-p (current-point))
+     (org-table-move-cell-horizontal (if forward-p 1 -1)))
     (t
-     (message "No shiftable Org timestamp or heading at point"))))
+     (message "No horizontally shiftable Org context at point"))))
 
 (define-command lem-yath-org-context-shift-right () ()
   "Move a timestamp later or a heading to its next TODO state."
@@ -1075,6 +1079,108 @@ source blocks on the ordinary Evil path."
        (declare (ignore candidate-content candidate))
        (cond ((< candidate-indent indent) (return-from org-list-previous-sibling nil))
              ((= candidate-indent indent) t))))))
+
+(defun org-list-level-siblings (item)
+  "Return the complete sibling level containing ITEM."
+  (let ((first (copy-point item :temporary)))
+    (loop :for previous := (org-list-previous-sibling first)
+          :while previous
+          :do (move-point first previous))
+    (loop :with siblings := nil
+          :for sibling := (copy-point first :temporary)
+            :then (org-list-next-sibling sibling)
+          :while sibling
+          :do (push sibling siblings)
+          :finally (return (nreverse siblings)))))
+
+(defun org-list-bullet-bounds (item)
+  "Return ITEM's bullet columns and normalized bullet name."
+  (multiple-value-bind (start end registers register-ends)
+      (cl-ppcre:scan "^(\\s*)([-+*]|[0-9]+[.)])(\\s+)"
+                     (line-string item))
+    (declare (ignore start end))
+    (when (and registers (aref registers 1))
+      (let* ((bullet-start (aref registers 1))
+             (bullet-end (aref register-ends 1))
+             (bullet (subseq (line-string item) bullet-start bullet-end)))
+        (values bullet-start bullet-end
+                (cond
+                  ((eql (char bullet (1- (length bullet))) #\.) "1.")
+                  ((eql (char bullet (1- (length bullet))) #\)) "1)")
+                  (t bullet)))))))
+
+(defun org-list-description-item-p (item)
+  "Whether ITEM is a GNU Org description-list item."
+  (multiple-value-bind (indent content-column text-column)
+      (org-list-item-columns item)
+    (declare (ignore indent content-column))
+    (and text-column
+         (cl-ppcre:scan "\\s+::(?:\\s+|$)"
+                        (subseq (line-string item) text-column)))))
+
+(defun org-list-cycle-bullets (siblings)
+  "Return the configured bullet cycle for SIBLINGS."
+  (let* ((indent (nth-value 0 (org-list-item-columns (first siblings))))
+         (description-p (find-if #'org-list-description-item-p siblings)))
+    (append '("-" "+")
+            (unless (zerop indent) '("*"))
+            (unless description-p '("1." "1)")))))
+
+(defun org-list-shift-owned-body (item end delta)
+  "Shift ITEM's continuation and descendant lines up to END by DELTA."
+  (unless (zerop delta)
+    (with-point ((point item))
+      (loop :while (and (line-offset point 1) (point< point end))
+            :unless (zerop (length (line-string point)))
+              :do (org-shift-line-indentation point delta)))))
+
+(defun org-list-replace-bullet (item replacement)
+  "Replace ITEM's bullet and return the change in bullet width."
+  (multiple-value-bind (start end current) (org-list-bullet-bounds item)
+    (declare (ignore current))
+    (unless start
+      (return-from org-list-replace-bullet nil))
+    (with-point ((point item))
+      (line-start point)
+      (character-offset point start)
+      (delete-character point (- end start))
+      (insert-string point replacement))
+    (- (length replacement) (- end start))))
+
+(defun org-cycle-list-bullet-at-point (forward-p)
+  "Cycle the complete list level at point in GNU Org's configured order."
+  (alexandria:if-let ((item (org-navigation-list-anchor (current-point))))
+    (let* ((siblings (org-list-level-siblings item))
+           (cycle (org-list-cycle-bullets siblings))
+           (current (nth-value 2 (org-list-bullet-bounds (first siblings))))
+           (index (or (position current cycle :test #'string=) 0))
+           (target (nth (mod (+ index (if forward-p 1 -1))
+                             (length cycle))
+                        cycle)))
+      (when (buffer-read-only-p (current-buffer))
+        (editor-error "Org buffer is read-only"))
+      (when (find-if #'org-list-line-structural-tab-p
+                     (org-list-repair-segment-lines item))
+        (editor-error "Tab-indented list bullet cycling is unsupported"))
+      (when (find-if (lambda (sibling)
+                       (cl-ppcre:scan "\\[@[0-9]+\\]"
+                                      (line-string sibling)))
+                     siblings)
+        (editor-error "Counter-cookie list cycling is unsupported"))
+      (org-clear-folds (current-buffer))
+      (loop :for sibling :in siblings
+            :for number :from 1
+            :for replacement :=
+              (if (member target '("1." "1)") :test #'string=)
+                  (format nil "~d~c" number
+                          (char target (1- (length target))))
+                  target)
+            :for end := (org-list-item-tree-end sibling)
+            :for delta := (org-list-replace-bullet sibling replacement)
+            :do (org-list-shift-owned-body sibling end delta))
+      (message "List bullet: ~a" target)
+      t)
+    (message "Point is not in an Org list item")))
 
 (defun org-shift-line-indentation (point delta)
   (with-point ((line point))
@@ -2358,6 +2464,41 @@ The second value is the length of SECOND in its new leading position."
     (org-table-move-to-cell (current-point) cell)
     (org-table-align)
     t))
+
+(defun org-table-move-cell-horizontal (direction)
+  "Swap the current data cell one column in DIRECTION."
+  (unless (member direction '(-1 1))
+    (error "Invalid horizontal table direction: ~s" direction))
+  (when (buffer-read-only-p (current-buffer))
+    (editor-error "Org buffer is read-only"))
+  (when (org-table-separator-line-p (line-string (current-point)))
+    (editor-error "Place point in a table data cell"))
+  (multiple-value-bind (raw-start raw-end) (org-table-bounds)
+    (unless raw-start
+      (editor-error "No table at point"))
+    (let* ((raw-lines (org-table-row-lines raw-start raw-end))
+           (raw-row (- (line-number-at-point (current-point))
+                       (line-number-at-point raw-start)))
+           (raw-cells (org-table-cells (nth raw-row raw-lines)))
+           (raw-cell (max 1 (org-table-cell-index)))
+           (raw-target (+ raw-cell direction)))
+      (when (or (< raw-target 1) (> raw-target (length raw-cells)))
+        (editor-error "Cannot move table cell further"))))
+  (org-table-align)
+  (multiple-value-bind (start end) (org-table-bounds)
+    (let* ((lines (org-table-row-lines start end))
+           (row (- (line-number-at-point (current-point))
+                   (line-number-at-point start)))
+           (cell (max 1 (org-table-cell-index)))
+           (target (+ cell direction))
+           (cells (org-table-cells (nth row lines))))
+      (setf (nth row lines)
+            (org-table-raw-data-line
+             (org-table-row-indentation (nth row lines))
+             (org-swap-list-elements cells (1- cell) (1- target))))
+      (org-table-rewrite-lines lines row target)
+      (message "Table cell moved ~:[left~;right~]" (plusp direction))
+      t)))
 
 (defun org-table-transform-columns (transform target-cell)
   (multiple-value-bind (raw-start raw-end) (org-table-bounds)

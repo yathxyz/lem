@@ -42,6 +42,15 @@ CLOCK: [2026-07-18 Sat 18:00]--[2026-07-18 Sat 19:30] =>  1:30
 CLOCK: [2026-07-18 Sat 20:00]--[2026-07-18 Sat 21:30] =>  1:30
 :END:
 Outside clock shift
+* Shift contexts
+- first
+  shift continuation
+  - child
+- second
+Horizontal table:
+| left | middle | right |
+| low  | center | high  |
+#+TBLFM: $3=$1
 EOF
 cp "$fixture" "$root/original.org"
 
@@ -519,6 +528,75 @@ if lem_wait_for "$session" 'Not at a CLOCK log' 10 >/dev/null; then
   pass clock-context 'Shift-Control clock adjustment refuses outside CLOCK logs'
 else
   fail clock-context 'non-CLOCK context did not report a bounded refusal'
+fi
+
+goto_marker list-continuation
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.3
+if snapshot 28 &&
+   grep -q '^+ first$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-28" &&
+   grep -q '^  shift continuation$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-28" &&
+   grep -q '^  - child$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-28" &&
+   grep -q '^+ second$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-28"; then
+  pass list-bullet 'Shift-Right cycles the complete list level from - to +'
+else
+  fail list-bullet 'list-level bullet cycling changed the wrong lines'
+fi
+
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.3
+if snapshot 29 &&
+   grep -q '^1\. first$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-29" &&
+   grep -q '^   shift continuation$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-29" &&
+   grep -q '^   - child$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-29" &&
+   grep -q '^2\. second$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-29"; then
+  pass list-numbering 'bullet-width changes preserve child and continuation structure'
+else
+  fail list-numbering 'ordered conversion or structural indentation differed'
+fi
+
+tmux_cmd send-keys -t "$session" C-x u
+sleep 0.3
+if snapshot 30 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-30" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-28"; then
+  pass list-undo 'one Emacs undo restores the complete prior list level'
+else
+  fail list-undo 'list bullet cycling split into multiple undo steps'
+fi
+
+goto_marker table-first
+tmux_cmd send-keys -t "$session" C-c Right
+sleep 0.3
+if snapshot 31 &&
+   grep -q '^| middle | left   | right |$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-31" &&
+   grep -q '^#+TBLFM: \$3=\$1$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-31"; then
+  pass table-cell 'Shift-Right swaps one table cell and preserves formulas'
+else
+  fail table-cell 'horizontal table-cell movement changed the wrong structure'
+fi
+
+tmux_cmd send-keys -t "$session" C-x u
+sleep 0.3
+if snapshot 32 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-32" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-30"; then
+  pass table-undo 'one Emacs undo restores the complete aligned table'
+else
+  fail table-undo 'table-cell movement split into multiple undo steps'
+fi
+
+goto_marker table-last
+tmux_cmd send-keys -t "$session" C-c Right
+if lem_wait_for "$session" 'Cannot move table cell further' 10 >/dev/null &&
+   snapshot 33 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-33" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-32"; then
+  pass table-edge 'edge movement refuses before changing or aligning the table'
+else
+  fail table-edge 'edge refusal mutated the table or did not report failure'
 fi
 
 if [ "$failed" -ne 0 ]; then

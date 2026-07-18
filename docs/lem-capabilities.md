@@ -2703,7 +2703,14 @@ remain unsaved and each command is one undo step.
 At a timestamp, `Shift-Left`/`Shift-Right` and terminal-safe `C-c Left`/
 `C-c Right` move its date while preserving delimiter type, time range, and
 suffix. At a heading the same keys cycle the configured TODO sequence in the
-corresponding direction and retain the profile's immediate-save behavior.
+corresponding direction and retain the profile's immediate-save behavior. In
+a list they cycle the complete sibling level through GNU Org's configured
+bullet order, including top-level star exclusion, ordered renumbering, and
+the indentation change required by wider bullets. In a table data field they
+swap the current cell with its horizontal neighbor, leave formulas attached
+to their table coordinates, and move point with the cell; table edges refuse
+before alignment or mutation. Tab-structured and counter-cookie list levels
+fail closed rather than risk lossy repair.
 The active Evil-Org additional map is also reproduced: `C-Shift-h/l` select
 the previous/next TODO keyword set (a stable no-op with this profile's single
 set), while `C-Shift-k/j` adjust the date or time field under point on a CLOCK
@@ -2718,8 +2725,9 @@ commands without stealing existing `C-h/j/k/l` behavior.
 The focused `scripts/org-timestamp-test.sh` resolves the ordinary, exact
 Evil-Org, and terminal-fallback production keys and drives insertion,
 replacement, conversion, shifting, CLOCK synchronization, prefix behavior,
-duration repair, open clocks, Normal-state `M-K` endpoint editing, cancellation, read-only
-and non-CLOCK refusal, undo, persistence boundaries, successive active/mixed
+duration repair, open clocks, Normal-state `M-K` endpoint editing, list-level
+bullet conversion, table-cell swapping, cancellation, read-only and
+non-CLOCK refusal, undo, persistence boundaries, successive active/mixed
 ranges, existing-timestamp ranges, interruption, and TODO dispatch through
 packaged ncurses Lem.
 
@@ -2842,9 +2850,10 @@ consumers would still require a different backend.
 This is intentionally narrower than GNU Org and Evil-Org. Richer drawer,
 footnote, nested-special, and malformed text-object contexts; structural
 repairs beyond the bounded `d/x/X/< />` and Visual Meta behavior; generic
-Org-element movement, unimplemented list/table Shift-control contexts, and
-richer list/table semantics; mouse calendar selection and Org's exact live
-echo overlay and wider timestamp variants; prefixed live Babel-session
+Org-element movement, vertical Shift-arrow dispatch and property/clocktable
+horizontal Shift-arrow contexts, and richer list/table semantics; mouse
+calendar selection, Org's exact live echo overlay, and wider timestamp
+variants; prefixed live Babel-session
 source editing, Elisp-valued inputs, variables/sessions and the rest of Babel's
 backend/header/result matrix; in-editor LaTeX preview, non-HTML export
 backends, and exact `ox-html` output remain explicit gaps. The display-only
