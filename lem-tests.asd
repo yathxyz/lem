@@ -39,7 +39,9 @@
                              (:file "input-decode-conformance")
                              (:file "width-vectors")
                              (:file "width-conformance")
-                             (:file "layout-conformance")))
+                             (:file "layout-conformance")
+                             (:file "redisplay-cache")
+                             (:file "screen-projection")))
                #+sbcl
                (:module "language-server"
                 :components ((:file "utils")

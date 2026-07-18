@@ -684,6 +684,93 @@ rebuild of an already-replaced control string maps to a NIL string — an edge
 the real pipeline cannot reach). Plus property tests of all four theorem
 groups on random kernel inputs. No divergence.
 
+## VK-12 — screen-matches-buffer & cache soundness (PBT, **no book**)
+
+By design (SPEC-VK VK-12) this scope item ships **no ACL2 book**: the composed
+redisplay pipeline crosses too much CLOS to port, so it is verified empirically
+— but the rigor comes from a **kernel-as-oracle differential** structure, not
+hand-checked expectations. Two rove/PBT suites drive a real Lem editor session
+through a new **recording fake interface**
+(`frontends/fake-interface/fake-interface.lisp`,
+`recording-fake-interface`), added additively so the ~30 existing
+`with-fake-interface` users are untouched. The recording interface (a) reports
+the real ncurses `object-width` (`string-width` for text, 0 otherwise) instead
+of the base stub's constant 1, and (b) paints each `render-line` into a
+**persistent per-view character grid** keyed by screen row, evicted from `y`
+down by `clear-to-end-of-window` — modelling the SDL2 persistent texture, on
+which a frame the cache wrongly skips leaves stale (ghosted) content.
+
+**Suite 1 — cache soundness** (`tests/pbt/redisplay-cache.lisp`). Random
+edit/scroll/resize scripts run in lockstep against two windows over identical
+buffers: a **cached** window redrawn with `force = nil` and never marked
+`need-to-redraw` (so it relies purely on the drawing-object + line-fingerprint
+caches to detect changes — strictly harder than production, which force-clears
+on `need-to-redraw`; note that buffer edits do **not** set `need-to-redraw`, so
+production likewise leans on the fingerprint after a plain edit), and a
+**fresh** window redrawn with `force = t` (a full ground-truth render every
+frame). After every step the two persistent grids — cells carry text, a
+content-based attribute signature, width and cursor flag — must be `equal`; a
+stale row diverges. The `tests/display-cache.lisp` invariants are folded in as
+fixed cases: (i) an attribute recoloured **in place** must change
+`compute-line-fingerprint` (asserted through the real overlay →
+`create-logical-line` path), and (ii) the stale-tail hazard — a large deletion
+blanks the lower rows via `clear-to-end-of-window`, then identical content
+re-inserted must re-render rather than hit a stale
+`evict-line-fingerprints-from` / `remove-drawing-cache-entries-from` entry.
+
+**Suite 2 — projection** (`tests/pbt/screen-projection.lisp`), "what you see is
+what's in the buffer". After each random buffer render, the concatenated visible
+row text (control chars as their `^X`/`\N` replacement, `:zero-width` chars as
+the middle dot, wrap markers stripped) equals the buffer text under the SAME
+projection, with the **verified width/layout kernel as the oracle**:
+`lem:string-width`/`char-width` (VK-10 `k-char-width`) for column layout and tab
+stops, and the certified `k-wrap` row-width bound (VK-11 `k-wrap-rows-all-lt`,
+the zero-opaque ncurses corollary) checked on every wrapped row. Cursor
+screen-column consistency against `k-string-width` of the line prefix is checked
+on the current window.
+
+**Volume:** ~40 cache scripts × (seed + up to 18 steps) × 2 renders plus 4
+projection properties × ~120 renders — well over ~1k random frames total,
+measured **under a second** combined (far under the ~2-3 min CI budget). Both
+suites are registered in `lem-tests.asd`.
+
+**No shim/book change** (`*kernel-exports*` untouched; VK-12 calls the existing
+VK-10/VK-11 exports through `lem:string-width`/`char-width`).
+
+**Coverage boundaries (precise, not silently narrowed).** These are the places
+fake-interface / the char-level oracle cannot faithfully reach, plus real
+production edges the suites deliberately steer around:
+
+- **Drawing-object cache & in-place attribute mutation.** `drawing-object-equal`
+  → `attribute-equal` is content-based, but the cached object and the freshly
+  built object share the ONE mutated attribute, so they compare equal — a
+  reference-based cache cannot by itself observe an in-place recolour. Only the
+  **line fingerprint** (a content snapshot) catches it; production closes the
+  residual gap by pairing recolours with `need-to-redraw` (`color-theme.lisp`).
+  Suite 1 therefore asserts the fingerprint invariant that holds and the
+  production-faithful recolour redraw, and does not claim the drawing cache
+  detects an in-place mutation on its own.
+- **Leading zero-width runs are clipped.** A run of display-width-0 objects at
+  column 0 has `obj-end = 0 <= start-x = 0`, so
+  `clip-objects-to-display-range` (and the certified `k-clip`) drops it. The
+  projection oracle uses only positive-width glyphs (bare combining marks are
+  excluded; combining-mark WIDTH is already certified by VK-10) to keep the
+  char-level oracle exact.
+- **`expand-tab` is character-index based, the width kernel column based.** They
+  agree on printable-ASCII runs (index = column); the tab-projection test uses
+  printable ASCII and derives the expansion from the kernel, while raw tabs are
+  excluded from the mixed wide/control/zero-width lines. A production quirk
+  (`src/display/logical-line.lisp`), recorded not papered over.
+- **Window width ≤ 2 under line-wrap infinite-loops in production.**
+  `map-wrapping-line` scans with goal `body-width - 1`; when that is ≤ 1 a
+  width-2 glyph makes `wide-index` return its own start index, so the
+  wrap-offset scan (reached from scroll / cursor-y) never advances. The suites
+  keep window width ≥ 4 (a real terminal never renders a 1–2-column window); the
+  edge is noted here as a finding, out of VK-12's PBT scope to fix.
+- **Floating windows, SDL2 surface-metric per-char widths and multi-cursor
+  rendering** are out of scope for fake-interface (the ncurses monospace model),
+  matching the VK-10/VK-11 non-goals.
+
 ## Proof status
 
 All theorems in every book under `verified/` certify with real ACL2 (no
@@ -694,7 +781,10 @@ prefix disjunct and the intra-hash-namespace residue stated explicitly rather
 than over-claimed — see the VK-6 section), VK-7 (all five obligations), VK-10
 (all four obligations) and VK-11 (all four obligation groups, including the
 blocked-head characterization and the clip/auto-scroll composition) are fully
-certified.
+certified. **VK-12 has no book by design** (SPEC-VK VK-12): it is verified
+empirically by two kernel-as-oracle differential PBT suites (see the VK-12
+section) — cache soundness and the screen-matches-buffer projection — with the
+VK-10/VK-11 kernels as the oracle.
 
 **VK-3.** Certified: obligation 1 for the single recorded **insert**
 (content + points + tick), obligation 2 (`redo ∘ undo = id`, full session), and
