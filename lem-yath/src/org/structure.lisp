@@ -291,35 +291,33 @@ cannot fall through to a paragraph or section after an inner end marker."
       (push (cons start end) ranges))
     (nreverse ranges)))
 
-(defun %org-string-delimited-ranges (line opener closer)
-  (let ((ranges '())
-        (search-from 0))
-    (loop
-      (let ((start (search opener line :start2 search-from)))
-        (unless start
-          (return (nreverse ranges)))
-        (let ((close (search closer line
-                             :start2 (+ start (length opener)))))
-          (unless close
-            (return (nreverse ranges)))
-          (let ((end (+ close (length closer))))
-            (push (cons start end) ranges)
-            (setf search-from end)))))))
-
 (defun %org-backslash-token-ranges (line)
-  "Return conservative ranges for Org entities and line-break syntax."
+  "Return ranges for unsupported backslash syntax on LINE.
+
+Alphabetic TeX macros and matched LaTeX delimiters are modeled inline below.
+Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
   (let ((ranges '())
         (search-from 0))
     (loop
       (let ((start (position #\Backslash line :start search-from)))
         (unless start
           (return (nreverse ranges)))
-        (let ((end (1+ start)))
+        (let* ((next (and (< (1+ start) (length line))
+                          (char line (1+ start))))
+               (modeled-p
+                 (or (and next
+                          (or (and (char>= next #\A) (char<= next #\Z))
+                              (and (char>= next #\a) (char<= next #\z))))
+                     (and (eql next #\()
+                          (search "\\)" line :start2 (+ start 2)))
+                     (and (eql next #\[)
+                          (search "\\]" line :start2 (+ start 2)))))
+               (end (1+ start)))
           (loop :while (and (< end (length line))
                             (not (member (char line end)
                                          '(#\Space #\Tab))))
                 :do (incf end))
-          (when (> end (1+ start))
+          (when (and (not modeled-p) (> end (1+ start)))
             (push (cons start end) ranges))
           (setf search-from (max (1+ start) end)))))))
 
@@ -330,14 +328,10 @@ cannot fall through to a paragraph or section after an inner end marker."
            '("\\[fn:[^]\\n]+\\]"
              "\\[(?:[0-9]+/[0-9]+|[0-9]+%)\\]"
              "@@[A-Za-z0-9_-]+:[^\\n]*?@@"
-             "\\$+[^$\\n]+\\$+"
              "\\{\\{\\{[^\\n]*\\}\\}\\}"
              "<<[^>\\n]+>>"
              "(?i)\\bsrc_[A-Za-z0-9_-]+(?:\\[[^]]*\\])?\\{[^}\\n]*\\}"
-             "(?i)\\bcall_[A-Za-z0-9_-]+(?:\\[[^]]*\\])?\\([^\\n)]*\\)(?:\\[[^]]*\\])?"
-             "[A-Za-z0-9][_^](?:\\{[^}\\n]+\\}|[A-Za-z0-9+-]+)"))
-   (%org-string-delimited-ranges line "\\(" "\\)")
-   (%org-string-delimited-ranges line "\\[" "\\]")
+             "(?i)\\bcall_[A-Za-z0-9_-]+(?:\\[[^]]*\\])?\\([^\\n)]*\\)(?:\\[[^]]*\\])?"))
    (%org-backslash-token-ranges line)))
 
 (defun %org-unsupported-inline-at-point-p (point)
@@ -505,6 +499,219 @@ cannot fall through to a paragraph or section after an inner end marker."
                      result))
              (setf search-from (1+ close)))))))))
 
+(defun %org-inline-postblank-end (line end)
+  (loop :while (and (< end (length line))
+                    (member (char line end) '(#\Space #\Tab)))
+        :do (incf end)
+        :finally (return end)))
+
+(defun %org-latex-delimited-candidates (line opener closer)
+  "Return bounded same-line LaTeX fragments using OPENER and CLOSER."
+  (let ((result '())
+        (search-from 0))
+    (loop
+      (let ((start (search opener line :start2 search-from)))
+        (unless start (return (nreverse result)))
+        (let ((close (search closer line
+                             :start2 (+ start (length opener)))))
+          (cond
+            ((null close)
+             (return (nreverse result)))
+            ((or (%org-escaped-character-p line start)
+                 (%org-escaped-character-p line close))
+             (setf search-from (1+ start)))
+            (t
+             (let ((end (+ close (length closer))))
+               (push (%make-org-inline-candidate
+                      start end (%org-inline-postblank-end line end)
+                      start end :latex-fragment)
+                     result)
+               (setf search-from end)))))))))
+
+(defun %org-ascii-letter-p (character)
+  (and character
+       (or (and (char>= character #\A) (char<= character #\Z))
+           (and (char>= character #\a) (char<= character #\z)))))
+
+(defun %org-latex-single-dollar-opener-p (line start)
+  (let ((next (and (< (1+ start) (length line))
+                   (char line (1+ start)))))
+    (and next
+         (or (zerop start) (not (eql (char line (1- start)) #\$)))
+         (not (member next
+                      '(#\Space #\Tab #\Newline #\Return #\, #\. #\;))))))
+
+(defun %org-latex-single-dollar-follower-p (line end)
+  "Whether the character at END can follow a single-dollar fragment."
+  (or (= end (length line))
+      (let ((character (char line end)))
+        (or (member character '(#\Space #\Tab #\Newline #\Return))
+            ;; Org accepts punctuation, delimiters, quotes, and apostrophes,
+            ;; but not word/symbol or escape syntax after the closing dollar.
+            (and (not (alphanumericp character))
+                 (not (member character '(#\_ #\Backslash))))))))
+
+(defun %org-latex-single-dollar-closer-p (line close)
+  (and (> close 0)
+       (not (member (char line (1- close))
+                    '(#\Space #\Tab #\Newline #\Return #\, #\.)))
+       (%org-latex-single-dollar-follower-p line (1+ close))))
+
+(defun %org-latex-dollar-candidates (line)
+  "Return bounded single- and double-dollar LaTeX fragments on LINE."
+  (let ((result '())
+        (search-from 0))
+    (loop
+      (let ((start (position #\$ line :start search-from)))
+        (unless start (return (nreverse result)))
+        (let* ((double-p (and (< (1+ start) (length line))
+                              (eql (char line (1+ start)) #\$)))
+               (delimiter (if double-p "$$" "$"))
+               (content-start (+ start (length delimiter)))
+               (close (search delimiter line :start2 content-start)))
+          (cond
+            ((or (%org-escaped-character-p line start)
+                 (and (not double-p)
+                      (not (%org-latex-single-dollar-opener-p line start)))
+                 (null close))
+             (setf search-from (1+ start)))
+            ((%org-escaped-character-p line close)
+             (setf search-from (1+ close)))
+            ((and (not double-p)
+                  (not (%org-latex-single-dollar-closer-p line close)))
+             (setf search-from (1+ start)))
+            (t
+             (let ((end (+ close (length delimiter))))
+               (push (%make-org-inline-candidate
+                      start end (%org-inline-postblank-end line end)
+                      start end :latex-fragment)
+                     result)
+               (setf search-from end)))))))))
+
+(defun %org-latex-flat-group-end (line start opener closer)
+  "Return the exclusive end of one flat TeX group, or NIL."
+  (when (and (< start (length line))
+             (eql (char line start) opener))
+    (let ((close (position closer line :start (1+ start))))
+      (when (and close
+                 (not (find-if
+                       (lambda (character)
+                         (if (eql opener #\[)
+                             (member character '(#\{ #\} #\[ #\]))
+                             (member character '(#\{ #\}))))
+                       line :start (1+ start) :end close)))
+        (1+ close)))))
+
+(defun %org-latex-macro-candidates (line)
+  "Return bounded Org TeX macro/entity objects on LINE."
+  (let ((result '())
+        (search-from 0))
+    (loop
+      (let ((start (position #\Backslash line :start search-from)))
+        (unless start (return (nreverse result)))
+        (let ((end (1+ start)))
+          (if (or (%org-escaped-character-p line start)
+                  (not (%org-ascii-letter-p
+                        (and (< end (length line)) (char line end)))))
+              (setf search-from (1+ start))
+              (progn
+                (loop :while (and (< end (length line))
+                                  (%org-ascii-letter-p (char line end)))
+                      :do (incf end))
+                (when (and (< end (length line))
+                           (eql (char line end) #\*))
+                  (incf end))
+                (loop
+                  (let ((group-end
+                          (cond
+                            ((and (< end (length line))
+                                  (eql (char line end) #\[))
+                             (%org-latex-flat-group-end
+                              line end #\[ #\]))
+                            ((and (< end (length line))
+                                  (eql (char line end) #\{))
+                             (%org-latex-flat-group-end
+                              line end #\{ #\})))))
+                    (unless group-end (return))
+                    (setf end group-end)))
+                (push (%make-org-inline-candidate
+                       start end (%org-inline-postblank-end line end)
+                       start end :latex-fragment)
+                      result)
+                (setf search-from end))))))))
+
+(defun %org-script-balanced-end (line start opener closer)
+  "Return a balanced script delimiter end, bounded to Org's depth three."
+  (loop :with depth := 0
+        :for index :from start :below (length line)
+        :for character := (char line index)
+        :do (cond
+              ((eql character opener)
+               (incf depth)
+               (when (> depth 3) (return nil)))
+              ((eql character closer)
+               (decf depth)
+               (when (zerop depth) (return (1+ index)))
+               (when (minusp depth) (return nil))))))
+
+(defun %org-script-plain-end (line start)
+  "Return Org's unbraced script end beginning at START, or NIL."
+  (when (< start (length line))
+    (if (eql (char line start) #\*)
+        (1+ start)
+        (let ((scan start)
+              (last-alphanumeric nil))
+          (when (member (char line scan) '(#\+ #\-))
+            (incf scan))
+          (loop :while (and (< scan (length line))
+                            (or (alphanumericp (char line scan))
+                                (member (char line scan) '(#\. #\,))))
+                :do
+                   (when (alphanumericp (char line scan))
+                     (setf last-alphanumeric scan))
+                   (incf scan))
+          (and last-alphanumeric (1+ last-alphanumeric))))))
+
+(defun %org-script-candidates (line)
+  "Return GNU Org subscript and superscript objects on LINE."
+  (let ((result '()))
+    (loop :for delimiter-start :from 1 :below (length line)
+          :for delimiter := (char line delimiter-start)
+          :when (and (member delimiter '(#\_ #\^))
+                     (not (member (char line (1- delimiter-start))
+                                  '(#\Space #\Tab #\Newline #\Return))))
+            :do
+               (let* ((contents-start (1+ delimiter-start))
+                      (opener (and (< contents-start (length line))
+                                   (char line contents-start)))
+                      (braced-p (eql opener #\{))
+                      (parenthesized-p (eql opener #\())
+                      (end
+                        (cond
+                          (braced-p
+                           (%org-script-balanced-end
+                            line contents-start #\{ #\}))
+                          (parenthesized-p
+                           (%org-script-balanced-end
+                            line contents-start #\( #\)))
+                          (t (%org-script-plain-end line contents-start))))
+                      (inner-start
+                        (and end
+                             (if braced-p
+                                 (1+ contents-start)
+                                 contents-start)))
+                      (inner-end
+                        (and end (if braced-p (1- end) end))))
+                 (when end
+                   (push (%make-org-inline-candidate
+                          delimiter-start end
+                          (%org-inline-postblank-end line end)
+                          inner-start inner-end
+                          (if (eql delimiter #\_)
+                              :subscript :superscript))
+                         result))))
+    (nreverse result)))
+
 (defun %org-link-candidates (line)
   (let ((result '()))
     (cl-ppcre:do-scans
@@ -650,6 +857,11 @@ cannot fall through to a paragraph or section after an inner end marker."
                links
                plain-links
                (%org-timestamp-candidates line)
+               (%org-latex-dollar-candidates line)
+               (%org-latex-delimited-candidates line "\\(" "\\)")
+               (%org-latex-delimited-candidates line "\\[" "\\]")
+               (%org-latex-macro-candidates line)
+               (%org-script-candidates line)
                (%org-inline-delimited-candidates line #\~ :code)
                (%org-inline-delimited-candidates line #\= :verbatim)
                (%org-inline-delimited-candidates line #\* :bold)
@@ -664,13 +876,14 @@ cannot fall through to a paragraph or section after an inner end marker."
 
 (defun %org-unambiguous-inline (candidates)
   (when candidates
-    ;; Code and verbatim are opaque in Org.  Delimiter-looking text inside
-    ;; either object is literal and cannot win merely by having a shorter span.
+    ;; Code, verbatim, and LaTeX fragments are opaque in Org.  Delimiter-looking
+    ;; text inside them is literal and cannot win merely by having a shorter
+    ;; span.
     (let* ((opaque
              (remove-if-not
               (lambda (candidate)
                 (member (%org-inline-candidate-node-type candidate)
-                        '(:code :verbatim)))
+                        '(:code :verbatim :latex-fragment)))
               candidates))
            (ordered (sort (copy-list (or opaque candidates))
                           #'< :key #'%org-inline-span))
@@ -718,7 +931,7 @@ cannot fall through to a paragraph or section after an inner end marker."
 
 (defun %org-unsupported-opaque-at-column-p (candidate column)
   (or (member (%org-inline-candidate-node-type candidate)
-              '(:code :verbatim :plain-link))
+              '(:code :verbatim :latex-fragment :plain-link))
       (and (eq (%org-inline-candidate-node-type candidate) :link)
            (not (%org-link-description-covers-column-p candidate column)))))
 
@@ -738,18 +951,24 @@ cannot fall through to a paragraph or section after an inner end marker."
             (lambda (candidate)
               (%org-link-opaque-at-column-p candidate column))
             all-covering))
-         ;; Code and verbatim are opaque before links are.  A URL or bracket
-         ;; link inside either wrapper is literal wrapper content, while an
-         ;; unwrapped link target remains opaque before recursively parsed
-         ;; containers such as emphasis.
+         ;; Code and verbatim are opaque before links are.  LaTeX fragments are
+         ;; opaque after link targets, while link descriptions retain nested
+         ;; object parsing.
          (opaque-code-covering
            (remove-if-not
             (lambda (candidate)
               (member (%org-inline-candidate-node-type candidate)
                       '(:code :verbatim)))
             all-covering))
+         (opaque-latex-covering
+           (remove-if-not
+            (lambda (candidate)
+              (eq (%org-inline-candidate-node-type candidate)
+                  :latex-fragment))
+            all-covering))
          (covering (or opaque-code-covering
                        opaque-link-covering
+                       opaque-latex-covering
                        all-covering))
          (candidate (%org-unambiguous-inline covering)))
     (cond

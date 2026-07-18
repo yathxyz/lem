@@ -2582,7 +2582,9 @@ A separate on-demand boundary model and Vi adapter implement all eight bindings
 in the active Evil-Org text-object theme: `ae/ie`, `aE/iE`, `ar/ir`, and
 `aR/iR` in operator-pending and Visual states. The bounded model covers inline
 markup, bracket/plain links, balanced citations and citation references,
-timestamps, table cells, paragraphs and rows, flat matched blocks,
+timestamps, GNU-style depth-three subscript/superscript objects, same-line
+single/double-dollar and `\(...\)`/`\[...\]` LaTeX fragments, flat TeX
+macros/entities, table cells, paragraphs and rows, flat matched blocks,
 point-sensitive space-indented ordered and unordered items/lists with wrapped,
 nested, mixed-level, and blank-separated paragraphs, tables with
 associated formulas, matched property/LOGBOOK/generic drawers with
@@ -2603,6 +2605,8 @@ unsupported or ambiguous inline/cell syntax fail object requests closed;
 empty leaf-item or inner-subtree ranges abort. These aborts occur before mutation and
 preserve text, registers, and an existing Visual selection. Type-mismatched
 inner end markers remain literal inside an otherwise matched flat block.
+Multiline LaTeX fragments and whitespace/punctuation entities are not yet
+modeled as Evil-Org objects.
 
 The exact
 `TODO → NEXT → WAITING → HOLD → SOMEDAY | DONE → CANCELLED`
@@ -2648,7 +2652,8 @@ top-level boundaries. Its formula case proves range-driven column movement,
 numeric reference repair, and one-step undo. It dynamically exercises all eight text-object
 bindings with delete/yank operators over
 opaque/nested markup, bracket/plain links, timestamps, table cells/rules and
-formula ownership, paragraphs, headlines, flat leaf and recursive blocks,
+formula ownership, scripts, same-line LaTeX fragments/macros, malformed-dollar
+fallback, paragraphs, headlines, flat leaf and recursive blocks,
 point-sensitive and empty lists, owned post-blank, and subtrees. It verifies
 object/element count anchors and unsupported-syntax barriers, subtree
 ancestry count, character/line registers, representative one-step undo,

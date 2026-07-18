@@ -542,7 +542,7 @@ write_fixtures() {
     >"$WORKDIR/citation-malformed.org"
   printf '%s\n' '~[cite:@key]~ tail' \
     >"$WORKDIR/citation-code-opaque.org"
-  printf '%s\n' 'prefix \alpha suffix' \
+  printf '%s\n' 'prefix \_ suffix' \
     >"$WORKDIR/unsupported-entity.org"
   printf '%s\n' '*prefix [cite:@key] suffix*' \
     >"$WORKDIR/citation-in-bold.org"
@@ -616,6 +616,23 @@ write_fixtures() {
   printf '%s\n' '- parent' '  - child' '- sibling' \
     >"$WORKDIR/repeated-visual-list.org"
   printf '%s\n' '<2026-07-12 Sun> tail' >"$WORKDIR/timestamp.org"
+  printf '%s\n' \
+    'application_measures x_2 N_{e} H^{2} tail' \
+    >"$WORKDIR/script-objects.org"
+  printf '%s\n' 'before $H^{2}$ middle \( S_{new} \) after' \
+    >"$WORKDIR/latex-objects.org"
+  printf '%s\n' \
+    'x_(i+1) x_{a_{b}} x_-1 x_1.2 x_* (_2) x\_2' \
+    >"$WORKDIR/script-edge-objects.org"
+  printf '%s\n' \
+    'before \alpha middle \frac{a}{b} tail \frac{V_{a}}{V_{e}}' \
+    >"$WORKDIR/latex-macro-objects.org"
+  printf '%s\n' '$ H$ tail' '' '$H $ tail' '' '$H$x tail' '' \
+    '$H$, tail' '$$$$ tail' '\(\) tail' \
+    >"$WORKDIR/latex-boundaries.org"
+  printf '%s\n' '*H^{2}* tail' >"$WORKDIR/script-emphasis.org"
+  printf '%s\n' '[[file:target][N_{e}]] tail' \
+    >"$WORKDIR/script-link-description.org"
   printf '%s\n' '* Parent' 'Body' '* Sibling' \
     >"$WORKDIR/heading-element.org"
   printf '%s\n' 'P1' '' '* H' 'body' >"$WORKDIR/count-heading.org"
@@ -2257,10 +2274,15 @@ if start_case link-description-subscript \
      "$WORKDIR/link-description-subscript.org" 'foo_bar.*tail'; then
   send_keys "$CASE_SESSION" 18 l
   if operate_and_record link-description-subscript "$CASE_SESSION" d a e; then
-    assert_state link-description-subscript-abort link-description-subscript \
-      "$CASE_SESSION" 'text=[[https://x][foo_bar]] tail\n bytes=' \
-      'register= register-type=none' 'small= small-type=none' \
-      'state=normal selection=none' 'modified=no'
+    assert_state link-description-subscript-delete link-description-subscript \
+      "$CASE_SESSION" 'text=[[https://x][foo]] tail\n bytes=' \
+      'register=_bar register-type=char' 'small=_bar small-type=char' \
+      'state=normal selection=none' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state link-description-subscript "$CASE_SESSION"
+    assert_state link-description-subscript-delete-undo \
+      link-description-subscript "$CASE_SESSION" \
+      'text=[[https://x][foo_bar]] tail\n bytes=' 'modified=no'
   fi
   stop_case "$CASE_SESSION"
 fi
@@ -2323,6 +2345,215 @@ if start_case timestamp "$WORKDIR/timestamp.org" '2026-07-12'; then
   if operate_and_record timestamp "$CASE_SESSION" y i e; then
     assert_state timestamp-inner timestamp "$CASE_SESSION" \
       'register=<2026-07-12 Sun> register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case script-objects "$WORKDIR/script-objects.org" \
+     'application_measures'; then
+  send_keys "$CASE_SESSION" 11 l
+  if operate_and_record script-objects "$CASE_SESSION" y a e; then
+    assert_state script-unbraced-outer script-objects "$CASE_SESSION" \
+      'register=_measures  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 11 l
+  if operate_and_record script-objects "$CASE_SESSION" y i e; then
+    assert_state script-unbraced-inner script-objects "$CASE_SESSION" \
+      'register=measures register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 22 l
+  if operate_and_record script-objects "$CASE_SESSION" y a e; then
+    assert_state script-short-outer script-objects "$CASE_SESSION" \
+      'register=_2  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 22 l
+  if operate_and_record script-objects "$CASE_SESSION" y i e; then
+    assert_state script-short-inner script-objects "$CASE_SESSION" \
+      'register=2 register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 26 l
+  if operate_and_record script-objects "$CASE_SESSION" y a e; then
+    assert_state script-braced-sub-outer script-objects "$CASE_SESSION" \
+      'register=_{e}  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 26 l
+  if operate_and_record script-objects "$CASE_SESSION" y i e; then
+    assert_state script-braced-sub-inner script-objects "$CASE_SESSION" \
+      'register=e register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 32 l
+  if operate_and_record script-objects "$CASE_SESSION" d a e; then
+    assert_state script-braced-super-delete script-objects "$CASE_SESSION" \
+      'text=application_measures x_2 N_{e} Htail\n bytes=' \
+      'register=^{2}  register-type=char' 'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state script-objects "$CASE_SESSION"
+    assert_state script-braced-super-delete-undo script-objects \
+      "$CASE_SESSION" \
+      'text=application_measures x_2 N_{e} H^{2} tail\n bytes=' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case latex-objects "$WORKDIR/latex-objects.org" 'H.*middle'; then
+  send_keys "$CASE_SESSION" 9 l
+  if operate_and_record latex-objects "$CASE_SESSION" y a e; then
+    assert_state latex-dollar-outer latex-objects "$CASE_SESSION" \
+      'register=$H^{2}$  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 9 l
+  if operate_and_record latex-objects "$CASE_SESSION" y i e; then
+    assert_state latex-dollar-inner latex-objects "$CASE_SESSION" \
+      'register=$H^{2}$ register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 26 l
+  if operate_and_record latex-objects "$CASE_SESSION" y a e; then
+    assert_state latex-paren-outer latex-objects "$CASE_SESSION" \
+      'register=\\( S_{new} \\)  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 26 l
+  if operate_and_record latex-objects "$CASE_SESSION" y i e; then
+    assert_state latex-paren-inner latex-objects "$CASE_SESSION" \
+      'register=\\( S_{new} \\) register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case script-edge-objects "$WORKDIR/script-edge-objects.org" \
+     'x.*i.*a.*b'; then
+  send_keys "$CASE_SESSION" l
+  if operate_and_record script-edge-objects "$CASE_SESSION" y a e; then
+    assert_state script-parenthesized-outer script-edge-objects \
+      "$CASE_SESSION" 'register=_(i+1)  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 l
+  if operate_and_record script-edge-objects "$CASE_SESSION" y i e; then
+    assert_state script-parenthesized-inner script-edge-objects \
+      "$CASE_SESSION" 'register=(i+1) register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 9 l
+  if operate_and_record script-edge-objects "$CASE_SESSION" y a e; then
+    assert_state script-nested-braced-outer script-edge-objects \
+      "$CASE_SESSION" 'register=_{a_{b}}  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 9 l
+  if operate_and_record script-edge-objects "$CASE_SESSION" y i e; then
+    assert_state script-nested-braced-inner script-edge-objects \
+      "$CASE_SESSION" 'register=a_{b} register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 19 l
+  if operate_and_record script-edge-objects "$CASE_SESSION" y a e; then
+    assert_state script-signed-outer script-edge-objects "$CASE_SESSION" \
+      'register=_-1  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 24 l
+  if operate_and_record script-edge-objects "$CASE_SESSION" y i e; then
+    assert_state script-decimal-inner script-edge-objects "$CASE_SESSION" \
+      'register=1.2 register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 30 l
+  if operate_and_record script-edge-objects "$CASE_SESSION" y a e; then
+    assert_state script-star-outer script-edge-objects "$CASE_SESSION" \
+      'register=_*  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 34 l
+  if operate_and_record script-edge-objects "$CASE_SESSION" y a e; then
+    assert_state script-punctuation-base script-edge-objects "$CASE_SESSION" \
+      'register=_2 register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 40 l
+  if operate_and_record script-edge-objects "$CASE_SESSION" y a e; then
+    assert_state script-escaped-delimiter script-edge-objects "$CASE_SESSION" \
+      'register=_2 register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case latex-macro-objects "$WORKDIR/latex-macro-objects.org" \
+     'alpha.*frac'; then
+  send_keys "$CASE_SESSION" 7 l
+  if operate_and_record latex-macro-objects "$CASE_SESSION" y a e; then
+    assert_state latex-entity-outer latex-macro-objects "$CASE_SESSION" \
+      'register=\\alpha  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 7 l
+  if operate_and_record latex-macro-objects "$CASE_SESSION" y i e; then
+    assert_state latex-entity-inner latex-macro-objects "$CASE_SESSION" \
+      'register=\\alpha register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 21 l
+  if operate_and_record latex-macro-objects "$CASE_SESSION" y a e; then
+    assert_state latex-flat-macro-outer latex-macro-objects "$CASE_SESSION" \
+      'register=\\frac{a}{b}  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 21 l
+  if operate_and_record latex-macro-objects "$CASE_SESSION" y i e; then
+    assert_state latex-flat-macro-inner latex-macro-objects "$CASE_SESSION" \
+      'register=\\frac{a}{b} register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 38 l
+  if operate_and_record latex-macro-objects "$CASE_SESSION" y a e; then
+    assert_state latex-nested-macro-prefix latex-macro-objects \
+      "$CASE_SESSION" 'register=\\frac register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 45 l
+  if operate_and_record latex-macro-objects "$CASE_SESSION" y a e; then
+    assert_state latex-nested-macro-script latex-macro-objects \
+      "$CASE_SESSION" 'register=_{a} register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case latex-boundaries "$WORKDIR/latex-boundaries.org" 'H.*tail'; then
+  if operate_and_record latex-boundaries "$CASE_SESSION" y a e; then
+    assert_state latex-open-space-paragraph latex-boundaries "$CASE_SESSION" \
+      'register=$ H$ tail\n\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 2 j 0
+  if operate_and_record latex-boundaries "$CASE_SESSION" y a e; then
+    assert_state latex-close-space-paragraph latex-boundaries "$CASE_SESSION" \
+      'register=$H $ tail\n\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 4 j 0
+  if operate_and_record latex-boundaries "$CASE_SESSION" y a e; then
+    assert_state latex-letter-follower-paragraph latex-boundaries \
+      "$CASE_SESSION" 'register=$H$x tail\n\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 6 j 0
+  if operate_and_record latex-boundaries "$CASE_SESSION" y a e; then
+    assert_state latex-punctuation-follower latex-boundaries "$CASE_SESSION" \
+      'register=$H$ register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 7 j 0
+  if operate_and_record latex-boundaries "$CASE_SESSION" y a e; then
+    assert_state latex-empty-double-dollar latex-boundaries "$CASE_SESSION" \
+      'register=$$$$  register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 8 j 0
+  if operate_and_record latex-boundaries "$CASE_SESSION" y a e; then
+    assert_state latex-empty-parenthetical latex-boundaries "$CASE_SESSION" \
+      'register=\\(\\)  register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case script-emphasis "$WORKDIR/script-emphasis.org" 'H'; then
+  send_keys "$CASE_SESSION" 2 l
+  if operate_and_record script-emphasis "$CASE_SESSION" y a e; then
+    assert_state script-emphasis-ae script-emphasis "$CASE_SESSION" \
+      'register=^{2} register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case script-link-description \
+     "$WORKDIR/script-link-description.org" 'file:target'; then
+  send_keys "$CASE_SESSION" 16 l
+  if operate_and_record script-link-description "$CASE_SESSION" y a e; then
+    assert_state script-link-description-ae script-link-description \
+      "$CASE_SESSION" 'register=_{e} register-type=char' 'modified=no'
   fi
   stop_case "$CASE_SESSION"
 fi
@@ -2587,11 +2818,11 @@ if start_case citation-code-opaque "$WORKDIR/citation-code-opaque.org" \
 fi
 
 if start_case unsupported-entity "$WORKDIR/unsupported-entity.org" \
-     'alpha.*suffix'; then
-  send_keys "$CASE_SESSION" 9 l
+     'prefix.*suffix'; then
+  send_keys "$CASE_SESSION" 8 l
   if operate_and_record unsupported-entity "$CASE_SESSION" d a e; then
     assert_state unsupported-entity-ae unsupported-entity "$CASE_SESSION" \
-      'text=prefix \\alpha suffix\n bytes=' \
+      'text=prefix \\_ suffix\n bytes=' \
       'register= register-type=none' 'small= small-type=none' \
       'state=normal selection=none' 'modified=no'
   fi
