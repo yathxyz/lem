@@ -630,6 +630,24 @@ write_fixtures() {
   printf '%s\n' '$ H$ tail' '' '$H $ tail' '' '$H$x tail' '' \
     '$H$, tail' '$$$$ tail' '\(\) tail' \
     >"$WORKDIR/latex-boundaries.org"
+  printf '%s\n' 'before' '$$' '[fn:note] H^{2}' '$$  tail' '' 'AFTER' \
+    >"$WORKDIR/multiline-latex.org"
+  printf '%s\n' '$$' 'FV_{N} = PV(1 + r)^{N}' '$$, where' 'AFTER' \
+    >"$WORKDIR/multiline-latex-comma.org"
+  printf '%s\n' '\[' 'S_{new}' '\]  tail' '' '\(' 'T^{2}' '\)' \
+    >"$WORKDIR/multiline-latex-delimited.org"
+  printf '%s\n' 'before' '$$' 'H^{2}' 'AFTER' \
+    >"$WORKDIR/multiline-latex-unclosed.org"
+  printf '%s\n' '- item' '  $$' '  H^{2}' '  $$' '- next' \
+    >"$WORKDIR/multiline-latex-list.org"
+  printf '%s\n' '#+begin_src text' '$$' 'H^{2}' '$$' '#+end_src' \
+    >"$WORKDIR/multiline-latex-source.org"
+  printf '%s\n' '| $$ |' '| H^{2} |' '| $$ |' \
+    >"$WORKDIR/multiline-latex-table.org"
+  printf '%s\n' '$$' '\[' 'H^{2}' '\]' '$$' \
+    >"$WORKDIR/multiline-latex-nested.org"
+  printf '%s\n' '$$' 'A' '$$ \[' 'B' '\]' \
+    >"$WORKDIR/multiline-latex-count.org"
   printf '%s\n' '*H^{2}* tail' >"$WORKDIR/script-emphasis.org"
   printf '%s\n' '[[file:target][N_{e}]] tail' \
     >"$WORKDIR/script-link-description.org"
@@ -2535,6 +2553,151 @@ if start_case latex-boundaries "$WORKDIR/latex-boundaries.org" 'H.*tail'; then
   if operate_and_record latex-boundaries "$CASE_SESSION" y a e; then
     assert_state latex-empty-parenthetical latex-boundaries "$CASE_SESSION" \
       'register=\\(\\)  register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case multiline-latex "$WORKDIR/multiline-latex.org" \
+     'note.*H'; then
+  send_keys "$CASE_SESSION" 2 j l
+  if operate_and_record multiline-latex "$CASE_SESSION" y a e; then
+    assert_state multiline-latex-outer multiline-latex "$CASE_SESSION" \
+      'register=$$\n[fn:note] H^{2}\n$$   register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 2 j l
+  if operate_and_record multiline-latex "$CASE_SESSION" y i e; then
+    assert_state multiline-latex-inner multiline-latex "$CASE_SESSION" \
+      'register=$$\n[fn:note] H^{2}\n$$ register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g j 0
+  if operate_and_record multiline-latex "$CASE_SESSION" y a e; then
+    assert_state multiline-latex-opener multiline-latex "$CASE_SESSION" \
+      'register=$$\n[fn:note] H^{2}\n$$   register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 3 j 0
+  if operate_and_record multiline-latex "$CASE_SESSION" y a e; then
+    assert_state multiline-latex-closer multiline-latex "$CASE_SESSION" \
+      'register=$$\n[fn:note] H^{2}\n$$   register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 2 j l
+  if operate_and_record multiline-latex "$CASE_SESSION" d a e; then
+    assert_state multiline-latex-delete multiline-latex "$CASE_SESSION" \
+      'text=before\ntail\n\nAFTER\n bytes=' \
+      'register=$$\n[fn:note] H^{2}\n$$   register-type=char' \
+      'modified=yes'
+    send_keys "$CASE_SESSION" u
+    record_state multiline-latex "$CASE_SESSION"
+    assert_state multiline-latex-delete-undo multiline-latex \
+      "$CASE_SESSION" \
+      'text=before\n$$\n[fn:note] H^{2}\n$$  tail\n\nAFTER\n bytes=' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case multiline-latex-comma \
+     "$WORKDIR/multiline-latex-comma.org" 'FV.*PV'; then
+  send_keys "$CASE_SESSION" j 5 l
+  if operate_and_record multiline-latex-comma "$CASE_SESSION" y a e; then
+    assert_state multiline-latex-comma-outer multiline-latex-comma \
+      "$CASE_SESSION" \
+      'register=$$\nFV_{N} = PV(1 + r)^{N}\n$$ register-type=char' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case multiline-latex-delimited \
+     "$WORKDIR/multiline-latex-delimited.org" 'tail'; then
+  send_keys "$CASE_SESSION" j 2 l
+  if operate_and_record multiline-latex-delimited "$CASE_SESSION" y a e; then
+    assert_state multiline-bracket-outer multiline-latex-delimited \
+      "$CASE_SESSION" \
+      'register=\\[\nS_{new}\n\\]   register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g j 2 l
+  if operate_and_record multiline-latex-delimited "$CASE_SESSION" y i e; then
+    assert_state multiline-bracket-inner multiline-latex-delimited \
+      "$CASE_SESSION" \
+      'register=\\[\nS_{new}\n\\] register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 5 j l
+  if operate_and_record multiline-latex-delimited "$CASE_SESSION" y i e; then
+    assert_state multiline-paren-inner multiline-latex-delimited \
+      "$CASE_SESSION" \
+      'register=\\(\nT^{2}\n\\) register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case multiline-latex-unclosed \
+     "$WORKDIR/multiline-latex-unclosed.org" 'AFTER'; then
+  send_keys "$CASE_SESSION" 2 j 0
+  if operate_and_record multiline-latex-unclosed "$CASE_SESSION" y a e; then
+    assert_state multiline-latex-unclosed-paragraph \
+      multiline-latex-unclosed "$CASE_SESSION" \
+      'register=before\n$$\nH^{2}\nAFTER\n register-type=char' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case multiline-latex-list \
+     "$WORKDIR/multiline-latex-list.org" 'H'; then
+  send_keys "$CASE_SESSION" 2 j 2 l
+  if operate_and_record multiline-latex-list "$CASE_SESSION" y a e; then
+    assert_state multiline-latex-list-outer multiline-latex-list \
+      "$CASE_SESSION" \
+      'register=$$\n  H^{2}\n  $$ register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case multiline-latex-source \
+     "$WORKDIR/multiline-latex-source.org" 'H'; then
+  send_keys "$CASE_SESSION" 2 j 0
+  if operate_and_record multiline-latex-source "$CASE_SESSION" y a e; then
+    assert_state multiline-latex-source-outer multiline-latex-source \
+      "$CASE_SESSION" \
+      'register=#+begin_src text\n$$\nH^{2}\n$$\n#+end_src\n register-type=char' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case multiline-latex-table \
+     "$WORKDIR/multiline-latex-table.org" 'H'; then
+  send_keys "$CASE_SESSION" j 2 l
+  if operate_and_record multiline-latex-table "$CASE_SESSION" y a e; then
+    assert_state multiline-latex-table-cell multiline-latex-table \
+      "$CASE_SESSION" 'register= H^{2} | register-type=char' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case multiline-latex-nested \
+     "$WORKDIR/multiline-latex-nested.org" 'H'; then
+  send_keys "$CASE_SESSION" 2 j 0
+  if operate_and_record multiline-latex-nested "$CASE_SESSION" y a e; then
+    assert_state multiline-latex-nested-outer multiline-latex-nested \
+      "$CASE_SESSION" \
+      'register=$$\n\\[\nH^{2}\n\\]\n$$ register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case multiline-latex-count \
+     "$WORKDIR/multiline-latex-count.org" 'A'; then
+  send_keys "$CASE_SESSION" j 0
+  if operate_and_record multiline-latex-count "$CASE_SESSION" 2 y a e; then
+    assert_state multiline-latex-count-adjacent multiline-latex-count \
+      "$CASE_SESSION" \
+      'register=A\n$$ \\[\nB\n\\] register-type=char' 'modified=no'
   fi
   stop_case "$CASE_SESSION"
 fi

@@ -911,6 +911,103 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
    :character
    (%org-inline-candidate-node-type candidate)))
 
+(defun %org-multiline-latex-candidates (text)
+  "Return paragraph-bounded LaTeX candidates that cross a line boundary."
+  (remove-if-not
+   (lambda (candidate)
+     (position #\Newline text
+               :start (%org-inline-candidate-start candidate)
+               :end (%org-inline-candidate-end candidate)))
+   (append (%org-latex-dollar-candidates text)
+           (%org-latex-delimited-candidates text "\\(" "\\)")
+           (%org-latex-delimited-candidates text "\\[" "\\]"))))
+
+(defun %org-unique-outer-inline (candidates)
+  "Return the sole candidate that contains every candidate in CANDIDATES."
+  (let ((outer
+          (remove-if-not
+           (lambda (candidate)
+             (every (lambda (other)
+                      (%org-inline-contained-by-p other candidate))
+                    candidates))
+           candidates)))
+    (when (null (rest outer))
+      (first outer))))
+
+(defun %org-container-inline-to-boundary (container candidate)
+  (let ((base (%org-boundary-start container)))
+    (%make-org-boundary
+     (org-navigation-point-at-offset
+      base (%org-inline-candidate-start candidate))
+     (org-navigation-point-at-offset
+      base (%org-inline-candidate-outer-end candidate))
+     (org-navigation-point-at-offset
+      base (%org-inline-candidate-inner-start candidate))
+     (org-navigation-point-at-offset
+      base (%org-inline-candidate-inner-end candidate))
+     :character
+     (%org-inline-candidate-node-type candidate))))
+
+(defun %org-multiline-latex-region-line-p (point)
+  "Whether POINT can participate in one bounded multiline LaTeX scan."
+  (let ((line (line-string point)))
+    (and (not (cl-ppcre:scan "^\\s*$" line))
+         (not (org-heading-line-p point))
+         (not (org-table-line-p point))
+         (null (org-block-marker line))
+         (null (%org-drawer-marker line))
+         (not (%org-property-looking-line-p line))
+         (not (cl-ppcre:scan "^\\s*#" line))
+         (not (cl-ppcre:scan
+               "(?i)^\\s*(?:SCHEDULED|DEADLINE|CLOSED|CLOCK):" line)))))
+
+(defun %org-multiline-latex-container-at (origin)
+  "Return a blank/structure-bounded scan container around ORIGIN."
+  (unless (or (org-inside-block-p origin)
+              (%org-unclosed-block-at-p origin)
+              (not (%org-multiline-latex-region-line-p origin)))
+    (with-point ((start origin)
+                 (end origin))
+      (line-start start)
+      (line-start end)
+      (loop :while
+              (with-point ((previous start))
+                (and (line-offset previous -1)
+                     (%org-multiline-latex-region-line-p previous)
+                     (progn (move-point start previous) t))))
+      (loop :while
+              (with-point ((next end))
+                (and (line-offset next 1)
+                     (%org-multiline-latex-region-line-p next)
+                     (progn (move-point end next) t))))
+      (let ((core-end (%org-line-after end)))
+        (%make-org-boundary
+         (copy-point start :temporary) core-end
+         (copy-point start :temporary) (copy-point core-end :temporary)
+         :character :paragraph)))))
+
+(defun %org-multiline-latex-boundary-at (origin)
+  "Return the structurally bounded multiline LaTeX fragment covering ORIGIN."
+  (let ((container (%org-multiline-latex-container-at origin)))
+    (when container
+      (let* ((base (%org-boundary-start container))
+             (text (points-to-string
+                    base (%org-boundary-inner-end container)))
+             (offset (org-navigation-offset-from base origin))
+             (covering
+               (remove-if-not
+                (lambda (candidate)
+                  (and (<= (%org-inline-candidate-start candidate) offset)
+                       (< offset
+                          (%org-inline-candidate-outer-end candidate))))
+                (%org-multiline-latex-candidates text)))
+             ;; A LaTeX fragment is opaque: nested delimiter-looking text is
+             ;; literal, so the unique containing fragment owns the point.
+             ;; Crossing or duplicate candidates remain ambiguous.
+             (candidate (%org-unique-outer-inline covering)))
+        (when candidate
+          (%org-container-inline-to-boundary container candidate))))))
+
 (defun %org-unsupported-table-object-at-point-p (point)
   "Whether POINT is on a table row whose cell boundaries are ambiguous."
   (and (org-table-line-p point)
@@ -936,7 +1033,9 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
            (not (%org-link-description-covers-column-p candidate column)))))
 
 (defun %org-object-at-point (origin)
-  (let* ((column (point-charpos origin))
+  (or
+   (%org-multiline-latex-boundary-at origin)
+   (let* ((column (point-charpos origin))
          (all-covering
            (remove-if-not
             (lambda (candidate)
@@ -986,7 +1085,7 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
       ;; An ambiguous inline parse must fail closed.  With no inline object,
       ;; org-element-context falls back to the containing element.
       (covering nil)
-      (t (%org-element-at-point origin)))))
+      (t (%org-element-at-point origin))))))
 
 (defun %org-boundary-scan-barrier-p (point)
   "Whether forward text-object discovery must stop at POINT."
