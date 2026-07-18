@@ -328,7 +328,6 @@ cannot fall through to a paragraph or section after an inner end marker."
   (append
    (mapcan (lambda (pattern) (%org-regexp-ranges pattern line))
            '("\\[fn:[^]\\n]+\\]"
-             "(?i)\\[cite(?:/[^]:\\n]+)?:[^]\\n]+\\]"
              "\\[(?:[0-9]+/[0-9]+|[0-9]+%)\\]"
              "@@[A-Za-z0-9_-]+:[^\\n]*?@@"
              "\\$+[^$\\n]+\\$+"
@@ -354,6 +353,116 @@ cannot fall through to a paragraph or section after an inner end marker."
         :while (eql (char line position) #\Backslash)
         :count t :into count
         :finally (return (oddp count))))
+
+(defparameter +org-citation-prefix-pattern+
+  "\\[cite(?:/[A-Za-z0-9_/-]+)?:[ \\t]*")
+
+(defparameter +org-citation-key-pattern+
+  "@[A-Za-z0-9_\\-.:?!`'/*@+|(){}<>&^$#%~]+")
+
+(defun %org-citation-closing-index (line start)
+  "Return the exclusive balanced square-bracket end beginning at START."
+  (loop :with depth := 0
+        :for index :from start :below (length line)
+        :for character := (char line index)
+        :unless (%org-escaped-character-p line index)
+          :do (cond
+                ((eql character #\[) (incf depth))
+                ((eql character #\])
+                 (decf depth)
+                 (when (zerop depth) (return (1+ index)))))))
+
+(defun %org-citation-key-ranges (line start end)
+  "Return citation-key ranges in LINE between START and END."
+  (let ((ranges '()))
+    (cl-ppcre:do-matches
+        (key-start key-end +org-citation-key-pattern+ line
+                   nil :start start :end end)
+      (unless (%org-escaped-character-p line key-start)
+        (push (cons key-start key-end) ranges)))
+    (nreverse ranges)))
+
+(defun %org-citation-reference-candidates
+    (line contents-start contents-end)
+  "Return citation-reference candidates within one citation contents range."
+  (loop :with result := '()
+        :with start := contents-start
+        :while (< start contents-end)
+        :for separator := (position #\; line :start start :end contents-end)
+        :for end := (if separator (1+ separator) contents-end)
+        :for keys := (%org-citation-key-ranges line start end)
+        :do
+           (when keys
+             (push (%make-org-inline-candidate
+                    start end end start end :citation-reference)
+                   result))
+           (setf start end)
+        :finally (return (nreverse result))))
+
+(defun %org-citation-candidates (line)
+  "Return balanced GNU Org citation and citation-reference candidates."
+  (let ((result '()))
+    (cl-ppcre:do-matches
+        (start prefix-end +org-citation-prefix-pattern+ line)
+      (let* ((closing (%org-citation-closing-index line start))
+             (raw-end (and closing (1- closing)))
+             (keys (and raw-end
+                        (%org-citation-key-ranges line prefix-end raw-end))))
+        (when keys
+          (let* ((first-key-end (cdr (first keys)))
+                 (prefix-separator
+                   (position #\; line :start prefix-end :end first-key-end
+                                  :from-end t))
+                 (contents-start
+                   (if prefix-separator (1+ prefix-separator) prefix-end))
+                 (trimmed-end raw-end))
+            (loop :while (and (> trimmed-end contents-start)
+                              (member (char line (1- trimmed-end))
+                                      '(#\Space #\Tab)))
+                  :do (decf trimmed-end))
+            (let* ((suffix-separator
+                     (position #\; line :start first-key-end :end trimmed-end
+                                    :from-end t))
+                   (key-after-suffix-p
+                     (and suffix-separator
+                          (find-if (lambda (range)
+                                     (>= (car range) (1+ suffix-separator)))
+                                   keys)))
+                   (contents-end
+                     (if (and suffix-separator (not key-after-suffix-p))
+                         (1+ suffix-separator)
+                         trimmed-end))
+                   (outer-end closing))
+              (loop :while (and (< outer-end (length line))
+                                (member (char line outer-end)
+                                        '(#\Space #\Tab)))
+                    :do (incf outer-end))
+              (push (%make-org-inline-candidate
+                     start closing outer-end contents-start contents-end
+                     :citation)
+                    result)
+              (dolist (reference
+                       (%org-citation-reference-candidates
+                        line contents-start contents-end))
+                (push reference result)))))))
+    (nreverse result)))
+
+(defun %org-malformed-citation-at-point-p (point)
+  "Whether POINT is within citation-looking syntax lacking a valid parse."
+  (let* ((line (line-string point))
+         (column (point-charpos point))
+         (valid-starts
+           (loop :for candidate :in (%org-citation-candidates line)
+                 :when (eq (%org-inline-candidate-node-type candidate)
+                           :citation)
+                   :collect (%org-inline-candidate-start candidate))))
+    (cl-ppcre:do-matches
+        (start prefix-end +org-citation-prefix-pattern+ line)
+      (when (and (< start prefix-end)
+                 (<= start column)
+                 (not (member start valid-starts)))
+        (return-from %org-malformed-citation-at-point-p t)))
+    nil))
 
 (defun %org-emphasis-before-p (line index)
   (or (zerop index)
@@ -508,16 +617,36 @@ cannot fall through to a paragraph or section after an inner end marker."
       (let ((line (line-string point)))
         (if (eq drawer-kind :timestamp)
             (%org-timestamp-candidates line)
-            (let* ((links (%org-link-candidates line))
+            (let* ((citations (%org-citation-candidates line))
+                   (citation-outers
+                     (remove-if-not
+                      (lambda (candidate)
+                        (eq (%org-inline-candidate-node-type candidate)
+                            :citation))
+                      citations))
+                   (links
+                     (remove-if
+                      (lambda (link)
+                        (find-if
+                         (lambda (citation)
+                           (%org-inline-contained-by-p link citation))
+                         citation-outers))
+                      (%org-link-candidates line)))
                    (plain-links
                      (remove-if
                       (lambda (plain-link)
-                        (find-if
-                         (lambda (link)
-                           (%org-inline-contained-by-p plain-link link))
-                         links))
+                        (or (find-if
+                             (lambda (link)
+                               (%org-inline-contained-by-p plain-link link))
+                             links)
+                            (find-if
+                             (lambda (citation)
+                               (%org-inline-contained-by-p
+                                plain-link citation))
+                             citation-outers)))
                       (%org-plain-link-candidates line))))
               (append
+               citations
                links
                plain-links
                (%org-timestamp-candidates line)
@@ -631,7 +760,8 @@ cannot fall through to a paragraph or section after an inner end marker."
       ;; literal.  Everywhere else it beats a supported containing candidate
       ;; so ae cannot over-delete that container or its paragraph.
       ((or (%org-unsupported-table-object-at-point-p origin)
-           (%org-unsupported-inline-at-point-p origin))
+           (%org-unsupported-inline-at-point-p origin)
+           (%org-malformed-citation-at-point-p origin))
        nil)
       (candidate (%org-inline-to-boundary origin candidate))
       ;; An ambiguous inline parse must fail closed.  With no inline object,
@@ -654,7 +784,8 @@ cannot fall through to a paragraph or section after an inner end marker."
       (alexandria:when-let ((at-point (%org-object-at-point point)))
         (return at-point))
       (when (or (%org-boundary-scan-barrier-p point)
-                (%org-unsupported-inline-at-point-p point))
+                (%org-unsupported-inline-at-point-p point)
+                (%org-malformed-citation-at-point-p point))
         (return nil))
       (let ((eligible
               (remove-if

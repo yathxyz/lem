@@ -2581,8 +2581,9 @@ motions retain the destination cursor and characterwise selection behavior.
 A separate on-demand boundary model and Vi adapter implement all eight bindings
 in the active Evil-Org text-object theme: `ae/ie`, `aE/iE`, `ar/ir`, and
 `aR/iR` in operator-pending and Visual states. The bounded model covers inline
-markup, bracket/plain links, timestamps, table cells, paragraphs and rows,
-flat matched blocks, point-sensitive simple unordered items/lists, tables with
+markup, bracket/plain links, balanced citations and citation references,
+timestamps, table cells, paragraphs and rows, flat matched blocks,
+point-sensitive simple unordered items/lists, tables with
 associated formulas, matched property/LOGBOOK/generic drawers with
 node-property, CLOCK, and paragraph children, headline elements, sections,
 and heading ancestry. Supported inline objects remain available in generic
@@ -2595,9 +2596,9 @@ ownership of normal `a/i`, stock `aw/iw`, surround, or operator Snipe. Ordered,
 tab-structured, or continuation-list contexts fail object, element, and
 greater-element requests closed. Empty drawer interiors, orphan-property
 lines, malformed or unclosed drawers, and nested or unclosed block roots fail
-the unavailable families closed; recognized
-unsupported or ambiguous inline/cell syntax fails object requests closed; and empty
-leaf-item or inner-subtree ranges abort. These aborts occur before mutation and
+the unavailable families closed. Malformed citations and recognized
+unsupported or ambiguous inline/cell syntax fail object requests closed;
+empty leaf-item or inner-subtree ranges abort. These aborts occur before mutation and
 preserve text, registers, and an existing Visual selection. Type-mismatched
 inner end markers remain literal inside an otherwise matched flat block.
 

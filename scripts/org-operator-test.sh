@@ -487,11 +487,27 @@ write_fixtures() {
   printf '%s\n' 'prefix [fn:note] suffix' \
     >"$WORKDIR/unsupported-inline.org"
   printf '%s\n' 'prefix [cite:@key] suffix' \
-    >"$WORKDIR/unsupported-citation.org"
+    >"$WORKDIR/citation-simple.org"
+  printf '%s\n' 'prefix [cite:@key] suffix' \
+    >"$WORKDIR/citation-simple-inner.org"
+  printf '%s\n' 'prefix [cite/t:See @one p. 4; and @two] suffix' \
+    >"$WORKDIR/citation-rich.org"
+  printf '%s\n' 'prefix [cite/t:See @one p. 4; and @two] suffix' \
+    >"$WORKDIR/citation-rich-inner.org"
+  printf '%s\n' 'prefix [cite/t:Common; @one; shared] suffix' \
+    >"$WORKDIR/citation-common-affixes.org"
+  printf '%s\n' 'prefix [cite/t:See @one p. 4; and @two] suffix' \
+    >"$WORKDIR/citation-second-reference.org"
+  printf '%s\n' 'prefix [cite:[[id:30ec][@key]]] suffix' \
+    >"$WORKDIR/citation-nested-reference.org"
+  printf '%s\n' 'prefix [cite:@key suffix' \
+    >"$WORKDIR/citation-malformed.org"
+  printf '%s\n' '~[cite:@key]~ tail' \
+    >"$WORKDIR/citation-code-opaque.org"
   printf '%s\n' 'prefix \alpha suffix' \
     >"$WORKDIR/unsupported-entity.org"
   printf '%s\n' '*prefix [cite:@key] suffix*' \
-    >"$WORKDIR/unsupported-nested.org"
+    >"$WORKDIR/citation-in-bold.org"
   printf '%s\n' '* H' ':ID: *orphan*' 'KEEP' '* S' \
     >"$WORKDIR/orphan-under-heading.org"
   printf '%s\n' '* H' ':MY-DRAWER:' ':ID: value' ':END:' 'KEEP' '* S' \
@@ -2435,14 +2451,99 @@ if start_case unsupported-inline "$WORKDIR/unsupported-inline.org" \
   stop_case "$CASE_SESSION"
 fi
 
-if start_case unsupported-citation "$WORKDIR/unsupported-citation.org" \
+if start_case citation-simple "$WORKDIR/citation-simple.org" 'cite:@key'; then
+  send_keys "$CASE_SESSION" 8 l
+  if operate_and_record citation-simple "$CASE_SESSION" d a e; then
+    assert_state citation-simple-ae citation-simple "$CASE_SESSION" \
+      'text=prefix suffix\n bytes=' \
+      'register=[cite:@key]  register-type=char' \
+      'state=normal selection=none' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case citation-simple-inner "$WORKDIR/citation-simple-inner.org" \
+     'cite:@key'; then
+  send_keys "$CASE_SESSION" 8 l
+  if operate_and_record citation-simple-inner "$CASE_SESSION" y i e; then
+    assert_state citation-simple-inner-ie citation-simple-inner \
+      "$CASE_SESSION" 'register=@key register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case citation-rich "$WORKDIR/citation-rich.org" 'See.*@two'; then
+  send_keys "$CASE_SESSION" 19 l
+  if operate_and_record citation-rich "$CASE_SESSION" d a e; then
+    assert_state citation-rich-first-ae citation-rich "$CASE_SESSION" \
+      'text=prefix [cite/t: and @two] suffix\n bytes=' \
+      'register=See @one p. 4; register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case citation-rich-inner "$WORKDIR/citation-rich-inner.org" \
+     'See.*@two'; then
+  send_keys "$CASE_SESSION" 8 l
+  if operate_and_record citation-rich-inner "$CASE_SESSION" y i e; then
+    assert_state citation-rich-inner-ie citation-rich-inner "$CASE_SESSION" \
+      'register=See @one p. 4; and @two register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case citation-common-affixes \
+     "$WORKDIR/citation-common-affixes.org" 'Common.*shared'; then
+  send_keys "$CASE_SESSION" 8 l
+  if operate_and_record citation-common-affixes "$CASE_SESSION" y i e; then
+    assert_state citation-common-affixes-ie citation-common-affixes \
+      "$CASE_SESSION" 'register= @one; register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case citation-second-reference \
+     "$WORKDIR/citation-second-reference.org" 'and.*@two'; then
+  send_keys "$CASE_SESSION" 37 l
+  if operate_and_record citation-second-reference "$CASE_SESSION" d a e; then
+    assert_state citation-second-reference-ae citation-second-reference \
+      "$CASE_SESSION" \
+      'text=prefix [cite/t:See @one p. 4;] suffix\n bytes=' \
+      'register= and @two register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case citation-nested-reference \
+     "$WORKDIR/citation-nested-reference.org" 'id:30ec'; then
+  send_keys "$CASE_SESSION" 27 l
+  if operate_and_record citation-nested-reference "$CASE_SESSION" d a e; then
+    assert_state citation-nested-reference-ae citation-nested-reference \
+      "$CASE_SESSION" 'text=prefix [cite:] suffix\n bytes=' \
+      'register=[[id:30ec][@key]] register-type=char' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case citation-malformed "$WORKDIR/citation-malformed.org" \
      'cite:@key'; then
   send_keys "$CASE_SESSION" 14 l
-  if operate_and_record unsupported-citation "$CASE_SESSION" d a e; then
-    assert_state unsupported-citation-ae unsupported-citation "$CASE_SESSION" \
-      'text=prefix [cite:@key] suffix\n bytes=' \
+  if operate_and_record citation-malformed "$CASE_SESSION" d a e; then
+    assert_state citation-malformed-ae citation-malformed "$CASE_SESSION" \
+      'text=prefix [cite:@key suffix\n bytes=' \
       'register= register-type=none' 'small= small-type=none' \
       'state=normal selection=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case citation-code-opaque "$WORKDIR/citation-code-opaque.org" \
+     'cite:@key'; then
+  send_keys "$CASE_SESSION" 7 l
+  if operate_and_record citation-code-opaque "$CASE_SESSION" y a e; then
+    assert_state citation-code-opaque-ae citation-code-opaque \
+      "$CASE_SESSION" 'register=~[cite:@key]~  register-type=char' \
+      'modified=no'
   fi
   stop_case "$CASE_SESSION"
 fi
@@ -2459,14 +2560,12 @@ if start_case unsupported-entity "$WORKDIR/unsupported-entity.org" \
   stop_case "$CASE_SESSION"
 fi
 
-if start_case unsupported-nested "$WORKDIR/unsupported-nested.org" \
-     'cite:@key'; then
+if start_case citation-in-bold "$WORKDIR/citation-in-bold.org" 'cite:@key'; then
   send_keys "$CASE_SESSION" 15 l
-  if operate_and_record unsupported-nested "$CASE_SESSION" d a e; then
-    assert_state unsupported-nested-ae unsupported-nested "$CASE_SESSION" \
-      'text=*prefix [cite:@key] suffix*\n bytes=' \
-      'register= register-type=none' 'small= small-type=none' \
-      'state=normal selection=none' 'modified=no'
+  if operate_and_record citation-in-bold "$CASE_SESSION" d a e; then
+    assert_state citation-in-bold-ae citation-in-bold "$CASE_SESSION" \
+      'text=*prefix [cite:] suffix*\n bytes=' \
+      'register=@key register-type=char' 'modified=yes'
   fi
   stop_case "$CASE_SESSION"
 fi
