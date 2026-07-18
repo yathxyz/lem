@@ -171,8 +171,12 @@ recording interface's `update-display` `:after` frame counter).
 | Workload | Session |
 |----------|---------|
 | big-file | open the 10 MB `mixed-10m` corpus via `find-file-buffer`, page through end-to-end (`next-page` until `end-of-buffer`), jump bottom/top |
-| scroll | syntax-scanned `lisp-500k` buffer (real lisp-mode tmlanguage), sustained line-scroll (`scroll-down` ×1500) then page-scroll (`next-page` ×150) over styled text |
+| isearch | 10 MB `mixed-10m` buffer, incremental search with common (`"the"`, ~34.7k hits), rare (`"attribute cache"`, ~213 hits), and absent needles — per-keystroke highlight via the real `lem/isearch::isearch-update-buffer`, then match stepping via `search-forward` (see Deviations for the headless-isearch note) |
+| undo-storm | seeded buffer, 5000 mixed edits (`insert`/`delete`/`newline` at moving positions, one undo group each), full `buffer-undo` to start, full `buffer-redo`; a correctness canary (undo/redo round-trips losslessly) is asserted once in setup, outside every timed window |
+| overlay-heavy | `lisp-500k` buffer with 2000 registered overlays (single- and multi-line via `make-overlay`), 500 net-zero edits interleaved with the overlay boundaries, full redisplay every 10 edits |
 | long-line | 16 KB single line: `character-offset` cursor sweeps, beginning/end-of-line, net-zero edits at 8 positions, wrap-off and wrap-on render passes (×2) |
+| lisp-edit | syntax-scanned `lisp-500k` (lem-lisp-syntax syntax table + lem-lisp-mode tmlanguage), `forward-sexp`/`backward-sexp` motion sweeps, `newline-and-indent` at nesting points (lem-core `calc-indent-default`) with per-edit region re-scan |
+| scroll | syntax-scanned `lisp-500k` buffer (real lisp-mode tmlanguage), sustained line-scroll (`scroll-down` ×1500) then page-scroll (`next-page` ×150) over styled text |
 
 **Measurement (per the task spec):** median of **three** full executions per
 workload per suite run, `gc :full` before each, **one** warm-up pass discarded,
@@ -186,13 +190,20 @@ at 20% (as T1 — see Deviations).
 
 Committed baseline medians (`bench/baselines/ex44-…-t2.json`); wall unit is
 ms/workload, band 20% for all. `consed`, `gc`, and `frames` are the per-workload
-medians; `frames` is deterministic (identical every run).
+medians; `frames` is deterministic (identical every run). The seven-workload
+table below supersedes the initial three-workload baseline (see the ledger
+rebaseline row that added `isearch`, `undo-storm`, `overlay-heavy`, `lisp-edit`;
+the pre-existing three shift slightly under seven-way interleaving).
 
 | Workload | median ms | consed B | GC count | GC pause ms | frames |
 |----------|----------:|---------:|---------:|------------:|-------:|
-| `big-file` | 4745 | 678 769 920 | 4 | ~28 | 4976 |
-| `scroll` | 1272 | 307 392 384 | 2 | ~5 | 1652 |
-| `long-line` | 610 | 133 027 360 | 1 | ~0 | 172 |
+| `big-file` | 4234 | 718 801 280 | 4 | ~33 | 4976 |
+| `isearch` | 2201 | 437 387 136 | 3 | ~41 | 496 |
+| `scroll` | 1075 | 322 662 272 | 2 | ~7 | 1652 |
+| `overlay-heavy` | 520 | 175 174 144 | 1 | ~0 | 51 |
+| `long-line` | 488 | 121 617 184 | 1 | ~0 | 172 |
+| `lisp-edit` | 299 | 36 621 696 | 1 | ~0 | 72 |
+| `undo-storm` | 266 | 24 322 688 | 1 | ~0 | 4 |
 
 (Absolute ms track machine load at baseline creation; the gate compares against
 the committed median within the 20% band on a matching fingerprint, so a
@@ -215,6 +226,7 @@ numbers and the motivating T0/T2 measurement (Constraint 1).
 | 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (PF-4) | Rebaseline completing Milestone P1: added the `width` (4), `search` (4), `syntax` (1), and `redisplay` (3) entry files to the registry (12 new entries). No optimization — new measurement entries only. Each is deterministic (fixed corpora / fixed-content strings) and sizes its iteration count for a ≥ 10 ms window; validated by 5 consecutive PASS runs. See Deviations for the redisplay long-line size cap (a stack-exhaustion finding), the headless syntax-grammar load, the absent-needle search sweep, and the persistent recording interface. |
 | 2026-07-18 | ex44 / i5-13500 / 20c | t1 | (PF-5, corpus pin) | **No t1 rebaseline needed.** Pinning `lisp-500k` to commit `5cd018a9` via `git show` (was: working-tree `read-file-string`) is byte-for-byte identical at this commit — the six source files are unchanged between the working tree and the pin — verified by regenerating both ways and comparing (`cmp` IDENTICAL). The `syntax/lisp-500k` t1 entry reads the same bytes, so its baseline is untouched; the committed t1 baseline stands. Recorded here per Constraint 6. |
 | 2026-07-18 | ex44 / i5-13500 / 20c | t2 | (PF-5) | **Initial T2 baseline** (Milestone P2): the `run-t2.lisp` macro-session harness + three workloads (`big-file`, `scroll`, `long-line`), the `mixed-10m` corpus generator, and the `lisp-500k` corpus pin. No optimization — new measurement tier only. Validated by 5 consecutive PASS gate runs; all three bands settle at the 20% floor after interleaving. See Deviations for the long-line 16 KB render cap (a tighter restatement of the P1 stack-exhaustion finding), the additive T2 metric fields, the interleaving/long-line sizing hygiene, and the `mixed-10m` corpus. |
+| 2026-07-18 | ex44 / i5-13500 / 20c | t2 | (PF-5, +4 workloads) | **T2 rebaseline** completing the PF-5 workload set: added `isearch`, `undo-storm`, `overlay-heavy`, and `lisp-edit` (one file each under `scripts/bench/t2/`), so all seven PF-5 workloads now exist. No optimization — new measurement workloads only; each drives frozen public API + existing internals (an API-stability canary). The pre-existing `big-file`/`scroll`/`long-line` medians shift down slightly (4745→4234, 1272→1075, 610→488) because the interleaved suite is now seven-way, not three-way — the honest per-machine reset (Constraint 5), not a regression. Rebaseline folds five suite runs; all bands settle at the 20% floor. Validated by 5 consecutive PASS gate runs. See Deviations for the headless-isearch driving choice, the undo-storm canary-in-setup + trailing-undo replay, the overlay-heavy net-zero edits, and the lisp-edit `calc-indent-default` + undo-restore choices. |
 
 ### Optimizations (OPT-n)
 
@@ -448,3 +460,78 @@ the spec.
   the machine's steady-state load at baseline creation; the gate is median-vs-
   band on a matching fingerprint, so a per-machine rebaseline is the honest reset
   when the platform moves (Constraint 5).
+
+- **`isearch` drives the real incremental-search engine per keystroke, not the
+  interactive command loop** (PF-5). The P2 task allows this fallback explicitly:
+  the interactive isearch loop (`lem/isearch:isearch-forward` → `isearch-start`
+  installs a minor mode and then `read-key`s each keystroke, with a floating
+  popup message) cannot run headlessly without a real input loop feeding key
+  events. So the workload drives the *real* isearch engine at per-keystroke
+  granularity rather than reimplementing it: for each prefix of the needle it
+  calls the real `lem/isearch::isearch-update-buffer` (the exact visible-region
+  search + highlight-overlay function `isearch-update-display` calls), then
+  forces a redisplay; match stepping is the `isearch-next` path — the frozen
+  `lem:search-forward` advancing the cursor match by match, scrolling the view
+  (`window-see`) and re-highlighting per step. Only the minor-mode entry,
+  `read-key`, and the popup message (input-loop / frontend-interactive, not
+  search work) are not driven. Needles and hit counts are deterministic
+  properties of the pinned `mixed-10m` generator: `"the"` (~34.7k hits, dense —
+  match stepping capped at 250), `"attribute cache"` (~213 hits, sparse — long
+  scans between hits), an absent needle (one full-buffer scan, no match). The
+  buffer is a private `make-buffer` copy of the corpus, **not** `find-file-buffer`
+  (which would return the *same* buffer object the `big-file` workload opens, so
+  the two would collide).
+
+- **`undo-storm` asserts its correctness canary in setup; RUN adds a trailing
+  undo for replay** (PF-5). The task requires asserting "final buffer text equals
+  post-edit text … outside the timed window". `t2-measure-once` times the whole
+  RUN thunk, so the assert cannot live in RUN. It is therefore done once in
+  `setup` (which is untimed and re-runs on every bench invocation): setup runs
+  the exact 5k-edit sequence, records the post-edit text, does a full undo (→
+  base) then full redo (→ post-edit), and asserts the redo result is
+  byte-identical to the recorded post-edit text — proving undo/redo round-trips
+  losslessly. For replayability the base text is seeded with undo **disabled**
+  (so the seed is never on the undo stack; "start" = the seeded base), and RUN is
+  net-zero: 5k edits → full undo (→ base) → full redo (→ post-edit) → a **final
+  full undo** (→ base), ending exactly where it began so all three timed reps +
+  the warm-up replay identically. The trailing undo is the only addition beyond
+  the spec's "edits, undo, redo" session and exists solely for replay hygiene;
+  it roughly doubles the undo work in the timed window, which is representative
+  (undo/redo is what the workload measures) and deterministic. One undo group is
+  recorded per edit (a `buffer-undo-boundary` after each), so the full undo/redo
+  replays exactly 5k groups.
+
+- **`overlay-heavy` edits are net-zero and the 2000 overlays persist across
+  reps** (PF-5). The 2000 overlays (`make-overlay`, single- and multi-line,
+  spread over the first 2000 lines of `lisp-500k`) are built once in setup and
+  never deleted, so every rep runs with the full overlay set registered. The 500
+  edits are net-zero (insert a char, delete it) — the same hygiene the T1
+  edit/points entries and the T2 long-line workload use — so the text, and
+  therefore every overlay point (which returns to its original position), is
+  invariant and every execution renders the identical frame sequence. The edits
+  sweep the same line band the overlays occupy and the view follows the cursor,
+  so each of the 50 forced frames (one per 10 edits, per the task) has real
+  overlays in the visible region to gather and paint; the per-edit cost is the
+  relocation of the 4000 registered overlay points that lie after the edit.
+
+- **`lisp-edit` uses lem-core's `calc-indent-default`, and undoes its edits to
+  restore** (PF-5). The task calls for "lem-core's syntax/indent machinery"; the
+  lisp-specific `calc-indent` lives in `lem-lisp-syntax`, whose load pulls
+  micros/usocket, which the `:lem/core` bench image deliberately does not carry.
+  So `newline-and-indent` indents via the default `calc-indent-function`
+  (`calc-indent-default`, copies the previous line's indentation) — genuine
+  lem-core indent machinery, no heavy deps. Structural motion uses the real
+  lem-lisp-syntax **syntax table** (`extensions/lisp-syntax/syntax-table.lisp`,
+  loaded directly — it depends only on `:lem`, unlike the rest of that system) so
+  `forward-sexp`/`backward-sexp` (`form-offset`/`scan-lists`) match parens
+  correctly; highlight attributes come from the lem-lisp-mode tmlanguage grammar
+  (the same direct-load trick `scroll` and the T1 `syntax` entry use). `backward-sexp`
+  is ~100× costlier per call than `forward-sexp` over dense real Lisp (its
+  negative-count `form-offset` re-scans backward), so it dominates the sweep and
+  the step count is sized for a bounded, gate-stable window, not raw motion
+  volume. For replayability the corpus is inserted with undo **disabled** then
+  undo enabled; the sexp sweeps are read-only and the `newline-and-indent` edits
+  are undone at the end of RUN by draining the undo stack (which stops at the
+  corpus base, since the corpus insert was not recorded), and each edit re-scans
+  only the few lines it touched (`syntax-scan-region`), never the whole 500 KB
+  buffer (a full re-scan per edit would be ~116 ms × the edit count).
