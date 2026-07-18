@@ -39,6 +39,12 @@
 (defvar *llm-response-origin* nil
   "Point where a conversation response should begin for one dispatch.")
 
+(defvar *llm-force-inline-output-p* nil
+  "Whether one dispatch should stream at point without conversation mode.")
+
+(defvar *llm-response-close-function* 'llm-response-close-now
+  "Function captured by one inline request to finish its insertion point.")
+
 (defvar *llm-visible-prompt* nil
   "Unexpanded prompt shown in transcripts and request traces for one dispatch.")
 
@@ -84,7 +90,8 @@
 (defstruct (llm-request
             (:constructor make-llm-request
                 (buffer process backend
-                 &key prompt insertion-point tool-context tools-p)))
+                 &key prompt insertion-point tool-context tools-p
+                   response-close-function)))
   "One asynchronous LLM request owned by BUFFER."
   buffer
   process
@@ -93,6 +100,7 @@
   insertion-point
   tool-context
   tools-p
+  response-close-function
   visual-state
   (aborted-p nil)
   (lock (bt2:make-lock :name "lem-yath/llm-request")))
@@ -447,14 +455,14 @@ end of the current word or punctuation run."
 
 (defun llm-current-output-buffer ()
   "Return the request-bearing conversation buffer or shared transcript."
-  (if (llm-conversation-buffer-p)
-      (let ((current (current-buffer)))
-        (if (llm-active-request current)
-            current
-            (let* ((*llm-output-buffer-override* nil)
-                   (shared (llm-output-buffer)))
-              (if (llm-active-request shared) shared current))))
-      (llm-output-buffer)))
+  (let ((current (current-buffer)))
+    (cond
+      ((llm-active-request current) current)
+      ((llm-conversation-buffer-p current)
+       (let* ((*llm-output-buffer-override* nil)
+              (shared (llm-output-buffer)))
+         (if (llm-active-request shared) shared current)))
+      (t (llm-output-buffer)))))
 
 (defun llm-active-request (buffer)
   (and (llm-buffer-live-p buffer)
@@ -469,7 +477,7 @@ end of the current word or punctuation run."
 (defun llm-prepare-response (buffer shared-heading)
   "Present BUFFER and prepare one response insertion point.
 SHARED-HEADING is rendered only for the traditional shared transcript."
-  (if (llm-conversation-buffer-p buffer)
+  (if (or (llm-conversation-buffer-p buffer) *llm-force-inline-output-p*)
       (progn
         (when (buffer-read-only-p buffer)
           (editor-error "Conversation buffer is read only"))
@@ -503,13 +511,17 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
                    'lem-yath-llm-role :user)
     (delete-point insertion-point)))
 
+(defun llm-close-insertion-point-now (insertion-point function)
+  (funcall (or function #'llm-response-close-now) insertion-point))
+
 (defun llm-unregistered-response-failure-now
     (buffer insertion-point text)
   "Render TEXT and release an insertion point that no request owns."
   (if insertion-point
       (progn
         (llm-response-insert-now insertion-point text :assistant-p t)
-        (llm-response-close-now insertion-point)
+        (llm-close-insertion-point-now
+         insertion-point *llm-response-close-function*)
         (redraw-display))
       (llm-buffer-append-now buffer text)))
 
@@ -549,7 +561,9 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
     (llm-run-request-functions
      *llm-request-finish-functions* request :complete)
     (when (llm-request-conversation-p request)
-      (llm-response-close-now (llm-request-insertion-point request))
+      (llm-close-insertion-point-now
+       (llm-request-insertion-point request)
+       (llm-request-response-close-function request))
       (setf (llm-request-insertion-point request) nil)
       (redraw-display))
     (setf (buffer-value (llm-request-buffer request)
@@ -589,7 +603,9 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
                                    :prompt prompt
                                    :insertion-point insertion-point
                                    :tool-context tool-context
-                                   :tools-p tools-p)))
+                                   :tools-p tools-p
+                                   :response-close-function
+                                   *llm-response-close-function*)))
     (setf (buffer-value buffer *llm-active-request-key*) request)
     (llm-run-request-functions *llm-request-start-functions* request)
     request))
@@ -877,11 +893,15 @@ SHARED-HEADING is rendered only for the traditional shared transcript."
 Read-only conversations follow gptel by falling back to the shared transcript."
   (let ((buffer (current-buffer)))
     (cond
-      ((not (llm-conversation-buffer-p buffer))
+      ((and (not *llm-force-inline-output-p*)
+            (not (llm-conversation-buffer-p buffer)))
        (funcall function))
       ((buffer-read-only-p buffer)
-       (message "Conversation is read only; using the shared LLM buffer")
-       (funcall function))
+       (if *llm-force-inline-output-p*
+           (editor-error "Inline LLM destination is read only")
+           (progn
+             (message "Conversation is read only; using the shared LLM buffer")
+             (funcall function))))
       (t
        (let ((*llm-output-buffer-override* buffer)
              (*llm-response-origin* (current-point)))

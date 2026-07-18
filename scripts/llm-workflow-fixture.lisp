@@ -5,6 +5,8 @@
 (defvar *llm-workflow-context-prompt* nil)
 (defvar *llm-workflow-context-visible-prompt* nil)
 (defvar *llm-workflow-context-messages* nil)
+(defvar *llm-workflow-capture-prompt* nil)
+(defvar *llm-workflow-capture-buffer* nil)
 
 (defmethod llm-backend-stream
     ((backend (eql :lem-yath-context-test)) prompt)
@@ -12,6 +14,22 @@
   (setf *llm-workflow-context-prompt* prompt
         *llm-workflow-context-visible-prompt* (llm-visible-prompt prompt)
         *llm-workflow-context-messages* *llm-conversation-messages*))
+
+(defmethod llm-backend-stream
+    ((backend (eql :lem-yath-capture-test)) prompt)
+  (declare (ignore backend))
+  (let* ((buffer (llm-output-buffer))
+         (insertion-point
+           (llm-prepare-response buffer "UNEXPECTED-SHARED-CAPTURE"))
+         (request
+           (llm-register-request
+            buffer nil :lem-yath-capture-test
+            :prompt (llm-visible-prompt prompt)
+            :insertion-point insertion-point)))
+    (setf *llm-workflow-capture-prompt* prompt
+          *llm-workflow-capture-buffer* buffer)
+    (llm-request-complete-now
+     request (format nil "CAPTURE-RESPONSE-SENTINEL~%"))))
 
 (setf *llm-handoff-browser-commands*
       (list (uiop:getenv "LEM_YATH_LLM_WORKFLOW_BROWSER"))
@@ -32,6 +50,18 @@
                    (sb-posix:stat (uiop:native-namestring pathname)))
                   #o777))
   #-sbcl "unsupported")
+
+(defun llm-workflow-uuid-v4-p (value)
+  (and (stringp value)
+       (= (length value) 36)
+       (loop :for index :in '(8 13 18 23)
+             :always (char= (char value index) #\-))
+       (char= (char value 14) #\4)
+       (find (char-downcase (char value 19)) "89ab" :test #'char=)
+       (loop :for index :below 36
+             :always
+             (or (member index '(8 13 18 23))
+                 (digit-char-p (char value index) 16)))))
 
 (defun llm-workflow-killring-head ()
   (or (lem/common/killring:peek-killring-item (current-killring) 0) ""))
@@ -243,6 +273,55 @@
   (clear-buffer-edit-history *llm-workflow-source-buffer*)
   (llm-workflow-log "LONG ready"))
 
+(define-command lem-yath-test-llm-workflow-capture-setup () ()
+  (switch-to-buffer *llm-workflow-source-buffer*)
+  (setf *llm-backend* :lem-yath-capture-test
+        *llm-current-preset* "quick-lookup"
+        *llm-workflow-capture-prompt* nil
+        *llm-workflow-capture-buffer* nil)
+  (llm-workflow-log "CAPTURE ready"))
+
+(define-command lem-yath-test-llm-workflow-capture-record () ()
+  (let* ((buffer (current-buffer))
+         (text (points-to-string (buffer-start-point buffer)
+                                 (buffer-end-point buffer)))
+         (path (buffer-filename buffer))
+         (owner-p (eq buffer *llm-workflow-capture-buffer*))
+         (heading-p (not (null (search "* Daily capture prompt :llm:" text))))
+         (topic-p
+           (not (null (search ":GPTEL_TOPIC: Daily capture prompt" text))))
+         (preset-p
+           (not (null (search ":GPTEL_PRESET: quick-lookup" text))))
+         (id-line
+           (find-if
+            (lambda (line) (alexandria:starts-with-subseq ":ID: " line))
+            (uiop:split-string text :separator '(#\Newline))))
+         (id-p
+           (and id-line (llm-workflow-uuid-v4-p (subseq id-line 5))))
+         (response-p
+           (not (null (search "CAPTURE-RESPONSE-SENTINEL" text))))
+         (no-shared-p (not (search "UNEXPECTED-SHARED-CAPTURE" text)))
+         (closed-p (not (search "CAPTURE-RESPONSE-SENTINEL\n\n* " text)))
+         (prompt-p
+           (string= *llm-workflow-capture-prompt* "Daily capture prompt"))
+         (ordinary-p (not (llm-conversation-buffer-p buffer)))
+         (released-p (null (llm-active-request buffer)))
+         (pass
+           (and owner-p
+                path
+                heading-p topic-p preset-p id-p response-p no-shared-p
+                closed-p prompt-p ordinary-p released-p)))
+    (llm-workflow-log
+     "CAPTURE DETAIL owner=~a heading=~a topic=~a preset=~a id=~a response=~a no-shared=~a closed=~a prompt=~a ordinary=~a released=~a"
+     owner-p heading-p topic-p preset-p id-p response-p no-shared-p closed-p
+     prompt-p ordinary-p released-p)
+    (when pass (save-buffer buffer))
+    (llm-workflow-log "CAPTURE ~a path=~a modified=~a"
+                      (if pass "PASS" "FAIL")
+                      (and path (namestring path))
+                      (if (buffer-modified-p buffer) "yes" "no"))
+    (switch-to-buffer *llm-workflow-source-buffer*)))
+
 (define-command lem-yath-test-llm-workflow-record () ()
   (let* ((preset-file (llm-preset-pathname))
          (preset-directory (uiop:pathname-directory-pathname preset-file))
@@ -276,6 +355,8 @@
   (define-key keymap "F3" 'lem-yath-test-llm-workflow-settings)
   (define-key keymap "F5" 'lem-yath-test-llm-workflow-region)
   (define-key keymap "F6" 'lem-yath-test-llm-workflow-long)
+  (define-key keymap "F7" 'lem-yath-test-llm-workflow-capture-setup)
+  (define-key keymap "F8" 'lem-yath-test-llm-workflow-capture-record)
   (define-key keymap "F12" 'lem-yath-test-llm-workflow-record))
 
 (llm-workflow-log "READY")

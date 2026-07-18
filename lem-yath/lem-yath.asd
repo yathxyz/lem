@@ -116,6 +116,7 @@
                              (:file "claude-code")))
                (:file "llm-codex-models")
                (:file "llm-trace")
+               (:file "llm-capture")
                (:file "business-visual")
                (:file "bookmarks")
                (:file "persistence")

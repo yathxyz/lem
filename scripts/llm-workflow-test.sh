@@ -7,6 +7,7 @@ id="${LEM_YATH_CHECK_ID:-llm-workflow-$$}"
 root="$(mktemp -d "${TMPDIR:-/tmp}/lem-yath-llm-workflow.XXXXXX")"
 export HOME="$root/home"
 export XDG_CACHE_HOME="$root/cache"
+export WORKDIR="$root/work"
 export LEM_YATH_LLM_WORKFLOW_REPORT="$root/report"
 export LEM_YATH_LLM_WORKFLOW_BROWSER="$root/bin/brave"
 export LEM_YATH_LLM_WORKFLOW_BROWSER_LOG="$root/browser"
@@ -33,7 +34,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$root/bin" "$root/private" \
-  "$root/project"
+  "$root/project" "$WORKDIR/roam"
 chmod 700 "$root/private"
 : >"$LEM_YATH_LLM_WORKFLOW_REPORT"
 printf 'initial context\n' >"$source_file"
@@ -239,6 +240,34 @@ if ! lem_wait_for "$session" 'use tools: off' "$WAIT_TIMEOUT" >/dev/null; then
 fi
 send_key q
 pass compact-to-full 'compact m followed the configured Emacs route to full settings'
+
+send_key F7
+if ! wait_report_count '^CAPTURE ready$' 1; then
+  die capture-setup 'the daily LLM capture fixture was not prepared'
+fi
+send_key M-x
+if ! lem_wait_for "$session" 'Command:' "$WAIT_TIMEOUT" >/dev/null; then
+  die capture-command 'M-x did not open for the configured capture command'
+fi
+send_literal 'yath/llm-capture'
+send_key Enter
+if ! lem_wait_for "$session" 'Type in your prompt:' "$WAIT_TIMEOUT" >/dev/null; then
+  die capture-prompt 'the exact configured capture command did not prompt'
+fi
+send_literal 'Daily capture prompt'
+send_key Enter
+if ! lem_wait_for "$session" 'CAPTURE-RESPONSE-SENTINEL' "$WAIT_TIMEOUT" >/dev/null; then
+  die capture-response 'the captured response did not stream into the daily note'
+fi
+send_key F8
+if ! wait_report_count '^CAPTURE PASS ' 1; then
+  die capture-contract 'daily topic metadata or inline response placement differed'
+fi
+if ! grep -R -q '^\* Daily capture prompt :llm:$' "$WORKDIR/roam" ||
+   ! grep -R -q '^CAPTURE-RESPONSE-SENTINEL$' "$WORKDIR/roam"; then
+  die capture-save 'the verified daily capture was not saved to the roam tree'
+fi
+pass daily-llm-capture 'exact M-x command saved one tagged inline exchange'
 
 send_key F3
 if ! wait_report_count '^SETTINGS ready$' 1; then
