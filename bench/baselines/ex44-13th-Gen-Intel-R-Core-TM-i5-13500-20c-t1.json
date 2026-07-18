@@ -1,0 +1,19 @@
+{
+  "fingerprint": "ex44 | 13th Gen Intel(R) Core(TM) i5-13500 | 20c",
+  "tier": "t1",
+  "commit": "b2fe7b7b",
+  "timestamp": "20260718165451",
+  "entries":
+  [
+    {
+      "name": "telemetry",
+      "unit": "us/op",
+      "min": 0.0,
+      "median": 0.001,
+      "p90": 0.001,
+      "consed-per-op": 0,
+      "n": 1000000,
+      "band": 0.05
+    }
+  ]
+}
