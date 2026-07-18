@@ -15,10 +15,12 @@
         (handler-case
             (progn
               (unless (bt2:thread-alive-p editor-thread) (return))
-              (let ((event (lem-ncurses/input:get-event)))
+              (let* ((event (lem-ncurses/input:get-event))
+                     ;; t0: the tty byte(s) for this event are now read.
+                     (read-time (when (pipeline-recording-p) (pipeline-now))))
                 (if (eq event :abort)
                     (send-abort-event editor-thread nil)
-                    (send-event event))))
+                    (send-input-event event read-time))))
           #+sbcl
           (sb-sys:interactive-interrupt (c)
             (declare (ignore c))

@@ -76,6 +76,7 @@
                 :components ((:file "main")))
                (:file "killring")
                (:file "metrics")
+               (:file "pipeline-timestamps")
                (:file "string-width-utils")
                (:file "syntax-test")
                (:file "syntax-scanner")

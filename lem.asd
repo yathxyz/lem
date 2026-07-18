@@ -129,6 +129,7 @@
                (:file "defcommand")
                (:file "fundamental-mode")
                (:file "region")
+               (:file "pipeline-timestamps")
                (:file "event-queue")
                (:file "interp")
                (:file "mouse")

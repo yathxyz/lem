@@ -82,7 +82,8 @@
                          (eq cmd '<mouse-event>))
                (message nil))
              (when cmd
-               (call-command cmd nil))))
+               (call-command cmd nil)
+               (note-command-done cmd))))
 
          (editor-abort-handler (c)
            (declare (ignore c))

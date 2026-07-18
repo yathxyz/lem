@@ -15,9 +15,10 @@
 
 (defun receive-event (timeout)
   (loop
-    (let ((e (dequeue *editor-event-queue*
-                      :timeout timeout
-                      :timeout-value :timeout)))
+    (let ((e (note-event-dequeued
+              (dequeue *editor-event-queue*
+                       :timeout timeout
+                       :timeout-value :timeout))))
       (cond ((null e)
              (return nil))
             ((eql e :timeout)

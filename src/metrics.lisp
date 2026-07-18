@@ -103,8 +103,10 @@ partition; readers observe either the old or the new head, both valid.")
 ;;;; ------------------------------------------------------------------
 
 (defun %set-recording-enabled (value)
-  "Change hook for `record-metrics': mirror VALUE into the fast gate."
-  (setf *metrics-recording-p* (and value t)))
+  "Change hook for `record-metrics': mirror VALUE into the fast gate and
+install or remove the PF-2 pipeline sink to match."
+  (setf *metrics-recording-p* (and value t))
+  (%sync-pipeline-recorder))
 
 (define-editor-variable record-metrics t
   "When non-nil (the default), the editor records T0 field telemetry
@@ -277,6 +279,35 @@ the keystroke-to-paint proxy.  No-op when recording is disabled."
   (declare (type fixnum microseconds))
   (when *metrics-recording-p*
     (histogram-record (partition-redisplay (current-partition)) microseconds)))
+
+;;;; ------------------------------------------------------------------
+;;;; PF-2 pipeline sink
+;;;; ------------------------------------------------------------------
+;;;;
+;;;; The input->paint pipeline stamps live in lem-core (loaded before this
+;;;; file) and reach the histograms through an installed sink function.  This
+;;;; keeps the always-loaded instrumentation decoupled from the histogram
+;;;; backend and lets the recording gate switch it off with no residual work.
+
+(defun %pipeline-record (stage value name)
+  "Sink for lem-core's pipeline instrumentation (SPEC-PERF PF-2): route a
+measured STAGE delta of VALUE microseconds into the matching T0 histogram.
+NAME is the command symbol for :command and is ignored otherwise."
+  (declare (type fixnum value))
+  (ecase stage
+    (:queue-wait (record-queue-wait value))
+    (:command    (record-command-duration name value))
+    (:redisplay  (record-redisplay-duration value))
+    (:keystroke  (record-keystroke-latency value)))
+  (values))
+
+(defun %sync-pipeline-recorder ()
+  "Install the pipeline sink when recording is enabled, remove it otherwise."
+  (set-pipeline-recorder (if *metrics-recording-p* #'%pipeline-record nil)))
+
+;; Install at load time so telemetry is live from the first keystroke (and for
+;; tests, which load lem/core without running the after-init hooks).
+(%sync-pipeline-recorder)
 
 ;;;; ------------------------------------------------------------------
 ;;;; GC log (ring buffer + pause histogram) via *after-gc-hooks*

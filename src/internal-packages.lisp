@@ -538,6 +538,12 @@
    :send-event
    :send-abort-event
    :event-queue-length)
+  ;; pipeline-timestamps.lisp (SPEC-PERF PF-2)
+  (:export
+   :pipeline-now
+   :pipeline-recording-p
+   :send-input-event
+   :set-pipeline-recorder)
   ;; interp.lisp
   (:export
    :*editor-abort-hook*
