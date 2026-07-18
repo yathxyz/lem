@@ -19,6 +19,9 @@
     "WebFetch" "WebSearch" "Agent")
   "Tools pre-approved by the active Emacs Claude Code registration.")
 
+(defparameter *llm-claude-allowed-tool-limit* 64)
+(defparameter *llm-claude-allowed-tool-character-limit* 256)
+
 (defparameter *llm-cli-session-keys*
   '((:claude-code . lem-yath-llm-claude-code-session-id)
     (:codex . lem-yath-llm-codex-session-id)
@@ -123,7 +126,22 @@
               *llm-system-message* prompt)
       prompt))
 
-(defun llm-cli-command (backend prompt &optional session-id mcp-config)
+(defun llm-claude-allowed-tool-valid-p (tool)
+  (and (stringp tool)
+       (plusp (length tool))
+       (<= (length tool) *llm-claude-allowed-tool-character-limit*)
+       (every #'graphic-char-p tool)))
+
+(defun llm-claude-validate-allowed-tools (tools)
+  (unless (and (listp tools)
+               (<= (length tools) *llm-claude-allowed-tool-limit*)
+               (every #'llm-claude-allowed-tool-valid-p tools))
+    (editor-error "Invalid Claude allowed-tools override"))
+  tools)
+
+(defun llm-cli-command
+    (backend prompt &optional session-id mcp-config
+                              (allowed-tools *llm-claude-allowed-tools*))
   "Build native argv for BACKEND and PROMPT, resuming SESSION-ID when given."
   (when (and session-id (not (llm-cli-session-id-valid-p session-id)))
     (error "Invalid ~a session id" backend))
@@ -131,10 +149,11 @@
                         (error "Unknown LLM CLI backend ~s" backend))))
     (ecase backend
       (:claude-code
+       (llm-claude-validate-allowed-tools allowed-tools)
        (append (list executable "-p" prompt
                      "--output-format" "stream-json" "--verbose")
                (when session-id (list "--resume" session-id))
-               (loop :for tool :in *llm-claude-allowed-tools*
+               (loop :for tool :in allowed-tools
                      :append (list "--allowedTools" tool))
                (when (plusp (length *llm-system-message*))
                  (list "--append-system-prompt" *llm-system-message*))
@@ -335,7 +354,13 @@
     (when (llm-active-request buffer)
       (message "An LLM request is already running; use M-x lem-yath-llm-abort")
       (return-from llm-cli-stream))
-    (let* ((stored-session-id (llm-cli-session-id backend buffer))
+    (let* ((property-origin
+             (if (and *llm-response-origin*
+                      (alive-point-p *llm-response-origin*)
+                      (eq source (point-buffer *llm-response-origin*)))
+                 *llm-response-origin*
+                 (buffer-point source)))
+           (stored-session-id (llm-cli-session-id backend buffer))
            (session-id
              (or (and (eq backend :claude-code)
                       (eq source buffer)
@@ -344,11 +369,16 @@
                  stored-session-id))
            (working-directory
              (and (eq backend :claude-code)
-                  (llm-claude-project-root source)))
+                  (llm-claude-working-directory source property-origin)))
+           (allowed-tools
+             (and (eq backend :claude-code)
+                  (llm-claude-allowed-tools-at source property-origin)))
            (mcp-config
              (and working-directory
                   (llm-claude-mcp-config-pathname working-directory)))
-           (command (llm-cli-command backend prompt session-id mcp-config))
+           (command
+             (llm-cli-command backend prompt session-id mcp-config
+                              allowed-tools))
            (insertion-point
              (llm-prepare-response
               buffer

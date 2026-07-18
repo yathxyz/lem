@@ -3455,6 +3455,15 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   branches remain authoritative. The physical gate proves response placement
   before the old continuation, exact fork contents/index registration, and
   new-session resume argv.
+  `CC_CWD` and `CC_ALLOWED_TOOLS` in the current Org property drawer or its
+  nearest defining ancestor reproduce the backend's heading-local overrides.
+  Relative cwd values resolve from the conversation buffer; the canonical
+  result must be an existing non-root, non-home directory inside a local Git
+  project. That exact cwd controls Claude launch, `.mcp.json` discovery, and
+  project-session history selection. Tool values are comma-separated, retain
+  Claude/MCP permission-pattern syntax, and reject controls or oversized lists.
+  The physical gate proves inheritance, nearest-ancestor precedence, exact
+  argv/cwd/MCP selection, and matching private session-directory encoding.
 
   `SPC g l` opens the compact three-column Presets/Handoff/Advanced menu used
   by the Emacs configuration. It loads or saves named presets and hands the active region

@@ -85,6 +85,14 @@
              "reject-option-shaped-session")
       (check (not (llm-cli-session-id-valid-p (format nil "line~%break")))
              "reject-control-session")
+      (check
+       (handler-case
+           (progn
+             (llm-claude-validate-allowed-tools
+              (list "Read" (format nil "bad~%tool")))
+             nil)
+         (editor-error () t))
+       "reject-control-allowed-tool")
       (let ((buffer (make-buffer " *Claude Unsafe Root Static*")))
         (unwind-protect
              (progn
@@ -94,6 +102,28 @@
                     (progn (llm-claude-project-root buffer) nil)
                   (editor-error () t))
                 "reject-home-as-claude-root"))
+          (delete-buffer buffer)))
+      (let ((buffer (make-buffer " *Claude Unsafe Property Static*")))
+        (unwind-protect
+             (progn
+               (setf (buffer-directory buffer)
+                     (uiop:ensure-directory-pathname
+                      (uiop:getenv "LEM_YATH_LLM_CLAUDE_PROJECT_ROOT")))
+               (with-current-buffer buffer
+                 (change-buffer-mode buffer 'org-mode))
+               (insert-string
+                (buffer-end-point buffer)
+                (format nil
+                        "* Unsafe~%:PROPERTIES:~%:CC_CWD: ~a~%:END:~%Prompt"
+                        (uiop:native-namestring (user-homedir-pathname))))
+               (check
+                (handler-case
+                    (progn
+                      (llm-claude-working-directory
+                       buffer (buffer-end-point buffer))
+                      nil)
+                  (editor-error () t))
+                "reject-home-cc-cwd"))
           (delete-buffer buffer)))
       (let* ((project-root
                (uiop:ensure-directory-pathname
@@ -286,12 +316,63 @@
      (if (llm-claude-auto-fork-state buffer (buffer-point buffer))
          "yes" "no"))))
 
+(define-command lem-yath-test-llm-claude-properties-setup () ()
+  (let ((buffer (make-buffer "*Claude Property Test*")))
+    (switch-to-buffer buffer)
+    (setf (buffer-read-only-p buffer) nil
+          (buffer-directory buffer)
+          (uiop:ensure-directory-pathname
+           (uiop:getenv "LEM_YATH_LLM_CLAUDE_PROJECT_ROOT")))
+    (buffer-mark-cancel buffer)
+    (erase-buffer buffer)
+    (unless (mode-active-p buffer 'org-mode)
+      (change-buffer-mode buffer 'org-mode))
+    (unless (llm-conversation-buffer-p buffer)
+      (lem-yath-llm-conversation-mode t))
+    (insert-string
+     (buffer-end-point buffer)
+     (format nil
+             (concatenate
+              'string
+              "* Root~%:PROPERTIES:~%:CC_CWD: property-work~%"
+              ":CC_ALLOWED_TOOLS: Bash~%:END:~%** Tool scope~%"
+              ":PROPERTIES:~%:CC_ALLOWED_TOOLS: Read, mcp__safe__search~%"
+              ":END:~%*** Request~%"))
+     'lem-yath-llm-role :assistant)
+    (insert-string (buffer-end-point buffer) (format nil "Property prompt~%")
+                   'lem-yath-llm-role :user)
+    (buffer-end (buffer-point buffer))
+    (clear-buffer-edit-history buffer)
+    (setf (buffer-value buffer (llm-cli-session-key :claude-code)) nil
+          *llm-backend* :claude-code)
+    (llm-role-refresh-static-overlays buffer)
+    (let* ((point (buffer-point buffer))
+           (working-directory
+             (llm-claude-working-directory buffer point))
+           (tools (llm-claude-allowed-tools-at buffer point)))
+      (multiple-value-bind (session-directory root)
+          (llm-claude-session-directory buffer point)
+        (declare (ignore root))
+        (llm-backend-test-log
+         "CLAUDE PROPERTIES READY cwd=~a tools=~a session-dir=~a"
+         (if (uiop:pathname-equal
+              working-directory
+              (uiop:ensure-directory-pathname
+               (uiop:getenv "LEM_YATH_LLM_CLAUDE_PROPERTY_ROOT")))
+             "yes" "no")
+         (if (equal tools '("Read" "mcp__safe__search")) "yes" "no")
+         (if (uiop:pathname-equal
+              session-directory
+              (uiop:ensure-directory-pathname
+               (uiop:getenv "LEM_YATH_LLM_CLAUDE_PROPERTY_SESSION_DIR")))
+             "yes" "no"))))))
+
 (define-command lem-yath-test-llm-backend-record () ()
   (let ((buffer (llm-output-buffer)))
     (llm-backend-test-log
      (concatenate
       'string
-      "STATE active=~a openrouter=~a claude1=~a claude2=~a claude3=~a auto5=~a auto-order=~a auto-repeat-safe=~a "
+      "STATE active=~a openrouter=~a claude1=~a claude2=~a claude3=~a auto5=~a auto-order=~a auto-repeat-safe=~a property6=~a "
       "thinking=~a tool=~a tool-result=~a codex1=~a codex2=~a "
       "command=~a file=~a grok1=~a grok2=~a aborted=~a "
       "claude-id=~a codex-id=~a grok-id=~a claude-branch=~a claude-boundary=~a selected-backend=~a")
@@ -313,6 +394,9 @@
                     (current-buffer) (current-point)))
            (error () nil))
          "yes" "no")
+     (let ((text (points-to-string (buffer-start-point (current-buffer))
+                                   (buffer-end-point (current-buffer)))))
+       (if (search "Claude answer 6" text) "yes" "no"))
      (if (llm-backend-test-contains-p "checked context") "yes" "no")
      (if (llm-backend-test-contains-p "Claude tool: `Read`") "yes" "no")
      (if (llm-backend-test-contains-p "Claude tool result") "yes" "no")
@@ -340,6 +424,7 @@
                       lem-vi-mode:*insert-keymap*
                       lem-vi-mode:*visual-keymap*))
   (define-key keymap "F2" 'lem-yath-test-llm-backend-static)
+  (define-key keymap "F1" 'lem-yath-test-llm-claude-properties-setup)
   (define-key keymap "F3" 'lem-yath-test-llm-openrouter)
   (define-key keymap "F4" 'lem-yath-test-llm-claude)
   (define-key keymap "F5" 'lem-yath-test-llm-codex)

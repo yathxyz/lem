@@ -52,6 +52,94 @@
     (or (and root (uiop:pathname-equal pathname root))
         (and home (uiop:pathname-equal pathname home)))))
 
+(defun llm-claude-containing-heading (point)
+  (with-point ((probe point))
+    (line-start probe)
+    (loop
+      (when (org-heading-line-p probe)
+        (return (copy-point probe :temporary)))
+      (unless (line-offset probe -1)
+        (return nil)))))
+
+(defun llm-claude-parent-heading (heading)
+  (let ((level (org-heading-level-at heading)))
+    (with-point ((probe heading))
+      (loop
+        (unless (line-offset probe -1)
+          (return nil))
+        (when (and (org-heading-line-p probe)
+                   (< (org-heading-level-at probe) level))
+          (return (copy-point probe :temporary)))))))
+
+(defun llm-claude-property-line-value (line property)
+  (let* ((trimmed (string-left-trim '(#\Space #\Tab) line))
+         (separator
+           (and (plusp (length trimmed))
+                (char= (char trimmed 0) #\:)
+                (position #\: trimmed :start 1))))
+    (when (and separator
+               (string-equal property (subseq trimmed 1 separator)))
+      (string-trim '(#\Space #\Tab)
+                   (subseq trimmed (1+ separator))))))
+
+(defun llm-claude-heading-property (heading property)
+  "Return PROPERTY from HEADING's own Org property drawer."
+  (with-point ((probe heading))
+    (unless (line-offset probe 1)
+      (return-from llm-claude-heading-property nil))
+    (loop
+      (let ((line (line-string probe)))
+        (cond
+          ((string-equal (string-trim '(#\Space #\Tab) line)
+                         ":PROPERTIES:")
+           (loop
+             (unless (line-offset probe 1)
+               (editor-error "Malformed Org property drawer: missing :END:"))
+             (let ((drawer-line (line-string probe)))
+               (when (string-equal
+                      (string-trim '(#\Space #\Tab) drawer-line) ":END:")
+                 (return-from llm-claude-heading-property nil))
+               (alexandria:when-let
+                   ((value
+                      (llm-claude-property-line-value drawer-line property)))
+                 (return-from llm-claude-heading-property value)))))
+          ((or (cl-ppcre:scan "^\\s*$" line)
+               (cl-ppcre:scan
+                "(?i)^\\s*(?:SCHEDULED|DEADLINE|CLOSED):" line))
+           (unless (line-offset probe 1)
+             (return nil)))
+          (t (return nil)))))))
+
+(defun llm-claude-org-property (buffer point property)
+  "Return PROPERTY from POINT's Org heading or nearest defining ancestor."
+  (when (and (llm-buffer-live-p buffer)
+             point
+             (alive-point-p point)
+             (eq buffer (point-buffer point))
+             (mode-active-p buffer 'org-mode))
+    (loop :for heading := (llm-claude-containing-heading point)
+            :then (llm-claude-parent-heading heading)
+          :while heading
+          :for value := (llm-claude-heading-property heading property)
+          :when value :return value)))
+
+(defun llm-claude-allowed-tools-at (buffer point)
+  "Return inherited CC_ALLOWED_TOOLS at POINT, or the configured defaults."
+  (let ((property
+          (llm-claude-org-property buffer point "CC_ALLOWED_TOOLS")))
+    (if property
+        (let ((tools
+                (remove-if
+                 (lambda (tool) (zerop (length tool)))
+                 (mapcar
+                  (lambda (tool)
+                    (string-trim '(#\Space #\Tab) tool))
+                  (cl-ppcre:split "," property)))))
+          (if tools
+              (llm-claude-validate-allowed-tools tools)
+              (copy-list *llm-claude-allowed-tools*)))
+        (copy-list *llm-claude-allowed-tools*))))
+
 (defun llm-claude-project-root (&optional (buffer (current-buffer)))
   (let* ((directory (or (buffer-directory buffer) (uiop:getcwd)))
          (root (and directory
@@ -65,12 +153,41 @@
         (editor-error "Refusing unsafe Claude working directory: ~a" root))
       root)))
 
-(defun llm-claude-mcp-config-pathname (project-root)
-  "Return the first safe configured Claude MCP file for PROJECT-ROOT."
+(defun llm-claude-working-directory (buffer point)
+  "Resolve inherited CC_CWD at POINT, otherwise BUFFER's Git root."
+  (alexandria:if-let
+      ((property (llm-claude-org-property buffer point "CC_CWD")))
+    (let* ((base
+             (progn
+               (when (zerop (length property))
+                 (editor-error "CC_CWD resolved to an empty directory"))
+               (or (buffer-directory buffer) (uiop:getcwd))))
+           (expanded
+             (handler-case
+                 (expand-file-name property base)
+               (error ()
+                 (editor-error "CC_CWD is not a valid path: ~a" property))))
+           (directory
+             (handler-case
+                 (canonical-project-directory expanded)
+               (error ()
+                 (editor-error
+                  "CC_CWD resolved to a missing directory: ~a" property)))))
+      (when (llm-claude-unsafe-working-directory-p directory)
+        (editor-error "Refusing unsafe Claude working directory: ~a"
+                      directory))
+      (unless (lem-yath-project-root-for-directory directory)
+        (editor-error "CC_CWD is not inside a local Git project: ~a"
+                      directory))
+      directory)
+    (llm-claude-project-root buffer)))
+
+(defun llm-claude-mcp-config-pathname (working-directory)
+  "Return the first safe Claude MCP file for WORKING-DIRECTORY."
   (find-if
    #'llm-claude-safe-owned-file-p
    (list (merge-pathnames ".mcp.json"
-                          (uiop:ensure-directory-pathname project-root))
+                          (uiop:ensure-directory-pathname working-directory))
          (merge-pathnames ".claude/.mcp.json"
                           (user-homedir-pathname)))))
 
@@ -81,9 +198,10 @@
    (string-right-trim '(#\/) (uiop:native-namestring root))
    "-"))
 
-(defun llm-claude-session-directory (&optional (buffer (current-buffer)))
+(defun llm-claude-session-directory
+    (&optional (buffer (current-buffer)) (point (buffer-point buffer)))
   (let* ((projects (llm-claude-projects-directory))
-         (root (llm-claude-project-root buffer))
+         (root (llm-claude-working-directory buffer point))
          (directory
            (merge-pathnames
             (format nil "~a/" (llm-claude-encoded-project-path root))
@@ -435,7 +553,7 @@ Return the new session id, or nil when this is an ordinary tail send."
     (let ((session-id (llm-response-state-provider-session-id state))
           (message-id (llm-response-state-provider-message-id state)))
       (multiple-value-bind (directory root)
-          (llm-claude-session-directory buffer)
+          (llm-claude-session-directory buffer origin)
         (let ((new-id
                 (llm-claude-create-session-fork
                  directory root session-id message-id)))
@@ -474,7 +592,7 @@ Return the new session id, or nil when this is an ordinary tail send."
     (unless (llm-claude-message-id-valid-p message-id)
       (editor-error "The response has no Claude message boundary"))
     (multiple-value-bind (directory root)
-        (llm-claude-session-directory buffer)
+        (llm-claude-session-directory buffer (current-point))
       (let ((new-id
               (llm-claude-create-session-fork
                directory root session-id message-id)))
@@ -504,7 +622,7 @@ Return the new session id, or nil when this is an ordinary tail send."
   (when (llm-active-request (current-buffer))
     (editor-error "Wait for or abort the active LLM request first"))
   (multiple-value-bind (directory root)
-      (llm-claude-session-directory (current-buffer))
+      (llm-claude-session-directory (current-buffer) (current-point))
     (let ((candidates (llm-claude-session-candidates directory root)))
       (unless candidates
         (editor-error "No Claude sessions are registered for this project"))

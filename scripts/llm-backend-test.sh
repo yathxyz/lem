@@ -11,6 +11,7 @@ export LEM_YATH_LLM_BACKEND_REPORT="$root/report"
 export LEM_YATH_LLM_FAKE_LOG="$root/log"
 export LEM_YATH_LLM_FAKE_BIN="$root/bin/"
 export LEM_YATH_LLM_CLAUDE_PROJECT_ROOT="$root/project"
+export LEM_YATH_LLM_CLAUDE_PROPERTY_ROOT="$root/project/property-work"
 export LEM_YATH_CLAUDE_PROJECTS_DIR="$root/claude-projects"
 export OPENROUTER_API_KEY='test-key-not-a-credential'
 source "$here/scripts/tui-driver.sh"
@@ -35,19 +36,26 @@ trap 'exit 130' INT TERM
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$LEM_YATH_LLM_FAKE_LOG" \
   "$LEM_YATH_LLM_FAKE_BIN" "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT" \
+  "$LEM_YATH_LLM_CLAUDE_PROPERTY_ROOT" \
   "$LEM_YATH_CLAUDE_PROJECTS_DIR" "$HOME/.claude"
 git -C "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT" init -q
 git -C "$HOME" init -q
 printf '%s\n' '{"mcpServers":{}}' \
   >"$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT/.mcp.json"
 chmod 600 "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT/.mcp.json"
+printf '%s\n' '{"mcpServers":{"property":{}}}' \
+  >"$LEM_YATH_LLM_CLAUDE_PROPERTY_ROOT/.mcp.json"
+chmod 600 "$LEM_YATH_LLM_CLAUDE_PROPERTY_ROOT/.mcp.json"
 printf '%s\n' '{"mcpServers":{"home":{}}}' >"$HOME/.claude/.mcp.json"
 chmod 600 "$HOME/.claude/.mcp.json"
 ln -s .mcp.json "$HOME/.claude/symlink-mcp.json"
 encoded_project=$(printf '%s' "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT" | tr '/.' '--')
 claude_project_dir="$LEM_YATH_CLAUDE_PROJECTS_DIR/$encoded_project"
-mkdir -p "$claude_project_dir"
-chmod 700 "$LEM_YATH_CLAUDE_PROJECTS_DIR" "$claude_project_dir"
+encoded_property=$(printf '%s' "$LEM_YATH_LLM_CLAUDE_PROPERTY_ROOT" | tr '/.' '--')
+export LEM_YATH_LLM_CLAUDE_PROPERTY_SESSION_DIR="$LEM_YATH_CLAUDE_PROJECTS_DIR/$encoded_property"
+mkdir -p "$claude_project_dir" "$LEM_YATH_LLM_CLAUDE_PROPERTY_SESSION_DIR"
+chmod 700 "$LEM_YATH_CLAUDE_PROJECTS_DIR" "$claude_project_dir" \
+  "$LEM_YATH_LLM_CLAUDE_PROPERTY_SESSION_DIR"
 printf '%s\n' \
   '{"type":"user","uuid":"claude-user-before"}' \
   '{"type":"assistant","uuid":"claude-message-boundary"}' \
@@ -138,7 +146,10 @@ assert_argv() {
   local index
   for index in "${!expected[@]}"; do
     if [[ "${actual[$index]}" != "${expected[$index]}" ]]; then
-      die "$label" "argv[$index] differed"
+      printf -v actual_value '%q' "${actual[$index]}"
+      printf -v expected_value '%q' "${expected[$index]}"
+      die "$label" \
+        "argv[$index] differed: actual=$actual_value expected=$expected_value"
     fi
   done
   pass "$label" 'native argv matched exactly'
@@ -314,6 +325,18 @@ PY
 )
 pass claude-auto-fork 'an earlier physical send forked at the preceding provider boundary'
 
+send_key F1
+if ! wait_report_count \
+  '^CLAUDE PROPERTIES READY cwd=yes tools=yes session-dir=yes$' 1; then
+  die claude-properties 'inherited Claude heading properties were not resolved'
+fi
+send_key C-c
+send_key Enter
+if ! wait_state 'property6=yes .*claude-branch=claude-session-1'; then
+  die claude-properties 'heading-local Claude request did not complete'
+fi
+pass claude-properties 'inherited CC_CWD and nearest CC_ALLOWED_TOOLS reached dispatch'
+
 fork_count_before=$(find "$claude_project_dir" -maxdepth 1 -name '*.jsonl' -type f | wc -l)
 printf '{malformed\n' >"$claude_project_dir/sessions-index.json"
 chmod 600 "$claude_project_dir/sessions-index.json"
@@ -357,13 +380,22 @@ assert_argv claude-auto-fork-argv "$LEM_YATH_LLM_FAKE_LOG/claude.5.argv" \
   -p 'Branch prompt' --output-format stream-json --verbose \
   --resume "$auto_session_id" "${claude_tools[@]}" \
   --append-system-prompt "$system" "${claude_mcp[@]}"
+assert_argv claude-property-argv "$LEM_YATH_LLM_FAKE_LOG/claude.6.argv" \
+  -p 'Property prompt' --output-format stream-json --verbose \
+  --allowedTools Read --allowedTools mcp__safe__search \
+  --append-system-prompt "$system" \
+  --mcp-config "$LEM_YATH_LLM_CLAUDE_PROPERTY_ROOT/.mcp.json"
 
 for cwd_file in "$LEM_YATH_LLM_FAKE_LOG"/claude.{1,2,3,4,5}.cwd; do
   if [ "$(<"$cwd_file")" != "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT" ]; then
     die claude-project-cwd 'Claude did not inherit the originating Git root'
   fi
 done
-pass claude-project-cwd 'all Claude requests ran at the originating Git root'
+if [ "$(<"$LEM_YATH_LLM_FAKE_LOG/claude.6.cwd")" != \
+     "$LEM_YATH_LLM_CLAUDE_PROPERTY_ROOT" ]; then
+  die claude-property-cwd 'CC_CWD did not become the exact Claude cwd'
+fi
+pass claude-project-cwd 'default and heading-local Claude cwd resolution matched exactly'
 
 assert_argv codex-first-argv "$LEM_YATH_LLM_FAKE_LOG/codex.1.argv" \
   exec --json -s read-only "${composed_prefix}codex prompt"

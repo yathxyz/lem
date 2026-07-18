@@ -624,8 +624,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   run from the originating buffer's canonical Git root, pre-approve the
   configured Bash/Read/Edit/Write/Glob/Grep/WebFetch/WebSearch/Agent tool set,
   and pass the first safe owned regular MCP config from project `.mcp.json` or
-  `~/.claude/.mcp.json`. Git roots resolving to `/` or the home directory and
-  symlinked or group/world-writable MCP files fail closed. Private named presets and
+  `~/.claude/.mcp.json`. Inherited Org `CC_CWD` and `CC_ALLOWED_TOOLS`
+  properties override the process/session directory and tool list at the
+  current heading, matching the Emacs backend. Git roots resolving to `/` or
+  the home directory, invalid property paths/tool lists, and symlinked or
+  group/world-writable MCP files fail closed. Private named presets and
   region-or-buffer handoff to Claude or ChatGPT remain in the compact menu; the built-in `quick-lookup`
   preset matches the Emacs startup model, system prompt, temperature, and
   token cap, `project-readonly` opts OpenRouter into the configured five-tool
