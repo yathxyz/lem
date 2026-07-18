@@ -139,12 +139,18 @@
 (defvar *lsp-project-test-pending-buffer* nil)
 (defvar *lsp-project-test-pending-workspace* nil)
 (defvar *lsp-project-test-slow-buffer* nil)
+(defvar *lsp-project-test-file-watch-workspace* nil)
+(defvar *lsp-project-test-file-watch-open-buffer* nil)
 
 (defun lsp-project-test-progress-workspace ()
   (or (and *lsp-project-test-a-one*
            (buffer-value *lsp-project-test-a-one*
                          'lem-lsp-mode::lsp-workspace))
       (editor-error "Project A has no LSP workspace")))
+
+(defun lsp-project-test-glob-match-p (pattern candidate)
+  (not (null (cl-ppcre:scan (lsp-file-watch-compile-glob pattern)
+                            candidate))))
 
 (defun lsp-project-test-send-progress-trigger (method)
   (let* ((workspace (lsp-project-test-progress-workspace))
@@ -175,6 +181,49 @@
 
 (define-command lem-yath-test-lsp-progress-end () ()
   (lsp-project-test-send-progress-trigger "lem-yath/progressEnd"))
+
+(defun lsp-project-test-send-file-watch-trigger (method)
+  (let* ((workspace (lsp-project-test-progress-workspace))
+         (client (lem-lsp-mode::workspace-client workspace)))
+    (setf *lsp-project-test-file-watch-workspace* workspace)
+    (jsonrpc:notify
+     (lem-language-client/client:client-connection client)
+     method
+     (lem-lsp-base/type:make-lsp-map))))
+
+(define-command lem-yath-test-lsp-file-watch-register () ()
+  (lsp-project-test-send-file-watch-trigger
+   "lem-yath/fileWatchRegister"))
+
+(define-command lem-yath-test-lsp-file-watch-unregister () ()
+  (lsp-project-test-send-file-watch-trigger
+   "lem-yath/fileWatchUnregister"))
+
+(define-command lem-yath-test-lsp-file-watch-reregister () ()
+  (lsp-project-test-send-file-watch-trigger
+   "lem-yath/fileWatchReregister"))
+
+(define-command lem-yath-test-lsp-record-file-watch-state () ()
+  (multiple-value-bind
+      (registrations kernel-watches live-threads global-watches)
+      (lsp-file-watch-workspace-state
+       *lsp-project-test-file-watch-workspace*)
+    (lsp-project-test-report
+     "FILE-WATCH-STATE registrations=~d kernel=~d threads=~d global=~d"
+     registrations kernel-watches live-threads global-watches)))
+
+(define-command lem-yath-test-lsp-file-watch-open-background () ()
+  (setf *lsp-project-test-file-watch-open-buffer*
+        (lsp-project-test-open
+         "LEM_YATH_LSP_TEST_PROJECT_A" "watch-open.fixture"))
+  (lsp-project-test-report "FILE-WATCH-BUFFER phase=open"))
+
+(define-command lem-yath-test-lsp-file-watch-close-background () ()
+  (when (lsp-project-test-live-buffer-p
+         *lsp-project-test-file-watch-open-buffer*)
+    (delete-buffer *lsp-project-test-file-watch-open-buffer*))
+  (setf *lsp-project-test-file-watch-open-buffer* nil)
+  (lsp-project-test-report "FILE-WATCH-BUFFER phase=closed"))
 
 (define-command lem-yath-test-lsp-record-progress () ()
   (let* ((buffer *lsp-project-test-a-one*)
@@ -378,6 +427,54 @@
         (check (eq t (lsp:window-client-capabilities-work-done-progress
                       window))
                "work-done-progress-is-advertised"))
+      (let* ((capabilities (lem-lsp-mode::client-capabilities))
+             (workspace (lsp:client-capabilities-workspace capabilities))
+             (watched
+               (lsp:workspace-client-capabilities-did-change-watched-files
+                workspace)))
+        (check
+         (and
+          (eq t
+              (lsp:did-change-watched-files-client-capabilities-dynamic-registration
+               watched))
+          (eq t
+              (lsp:did-change-watched-files-client-capabilities-relative-pattern-support
+               watched)))
+         "dynamic-relative-file-watching-is-advertised"))
+      (dolist
+          (contract
+            '((t "foo/**/baz" "foo/bar/baz")
+              (t "foo/**/baz" "foo/baz")
+              (nil "foo/**/baz" "foo/bar")
+              (t "foo/**/baz/**/quuz" "foo/foo/foo/baz/foo/quuz")
+              (t "*.js" "foo.js")
+              (nil "*.js" "foo.jsx")
+              (t "foo/**/*.js" "foo/bar/baz/foo.js")
+              (t "*.{js,ts}" "foo.js")
+              (nil "*.{js,ts}" "foo.xs")
+              (t "?oo.js" "foo.js")
+              (t "example.[!0-9]" "example.a")
+              (nil "example.[!0-9]" "example.0")
+              (t "example.[0-9]" "example.0")
+              (t "**/bar/" "foo/bar/")
+              (t "**/.*" ".git")
+              (t "**/.*" "path/.hidden.txt")
+              (t "**/node_modules/**" "node_modules/")
+              (t "{foo,bar}/**" "bar/test")
+              (t "some/**/*" "some/folder/foo.js")
+              (t "{**/*.d.ts,**/*.js}" "/testing/foo.js")
+              (t "{**/*.d.ts,**/*.js,foo.[0-9]}" "foo.5")
+              (nil "{**/*.d.ts,**/*.js,foo.[0-4]}" "foo.5")
+              (t "prefix/{**/*.js,**/foo.[0-9]}.suffix"
+                 "prefix/a/b/c/d/foo.5.suffix")))
+        (destructuring-bind (expected pattern candidate) contract
+          (check
+           (eq expected
+               (lsp-project-test-glob-match-p pattern candidate))
+           (format nil "eglot-glob-~s-matches-~s" pattern candidate))))
+      (check (lsp-project-test-signals-error-p
+              (lambda () (lsp-file-watch-compile-glob "unterminated[")))
+             "invalid-file-watch-glob-is-rejected")
       (check (uiop:pathname-equal
               #P"/tmp/localhost.lisp"
               (lem-lsp-base/utils:uri-to-pathname

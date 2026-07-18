@@ -111,6 +111,7 @@ class FixtureServer:
         self.pid = os.getpid()
         self.root_uri = ""
         self.root_path = ""
+        self.file_watch_registration_serial = 0
         self.log("START", cwd=os.getcwd())
 
     def log(self, event: str, **fields: object) -> None:
@@ -206,10 +207,62 @@ class FixtureServer:
                 symbol["score"] = self.symbol_score_base - offset
         return symbols
 
+    def file_watch_registration_request(self) -> dict[str, Any]:
+        self.file_watch_registration_serial += 1
+        return {
+            "jsonrpc": "2.0",
+            "id": f"fixture-file-watch-register-{self.file_watch_registration_serial}",
+            "method": "client/registerCapability",
+            "params": {
+                "registrations": [
+                    {
+                        "id": "fixture-file-watch",
+                        "method": "workspace/didChangeWatchedFiles",
+                        "registerOptions": {
+                            "watchers": [
+                                {"globPattern": "**/*.watched", "kind": 7},
+                                {
+                                    "globPattern": "**/watch-open.fixture",
+                                    "kind": 7,
+                                },
+                                {
+                                    "globPattern": {
+                                        "baseUri": self.root_uri.rstrip("/")
+                                        + "/relative-base",
+                                        "pattern": "*.cfg",
+                                    },
+                                    "kind": 1,
+                                },
+                            ]
+                        },
+                    }
+                ]
+            },
+        }
+
     def handle(self, message: dict[str, Any]) -> dict[str, Any] | None:
         method = message.get("method")
         params = message.get("params") or {}
         request_id = message.get("id")
+
+        if method is None and str(request_id).startswith(
+            "fixture-file-watch-register-"
+        ):
+            self.log(
+                "FILE_WATCH_REGISTER_RESPONSE",
+                request_id=request_id,
+                error=message.get("error"),
+                result=message.get("result"),
+            )
+            return None
+
+        if method is None and request_id == "fixture-file-watch-unregister":
+            self.log(
+                "FILE_WATCH_UNREGISTER_RESPONSE",
+                error=message.get("error"),
+                result=message.get("result"),
+            )
+            return None
 
         if method is None and request_id in {
             "fixture-progress-create",
@@ -456,6 +509,39 @@ class FixtureServer:
         if method == "lem-yath/progressEnd":
             self.log("PROGRESS_TRIGGER", kind="end")
             return self.progress_notification("end")
+
+        if method in {
+            "lem-yath/fileWatchRegister",
+            "lem-yath/fileWatchReregister",
+        }:
+            self.log("FILE_WATCH_REGISTER_TRIGGER", method=method)
+            return self.file_watch_registration_request()
+
+        if method == "lem-yath/fileWatchUnregister":
+            self.log("FILE_WATCH_UNREGISTER_TRIGGER")
+            return {
+                "jsonrpc": "2.0",
+                "id": "fixture-file-watch-unregister",
+                "method": "client/unregisterCapability",
+                "params": {
+                    "unregisterations": [
+                        {
+                            "id": "fixture-file-watch",
+                            "method": "workspace/didChangeWatchedFiles",
+                        }
+                    ]
+                },
+            }
+
+        if method == "workspace/didChangeWatchedFiles":
+            changes = params.get("changes") or []
+            for change in changes:
+                self.log(
+                    "FILE_WATCH_CHANGE",
+                    uri=change.get("uri", ""),
+                    type=change.get("type", ""),
+                )
+            return None
 
         if method == "shutdown":
             self.log("SHUTDOWN", delay_ms=self.shutdown_delay_ms)

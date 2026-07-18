@@ -417,6 +417,14 @@ full Yasnippet compatibility.
 
 **LSP client = Eglot (built-in), boosted by `eglot-booster`** (`eglot-booster-mode 1`; requires `emacs-lsp-booster` binary on PATH).
 
+The pinned Eglot client advertises dynamic
+`workspace/didChangeWatchedFiles` support. Server registrations use project
+files for directories inside the project, recursive discovery for an allowed
+external `RelativePattern` base, Eglot's LSP glob compiler and
+Create/Change/Delete mask, suppression for files already visited by the server,
+and a global 10,000-directory ceiling; unregister and server shutdown remove
+the watches.
+
 The pinned runtime advertises `completionItem.snippetSupport` because
 Yasnippet is active. On acceptance, Corfu closes first and Eglot passes format-2
 `insertText` or the winning `textEdit.newText` directly to

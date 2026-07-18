@@ -70,6 +70,8 @@ printf '%s\n' 'gitdir: /tmp/main/.git/worktrees/fixture' \
 
 for project in "$LEM_YATH_LSP_TEST_PROJECT_A" "$LEM_YATH_LSP_TEST_PROJECT_B"; do
   : >"$project/.lsp-fixture-root"
+  mkdir -p "$project/relative-base"
+  printf 'anchor\n' >"$project/relative-base/anchor.txt"
   printf 'one\n' >"$project/one.fixture"
   printf 'two\n' >"$project/two.fixture"
   printf 'constant\npadding\nxxxxAlphaSymbol tail\n' >"$project/symbols.fixture"
@@ -90,6 +92,8 @@ done >"$LEM_YATH_LSP_TEST_PROJECT_A/one.fixture"
 
 printf 'idle\n' >"$LEM_YATH_LSP_TEST_PROJECT_A/idle.fixture"
 printf 'peer\n' >"$LEM_YATH_LSP_TEST_PROJECT_A/peer.fixture"
+printf 'open suppression\n' \
+  >"$LEM_YATH_LSP_TEST_PROJECT_A/watch-open.fixture"
 printf 'constant\npadding\nxxxxPeerAlphaSymbol tail\n' \
   >"$LEM_YATH_LSP_TEST_PROJECT_A/peer-symbols.fixture"
 printf 'migration target\n' \
@@ -232,6 +236,33 @@ record_progress_state() {
   before=$(report_count '^PROGRESS ')
   invoke_mx lem-yath-test-lsp-record-progress || return 1
   wait_report_count '^PROGRESS ' "$((before + 1))"
+}
+
+record_file_watch_state() {
+  local before
+  before=$(report_count '^FILE-WATCH-STATE ')
+  invoke_mx lem-yath-test-lsp-record-file-watch-state || return 1
+  wait_report_count '^FILE-WATCH-STATE ' "$((before + 1))"
+}
+
+file_watch_event_count() {
+  local pathname=$1 type=$2
+  grep -E '^FILE_WATCH_CHANGE[[:space:]]' \
+    "$LEM_YATH_LSP_TEST_EVENTS" 2>/dev/null |
+    grep -F "uri=file://$pathname" |
+    grep -Fc "type=$type" || true
+}
+
+wait_file_watch_event() {
+  local pathname=$1 type=$2 expected=$3 timeout=${4:-15} index=0
+  while ((index < timeout * 4)); do
+    if (( $(file_watch_event_count "$pathname" "$type") >= expected )); then
+      return 0
+    fi
+    sleep 0.25
+    index=$((index + 1))
+  done
+  return 1
 }
 
 wait_session_dead() {
@@ -464,6 +495,211 @@ if ! lem_capture "$session" | grep -Fq 'LSP 100%' &&
   fi
 else
   fail lsp-progress-expiry 'completed progress remained visible or unrecordable'
+fi
+
+# The fake server dynamically registers the exact LSP 3.17 filesystem-watch
+# capability.  Exercise absolute globs, RelativePattern, WatchKind filtering,
+# open-buffer suppression, recursive directory growth, unregistration, and
+# replacement cleanup through the real stdio connection and Linux inotify.
+watch_register_before=$(event_count FILE_WATCH_REGISTER_RESPONSE '')
+if invoke_mx lem-yath-test-lsp-file-watch-register &&
+   wait_event_count FILE_WATCH_REGISTER_RESPONSE \
+     "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+     "$((watch_register_before + 1))" &&
+   record_file_watch_state; then
+  watch_state=$(grep '^FILE-WATCH-STATE ' \
+    "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [[ "$watch_state" =~ ^FILE-WATCH-STATE\ registrations=1\ kernel=([1-9][0-9]*)\ threads=1\ global=([1-9][0-9]*)$ ]] &&
+     [ "${BASH_REMATCH[1]}" -eq "${BASH_REMATCH[2]}" ]; then
+    watch_kernel_baseline=${BASH_REMATCH[1]}
+    pass lsp-file-watch-register \
+      "dynamic registration installed $watch_kernel_baseline bounded kernel watches"
+  else
+    watch_kernel_baseline=0
+    fail lsp-file-watch-register "unexpected watcher state: $watch_state"
+  fi
+else
+  watch_kernel_baseline=0
+  fail lsp-file-watch-register 'the server registration request did not complete'
+fi
+
+watched_path="${LEM_YATH_LSP_TEST_PROJECT_A%/}/created.watched"
+watched_create_before=$(file_watch_event_count "$watched_path" 1)
+: >"$watched_path"
+if wait_file_watch_event "$watched_path" 1 "$((watched_create_before + 1))"; then
+  pass lsp-file-watch-create 'a matching creation reached the registering server'
+else
+  fail lsp-file-watch-create 'the matching creation notification was absent'
+fi
+
+watched_change_before=$(file_watch_event_count "$watched_path" 2)
+printf 'changed\n' >>"$watched_path"
+if wait_file_watch_event "$watched_path" 2 "$((watched_change_before + 1))"; then
+  pass lsp-file-watch-change 'a matching close-write reached the registering server'
+else
+  fail lsp-file-watch-change 'the matching change notification was absent'
+fi
+
+watched_delete_before=$(file_watch_event_count "$watched_path" 3)
+rm -f -- "$watched_path"
+if wait_file_watch_event "$watched_path" 3 "$((watched_delete_before + 1))"; then
+  pass lsp-file-watch-delete 'a matching deletion reached the registering server'
+else
+  fail lsp-file-watch-delete 'the matching delete notification was absent'
+fi
+
+open_path="${LEM_YATH_LSP_TEST_PROJECT_A%/}/watch-open.fixture"
+open_did_open_before=$(event_count DID_OPEN "uri=file://$open_path")
+if ! invoke_mx lem-yath-test-lsp-file-watch-open-background ||
+   ! wait_event_count DID_OPEN "uri=file://$open_path" \
+     "$((open_did_open_before + 1))"; then
+  fail lsp-file-watch-open-suppression \
+    'the dedicated background buffer did not attach to the workspace'
+fi
+open_before=$(event_count FILE_WATCH_CHANGE "uri=file://$open_path")
+printf 'external change\n' >>"$open_path"
+sleep 1
+open_after=$(event_count FILE_WATCH_CHANGE "uri=file://$open_path")
+if [ "$open_after" -eq "$open_before" ]; then
+  pass lsp-file-watch-open-suppression \
+    'a file already managed by the workspace was not echoed back'
+else
+  fail lsp-file-watch-open-suppression \
+    "an open file generated $((open_after - open_before)) watcher events"
+fi
+open_did_close_before=$(event_count DID_CLOSE "uri=file://$open_path")
+if ! invoke_mx lem-yath-test-lsp-file-watch-close-background ||
+   ! wait_event_count DID_CLOSE "uri=file://$open_path" \
+     "$((open_did_close_before + 1))"; then
+  fail lsp-file-watch-open-suppression \
+    'the dedicated background buffer did not detach cleanly'
+fi
+
+relative_path="${LEM_YATH_LSP_TEST_PROJECT_A%/}/relative-base/direct.cfg"
+relative_create_before=$(file_watch_event_count "$relative_path" 1)
+: >"$relative_path"
+if wait_file_watch_event "$relative_path" 1 \
+     "$((relative_create_before + 1))"; then
+  relative_change_before=$(file_watch_event_count "$relative_path" 2)
+  relative_delete_before=$(file_watch_event_count "$relative_path" 3)
+  printf 'ignored change\n' >>"$relative_path"
+  rm -f -- "$relative_path"
+  sleep 1
+  relative_change_after=$(file_watch_event_count "$relative_path" 2)
+  relative_delete_after=$(file_watch_event_count "$relative_path" 3)
+  if [ "$relative_change_after" -eq "$relative_change_before" ] &&
+     [ "$relative_delete_after" -eq "$relative_delete_before" ]; then
+    pass lsp-file-watch-relative-kind \
+      'RelativePattern matched its base and honored create-only WatchKind'
+  else
+    fail lsp-file-watch-relative-kind \
+      'the create-only RelativePattern leaked change or delete events'
+  fi
+else
+  fail lsp-file-watch-relative-kind \
+    'the direct RelativePattern creation was not delivered'
+fi
+
+new_watch_dir="${LEM_YATH_LSP_TEST_PROJECT_A%/}/created-directory"
+mkdir -p "$new_watch_dir"
+new_directory_watched=0
+for _attempt in $(seq 1 20); do
+  if record_file_watch_state; then
+    watch_state=$(grep '^FILE-WATCH-STATE ' \
+      "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+    watch_kernel=$(sed -n \
+      's/^FILE-WATCH-STATE registrations=[0-9][0-9]* kernel=\([0-9][0-9]*\) threads=[0-9][0-9]* global=[0-9][0-9]*$/\1/p' \
+      <<<"$watch_state")
+    if [ -n "$watch_kernel" ] &&
+       [ "$watch_kernel" -gt "$watch_kernel_baseline" ]; then
+      new_directory_watched=1
+      break
+    fi
+  fi
+  sleep 0.15
+done
+new_nested_path="$new_watch_dir/nested.watched"
+new_nested_before=$(file_watch_event_count "$new_nested_path" 1)
+: >"$new_nested_path"
+if [ "$new_directory_watched" -eq 1 ] &&
+   wait_file_watch_event "$new_nested_path" 1 "$((new_nested_before + 1))"; then
+  pass lsp-file-watch-new-directory \
+    'a newly created project directory gained a watch before its nested file'
+else
+  fail lsp-file-watch-new-directory \
+    'the new directory watch or nested creation notification was absent'
+fi
+
+watch_unregister_before=$(event_count FILE_WATCH_UNREGISTER_RESPONSE '')
+if invoke_mx lem-yath-test-lsp-file-watch-unregister &&
+   wait_event_count FILE_WATCH_UNREGISTER_RESPONSE \
+     "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+     "$((watch_unregister_before + 1))" &&
+   record_file_watch_state; then
+  watch_state=$(grep '^FILE-WATCH-STATE ' \
+    "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$watch_state" = \
+       'FILE-WATCH-STATE registrations=0 kernel=0 threads=0 global=0' ]; then
+    pass lsp-file-watch-unregister \
+      'unregistration removed registrations, kernel watches, and reader thread'
+  else
+    fail lsp-file-watch-unregister "unexpected teardown state: $watch_state"
+  fi
+else
+  fail lsp-file-watch-unregister 'the unregistration request did not complete'
+fi
+
+after_unregister_path="${LEM_YATH_LSP_TEST_PROJECT_A%/}/after-unregister.watched"
+after_unregister_before=$(event_count FILE_WATCH_CHANGE \
+  "uri=file://$after_unregister_path")
+: >"$after_unregister_path"
+sleep 1
+after_unregister_after=$(event_count FILE_WATCH_CHANGE \
+  "uri=file://$after_unregister_path")
+if [ "$after_unregister_after" -eq "$after_unregister_before" ]; then
+  pass lsp-file-watch-unregistered-silence \
+    'filesystem activity stayed silent after server unregistration'
+else
+  fail lsp-file-watch-unregistered-silence \
+    'an unregistered watcher still delivered filesystem activity'
+fi
+
+watch_reregister_before=$(event_count FILE_WATCH_REGISTER_RESPONSE '')
+if invoke_mx lem-yath-test-lsp-file-watch-reregister &&
+   wait_event_count FILE_WATCH_REGISTER_RESPONSE \
+     "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+     "$((watch_reregister_before + 1))" &&
+   record_file_watch_state; then
+  watch_state=$(grep '^FILE-WATCH-STATE ' \
+    "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [[ "$watch_state" =~ ^FILE-WATCH-STATE\ registrations=1\ kernel=([1-9][0-9]*)\ threads=1\ global=([1-9][0-9]*)$ ]] &&
+     [ "${BASH_REMATCH[1]}" -eq "${BASH_REMATCH[2]}" ]; then
+    pass lsp-file-watch-reregister \
+      'unregister followed by registration rebuilt one clean live backend'
+  else
+    fail lsp-file-watch-reregister "unexpected rebuilt state: $watch_state"
+  fi
+else
+  fail lsp-file-watch-reregister 'the replacement registration did not complete'
+fi
+
+watch_replace_before=$(event_count FILE_WATCH_REGISTER_RESPONSE '')
+if invoke_mx lem-yath-test-lsp-file-watch-reregister &&
+   wait_event_count FILE_WATCH_REGISTER_RESPONSE \
+     "root_path=${LEM_YATH_LSP_TEST_PROJECT_A%/}" \
+     "$((watch_replace_before + 1))" &&
+   record_file_watch_state; then
+  watch_state=$(grep '^FILE-WATCH-STATE ' \
+    "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [[ "$watch_state" =~ ^FILE-WATCH-STATE\ registrations=1\ kernel=([1-9][0-9]*)\ threads=1\ global=([1-9][0-9]*)$ ]] &&
+     [ "${BASH_REMATCH[1]}" -eq "${BASH_REMATCH[2]}" ]; then
+    pass lsp-file-watch-replace \
+      'replacing a live registration ID retained one backend without reservations leaking'
+  else
+    fail lsp-file-watch-replace "unexpected replacement state: $watch_state"
+  fi
+else
+  fail lsp-file-watch-replace 'the live registration replacement did not complete'
 fi
 
 if invoke_mx lem-yath-test-lsp-open-project-b &&
@@ -1627,6 +1863,25 @@ if invoke_mx lsp-shutdown-server &&
     'explicit stop found the idle project, shut it down, and removed the registry entry'
 else
   fail idle-project-shutdown 'explicit idle-project shutdown did not complete cleanly'
+fi
+
+watch_cleanup_before=$(report_count '^FILE-WATCH-STATE ')
+if invoke_mx lem-yath-test-lsp-record-file-watch-state &&
+   wait_report_count '^FILE-WATCH-STATE ' \
+     "$((watch_cleanup_before + 1))"; then
+  watch_state=$(grep '^FILE-WATCH-STATE ' \
+    "$LEM_YATH_LSP_TEST_REPORT" | tail -1)
+  if [ "$watch_state" = \
+       'FILE-WATCH-STATE registrations=0 kernel=0 threads=0 global=0' ]; then
+    pass lsp-file-watch-workspace-cleanup \
+      'workspace disposal removed the re-registered backend without residue'
+  else
+    fail lsp-file-watch-workspace-cleanup \
+      "workspace disposal left watcher state behind: $watch_state"
+  fi
+else
+  fail lsp-file-watch-workspace-cleanup \
+    'workspace disposal state could not be inspected'
 fi
 
 a_reenable_init_before=$(event_count INITIALIZE \

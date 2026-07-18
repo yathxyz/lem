@@ -42,6 +42,7 @@
                (:file "forge")
                (:file "project-history")
                (:file "project")
+               (:file "lsp-file-watches")
                (:file "calc")
                (:file "lint")
                (:file "dap")

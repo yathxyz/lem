@@ -384,6 +384,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   project-wide restart, bounded shutdown/disposal, graceful exit when responsive,
   Eglot-style aggregate work-done percentages in every attached buffer's
   modeline with independent two-second completion expiry,
+  Eglot-compatible dynamic `workspace/didChangeWatchedFiles` registration
+  backed by bounded Linux inotify watches, including LSP globs,
+  `RelativePattern`, watch-kind masks, open-buffer suppression, newly created
+  directories, and complete unregister/restart/exit teardown,
   and a one-prompt `SPC p s` workspace-symbol search with Consult's minimum
   input, debounce/throttle timing, annotated kind groups, project-scoped
   fan-out across every active language server, progressive score-ranked

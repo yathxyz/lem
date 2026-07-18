@@ -36,6 +36,7 @@
               ./patches/lem-project-lsp-workspaces.patch
               ./patches/lem-lsp-buffer-lifecycle-hooks.patch
               ./patches/lem-lsp-pipe-stdio.patch
+              ./patches/lem-lsp-file-watches.patch
               ./patches/lem-lsp-json-type-error.patch
               ./patches/lem-lsp-workspace-symbol-score.patch
               ./patches/lem-grep-writeback.patch

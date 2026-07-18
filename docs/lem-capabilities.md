@@ -1787,8 +1787,19 @@ This is intentionally partial parity with Emacs `csharp-mode`/
 `csharp-ts-mode`: tree-sitter supplies highlighting, but the native mode and
 C-like indentation remain in control rather than reproducing the full
 tree-sitter major-mode semantics. Lem-yath acknowledges dynamic file-watch
-registration so conforming servers can continue, but it does not provide
-filesystem notifications. It advertises work-done progress, accepts server
+registration and delivers `workspace/didChangeWatchedFiles` notifications from
+bounded, nonblocking Linux inotify watches. String globs and LSP 3.17
+`RelativePattern` bases use Eglot-compatible `**`, `*`, `?`, range, and brace
+matching; Create/Change/Delete masks are honored, files already open in the
+workspace are suppressed, newly created directories gain watches, and rename
+events are split into delete/create notifications. Project-internal watches use
+the configured project file set, external relative bases recurse without
+following symlinked directories, and the Eglot-compatible global ceiling is
+10,000 watched directories. Each registration is bounded and transactional;
+unregister, replacement, workspace restart, shutdown, failed startup, and editor
+exit release the reader thread, descriptor, and global reservations.
+
+Lem-yath advertises work-done progress, accepts server
 progress-token creation, and tracks at most 64 simultaneous reports per
 workspace. Every attached buffer renders the Eglot-style aggregate percentage
 in its right modeline; completed tokens remain at 100% for two seconds, expire
