@@ -3447,8 +3447,14 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   fails, the unregistered fork is removed and the buffer retains its prior
   session. `LEM_YATH_CLAUDE_PROJECTS_DIR` permits an explicit private history
   root, which the ncurses gate uses so real user sessions are never touched.
-  Automatic detection of an Org sibling continuation remains absent because
-  Lem's conversation transcript is linear rather than a heading-tree FSM.
+  Lem maps gptel's Org-sibling branch behavior onto its linear role-tagged
+  transcript: sending before an existing same-session Claude continuation
+  automatically forks from the exact preceding Assistant boundary. The new
+  branch becomes authoritative, so continuing it before the visually retained
+  old branch does not fork again; fresh sessions and already divergent provider
+  branches remain authoritative. The physical gate proves response placement
+  before the old continuation, exact fork contents/index registration, and
+  new-session resume argv.
 
   `SPC g l` opens the compact three-column Presets/Handoff/Advanced menu used
   by the Emacs configuration. It loads or saves named presets and hands the active region

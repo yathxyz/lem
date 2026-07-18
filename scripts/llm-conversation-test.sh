@@ -102,7 +102,7 @@ pass boot 'configured Lem loaded the isolated conversation fixture'
 
 send_key F3
 if ! wait_report_count \
-  '^PASS STATIC buffer=\*scratch\* org=yes conversation=yes key=LEM-YATH-LLM-SEND shared=no gutter=none$' 1; then
+  '^PASS STATIC buffer=\*scratch\* org=yes conversation=yes key=LEM-YATH-LLM-SEND shared=no gutter=none fresh-session=yes$' 1; then
   die startup-mode 'startup scratch, mode, or C-c Return binding differed'
 fi
 pass startup-mode 'startup is an Org LLM conversation with C-c Return'

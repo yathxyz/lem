@@ -255,27 +255,60 @@
    "SETUP-REGION mark=~a"
    (if (buffer-mark-p (current-buffer)) "yes" "no")))
 
+(defun llm-conversation-test-fresh-session-bypasses-auto-fork-p ()
+  (let ((buffer (make-buffer " *Claude Fresh Branch Static*")))
+    (unwind-protect
+         (progn
+           (with-current-buffer buffer
+             (change-buffer-mode buffer 'org-mode)
+             (lem-yath-llm-conversation-mode t))
+           (setf (buffer-value buffer (llm-cli-session-key :claude-code)) nil)
+           (insert-string (buffer-end-point buffer) "* Fresh prompt"
+                          'lem-yath-llm-role :user)
+           (with-point ((origin (buffer-end-point buffer)))
+             (insert-string
+              (buffer-end-point buffer) (format nil "~2%Later response")
+              'lem-yath-llm-role :assistant
+              *llm-response-state-key*
+              (make-llm-response-state
+               :backend :claude-code
+               :model "claude-code"
+               :system-message "test"
+               :provider-session-id "claude-session-1"
+               :provider-message-id "claude-later-boundary"))
+             (handler-case
+                 (null (llm-claude-auto-fork-state buffer origin))
+               (error () nil))))
+      (delete-buffer buffer))))
+
 (define-command lem-yath-test-llm-conversation-static () ()
   (let* ((buffer (current-buffer))
          (command
            (llm-conversation-test-key-command
             *lem-yath-llm-conversation-mode-keymap* "C-c Return"))
+         (fresh-session-p
+           (llm-conversation-test-fresh-session-bypasses-auto-fork-p))
          (ok (and (string= (buffer-name buffer) "*scratch*")
                   (mode-active-p buffer 'org-mode)
                   (llm-conversation-buffer-p buffer)
                   (eq command 'lem-yath-llm-send)
-                  (null (get-buffer *llm-buffer-name*))))
+                  (null (get-buffer *llm-buffer-name*))
+                  fresh-session-p))
          (gutter
            (llm-role-gutter-content buffer (buffer-start-point buffer))))
     (llm-conversation-test-log
-     "~a STATIC buffer=~a org=~a conversation=~a key=~a shared=~a gutter=~a"
+     (concatenate
+      'string
+      "~a STATIC buffer=~a org=~a conversation=~a key=~a shared=~a "
+      "gutter=~a fresh-session=~a")
      (if ok "PASS" "FAIL")
      (buffer-name buffer)
      (if (mode-active-p buffer 'org-mode) "yes" "no")
      (if (llm-conversation-buffer-p buffer) "yes" "no")
      (or command "none")
      (if (get-buffer *llm-buffer-name*) "yes" "no")
-     (if gutter "reserved" "none"))))
+     (if gutter "reserved" "none")
+     (if fresh-session-p "yes" "no"))))
 
 (define-command lem-yath-test-llm-conversation-record () ()
   (let* ((scratch (get-buffer "*scratch*"))

@@ -615,7 +615,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   provider-owned resumable history cannot safely rewind. In an Org LLM
   conversation backed by Claude Code, `C-c C-f` forks the active project
   session at the nearest preceding Assistant boundary and `C-c C-b` selects a
-  registered project session. Forks truncate a private Claude JSONL history,
+  registered project session. Sending from an earlier point before an existing
+  same-session continuation performs the equivalent fork automatically; later
+  continuations belonging to the old branch do not cause repeated forks.
+  Forks truncate a private Claude JSONL history,
   append its new continuation marker, and update `sessions-index.json`
   transactionally without touching the source session. Native Claude requests
   run from the originating buffer's canonical Git root, pre-approve the

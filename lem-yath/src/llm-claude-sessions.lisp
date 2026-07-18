@@ -348,10 +348,10 @@
            (ignore-errors (delete-file target))
            (error condition)))))))
 
-(defun llm-claude-nearest-response-state ()
-  "Return the nearest response state at or before point."
-  (let ((buffer (current-buffer)))
-    (with-point ((probe (current-point))
+(defun llm-claude-response-state-at-or-before (point)
+  "Return the nearest response state at or before POINT."
+  (let ((buffer (point-buffer point)))
+    (with-point ((probe point)
                  (start (buffer-start-point buffer))
                  (end (buffer-end-point buffer)))
       (when (and (point= probe end) (point< start probe))
@@ -365,6 +365,84 @@
                  probe *llm-response-state-key* start)
           (move-point probe start))
         (when (point< start probe) (character-offset probe -1))))))
+
+(defun llm-claude-nearest-response-state ()
+  "Return the nearest response state at or before point."
+  (llm-claude-response-state-at-or-before (current-point)))
+
+(defun llm-claude-response-state-after-point (point)
+  "Return the nearest Claude response state starting after POINT."
+  (let ((buffer (point-buffer point)))
+    (with-point ((probe point)
+                 (end (buffer-end-point buffer)))
+      (loop
+        (when (point< probe end)
+          (alexandria:when-let
+              ((state (text-property-at probe *llm-response-state-key*)))
+            (when (eq (llm-response-state-backend state) :claude-code)
+              (return state))))
+        (unless (and (point< probe end)
+                     (next-single-property-change
+                      probe *llm-response-state-key* end))
+          (return nil))))))
+
+(defun llm-claude-response-state-before (point)
+  "Return the nearest response state strictly before POINT."
+  (let ((buffer (point-buffer point)))
+    (with-point ((probe point)
+                 (start (buffer-start-point buffer)))
+      (when (point< start probe)
+        (character-offset probe -1)
+        (llm-claude-response-state-at-or-before probe)))))
+
+(defun llm-claude-auto-fork-state (buffer origin)
+  "Return the preceding state when ORIGIN requires a Claude fork.
+A fresh or already divergent session remains authoritative."
+  (when (and (llm-conversation-buffer-p buffer)
+             origin
+             (alive-point-p origin)
+             (eq buffer (point-buffer origin)))
+    (alexandria:when-let
+        ((later-state (llm-claude-response-state-after-point origin)))
+      (alexandria:when-let
+          ((stored-session-id (llm-cli-session-id :claude-code buffer)))
+        (let* ((state
+                 (or (llm-claude-response-state-before origin)
+                     (editor-error
+                      "Cannot branch Claude without a preceding Assistant response")))
+               (backend (llm-response-state-backend state))
+               (session-id (llm-response-state-provider-session-id state))
+               (later-session-id
+                 (llm-response-state-provider-session-id later-state)))
+          (unless (eq backend :claude-code)
+            (editor-error
+             "Cannot branch Claude from a non-Claude Assistant response"))
+          (unless (llm-cli-session-id-valid-p session-id)
+            (editor-error "The branch point has no resumable Claude session"))
+          (unless (llm-cli-session-id-valid-p later-session-id)
+            (editor-error "The later Claude response has no resumable session"))
+          (when (and (equal stored-session-id session-id)
+                     (equal later-session-id session-id))
+            (unless (llm-claude-message-id-valid-p
+                     (llm-response-state-provider-message-id state))
+              (editor-error "The branch point has no Claude message boundary"))
+            state))))))
+
+(defun llm-claude-maybe-auto-fork-session (buffer origin)
+  "Fork a Claude session when ORIGIN branches before a later response.
+Return the new session id, or nil when this is an ordinary tail send."
+  (alexandria:when-let ((state (llm-claude-auto-fork-state buffer origin)))
+    (let ((session-id (llm-response-state-provider-session-id state))
+          (message-id (llm-response-state-provider-message-id state)))
+      (multiple-value-bind (directory root)
+          (llm-claude-session-directory buffer)
+        (let ((new-id
+                (llm-claude-create-session-fork
+                 directory root session-id message-id)))
+          (llm-cli-store-session-id buffer :claude-code new-id)
+          (message "Automatically forked Claude session ~a -> ~a"
+                   session-id new-id)
+          new-id)))))
 
 (defun llm-claude-activate-backend ()
   "Make the selected Claude session the backend for the next send."

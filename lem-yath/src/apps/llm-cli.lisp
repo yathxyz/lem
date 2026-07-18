@@ -335,7 +335,13 @@
     (when (llm-active-request buffer)
       (message "An LLM request is already running; use M-x lem-yath-llm-abort")
       (return-from llm-cli-stream))
-    (let* ((session-id (llm-cli-session-id backend buffer))
+    (let* ((stored-session-id (llm-cli-session-id backend buffer))
+           (session-id
+             (or (and (eq backend :claude-code)
+                      (eq source buffer)
+                      (llm-claude-maybe-auto-fork-session
+                       buffer *llm-response-origin*))
+                 stored-session-id))
            (working-directory
              (and (eq backend :claude-code)
                   (llm-claude-project-root source)))

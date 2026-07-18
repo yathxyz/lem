@@ -274,6 +274,46 @@ if ! wait_state 'claude-branch=claude-session-1 .*selected-backend=CLAUDE-CODE';
 fi
 pass claude-session-picker 'physical C-c C-b restored a registered project session'
 
+send_key F11
+if ! wait_report_count '^CLAUDE AUTO FORK READY decision=yes$' 1; then
+  die claude-auto-fork 'automatic branch fixture was not prepared'
+fi
+send_key C-c
+send_key Enter
+if ! wait_state 'auto5=yes auto-order=yes auto-repeat-safe=yes .*claude-branch=[0-9A-Fa-f-]{36}'; then
+  die claude-auto-fork 'an earlier continuation did not fork and resume automatically'
+fi
+
+auto_session_id=$(python3 - "$claude_project_dir" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+directory = pathlib.Path(sys.argv[1])
+index = json.loads((directory / "sessions-index.json").read_text())
+assert index["unknown"] == {"keep": True}
+assert len(index["entries"]) == 3
+fork = index["entries"][-1]
+session_id = fork["sessionId"]
+assert re.fullmatch(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+    session_id,
+    re.IGNORECASE,
+)
+assert fork["firstPrompt"] == "Fork of claude-session-1"
+records = [json.loads(line) for line in pathlib.Path(fork["fullPath"]).read_text().splitlines()]
+assert [record.get("uuid") for record in records[:2]] == [
+    "claude-user-before", "claude-message-boundary"
+]
+assert records[2] == {
+    "type": "last-prompt", "sessionId": session_id, "lastPrompt": "fork"
+}
+print(session_id)
+PY
+)
+pass claude-auto-fork 'an earlier physical send forked at the preceding provider boundary'
+
 fork_count_before=$(find "$claude_project_dir" -maxdepth 1 -name '*.jsonl' -type f | wc -l)
 printf '{malformed\n' >"$claude_project_dir/sessions-index.json"
 chmod 600 "$claude_project_dir/sessions-index.json"
@@ -313,8 +353,12 @@ assert_argv claude-aborted-argv "$LEM_YATH_LLM_FAKE_LOG/claude.4.argv" \
   -p 'abort prompt' --output-format stream-json --verbose \
   --resume claude-session-1 "${claude_tools[@]}" \
   --append-system-prompt "$system" "${claude_mcp[@]}"
+assert_argv claude-auto-fork-argv "$LEM_YATH_LLM_FAKE_LOG/claude.5.argv" \
+  -p 'Branch prompt' --output-format stream-json --verbose \
+  --resume "$auto_session_id" "${claude_tools[@]}" \
+  --append-system-prompt "$system" "${claude_mcp[@]}"
 
-for cwd_file in "$LEM_YATH_LLM_FAKE_LOG"/claude.{1,2,3,4}.cwd; do
+for cwd_file in "$LEM_YATH_LLM_FAKE_LOG"/claude.{1,2,3,4,5}.cwd; do
   if [ "$(<"$cwd_file")" != "$LEM_YATH_LLM_CLAUDE_PROJECT_ROOT" ]; then
     die claude-project-cwd 'Claude did not inherit the originating Git root'
   fi

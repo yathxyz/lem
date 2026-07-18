@@ -238,12 +238,60 @@
     (llm-role-refresh-static-overlays buffer)
     (llm-backend-test-log "CLAUDE SESSION READY")))
 
+(define-command lem-yath-test-llm-claude-auto-fork-setup () ()
+  (let ((buffer (make-buffer "*Claude Automatic Fork Test*")))
+    (switch-to-buffer buffer)
+    (setf (buffer-read-only-p buffer) nil
+          (buffer-directory buffer)
+          (uiop:ensure-directory-pathname
+           (uiop:getenv "LEM_YATH_LLM_CLAUDE_PROJECT_ROOT")))
+    (buffer-mark-cancel buffer)
+    (erase-buffer buffer)
+    (unless (mode-active-p buffer 'org-mode)
+      (change-buffer-mode buffer 'org-mode))
+    (unless (llm-conversation-buffer-p buffer)
+      (lem-yath-llm-conversation-mode t))
+    (insert-string (buffer-end-point buffer) (format nil "* Root prompt~2%")
+                   'lem-yath-llm-role :user)
+    (insert-string
+     (buffer-end-point buffer) "Claude boundary response"
+     'lem-yath-llm-role :assistant
+     *llm-response-state-key*
+     (make-llm-response-state
+      :backend :claude-code
+      :model "claude-code"
+      :system-message "test"
+      :provider-session-id "claude-session-1"
+      :provider-message-id "claude-message-boundary"))
+    (insert-string (buffer-end-point buffer) (format nil "~2%* Branch prompt~%")
+                   'lem-yath-llm-role :user)
+    (with-point ((branch-origin (buffer-end-point buffer)))
+      (insert-string
+       (buffer-end-point buffer) (format nil "~2%Existing later response")
+       'lem-yath-llm-role :assistant
+       *llm-response-state-key*
+       (make-llm-response-state
+        :backend :claude-code
+        :model "claude-code"
+        :system-message "test"
+        :provider-session-id "claude-session-1"
+        :provider-message-id "claude-later-boundary"))
+      (move-point (buffer-point buffer) branch-origin))
+    (clear-buffer-edit-history buffer)
+    (llm-cli-store-session-id buffer :claude-code "claude-session-1")
+    (setf *llm-backend* :claude-code)
+    (llm-role-refresh-static-overlays buffer)
+    (llm-backend-test-log
+     "CLAUDE AUTO FORK READY decision=~a"
+     (if (llm-claude-auto-fork-state buffer (buffer-point buffer))
+         "yes" "no"))))
+
 (define-command lem-yath-test-llm-backend-record () ()
   (let ((buffer (llm-output-buffer)))
     (llm-backend-test-log
      (concatenate
       'string
-      "STATE active=~a openrouter=~a claude1=~a claude2=~a claude3=~a "
+      "STATE active=~a openrouter=~a claude1=~a claude2=~a claude3=~a auto5=~a auto-order=~a auto-repeat-safe=~a "
       "thinking=~a tool=~a tool-result=~a codex1=~a codex2=~a "
       "command=~a file=~a grok1=~a grok2=~a aborted=~a "
       "claude-id=~a codex-id=~a grok-id=~a claude-branch=~a claude-boundary=~a selected-backend=~a")
@@ -252,6 +300,19 @@
      (if (llm-backend-test-contains-p "Claude answer 1") "yes" "no")
      (if (llm-backend-test-contains-p "Claude answer 2") "yes" "no")
      (if (llm-backend-test-contains-p "Claude answer 3") "yes" "no")
+     (let ((text (points-to-string (buffer-start-point (current-buffer))
+                                   (buffer-end-point (current-buffer)))))
+       (if (search "Claude answer 5" text) "yes" "no"))
+     (let* ((text (points-to-string (buffer-start-point (current-buffer))
+                                    (buffer-end-point (current-buffer))))
+            (answer (search "Claude answer 5" text))
+            (later (search "Existing later response" text)))
+       (if (and answer later (< answer later)) "yes" "no"))
+     (if (handler-case
+             (null (llm-claude-auto-fork-state
+                    (current-buffer) (current-point)))
+           (error () nil))
+         "yes" "no")
      (if (llm-backend-test-contains-p "checked context") "yes" "no")
      (if (llm-backend-test-contains-p "Claude tool: `Read`") "yes" "no")
      (if (llm-backend-test-contains-p "Claude tool result") "yes" "no")
@@ -287,6 +348,7 @@
   (define-key keymap "F8" 'lem-yath-test-llm-slow-claude)
   (define-key keymap "F9" 'lem-yath-test-llm-new-session)
   (define-key keymap "F10" 'lem-yath-test-llm-claude-session-setup)
+  (define-key keymap "F11" 'lem-yath-test-llm-claude-auto-fork-setup)
   (define-key keymap "F12" 'lem-yath-test-llm-backend-record))
 
 (setf (buffer-directory (current-buffer))
