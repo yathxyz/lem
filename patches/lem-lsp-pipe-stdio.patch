@@ -63,13 +63,31 @@
 +             :error-output :interactive
 +             :external-format :utf-8)))
        (make-instance 'client:stdio-client :process process))))
-@@ -742,4 +750,24 @@
-+(defun workspace/configuration (params)
+@@ -742,4 +750,42 @@
++(defun configuration-item-section (item)
++  (handler-case
++      (lsp:configuration-item-section item)
++    (unbound-slot () nil)))
++
++(defun workspace-configuration-section (workspace section)
++  (let ((value (workspace-configuration workspace)))
++    (if (or (null section) (zerop (length section)))
++        (or value +null+)
++        (dolist (name (uiop:split-string section :separator '(#\.)) value)
++          (unless (hash-table-p value)
++            (return +null+))
++          (multiple-value-bind (next present-p) (gethash name value)
++            (unless present-p
++              (return +null+))
++            (setf value next))))))
++
++(defun workspace/configuration (workspace params)
 +  (let ((params (convert-from-json params 'lsp:configuration-params)))
 +    (map 'vector
 +         (lambda (item)
-+           (declare (ignore item))
-+           +null+)
++           (workspace-configuration-section
++            workspace
++            (configuration-item-section item)))
 +         (lsp:configuration-params-items params))))
 +
 +(defun client/register-capability (params)
@@ -88,13 +106,14 @@
    (jsonrpc:expose (lem-language-client/client:client-connection (workspace-client workspace))
                    method
                    function))
-@@ -755,7 +783,19 @@
+@@ -755,7 +804,20 @@
    (register-lsp-method workspace
                         "window/logMessage"
                         'window/log-message)
-+  (register-lsp-method workspace
-+                       "workspace/configuration"
-+                       'workspace/configuration)
++  (register-lsp-method
++   workspace
++   "workspace/configuration"
++   (lambda (params) (workspace/configuration workspace params)))
 +  (register-lsp-method workspace
 +                       "client/registerCapability"
 +                       'client/register-capability)

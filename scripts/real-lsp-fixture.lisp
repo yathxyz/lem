@@ -120,15 +120,23 @@
 (defvar *real-lsp-test-next-case-index* 0)
 (defvar *real-lsp-test-current* nil)
 
-;; JSON-RPC registers the function designator, so this wrapper records real
-;; server requests without replacing the production response implementation.
+;; The registered JSON-RPC closure calls this global function, so the wrapper
+;; records real requests without replacing the production response
+;; implementation.
 (defvar *real-lsp-test-workspace-configuration-count* 0)
+(defvar *real-lsp-test-workspace-configuration-records* '())
 (defvar *real-lsp-test-workspace-configuration-original*
   (symbol-function 'lem-lsp-mode::workspace/configuration))
 
-(defun real-lsp-test-workspace-configuration (params)
-  (incf *real-lsp-test-workspace-configuration-count*)
-  (funcall *real-lsp-test-workspace-configuration-original* params))
+(defun real-lsp-test-workspace-configuration (workspace params)
+  (let ((result
+          (funcall *real-lsp-test-workspace-configuration-original*
+                   workspace
+                   params)))
+    (incf *real-lsp-test-workspace-configuration-count*)
+    (push (list workspace params result)
+          *real-lsp-test-workspace-configuration-records*)
+    result))
 
 (setf (symbol-function 'lem-lsp-mode::workspace/configuration)
       #'real-lsp-test-workspace-configuration)
@@ -242,6 +250,23 @@
          (workspace (lsp:client-capabilities-workspace capabilities)))
     (eq t (lsp:workspace-client-capabilities-configuration workspace))))
 
+(defun real-lsp-test-configuration-response (workspace section)
+  (dolist (record *real-lsp-test-workspace-configuration-records*
+                  (values nil nil))
+    (destructuring-bind (record-workspace raw-params result) record
+      (when (and (eq workspace record-workspace) (vectorp result))
+        (let* ((params
+                 (lem-lsp-base/converter:convert-from-json
+                  raw-params
+                  'lsp:configuration-params))
+               (items (lsp:configuration-params-items params)))
+          (loop :for item :across items
+                :for response :across result
+                :when (equal section
+                             (lem-lsp-mode::configuration-item-section item))
+                  :do (return-from real-lsp-test-configuration-response
+                        (values response t))))))))
+
 (defun real-lsp-test-stop-watchdog (current)
   (alexandria:when-let ((watchdog (real-lsp-test-current-watchdog current)))
     (ignore-errors (stop-timer watchdog))
@@ -260,21 +285,28 @@
      "FAIL id=~a phase=initialize error=server-process-exited"
      (getf (real-lsp-test-current-case current) :id))))
 
-(defun real-lsp-test-initialization-option-failures (case workspace)
-  "Return failed assertions for the options frozen into WORKSPACE at launch."
+(defun real-lsp-test-configuration-failures (case workspace)
+  "Return failed assertions for configuration frozen into WORKSPACE at launch."
   (let ((id (getf case :id))
         (options (lem-lsp-mode::workspace-initialization-options workspace))
+        (configuration (lem-lsp-mode::workspace-configuration workspace))
         (failures '()))
     (flet ((check (condition label)
              (unless condition (push label failures))))
       (cond
         ((string= id "nix")
-         (check (hash-table-p options) "nix-options-map")
-         (when (hash-table-p options)
+         (check (null options) "nix-initialization-options-null")
+         (check (hash-table-p configuration) "nix-configuration-map")
+         (when (hash-table-p configuration)
            (let* ((root (nixd-flake-root))
-                  (nixpkgs (gethash "nixpkgs" options))
-                  (formatting (gethash "formatting" options))
-                  (option-sources (gethash "options" options)))
+                  (settings (gethash "nixd" configuration))
+                  (nixpkgs (and (hash-table-p settings)
+                                (gethash "nixpkgs" settings)))
+                  (formatting (and (hash-table-p settings)
+                                   (gethash "formatting" settings)))
+                  (option-sources (and (hash-table-p settings)
+                                       (gethash "options" settings))))
+             (check (hash-table-p settings) "nix-settings-map")
              (check (hash-table-p nixpkgs) "nix-nixpkgs-map")
              (when (hash-table-p nixpkgs)
                (check (string=
@@ -304,6 +336,7 @@
                        (gethash "expr" entry ""))
                       (format nil "nix-~a-expr" (car source))))))))))
         ((string= id "java")
+         (check (null configuration) "unexpected-workspace-configuration")
          (check (hash-table-p options) "java-options-map")
          (when (hash-table-p options)
            (let* ((settings (gethash "settings" options))
@@ -326,7 +359,8 @@
                                (gethash "url" format-settings ""))
                       "java-google-style-url")))))
         (t
-         (check (null options) "unexpected-initialization-options"))))
+         (check (null options) "unexpected-initialization-options")
+         (check (null configuration) "unexpected-workspace-configuration"))))
     (nreverse failures)))
 
 (defun real-lsp-test-record-ready (current)
@@ -345,7 +379,7 @@
              (command (real-lsp-test-spec-command spec connection-mode))
              (program (first command))
              (failures
-               (real-lsp-test-initialization-option-failures case workspace)))
+               (real-lsp-test-configuration-failures case workspace)))
         (flet ((check (condition label)
                  (unless condition (push label failures))))
           (check (eq expected-mode (buffer-major-mode buffer)) "major-mode")
@@ -611,9 +645,19 @@
       (when (string= id "csharp")
         (check (plusp (length (lem-lsp-mode::buffer-diagnostic-overlays buffer)))
                "csharp-diagnostics"))
-      (when (string= id "markdown")
+      (when (member id '("nix" "markdown") :test #'string=)
         (check (plusp configuration-count)
-               "workspace-configuration-request")))
+               "workspace-configuration-request"))
+      (when (string= id "nix")
+        (multiple-value-bind (response present-p)
+            (real-lsp-test-configuration-response workspace "nixd")
+          (check present-p "nixd-configuration-section-request")
+          (check (and present-p
+                      (eq response
+                          (gethash
+                           "nixd"
+                           (lem-lsp-mode::workspace-configuration workspace))))
+                 "nixd-configuration-response"))))
     (real-lsp-test-report
      (concatenate
       'string

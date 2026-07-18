@@ -112,6 +112,8 @@
 +  (async-process:process-alive-p (stdio-client-process client)))
 --- a/extensions/lsp-mode/lsp-mode.lisp
 +++ b/extensions/lsp-mode/lsp-mode.lisp
+@@ -22,0 +23 @@
++           :spec-workspace-configuration
 @@ -37,7 +37,7 @@
  (defmacro without-lsp-mode (() &body body)
    "This macro prevents enabling lsp-mode within the body.
@@ -167,7 +169,7 @@
 +    :initarg :key
 +    :initform nil
 +    :accessor workspace-key)
-@@ -176,0 +196,24 @@
+@@ -176,0 +196,28 @@
 +   (state
 +    :initarg :state
 +    :initform :starting
@@ -192,7 +194,11 @@
 +    :initarg :initialization-options
 +    :initform nil
 +    :accessor workspace-initialization-options)
-@@ -183,4 +226,10 @@
++   (configuration
++    :initarg :configuration
++    :initform nil
++    :accessor workspace-configuration)
+@@ -183,4 +230,13 @@
 -  (make-instance 'workspace
 -                 :spec spec
 -                 :client client
@@ -206,7 +212,10 @@
 +                   :key (make-workspace-key spec root)
 +                   :initialization-options
 +                   (with-current-buffer buffer
-+                     (spec-initialization-options spec)))))
++                     (spec-initialization-options spec))
++                   :configuration
++                   (with-current-buffer buffer
++                     (spec-workspace-configuration spec)))))
 @@ -197,0 +247,14 @@
 +(defgeneric make-workspace-key (spec root-pathname)
 +  (:method (spec root-pathname)
@@ -826,6 +835,17 @@
 +    (unless (and workspace (eq :ready (workspace-state workspace)))
 +      (editor-error "No initialized LSP workspace for this buffer."))
 +    workspace))
+@@ -532,6 +1015,9 @@
+ (defgeneric spec-initialization-options (spec)
+   (:method (spec) nil))
+-
++
++(defgeneric spec-workspace-configuration (spec)
++  (:method (spec) nil))
++
+ (defparameter *client-capabilities-text*
+   (load-time-value
+    (uiop:read-file-string
 @@ -710 +1193 @@
 -(defun initialize (workspace continuation)
 +(defun initialize (workspace continuation &key error)

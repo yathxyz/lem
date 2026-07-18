@@ -394,7 +394,7 @@
   :readme-url "https://github.com/nix-community/nixd"
   :connection-mode :stdio)
 
-(defmethod lem-lsp-mode:spec-initialization-options ((spec lem-yath-nix-spec))
+(defun nixd-workspace-settings ()
   (let* ((root (nixd-flake-root))
          (expr (if root
                    (format nil "import (builtins.getFlake \"~a\").inputs.nixpkgs { }" root)
@@ -418,6 +418,11 @@
                    (when options
                      (list "options" (apply #'lem-lsp-base/type:make-lsp-map
                                             options)))))))
+
+(defmethod lem-lsp-mode:spec-workspace-configuration
+    ((spec lem-yath-nix-spec))
+  (declare (ignore spec))
+  (lem-lsp-base/type:make-lsp-map "nixd" (nixd-workspace-settings)))
 
 ;;; --- configured Eglot stdio specs ---------------------------------------
 

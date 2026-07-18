@@ -610,8 +610,9 @@ process. Different roots using the same language remain isolated. Lem's Lisp-v2
 self/manual connections are the intentional exception: they retain global connection
 selection, and newly opened or restarted Lisp buffers follow the selected connection.
 
-Servers start in the project directory, and initialization options are frozen under the
-originating buffer. Initialization has a 30-second bound; detaching the final pending
+Servers start in the project directory, and initialization options plus workspace
+configuration are frozen from the originating buffer. Initialization has a 30-second
+bound; detaching the final pending
 buffer cancels its spinner, retry loop, timer, registry entry, and process. Dead cached
 child processes are replaced as one project unit. File URIs percent-encode reserved and
 Unicode path characters, preserve literal `+`, and reject non-file or remote-authority
@@ -679,6 +680,13 @@ submodule merging, and linked-worktree separation. Static contracts
 cover exact and glob root markers, `.git/` directory fallback, filesystem-root
 termination, safe URI conversion, spec-instance-stable keys, fileless guards, global Lisp-v2
 connection selection/restart, and both leader states.
+
+Nix follows the configured buffer-local Eglot settings shape: initialization options
+remain null, while a frozen outer `nixd` map contains the flake-derived nixpkgs,
+formatter, NixOS, and Home Manager expressions. Lem answers the server's real
+`workspace/configuration` request by resolving the requested section from that map.
+The installed-wrapper gate proves nixd requests `nixd`, receives that exact settings
+object, remains live, and shuts down cleanly.
 
 Java deliberately follows the current Emacs configuration's manual activation
 policy. `lem-yath-java-spec` is registered without adding a Java mode hook, and
@@ -1809,7 +1817,9 @@ default diagnostics provider.
   :install-command "…" :readme-url "…" :connection-mode :stdio) ; :stdio | :tcp
 ```
 Spec class slots in `lsp-mode/spec.lisp:16-47`. Override per-server init options with
-`(defmethod spec-initialization-options ((spec my-spec)) (make-lsp-map …))`.
+`(defmethod spec-initialization-options ((spec my-spec)) (make-lsp-map …))`, or frozen
+server-requested settings with
+`(defmethod spec-workspace-configuration ((spec my-spec)) (make-lsp-map …))`.
 Customize the server command at runtime: redefine the spec, or set the relevant
 defvars (some configs expose them, e.g. erlang `*lsp-erlang-server-command*`).
 
