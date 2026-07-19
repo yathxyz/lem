@@ -211,6 +211,24 @@ rectangle coercion at tab or wide-character edges."
         (delete-between-points start end)
         (insert-string start string)))))
 
+(defun rectangle-call-with-change-group (buffer function)
+  "Call FUNCTION in a retained-undo transaction when BUFFER supports one."
+  (let ((group
+          (handler-case (buffer-prepare-change-group buffer)
+            (error () nil))))
+    (if (null group)
+        (funcall function)
+        (handler-case
+            (multiple-value-prog1 (funcall function)
+              (buffer-accept-change-group group))
+          (error (condition)
+            (when (buffer-change-group-active-p group)
+              (handler-case (buffer-cancel-change-group group)
+                (error ()
+                  (when (buffer-change-group-active-p group)
+                    (ignore-errors (buffer-abort-change-group group))))))
+            (error condition))))))
+
 (defun rectangle-transform-lines (state function)
   "Precompute, then apply FUNCTION to every line in STATE's rectangle."
   (let ((buffer (current-buffer))
@@ -226,9 +244,12 @@ rectangle coercion at tab or wide-character edges."
             :do (when (find #\Newline new)
                   (editor-error "Rectangle replacement cannot contain a newline."))
                 (push (list line new) changes))
-      (dolist (change (nreverse changes))
-        (destructuring-bind (line new) change
-          (rectangle-rewrite-line buffer line new))))
+      (rectangle-call-with-change-group
+       buffer
+       (lambda ()
+         (dolist (change (nreverse changes))
+           (destructuring-bind (line new) change
+             (rectangle-rewrite-line buffer line new))))))
     (setf (rectangle-state-allow-edit-p state) t)
     state))
 
@@ -504,14 +525,18 @@ rectangle coercion at tab or wide-character edges."
          (last (car (last *killed-rectangle*))))
     (when (buffer-read-only-p buffer)
       (error 'read-only-error))
-    (rectangle-ensure-yank-lines (length *killed-rectangle*))
-    (loop :for inserted :in *killed-rectangle*
-          :for line :from top
-          :do (let* ((old (line-string (rectangle-line-point buffer line)))
-                     (new
-                       (funcall (rectangle-insert-transform column inserted)
-                                old column column tab-width line)))
-                (rectangle-rewrite-line buffer line new)))
+    (rectangle-call-with-change-group
+     buffer
+     (lambda ()
+       (rectangle-ensure-yank-lines (length *killed-rectangle*))
+       (loop :for inserted :in *killed-rectangle*
+             :for line :from top
+             :do (let* ((old (line-string (rectangle-line-point buffer line)))
+                        (new
+                          (funcall
+                           (rectangle-insert-transform column inserted)
+                           old column column tab-width line)))
+                   (rectangle-rewrite-line buffer line new)))))
     (rectangle-move-point
      (+ top (1- (length *killed-rectangle*)))
      (+ column

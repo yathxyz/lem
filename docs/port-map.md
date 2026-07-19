@@ -201,8 +201,8 @@ Status legend:
   Lem additionally caps retained history at 65,536 nodes, 262,144 edits, and
   128 MiB of UTF-8 route-validation work. Retained states restore their
   historical source point for ordinary undo/redo and Vundo preview. Vundo's
-  internal `i`/`D` debug commands remain absent. Rectangle/Copilot-style paths
-  do not yet use the constrained retained-undo change-group API, so their
+  internal `i`/`D` debug commands remain absent. Copilot-style paths do not yet
+  use the constrained retained-undo change-group API, so their
   intermediate transactions remain in history.
 - **Embark scope**: completion uses `C-c a` because the ncurses input path cannot
   represent `C-.` distinctly. Characterwise regions and Evil Visual Blocks are

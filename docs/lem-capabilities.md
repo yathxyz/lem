@@ -1312,9 +1312,8 @@ reload, killed windows and buffers, wide-tree pruning, mutating hooks,
 stale-reference rejection, asymmetric route refusal, after-save descendants,
 direct and re-entrant teardown, prior bottom panes, and read-only failures.
 Vundo's internal debug keys `i`/`D` are not implemented.
-Rectangle/Copilot-style paths do not yet use the constrained
-retained-undo change-group API, so their intermediate transactions remain in
-history.
+Copilot-style paths do not yet use the constrained retained-undo change-group
+API, so their intermediate transactions remain in history.
 
 - Find by name: `M-s f` (`lem-yath/src/find-name.lisp`) prompts for a root and
   wildcard, runs GNU find asynchronously with a NUL-delimited argv-safe protocol,
@@ -1436,7 +1435,9 @@ configuration is present on `C-x r`: kill, copy, delete, clear, open, prompted
 string replacement, safe integer numbering, and multiline yank. Operations
 precompute every row before mutation, coerce tab or wide-character boundary
 cells to spaces, honor prefix fill behavior on short lines, and refuse embedded
-newlines or unsafe number formats before editing. Rectangle `M-j` duplicates
+newlines or unsafe number formats before editing. Mutations use the retained
+undo change-group API, so a throwing buffer hook restores the complete prior
+text and history even after an earlier row changed. Rectangle `M-j` duplicates
 every row to the right with its count, preserves both corners and the mark, and
 undoes in one step.
 

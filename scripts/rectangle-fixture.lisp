@@ -1,6 +1,7 @@
 (in-package :lem-yath)
 
 (defvar *rectangle-test-failures* 0)
+(defvar *rectangle-test-throwing-hook-fired-p* nil)
 
 (defun rectangle-test-log (format-control &rest arguments)
   (with-open-file (stream (uiop:getenv "LEM_YATH_RECTANGLE_REPORT")
@@ -37,6 +38,13 @@
 (defun rectangle-test-binding (keymap keys)
   (lem-core::prefix-suffix
    (lem-core::keymap-find keymap (lem-core::parse-keyspec keys))))
+
+(defun rectangle-test-mutating-throwing-hook (start end old-length)
+  (declare (ignore end old-length))
+  (unless *rectangle-test-throwing-hook-fired-p*
+    (setf *rectangle-test-throwing-hook-fired-p* t)
+    (insert-string (buffer-end-point (point-buffer start)) "!")
+    (editor-error "rectangle nested mutation failure")))
 
 (defun rectangle-test-start (buffer)
   (with-current-buffer buffer
@@ -175,6 +183,30 @@
                      (rectangle-test-buffer-text buffer))
             (not (rectangle-mode-active-p buffer)))
        "copy-rectangle-retains-buffer-and-padded-rows")))
+  (with-rectangle-test-buffer (buffer)
+    (with-current-buffer buffer
+      (let ((baseline (lem:buffer-undo-tree-snapshot buffer))
+            (thrown-p nil))
+        (setf *rectangle-test-throwing-hook-fired-p* nil)
+        (add-hook (variable-value 'after-change-functions :buffer buffer)
+                  'rectangle-test-mutating-throwing-hook)
+        (unwind-protect
+             (handler-case (lem-yath-delete-rectangle)
+               (error () (setf thrown-p t)))
+          (remove-hook (variable-value 'after-change-functions :buffer buffer)
+                       'rectangle-test-mutating-throwing-hook))
+        (let ((after (lem:buffer-undo-tree-snapshot buffer)))
+          (rectangle-test-check
+           (and thrown-p
+                *rectangle-test-throwing-hook-fired-p*
+                (string= (format nil "abcdef~%xy~%123456~%")
+                         (rectangle-test-buffer-text buffer))
+                (rectangle-mode-active-p buffer)
+                (null (lem/buffer/internal::buffer-%active-change-group buffer))
+                (= (getf baseline :node-count) (getf after :node-count))
+                (= (getf baseline :payload-bytes) (getf after :payload-bytes))
+                (eql (getf baseline :current) (getf after :current)))
+           "rectangle-throwing-hook-rolls-back-text-and-history")))))
   (let ((buffer (make-buffer "*rectangle-yank-test*")))
     (unwind-protect
          (with-current-buffer buffer
