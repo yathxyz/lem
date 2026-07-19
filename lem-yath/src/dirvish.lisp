@@ -162,6 +162,9 @@
 (defconstant +dirvish-preview-directory-limit+ 200)
 (defconstant +dirvish-preview-debounce-milliseconds+ 20)
 (defconstant +dirvish-preview-throttle-milliseconds+ 250)
+(defconstant +dirvish-preview-process-timeout+ 3)
+(defconstant +dirvish-preview-process-output-limit+ (* 512 1024))
+(defconstant +dirvish-preview-derived-input-limit+ (* 128 1024 1024))
 
 (defclass dirvish-session ()
   ((frame :initarg :frame :reader dirvish-session-frame)
@@ -173,6 +176,7 @@
    (root-directory :initform nil :accessor dirvish-session-root-directory)
    (preview-path :initform nil :accessor dirvish-session-preview-path)
    (preview-timer :initform nil :accessor dirvish-session-preview-timer)
+   (preview-request :initform nil :accessor dirvish-session-preview-request)
    (preview-generation :initform 0 :accessor dirvish-session-preview-generation)
    (last-preview-time :initform nil :accessor dirvish-session-last-preview-time)))
 
@@ -248,6 +252,10 @@
              character))
        name))
 
+(defun dirvish-preview-display-path (pathname)
+  "Return PATHNAME escaped onto one terminal row without changing identity."
+  (completion-path-display-string (dirvish-native-path pathname)))
+
 (defun dirvish-preview-directory-text (pathname)
   "Return a bounded, nonrecursive directory preview for PATHNAME."
   (let ((directory nil)
@@ -271,7 +279,7 @@
                              (return))))
            (setf names (sort names #'string-lessp))
            (with-output-to-string (stream)
-             (format stream "~a~2%" (dirvish-native-path pathname))
+             (format stream "~a~2%" (dirvish-preview-display-path pathname))
              (dolist (name names)
                (let* ((child (merge-pathnames name pathname))
                       (directory-p
@@ -295,7 +303,7 @@
   (let ((type (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)))
     (format nil
             "~a~2%Type: ~a~%Size: ~d bytes~@[~2%~a~]~%"
-            (dirvish-native-path pathname)
+            (dirvish-preview-display-path pathname)
             (cond
               ((= type sb-posix:s-iflnk) "symbolic link")
               ((= type sb-posix:s-ififo) "named pipe")
@@ -307,7 +315,128 @@
             (sb-posix:stat-size stat)
             reason)))
 
-(defun dirvish-preview-text (pathname)
+(defun dirvish-preview-derived-kind (pathname)
+  "Return the bounded external preview kind implied by PATHNAME, or NIL."
+  (let ((name (string-downcase (file-namestring pathname))))
+    (flet ((suffix-p (suffixes)
+             (some (lambda (suffix)
+                     (alexandria:ends-with-subseq suffix name))
+                   suffixes)))
+      (cond
+        ((suffix-p '(".pdf")) :pdf)
+        ((suffix-p '(".epub")) :epub)
+        ((suffix-p '(".tar.gz" ".tar.bz2" ".tar.xz" ".tgz" ".tbz2"
+                     ".txz" ".zip" ".tar" ".7z" ".rar" ".cpio" ".iso"))
+         :archive)
+        ((suffix-p '(".png" ".jpg" ".jpeg" ".gif" ".webp" ".bmp"
+                     ".tif" ".tiff" ".svg" ".avif" ".heic" ".mp3"
+                     ".flac" ".ogg" ".wav" ".m4a" ".mp4" ".mkv"
+                     ".webm" ".avi" ".mov" ".mpeg" ".mpg"))
+         :media)))))
+
+(defun dirvish-preview-run (program arguments directory request)
+  "Run one preview PROGRAM as direct argv under strict time/output bounds."
+  (let ((executable (or (executable-find program)
+                        (error "~a is unavailable" program)))
+        (*project-process-timeout* +dirvish-preview-process-timeout+))
+    (multiple-value-bind (stdout stderr status)
+        (run-project-program
+         (cons (uiop:native-namestring executable) arguments)
+         :directory directory
+         :request request
+         :output-limit +dirvish-preview-process-output-limit+)
+      (unless (and (integerp status) (zerop status))
+        (let ((diagnostic
+                (completion-first-documentation-line
+                 (document-safe-display-text stderr))))
+          (error "~a failed~@[ (~a)~]" program diagnostic)))
+      (document-safe-display-text stdout))))
+
+(defun dirvish-preview-pdf-text (pathname request)
+  (let* ((native (dirvish-native-path pathname))
+         (directory (directory-namestring pathname))
+         (info (dirvish-preview-run "pdfinfo" (list native)
+                                    directory request))
+         (pages (document-ascii-integer
+                 (or (document-pdf-info-field info "Pages") "")))
+         (title (document-pdf-info-field info "Title"))
+         (author (document-pdf-info-field info "Author"))
+         (page-text
+           (dirvish-preview-run
+            "pdftotext"
+            (list "-f" "1" "-l" "1" "-layout" "-nopgbrk"
+                  "-enc" "UTF-8" native "-")
+            directory request)))
+    (with-output-to-string (stream)
+      (format stream "~a~2%PDF document~%"
+              (dirvish-preview-display-path pathname))
+      (when (and title (plusp (length title)))
+        (format stream "Title: ~a~%" title))
+      (when (and author (plusp (length author)))
+        (format stream "Author: ~a~%" author))
+      (format stream "Page 1~@[ of ~d~]~%~a~2%"
+              pages (make-string 60 :initial-element #\-))
+      (if (plusp (length (string-trim '(#\Space #\Tab #\Newline #\Return)
+                                      page-text)))
+          (write-string page-text stream)
+          (write-string "[The first page has no extractable text.]" stream))
+      (terpri stream))))
+
+(defun dirvish-preview-epub-text (pathname request)
+  (let* ((native (dirvish-native-path pathname))
+         (content
+           (dirvish-preview-run
+            "pandoc"
+            (list "--sandbox" "--from=epub" "--to=plain" "--wrap=none"
+                  native)
+            (directory-namestring pathname) request)))
+    (format nil "~a~2%EPUB document~%~a~2%~a~%"
+            (dirvish-preview-display-path pathname)
+            (make-string 60 :initial-element #\-) content)))
+
+(defun dirvish-preview-archive-text (pathname request)
+  (let* ((native (dirvish-native-path pathname))
+         (output
+           (dirvish-preview-run
+            "bsdtar" (list "-tf" native)
+            (directory-namestring pathname) request))
+         (members
+           (remove-if
+            (lambda (line) (zerop (length line)))
+            (mapcar #'dirvish-preview-safe-name
+                    (cl-ppcre:split "\\r?\\n" output))))
+         (truncated-p (> (length members) +dirvish-preview-directory-limit+)))
+    (with-output-to-string (stream)
+      (format stream "~a~2%Archive members~%~a~2%"
+              (dirvish-preview-display-path pathname)
+              (make-string 60 :initial-element #\-))
+      (dolist (member (subseq members 0 (min (length members)
+                                             +dirvish-preview-directory-limit+)))
+        (format stream "~a~%" member))
+      (when truncated-p
+        (format stream "~%... first ~d members shown ...~%"
+                +dirvish-preview-directory-limit+)))))
+
+(defun dirvish-preview-media-text (pathname request)
+  (let* ((native (dirvish-native-path pathname))
+         (description
+           (string-trim
+            '(#\Space #\Tab #\Newline #\Return)
+            (dirvish-preview-run
+             "file" (list "--brief" "--" native)
+             (directory-namestring pathname) request))))
+    (format nil "~a~2%Media metadata~%~a~%"
+            (dirvish-preview-display-path pathname)
+            (if (plusp (length description)) description "unknown"))))
+
+(defun dirvish-preview-derived-text (kind pathname request)
+  (ecase kind
+    (:pdf (dirvish-preview-pdf-text pathname request))
+    (:epub (dirvish-preview-epub-text pathname request))
+    (:archive (dirvish-preview-archive-text pathname request))
+    (:media (dirvish-preview-media-text pathname request))))
+
+(defun dirvish-preview-text (pathname &key request)
   "Return a safe textual preview for PATHNAME without activating file modes."
   (handler-case
       (let* ((stat (sb-posix:lstat (dirvish-native-path pathname)))
@@ -316,27 +445,42 @@
           ((= type sb-posix:s-ifdir)
            (dirvish-preview-directory-text pathname))
           ((= type sb-posix:s-ifreg)
-           (alexandria:if-let ((text (project-picker-read-preview-text pathname)))
-             (format nil "~a~2%~a"
-                     (dirvish-native-path pathname)
-                     text)
-             (dirvish-preview-file-description
-              pathname stat
-              "Preview unavailable: file is binary, undecodable, or larger than 1 MiB.")))
+           (let ((kind (dirvish-preview-derived-kind pathname)))
+             (cond
+               ((and kind
+                     (not (eq kind :media))
+                     (> (sb-posix:stat-size stat)
+                        +dirvish-preview-derived-input-limit+))
+                (dirvish-preview-file-description
+                 pathname stat
+                 "Derived preview skipped: file is larger than 128 MiB."))
+               (kind
+                (dirvish-preview-derived-text kind pathname request))
+               (t
+                (alexandria:if-let
+                    ((text (project-picker-read-preview-text pathname)))
+                  (format nil "~a~2%~a"
+                          (dirvish-preview-display-path pathname)
+                          text)
+                  (dirvish-preview-file-description
+                   pathname stat
+                   "Preview unavailable: file is binary, undecodable, or larger than 1 MiB."))))))
           (t
            (dirvish-preview-file-description
             pathname stat "Special files are never opened for preview."))))
+    (project-request-cancelled (condition)
+      (error condition))
     (error (condition)
       (format nil "~a~2%Preview unavailable: ~a~%"
-              (dirvish-native-path pathname) condition))))
+              (dirvish-preview-display-path pathname) condition))))
 
-(defun dirvish-render-preview-buffer (session pathname)
+(defun dirvish-render-preview-buffer (session pathname &optional text)
   (let ((buffer (dirvish-session-preview-buffer session)))
     (when (dirvish-live-buffer-p buffer)
       (with-buffer-read-only buffer nil
         (erase-buffer buffer)
         (insert-string (buffer-start-point buffer)
-                       (dirvish-preview-text pathname)))
+                       (or text (dirvish-preview-text pathname))))
       (setf (buffer-directory buffer)
             (or (uiop:directory-exists-p pathname)
                 (uiop:pathname-directory-pathname pathname))
@@ -353,8 +497,63 @@
             (get-internal-real-time))
       (redraw-display))))
 
+(defun dirvish-cancel-preview-request (session)
+  (alexandria:when-let ((request (dirvish-session-preview-request session)))
+    (setf (dirvish-session-preview-request session) nil)
+    (cancel-project-request request)))
+
+(defun dirvish-start-derived-preview (session pathname generation)
+  "Render PATHNAME off the editor thread and publish only the current result."
+  (let* ((key (dirvish-native-path pathname))
+         (display-path (dirvish-preview-display-path pathname))
+         (request
+           (%make-project-request generation (capture-project-request-origin))))
+    (setf (dirvish-session-preview-request session) request)
+    (dirvish-render-preview-buffer
+     session pathname
+     (format nil "~a~2%Loading bounded preview ...~%" display-path))
+    (bt2:make-thread
+     (lambda ()
+       (handler-case
+           (let ((text (dirvish-preview-text pathname :request request)))
+             (send-event
+              (lambda ()
+                (when (and (= generation
+                              (dirvish-session-preview-generation session))
+                           (eq request
+                               (dirvish-session-preview-request session))
+                           (eq session
+                               (gethash (dirvish-session-frame session)
+                                        *dirvish-sessions*))
+                           (string= key
+                                    (or (dirvish-session-preview-path session)
+                                        "")))
+                  (setf (dirvish-session-preview-request session) nil)
+                  (dirvish-render-preview-buffer session pathname text)))))
+         (project-request-cancelled ())
+         (error (condition)
+           (send-event
+            (lambda ()
+              (when (and (= generation
+                            (dirvish-session-preview-generation session))
+                         (eq request
+                             (dirvish-session-preview-request session)))
+                (setf (dirvish-session-preview-request session) nil)
+                (dirvish-render-preview-buffer
+                 session pathname
+                 (format nil "~a~2%Preview unavailable: ~a~%"
+                         display-path condition))))))))
+     :name "lem-yath/dirvish-preview")))
+
+(defun dirvish-render-current-preview (session pathname)
+  (let ((generation (dirvish-session-preview-generation session)))
+    (if (dirvish-preview-derived-kind pathname)
+        (dirvish-start-derived-preview session pathname generation)
+        (dirvish-render-preview-buffer session pathname))))
+
 (defun dirvish-stop-preview-timer (session)
   (incf (dirvish-session-preview-generation session))
+  (dirvish-cancel-preview-request session)
   (alexandria:when-let ((timer (dirvish-session-preview-timer session)))
     (ignore-errors (stop-timer timer))
     (setf (dirvish-session-preview-timer session) nil)))
@@ -377,7 +576,7 @@
       (dirvish-stop-preview-timer session)
       (setf (dirvish-session-preview-path session) key)
       (if immediate-p
-          (dirvish-render-preview-buffer session pathname)
+          (dirvish-render-current-preview session pathname)
           (let* ((generation (dirvish-session-preview-generation session))
                  (timer
                    (make-timer
@@ -390,7 +589,7 @@
                         (alexandria:when-let
                             ((current (dirvish-root-selected-path session)))
                           (when (string= key (dirvish-native-path current))
-                            (dirvish-render-preview-buffer session current)))))
+                            (dirvish-render-current-preview session current)))))
                     :name "lem-yath Dirvish preview")))
             (setf (dirvish-session-preview-timer session) timer)
             (start-timer timer (dirvish-preview-delay session) :repeat nil))))))

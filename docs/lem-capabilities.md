@@ -3396,12 +3396,19 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   text is read through the shared nonblocking, mode-hook-free 1 MiB reader,
   directories expose at most 200 direct children, and binary, undecodable,
   oversized, symbolic-link, pipe, socket, or device entries expose metadata
-  without being opened. `Return` on a file restores the exact preceding layout
+  without being opened. Recognized archives, PDFs, EPUBs, and image/media files
+  use cancellable background direct-argv dispatch instead of activating a file
+  mode: libarchive lists at most 200 members without extraction, Poppler renders
+  first-page text, sandboxed Pandoc produces bounded plain EPUB text, and
+  `file(1)` reports media metadata. Each request has a three-second timeout and
+  512-KiB stdout/stderr cap; document/archive inputs above 128 MiB stay
+  metadata-only, and a superseded result cannot replace the current selection's
+  preview. `Return` on a file restores the exact preceding layout
   before visiting it, `q` restores without visiting, and
   `dirvish-layout-toggle` keeps the directory in the restored selected window.
-  Graphical image/media/archive/document dispatchers, Dirvish header and
-  mode-line segments, subtree/collapse extensions, and its wider integrations
-  are not reproduced. Filer retains its own tree presentation.
+  Pixel image/video rendering, Dirvish header and mode-line segments,
+  subtree/collapse extensions, and its wider integrations are not reproduced.
+  Filer retains its own tree presentation.
 - **Encodings**: `extensions/encodings/` (`lem-encodings`): utf-8/16, cp932, euc-jp,
   gb2312, iso-8859-1, 8bit. `prompt-for-encodings`, `*default-external-format*`
   (`:detect-encoding` default).

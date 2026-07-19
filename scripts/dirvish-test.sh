@@ -25,6 +25,58 @@ mkfifo "$LEM_YATH_DIRVISH_ROOT/special.fifo"
 for index in $(seq 1 205); do
   : >"$LEM_YATH_DIRVISH_ROOT/zz-crowded/entry-$index"
 done
+mkdir -p "$root/archive-source"
+printf 'Dirvish archive payload\n' >"$root/archive-source/zz-archive-member.txt"
+bsdtar -a -cf "$LEM_YATH_DIRVISH_ROOT/preview-archive;safe.zip" \
+  -C "$root/archive-source" zz-archive-member.txt
+rm "$root/archive-source/zz-archive-member.txt"
+rmdir "$root/archive-source"
+printf '# Dirvish EPUB Chapter\n\nDirvish EPUB body.\n' \
+  >"$LEM_YATH_DIRVISH_ROOT/zz-epub-source.md"
+pandoc "$LEM_YATH_DIRVISH_ROOT/zz-epub-source.md" \
+  --output="$LEM_YATH_DIRVISH_ROOT/preview-book.epub"
+python3 - "$LEM_YATH_DIRVISH_ROOT/preview-paper.pdf" \
+  "$LEM_YATH_DIRVISH_ROOT/preview-image.png" <<'PY'
+import base64
+import sys
+
+pdf_path, png_path = sys.argv[1:]
+stream = b"BT /F1 18 Tf 72 720 Td (Dirvish PDF Page) Tj ET\n"
+objects = [
+    b"<< /Type /Catalog /Pages 2 0 R >>",
+    b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+    b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"endstream",
+]
+pdf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+offsets = [0]
+for number, body in enumerate(objects, 1):
+    offsets.append(len(pdf))
+    pdf.extend(f"{number} 0 obj\n".encode())
+    pdf.extend(body)
+    pdf.extend(b"\nendobj\n")
+xref = len(pdf)
+pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+pdf.extend(b"0000000000 65535 f \n")
+for offset in offsets[1:]:
+    pdf.extend(f"{offset:010d} 00000 n \n".encode())
+pdf.extend(
+    f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+    f"startxref\n{xref}\n%%EOF\n".encode()
+)
+with open(pdf_path, "wb") as output:
+    output.write(pdf)
+
+png = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "/x8AAusB9Y9Z4QAAAABJRU5ErkJggg=="
+)
+with open(png_path, "wb") as output:
+    output.write(png)
+PY
+truncate -s 134217729 "$LEM_YATH_DIRVISH_ROOT/zz-oversized.pdf"
 : >"$LEM_YATH_DIRVISH_REPORT"
 
 source "$here/scripts/tui-driver.sh"
@@ -176,11 +228,69 @@ else
 fi
 
 lem_keys "$session" F11
-if wait_report '^SAFE binary=yes special=yes bounded=yes eof=yes debounce=20 throttle=250 limit=200$'; then
-  pass preview-boundaries 'binary, FIFO, and large-directory previews stayed bounded and non-opening'
+if wait_report '^SAFE binary=yes special=yes bounded=yes eof=yes archive=yes epub=yes pdf=yes media=yes oversized=yes debounce=20 throttle=250 limit=200 timeout=3 output=524288 input=134217728$'; then
+  pass preview-boundaries 'binary, special, directory, archive, document, and media previews stayed bounded'
 else
   fail preview-boundaries 'preview safety or pinned scheduling bounds differed'
 fi
+
+lem_keys "$session" C-c D
+if wait_report '^DERIVED-READY row=open\.txt session=yes$'; then
+  pass derived-ready 'prepared a full-frame session before physical preview movement'
+else
+  fail derived-ready 'could not prepare the derived-preview movement fixture'
+fi
+
+lem_keys "$session" n
+if lem_wait_for "$session" 'Archive members' 15 >/dev/null; then
+  lem_keys "$session" C-c R
+  if wait_report '^DERIVED row=preview-archive;safe\.zip archive=yes epub=no pdf=no media=no extracted=no request=idle$'; then
+    pass archive-preview 'physical movement listed archive members without extraction'
+  else
+    fail archive-preview 'archive preview state or async ownership differed'
+  fi
+else
+  fail archive-preview 'archive member list did not reach the terminal preview'
+fi
+
+lem_keys "$session" n
+if lem_wait_for "$session" 'Dirvish EPUB body' 15 >/dev/null; then
+  lem_keys "$session" C-c R
+  if wait_report '^DERIVED row=preview-book\.epub archive=no epub=yes pdf=no media=no extracted=no request=idle$'; then
+    pass epub-preview 'physical movement rendered bounded EPUB text through Pandoc'
+  else
+    fail epub-preview 'EPUB preview state or async ownership differed'
+  fi
+else
+  fail epub-preview 'EPUB text did not reach the terminal preview'
+fi
+
+lem_keys "$session" n
+if lem_wait_for "$session" 'PNG image data' 15 >/dev/null; then
+  lem_keys "$session" C-c R
+  if wait_report '^DERIVED row=preview-image\.png archive=no epub=no pdf=no media=yes extracted=no request=idle$'; then
+    pass media-preview 'physical movement rendered safe image metadata'
+  else
+    fail media-preview 'media preview state or async ownership differed'
+  fi
+else
+  fail media-preview 'image metadata did not reach the terminal preview'
+fi
+
+lem_keys "$session" n
+if lem_wait_for "$session" 'Dirvish PDF Page' 15 >/dev/null; then
+  lem_keys "$session" C-c R
+  if wait_report '^DERIVED row=preview-paper\.pdf archive=no epub=no pdf=yes media=no extracted=no request=idle$'; then
+    pass pdf-preview 'physical movement rendered the bounded first PDF page'
+  else
+    fail pdf-preview 'PDF preview state or async ownership differed'
+  fi
+else
+  fail pdf-preview 'PDF first-page text did not reach the terminal preview'
+fi
+
+lem_keys "$session" q
+sleep 0.3
 
 lem_keys "$session" Escape Escape M-x
 if lem_wait_for "$session" 'Command:' 10 >/dev/null; then
@@ -201,7 +311,7 @@ fi
 lem_keys "$session" q
 sleep 0.3
 lem_keys "$session" F12
-if wait_report '^MX session=no windows=3 focus=other selected-mode=DIRECTORY-MODE preview-live=no$'; then
+if wait_report '^MX session=no windows=3 focus=other selected-mode=FUNDAMENTAL-MODE preview-live=no$'; then
   pass mx-quit 'physical q restored the command-origin layout and removed its preview'
 else
   fail mx-quit 'the physical command session did not restore and clean up exactly'

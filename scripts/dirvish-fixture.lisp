@@ -267,20 +267,73 @@
           (dirvish-preview-text
            (merge-pathnames "zz-crowded/" *dirvish-test-root*)))
         (small-directory (dirvish-preview-text *dirvish-test-root*)))
+    (let ((archive
+            (dirvish-preview-text
+             (merge-pathnames "preview-archive;safe.zip" *dirvish-test-root*)))
+          (epub
+            (dirvish-preview-text
+             (merge-pathnames "preview-book.epub" *dirvish-test-root*)))
+          (pdf
+            (dirvish-preview-text
+             (merge-pathnames "preview-paper.pdf" *dirvish-test-root*)))
+          (media
+            (dirvish-preview-text
+             (merge-pathnames "preview-image.png" *dirvish-test-root*)))
+          (oversized
+            (dirvish-preview-text
+             (merge-pathnames "zz-oversized.pdf" *dirvish-test-root*))))
     (dirvish-test-log
      (concatenate
       'string
-      "SAFE binary=~a special=~a bounded=~a eof=~a "
-      "debounce=~d throttle=~d limit=~d")
+      "SAFE binary=~a special=~a bounded=~a eof=~a archive=~a "
+      "epub=~a pdf=~a media=~a oversized=~a debounce=~d throttle=~d limit=~d "
+      "timeout=~d output=~d input=~d")
      (if (search "binary" binary) "yes" "no")
      (if (search "Special files are never opened" special) "yes" "no")
      (if (search "first 200 entries shown" crowded) "yes" "no")
      (if (and (search "open.txt" small-directory)
               (not (search "Preview unavailable" small-directory)))
          "yes" "no")
+     (if (search "zz-archive-member.txt" archive) "yes" "no")
+     (if (search "Dirvish EPUB body" epub) "yes" "no")
+     (if (search "Dirvish PDF Page" pdf) "yes" "no")
+     (if (search "PNG image data" media) "yes" "no")
+     (if (search "larger than 128 MiB" oversized) "yes" "no")
      +dirvish-preview-debounce-milliseconds+
      +dirvish-preview-throttle-milliseconds+
-     +dirvish-preview-directory-limit+)))
+     +dirvish-preview-directory-limit+
+     +dirvish-preview-process-timeout+
+     +dirvish-preview-process-output-limit+
+     +dirvish-preview-derived-input-limit+))))
+
+(define-command lem-yath-test-dirvish-derived-setup () ()
+  (dirvish-test-setup-origin-layout)
+  (dirvish-open-directory *dirvish-test-root*)
+  (let* ((session (current-dirvish-session))
+         (root (dirvish-session-root-window session))
+         (pathname (merge-pathnames "open.txt" *dirvish-test-root*)))
+    (dirvish-position-on-path root pathname)
+    (dirvish-refresh-session session t)
+    (dirvish-test-log "DERIVED-READY row=~a session=~a"
+                      (dirvish-test-current-name)
+                      (if session "yes" "no"))))
+
+(define-command lem-yath-test-dirvish-derived-report () ()
+  (let* ((session (current-dirvish-session))
+         (text (and session
+                    (buffer-text (dirvish-session-preview-buffer session)))))
+    (dirvish-test-log
+     "DERIVED row=~a archive=~a epub=~a pdf=~a media=~a extracted=~a request=~a"
+     (or (dirvish-test-current-name) "none")
+     (if (and text (search "zz-archive-member.txt" text)) "yes" "no")
+     (if (and text (search "Dirvish EPUB body" text)) "yes" "no")
+     (if (and text (search "Dirvish PDF Page" text)) "yes" "no")
+     (if (and text (search "PNG image data" text)) "yes" "no")
+     (if (probe-file (merge-pathnames "zz-archive-member.txt"
+                                      *dirvish-test-root*))
+         "yes" "no")
+     (if (and session (dirvish-session-preview-request session))
+         "pending" "idle"))))
 
 (define-command lem-yath-test-dirvish-mx-report () ()
   (let ((session (current-dirvish-session)))
@@ -308,6 +361,8 @@
 (define-key *global-keymap* "F10" 'lem-yath-test-dirvish-toggle)
 (define-key *global-keymap* "F11" 'lem-yath-test-dirvish-safe-preview)
 (define-key *global-keymap* "F12" 'lem-yath-test-dirvish-mx-report)
+(define-key *global-keymap* "C-c D" 'lem-yath-test-dirvish-derived-setup)
+(define-key *global-keymap* "C-c R" 'lem-yath-test-dirvish-derived-report)
 
 (setf *dirvish-test-origin-a*
       (dirvish-test-buffer "DIRVISH-ORIGIN-A" "origin A\n")

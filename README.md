@@ -108,7 +108,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   presentation. `M-x dirvish` adds the pinned full-frame shape with one parent
   pane, the active directory, and a selection-following preview; text reads are
   raw, bounded, and mode-hook-free, directories list at most 200 children, and
-  binary or special files show metadata without being opened. `Return` restores
+  binary or special files show metadata without being opened. Cancellable
+  background dispatch lists at most 200 archive members without extraction,
+  renders the first PDF page, converts bounded EPUB text, and reports
+  image/media metadata under a 3-second/512-KiB process budget. `Return` restores
   the prior layout before visiting a file, `q` restores it without visiting,
   and `M-x dirvish-layout-toggle` keeps the directory while collapsing the
   companion panes

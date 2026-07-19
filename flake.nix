@@ -286,6 +286,7 @@
               direnv
               editorconfig-core-c
               fd
+              file
               findutils
               gitMinimal
               gnumake
@@ -295,6 +296,7 @@
               gnused
               nixfmt-rfc-style
               mypy
+              libarchive
               ripgrep
               ruff
               rustfmt
@@ -778,7 +780,10 @@
             formatting-test = mkTestApp "lem-yath-formatting-test" "formatting-test.sh";
             prompt-completion-test = mkTestApp "lem-yath-prompt-completion-test" "prompt-completion-test.sh";
             daily-workflows-test = mkTestApp "lem-yath-daily-workflows-test" "daily-workflows-test.sh";
-            dirvish-test = mkTestAppWithLem lemYath "lem-yath-dirvish-test" "dirvish-test.sh";
+            dirvish-test = mkTestAppWithLemAndInputs lemYath [
+              pkgs.pandoc
+              pkgs.poppler-utils
+            ] "lem-yath-dirvish-test" "dirvish-test.sh";
             calc-test = mkTestAppWithLem lemYath "lem-yath-calc-test" "calc-test.sh";
             so-long-test = mkTestAppWithLem lemYath "lem-yath-so-long-test" "so-long-test.sh";
             large-file-test = mkTestAppWithLem lemYath "lem-yath-large-file-test" "large-file-test.sh";
@@ -899,7 +904,10 @@
             formatting = mkCheck "formatting" "formatting-test.sh";
             prompt-completion = mkCheck "prompt-completion" "prompt-completion-test.sh";
             daily-workflows = mkCheck "daily-workflows" "daily-workflows-test.sh";
-            dirvish = mkCheckWithLem lemYath "dirvish" "dirvish-test.sh";
+            dirvish = mkCheckWithLemAndInputs lemYath [
+              pkgs.pandoc
+              pkgs.poppler-utils
+            ] "dirvish" "dirvish-test.sh";
             calc = mkCheckWithLem lemYath "calc" "calc-test.sh";
             so-long = mkCheckWithLem lemYath "so-long" "so-long-test.sh";
             large-file = mkCheckWithLem lemYath "large-file" "large-file-test.sh";
