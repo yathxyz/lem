@@ -58,6 +58,21 @@ jobs:
                  --eval "(ql::without-prompting (ql:add-to-init-file))"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Install pinned UIOP (qlfile "ql uiop" -> 3.3.7)
+        shell: pwsh
+        run: |
+          # SBCL's bundled UIOP lacks the uiop/cl package nickname that
+          # lem-extension-manager references; the qlfile pins standalone
+          # uiop 3.3.7 (see .qlot/dists/uiop/releases.txt for the hash).
+          $dst = Join-Path $env:USERPROFILE "common-lisp"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          $tgz = Join-Path $env:RUNNER_TEMP "uiop.tgz"
+          Invoke-WebRequest "http://beta.quicklisp.org/archive/uiop/2024-10-12/uiop-3.3.7.tgz" -OutFile $tgz
+          $sha1 = (Get-FileHash $tgz -Algorithm SHA1).Hash.ToLower()
+          if ($sha1 -ne "e05fafc1749b38f628249565484a9f2329fb47b8") { throw "uiop tarball sha1 mismatch: $sha1" }
+          tar -xzf $tgz -C $dst
+          if (-not (Test-Path (Join-Path $dst "uiop-3.3.7\uiop.asd"))) { throw "uiop extraction failed" }
+
       - name: Clone qlfile git deps at locked SHAs
         shell: pwsh
         run: |
@@ -91,6 +106,8 @@ jobs:
         run: |
           & sbcl --dynamic-space-size 4096 --non-interactive `
                  --eval "(require :asdf)" `
+                 --eval "(asdf:load-system :uiop)" `
+                 --eval "(assert (find-package :uiop/cl) () `"pinned uiop 3.3.7 not in effect`")" `
                  --eval "(ql:quickload :lem)" `
                  --eval "(asdf:make :lem)"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
