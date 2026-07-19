@@ -1335,15 +1335,19 @@ this function consumes NODE and every named-child handle it obtains."
     ("variable" "(?m)^(?:export +)?([A-Z_a-z][0-9A-Z_a-z-]*) *:=")
     ("setting" "(?m)^set +([A-Z_a-z][0-9A-Z_a-z-]*)(?:$| |:=)")))
 
-(defun imenu-just-string-line-starts (source)
-  "Return line-start offsets inside strings under just-mode's syntax table."
-  (let ((starts (make-hash-table :test #'eql))
+(defun imenu-generic-excluded-offsets
+    (source comment-character quote-characters)
+  "Mark SOURCE offsets inside a line comment or quoted string."
+  (let ((excluded (make-array (1+ (length source))
+                              :element-type 'bit :initial-element 0))
         (quote nil)
         (comment-p nil)
         (escaped-p nil))
     (loop :for offset :below (length source)
           :for character := (char source offset)
-          :do (cond
+          :do (setf (aref excluded offset)
+                    (if (or quote comment-p) 1 0))
+              (cond
                 (comment-p
                  (when (char= character #\Newline)
                    (setf comment-p nil)))
@@ -1353,15 +1357,15 @@ this function consumes NODE and every named-child handle it obtains."
                    ((char= character #\\) (setf escaped-p t))
                    ((char= character quote) (setf quote nil))))
                 ((char= character #\\) (setf escaped-p t))
-                ((char= character #\#) (setf comment-p t))
-                ((member character '(#\" #\' #\`))
-                 (setf quote character)))
-              (when (and (char= character #\Newline) quote)
-                (setf (gethash (1+ offset) starts) t)))
-    starts))
+                ((char= character comment-character) (setf comment-p t))
+                ((member character quote-characters)
+                 (setf quote character))))
+    (setf (aref excluded (length source))
+          (if (or quote comment-p) 1 0))
+    excluded))
 
 (defun imenu-just-group-candidates
-    (buffer source excluded-starts category pattern)
+    (buffer source excluded-offsets category pattern)
   (let ((candidates nil))
     (ppcre:do-scans
         (start end register-starts register-ends pattern source)
@@ -1369,7 +1373,7 @@ this function consumes NODE and every named-child handle it obtains."
       ;; GNU Imenu's generic scanner ignores matches whose start is inside a
       ;; comment or string.  A comment cannot satisfy these line-anchored
       ;; patterns, so only multiline string state needs an explicit filter.
-      (unless (gethash start excluded-starts)
+      (unless (plusp (aref excluded-offsets start))
         (let ((point (copy-point (buffer-start-point buffer))))
           (character-offset point start)
           (push
@@ -1387,7 +1391,9 @@ this function consumes NODE and every named-child handle it obtains."
   "Match pinned just-mode's generic Imenu expressions and syntax filtering."
   (handler-case
       (let* ((source (buffer-text buffer))
-             (excluded-starts (imenu-just-string-line-starts source)))
+             (excluded-offsets
+               (imenu-generic-excluded-offsets
+                source #\# '(#\" #\' #\`))))
         ;; `imenu--generic-function' pushes each submenu while traversing the
         ;; expression, hence the package's setting/variable/task declaration
         ;; appears as task/variable/setting.  It then sorts children by their
@@ -1395,13 +1401,60 @@ this function consumes NODE and every named-child handle it obtains."
         (loop :for (category pattern) :in *imenu-just-groups*
               :for children :=
                 (imenu-just-group-candidates
-                 buffer source excluded-starts category pattern)
+                 buffer source excluded-offsets category pattern)
               :when children
                 :collect (make-imenu-candidate
                           :label category
                           :children children)))
     (error (condition)
       (log:warn "Just Imenu indexing failed for ~a: ~a"
+                (buffer-name buffer) condition)
+      nil)))
+
+;;; --- nasm-mode ----------------------------------------------------------
+
+(defparameter *imenu-nasm-patterns*
+  '("(?m)^[ \\t]*([A-Za-z_?][A-Za-z0-9_$#@~?]*)[ \\t]*:"
+    "(?im)(?<![A-Za-z0-9_$#@~.?%])%(?:define|macro)(?![A-Za-z0-9_$#@~.?%])\\s+([A-Za-z0-9_$#@~.?]+)"))
+
+(defun imenu-nasm-candidates (buffer)
+  "Match pinned nasm-mode's flat label and define/macro generic index."
+  (handler-case
+      (let* ((source (buffer-text buffer))
+             (excluded-offsets
+               (imenu-generic-excluded-offsets
+                source #\; '(#\" #\' #\`)))
+             (entries nil)
+             (seen (make-hash-table :test #'equal)))
+        (dolist (pattern *imenu-nasm-patterns*)
+          (ppcre:do-scans
+              (start end register-starts register-ends pattern source)
+            (declare (ignore end))
+            (unless (plusp (aref excluded-offsets start))
+              (let* ((label (subseq source
+                                    (aref register-starts 0)
+                                    (aref register-ends 0)))
+                     (key (cons label start)))
+                (unless (gethash key seen)
+                  (setf (gethash key seen) t)
+                  (let ((point (copy-point (buffer-start-point buffer))))
+                    (character-offset point start)
+                    (line-start point)
+                    (push
+                     (list
+                      start
+                      (make-imenu-candidate
+                       :label label
+                       :detail (format nil "[NASM symbol] line ~d"
+                                       (line-number-at-point point))
+                       :point point))
+                     entries)))))))
+        ;; Both generic expressions share a nil menu title.  GNU Imenu merges
+        ;; them into one flat index and sorts the combined entries by position.
+        (mapcar #'second
+                (sort entries #'< :key #'first)))
+    (error (condition)
+      (log:warn "NASM Imenu indexing failed for ~a: ~a"
                 (buffer-name buffer) condition)
       nil)))
 
@@ -1422,3 +1475,4 @@ this function consumes NODE and every named-child handle it obtains."
 (register-imenu-native-provider
  'lem-terraform-mode:terraform-mode 'imenu-terraform-candidates)
 (register-imenu-native-provider 'just-mode 'imenu-just-candidates)
+(register-imenu-native-provider 'nasm-mode 'imenu-nasm-candidates)

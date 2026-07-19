@@ -48,6 +48,8 @@ printf '%s\n' 'build:' '    echo ready' \
   >"$LEM_YATH_LANGUAGE_MODE_ROOT/.JuStFiLe"
 printf '%s\n' 'test:' '    echo tested' \
   >"$LEM_YATH_LANGUAGE_MODE_ROOT/jUsTfIlE"
+printf '%s\n' 'section .text' '_start:' '    mov eax, 1' \
+  >"$LEM_YATH_LANGUAGE_MODE_ROOT/program.nasm"
 printf '%s\n' "project('fixture')" 'if true' 'endif' \
   >"$LEM_YATH_LANGUAGE_MODE_ROOT/meson.build"
 printf '%s\n' "option('feature', type: 'boolean')" \

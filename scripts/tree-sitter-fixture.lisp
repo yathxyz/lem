@@ -385,6 +385,8 @@
 (defun tree-sitter-test-check-language-highlighting ()
   (dolist (entry
            '((".JuStFiLe" "build" lem:syntax-function-name-attribute)
+             ("program.nasm" "_start" lem:syntax-function-name-attribute)
+             ("program.nasm" "eax" lem:syntax-variable-attribute)
              ("meson.build" "if" lem:syntax-keyword-attribute)
              ("nginx/sites/site.conf" "$host"
               lem:syntax-variable-attribute)
@@ -420,6 +422,17 @@
              (funcall (variable-value 'calc-indent-function) point)))
       (tree-sitter-test-delete-buffer buffer))))
 
+(defun tree-sitter-test-nasm-command-result (text command)
+  (let ((buffer (make-buffer (format nil "*nasm-~a*" command))))
+    (unwind-protect
+         (with-current-buffer buffer
+           (nasm-mode)
+           (tree-sitter-test-set-text buffer text)
+           (move-point (buffer-point buffer) (buffer-end-point buffer))
+           (funcall command)
+           (buffer-text buffer))
+      (tree-sitter-test-delete-buffer buffer))))
+
 (defun tree-sitter-test-check-language-modes ()
   (tree-sitter-test-check-mode-file
    ".JuStFiLe" 'just-mode :grammar "just" :width 4 :comment "#"
@@ -427,6 +440,8 @@
   (tree-sitter-test-check-mode-file
    "jUsTfIlE" 'just-mode :grammar "just" :width 4 :comment "#"
    :programming t)
+  (tree-sitter-test-check-mode-file
+   "program.nasm" 'nasm-mode :width 4 :comment ";" :programming t)
   (tree-sitter-test-check-mode-file
    "meson.build" 'meson-mode :width 2 :comment "#" :programming t)
   (tree-sitter-test-check-mode-file
@@ -452,8 +467,23 @@
    "player.gd" 'gdscript-mode :grammar "gdscript" :width 4 :comment "#"
    :programming t :tabs t)
   (tree-sitter-test-check-language-highlighting)
+  (tree-sitter-test-check
+   (string= (format nil "    mov~c" #\Tab)
+            (tree-sitter-test-nasm-command-result "    mov" 'nasm-tab))
+   "nasm-tab-after-mnemonic-inserts-tab")
+  (tree-sitter-test-check
+   (string= "target:"
+            (tree-sitter-test-nasm-command-result "    target" 'nasm-colon))
+   "nasm-colon-promotes-label-to-column-zero")
+  (tree-sitter-test-check
+   (zerop (tree-sitter-test-indent-result 'nasm-mode "%DEFINE VALUE 1"))
+   "nasm-known-preprocessor-directive-uses-column-zero")
+  (tree-sitter-test-check
+   (= 4 (tree-sitter-test-indent-result 'nasm-mode "%project_macro value"))
+   "nasm-project-macro-call-uses-code-column")
   (dolist (entry
            `((just-mode ,(format nil "build:~%") 4)
+             (nasm-mode ,(format nil "mov eax, 1~%") 4)
              (meson-mode ,(format nil "if true~%") 2)
              (nginx-mode ,(format nil "server {~%") 4)
              (nushell-mode ,(format nil "if true {~%") 2)
@@ -465,6 +495,7 @@
        (format nil "~a-indents-after-opener" mode))))
   (dolist (entry
            `((meson-mode ,(format nil "if true~%  value = 1~%endif") 0)
+             (nasm-mode ,(format nil "    mov eax, 1~%target:") 0)
              (nginx-mode ,(format nil "server {~%    listen 80;~%}") 0)
              (nushell-mode ,(format nil "if true {~%  print yes~%}") 0)
              (typst-mode ,(format nil "#let value = (~%    1~%)") 0)

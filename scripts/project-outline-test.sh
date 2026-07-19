@@ -28,6 +28,7 @@ export LEM_YATH_PROJECT_OUTLINE_GDSCRIPT="$root/native-imenu.gd"
 export LEM_YATH_PROJECT_OUTLINE_TYPST="$root/native-imenu.typ"
 export LEM_YATH_PROJECT_OUTLINE_TERRAFORM="$root/native-imenu.tf"
 export LEM_YATH_PROJECT_OUTLINE_JUST="$root/Justfile"
+export LEM_YATH_PROJECT_OUTLINE_NASM="$root/native-imenu.nasm"
 export LEM_YATH_PROJECT_OUTLINE_READER_MARKER="$root/reader-evaluated"
 mkdir -p "$HOME" "$WORKDIR" "$root/config" "$root/outside" "$root/malicious"
 
@@ -383,6 +384,30 @@ for line in $(seq 1 80); do
     *) printf '\n' ;;
   esac
 done >"$LEM_YATH_PROJECT_OUTLINE_JUST"
+
+for line in $(seq 1 80); do
+  case "$line" in
+    1) printf '%s\n' 'section .text' ;;
+    3) printf '%s\n' '_start:' ;;
+    5) printf '%s\n' '.local:' ;;
+    7) printf '%s\n' 'label_without_colon' ;;
+    10) printf '%s\n' '%define CONST 1' ;;
+    12) printf '%s\n' '%DEFINE UPPER 2' ;;
+    14) printf '%s\n' '%macro do_work 1' ;;
+    16) printf '%s\n' '%imacro indirect 0' ;;
+    20) printf '%s\n' '  spaced_label :' ;;
+    24) printf '%s\n' 'db "_fake:"' ;;
+    26) printf '%s\n' '; comment_label:' ;;
+    30) printf '%s\n' 'mov eax, %define WEIRD 1' ;;
+    34) printf '%s\n' 'db "%define HIDDEN 1"' ;;
+    40) printf '%s\n' '"multi' ;;
+    42) printf '%s\n' 'inside_label:' ;;
+    44) printf '%s\n' '%define INSIDE 1' ;;
+    46) printf '%s\n' '"' ;;
+    60) printf '%s\n' 'tail:' ;;
+    *) printf '\n' ;;
+  esac
+done >"$LEM_YATH_PROJECT_OUTLINE_NASM"
 
 for line in $(seq 1 80); do
   case "$line" in
@@ -1954,6 +1979,97 @@ if invoke_mx imenu 'Index item:'; then
   fi
 else
   fail imenu-just-command 'M-x imenu did not open in the Just fixture'
+fi
+
+# nasm-mode uses two nil-title generic expressions, so nonlocal labels and
+# standalone %define/%macro names merge into one flat, position-sorted index.
+# Local labels and colonless labels are absent; the generic syntax filter also
+# rejects matches beginning in comments or any of NASM's three string forms.
+send_chord C-c z a
+lem_wait_for "$session" 'section .text' 10 >/dev/null || true
+send_chord C-c z m
+wait_report_count '^MODE file=nasm major=NASM-MODE tree=none$' 1 || true
+if grep -q '^MODE file=nasm major=NASM-MODE tree=none$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-nasm-routing '.nasm selects the dedicated configured NASM mode'
+else
+  fail imenu-nasm-routing 'the NASM fixture selected another mode or parser'
+fi
+send_chord C-c z v
+wait_report_count '^PROVIDER file=nasm native=IMENU-NASM-CANDIDATES lsp=none$' 1 || true
+if grep -q '^PROVIDER file=nasm native=IMENU-NASM-CANDIDATES lsp=none$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-nasm-provider 'NASM Imenu uses the pinned native provider'
+else
+  fail imenu-nasm-provider 'NASM Imenu selected an unexpected provider'
+fi
+
+send_chord C-c z i
+wait_report_count '^IMENU-INDEX file=nasm count=7$' 1 || true
+nasm_index_ok=1
+for path in '_start' CONST UPPER do_work spaced_label WEIRD tail; do
+  grep -Fqx "IMENU-PATH file=nasm path=\"$path\"" \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" || nasm_index_ok=0
+done
+nasm_order="$(sed -n \
+  's/^IMENU-PATH file=nasm path="\([^"]*\)"$/\1/p' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | paste -sd, -)"
+if [ "$nasm_index_ok" = 1 ] &&
+   [ "$(report_count '^IMENU-PATH file=nasm ')" -eq 7 ] &&
+   [ "$nasm_order" = '_start,CONST,UPPER,do_work,spaced_label,WEIRD,tail' ] &&
+   ! grep -Eq '^IMENU-PATH file=nasm .*(local|without|indirect|fake|comment|HIDDEN|inside|INSIDE)' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-nasm-index 'NASM Imenu matches pinned flattening, ordering, case fold, and syntax quirks'
+else
+  fail imenu-nasm-index 'NASM generic-Imenu semantics differed'
+fi
+
+send_chord C-c z b
+send_chord C-c z r
+wait_report_count '^STATE file=nasm line=80 column=0 ' 1 || true
+nasm_origin="$(grep '^STATE file=nasm line=80 column=0 ' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+nasm_origin_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+  <<<"$nasm_origin")"
+
+if invoke_mx imenu 'Index item:'; then
+  nasm_prompt="$(lem_capture "$session")"
+  if grep -Fq '_start' <<<"$nasm_prompt" &&
+     grep -Fq 'CONST' <<<"$nasm_prompt" &&
+     grep -Fq 'spaced_label' <<<"$nasm_prompt" &&
+     grep -Fq 'tail' <<<"$nasm_prompt"; then
+    pass imenu-nasm-presentation 'NASM presents one flat source-ordered index'
+  else
+    fail imenu-nasm-presentation 'the NASM Imenu prompt differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l spaced_label
+  send_chord Enter
+  sleep 0.5
+  send_chord C-c z r
+  wait_report_count '^STATE file=nasm line=20 column=0 ' 1 || true
+  nasm_final="$(grep '^STATE file=nasm line=20 column=0 ' \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  nasm_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+    <<<"$nasm_final")"
+  if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+       <<<"$nasm_final" &&
+     [ -n "$nasm_origin_view" ] && [ -n "$nasm_view" ] &&
+     [ "$nasm_origin_view" != "$nasm_view" ]; then
+    pass imenu-nasm-jump 'NASM Imenu lands at the generic line start without pulse'
+  else
+    fail imenu-nasm-jump "the NASM Imenu destination differed: $nasm_final"
+  fi
+  send_chord C-o
+  sleep 0.3
+  send_chord C-c z r
+  wait_report_count '^STATE file=nasm line=80 column=0 ' 2 || true
+  if [ "$(report_count '^STATE file=nasm line=80 column=0 ')" -ge 2 ]; then
+    pass imenu-nasm-jumplist 'C-o returns from NASM Imenu to its exact origin'
+  else
+    fail imenu-nasm-jumplist 'NASM Imenu did not record one Vi jump'
+  fi
+else
+  fail imenu-nasm-command 'M-x imenu did not open in the NASM fixture'
 fi
 
 send_chord C-c z 2

@@ -292,7 +292,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   pairs across existing language modes, with predicate-aware capture
   precedence, Unicode-safe reparsing, and the original mode parser as fallback;
   indentation, LSP, and structural editing remain owned by their normal modes
-- dedicated GDScript, Just, Meson, nginx, Nushell, and Typst modes with the
+- dedicated GDScript, Just, Meson, NASM, nginx, Nushell, and Typst modes with the
   pinned filename, nginx-content, and Nu-shebang associations; GDScript, Just,
   Nu, and Typst use packaged tree-sitter highlighting while Meson and nginx
   retain bounded TextMate fallbacks. GDScript automatically connects to the
@@ -417,7 +417,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 - generic `M-x imenu` for Eglot document symbols, Lisp-family definitions,
   native Org headings, native Markdown headings and footnotes, and nested
   Python functions/classes plus native Java, C, C++, Rust, Go, GDScript, Typst,
-  Terraform, and Just declarations
+  Terraform, Just, and NASM declarations
   when no ready LSP symbol provider is available, with GNU Imenu's successive hierarchy
   prompts, Prescient filtering, exact source placement, configured
   recenter-only feedback, and Vi `C-o` return

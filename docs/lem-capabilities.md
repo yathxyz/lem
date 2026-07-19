@@ -474,13 +474,21 @@ single-, double-, or backtick-quoted strings are excluded under the package's
 syntax table; comment matches, assignment-shaped aliases, malformed settings,
 and a task at end-of-buffer without the regexp's required following character
 remain absent exactly as in the pinned package.
+Native NASM buffers reproduce nasm-mode's merged nil-title generic index:
+colon-terminated nonlocal labels plus standalone `%define` and `%macro` names
+appear in one source-ordered list, while local/colonless labels, `%imacro`, and
+matches beginning inside comments or single-, double-, and backtick-quoted
+strings remain absent. The upstream expressions are deliberately unanchored
+for macros, so an odd mid-instruction `%define` remains visible; destinations
+land at column zero of the containing line.
 
 Acceptance records one Vi jumplist entry and runs the configured Imenu feedback:
 recenter only, with no Consult Pulsar pulse. `scripts/lsp-project-test.sh` and
 `scripts/project-outline-test.sh` drive the command through physical M-x,
 successive Return selections, exact target placement, viewport change, silent
 feedback, folded Org reveal, and `C-o` return, including the regexp-driven Just
-fallback. Native indices for other non-LSP modes are not yet implemented.
+and NASM providers. Native indices for other non-LSP modes are not yet
+implemented.
 
 `lem-yath/src/annotations.lisp` supplies a bounded Marginalia-style layer for
 the daily prompt categories. Commands show active bindings and their first
@@ -2078,11 +2086,17 @@ uses highlighting only: mode selection, indentation, LSP, and structural
 editing remain owned by their existing implementations.
 
 `lem-yath/src/language-modes.lisp` supplies the previously absent GDScript,
-Just, Meson, nginx, Nushell, and Typst modes. It reproduces the pinned filename
+Just, Meson, NASM, nginx, Nushell, and Typst modes. It reproduces the pinned filename
 associations, nginx content fallback, Nu shebang, comment syntax, indentation
 widths, and GDScript's local tab policy. GDScript, Just, Nu, and Typst
-participate in this parser bundle and Expreg; Meson and nginx retain bounded
-TextMate fallback highlighting.
+participate in this parser bundle and Expreg; NASM, Meson, and nginx retain
+bounded TextMate fallback highlighting. NASM additionally has its pinned
+four-column label/directive/instruction indentation, mnemonic Tab insertion,
+colon-triggered label reindent, string/symbol/comment syntax, and `.nasm`
+association. Its structural instruction-field highlighter follows new and
+project-local macro instructions without embedding nasm-mode's 41 KiB generated
+token snapshot; the upstream comment-gutter and custom join-line commands are
+not reproduced.
 
 This approximates the configured Emacs `treesit-font-lock-level 3`; it does not
 load injection or locals queries. In particular, captures guarded by

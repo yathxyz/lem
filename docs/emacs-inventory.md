@@ -530,7 +530,7 @@ supplies these effective modal bindings (stock `compile.el` supplies
 | **Terraform** | `terraform-mode` | eglot-ensure (`terraform-ls`) | — | Flymake | — | Ready document symbols override the pinned native regexp Imenu fallback |
 | **C / C++** | cc/c-ts modes | (clangd if present) | clang-format (apheleia) | Flycheck | `lldb`/`gdb` | `clang-tools`, `gcc`, `gdb`, `gnumake`, `pkg-config` on PATH |
 | **Emacs Lisp / Lisp / Scheme / Racket / Clojure** | respective + `lispy`/`lispyville` | — | — | Flycheck (elisp `load-path inherit`) | — | `clojure-ts-mode`, `cider` declared in nix, **no explicit config** |
-| **NASM** | `nasm-mode` (`.nasm`) | — | — | — | — | |
+| **NASM** | `nasm-mode` (`.nasm`) | — | — | — | — | Lem supplies a dedicated mode with pinned syntax/indent/Tab/colon behavior and flat label/macro Imenu; token highlighting is structurally bounded rather than a verbatim NASM 3.01rc0 token snapshot |
 | **Nushell** | `nushell-ts-mode` (`.nu`) | — | — | — | — | |
 | **Typst** | `typst-ts-mode` | no configured LSP hook | — | — | — | Lem recognizes `.typ` with the pinned default mode semantics and packaged grammar, including the native Functions/Headings Imenu groups |
 | **Just** | `just-mode` | — | — | — | — | Explicit case-insensitive Justfile association; Lem reproduces its packaged grammar and pinned task/variable/setting generic-Imenu index |
