@@ -3382,9 +3382,19 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   or direct-child count for directories. Resizing preserves alignment without
   changing buffer text; refreshes remain clean and read-only, and native
   directory-mode visiting, marking, sorting, copy, rename, and deletion continue
-  to operate on exact path properties. Dirvish preview dispatchers, header and
-  mode-line segments, layout switching, subtree/collapse extensions, and its
-  wider integrations are not reproduced. Filer retains its own tree presentation.
+  to operate on exact path properties. `M-x dirvish` uses the current buffer
+  directory (or prompts with a prefix) and replaces the ordinary windows with
+  the pinned one-parent/current/preview proportions. The root retains focus;
+  movement drives a 20 ms debounced and 250 ms throttled preview. Regular UTF-8
+  text is read through the shared nonblocking, mode-hook-free 1 MiB reader,
+  directories expose at most 200 direct children, and binary, undecodable,
+  oversized, symbolic-link, pipe, socket, or device entries expose metadata
+  without being opened. `Return` on a file restores the exact preceding layout
+  before visiting it, `q` restores without visiting, and
+  `dirvish-layout-toggle` keeps the directory in the restored selected window.
+  Graphical image/media/archive/document dispatchers, Dirvish header and
+  mode-line segments, subtree/collapse extensions, and its wider integrations
+  are not reproduced. Filer retains its own tree presentation.
 - **Encodings**: `extensions/encodings/` (`lem-encodings`): utf-8/16, cp932, euc-jp,
   gb2312, iso-8859-1, 8bit. `prompt-for-encodings`, `*default-external-format*`
   (`:detect-encoding` default).

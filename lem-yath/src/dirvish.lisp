@@ -156,3 +156,432 @@
     (alexandria:when-let ((size (text-property-at point :dirvish-size)))
       (dirvish-extend-display-size
        logical-line (lem-core::window-body-width window) size))))
+
+;;; --- Full-frame Dirvish session ------------------------------------------
+
+(defconstant +dirvish-preview-directory-limit+ 200)
+(defconstant +dirvish-preview-debounce-milliseconds+ 20)
+(defconstant +dirvish-preview-throttle-milliseconds+ 250)
+
+(defclass dirvish-session ()
+  ((frame :initarg :frame :reader dirvish-session-frame)
+   (saved-layout :initarg :saved-layout :accessor dirvish-session-saved-layout)
+   (root-window :initarg :root-window :reader dirvish-session-root-window)
+   (parent-window :initarg :parent-window :reader dirvish-session-parent-window)
+   (preview-window :initarg :preview-window :reader dirvish-session-preview-window)
+   (preview-buffer :initarg :preview-buffer :reader dirvish-session-preview-buffer)
+   (root-directory :initform nil :accessor dirvish-session-root-directory)
+   (preview-path :initform nil :accessor dirvish-session-preview-path)
+   (preview-timer :initform nil :accessor dirvish-session-preview-timer)
+   (preview-generation :initform 0 :accessor dirvish-session-preview-generation)
+   (last-preview-time :initform nil :accessor dirvish-session-last-preview-time)))
+
+(defvar *dirvish-sessions* (make-hash-table :test #'eq))
+
+(defun dirvish-live-window-p (window)
+  (and window (not (lem-core::window-deleted-p window))))
+
+(defun dirvish-live-buffer-p (buffer)
+  (and buffer (not (deleted-buffer-p buffer))))
+
+(defun current-dirvish-session ()
+  (gethash (current-frame) *dirvish-sessions*))
+
+(defun dirvish-session-window-p (session window)
+  (member window
+          (list (dirvish-session-root-window session)
+                (dirvish-session-parent-window session)
+                (dirvish-session-preview-window session))
+          :test #'eq))
+
+(defun dirvish-root-buffer (session)
+  (let ((window (dirvish-session-root-window session)))
+    (and (dirvish-live-window-p window) (window-buffer window))))
+
+(defun dirvish-root-directory (session)
+  (alexandria:when-let ((buffer (dirvish-root-buffer session)))
+    (and (eq (buffer-major-mode buffer)
+             'lem/directory-mode/mode:directory-mode)
+         (buffer-directory buffer))))
+
+(defun dirvish-root-selected-path (session)
+  (let ((window (dirvish-session-root-window session)))
+    (when (and (dirvish-live-window-p window)
+               (eq (buffer-major-mode (window-buffer window))
+                   'lem/directory-mode/mode:directory-mode))
+      (with-current-window window
+        (lem/directory-mode/internal:get-pathname (current-point))))))
+
+(defun dirvish-switch-window-buffer (window buffer)
+  (when (and (dirvish-live-window-p window)
+             (dirvish-live-buffer-p buffer))
+    (with-current-window window
+      (lem-core::%switch-to-buffer buffer nil t)
+      (setf (window-parameter window 'lem-core::horizontal-scroll-start) 0))))
+
+(defun dirvish-position-on-path (window pathname)
+  (when (dirvish-live-window-p window)
+    (with-current-window window
+      (with-point ((point (buffer-start-point (current-buffer))))
+        (loop
+          (alexandria:when-let
+              ((row-path (lem/directory-mode/internal:get-pathname point)))
+            (when (ignore-errors (uiop:pathname-equal row-path pathname))
+              (move-point (current-point) point)
+              (window-recenter window)
+              (return t)))
+          (unless (line-offset point 1)
+            (return nil)))))))
+
+(defun dirvish-update-parent (session directory)
+  (let* ((parent (uiop:pathname-parent-directory-pathname directory))
+         (buffer (lem/directory-mode/internal:directory-buffer parent))
+         (window (dirvish-session-parent-window session)))
+    (dirvish-switch-window-buffer window buffer)
+    (dirvish-position-on-path window directory)))
+
+(defun dirvish-preview-safe-name (name)
+  (map 'string
+       (lambda (character)
+         (if (or (char< character #\Space) (char= character #\Rubout))
+             #\?
+             character))
+       name))
+
+(defun dirvish-preview-directory-text (pathname)
+  "Return a bounded, nonrecursive directory preview for PATHNAME."
+  (let ((directory nil)
+        (names nil)
+        (truncated-p nil))
+    (unwind-protect
+         (progn
+           (setf directory (sb-posix:opendir (dirvish-native-path pathname)))
+           (loop :for entry := (sb-posix:readdir directory)
+                 :while entry
+                 ;; READDIR may reuse its foreign entry storage on the next
+                 ;; call.  Retain only an immediate Lisp-owned copy.
+                 :for name := (copy-seq (sb-posix:dirent-name entry))
+                 :unless (or (string= name ".") (string= name ".."))
+                   :do (if (< (length names)
+                              +dirvish-preview-directory-limit+)
+                           (push name names)
+                           (progn
+                             (setf truncated-p t)
+                             (return))))
+           (setf names (sort names #'string-lessp))
+           (with-output-to-string (stream)
+             (format stream "~a~2%" (dirvish-native-path pathname))
+             (dolist (name names)
+               (let* ((child (merge-pathnames name pathname))
+                      (directory-p
+                        (handler-case
+                            (= (logand (sb-posix:stat-mode
+                                        (sb-posix:lstat
+                                         (dirvish-native-path child)))
+                                       sb-posix:s-ifmt)
+                               sb-posix:s-ifdir)
+                          (error () nil))))
+                 (format stream "~a~:[~;/~]~%"
+                         (dirvish-preview-safe-name name)
+                         directory-p)))
+             (when truncated-p
+               (format stream "~%... first ~d entries shown ...~%"
+                       +dirvish-preview-directory-limit+))))
+      (when directory
+        (sb-posix:closedir directory)))))
+
+(defun dirvish-preview-file-description (pathname stat &optional reason)
+  (let ((type (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)))
+    (format nil
+            "~a~2%Type: ~a~%Size: ~d bytes~@[~2%~a~]~%"
+            (dirvish-native-path pathname)
+            (cond
+              ((= type sb-posix:s-iflnk) "symbolic link")
+              ((= type sb-posix:s-ififo) "named pipe")
+              ((= type sb-posix:s-ifsock) "socket")
+              ((= type sb-posix:s-ifchr) "character device")
+              ((= type sb-posix:s-ifblk) "block device")
+              ((= type sb-posix:s-ifreg) "regular file")
+              (t "special file"))
+            (sb-posix:stat-size stat)
+            reason)))
+
+(defun dirvish-preview-text (pathname)
+  "Return a safe textual preview for PATHNAME without activating file modes."
+  (handler-case
+      (let* ((stat (sb-posix:lstat (dirvish-native-path pathname)))
+             (type (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)))
+        (cond
+          ((= type sb-posix:s-ifdir)
+           (dirvish-preview-directory-text pathname))
+          ((= type sb-posix:s-ifreg)
+           (alexandria:if-let ((text (project-picker-read-preview-text pathname)))
+             (format nil "~a~2%~a"
+                     (dirvish-native-path pathname)
+                     text)
+             (dirvish-preview-file-description
+              pathname stat
+              "Preview unavailable: file is binary, undecodable, or larger than 1 MiB.")))
+          (t
+           (dirvish-preview-file-description
+            pathname stat "Special files are never opened for preview."))))
+    (error (condition)
+      (format nil "~a~2%Preview unavailable: ~a~%"
+              (dirvish-native-path pathname) condition))))
+
+(defun dirvish-render-preview-buffer (session pathname)
+  (let ((buffer (dirvish-session-preview-buffer session)))
+    (when (dirvish-live-buffer-p buffer)
+      (with-buffer-read-only buffer nil
+        (erase-buffer buffer)
+        (insert-string (buffer-start-point buffer)
+                       (dirvish-preview-text pathname)))
+      (setf (buffer-directory buffer)
+            (or (uiop:directory-exists-p pathname)
+                (uiop:pathname-directory-pathname pathname))
+            (buffer-read-only-p buffer) t)
+      (buffer-unmark buffer)
+      (buffer-start (buffer-point buffer))
+      (alexandria:when-let ((window (dirvish-session-preview-window session)))
+        (when (dirvish-live-window-p window)
+          (move-point (lem-core::%window-point window)
+                      (buffer-start-point buffer))
+          (move-point (window-view-point window)
+                      (buffer-start-point buffer))))
+      (setf (dirvish-session-last-preview-time session)
+            (get-internal-real-time))
+      (redraw-display))))
+
+(defun dirvish-stop-preview-timer (session)
+  (incf (dirvish-session-preview-generation session))
+  (alexandria:when-let ((timer (dirvish-session-preview-timer session)))
+    (ignore-errors (stop-timer timer))
+    (setf (dirvish-session-preview-timer session) nil)))
+
+(defun dirvish-preview-delay (session)
+  (let ((last (dirvish-session-last-preview-time session)))
+    (if (null last)
+        +dirvish-preview-debounce-milliseconds+
+        (let ((elapsed
+                (floor
+                 (* 1000
+                    (/ (- (get-internal-real-time) last)
+                       internal-time-units-per-second)))))
+          (max +dirvish-preview-debounce-milliseconds+
+               (- +dirvish-preview-throttle-milliseconds+ elapsed))))))
+
+(defun dirvish-schedule-preview (session pathname &optional immediate-p)
+  (let ((key (dirvish-native-path pathname)))
+    (unless (string= key (or (dirvish-session-preview-path session) ""))
+      (dirvish-stop-preview-timer session)
+      (setf (dirvish-session-preview-path session) key)
+      (if immediate-p
+          (dirvish-render-preview-buffer session pathname)
+          (let* ((generation (dirvish-session-preview-generation session))
+                 (timer
+                   (make-timer
+                    (lambda ()
+                      (setf (dirvish-session-preview-timer session) nil)
+                      (when (and (= generation
+                                    (dirvish-session-preview-generation session))
+                                 (eq session (gethash (dirvish-session-frame session)
+                                                      *dirvish-sessions*)))
+                        (alexandria:when-let
+                            ((current (dirvish-root-selected-path session)))
+                          (when (string= key (dirvish-native-path current))
+                            (dirvish-render-preview-buffer session current)))))
+                    :name "lem-yath Dirvish preview")))
+            (setf (dirvish-session-preview-timer session) timer)
+            (start-timer timer (dirvish-preview-delay session) :repeat nil))))))
+
+(defun dirvish-refresh-session (session &optional immediate-preview-p)
+  (alexandria:when-let ((directory (dirvish-root-directory session)))
+    (unless (and (dirvish-session-root-directory session)
+                 (ignore-errors
+                   (uiop:pathname-equal
+                    directory (dirvish-session-root-directory session))))
+      (setf (dirvish-session-root-directory session) directory)
+      (dirvish-update-parent session directory))
+    (alexandria:when-let ((pathname (dirvish-root-selected-path session)))
+      (dirvish-schedule-preview session pathname immediate-preview-p))))
+
+(defun dirvish-delete-preview-buffer (session)
+  (let ((buffer (dirvish-session-preview-buffer session)))
+    (when (dirvish-live-buffer-p buffer)
+      (ignore-errors
+        (with-global-variable-value (kill-buffer-hook nil)
+          (delete-buffer buffer))))))
+
+(defun dirvish-restore-session-layout (session root-buffer keep-root-p)
+  (let* ((configuration (dirvish-session-saved-layout session))
+         (restored-p
+           (and configuration
+                (handler-case
+                    (restore-window-layout configuration)
+                  (error () nil)))))
+    (unless restored-p
+      (alexandria:when-let ((root-window (dirvish-session-root-window session)))
+        (when (dirvish-live-window-p root-window)
+          (switch-to-window root-window)))
+      (delete-other-windows)
+      (when (dirvish-live-buffer-p root-buffer)
+        (switch-to-buffer root-buffer)))
+    (when (and keep-root-p (dirvish-live-buffer-p root-buffer))
+      (switch-to-buffer root-buffer))
+    (when configuration
+      (dispose-window-layout configuration)
+      (setf (dirvish-session-saved-layout session) nil))
+    restored-p))
+
+(defun quit-dirvish-session (session &key keep-root)
+  (let ((root-buffer (dirvish-root-buffer session)))
+    (dirvish-stop-preview-timer session)
+    (remhash (dirvish-session-frame session) *dirvish-sessions*)
+    (let ((restored-p
+            (dirvish-restore-session-layout session root-buffer keep-root)))
+      (dirvish-delete-preview-buffer session)
+      (unless restored-p
+        (message "The prior layout contained a dead buffer; kept Dirvish directory instead"))
+      restored-p)))
+
+(defun dirvish-make-preview-buffer (directory)
+  (let ((buffer
+          (make-buffer (unique-buffer-name "*Dirvish Preview*")
+                       :temporary t
+                       :enable-undo-p nil
+                       :read-only-p t
+                       :directory directory)))
+    (setf (buffer-encoding buffer)
+          (lem/buffer/encodings:encoding :utf-8 :lf))
+    buffer))
+
+(defun start-dirvish-session (directory)
+  (let* ((directory
+           (or (uiop:directory-exists-p directory)
+               (editor-error "Directory does not exist: ~a" directory)))
+         (root-buffer
+           (lem/directory-mode/internal:directory-buffer directory))
+         (configuration (capture-window-layout))
+         (preview-buffer nil))
+    (unless configuration
+      (editor-error "The current window layout cannot be recorded"))
+    (handler-case
+        (progn
+          (setf preview-buffer (dirvish-make-preview-buffer directory))
+          (delete-other-windows)
+          (switch-to-buffer root-buffer)
+          (let* ((parent-window (current-window))
+                 (total-width (window-width parent-window))
+                 (parent-width (max 8 (round (* total-width 0.11d0)))))
+            (split-window-horizontally parent-window :width parent-width)
+            (let* ((root-window (get-next-window parent-window))
+                   (root-width (max 12 (round (* total-width 0.34d0)))))
+              (split-window-horizontally root-window :width root-width)
+              (let* ((preview-window (get-next-window root-window))
+                     (session
+                       (make-instance
+                        'dirvish-session
+                        :frame (current-frame)
+                        :saved-layout configuration
+                        :root-window root-window
+                        :parent-window parent-window
+                        :preview-window preview-window
+                        :preview-buffer preview-buffer)))
+                (setf (gethash (current-frame) *dirvish-sessions*) session)
+                (dirvish-switch-window-buffer preview-window preview-buffer)
+                (switch-to-window root-window)
+                (dirvish-refresh-session session t)
+                session))))
+      (error (condition)
+        (ignore-errors (restore-window-layout configuration))
+        (dispose-window-layout configuration)
+        (when (dirvish-live-buffer-p preview-buffer)
+          (ignore-errors (delete-buffer preview-buffer)))
+        (error condition)))))
+
+(defun dirvish-open-directory (directory)
+  (alexandria:if-let ((session (current-dirvish-session)))
+    (let ((buffer (lem/directory-mode/internal:directory-buffer directory)))
+      (dirvish-switch-window-buffer (dirvish-session-root-window session) buffer)
+      (switch-to-window (dirvish-session-root-window session))
+      (setf (dirvish-session-root-directory session) nil
+            (dirvish-session-preview-path session) nil)
+      (dirvish-refresh-session session t)
+      session)
+    (start-dirvish-session directory)))
+
+(define-command dirvish (argument) (:universal-nil)
+  "Open a full-frame parent/current/preview Dirvish session.
+
+With a prefix argument, prompt for the directory.  Otherwise use the current
+buffer's directory, matching pinned Dirvish."
+  (dirvish-open-directory
+   (if argument
+       (prompt-for-directory "Dirvish: " :directory (buffer-directory))
+       (buffer-directory))))
+
+(define-command dirvish-layout-toggle () ()
+  "Toggle between full-frame Dirvish and the ordinary directory buffer."
+  (alexandria:if-let ((session (current-dirvish-session)))
+    (quit-dirvish-session session :keep-root t)
+    (dirvish-open-directory (buffer-directory))))
+
+(define-command lem-yath-dirvish-quit () ()
+  (alexandria:if-let ((session (current-dirvish-session)))
+    (if (dirvish-session-window-p session (current-window))
+        (quit-dirvish-session session)
+        (quit-active-window))
+    (quit-active-window)))
+
+(defun dirvish-open-selected (read-only-p)
+  (alexandria:if-let ((session (current-dirvish-session)))
+    (if (eq (current-window) (dirvish-session-root-window session))
+        (alexandria:if-let
+            ((pathname
+               (lem/directory-mode/internal:get-pathname (current-point))))
+          (if (uiop:directory-exists-p pathname)
+              (if read-only-p
+                  (lem/directory-mode/commands:directory-mode-read-file)
+                  (lem/directory-mode/commands:directory-mode-find-file))
+              (progn
+                (quit-dirvish-session session)
+                (if read-only-p (read-file pathname) (find-file pathname))))
+          (editor-error "No file on this line"))
+        (if read-only-p
+            (lem/directory-mode/commands:directory-mode-read-file)
+            (lem/directory-mode/commands:directory-mode-find-file)))
+    (if read-only-p
+        (lem/directory-mode/commands:directory-mode-read-file)
+        (lem/directory-mode/commands:directory-mode-find-file))))
+
+(define-command lem-yath-dirvish-find-file () ()
+  (dirvish-open-selected nil))
+
+(define-command lem-yath-dirvish-read-file () ()
+  (dirvish-open-selected t))
+
+(defun dirvish-post-command ()
+  (alexandria:when-let ((session (current-dirvish-session)))
+    (let ((root-buffer (dirvish-root-buffer session)))
+      (cond
+        ((not (dirvish-live-buffer-p root-buffer))
+         (quit-dirvish-session session))
+        ((eq (buffer-major-mode root-buffer)
+             'lem/directory-mode/mode:directory-mode)
+         (dirvish-refresh-session session))
+        (t
+         (quit-dirvish-session session)
+         (when (dirvish-live-buffer-p root-buffer)
+           (switch-to-buffer root-buffer)))))))
+
+(define-key lem/directory-mode/mode:*directory-mode-keymap*
+  "q" 'lem-yath-dirvish-quit)
+(define-key lem/directory-mode/mode:*directory-mode-keymap*
+  "M-q" 'lem-yath-dirvish-quit)
+(define-key lem/directory-mode/mode:*directory-mode-keymap*
+  "Return" 'lem-yath-dirvish-find-file)
+(define-key lem/directory-mode/mode:*directory-mode-keymap*
+  "Space" 'lem-yath-dirvish-read-file)
+
+(remove-hook *post-command-hook* 'dirvish-post-command)
+(add-hook *post-command-hook* 'dirvish-post-command -375)

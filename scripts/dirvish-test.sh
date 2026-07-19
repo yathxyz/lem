@@ -13,13 +13,18 @@ export XDG_CACHE_HOME="$root/cache"
 export WORKDIR="$root/work"
 export LEM_YATH_DIRVISH_REPORT="$root/report"
 export LEM_YATH_DIRVISH_ROOT="$root/files"
+export LEM_YATH_DIRVISH_SOURCE="${LEM_YATH_DIRVISH_SOURCE:-${LEM_YATH_SOURCE:-$here/lem-yath}/src/dirvish.lisp}"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR" \
-  "$LEM_YATH_DIRVISH_ROOT/child"
+  "$LEM_YATH_DIRVISH_ROOT/child" "$LEM_YATH_DIRVISH_ROOT/zz-crowded"
 printf 'one\n' >"$LEM_YATH_DIRVISH_ROOT/child/one"
 printf 'two\n' >"$LEM_YATH_DIRVISH_ROOT/child/two"
 printf 'three\n' >"$LEM_YATH_DIRVISH_ROOT/child/three"
 head -c 1536 /dev/zero >"$LEM_YATH_DIRVISH_ROOT/size.bin"
 printf 'DIRVISH VISIT\n' >"$LEM_YATH_DIRVISH_ROOT/open.txt"
+mkfifo "$LEM_YATH_DIRVISH_ROOT/special.fifo"
+for index in $(seq 1 205); do
+  : >"$LEM_YATH_DIRVISH_ROOT/zz-crowded/entry-$index"
+done
 : >"$LEM_YATH_DIRVISH_REPORT"
 
 source "$here/scripts/tui-driver.sh"
@@ -107,6 +112,99 @@ if wait_report '^RELOAD inserters=1 exact=yes transformer=yes$'; then
   pass reload 'two source reloads retained one inserter and the composite transformer'
 else
   fail reload 'reload duplicated or displaced presentation state'
+fi
+
+tmux_cmd resize-window -t "$session" -x 120 -y 30
+lem_keys "$session" F5
+if wait_report '^FULL windows=3 widths=[0-9]+,[0-9]+,[0-9]+ modes=DIRECTORY-MODE,DIRECTORY-MODE,FUNDAMENTAL-MODE focus=root command=yes preview-parent=yes readonly=yes$'; then
+  pass fullframe 'M-x command built the pinned one-parent/current/preview layout'
+else
+  fail fullframe 'full-frame layout, focus, command registration, or initial preview differed'
+fi
+
+screen="$(lem_capture "$session")"
+if [[ "$screen" == *'open.txt'* ]] &&
+   [[ "$screen" == *'*Dirvish Preview*'* ]]; then
+  pass fullframe-render 'the real terminal displayed directory and preview panes together'
+else
+  fail fullframe-render 'the three-pane layout did not reach the real terminal'
+fi
+
+lem_keys "$session" n n n
+sleep 0.8
+lem_keys "$session" F6
+if wait_report '^PREVIEW row=open\.txt path=open\.txt text=yes readonly=yes timer=idle$'; then
+  pass preview 'physical directory movement drove a debounced safe text preview'
+else
+  fail preview 'selection and preview content did not converge after physical movement'
+fi
+
+lem_keys "$session" Enter
+sleep 0.3
+lem_keys "$session" F7
+if wait_report '^OPEN session=no file=open\.txt shape=restored side=preserved selected=open\.txt$'; then
+  pass open-restore 'Return restored the prior topology before opening the selected file'
+else
+  fail open-restore 'file activation stranded panes or disturbed unrelated windows'
+fi
+
+lem_keys "$session" F8
+if wait_report '^QUIT-READY session=yes$'; then
+  pass quit-ready 'a second full-frame session started from a nested layout'
+else
+  fail quit-ready 'could not prepare the physical q restoration probe'
+fi
+
+lem_keys "$session" F4
+if wait_report '^RELOAD inserters=1 exact=yes transformer=yes$' 5; then
+  :
+fi
+lem_keys "$session" q
+sleep 0.3
+lem_keys "$session" F9
+if wait_report '^QUIT session=no tree=restored selected=DIRVISH-ORIGIN-B preview-live=no$'; then
+  pass quit-restore 'q survived source reload and restored the exact prior window tree'
+else
+  fail quit-restore 'q failed to restore selection, buffers, geometry, or preview ownership'
+fi
+
+lem_keys "$session" F10
+if wait_report '^TOGGLE session=no shape=restored selected-mode=DIRECTORY-MODE sides=preserved$'; then
+  pass layout-toggle 'layout-toggle kept the directory while restoring companion windows'
+else
+  fail layout-toggle 'layout-toggle did not preserve the ordinary directory workflow'
+fi
+
+lem_keys "$session" F11
+if wait_report '^SAFE binary=yes special=yes bounded=yes debounce=20 throttle=250 limit=200$'; then
+  pass preview-boundaries 'binary, FIFO, and large-directory previews stayed bounded and non-opening'
+else
+  fail preview-boundaries 'preview safety or pinned scheduling bounds differed'
+fi
+
+lem_keys "$session" Escape Escape M-x
+if lem_wait_for "$session" 'Command:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'dirvish'
+  sleep 0.3
+  lem_keys "$session" Enter
+  sleep 0.5
+  lem_keys "$session" F12
+  if wait_report '^MX session=yes windows=3 focus=root selected-mode=DIRECTORY-MODE preview-live=yes$'; then
+    pass mx-command 'physical M-x dirvish opened the full-frame session'
+  else
+    fail mx-command 'the physical command route did not open or focus Dirvish'
+  fi
+else
+  fail mx-command 'M-x did not open the command prompt'
+fi
+
+lem_keys "$session" q
+sleep 0.3
+lem_keys "$session" F12
+if wait_report '^MX session=no windows=3 focus=other selected-mode=DIRECTORY-MODE preview-live=no$'; then
+  pass mx-quit 'physical q restored the command-origin layout and removed its preview'
+else
+  fail mx-quit 'the physical command session did not restore and clean up exactly'
 fi
 
 if ((failed)); then

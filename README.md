@@ -104,6 +104,14 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   a bounded 200-layout route over split topology, proportions, displayed
   buffers, selection, and scroll state while retaining live buffer points;
   restored proportions adapt to terminal resizes
+- ordinary directory visits inherit the configured hidden-detail Dirvish
+  presentation. `M-x dirvish` adds the pinned full-frame shape with one parent
+  pane, the active directory, and a selection-following preview; text reads are
+  raw, bounded, and mode-hook-free, directories list at most 200 children, and
+  binary or special files show metadata without being opened. `Return` restores
+  the prior layout before visiting a file, `q` restores it without visiting,
+  and `M-x dirvish-layout-toggle` keeps the directory while collapsing the
+  companion panes
 - Evil's visual-line policy on `SPC y v`: wrapped buffers swap screen/logical
   `j/k`, `gj/gk`, endpoints, insert/append, operators, registers, paste, and
   `V`; a patched shared geometry layer prefers Emacs-style space/tab boundaries
@@ -899,7 +907,7 @@ Pass `check`, `compile`, `compilation`, `terminal`, `server`, `boot`, `completio
 `lsp-project`, `real-lsp`, `tree-sitter`, `dap`, `project-navigation`, `project-outline`, `persistence`, `bookmarks`,
 `vundo`, `electric-editing`, `ui-parity`, `business-visual`, `cursor-state`, `snipe`, `avy`,
 `documents`, `notmuch`, `interactive`, `structural`, `roam`, `roam-backlinks`,
-`org-modern`, `org-download`, `agenda`, `agenda-undo`, `agenda-filter`, `agenda-view`, or `notes` to run only
+`org-modern`, `org-download`, `agenda`, `agenda-undo`, `agenda-filter`, `agenda-view`, `dirvish`, `window-history`, or `notes` to run only
 that gate.
 `LEM_YATH_TEST_HOST` and `LEM_YATH_REMOTE_ROOT` override the SSH host and remote
 cache directory.
