@@ -1,0 +1,126 @@
+name: Windows Release
+
+# Fork-owned Windows build of lem (webview frontend) for the yathxyz/scoop-yath
+# private Scoop bucket. Adapted from upstream's Windows CD (removed upstream at
+# 7f7a21a5 as "doesn't work properly") with two fixes: git deps are cloned at
+# the SHAs pinned in qlfile.lock (upstream cloned default-branch HEADs), and
+# the SBCL MSI picker matches x86-64 explicitly (upstream's regex now matches
+# the arm64 MSI first).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: windows-release
+
+jobs:
+  build:
+    name: Build lem.exe (webview frontend)
+    runs-on: windows-latest
+    steps:
+      - name: Force LF line endings for all clones
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install SBCL (x86-64 MSI)
+        shell: pwsh
+        run: |
+          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/roswell/sbcl_bin/releases/latest" -Headers @{ "User-Agent" = "gh-actions" }
+          $asset = $rel.assets | Where-Object { $_.name -match 'x86-64-windows.*\.msi$' } | Select-Object -First 1
+          if (-not $asset) { throw "x86-64 Windows SBCL MSI not found in latest sbcl_bin release." }
+          $msi = Join-Path $env:RUNNER_TEMP "sbcl.msi"
+          Invoke-WebRequest $asset.browser_download_url -OutFile $msi
+          Start-Process msiexec.exe -Wait -ArgumentList "/i `"$msi`" /qn /norestart"
+          $sbcl = Get-Command sbcl.exe -ErrorAction SilentlyContinue
+          if (-not $sbcl) {
+            $sbclExe = Get-ChildItem "C:\Program Files\Steel Bank Common Lisp" -Recurse -Filter sbcl.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $sbclExe) { throw "sbcl.exe not found after install." }
+            echo ($sbclExe.DirectoryName) | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
+
+      - name: Install Quicklisp (dist pinned to qlfile.lock)
+        shell: pwsh
+        run: |
+          $lock = Get-Content qlfile.lock -Raw
+          if ($lock -notmatch '(?s)\("quicklisp"\s*\..*?:version "([\d-]+)"') { throw "quicklisp dist version not found in qlfile.lock" }
+          $dist = $Matches[1]
+          Write-Host "Pinned quicklisp dist: $dist"
+          Invoke-WebRequest https://beta.quicklisp.org/quicklisp.lisp -OutFile quicklisp.lisp
+          & sbcl --non-interactive --load quicklisp.lisp `
+                 --eval "(quicklisp-quickstart:install :dist-url `"https://beta.quicklisp.org/dist/quicklisp/$dist/distinfo.txt`")" `
+                 --eval "(ql::without-prompting (ql:add-to-init-file))"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Clone qlfile git deps at locked SHAs
+        shell: pwsh
+        run: |
+          $dst = Join-Path $env:USERPROFILE "common-lisp"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          $lock = Get-Content qlfile.lock -Raw
+          $pattern = '\("([^"]+)"\s*\.\s*\(:class qlot/source/git:source-git\s*:initargs \(:remote-url "([^"]+)"[^(]*?:version "git-([0-9a-f]+)"'
+          $found = [regex]::Matches($lock, $pattern)
+          if ($found.Count -eq 0) { throw "no git sources parsed from qlfile.lock" }
+          foreach ($m in $found) {
+            $name = $m.Groups[1].Value; $url = $m.Groups[2].Value; $sha = $m.Groups[3].Value
+            $target = Join-Path $dst $name
+            Write-Host "$name -> $sha"
+            git -c core.autocrlf=false clone --quiet $url $target
+            if ($LASTEXITCODE -ne 0) { throw "clone $name failed" }
+            git -C $target checkout --quiet --detach $sha
+            if ($LASTEXITCODE -ne 0) { throw "checkout $name@$sha failed" }
+          }
+          Write-Host "Cloned $($found.Count) pinned git deps."
+
+      - name: Link repo into quicklisp local-projects
+        shell: pwsh
+        run: |
+          $lp = Join-Path $env:USERPROFILE "quicklisp\local-projects"
+          New-Item -ItemType Directory -Force -Path $lp | Out-Null
+          cmd /c mklink /D "$lp\lem" "${{ github.workspace }}"
+          if ($LASTEXITCODE -ne 0) { throw "mklink failed (needed so deploy's bin/ lands in the workspace)" }
+
+      - name: Build lem (deploy-op)
+        shell: pwsh
+        run: |
+          & sbcl --dynamic-space-size 4096 --non-interactive `
+                 --eval "(require :asdf)" `
+                 --eval "(ql:quickload :lem)" `
+                 --eval "(asdf:make :lem)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "bin\lem.exe")) { throw "bin/lem.exe not produced" }
+          Get-ChildItem bin | Format-Table Name, Length
+
+      - name: Compute release tag
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "windows-v" + (Get-Date -Format "yyyyMMdd") + "." + $env:GITHUB_RUN_NUMBER
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Release tag: $tag"
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path bin\* -DestinationPath dist\lem-windows.zip
+          $hash = (Get-FileHash dist\lem-windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  lem-windows.zip" | Out-File -Encoding ascii -NoNewline dist\lem-windows.zip.sha256
+          Write-Host "sha256: $hash"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Windows build ${{ steps.ver.outputs.tag }}
+          prerelease: true
+          generate_release_notes: false
+          files: |
+            dist/lem-windows.zip
+            dist/lem-windows.zip.sha256
