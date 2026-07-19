@@ -52,7 +52,7 @@ real_notmuch=$(command -v notmuch)
 printf 'attachment bytes\000with binary\377tail\n' \
   >"$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT"
 cp "$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT" "$smtp_attachment"
-printf '%s\n' '{"searches":0,"news":0,"inserts":0,"draft_inserts":0,"drafts":{},"tags":{"alpha@example.invalid":["inbox","unread"],"payment+safe;touch PWNED@example.invalid":["inbox","unread"],"reply/second?value@example.invalid":["inbox","unread"]}}' >"$LEM_YATH_NOTMUCH_STATE"
+printf '%s\n' '{"searches":0,"news":0,"inserts":0,"draft_inserts":0,"drafts":{},"tags":{"alpha@example.invalid":["inbox","unread"],"payment+safe|touch@example.invalid":["inbox","unread"],"reply/second?value@example.invalid":["inbox","unread"]}}' >"$LEM_YATH_NOTMUCH_STATE"
 cp "$here/scripts/fake-notmuch.py" "$fakebin/notmuch"
 cp "$here/scripts/fake-mbsync.sh" "$fakebin/mbsync"
 cp "$here/scripts/fake-notmuch-xdg-open.py" "$fakebin/xdg-open"
@@ -177,6 +177,13 @@ invoke_report() {
   before=$(report_count STATE)
   lem_keys "$session" F1
   wait_report STATE "$before"
+}
+invoke_forward_report() {
+  lem_keys "$session" M-x
+  lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
+  tmux_cmd send-keys -t "$session" -l -- \
+    'lem-yath-notmuch-test-forward-report'
+  lem_keys "$session" Enter
 }
 wait_log_count() {
   local path=$1 expected=$2 index=0
@@ -387,6 +394,76 @@ else
   fail draft-helper 'draft MIME preparation, metadata, snapshot extraction, or MML restoration diverged'
 fi
 
+forward_helper_root="$smtp_tls/forward resume;safe"
+mkdir -m 700 "$forward_helper_root"
+forward_editable="$smtp_tls/forward-editable.eml"
+forward_helper_ok=1
+"$real_smtp_program" --prepare-forward "$forward_helper_root" \
+  <"$draft_mime" >"$forward_editable" 2>"$smtp_tls/forward-prepare.err" || forward_helper_ok=0
+if ((forward_helper_ok)) && python3 - "$draft_mime" "$forward_editable" \
+     "$forward_helper_root" "$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT" <<'PY'
+import html
+import re
+import stat
+import sys
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
+
+source_path, editable_path, root_path, expected_path = map(Path, sys.argv[1:])
+source = BytesParser(policy=policy.default).parsebytes(source_path.read_bytes())
+editable = editable_path.read_text()
+assert 'Subject: [Yanni] SMTP helper; $(touch PWNED)' in editable
+assert f'References: {source["Message-ID"]}' in editable
+assert "Start of forwarded message" in editable and "End of forwarded message" in editable
+assert "From: Yanni <yanni@example.invalid>" in editable
+assert "To: Alice <alice@example.invalid>" in editable
+assert "Bcc:" not in editable
+assert "Literal body; `touch PWNED`." in editable
+match = re.search(r'<#part type="application/octet-stream" filename="([^"]+)" disposition=attachment>', editable)
+assert match
+extracted = Path(html.unescape(match.group(1)))
+assert extracted.parent == root_path
+assert extracted.read_bytes() == expected_path.read_bytes()
+info = extracted.lstat()
+assert stat.S_ISREG(info.st_mode) and not info.st_mode & 0o077
+PY
+then
+  pass forward-helper 'packaged inline forwarding retained stock headers, delimiters, references, and attachment bytes'
+else
+  fail forward-helper 'inline subject/header shaping, private extraction, or attachment preservation diverged'
+fi
+
+forward_refusal_root="$smtp_tls/forward-refusal"
+mkdir -m 700 "$forward_refusal_root"
+signed_source="$smtp_tls/signed-forward.eml"
+python3 - "$signed_source" <<'PY'
+import sys
+from pathlib import Path
+
+Path(sys.argv[1]).write_bytes(
+    b"From: Bob <bob@example.invalid>\r\n"
+    b"To: Yanni <yanni@example.invalid>\r\n"
+    b"Message-ID: <signed@example.invalid>\r\n"
+    b"Subject: Signed message\r\n"
+    b"MIME-Version: 1.0\r\n"
+    b"Content-Type: multipart/signed; boundary=safe; protocol=application/pgp-signature\r\n"
+    b"\r\n--safe\r\nContent-Type: text/plain\r\n\r\nProtected body.\r\n"
+    b"--safe\r\nContent-Type: application/pgp-signature\r\n\r\nsignature\r\n"
+    b"--safe--\r\n"
+)
+PY
+if ! "$real_smtp_program" --prepare-forward "$forward_refusal_root" \
+       <"$signed_source" >"$smtp_tls/signed-forward.out" \
+       2>"$smtp_tls/signed-forward.err" &&
+   grep -Fq 'signed or encrypted messages require raw MIME forwarding' \
+     "$smtp_tls/signed-forward.err" &&
+   [[ -z $(find "$forward_refusal_root" -mindepth 1 -print -quit) ]]; then
+  pass forward-protected-refusal 'signed MIME failed closed without extracting or flattening protected content'
+else
+  fail forward-protected-refusal 'signed MIME was flattened, partially extracted, or accepted'
+fi
+
 fixture="$(lem-yath_lisp_string "$here/scripts/notmuch-fixture.lisp")"
 lem_start "$session" "$source_file" --eval "(load #P$fixture)"
 
@@ -411,7 +488,7 @@ if lem_wait_for "$session" 'First plain body' 20 >/dev/null; then
   lem_keys "$session" A
 fi
 if lem_wait_for "$session" 'Primary plain body' 20 >/dev/null && invoke_report &&
-   [[ $(latest STATE) == 'STATE mode=show query=no row=none thread=beta message=payment+safe;touch PWNED@example.invalid read-only=yes keys=yes body=yes html-hidden=yes source-live=yes source-exact=yes' ]]; then
+   [[ $(latest STATE) == 'STATE mode=show query=no row=none thread=beta message=payment+safe|touch@example.invalid read-only=yes keys=yes body=yes html-hidden=yes source-live=yes source-exact=yes' ]]; then
   pass read 'Return opened a bare-ID thread and A archived it before opening the next thread'
 else
   fail read 'bare-ID show query, thread archive navigation, nested parsing, or focus failed'
@@ -717,7 +794,7 @@ if ((reply_all_ok)) && lem_wait_for "$session" 'Primary plain body' 20 >/dev/nul
 import json, sys
 
 calls = [json.loads(line) for line in open(sys.argv[1])]
-query = 'id:"payment+safe;touch PWNED@example.invalid"'
+query = 'id:"payment+safe|touch@example.invalid"'
 assert ["reply", "--format=default", "--reply-to=all", query] in calls
 PY
 then
@@ -784,12 +861,12 @@ assert len(smtp) == 1 and smtp[0]["argv"] == []
 assert "Editor-composed reply; $(touch PWNED)." in smtp[0]["input"]
 assert "<lem-yath-sent@example.invalid>" in smtp[0]["wire"]
 assert inserted == [smtp[0]["wire"]]
-query = 'id:"payment+safe;touch PWNED@example.invalid"'
+query = 'id:"payment+safe|touch@example.invalid"'
 assert ["reply", "--format=default", "--reply-to=sender", query] in calls
 assert calls.count(["insert", "--create-folder", "--folder=sent"]) == 2
 assert ["tag", "+replied", "--", query] in calls
 assert state["inserts"] == 1
-assert "replied" in state["tags"]["payment+safe;touch PWNED@example.invalid"]
+assert "replied" in state["tags"]["payment+safe|touch@example.invalid"]
 PY
 then
   pass send-reply 'retry performed only FCC/tag, returned to the show view, and preserved the exact transmitted message'
@@ -867,6 +944,113 @@ if lem_wait_for "$session" 'Second thread' 20 >/dev/null; then
 fi
 lem_wait_for "$session" 'Primary plain body' 20 >/dev/null || true
 
+# Match stock Evil-collection's shown-message `cf' route, then prove that a
+# forward can be postponed, resumed, sent, filed, and tagged without losing
+# either its source identity or attachment snapshot.
+forward_ok=0
+before_forward_report=$(report_count FORWARD)
+lem_keys "$session" c f
+if lem_wait_for "$session" 'Subject: \[Bob\] Second thread' 20 >/dev/null; then
+  invoke_forward_report || true
+fi
+forward_shape_ok=0
+if wait_report FORWARD "$before_forward_report" &&
+   [[ $(latest FORWARD) == 'FORWARD mode=yes tracked=yes subject=yes reference=yes headers=yes body=yes delimiters=yes marker=yes private=yes bytes=yes keys=yes cleaned=no source=yes' ]]; then
+  forward_shape_ok=1
+fi
+
+# The composition point starts at the end of the empty To header.
+sleep 0.5
+lem_keys "$session" A
+tmux_cmd send-keys -t "$session" -l -- 'Alice <alice@example.invalid>'
+lem_keys "$session" Escape
+lem_wait_for "$session" 'NORMAL' 10 >/dev/null || true
+sleep 0.5
+lem_keys "$session" C-c
+sleep 0.15
+lem_keys "$session" C-p
+lem_wait_for "$session" 'Message postponed;' 20 >/dev/null || true
+
+lem_keys "$session" F11
+if lem_wait_for "$session" '\(draft\)' 20 >/dev/null; then
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Tags: \(draft\)' 20 >/dev/null; then
+  lem_keys "$session" e
+fi
+before_forward_resume_report=$(report_count FORWARD)
+if lem_wait_for "$session" 'Draft resumed;' 20 >/dev/null; then
+  invoke_forward_report || true
+fi
+forward_resume_ok=0
+if wait_report FORWARD "$before_forward_resume_report" &&
+   [[ $(latest FORWARD) == 'FORWARD mode=yes tracked=yes subject=yes reference=yes headers=yes body=yes delimiters=yes marker=yes private=yes bytes=yes keys=yes cleaned=no source=yes' ]]; then
+  forward_resume_ok=1
+fi
+
+before_forward_smtp=$(wc -l <"$LEM_YATH_SMTP_FAKE_LOG")
+before_forward_sent=$(wc -l <"$LEM_YATH_NOTMUCH_INSERT_LOG")
+before_forward_drafts=$(wc -l <"$LEM_YATH_NOTMUCH_DRAFT_LOG")
+sleep 0.5
+lem_keys "$session" C-c C-c
+wait_log_count "$LEM_YATH_SMTP_FAKE_LOG" "$((before_forward_smtp + 1))" || true
+wait_log_count "$LEM_YATH_NOTMUCH_INSERT_LOG" "$((before_forward_sent + 1))" || true
+before_forward_clean=$(report_count FORWARD)
+if lem_wait_for "$session" 'Message sent and filed in Notmuch' 20 >/dev/null; then
+  invoke_forward_report || true
+fi
+if ((forward_shape_ok && forward_resume_ok)) &&
+   wait_report FORWARD "$before_forward_clean" &&
+   [[ $(latest FORWARD) == 'FORWARD mode=no tracked=no subject=no reference=no headers=no body=no delimiters=no marker=no private=no bytes=no keys=yes cleaned=yes source=yes' ]] &&
+   python3 - "$LEM_YATH_SMTP_FAKE_LOG" "$LEM_YATH_NOTMUCH_INSERT_LOG" \
+     "$LEM_YATH_NOTMUCH_DRAFT_LOG" "$LEM_YATH_NOTMUCH_STATE" \
+     "$LEM_YATH_NOTMUCH_LOG" "$before_forward_drafts" <<'PY'
+import json
+import sys
+from email import policy
+from email.parser import BytesParser
+
+smtp = [json.loads(line) for line in open(sys.argv[1])]
+sent = [json.loads(line) for line in open(sys.argv[2])]
+drafts = [json.loads(line) for line in open(sys.argv[3])]
+state = json.load(open(sys.argv[4]))
+calls = [json.loads(line) for line in open(sys.argv[5])]
+before_drafts = int(sys.argv[6])
+query = 'id:"payment+safe|touch@example.invalid"'
+assert len(smtp) == 3 and smtp[-1]["argv"] == []
+assert "To: Alice <alice@example.invalid>" in smtp[-1]["input"]
+assert "Subject: [Bob] Second thread" in smtp[-1]["input"]
+assert "References: <payment+safe|touch@example.invalid>" in smtp[-1]["input"]
+assert "Start of forwarded message" in smtp[-1]["input"]
+assert "Primary plain body." in smtp[-1]["input"]
+assert '<#part type="application/pdf"' in smtp[-1]["input"]
+assert sent[-1] == smtp[-1]["wire"]
+assert before_drafts > 0 and len(drafts) == before_drafts
+forward_draft = BytesParser(policy=policy.default).parsebytes(drafts[-1].encode())
+draft_id = str(forward_draft["Message-ID"])[1:-1]
+assert forward_draft["X-Lem-Yath-Forward-Query"] == query
+assert "forwarded" in state["tags"]["payment+safe|touch@example.invalid"]
+assert "deleted" in state["tags"][draft_id]
+assert ["tag", "+forwarded", "--", query] in calls
+assert ["tag", "+deleted", "--", f'id:"{draft_id}"'] in calls
+assert not __import__("pathlib").Path("PWNED").exists()
+PY
+then
+  forward_ok=1
+fi
+if ((forward_ok)); then
+  pass forward-message 'cf preserved stock inline shape and attachments through postpone/resume, then FCCed and tagged safely'
+else
+  fail forward-message 'forward shaping, snapshot metadata, send ordering, tags, bytes, or cleanup diverged'
+fi
+
+# Restore the ordinary shown message for the remaining show-mode actions.
+lem_keys "$session" F3
+if lem_wait_for "$session" 'Second thread' 20 >/dev/null; then
+  lem_keys "$session" Enter
+fi
+lem_wait_for "$session" 'Primary plain body' 20 >/dev/null || true
+
 lem_keys "$session" C-c s e
 if wait_log_count "$LEM_YATH_NOTMUCH_OPEN_LOG" 1; then
   lem_keys "$session" G
@@ -880,7 +1064,7 @@ import json, sys, urllib.parse
 calls = [json.loads(line) for line in open(sys.argv[1])]
 base = "https://backup.ecolink.ie/payment-emails/by-message-id?id="
 ids = [
-    "payment+safe;touch PWNED@example.invalid",
+    "payment+safe|touch@example.invalid",
     "reply/second?value@example.invalid",
 ]
 assert calls == [[base + urllib.parse.quote(value, safe="")] for value in ids]
@@ -954,19 +1138,19 @@ import json, sys
 
 calls = [json.loads(line) for line in open(sys.argv[1])]
 expected = [
-    ["tag", "+showtag;safe", "--", 'id:"payment+safe;touch PWNED@example.invalid"'],
-    ["tag", "-showtag;safe", "--", 'id:"payment+safe;touch PWNED@example.invalid"'],
-    ["tag", "+flagged", "--", 'id:"payment+safe;touch PWNED@example.invalid"'],
+    ["tag", "+showtag;safe", "--", 'id:"payment+safe|touch@example.invalid"'],
+    ["tag", "-showtag;safe", "--", 'id:"payment+safe|touch@example.invalid"'],
+    ["tag", "+flagged", "--", 'id:"payment+safe|touch@example.invalid"'],
     ["tag", "+deleted", "--", 'id:"reply/second?value@example.invalid"'],
     ["tag", "-deleted", "--", 'id:"reply/second?value@example.invalid"'],
-    ["tag", "-inbox", "--", 'id:"payment+safe;touch PWNED@example.invalid"'],
+    ["tag", "-inbox", "--", 'id:"payment+safe|touch@example.invalid"'],
     ["tag", "-inbox", "--", 'id:"reply/second?value@example.invalid"'],
 ]
 positions = iter(range(len(calls)))
 for wanted in expected:
     assert any(calls[index] == wanted for index in positions), wanted
 state = json.load(open(sys.argv[2]))
-assert sorted(state["tags"]["payment+safe;touch PWNED@example.invalid"]) == ["flagged", "replied"]
+assert sorted(state["tags"]["payment+safe|touch@example.invalid"]) == ["flagged", "forwarded", "replied"]
 assert state["tags"]["reply/second?value@example.invalid"] == []
 PY
 then
@@ -1035,11 +1219,11 @@ positions = iter(range(len(calls)))
 for wanted in expected:
     assert any(calls[index] == wanted for index in positions), wanted
 state = json.load(open(sys.argv[2]))
-assert sorted(state["tags"]["payment+safe;touch PWNED@example.invalid"]) == [
-    "flagged", "replied", "unread"
+assert sorted(state["tags"]["payment+safe|touch@example.invalid"]) == [
+    "flagged", "forwarded", "replied", "unread"
 ]
 assert sorted(state["tags"]["reply/second?value@example.invalid"]) == ["flagged", "unread"]
-for message_id in ("payment+safe;touch PWNED@example.invalid", "reply/second?value@example.invalid"):
+for message_id in ("payment+safe|touch@example.invalid", "reply/second?value@example.invalid"):
     assert "failtag" not in state["tags"][message_id]
 PY
 then
@@ -1072,7 +1256,7 @@ assert [
     "show",
     "--format=raw",
     "--part=7",
-    'id:"payment+safe;touch PWNED@example.invalid"',
+    'id:"payment+safe|touch@example.invalid"',
 ] in calls
 assert ["show", "--format=raw", "--part=8", 'id:"bad@example.invalid"'] in calls
 assert ["show", "--format=raw", "--part=9", 'id:"slow@example.invalid"'] in calls

@@ -152,7 +152,9 @@ def expand_mml_attachments(message) -> None:
     attachments: list[tuple[str, str]] = []
     for line in body.splitlines(keepends=True):
         marker = line.rstrip("\r\n")
-        if marker.startswith("<#part"):
+        if marker.startswith("<#!part"):
+            cleaned_lines.append(line.replace("<#!part", "<#part", 1))
+        elif marker.startswith("<#part"):
             match = MML_ATTACHMENT.fullmatch(marker)
             if match is None:
                 raise SubmitError("attachment marker is malformed")
@@ -179,6 +181,16 @@ def expand_mml_attachments(message) -> None:
         message.add_attachment(
             data, maintype=maintype, subtype=subtype, filename=path.name
         )
+
+
+def escape_mml_text(text: str) -> str:
+    """Quote literal attachment-looking lines while text remains editable."""
+    return "".join(
+        line.replace("<#part", "<#!part", 1)
+        if line.rstrip("\r\n").startswith("<#part")
+        else line
+        for line in text.splitlines(keepends=True)
+    )
 
 
 def parsed_composition(raw: bytes, *, validate_addresses: bool = True):
@@ -226,7 +238,11 @@ def normalized_message(raw: bytes):
     return envelope_from, recipients, wire
 
 
-def prepared_draft(raw: bytes, reply_query: str | None = None) -> bytes:
+def prepared_draft(
+    raw: bytes,
+    reply_query: str | None = None,
+    forward_query: str | None = None,
+) -> bytes:
     """Return a MIME snapshot suitable for ``notmuch insert +draft``."""
     # Drafts are intentionally allowed to contain unfinished recipient fields;
     # normalized_message performs the strict address checks before any send.
@@ -237,17 +253,25 @@ def prepared_draft(raw: bytes, reply_query: str | None = None) -> bytes:
         "Message-ID",
         "X-Notmuch-Emacs-Draft",
         "X-Lem-Yath-Reply-Query",
+        "X-Lem-Yath-Forward-Query",
     ):
         while message.get(name) is not None:
             del message[name]
-    if reply_query is not None:
+    if reply_query is not None and forward_query is not None:
+        raise SubmitError("a draft cannot be both a reply and a forward")
+    for label, query, header_name in (
+        ("reply", reply_query, "X-Lem-Yath-Reply-Query"),
+        ("forward", forward_query, "X-Lem-Yath-Forward-Query"),
+    ):
+        if query is None:
+            continue
         if (
-            not reply_query
-            or len(reply_query) > 4096
-            or any(character in reply_query for character in "\r\n\x00")
+            not query
+            or len(query) > 4096
+            or any(character in query for character in "\r\n\x00")
         ):
-            raise SubmitError("draft reply query is malformed")
-        message["X-Lem-Yath-Reply-Query"] = reply_query
+            raise SubmitError(f"draft {label} query is malformed")
+        message[header_name] = query
     message["Date"] = email.utils.formatdate(localtime=True)
     message["Message-ID"] = email.utils.make_msgid(idstring="draft")
     message["X-Notmuch-Emacs-Draft"] = "True"
@@ -407,7 +431,11 @@ def resumed_draft(raw: bytes, directory_value: str) -> bytes:
             if any(character in text for character in "\r\n\x00"):
                 raise SubmitError(f"saved draft {name} header is malformed")
             headers.append(f"{name}: {text}")
-        editable = "\n".join(headers) + "\n\n" + body.replace("\r\n", "\n")
+        editable = (
+            "\n".join(headers)
+            + "\n\n"
+            + escape_mml_text(body.replace("\r\n", "\n"))
+        )
         if markers:
             if not editable.endswith("\n"):
                 editable += "\n"
@@ -415,6 +443,118 @@ def resumed_draft(raw: bytes, directory_value: str) -> bytes:
         output = editable.encode("utf-8")
         if len(output) > MAX_MESSAGE_BYTES:
             raise SubmitError("resumed draft exceeds the 10 MiB limit")
+        return output
+    except Exception:
+        for path in created:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        raise
+
+
+def prepared_forward(raw: bytes, directory_value: str) -> bytes:
+    """Return the stock inline-forward shape with safe local attachment MML."""
+    if len(raw) > MAX_MESSAGE_BYTES:
+        raise SubmitError("message to forward exceeds the 10 MiB limit")
+    message = BytesParser(policy=email.policy.SMTP).parsebytes(raw)
+    if message.defects:
+        raise SubmitError("message to forward has malformed headers")
+    protected_types = {
+        "multipart/signed",
+        "multipart/encrypted",
+        "application/pkcs7-mime",
+        "application/x-pkcs7-mime",
+    }
+    if any(part.get_content_type() in protected_types for part in message.walk()):
+        raise SubmitError("signed or encrypted messages require raw MIME forwarding")
+
+    def header(name: str, *, required: bool = False) -> str:
+        values = message.get_all(name, [])
+        if required and len(values) != 1:
+            raise SubmitError(f"message to forward requires exactly one {name} header")
+        if len(values) > 1:
+            raise SubmitError(f"message to forward has duplicate {name} headers")
+        value = str(values[0]) if values else ""
+        if any(character in value for character in "\r\n\x00"):
+            raise SubmitError(f"message to forward has a malformed {name} header")
+        return value
+
+    from_value = header("From", required=True)
+    subject = header("Subject")
+    message_id = header("Message-ID", required=True)
+    if not re.fullmatch(r"<[^<>\r\n]+>", message_id):
+        raise SubmitError("message to forward has an invalid Message-ID")
+    sender_name, sender_address = email.utils.parseaddr(from_value)
+    source = sender_name or sender_address or "(nowhere)"
+    forward_subject = f"[{source}] {subject}"
+
+    body_part = message.get_body(preferencelist=("plain",))
+    if body_part is None and not message.is_multipart() and message.get_content_type() == "text/plain":
+        body_part = message
+    if body_part is None or body_part.is_multipart():
+        raise SubmitError("message to forward has no bounded text/plain body")
+    body = escape_mml_text(decoded_text(body_part).replace("\r\n", "\n"))
+
+    attachment_parts = [
+        part
+        for part in message.walk()
+        if part.get_content_disposition() == "attachment"
+    ]
+    if len(attachment_parts) > MAX_ATTACHMENTS:
+        raise SubmitError("message to forward contains more than 16 attachments")
+    directory = private_draft_directory(directory_value)
+    created: list[Path] = []
+    markers: list[str] = []
+    aggregate = 0
+    try:
+        for index, part in enumerate(attachment_parts, 1):
+            if part.is_multipart():
+                raise SubmitError("message to forward has an unsupported MIME attachment")
+            data = part.get_payload(decode=True)
+            if data is None:
+                raise SubmitError("message to forward has a malformed attachment")
+            aggregate += len(data)
+            if len(data) > MAX_ATTACHMENT_BYTES or aggregate > MAX_ATTACHMENT_BYTES:
+                raise SubmitError("forwarded attachments exceed the 7 MiB limit")
+            content_type = part.get_content_type()
+            if MML_ATTACHMENT.fullmatch(
+                f'<#part type="{content_type}" filename="x" disposition=attachment>'
+            ) is None:
+                raise SubmitError("message to forward has an invalid attachment type")
+            path = write_draft_attachment(
+                directory, safe_attachment_name(part.get_filename(), index), data, index
+            )
+            created.append(path)
+            markers.append(
+                f'<#part type="{content_type}" '
+                f'filename="{html.escape(os.fspath(path), quote=True)}" '
+                "disposition=attachment>"
+            )
+
+        included_headers = []
+        for name in ("From", "To", "Cc", "Date", "Subject"):
+            value = header(name)
+            if value:
+                included_headers.append(f"{name}: {value}")
+        forwarded = (
+            "\n-------------------- Start of forwarded message --------------------\n"
+            + "\n".join(included_headers)
+            + "\n\n"
+            + body
+        )
+        if not forwarded.endswith("\n"):
+            forwarded += "\n"
+        if markers:
+            forwarded += "\n".join(markers) + "\n"
+        forwarded += "-------------------- End of forwarded message --------------------\n"
+        template = (
+            f"To: \nSubject: {forward_subject}\nReferences: {message_id}\n\n"
+            + forwarded
+        )
+        output = template.encode("utf-8")
+        if len(output) > MAX_MESSAGE_BYTES:
+            raise SubmitError("forward composition exceeds the 10 MiB limit")
         return output
     except Exception:
         for path in created:
@@ -581,9 +721,15 @@ def main() -> int:
             output = prepared_draft(
                 bounded_stdin(), arguments[1] if len(arguments) == 2 else None
             )
+        elif len(arguments) == 2 and arguments[0] == "--prepare-draft-forward":
+            label = "Notmuch draft preparation failed"
+            output = prepared_draft(bounded_stdin(), forward_query=arguments[1])
         elif len(arguments) == 2 and arguments[0] == "--resume-draft":
             label = "Notmuch draft resume failed"
             output = resumed_draft(bounded_stdin(), arguments[1])
+        elif len(arguments) == 2 and arguments[0] == "--prepare-forward":
+            label = "Notmuch forward preparation failed"
+            output = prepared_forward(bounded_stdin(), arguments[1])
         else:
             raise SubmitError("unsupported helper arguments")
         sys.stdout.buffer.write(output)

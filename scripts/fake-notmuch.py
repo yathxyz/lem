@@ -9,6 +9,7 @@ import re
 import sys
 import email.policy
 from email.parser import BytesParser
+from email.message import EmailMessage
 from pathlib import Path
 
 
@@ -50,7 +51,7 @@ def message(
 THREAD_MESSAGES = {
     "alpha": ["alpha@example.invalid"],
     "beta": [
-        "payment+safe;touch PWNED@example.invalid",
+        "payment+safe|touch@example.invalid",
         "reply/second?value@example.invalid",
     ],
 }
@@ -107,7 +108,7 @@ def show_tree(thread_id: str, data: dict) -> list:
         )
         return [[[first, []]]]
     original = message(
-        "payment+safe;touch PWNED@example.invalid",
+        "payment+safe|touch@example.invalid",
         "Bob <bob@example.invalid>",
         "Second thread",
         [
@@ -126,7 +127,7 @@ def show_tree(thread_id: str, data: dict) -> list:
                 ],
             }
         ],
-        tags["payment+safe;touch PWNED@example.invalid"],
+        tags["payment+safe|touch@example.invalid"],
     )
     reply = message(
         "reply/second?value@example.invalid",
@@ -136,6 +137,26 @@ def show_tree(thread_id: str, data: dict) -> list:
         tags["reply/second?value@example.invalid"],
     )
     return [[[original, [[reply, []]]]]]
+
+
+def raw_message(message_id: str) -> bytes | None:
+    if message_id == "payment+safe|touch@example.invalid":
+        value = EmailMessage(policy=email.policy.SMTP)
+        value["From"] = "Bob <bob@example.invalid>"
+        value["To"] = "Yanni <yanni@example.invalid>"
+        value["Cc"] = "Team <team@example.invalid>"
+        value["Date"] = "Wed, 15 Jul 2026 20:00:00 +0100"
+        value["Message-ID"] = f"<{message_id}>"
+        value["Subject"] = "Second thread"
+        value.set_content("Primary plain body.", charset="utf-8")
+        value.add_attachment(
+            Path(os.environ["LEM_YATH_NOTMUCH_PDF"]).read_bytes(),
+            maintype="application",
+            subtype="pdf",
+            filename="quarterly report;safe.pdf",
+        )
+        return value.as_bytes()
+    return None
 
 
 def thread_tags(data: dict, thread_id: str) -> list[str]:
@@ -225,7 +246,7 @@ def main() -> int:
         message_id = ids[-1]
         recipient = (
             "Bob <bob@example.invalid>"
-            if message_id == "payment+safe;touch PWNED@example.invalid"
+            if message_id == "payment+safe|touch@example.invalid"
             else "Yanni <yanni@example.invalid>"
         )
         cc = "Cc: Team <team@example.invalid>\n" if args[2] == "--reply-to=all" else ""
@@ -326,7 +347,7 @@ def main() -> int:
                 "show",
                 "--format=raw",
                 "--part=7",
-                'id:"payment+safe;touch PWNED@example.invalid"',
+                'id:"payment+safe|touch@example.invalid"',
             ]
             if args == success:
                 sys.stdout.buffer.write(
@@ -355,7 +376,12 @@ def main() -> int:
             if len(ids) == 1 and ids[0] in data.get("drafts", {}):
                 sys.stdout.buffer.write(data["drafts"][ids[0]].encode())
                 return 0
-            print("raw show requires an exact saved draft", file=sys.stderr)
+            if len(ids) == 1:
+                raw = raw_message(ids[0])
+                if raw is not None:
+                    sys.stdout.buffer.write(raw)
+                    return 0
+            print("raw show requires an exact supported message", file=sys.stderr)
             return 2
         thread_id = thread_from_query(args[-1])
         if thread_id is None:

@@ -3429,10 +3429,14 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   The configured Evil-collection mail loop is also present. `C`/`cc` opens a
   new RFC 822 composition from Notmuch's `user.name` and
   `user.primary_email`; `cr` and `cR` ask `notmuch reply --format=default` for
-  the exact selected message/thread's sender or all-recipient template.
+  the exact selected message/thread's sender or all-recipient template. On a
+  shown message, `cf` prepares the stock inline-forward shape: `[Sender]`
+  subject, `References`, included From/To/Cc/Date/Subject headers, start/end
+  delimiters, plain body, and owner-private snapshots of regular attachments.
   `C-c C-c` submits through the packaged local-Bridge STARTTLS helper, files
   the exact normalized transmitted bytes through `notmuch insert` in `sent`,
-  and applies `+replied` only after both stages succeed; `C-c C-k` cancels.
+  and applies `+replied` or `+forwarded` only after both stages succeed;
+  `C-c C-k` cancels.
   SMTP credentials come from a matching owner-private `.authinfo.gpg`,
   `.authinfo`, or `.netrc` entry (or explicit paired environment variables),
   never argv. Bcc is retained in the envelope but removed from transmitted and
@@ -3447,14 +3451,17 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   into a fresh owner-private directory. Resave inserts the replacement before
   marking the old version deleted, cancel leaves the durable draft intact,
   and send retires it only after SMTP and sent FCC have succeeded. Every close
-  path removes resumed attachment files.
+  path removes resumed attachment files. Forward metadata and attachment bytes
+  survive this same save/postpone/resume lifecycle. Signed/encrypted MIME is
+  refused rather than flattened until a raw-MIME forwarding path exists.
   The Notmuch gate proves a real local STARTTLS/AUTH exchange plus physical
-  new/reply/send/draft keys, exact templates and FCC bytes, malformed-recipient
-  refusal, binary attachment snapshots after source removal, private resume
-  cleanup, durable draft replacement/retirement, an injected FCC failure, and
-  duplicate-safe retry. Address completion and bounded MIME attachment
-  composition are also covered. Forwarding, non-PDF received-part actions,
-  and Outlook integration remain outside this bounded text-mail port.
+  new/reply/forward/send/draft keys, exact templates and FCC bytes,
+  malformed-recipient and protected-MIME refusal, binary forward/draft
+  attachment snapshots after source removal, private resume cleanup, durable
+  draft replacement/retirement, an injected FCC failure, and duplicate-safe
+  retry. Address completion and bounded MIME attachment composition are also
+  covered. Raw signed/encrypted forwarding, non-PDF received-part actions, and
+  Outlook integration remain outside this bounded text-mail port.
 
   The default Bridge credential entry has the ordinary authinfo shape
   `machine 127.0.0.1 port 1025 login BRIDGE_USER password BRIDGE_PASSWORD`.

@@ -630,6 +630,7 @@ earlier recipients and their whitespace."
 (define-key *notmuch-show-mode-keymap* "c c" 'lem-yath-notmuch-compose)
 (define-key *notmuch-show-mode-keymap* "c r" 'lem-yath-notmuch-reply-sender)
 (define-key *notmuch-show-mode-keymap* "c R" 'lem-yath-notmuch-reply-all)
+(define-key *notmuch-show-mode-keymap* "c f" 'lem-yath-notmuch-forward-message)
 (define-key *notmuch-show-mode-keymap* "e" 'lem-yath-notmuch-resume-draft)
 (define-key *notmuch-compose-mode-keymap* "C-c C-c"
   'lem-yath-notmuch-compose-send)
@@ -743,10 +744,12 @@ earlier recipients and their whitespace."
                  (file-namestring pathname))))))
 
 (defun notmuch-compose-open
-    (text &key reply-query user-emails draft-query draft-directory)
+    (text &key reply-query forward-query user-emails
+               draft-query draft-directory)
   "Open TEXT in the single Notmuch composition buffer.
 
 REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed.
+FORWARD-QUERY is tagged `+forwarded' at the same success boundary.
 DRAFT-QUERY identifies the saved version replaced by save or deleted after a
 successful send.  DRAFT-DIRECTORY owns attachment snapshots for a resumed
 draft and is removed when the composition closes."
@@ -763,9 +766,11 @@ draft and is removed when the composition closes."
             (or (ignore-errors (buffer-directory origin)) (uiop:getcwd))
             (buffer-value buffer 'notmuch-compose-origin) origin
             (buffer-value buffer 'notmuch-compose-reply-query) reply-query
+            (buffer-value buffer 'notmuch-compose-forward-query) forward-query
             (buffer-value buffer 'notmuch-compose-sent-message) nil
             (buffer-value buffer 'notmuch-compose-fcc-done-p) nil
             (buffer-value buffer 'notmuch-compose-reply-tag-done-p) nil
+            (buffer-value buffer 'notmuch-compose-forward-tag-done-p) nil
             (buffer-value buffer 'notmuch-compose-draft-query) draft-query
             (buffer-value buffer 'notmuch-compose-draft-directory)
             draft-directory
@@ -869,7 +874,7 @@ draft and is removed when the composition closes."
                      (char= (char value (1- (length value))) #\>))
             (return (subseq value 1 (1- (length value))))))))))
 
-(defun notmuch-draft-reply-query-valid-p (query)
+(defun notmuch-draft-query-valid-p (query)
   "True when QUERY is one exact quoted id: or thread: query we generated."
   (and (stringp query)
        (plusp (length query))
@@ -899,11 +904,13 @@ draft and is removed when the composition closes."
                         (return nil)))
                  :finally (return (not escaped-p)))))))
 
-(defun notmuch-draft-strip-reply-metadata (text)
-  "Remove the private reply-query header from resumed draft TEXT.
-Returns the editable text and optional query as two values."
-  (let ((prefix "X-Lem-Yath-Reply-Query:")
+(defun notmuch-draft-strip-metadata (text)
+  "Remove private action metadata from resumed draft TEXT.
+Returns editable text, optional reply query, and optional forward query."
+  (let ((reply-prefix "X-Lem-Yath-Reply-Query:")
+        (forward-prefix "X-Lem-Yath-Forward-Query:")
         (reply-query nil)
+        (forward-query nil)
         (headers-p t))
     (values
      (with-output-to-string (stream)
@@ -919,22 +926,39 @@ Returns the editable text and optional query as two values."
                 (write-string line stream)
                 (when newline (write-char #\Newline stream)))
                ((and headers-p
-                     (zerop (or (search prefix line :test #'char-equal) -1)))
+                     (zerop (or (search reply-prefix line
+                                         :test #'char-equal)
+                                -1)))
                 (when reply-query
                   (editor-error "Saved draft contains duplicate reply metadata"))
                 (setf reply-query
                       (string-trim '(#\Space #\Tab)
-                                   (subseq line (length prefix)))))
+                                   (subseq line (length reply-prefix)))))
+               ((and headers-p
+                     (zerop (or (search forward-prefix line
+                                         :test #'char-equal)
+                                -1)))
+                (when forward-query
+                  (editor-error "Saved draft contains duplicate forward metadata"))
+                (setf forward-query
+                      (string-trim '(#\Space #\Tab)
+                                   (subseq line (length forward-prefix)))))
                (t
                 (write-string line stream)
                 (when newline (write-char #\Newline stream))))
              (unless newline (return))
              (setf start (1+ newline))))))
      (progn
-       (when (and reply-query
-                  (not (notmuch-draft-reply-query-valid-p reply-query)))
-         (editor-error "Saved draft contains invalid reply metadata"))
-       reply-query))))
+       (when (and reply-query forward-query)
+         (editor-error "Saved draft contains conflicting action metadata"))
+       (dolist (entry (list (cons "reply" reply-query)
+                            (cons "forward" forward-query)))
+         (when (and (cdr entry)
+                    (not (notmuch-draft-query-valid-p (cdr entry))))
+           (editor-error "Saved draft contains invalid ~a metadata"
+                         (car entry))))
+       reply-query)
+     forward-query)))
 
 (defun notmuch-remove-draft-directory (directory)
   "Remove regular attachment snapshots and then private DIRECTORY."
@@ -959,9 +983,14 @@ Returns the editable text and optional query as two values."
   (when (buffer-value buffer 'notmuch-compose-sent-message)
     (error "A message already accepted by SMTP cannot be saved as a draft"))
   (let* ((reply-query (buffer-value buffer 'notmuch-compose-reply-query))
-         (arguments (if reply-query
-                        (list "--prepare-draft" reply-query)
-                        (list "--prepare-draft")))
+         (forward-query (buffer-value buffer 'notmuch-compose-forward-query))
+         (arguments
+           (cond
+             ((and reply-query forward-query)
+              (error "A composition cannot be both a reply and a forward"))
+             (reply-query (list "--prepare-draft" reply-query))
+             (forward-query (list "--prepare-draft-forward" forward-query))
+             (t (list "--prepare-draft"))))
          (wire (notmuch-draft-run-helper arguments (buffer-text buffer)))
          (message-id (or (notmuch-draft-message-id wire)
                          (error "Prepared draft has no valid Message-ID")))
@@ -1021,19 +1050,50 @@ Returns the editable text and optional query as two values."
            (directory (notmuch-private-temp-directory))
            (keep-directory-p nil))
       (unwind-protect
-           (multiple-value-bind (editable reply-query)
-               (notmuch-draft-strip-reply-metadata
+           (multiple-value-bind (editable reply-query forward-query)
+               (notmuch-draft-strip-metadata
                 (notmuch-draft-run-helper
                  (list "--resume-draft" (uiop:native-namestring directory))
                  raw))
              (notmuch-compose-open editable
                                    :reply-query reply-query
+                                   :forward-query forward-query
                                    :draft-query query
                                    :draft-directory directory)
              (setf keep-directory-p t)
              (message "Draft resumed; C-x C-s saves and C-c C-p postpones"))
         (unless keep-directory-p
           (notmuch-remove-draft-directory directory))))))
+
+(define-command lem-yath-notmuch-forward-message () ()
+  "Forward the current shown message inline (`cf' from Evil-collection)."
+  (unless (eq (buffer-major-mode (current-buffer)) 'notmuch-show-mode)
+    (editor-error "Forwarding requires a shown Notmuch message"))
+  (let* ((message-id (or (notmuch-message-id-at-point)
+                         (editor-error "No message at point")))
+         (query (notmuch-message-id-query message-id))
+         (raw (notmuch-run-text
+               (list "show" "--format=raw" query)
+               :output-limit *notmuch-message-output-limit*))
+         (directory (notmuch-private-temp-directory))
+         (keep-directory-p nil))
+    (unwind-protect
+         (let* ((user-emails (notmuch-user-emails))
+                (template
+                  (notmuch-draft-run-helper
+                   (list "--prepare-forward"
+                         (uiop:native-namestring directory))
+                   raw)))
+           (notmuch-compose-open
+            (format nil "From: ~a~%~a"
+                    (notmuch-from-header (first user-emails)) template)
+            :forward-query query
+            :user-emails user-emails
+            :draft-directory directory)
+           (setf keep-directory-p t)
+           (message "Forward prepared inline; edit recipients, then C-c C-c sends"))
+      (unless keep-directory-p
+        (notmuch-remove-draft-directory directory)))))
 
 (defun notmuch-smtp-submit-program ()
   (or (alexandria:when-let ((configured
@@ -1107,6 +1167,12 @@ the interactive command so it can retain BUFFER and explain the recovery."
       (unless (notmuch-change-tags query '("+replied"))
         (error "tagging the sent reply failed")))
     (setf (buffer-value buffer 'notmuch-compose-reply-tag-done-p) t))
+  (unless (buffer-value buffer 'notmuch-compose-forward-tag-done-p)
+    (alexandria:when-let
+        ((query (buffer-value buffer 'notmuch-compose-forward-query)))
+      (unless (notmuch-change-tags query '("+forwarded"))
+        (error "tagging the forwarded message failed")))
+    (setf (buffer-value buffer 'notmuch-compose-forward-tag-done-p) t))
   (unless (buffer-value buffer 'notmuch-compose-draft-tag-done-p)
     (alexandria:when-let
         ((query (buffer-value buffer 'notmuch-compose-draft-query)))

@@ -693,7 +693,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   `C-c C-p` postpones it, and `e` resumes a shown `tag:draft` message with
   attachment bytes restored into owner-private temporary files. A resave
   hides the previous version only after the replacement is durable; a send
-  retires the draft only after SMTP and sent FCC succeed
+  retires the draft only after SMTP and sent FCC succeed. In a shown message,
+  `cf` prepares Notmuch's ordinary inline-forward shape with the stock
+  included headers, `References`, delimiters, and regular attachment bytes.
+  Forward state survives save/postpone/resume; successful SMTP/FCC applies
+  `+forwarded`. Signed/encrypted MIME fails closed until raw-MIME forwarding
+  is implemented
 - ordinary `.pdf` and `.epub` opens stay inside Lem: PDFs expose bounded
   Poppler text one page at a time, while EPUBs become bounded Markdown with
   chapter navigation. Both are read-only, never visit or overwrite the binary

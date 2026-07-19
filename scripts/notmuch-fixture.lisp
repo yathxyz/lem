@@ -15,6 +15,7 @@
 (defvar *notmuch-test-compose-attachment*
   (uiop:getenv "LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT"))
 (defvar *notmuch-test-draft-directory* nil)
+(defvar *notmuch-test-forward-directory* nil)
 
 (defun notmuch-test-yes-no (value) (if value "yes" "no"))
 
@@ -89,6 +90,8 @@
        'lem-yath-notmuch-reply-sender)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "c R")
        'lem-yath-notmuch-reply-all)
+   (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "c f")
+       'lem-yath-notmuch-forward-message)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "e")
        'lem-yath-notmuch-resume-draft)
    (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-c")
@@ -389,6 +392,66 @@
                  *notmuch-test-draft-directory*))))
      (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
 
+(define-command lem-yath-notmuch-test-forward-report () ()
+  (let* ((buffer (current-buffer))
+         (compose-p (eq (buffer-major-mode buffer) 'notmuch-compose-mode))
+         (text (buffer-text buffer))
+         (directory (and compose-p
+                         (buffer-value buffer
+                                       'notmuch-compose-draft-directory)))
+         (files (and directory
+                     (ignore-errors (uiop:directory-files directory))))
+         (file (and (= (length files) 1) (first files)))
+         (directory-stat
+           (and directory
+                (ignore-errors
+                  (sb-posix:lstat (uiop:native-namestring directory))))))
+    (when directory
+      (setf *notmuch-test-forward-directory* directory))
+    (notmuch-test-log
+     "FORWARD mode=~a tracked=~a subject=~a reference=~a headers=~a body=~a delimiters=~a marker=~a private=~a bytes=~a keys=~a cleaned=~a source=~a"
+     (notmuch-test-yes-no compose-p)
+     (notmuch-test-yes-no
+      (and compose-p
+           (buffer-value buffer 'notmuch-compose-forward-query)))
+     (notmuch-test-yes-no
+      (and compose-p (search "Subject: [Bob] Second thread" text)))
+     (notmuch-test-yes-no
+      (and compose-p
+           (search "References: <payment+safe|touch@example.invalid>"
+                   text)))
+     (notmuch-test-yes-no
+      (and compose-p
+           (search "From: Bob <bob@example.invalid>" text)
+           (search "To: Yanni <yanni@example.invalid>" text)
+           (search "Cc: Team <team@example.invalid>" text)
+           (search "Date: Wed, 15 Jul 2026 20:00:00 +0100" text)))
+     (notmuch-test-yes-no
+      (and compose-p (search "Primary plain body." text)))
+     (notmuch-test-yes-no
+      (and compose-p
+           (search "-------------------- Start of forwarded message --------------------"
+                   text)
+           (search "-------------------- End of forwarded message --------------------"
+                   text)))
+     (notmuch-test-yes-no
+      (and compose-p (= 1 (notmuch-compose-attachment-marker-count buffer))))
+     (notmuch-test-yes-no
+      (and directory-stat
+           (= (logand (sb-posix:stat-mode directory-stat) sb-posix:s-ifmt)
+              sb-posix:s-ifdir)
+           (zerop (logand (sb-posix:stat-mode directory-stat) #o077))))
+     (notmuch-test-yes-no
+      (and file
+           (notmuch-test-file-bytes-equal-p
+            file (uiop:getenv "LEM_YATH_NOTMUCH_PDF"))))
+     (notmuch-test-yes-no (notmuch-test-keys-p))
+     (notmuch-test-yes-no
+      (and *notmuch-test-forward-directory*
+           (not (uiop:directory-exists-p
+                 *notmuch-test-forward-directory*))))
+     (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
+
 (defun notmuch-test-extraction-refusal
     (attachment &key output-limit timeout)
   (let* ((directory (notmuch-private-temp-directory))
@@ -411,7 +474,7 @@
   (multiple-value-bind (output output-clean)
       (notmuch-test-extraction-refusal
        (make-notmuch-attachment
-        :message-id "payment+safe;touch PWNED@example.invalid"
+        :message-id "payment+safe|touch@example.invalid"
         :part-id 7 :filename "large.pdf")
        :output-limit 32)
     (multiple-value-bind (nonpdf nonpdf-clean)
@@ -461,7 +524,6 @@
 (define-key *global-keymap* "F10" 'lem-yath-notmuch-test-attachment-report)
 (define-key *global-keymap* "F11" 'lem-yath-notmuch-test-drafts)
 (define-key *global-keymap* "F12" 'lem-yath-notmuch-test-draft-report)
-
 (notmuch-test-log "EXEC notmuch=~a xdg-open=~a"
                   (executable-find "notmuch")
                   (executable-find "xdg-open"))
