@@ -477,7 +477,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   owner-private, signal-free sequence-editor handshake and Git's real commit
   editor through the reusable Lem client; consecutive reword sessions are
   physically covered. An `edit` stop can be changed and staged through Legit,
-  amended with `A` in a prefilled commit buffer, and completed with `r c`.
+  amended with Magit's `c a` in a prefilled commit buffer, and completed with
+  `r c`. Ordinary commits use the matching `c c` dispatch.
   Packaged `gh` also backs
   command-accessible GitHub Forge lists, detail views, multiline creation and
   comments, close/reopen actions, external browsing, and cache-only Legit

@@ -970,7 +970,7 @@ else
     "$porcelain_session"
 fi
 
-lem_keys "$porcelain_session" c
+lem_keys "$porcelain_session" c c
 if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
      "$WAIT_TIMEOUT" >/dev/null; then
   lem_keys "$porcelain_session" i
@@ -979,13 +979,13 @@ if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
   send_keys "$porcelain_session" Escape C-c C-c
   if wait_until "$WAIT_TIMEOUT" porcelain_subject_is \
        'porcelain commit from Lem'; then
-    pass legit-commit 'c and C-c C-c created the staged commit from Vi state'
+    pass legit-commit 'c c and C-c C-c created the staged commit from Vi state'
   else
     fail legit-commit 'the commit buffer did not create the expected commit' \
       "$porcelain_session"
   fi
 else
-  fail legit-commit "c did not open Legit's commit-message buffer" \
+  fail legit-commit "c c did not open Legit's commit-message buffer" \
     "$porcelain_session"
 fi
 
@@ -1094,7 +1094,7 @@ if wait_until "$WAIT_TIMEOUT" porcelain_rebase_todo_ready; then
 fi
 if wait_report_count '^REBASE ' "$((rebase_before + 1))" &&
    [[ $(latest_report '^REBASE ') == \
-      'REBASE mode=yes file=yes first=yes second=yes point=yes fixup=yes edit=yes amend=yes continue=yes abort=yes modified=no' ]]; then
+      'REBASE mode=yes file=yes first=yes second=yes point=yes fixup=yes edit=yes commit=yes amend=yes diff=yes legacy-free=yes continue=yes abort=yes modified=no' ]]; then
   pass legit-rebase-open 'r i opened the two-commit todo in the native rebase mode'
 else
   fail legit-rebase-open 'interactive rebase did not expose the expected todo mode' \
@@ -1161,7 +1161,7 @@ if wait_until "$WAIT_TIMEOUT" porcelain_repeat_rebase_todo_ready; then
 fi
 if wait_report_count '^REBASE ' "$((rebase_before + 1))" &&
    [[ $(latest_report '^REBASE ') == \
-      'REBASE mode=yes file=yes first=yes second=no point=yes fixup=yes edit=yes amend=yes continue=yes abort=yes modified=no' ]]; then
+      'REBASE mode=yes file=yes first=yes second=no point=yes fixup=yes edit=yes commit=yes amend=yes diff=yes legacy-free=yes continue=yes abort=yes modified=no' ]]; then
   pass legit-repeat-rebase-open \
     'an immediate second r i opened a fresh one-commit todo'
 else
@@ -1267,7 +1267,7 @@ else
     "$porcelain_session"
 fi
 
-send_keys "$porcelain_session" A
+send_keys "$porcelain_session" c a
 amend_before=$(report_count '^AMEND ')
 if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -1275,9 +1275,9 @@ if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
 fi
 if wait_report_count '^AMEND ' "$((amend_before + 1))" &&
    [[ $(latest_report '^AMEND ') == \
-      'AMEND mode=yes file=no name=yes action=yes subject=yes clean=yes continue=yes abort=yes binding=yes' ]]; then
+      'AMEND mode=yes file=no name=yes action=yes subject=yes clean=yes continue=yes abort=yes commit=yes amend=yes diff=yes legacy-free=yes' ]]; then
   pass legit-edit-rebase-amend-open \
-    'A opened a prefilled transient amend message in Legit commit mode'
+    'c a opened a prefilled transient amend message in Legit commit mode'
 else
   fail legit-edit-rebase-amend-open \
     'the amend action did not open the expected safe transient buffer' \
@@ -1299,16 +1299,16 @@ else
 fi
 
 amend_before=$(report_count '^AMEND ')
-send_keys "$porcelain_session" A
+send_keys "$porcelain_session" c a
 if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
      "$WAIT_TIMEOUT" >/dev/null; then
   send_keys "$porcelain_session" C-c v
 fi
 if wait_report_count '^AMEND ' "$((amend_before + 1))" &&
    [[ $(latest_report '^AMEND ') == \
-      'AMEND mode=yes file=no name=yes action=yes subject=yes clean=yes continue=yes abort=yes binding=yes' ]]; then
+      'AMEND mode=yes file=no name=yes action=yes subject=yes clean=yes continue=yes abort=yes commit=yes amend=yes diff=yes legacy-free=yes' ]]; then
   pass legit-edit-rebase-amend-reopen \
-    'A reopened a fresh prefilled amend buffer after abort'
+    'c a reopened a fresh prefilled amend buffer after abort'
 else
   fail legit-edit-rebase-amend-reopen \
     'the aborted amend buffer leaked or did not return focus to status' \

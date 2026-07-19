@@ -2168,8 +2168,8 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
 ### Workflow / bindings (in the legit/peek-legit status window) — `legit/legit.lisp`, `peek-legit.lisp`
 - Stage/unstage/discard file: `s` / `u` / `k` (`peek-legit.lisp:26-28`); hunk-level
   stage/unstage: `s`/`u` in the diff window (`legit.lisp:66-67`).
-- Commit: `c` → opens commit buffer; finish `C-c C-c`, abort `M-q`/`C-c C-k`
-  (`legit-commit.lisp:38-41`).
+- Commit: lem-yath replaces upstream Legit's direct `c` with `c c`; finish
+  `C-c C-c`, abort `M-q`/`C-c C-k` (`legit-commit.lisp:38-41`).
 - Branches: checkout `b b`, create `b c` (`legit.lisp:74-76`).
 - Push/Pull: `P p` / `F p` (`legit.lisp:80-82`).
 - Log: `l l`, last/first page `l F` / pagination (`legit.lisp:86-87`).
@@ -2177,7 +2177,8 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
 - **Interactive rebase**: `r i`; abort/continue/skip `r a`/`r c`/`r s`
   (`legit.lisp:105-108`); full rebase-todo editing mode with `p r e s f x b d l t m`
   keys (`legit-rebase.lisp:49-77`).
-- **Amend HEAD**: `A` opens the current message in a transient commit buffer;
+- **Commit / amend dispatch**: `c c` opens an ordinary commit buffer and `c a`
+  opens the current message in a transient amend buffer;
   finish with `C-c C-c` or abort with `M-q`/`C-c C-k`.
 - Refresh `g`, navigate `n`/`p`/`M-n`/`M-p`, help `?`/`C-x ?`, quit `q`.
 
@@ -2196,11 +2197,11 @@ The retained asynchronous Git process is reaped and explicitly closed before
 another session starts. A `reword` stop opens Git's real `COMMIT_EDITMSG`
 through the owner-private blocking client. The commit-mode confirm and abort
 keys detect that request and save/release or abort Git instead of starting a
-nested commit. At an `edit` stop, `A` first reaps and closes the stopped rebase
+nested commit. At an `edit` stop, `c a` first reaps and closes the stopped rebase
 process, then opens a prefilled transient message. A successful amend returns
 focus explicitly to Legit's status pane so `r c` continues the same rebase.
-The dedicated `A` binding preserves Legit's existing direct `c` command; Lem's
-keymap cannot make `c` both an immediate command and the prefix of `c a`.
+The local commit dispatch deliberately replaces Legit's direct `c` command
+with Magit's configured `c c`/`c a` muscle memory in status and diff panes.
 
 ### Porcelain coverage vs magit — `legit/README.md`
 Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkout/
@@ -2226,7 +2227,7 @@ an isolated private server socket so it cannot target another running Lem. It
 then immediately opens a fresh one-row rebase, rewords the rewritten commit
 again through a second blocking client callback, and proves clean history after
 the second session. Finally it starts another one-row rebase, marks `edit`,
-waits for Git's real stop, changes and stages a file through Legit, opens `A`,
+waits for Git's real stop, changes and stages a file through Legit, opens `c a`,
 edits and confirms the prefilled subject, and uses `r c` to prove the amended
 content and message in a clean two-commit history. The amend path also proves
 the stopped asynchronous process is reaped before the next Git subprocess.

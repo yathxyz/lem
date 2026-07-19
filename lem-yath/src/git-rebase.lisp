@@ -217,6 +217,9 @@ esac
 
 (defvar *legit-amend-operation-key* 'lem-yath-legit-amend-operation)
 
+(defvar *legit-commit-dispatch-keymap*
+  (make-keymap :description "Commit"))
+
 (defparameter *legit-amend-buffer-help*
   "
 
@@ -303,8 +306,23 @@ esac
       (when (lem/legit::legit-status-active-p)
         (setf (current-window) lem/legit::*peek-window*)))))
 
-(define-key lem/legit::*peek-legit-keymap* "A" 'lem-yath-legit-amend)
-(define-key lem/legit::*legit-diff-mode-keymap* "A" 'lem-yath-legit-amend)
+(defun remove-legacy-legit-amend-binding (keymap)
+  "Remove lem-yath's former A binding without erasing an upstream command."
+  (alexandria:when-let
+      ((prefix
+         (lem-core::keymap-find keymap (lem-core::parse-keyspec "A"))))
+    (when (eq (lem-core::prefix-suffix prefix) 'lem-yath-legit-amend)
+      (undefine-key keymap "A"))))
+
+(remove-legacy-legit-amend-binding lem/legit::*peek-legit-keymap*)
+(remove-legacy-legit-amend-binding lem/legit::*legit-diff-mode-keymap*)
+
+(define-key *legit-commit-dispatch-keymap* "c" 'lem/legit::legit-commit)
+(define-key *legit-commit-dispatch-keymap* "a" 'lem-yath-legit-amend)
+(define-key lem/legit::*peek-legit-keymap*
+  "c" *legit-commit-dispatch-keymap*)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "c" *legit-commit-dispatch-keymap*)
 
 (defun position-legit-rebase-todo-at-first-command (buffer)
   "Do not restore a stale cursor row when Git creates a fresh todo file."

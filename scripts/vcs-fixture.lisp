@@ -621,7 +621,8 @@
      (concatenate
       'string
       "REBASE mode=~a file=~a first=~a second=~a "
-      "point=~a fixup=~a edit=~a amend=~a continue=~a abort=~a modified=~a")
+      "point=~a fixup=~a edit=~a commit=~a amend=~a diff=~a legacy-free=~a "
+      "continue=~a abort=~a modified=~a")
      (vcs-test-yes-no
       (eq (buffer-major-mode buffer) 'lem/legit::legit-rebase-mode))
      (vcs-test-yes-no
@@ -639,8 +640,23 @@
       (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap* "e")
           'lem/legit::rebase-mark-line-edit))
      (vcs-test-yes-no
-      (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "A")
+      (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "c c")
+          'lem/legit::legit-commit))
+     (vcs-test-yes-no
+      (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "c a")
           'lem-yath-legit-amend))
+     (vcs-test-yes-no
+      (and
+       (eq (vcs-test-key-command lem/legit::*legit-diff-mode-keymap* "c c")
+           'lem/legit::legit-commit)
+       (eq (vcs-test-key-command lem/legit::*legit-diff-mode-keymap* "c a")
+           'lem-yath-legit-amend)))
+     (vcs-test-yes-no
+      (and
+       (not (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "A")
+                'lem-yath-legit-amend))
+       (not (eq (vcs-test-key-command lem/legit::*legit-diff-mode-keymap* "A")
+                'lem-yath-legit-amend))))
      (vcs-test-yes-no
       (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap*
                                 "C-c C-c")
@@ -664,7 +680,7 @@
            (concatenate
             'string
             "AMEND mode=~a file=~a name=~a action=~a subject=~a clean=~a "
-            "continue=~a abort=~a binding=~a")
+            "continue=~a abort=~a commit=~a amend=~a diff=~a legacy-free=~a")
          (vcs-test-yes-no
           (eq (buffer-major-mode buffer) 'lem/legit::legit-commit-mode))
          (vcs-test-yes-no filename)
@@ -684,8 +700,24 @@
                                     "C-c C-k")
               'lem-yath-legit-commit-abort))
          (vcs-test-yes-no
-          (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "A")
-              'lem-yath-legit-amend))))
+          (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "c c")
+              'lem/legit::legit-commit))
+         (vcs-test-yes-no
+          (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "c a")
+              'lem-yath-legit-amend))
+         (vcs-test-yes-no
+          (and
+           (eq (vcs-test-key-command lem/legit::*legit-diff-mode-keymap* "c c")
+               'lem/legit::legit-commit)
+           (eq (vcs-test-key-command lem/legit::*legit-diff-mode-keymap* "c a")
+               'lem-yath-legit-amend)))
+         (vcs-test-yes-no
+          (and
+           (not (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "A")
+                    'lem-yath-legit-amend))
+           (not (eq (vcs-test-key-command lem/legit::*legit-diff-mode-keymap*
+                                          "A")
+                    'lem-yath-legit-amend))))))
         (vcs-test-log
          (concatenate
           'string
