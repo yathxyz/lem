@@ -533,7 +533,8 @@ supplies these effective modal bindings (stock `compile.el` supplies
 | **NASM** | `nasm-mode` (`.nasm`) | — | — | — | — | |
 | **Nushell** | `nushell-ts-mode` (`.nu`) | — | — | — | — | |
 | **Typst** | `typst-ts-mode` | no configured LSP hook | — | — | — | Lem recognizes `.typ` with the pinned default mode semantics and packaged grammar, including the native Functions/Headings Imenu groups |
-| **YAML / Meson / nginx / Just** | `yaml-mode`, `meson-mode`, `nginx-mode`, `just-mode` | declared in nix, **no explicit config (defaults)** | — | — | — | Lem now covers the packages' effective default file associations and highlighting |
+| **Just** | `just-mode` | — | — | — | — | Explicit case-insensitive Justfile association; Lem reproduces its packaged grammar and pinned task/variable/setting generic-Imenu index |
+| **YAML / Meson / nginx** | `yaml-mode`, `meson-mode`, `nginx-mode` | declared in nix, **no explicit config (defaults)** | — | — | — | Lem covers the packages' effective default file associations and highlighting |
 
 **LSP server binaries required on PATH** (from `emacsRuntimeRequiredExecutables` + `emacsSharedDevTools`): `nixd`, `harper-ls` (pkg `harper`), `gopls`, `terraform-ls`, `rust-analyzer`, `pyright-langserver` (pkg `pyright`), plus `emacs-lsp-booster`. Tooling binaries: `go`, `goimports` (gotools), `dlv`/`dlv-dap` (delve), `cargo`, `rustc`, `rustfmt`, `cargo-clippy` (clippy), `lldb-dap` (lldb), `python`, `debugpy`, `debugpy-adapter`, `pytest`, `ruff`, `black`, `mypy`, `clang-tools`, `gcc`, `gdb`, `gnumake`, `pkg-config`. The declared daemon PATH does not include nixfmt-rfc-style, nixfmt, or alejandra, so the configured nixd formatter field is normally omitted.
 

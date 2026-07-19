@@ -466,13 +466,21 @@ index reverses group insertion and entries within each group, and its
 syntax-blind scanner can index block-looking heredoc lines; Lem retains those
 observable quirks. A ready `terraform-ls` document-symbol provider remains
 authoritative.
+Native Just buffers reproduce just-mode's three generic-Imenu expressions.
+They present the pinned reverse declaration order (`task`, `variable`,
+`setting`), retain source order inside each group, capture the same names, and
+jump to column zero of the definition line. Matches beginning inside multiline
+single-, double-, or backtick-quoted strings are excluded under the package's
+syntax table; comment matches, assignment-shaped aliases, malformed settings,
+and a task at end-of-buffer without the regexp's required following character
+remain absent exactly as in the pinned package.
 
 Acceptance records one Vi jumplist entry and runs the configured Imenu feedback:
 recenter only, with no Consult Pulsar pulse. `scripts/lsp-project-test.sh` and
 `scripts/project-outline-test.sh` drive the command through physical M-x,
 successive Return selections, exact target placement, viewport change, silent
-feedback, folded Org reveal, and `C-o` return. Native indices for other
-non-LSP modes are not yet implemented.
+feedback, folded Org reveal, and `C-o` return, including the regexp-driven Just
+fallback. Native indices for other non-LSP modes are not yet implemented.
 
 `lem-yath/src/annotations.lisp` supplies a bounded Marginalia-style layer for
 the daily prompt categories. Commands show active bindings and their first

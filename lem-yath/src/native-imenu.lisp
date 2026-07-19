@@ -1328,6 +1328,83 @@ this function consumes NODE and every named-child handle it obtains."
                 (buffer-name buffer) condition)
       nil)))
 
+;;; --- just-mode ----------------------------------------------------------
+
+(defparameter *imenu-just-groups*
+  '(("task" "(?m)^(?:alias +)?@?([A-Z_a-z][0-9A-Z_a-z-]*).*:[^=]")
+    ("variable" "(?m)^(?:export +)?([A-Z_a-z][0-9A-Z_a-z-]*) *:=")
+    ("setting" "(?m)^set +([A-Z_a-z][0-9A-Z_a-z-]*)(?:$| |:=)")))
+
+(defun imenu-just-string-line-starts (source)
+  "Return line-start offsets inside strings under just-mode's syntax table."
+  (let ((starts (make-hash-table :test #'eql))
+        (quote nil)
+        (comment-p nil)
+        (escaped-p nil))
+    (loop :for offset :below (length source)
+          :for character := (char source offset)
+          :do (cond
+                (comment-p
+                 (when (char= character #\Newline)
+                   (setf comment-p nil)))
+                (escaped-p (setf escaped-p nil))
+                (quote
+                 (cond
+                   ((char= character #\\) (setf escaped-p t))
+                   ((char= character quote) (setf quote nil))))
+                ((char= character #\\) (setf escaped-p t))
+                ((char= character #\#) (setf comment-p t))
+                ((member character '(#\" #\' #\`))
+                 (setf quote character)))
+              (when (and (char= character #\Newline) quote)
+                (setf (gethash (1+ offset) starts) t)))
+    starts))
+
+(defun imenu-just-group-candidates
+    (buffer source excluded-starts category pattern)
+  (let ((candidates nil))
+    (ppcre:do-scans
+        (start end register-starts register-ends pattern source)
+      (declare (ignore end))
+      ;; GNU Imenu's generic scanner ignores matches whose start is inside a
+      ;; comment or string.  A comment cannot satisfy these line-anchored
+      ;; patterns, so only multiline string state needs an explicit filter.
+      (unless (gethash start excluded-starts)
+        (let ((point (copy-point (buffer-start-point buffer))))
+          (character-offset point start)
+          (push
+           (make-imenu-candidate
+            :label (subseq source
+                           (aref register-starts 0)
+                           (aref register-ends 0))
+            :detail (format nil "[Just ~a] line ~d"
+                            category (line-number-at-point point))
+            :point point)
+           candidates))))
+    (nreverse candidates)))
+
+(defun imenu-just-candidates (buffer)
+  "Match pinned just-mode's generic Imenu expressions and syntax filtering."
+  (handler-case
+      (let* ((source (buffer-text buffer))
+             (excluded-starts (imenu-just-string-line-starts source)))
+        ;; `imenu--generic-function' pushes each submenu while traversing the
+        ;; expression, hence the package's setting/variable/task declaration
+        ;; appears as task/variable/setting.  It then sorts children by their
+        ;; line-start positions, preserving source order within each group.
+        (loop :for (category pattern) :in *imenu-just-groups*
+              :for children :=
+                (imenu-just-group-candidates
+                 buffer source excluded-starts category pattern)
+              :when children
+                :collect (make-imenu-candidate
+                          :label category
+                          :children children)))
+    (error (condition)
+      (log:warn "Just Imenu indexing failed for ~a: ~a"
+                (buffer-name buffer) condition)
+      nil)))
+
 (register-imenu-native-provider 'org-mode 'imenu-org-candidates)
 (register-imenu-native-provider
  'lem-markdown-mode:markdown-mode 'imenu-markdown-candidates)
@@ -1344,3 +1421,4 @@ this function consumes NODE and every named-child handle it obtains."
 (register-imenu-native-provider 'typst-mode 'imenu-typst-candidates)
 (register-imenu-native-provider
  'lem-terraform-mode:terraform-mode 'imenu-terraform-candidates)
+(register-imenu-native-provider 'just-mode 'imenu-just-candidates)

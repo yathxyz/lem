@@ -27,6 +27,7 @@ export LEM_YATH_PROJECT_OUTLINE_GO="$root/native-imenu.go"
 export LEM_YATH_PROJECT_OUTLINE_GDSCRIPT="$root/native-imenu.gd"
 export LEM_YATH_PROJECT_OUTLINE_TYPST="$root/native-imenu.typ"
 export LEM_YATH_PROJECT_OUTLINE_TERRAFORM="$root/native-imenu.tf"
+export LEM_YATH_PROJECT_OUTLINE_JUST="$root/Justfile"
 export LEM_YATH_PROJECT_OUTLINE_READER_MARKER="$root/reader-evaluated"
 mkdir -p "$HOME" "$WORKDIR" "$root/config" "$root/outside" "$root/malicious"
 
@@ -358,6 +359,30 @@ for line in $(seq 1 100); do
     *) printf '\n' ;;
   esac
 done >"$LEM_YATH_PROJECT_OUTLINE_TERRAFORM"
+
+for line in $(seq 1 80); do
+  case "$line" in
+    1) printf '%s\n' 'set shell := ["bash", "-cu"]' ;;
+    3) printf '%s\n' 'set dotenv-load' ;;
+    5) printf '%s\n' 'set BAD!' ;;
+    8) printf '%s\n' 'VALUE := "x"' ;;
+    10) printf '%s\n' 'export EXPORTED := "y"' ;;
+    14) printf '%s\n' 'build:' ;;
+    18) printf '%s\n' '@quiet arg:' ;;
+    22) printf '%s\n' 'alias ship := deploy' ;;
+    26) printf '%s\n' 'alias shortcut: deploy' ;;
+    30) printf '%s\n' 'deploy target: build' ;;
+    34) printf '%s\n' 'NAME:="z"' ;;
+    40) printf '%s\n' '"multi' ;;
+    42) printf '%s\n' 'set hidden := true' ;;
+    44) printf '%s\n' 'inside: nope' ;;
+    46) printf '%s\n' '"' ;;
+    50) printf '%s\n' '# set comment-hidden := true' ;;
+    52) printf '%s\n' '# comment-task: nope' ;;
+    80) printf '%s' 'tail:' ;;
+    *) printf '\n' ;;
+  esac
+done >"$LEM_YATH_PROJECT_OUTLINE_JUST"
 
 for line in $(seq 1 80); do
   case "$line" in
@@ -1806,6 +1831,129 @@ if invoke_mx imenu 'Index item:'; then
   fi
 else
   fail imenu-terraform-command 'M-x imenu did not open in the Terraform fixture'
+fi
+
+# just-mode delegates to generic Imenu.  The pinned expressions are declared
+# setting/variable/task, but GNU Imenu pushes submenus and therefore presents
+# task/variable/setting.  Children are position-sorted, and the generic jump
+# target is the beginning of the definition line rather than the name capture.
+send_chord C-c z j
+lem_wait_for "$session" 'set shell' 10 >/dev/null || true
+send_chord C-c z m
+wait_report_count '^MODE file=just major=JUST-MODE tree=just$' 1 || true
+if grep -q '^MODE file=just major=JUST-MODE tree=just$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-just-routing 'Justfile names select the configured mode and grammar'
+else
+  fail imenu-just-routing 'the Just fixture did not activate tree-sitter'
+fi
+send_chord C-c z v
+wait_report_count '^PROVIDER file=just native=IMENU-JUST-CANDIDATES lsp=none$' 1 || true
+if grep -q '^PROVIDER file=just native=IMENU-JUST-CANDIDATES lsp=none$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-just-provider 'Just Imenu uses the pinned native fallback'
+else
+  fail imenu-just-provider 'Just Imenu selected an unexpected provider'
+fi
+
+send_chord C-c z i
+wait_report_count '^IMENU-INDEX file=just count=12$' 1 || true
+just_index_ok=1
+for path in \
+  'task' \
+  'task/build' \
+  'task/quiet' \
+  'task/shortcut' \
+  'task/deploy' \
+  'variable' \
+  'variable/VALUE' \
+  'variable/EXPORTED' \
+  'variable/NAME' \
+  'setting' \
+  'setting/shell' \
+  'setting/dotenv-load'; do
+  grep -Fqx "IMENU-PATH file=just path=\"$path\"" \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" || just_index_ok=0
+done
+just_root_order="$(sed -n \
+  's/^IMENU-PATH file=just path="\([^/\"]*\)"$/\1/p' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | paste -sd, -)"
+just_task_order="$(sed -n \
+  's|^IMENU-PATH file=just path="task/\(.*\)"$|\1|p' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | paste -sd, -)"
+if [ "$just_index_ok" = 1 ] &&
+   [ "$(report_count '^IMENU-PATH file=just ')" -eq 12 ] &&
+   [ "$just_root_order" = 'task,variable,setting' ] &&
+   [ "$just_task_order" = 'build,quiet,shortcut,deploy' ] &&
+   ! grep -Eq '^IMENU-PATH file=just .*(ship|BAD|hidden|inside|comment|tail)' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-just-index 'Just Imenu matches pinned groups, ordering, labels, and exclusions'
+else
+  fail imenu-just-index 'Just generic-Imenu semantics differed'
+fi
+
+send_chord C-c z b
+send_chord C-c z r
+wait_report_count '^STATE file=just line=80 column=0 ' 1 || true
+just_origin="$(grep '^STATE file=just line=80 column=0 ' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+just_origin_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+  <<<"$just_origin")"
+
+if invoke_mx imenu 'Index item:'; then
+  # The deliberately unindexed no-newline `tail:' token is the symbol at
+  # point, so Imenu legitimately offers it as the initial completion input.
+  # Clear that default before inspecting and selecting from the root menu.
+  send_chord C-a C-k
+  sleep 0.3
+  just_top="$(lem_capture "$session")"
+  if grep -Fq 'task' <<<"$just_top" &&
+     grep -Fq 'variable' <<<"$just_top" &&
+     grep -Fq 'setting' <<<"$just_top"; then
+    pass imenu-just-presentation 'Just presents the pinned reversed group order'
+  else
+    fail imenu-just-presentation 'the Just root prompt differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l task
+  send_chord Enter
+  sleep 0.3
+  just_tasks="$(lem_capture "$session")"
+  if grep -Fq 'build' <<<"$just_tasks" &&
+     grep -Fq 'quiet' <<<"$just_tasks" &&
+     grep -Fq 'shortcut' <<<"$just_tasks" &&
+     grep -Fq 'deploy' <<<"$just_tasks"; then
+    pass imenu-just-tasks 'the task submenu retains generic-Imenu source order'
+  else
+    fail imenu-just-tasks 'the Just task submenu differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l shortcut
+  send_chord Enter
+  sleep 0.5
+  send_chord C-c z r
+  wait_report_count '^STATE file=just line=26 column=0 ' 1 || true
+  just_final="$(grep '^STATE file=just line=26 column=0 ' \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  just_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+    <<<"$just_final")"
+  if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+       <<<"$just_final" &&
+     [ -n "$just_origin_view" ] && [ -n "$just_view" ] &&
+     [ "$just_origin_view" != "$just_view" ]; then
+    pass imenu-just-jump 'Just Imenu lands at the generic line-start target without pulse'
+  else
+    fail imenu-just-jump "the Just Imenu destination differed: $just_final"
+  fi
+  send_chord C-o
+  sleep 0.3
+  send_chord C-c z r
+  wait_report_count '^STATE file=just line=80 column=0 ' 2 || true
+  if [ "$(report_count '^STATE file=just line=80 column=0 ')" -ge 2 ]; then
+    pass imenu-just-jumplist 'C-o returns from Just Imenu to its exact origin'
+  else
+    fail imenu-just-jumplist 'Just Imenu did not record one Vi jump'
+  fi
+else
+  fail imenu-just-command 'M-x imenu did not open in the Just fixture'
 fi
 
 send_chord C-c z 2

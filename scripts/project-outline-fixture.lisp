@@ -68,6 +68,10 @@
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_TERRAFORM")))
 
+(defvar *project-outline-test-just*
+  (uiop:parse-native-namestring
+   (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_JUST")))
+
 (defvar *project-outline-test-reader-marker*
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_READER_MARKER")))
@@ -120,6 +124,8 @@
                   file *project-outline-test-typst*)) "typst")
       ((and file (uiop:pathname-equal
                   file *project-outline-test-terraform*)) "terraform")
+      ((and file (uiop:pathname-equal
+                  file *project-outline-test-just*)) "just")
       (t "other"))))
 
 (defun project-outline-test-command-name (state)
@@ -373,6 +379,9 @@
   (when (mode-active-p (current-buffer) 'lem-lsp-mode::lsp-mode)
     (lem-lsp-mode::lsp-mode nil)))
 
+(define-command lem-yath-test-project-outline-just () ()
+  (find-file *project-outline-test-just*))
+
 (define-command lem-yath-test-project-outline-imenu-count () ()
   (let ((candidates (imenu-candidates (current-buffer))))
     (unwind-protect
@@ -419,6 +428,7 @@
   (define-key keymap "C-c z d" 'lem-yath-test-project-outline-gdscript)
   (define-key keymap "C-c z t" 'lem-yath-test-project-outline-typst)
   (define-key keymap "C-c z e" 'lem-yath-test-project-outline-terraform)
+  (define-key keymap "C-c z j" 'lem-yath-test-project-outline-just)
   (define-key keymap "C-c z w" 'lem-yath-test-project-outline-imenu-count)
   (define-key keymap "C-c z f" 'lem-yath-test-project-outline-fold-org))
 
