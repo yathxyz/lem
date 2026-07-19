@@ -451,6 +451,13 @@ classes. Entries retain the pinned `var`, `e-var`, `o-var`, `def`, and `class`
 labels; nested parents expose the exact class/function definition self-jump,
 and strings/comments do not create definitions. Ready Godot document symbols
 remain authoritative over this offline and not-yet-ready fallback.
+Native Typst buffers reproduce typst-ts-mode's ordered `Functions` and
+`Headings` groups. Function entries are the identifier of a `let` pattern call,
+so ordinary bindings and calls used as assigned values remain absent. Heading
+entries preserve the complete heading node, including the leading equals signs
+and inline markup, and both groups retain source order. The configured Emacs
+path has no Typst Eglot hook, so this is its ordinary Imenu provider rather
+than an LSP fallback.
 
 Acceptance records one Vi jumplist entry and runs the configured Imenu feedback:
 recenter only, with no Consult Pulsar pulse. `scripts/lsp-project-test.sh` and

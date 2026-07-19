@@ -1144,6 +1144,102 @@ this function consumes NODE and every named-child handle it obtains."
                 (buffer-name buffer) condition)
       nil)))
 
+;;; --- typst-ts-mode ------------------------------------------------------
+
+(defun imenu-typst-same-node-range-p (left right)
+  (and (string= (tree-sitter:node-type left)
+                (tree-sitter:node-type right))
+       (= (tree-sitter:node-start-byte left)
+          (tree-sitter:node-start-byte right))
+       (= (tree-sitter:node-end-byte left)
+          (tree-sitter:node-end-byte right))))
+
+(defun imenu-typst-function-identifier-p (node)
+  "Match typst-ts-mode's identifier-in-function-pattern predicate."
+  (and
+   (string= (tree-sitter:node-type node) "ident")
+   (let ((parent (tree-sitter:node-parent node)))
+     (when parent
+       (unwind-protect
+            (and
+             (string= (tree-sitter:node-type parent) "call")
+             (let ((grandparent (tree-sitter:node-parent parent)))
+               (when grandparent
+                 (unwind-protect
+                      (and
+                       (string= (tree-sitter:node-type grandparent) "let")
+                       (let ((pattern
+                               (tree-sitter:node-named-child grandparent 0)))
+                         (when pattern
+                           (unwind-protect
+                                (imenu-typst-same-node-range-p
+                                 parent pattern)
+                             (delete-tree-sitter-node pattern)))))
+                   (delete-tree-sitter-node grandparent)))))
+         (delete-tree-sitter-node parent))))))
+
+(defun imenu-typst-entry-candidate
+    (buffer node category children)
+  (let* ((name (tree-sitter-node-text buffer node))
+         (point (imenu-tree-sitter-node-point buffer node))
+         (detail (format nil "[Typst ~a] line ~d"
+                         category (line-number-at-point point))))
+    (if children
+        (make-imenu-candidate
+         :label name
+         :detail detail
+         :children
+         (cons (make-imenu-candidate
+                :label " "
+                :detail detail
+                :point point)
+               children))
+        (make-imenu-candidate :label name :detail detail :point point))))
+
+(defun imenu-typst-walk-category
+    (buffer node category predicate depth)
+  "Return NODE's sparse Typst forest for CATEGORY and consume NODE."
+  (unwind-protect
+       (let ((matching-p (funcall predicate node))
+             (children nil))
+         (when (< depth *imenu-tree-sitter-depth*)
+           (dotimes (index (tree-sitter:node-named-child-count node))
+             (let ((child (tree-sitter:node-named-child node index)))
+               (when child
+                 (setf children
+                       (nconc children
+                              (imenu-typst-walk-category
+                               buffer child category predicate
+                               (1+ depth))))))))
+         (if matching-p
+             (list (imenu-typst-entry-candidate
+                    buffer node category children))
+             children))
+    (delete-tree-sitter-node node)))
+
+(defun imenu-typst-candidates (buffer)
+  "Match pinned typst-ts-mode's two tree-sitter Imenu groups."
+  (handler-case
+      (with-imenu-tree-sitter-candidate-points
+        (alexandria:when-let ((tree (imenu-tree-sitter-current-tree buffer)))
+          (loop :for (category predicate) :in
+                  `(("Functions" ,#'imenu-typst-function-identifier-p)
+                    ("Headings" ,(lambda (node)
+                                    (string= (tree-sitter:node-type node)
+                                             "heading"))))
+                :for children :=
+                  (imenu-typst-walk-category
+                   buffer (tree-sitter:tree-root-node tree)
+                   category predicate 0)
+                :when children
+                  :collect (make-imenu-candidate
+                            :label category
+                            :children children))))
+    (error (condition)
+      (log:warn "Typst Imenu indexing failed for ~a: ~a"
+                (buffer-name buffer) condition)
+      nil)))
+
 (register-imenu-native-provider 'org-mode 'imenu-org-candidates)
 (register-imenu-native-provider
  'lem-markdown-mode:markdown-mode 'imenu-markdown-candidates)
@@ -1157,3 +1253,4 @@ this function consumes NODE and every named-child handle it obtains."
  'lem-rust-mode:rust-mode 'imenu-rust-candidates)
 (register-imenu-native-provider 'lem-go-mode:go-mode 'imenu-go-candidates)
 (register-imenu-native-provider 'gdscript-mode 'imenu-gdscript-candidates)
+(register-imenu-native-provider 'typst-mode 'imenu-typst-candidates)

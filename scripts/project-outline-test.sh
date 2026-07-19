@@ -25,6 +25,7 @@ export LEM_YATH_PROJECT_OUTLINE_CPP="$root/NativeImenu.cpp"
 export LEM_YATH_PROJECT_OUTLINE_RUST="$root/native-imenu.rs"
 export LEM_YATH_PROJECT_OUTLINE_GO="$root/native-imenu.go"
 export LEM_YATH_PROJECT_OUTLINE_GDSCRIPT="$root/native-imenu.gd"
+export LEM_YATH_PROJECT_OUTLINE_TYPST="$root/native-imenu.typ"
 export LEM_YATH_PROJECT_OUTLINE_READER_MARKER="$root/reader-evaluated"
 mkdir -p "$HOME" "$WORKDIR" "$root/config" "$root/outside" "$root/malicious"
 
@@ -309,6 +310,25 @@ for line in $(seq 1 100); do
     *) printf '\n' ;;
   esac
 done >"$LEM_YATH_PROJECT_OUTLINE_GDSCRIPT"
+
+for line in $(seq 1 80); do
+  case "$line" in
+    1) printf '%s\n' '#let plain = 1' ;;
+    3) printf '%s\n' '#let add(left, right) = left + right' ;;
+    5) printf '%s\n' '#let value = add(1, 2)' ;;
+    8) printf '%s\n' '= Introduction' ;;
+    12) printf '%s\n' '== Details *with markup*' ;;
+    20) printf '%s\n' '#let outer(x) = {' ;;
+    22) printf '%s\n' '  let inner(y) = y * 2' ;;
+    24) printf '%s\n' '  inner(x)' ;;
+    25) printf '%s\n' '}' ;;
+    30) printf '%s\n' '=== Final' ;;
+    40) printf '%s\n' '#let decoy = "= Fake heading; let nope(x) = x"' ;;
+    45) printf '%s\n' '// #let comment_fake(x) = x' ;;
+    46) printf '%s\n' '// == Comment heading' ;;
+    *) printf '\n' ;;
+  esac
+done >"$LEM_YATH_PROJECT_OUTLINE_TYPST"
 
 for line in $(seq 1 80); do
   case "$line" in
@@ -1523,6 +1543,114 @@ if invoke_mx imenu 'Index item:'; then
   fi
 else
   fail imenu-gdscript-command 'M-x imenu did not open in the GDScript fixture'
+fi
+
+# typst-ts-mode exposes two ordered treesit-simple-imenu groups.  Function
+# entries are only identifiers in a let-pattern call; calls used as values do
+# not qualify.  Heading labels and positions use the complete heading node.
+send_chord C-c z t
+lem_wait_for "$session" '#let plain' 10 >/dev/null || true
+send_chord C-c z m
+wait_report_count '^MODE file=typst major=TYPST-MODE tree=typst$' 1 || true
+if grep -q '^MODE file=typst major=TYPST-MODE tree=typst$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-typst-routing 'Typst suffixes select the configured mode and grammar'
+else
+  fail imenu-typst-routing 'the Typst fixture did not activate tree-sitter'
+fi
+send_chord C-c z v
+wait_report_count '^PROVIDER file=typst native=IMENU-TYPST-CANDIDATES lsp=none$' 1 || true
+if grep -q '^PROVIDER file=typst native=IMENU-TYPST-CANDIDATES lsp=none$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-typst-provider 'Typst Imenu uses the configured native provider'
+else
+  fail imenu-typst-provider 'Typst Imenu selected an unexpected provider'
+fi
+
+send_chord C-c z i
+wait_report_count '^IMENU-INDEX file=typst count=8$' 1 || true
+typst_index_ok=1
+for path in \
+  'Functions' \
+  'Functions/add' \
+  'Functions/outer' \
+  'Functions/inner' \
+  'Headings' \
+  'Headings/= Introduction' \
+  'Headings/== Details *with markup*' \
+  'Headings/=== Final'; do
+  grep -Fqx "IMENU-PATH file=typst path=\"$path\"" \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" || typst_index_ok=0
+done
+typst_root_order="$(sed -n \
+  's/^IMENU-PATH file=typst path="\([^/\"]*\)"$/\1/p' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | paste -sd, -)"
+if [ "$typst_index_ok" = 1 ] &&
+   [ "$(report_count '^IMENU-PATH file=typst ')" -eq 8 ] &&
+   [ "$typst_root_order" = 'Functions,Headings' ] &&
+   ! grep -Eq '^IMENU-PATH file=typst .*(plain|value|Fake|nope|comment_fake|Comment)' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-typst-index 'Typst Imenu matches pinned groups, predicates, labels, and exclusions'
+else
+  fail imenu-typst-index 'Typst function-pattern or heading semantics differed'
+fi
+
+send_chord C-c z b
+send_chord C-c z r
+wait_report_count '^STATE file=typst line=80 column=0 ' 1 || true
+typst_origin="$(grep '^STATE file=typst line=80 column=0 ' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+typst_origin_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+  <<<"$typst_origin")"
+
+if invoke_mx imenu 'Index item:'; then
+  typst_top="$(lem_capture "$session")"
+  if grep -Fq 'Functions' <<<"$typst_top" &&
+     grep -Fq 'Headings' <<<"$typst_top"; then
+    pass imenu-typst-presentation 'Typst presents the pinned ordered groups'
+  else
+    fail imenu-typst-presentation 'the Typst root prompt differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l Functions
+  send_chord Enter
+  sleep 0.3
+  typst_functions="$(lem_capture "$session")"
+  if grep -Fq 'add' <<<"$typst_functions" &&
+     grep -Fq 'outer' <<<"$typst_functions" &&
+     grep -Fq 'inner' <<<"$typst_functions" &&
+     ! grep -Fq 'plain' <<<"$typst_functions"; then
+    pass imenu-typst-functions 'only function-pattern identifiers enter the submenu'
+  else
+    fail imenu-typst-functions 'the Typst Functions submenu differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l inner
+  send_chord Enter
+  sleep 0.5
+  send_chord C-c z r
+  wait_report_count '^STATE file=typst line=22 column=6 ' 1 || true
+  typst_final="$(grep '^STATE file=typst line=22 column=6 ' \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  typst_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+    <<<"$typst_final")"
+  if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+       <<<"$typst_final" &&
+     [ -n "$typst_origin_view" ] && [ -n "$typst_view" ] &&
+     [ "$typst_origin_view" != "$typst_view" ]; then
+    pass imenu-typst-jump 'Typst Imenu lands on the nested function name without pulse'
+  else
+    fail imenu-typst-jump "the Typst Imenu destination differed: $typst_final"
+  fi
+  send_chord C-o
+  sleep 0.3
+  send_chord C-c z r
+  wait_report_count '^STATE file=typst line=80 column=0 ' 2 || true
+  if [ "$(report_count '^STATE file=typst line=80 column=0 ')" -ge 2 ]; then
+    pass imenu-typst-jumplist 'C-o returns from Typst Imenu to its exact origin'
+  else
+    fail imenu-typst-jumplist 'Typst Imenu did not record one Vi jump'
+  fi
+else
+  fail imenu-typst-command 'M-x imenu did not open in the Typst fixture'
 fi
 
 send_chord C-c z 2

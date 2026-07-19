@@ -416,7 +416,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   optional Lisp-v2 connections remain globally selected when loaded
 - generic `M-x imenu` for Eglot document symbols, Lisp-family definitions,
   native Org headings, native Markdown headings and footnotes, and nested
-  Python functions/classes plus native Java, C, C++, Rust, Go, and GDScript declarations
+  Python functions/classes plus native Java, C, C++, Rust, Go, GDScript, and Typst declarations
   when no ready LSP symbol provider is available, with GNU Imenu's successive hierarchy
   prompts, Prescient filtering, exact source placement, configured
   recenter-only feedback, and Vi `C-o` return

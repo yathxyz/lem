@@ -60,6 +60,10 @@
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_GDSCRIPT")))
 
+(defvar *project-outline-test-typst*
+  (uiop:parse-native-namestring
+   (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_TYPST")))
+
 (defvar *project-outline-test-reader-marker*
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_READER_MARKER")))
@@ -108,6 +112,8 @@
                   file *project-outline-test-go*)) "go")
       ((and file (uiop:pathname-equal
                   file *project-outline-test-gdscript*)) "gdscript")
+      ((and file (uiop:pathname-equal
+                  file *project-outline-test-typst*)) "typst")
       (t "other"))))
 
 (defun project-outline-test-command-name (state)
@@ -352,6 +358,9 @@
   (when (mode-active-p (current-buffer) 'lem-lsp-mode::lsp-mode)
     (lem-lsp-mode::lsp-mode nil)))
 
+(define-command lem-yath-test-project-outline-typst () ()
+  (find-file *project-outline-test-typst*))
+
 (define-command lem-yath-test-project-outline-imenu-count () ()
   (let ((candidates (imenu-candidates (current-buffer))))
     (unwind-protect
@@ -396,6 +405,7 @@
   (define-key keymap "C-c z u" 'lem-yath-test-project-outline-rust)
   (define-key keymap "C-c z g" 'lem-yath-test-project-outline-go)
   (define-key keymap "C-c z d" 'lem-yath-test-project-outline-gdscript)
+  (define-key keymap "C-c z t" 'lem-yath-test-project-outline-typst)
   (define-key keymap "C-c z w" 'lem-yath-test-project-outline-imenu-count)
   (define-key keymap "C-c z f" 'lem-yath-test-project-outline-fold-org))
 
