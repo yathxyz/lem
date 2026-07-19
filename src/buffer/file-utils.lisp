@@ -187,7 +187,7 @@ direct in-place write.")
 (defun fsync-stream (stream)
   "Best-effort flush of STREAM's buffered data through to stable storage."
   (finish-output stream)
-  #+sbcl
+  #+(and sbcl (not win32))
   (ignore-errors (sb-posix:fsync (sb-sys:fd-stream-fd stream)))
   (values))
 
@@ -209,7 +209,7 @@ direct in-place write.")
 possible. Best effort: ownership changes usually require privilege and are
 silently skipped when denied."
   (declare (ignorable source-path temp-path))
-  #+sbcl
+  #+(and sbcl (not win32))
   (let ((stat (ignore-errors (sb-posix:stat source-path))))
     (when stat
       ;; chown first: an unprivileged chown() clears setuid/setgid, so the
@@ -258,7 +258,10 @@ temporary file therefore cannot be created.
 The create/write/fsync/metadata/rename/cleanup step sequence is transcribed by
 verified/crash-safety.lisp (SPEC-VK VK-6) and tests/pbt/crash-safety-faults.lisp;
 any change to the sequence (especially removing the fsync before rename, which
-the durability proof depends on) must be mirrored there."
+the durability proof depends on) must be mirrored there. That transcription
+covers the POSIX path only: on Windows there is no fsync and the final replace
+is delete+rename (not atomic), so the no-truncation guarantee is best-effort
+there."
   (when (or (not *atomic-save*) *virtual-file-open*)
     (return-from write-file-atomically
       (write-file-in-place filename writer element-type external-format)))
@@ -281,9 +284,10 @@ the durability proof depends on) must be mirrored there."
            (preserve-file-metadata resolved temp)
            (handler-case
                (progn
-                 #+sbcl (sb-posix:rename temp (namestring resolved))
+                 #+(and sbcl (not win32)) (sb-posix:rename temp (namestring resolved))
+                 #+(and sbcl win32) (uiop:rename-file-overwriting-target temp (namestring resolved))
                  #-sbcl (rename-file temp resolved))
-             (#+sbcl sb-posix:syscall-error #-sbcl file-error (e)
+             (#+(and sbcl (not win32)) sb-posix:syscall-error #-(and sbcl (not win32)) file-error (e)
                (editor-error "Can't replace ~A (rename failed): ~A"
                              (namestring resolved) e)))
            (setf renamed t))

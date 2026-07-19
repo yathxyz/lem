@@ -107,7 +107,8 @@ was closed by adding it in VK-4 hardening) must be mirrored there."
                                 :external-format :utf-8)
              (write-string string out)
              (lem/buffer/file-utils:fsync-stream out))
-           #+sbcl (sb-posix:rename temp (namestring path))
+           #+(and sbcl (not win32)) (sb-posix:rename temp (namestring path))
+           #+(and sbcl win32) (uiop:rename-file-overwriting-target temp (namestring path))
            #-sbcl (rename-file temp path))
       (uiop:delete-file-if-exists temp))))
 
