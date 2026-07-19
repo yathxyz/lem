@@ -472,7 +472,7 @@ index b50d1d4..a0997c1 100644
          (unless (lsp-null-p result)
            (contents-to-markdown-buffer (lsp:hover-contents result)))))))
 
-@@ -882,76 +1051,470 @@ Use this when lsp-mode has side effects that you want to avoid."
+@@ -882,76 +1051,526 @@ Use this when lsp-mode has side effects that you want to avoid."
  ;; - partialResult
  ;; - completionParams.context, include information about how completion was triggered.
  ;; - There are many unused fields in `completionItem`
@@ -800,6 +800,59 @@ index b50d1d4..a0997c1 100644
 +      (message "Cannot expand LSP snippet: no snippet expander is configured")
 +      nil)))
 +
++(defun rollback-completion-change-group (group buffer point-position)
++  "Cancel GROUP, failing closed if its retained history cannot be replayed."
++  (when (buffer-change-group-active-p group)
++    (handler-case
++        (progn
++          (buffer-cancel-change-group group)
++          (unless (move-to-position (buffer-point buffer) point-position)
++            (message "Could not restore point after failed LSP completion"))
++          nil)
++      (error (condition)
++        (when (buffer-change-group-active-p group)
++          (ignore-errors (buffer-abort-change-group group)))
++        condition))))
++
++(defun call-with-completion-change-group (buffer function)
++  "Call FUNCTION as one undo-honest completion mutation in BUFFER."
++  (let ((group
++          (handler-case (buffer-prepare-change-group buffer)
++            (error (condition)
++              (message "Cannot apply LSP completion transactionally: ~A"
++                       condition)
++              nil))))
++    (unless group
++      (return-from call-with-completion-change-group nil))
++    (let* ((point-position (position-at-point (buffer-point buffer)))
++           (result
++            (handler-case (funcall function)
++              (error (condition)
++                (alexandria:when-let
++                    ((rollback-error
++                       (rollback-completion-change-group
++                        group buffer point-position)))
++                  (message "Could not roll back failed LSP completion: ~A"
++                           rollback-error))
++                (error condition)))))
++      (if result
++          (handler-case
++              (buffer-accept-change-group group)
++            (error (condition)
++              (alexandria:when-let
++                  ((rollback-error
++                     (rollback-completion-change-group
++                      group buffer point-position)))
++                (message "Could not roll back uncommitted LSP completion: ~A"
++                         rollback-error))
++              (error condition)))
++          (alexandria:when-let
++              ((rollback-error
++                 (rollback-completion-change-group
++                  group buffer point-position)))
++            (error rollback-error)))
++      result)))
++
 +(defun completion-final-insert-action (item workspace text label snapshot)
 +  (when (completion-item-needs-final-insertion-p item workspace)
 +    (let ((snippet-p (completion-snippet-p item)))
@@ -821,22 +874,25 @@ index b50d1d4..a0997c1 100644
 +                   (setf edits prepared-edits)
 +                   (unless valid-p
 +                     (message "Ignoring invalid or overlapping LSP additionalTextEdits"))
-+                   (handler-case
-+                       (progn
-+                         (ensure-completion-edits-writable
-+                          edits main-start main-end)
-+                         (apply-completion-text-edits edits)
-+                         (if snippet-p
-+                             (funcall installer main-start main-end)
-+                             (progn
-+                               (delete-between-points main-start main-end)
-+                               (move-point point main-start)
-+                               (insert-string point text)
-+                               t)))
-+                     (read-only-error (condition)
-+                       (message "Cannot apply read-only LSP completion: ~A"
-+                                condition)
-+                       nil))))
++                   (call-with-completion-change-group
++                    buffer
++                    (lambda ()
++                      (handler-case
++                          (progn
++                            (ensure-completion-edits-writable
++                             edits main-start main-end)
++                            (apply-completion-text-edits edits)
++                            (if snippet-p
++                                (funcall installer main-start main-end)
++                                (progn
++                                  (delete-between-points main-start main-end)
++                                  (move-point point main-start)
++                                  (insert-string point text)
++                                  t)))
++                        (read-only-error (condition)
++                          (message "Cannot apply read-only LSP completion: ~A"
++                                   condition)
++                          nil))))))
 +            (when edits
 +              (delete-completion-text-edit-points edits))
 +            (delete-point main-start)

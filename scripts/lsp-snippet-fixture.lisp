@@ -4,6 +4,8 @@
   (uiop:getenv "LEM_YATH_LSP_SNIPPET_TEST_REPORT"))
 
 (defvar *lsp-snippet-test-pwned* nil)
+(defvar *lsp-snippet-test-rollback-baseline* nil)
+(defvar *lsp-snippet-test-throwing-hook-fired-p* nil)
 
 (defclass lsp-snippet-test-client
     (lem-language-client/client:client)
@@ -65,6 +67,26 @@
        (item (lem/popup-menu:get-focus-item popup)))
     (lem/completion-mode:completion-item-label item)))
 
+(defun lsp-snippet-test-mutating-throwing-hook (start end old-length)
+  (declare (ignore end old-length))
+  (unless *lsp-snippet-test-throwing-hook-fired-p*
+    (setf *lsp-snippet-test-throwing-hook-fired-p* t)
+    (let ((buffer (point-buffer start)))
+      (remove-hook (variable-value 'after-change-functions :buffer buffer)
+                   'lsp-snippet-test-mutating-throwing-hook)
+      (insert-string (buffer-end-point buffer) "!")
+      (editor-error "fixture nested LSP completion mutation failure"))))
+
+(defun lsp-snippet-test-rollback-history-restored-p ()
+  (and *lsp-snippet-test-rollback-baseline*
+       (let ((after (lem:buffer-undo-tree-snapshot (current-buffer))))
+         (and (= (getf *lsp-snippet-test-rollback-baseline* :node-count)
+                 (getf after :node-count))
+              (= (getf *lsp-snippet-test-rollback-baseline* :payload-bytes)
+                 (getf after :payload-bytes))
+              (eql (getf *lsp-snippet-test-rollback-baseline* :current)
+                   (getf after :current))))))
+
 (defun lsp-snippet-test-reset (label text point-offset)
   (lem/completion-mode:completion-end)
   (auto-completion-cancel-timer)
@@ -78,6 +100,9 @@
   (setf (variable-value 'lem/language-mode:completion-spec
                         :buffer (current-buffer))
         nil)
+  (remove-hook
+   (variable-value 'after-change-functions :buffer (current-buffer))
+   'lsp-snippet-test-mutating-throwing-hook)
   (let ((*inhibit-read-only* t))
     (erase-buffer (current-buffer))
     (insert-string (current-point) text))
@@ -86,6 +111,8 @@
   (clear-buffer-edit-history (current-buffer))
   (setf (buffer-value (current-buffer) :lsp-snippet-test-label) label
         *lsp-snippet-test-pwned* nil
+        *lsp-snippet-test-rollback-baseline* nil
+        *lsp-snippet-test-throwing-hook-fired-p* nil
         (lem-vi-mode/core:buffer-state (current-buffer))
         'lem-vi-mode:normal)
   (lem-yath-snippet-mode t)
@@ -648,6 +675,29 @@
       ;; Preflight must reject this later, protected prefix before any edit.
       (lsp-snippet-test-additional-edit 0 2 "PRE-"))))))
 
+(define-command lem-yath-test-lsp-snippet-transaction-rollback-setup () ()
+  (lsp-snippet-test-reset "transaction-rollback" "AAfoTAILZZ" 4)
+  (lsp-snippet-test-open-items
+   (list
+    (lsp-snippet-test-item
+     "TRANSACTION-ROLLBACK-SNIPPET"
+     "ignored"
+     :filter-text "fo"
+     :text-edit
+     (make-instance 'lsp:text-edit
+                    :range (lsp-snippet-test-range 2 8)
+                    :new-text "atomic(${1:x})$0")
+     :additional-text-edits
+     (vector
+      (lsp-snippet-test-additional-edit 0 2 "PRE-")
+      (lsp-snippet-test-additional-edit 8 10 "-POST")))))
+  (setf *lsp-snippet-test-rollback-baseline*
+        (lem:buffer-undo-tree-snapshot (current-buffer)))
+  (add-hook
+   (variable-value 'after-change-functions :buffer (current-buffer))
+   'lsp-snippet-test-mutating-throwing-hook
+   20000))
+
 (define-command lem-yath-test-lsp-snippet-resolve-setup () ()
   (lsp-snippet-test-reset "resolve" "AAfoTAILZZ" 4)
   (let* ((response
@@ -1121,7 +1171,7 @@
    (concatenate
     'string
     "STATE label=~a text-hex=~a point=~d active=~a field=~a "
-    "completion=~a local=~a focus=~a pwned=~a")
+    "completion=~a local=~a focus=~a pwned=~a hook=~a group=~a history=~a")
    (buffer-value (current-buffer) :lsp-snippet-test-label)
    (lsp-snippet-test-hex (lsp-snippet-test-buffer-text))
    (position-at-point (current-point))
@@ -1130,7 +1180,12 @@
    (if lem/completion-mode::*completion-context* "yes" "no")
    (if (lem/completion-mode:completion-local-filtering-p) "yes" "no")
    (or (lsp-snippet-test-focus-label) "none")
-   (if *lsp-snippet-test-pwned* "yes" "no")))
+   (if *lsp-snippet-test-pwned* "yes" "no")
+   (if *lsp-snippet-test-throwing-hook-fired-p* "yes" "no")
+   (if (lem/buffer/internal::buffer-%active-change-group (current-buffer))
+       "yes"
+       "no")
+   (if (lsp-snippet-test-rollback-history-restored-p) "yes" "no")))
 
 (dolist (keymap (list *global-keymap*
                       lem-vi-mode:*normal-keymap*

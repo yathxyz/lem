@@ -308,6 +308,20 @@ else
     "mixed writable/read-only completion did not open"
 fi
 
+if run_mx lem-yath-test-lsp-snippet-transaction-rollback-setup &&
+   lem_wait_for "$session" 'TRANSACTION-ROLLBACK-SNIPPET' 10 >/dev/null; then
+  lem_keys "$session" Enter
+  sleep 0.4
+  if record_state transaction-rollback; then
+    assert_state throwing-hook-transaction-rollback transaction-rollback \
+      'AAfoTAILZZ' 'active=no' 'field=none' 'completion=no' \
+      'point=5' 'hook=yes' 'group=no' 'history=yes'
+  fi
+else
+  fail throwing-hook-transaction-rollback \
+    "transaction rollback completion did not open"
+fi
+
 if run_mx lem-yath-test-lsp-snippet-resolve-setup &&
    lem_wait_for "$session" 'RESOLVE-SNIPPET' 10 >/dev/null; then
   if (( $(report_count '^RESOLVE ') != 0 )); then

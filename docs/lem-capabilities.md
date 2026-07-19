@@ -610,12 +610,13 @@ symbols, and completion. The client advertises UTF-16, rejects offsets that
 split a surrogate pair, and retains tested UTF-8/UTF-32 conversion helpers.
 Generic edit batches are validated before mutation and applied in descending
 order, so adjacent simultaneous edits cannot consume one another.
-Rollback of the LSP acceptance path after an arbitrary throwing buffer hook
-remains a separate gap. The configured Emacs comparison does not enable Corfu
-Popupinfo, does not advertise CompletionList item defaults or `insertTextMode`,
-and ignores completion commands, so Lem deliberately does not add those as
-parity behavior. The retained-undo change group used for Corfu-style input
-reset is deliberately narrower than that LSP transaction.
+The final LSP insertion owns a separate retained-undo transaction after Corfu
+has closed. If an additional edit, primary edit, snippet installer, or nested
+buffer hook throws, Lem restores the exact pre-accept text, point, and undo-tree
+node/current/payload state without retaining a live transaction owner. The
+configured Emacs comparison does not enable Corfu Popupinfo, does not advertise
+CompletionList item defaults or `insertTextMode`, and ignores completion
+commands, so Lem deliberately does not add those as parity behavior.
 
 ### Embark-style actions — `lem-yath/src/actions.lisp` (verified subset)
 
@@ -989,11 +990,10 @@ are ignored as a unit. Resolve failure likewise leaves the original primary
 completion usable.
 
 This is not full LSP TextMate grammar support. Standard variables, choices,
-variable transforms, strict LSP escaping, and rollback after an arbitrary
-mutation-hook failure remain explicit gaps. Focus-resolved documentation,
-CompletionList item defaults, `insertTextMode`, and completion commands are not
-effective in the configured Eglot/Corfu path and are therefore not parity
-requirements.
+variable transforms, and strict LSP escaping remain explicit gaps.
+Focus-resolved documentation, CompletionList item defaults, `insertTextMode`,
+and completion commands are not effective in the configured Eglot/Corfu path
+and are therefore not parity requirements.
 Malformed payloads are parsed before mutation; an invalid item does not discard
 valid siblings, and a rejected accepted item leaves the completion prefix
 unchanged.
@@ -1001,12 +1001,13 @@ unchanged.
 `InsertReplaceEdit.replace` path, direct and resolved additional edits on both
 sides of the primary range, literal `$1` additional text, one-step undo,
 invalid/overlap rejection, deferred exact-once resolve, original-primary
-preservation, UTF-8/16/32 conversion and split-unit rejection, originating
-workspace use, adjacent generic edits, diagnostic/navigation ranges, literal
-plain-format markers, mirrors and field exit, Tab/Return acceptance,
-multiple-candidate non-insertion, malformed recovery, bounded capability
-advertising, exact-once callbacks, JSON-RPC timeout cleanup, and inert
-server-supplied backquotes through the real ncurses editor.
+preservation, exact text/point/history rollback after a nested throwing mutation
+hook, UTF-8/16/32 conversion and split-unit rejection, originating workspace
+use, adjacent generic edits, diagnostic/navigation ranges, literal plain-format
+markers, mirrors and field exit, Tab/Return acceptance, multiple-candidate
+non-insertion, malformed recovery, bounded capability advertising, exact-once
+callbacks, JSON-RPC timeout cleanup, and inert server-supplied backquotes through
+the real ncurses editor.
 
 Roots retain private-before-community precedence. Tables combine natural
 `prog-mode`, `text-mode`, and `fundamental-mode` ancestry with `.yas-parents`

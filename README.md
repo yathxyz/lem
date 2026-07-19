@@ -230,7 +230,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   after `insertText`, `TextEdit`, or `InsertReplaceEdit` acceptance; direct and
   lazily resolved `additionalTextEdits` share the acceptance undo step,
   UTF-16 ranges are decoded consistently, malformed payloads fail closed, and
-  server-supplied backquoted Lisp remains inert
+  server-supplied backquoted Lisp remains inert; a throwing mutation hook rolls
+  the complete acceptance back to its original text, point, and undo history
 - Emacs-like daily navigation/editing: region-or-line `M-j`, a persistent
   300-entry `M-g r` MRU, filterable `C-x C-b`, asynchronous persistent
   `M-s f` name search, and directory-scoped `M-s g` ripgrep with read-only,
