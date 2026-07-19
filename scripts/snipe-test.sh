@@ -30,7 +30,7 @@ trap 'exit 130' INT TERM
 export HOME="$root/home"
 export XDG_CACHE_HOME="$root/cache"
 export LEM_YATH_SNIPE_REPORT="$root/report"
-export LEM_YATH_SNIPE_SOURCE="$here/lem-yath/src/vi.lisp"
+export LEM_YATH_SNIPE_SOURCE="${LEM_YATH_SOURCE:-$here/lem-yath}/src/vi.lisp"
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$root/fixtures"
 : >"$LEM_YATH_SNIPE_REPORT"
@@ -176,7 +176,7 @@ body_attributes() {
 # two backgrounds separate: the test below verifies that the selected target
 # remains visually distinct from the other matches.
 snipe_selected_background='44|104|48;5;39'
-snipe_match_background='47|107|48;5;251'
+snipe_match_background='47|107|48;5;231|48;5;251'
 
 attribute_count() {
   local colors=$1

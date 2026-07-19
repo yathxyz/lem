@@ -12,7 +12,7 @@ export HOME="$root/home"
 export XDG_CACHE_HOME="$root/cache"
 export WORKDIR="$root/work"
 export LEM_YATH_SO_LONG_REPORT="$root/report"
-export LEM_YATH_SOURCE="$here/lem-yath"
+export LEM_YATH_SOURCE="${LEM_YATH_SOURCE:-$here/lem-yath}"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR"
 : >"$LEM_YATH_SO_LONG_REPORT"
 

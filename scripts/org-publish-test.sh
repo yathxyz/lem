@@ -28,6 +28,7 @@ if [ -e "$LEM_YATH_ORG_PUBLISH_SLOW" ]; then
 fi
 exec "$LEM_YATH_REAL_PANDOC" "$@"
 EOF
+sed -i "1c#!$(command -v bash)" "$LEM_YATH_ORG_PUBLISH_TEST_BIN/pandoc"
 chmod +x "$LEM_YATH_ORG_PUBLISH_TEST_BIN/pandoc"
 
 cat >"$WORKDIR/roam/index.org" <<'EOF'
@@ -117,8 +118,7 @@ if ! start_editor; then
 fi
 
 mx lem-yath-test-org-publish-bindings
-sleep 0.5
-if grep -q '^BINDING C-c C-e LEM-YATH-ORG-EXPORT-DISPATCH$' "$LEM_YATH_ORG_PUBLISH_REPORT"; then
+if wait_report '^BINDING C-c C-e LEM-YATH-ORG-EXPORT-DISPATCH$'; then
   pass bindings 'C-c C-e resolves to the GNU Org-style export dispatcher'
 else
   fail bindings 'one or more Org export suffixes did not resolve'

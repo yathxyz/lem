@@ -18,8 +18,9 @@ export XDG_STATE_HOME="$root/state-home"
 export LEM_HOME="$root/lem-home/"
 export LEM_YATH_PERSISTENCE_STATE_FILE="$root/state/persistence.sexp"
 export LEM_YATH_BOOKMARK_TEST_REPORT="$root/report"
-export LEM_YATH_BOOKMARKS_SOURCE="$here/lem-yath/src/bookmarks.lisp"
-export LEM_YATH_PERSISTENCE_SOURCE="$here/lem-yath/src/persistence.lisp"
+source_root="${LEM_YATH_SOURCE:-$here/lem-yath}"
+export LEM_YATH_BOOKMARKS_SOURCE="$source_root/src/bookmarks.lisp"
+export LEM_YATH_PERSISTENCE_SOURCE="$source_root/src/persistence.lisp"
 export LEM_YATH_BOOKMARK_TEST_PHASE=unknown
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$LEM_HOME" \

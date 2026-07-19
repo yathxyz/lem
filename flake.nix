@@ -660,7 +660,12 @@
                 export LEM_UPSTREAM_BIN=${lemNcurses}/bin/lem
                 export LEM_YATH_CHECK_ID=nix-${name}
                 export LEM_YATH_LEM_SOURCE=${lemPatchedSrc}
-                export LEM_YATH_SNIPPET_DIRS="$PWD/source/lem-yath/snippets:${yasnippet-snippets}/snippets"
+                export LEM_YATH_SOURCE=${self}/lem-yath
+                export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
+                export LEM_YATH_ASPELL_PROGRAM=${lib.getExe' aspellRuntime "aspell"}
+                export LEM_YATH_TIMEOUT_PROGRAM=${lib.getExe' pkgs.coreutils "timeout"}
+                export LEM_YATH_SMTP_SUBMIT_PROGRAM=${smtpSubmit}/bin/lem-yath-smtp-submit
+                export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
 
                 mkdir -p "$HOME" "$XDG_CACHE_HOME"
                 cp -R ${self} source
@@ -842,7 +847,7 @@
             lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
             real-lsp-test = mkRealLspTestApp "lem-yath-real-lsp-test" "real-lsp-test.sh";
             gdscript-test = mkTestAppWithLem lemYath "lem-yath-gdscript-test" "gdscript-test.sh";
-            lint-test = mkTestAppWithLemAndInputs lemYath rustRuntimeInputs "lem-yath-lint-test" "lint-test.sh";
+            lint-test = mkTestAppWithLemAndInputs lemYath (rustRuntimeInputs ++ [ pkgs.nix ]) "lem-yath-lint-test" "lint-test.sh";
             tree-sitter-test = mkTestAppWithLem lemYath "lem-yath-tree-sitter-test" "tree-sitter-test.sh";
             dap-test = mkTestAppWithLemAndInputs lemYath (
               dapRuntimeInputs ++ rustRuntimeInputs
@@ -954,7 +959,7 @@
             lsp-project = mkCheckWithLem lemLspTest "lsp-project" "lsp-project-test.sh";
             real-lsp = mkRealLspCheck "real-lsp" "real-lsp-test.sh";
             gdscript = mkCheckWithLem lemYath "gdscript" "gdscript-test.sh";
-            lint = mkCheckWithLemAndInputs lemYath rustRuntimeInputs "lint" "lint-test.sh";
+            lint = mkCheckWithLemAndInputs lemYath (rustRuntimeInputs ++ [ pkgs.nix ]) "lint" "lint-test.sh";
             tree-sitter = mkCheckWithLem lemYath "tree-sitter" "tree-sitter-test.sh";
             dap = mkCheckWithLemAndInputs lemYath (dapRuntimeInputs ++ rustRuntimeInputs) "dap" "dap-test.sh";
             parity-ledger =

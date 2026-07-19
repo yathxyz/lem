@@ -25,7 +25,7 @@ trap 'exit 130' INT TERM
 export HOME="$root/home"
 export XDG_CACHE_HOME="$root/cache"
 export LEM_YATH_AVY_REPORT="$root/report"
-export LEM_YATH_AVY_SOURCE="${LEM_YATH_AVY_SOURCE:-$here/lem-yath/src/avy.lisp}"
+export LEM_YATH_AVY_SOURCE="${LEM_YATH_AVY_SOURCE:-${LEM_YATH_SOURCE:-$here/lem-yath}/src/avy.lisp}"
 export LEM_TUI_WIDTH="${LEM_TUI_WIDTH:-100}"
 export LEM_TUI_HEIGHT="${LEM_TUI_HEIGHT:-30}"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$root/fixtures"

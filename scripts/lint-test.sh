@@ -44,7 +44,12 @@ if [ ! -x "$here/scripts/fake-ruff.py" ]; then
   printf 'FAIL prerequisites: scripts/fake-ruff.py is not executable\n' >&2
   exit 1
 fi
-ln -s "$here/scripts/fake-ruff.py" "$LEM_YATH_LINT_FAKE_BIN/ruff"
+printf '#!%s\nexec %q %q "$@"\n' \
+  "$(command -v bash)" \
+  "$(command -v python3)" \
+  "$here/scripts/fake-ruff.py" \
+  >"$LEM_YATH_LINT_FAKE_BIN/ruff"
+chmod +x "$LEM_YATH_LINT_FAKE_BIN/ruff"
 
 printf '%s\n' \
   'import os' \

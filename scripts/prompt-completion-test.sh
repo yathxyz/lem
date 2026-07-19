@@ -578,7 +578,13 @@ if invoke_prompt_command lem-yath-test-foreign-owner-prompt 'Foreign owner:'; th
   tmux_cmd send-keys -t "$session" -l foreign-passwd
   sleep 0.8
   screen=$(lem_capture "$session")
-  if grep -Eq 'foreign-passwd.*-rw-r--r--.*root:root' <<<"$screen"; then
+  foreign_owner=$(stat -c '%U:%G' /etc/passwd)
+  foreign_uid=$(stat -c '%u' /etc/passwd)
+  foreign_gid=$(stat -c '%g' /etc/passwd)
+  if { [ "$foreign_uid" != "$(id -u)" ] ||
+       [ "$foreign_gid" != "$(id -g)" ]; } &&
+     grep -E 'foreign-passwd.*-rw-r--r--' <<<"$screen" |
+       grep -Fq "$foreign_owner"; then
     pass file-foreign-owner-annotation \
       'a real foreign-owned file showed its user and group conditionally'
   else

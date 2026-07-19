@@ -8,7 +8,7 @@ root="$(mktemp -d "${TMPDIR:-/tmp}/lem-yath-cursor-state.XXXXXX")"
 export HOME="$root/home"
 export XDG_CACHE_HOME="$root/cache"
 export LEM_YATH_CURSOR_STATE_REPORT="$root/report"
-export LEM_YATH_CURSOR_STATE_SOURCE="$here/lem-yath/src/cursor-state.lisp"
+export LEM_YATH_CURSOR_STATE_SOURCE="${LEM_YATH_SOURCE:-$here/lem-yath}/src/cursor-state.lisp"
 
 session="lem-yath-cursor-state-$id"
 raw="$root/raw"
@@ -147,7 +147,7 @@ send_key() {
 }
 
 assert_cursor_background() {
-  local codes=$1 timeout=${2:-$WAIT_TIMEOUT} code pattern screen index=0
+  local codes=$1 timeout=${2:-$WAIT_TIMEOUT} code indexed pattern screen index=0
   local escape
   escape="$(printf '\033')"
   while ((index < timeout * 4)); do
@@ -156,6 +156,21 @@ assert_cursor_background() {
       pattern="${escape}\\[7m(${escape}\\[[0-9;:]+m)*${escape}\\[${code}m"
       if LC_ALL=C grep -Eq "$pattern" <<<"$screen"; then
         return 0
+      fi
+      # Ncurses may encode the same configured RGB primaries through the
+      # xterm-256 palette instead of the eight/bright ANSI background slots.
+      case "$code" in
+        41|101) indexed=196 ;; # red:   #ff0000
+        42|102) indexed=46  ;; # green: #00ff00
+        46|106) indexed=51  ;; # cyan:  #00ffff
+        47|107) indexed=231 ;; # white: #ffffff
+        *) indexed= ;;
+      esac
+      if [[ -n $indexed ]]; then
+        pattern="${escape}\\[7m(${escape}\\[[0-9;:]+m)*${escape}\\[48;5;${indexed}m"
+        if LC_ALL=C grep -Eq "$pattern" <<<"$screen"; then
+          return 0
+        fi
       fi
     done
     sleep 0.25

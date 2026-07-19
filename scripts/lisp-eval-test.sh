@@ -8,7 +8,7 @@ root="$(mktemp -d "${TMPDIR:-/tmp}/lem-yath-lisp-eval.XXXXXX")"
 export HOME="$root/home"
 export XDG_CACHE_HOME="$root/cache"
 export LEM_YATH_LISP_EVAL_REPORT="$root/report"
-export LEM_YATH_LISP_EVAL_SOURCE="$here/lem-yath/src/lisp-eval.lisp"
+export LEM_YATH_LISP_EVAL_SOURCE="${LEM_YATH_SOURCE:-$here/lem-yath}/src/lisp-eval.lisp"
 source "$here/scripts/tui-driver.sh"
 export LEM_YATH_SOURCE
 

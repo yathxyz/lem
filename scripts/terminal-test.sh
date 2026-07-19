@@ -10,7 +10,14 @@ launch_parent="$root/work"
 launch_directory="$root/work;touch injected-marker"
 source_file="$launch_directory/source.txt"
 injected_marker="$launch_parent/injected-marker"
-terminal_shell="${LEM_YATH_TERMINAL_SHELL_OVERRIDE:-$here/scripts/terminal-shell-fixture.sh}"
+if [[ -n ${LEM_YATH_TERMINAL_SHELL_OVERRIDE:-} ]]; then
+  terminal_shell="$LEM_YATH_TERMINAL_SHELL_OVERRIDE"
+else
+  terminal_shell="$root/terminal-shell-fixture"
+  cp "$here/scripts/terminal-shell-fixture.sh" "$terminal_shell"
+  sed -i "1c#!$(command -v bash)" "$terminal_shell"
+  chmod +x "$terminal_shell"
+fi
 
 export HOME="$root/home"
 export XDG_CACHE_HOME="$root/cache"
