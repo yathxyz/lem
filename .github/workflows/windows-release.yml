@@ -69,7 +69,7 @@ jobs:
           $tgz = Join-Path $env:RUNNER_TEMP "uiop.tgz"
           Invoke-WebRequest "http://beta.quicklisp.org/archive/uiop/2024-10-12/uiop-3.3.7.tgz" -OutFile $tgz
           $sha1 = (Get-FileHash $tgz -Algorithm SHA1).Hash.ToLower()
-          if ($sha1 -ne "e05fafc1749b38f628249565484a9f2329fb47b8") { throw "uiop tarball sha1 mismatch: $sha1" }
+          if ($sha1 -ne "7599e81d10a94dd1c39af80e1f3aef74bdbffa90") { throw "uiop tarball sha1 mismatch: $sha1" }
           tar -xzf $tgz -C $dst
           if (-not (Test-Path (Join-Path $dst "uiop-3.3.7\uiop.asd"))) { throw "uiop extraction failed" }
 
