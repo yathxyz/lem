@@ -20,6 +20,7 @@ export LEM_YATH_PROJECT_OUTLINE_MARKDOWN="$root/native-imenu.md"
 export LEM_YATH_PROJECT_OUTLINE_PYTHON="$root/native-imenu.py"
 export LEM_YATH_PROJECT_OUTLINE_PYTHON_WIDE="$root/native-imenu-wide.py"
 export LEM_YATH_PROJECT_OUTLINE_JAVA="$root/NativeImenu.java"
+export LEM_YATH_PROJECT_OUTLINE_C="$root/native-imenu.c"
 export LEM_YATH_PROJECT_OUTLINE_READER_MARKER="$root/reader-evaluated"
 mkdir -p "$HOME" "$WORKDIR" "$root/config" "$root/outside" "$root/malicious"
 
@@ -169,6 +170,34 @@ for line in $(seq 1 80); do
     *) printf '\n' ;;
   esac
 done >"$LEM_YATH_PROJECT_OUTLINE_JAVA"
+
+for line in $(seq 1 90); do
+  case "$line" in
+    3) printf '%s\n' 'enum Shade { RED, BLUE };' ;;
+    8) printf '%s\n' 'struct Outer {' ;;
+    10) printf '%s\n' '  int field;' ;;
+    12) printf '%s\n' '  struct Nested { int nested; } nested_value;' ;;
+    14) printf '%s\n' '};' ;;
+    20) printf '%s\n' 'union Value { int integer; float real; };' ;;
+    27) printf '%s\n' 'static int global_count = 1;' ;;
+    28) printf '%s\n' 'const char *label = "ok";' ;;
+    29) printf '%s\n' 'int first, second;' ;;
+    32) printf '%s\n' 'int declared(int x);' ;;
+    35) printf '%s\n' 'int (*callback)(int);' ;;
+    42) printf '%s\n' 'static int helper(int value) {' ;;
+    44) printf '%s\n' '  int local = value;' ;;
+    46) printf '%s\n' '  enum LocalShade { LOCAL_RED };' ;;
+    48) printf '%s\n' '  struct LocalRecord { int hidden; };' ;;
+    50) printf '%s\n' '  return local;' ;;
+    51) printf '%s\n' '}' ;;
+    60) printf '%s\n' '__attribute__((deprecated)) int attributed(void) {' ;;
+    61) printf '%s\n' '  return 0;' ;;
+    62) printf '%s\n' '}' ;;
+    70) printf '%s\n' '// struct CommentFake { int nope; };' ;;
+    72) printf '%s\n' 'const char *decoy = "int fake_function(void) {}";' ;;
+    *) printf '\n' ;;
+  esac
+done >"$LEM_YATH_PROJECT_OUTLINE_C"
 
 for line in $(seq 1 80); do
   case "$line" in
@@ -779,6 +808,104 @@ if invoke_mx imenu 'Index item:'; then
   fi
 else
   fail imenu-java-command 'M-x imenu did not reopen for a method jump'
+fi
+
+# Pinned c-ts-mode groups only top-level enum/struct/union declarations,
+# ordinary declarations that are not direct function prototypes, and function
+# definitions.  The multi-declarator declaration contributes its first name.
+send_chord C-c z 0
+lem_wait_for "$session" 'enum Shade' 10 >/dev/null || true
+send_chord C-c z i
+wait_report_count '^IMENU-INDEX file=c count=14$' 1 || true
+c_index_ok=1
+for path in \
+  'Enum' \
+  'Enum/Shade' \
+  'Struct' \
+  'Struct/Outer' \
+  'Union' \
+  'Union/Value' \
+  'Variable' \
+  'Variable/global_count' \
+  'Variable/label' \
+  'Variable/first' \
+  'Variable/decoy' \
+  'Function' \
+  'Function/helper' \
+  'Function/attributed'; do
+  grep -Fqx "IMENU-PATH file=c path=\"$path\"" \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" || c_index_ok=0
+done
+c_root_order="$(sed -n \
+  's/^IMENU-PATH file=c path="\([^/"]*\)"$/\1/p' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | paste -sd, -)"
+if [ "$c_index_ok" = 1 ] &&
+   [ "$(report_count '^IMENU-PATH file=c ')" -eq 14 ] &&
+   [ "$c_root_order" = 'Enum,Struct,Union,Variable,Function' ] &&
+   ! grep -Eq '^IMENU-PATH file=c .*Nested|Local|declared|callback|CommentFake|fake_function|second' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-c-index 'C Imenu matches pinned categories, declarators, and exclusions'
+else
+  fail imenu-c-index 'C categories, names, prototypes, or top-level predicates differed'
+fi
+
+send_chord C-c z b
+if invoke_mx imenu 'Index item:'; then
+  c_top="$(lem_capture "$session")"
+  if grep -Fq 'Enum' <<<"$c_top" &&
+     grep -Fq 'Struct' <<<"$c_top" &&
+     grep -Fq 'Union' <<<"$c_top" &&
+     grep -Fq 'Variable' <<<"$c_top" &&
+     grep -Fq 'Function' <<<"$c_top"; then
+    pass imenu-c-presentation 'C roots use the pinned category order'
+  else
+    fail imenu-c-presentation 'the C category prompt differed'
+  fi
+  send_chord C-g
+else
+  fail imenu-c-command 'M-x imenu did not open in the C fixture'
+fi
+
+send_chord C-c z b
+send_chord C-c z r
+wait_report_count '^STATE file=c line=90 column=0 ' 1 || true
+c_origin="$(grep '^STATE file=c line=90 column=0 ' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+c_origin_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+  <<<"$c_origin")"
+
+if invoke_mx imenu 'Index item:'; then
+  tmux_cmd send-keys -t "$session" -l Function
+  send_chord Enter
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" -l attributed
+  send_chord Enter
+  sleep 0.5
+  send_chord C-c z r
+  wait_report_count '^STATE file=c line=60 column=0 ' 1 || true
+  c_final="$(grep '^STATE file=c line=60 column=0 ' \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  c_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+    <<<"$c_final")"
+  if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+       <<<"$c_final" &&
+     [ -n "$c_origin_view" ] && [ -n "$c_view" ] &&
+     [ "$c_origin_view" != "$c_view" ]; then
+    pass imenu-c-jump 'C Imenu lands on the attributed function node without pulse'
+  else
+    fail imenu-c-jump "the C Imenu destination differed: $c_final"
+  fi
+  send_chord C-o
+  sleep 0.3
+  send_chord C-c z r
+  wait_report_count '^STATE file=c line=90 column=0 ' 2 || true
+  if [ "$(report_count '^STATE file=c line=90 column=0 ')" -ge 2 ]; then
+    pass imenu-c-jumplist 'C-o returns from C Imenu to its exact origin'
+  else
+    fail imenu-c-jumplist 'C Imenu did not record one Vi jump'
+  fi
+else
+  fail imenu-c-command 'M-x imenu did not reopen for a function jump'
 fi
 
 send_chord C-c z 2

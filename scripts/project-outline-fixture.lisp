@@ -40,6 +40,10 @@
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_JAVA")))
 
+(defvar *project-outline-test-c*
+  (uiop:parse-native-namestring
+   (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_C")))
+
 (defvar *project-outline-test-reader-marker*
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_READER_MARKER")))
@@ -78,6 +82,8 @@
                   file *project-outline-test-python-wide*)) "python-wide")
       ((and file (uiop:pathname-equal
                   file *project-outline-test-java*)) "java")
+      ((and file (uiop:pathname-equal
+                  file *project-outline-test-c*)) "c")
       (t "other"))))
 
 (defun project-outline-test-command-name (state)
@@ -271,6 +277,11 @@
   (lem-lsp-mode:without-lsp-mode ()
     (find-file *project-outline-test-java*)))
 
+(define-command lem-yath-test-project-outline-c () ()
+  ;; Exercise the native c-ts-mode fallback without starting clangd.
+  (lem-lsp-mode:without-lsp-mode ()
+    (find-file *project-outline-test-c*)))
+
 (define-command lem-yath-test-project-outline-imenu-count () ()
   (let ((candidates (imenu-candidates (current-buffer))))
     (unwind-protect
@@ -308,6 +319,7 @@
   (define-key keymap "C-c z 7" 'lem-yath-test-project-outline-python)
   (define-key keymap "C-c z 8" 'lem-yath-test-project-outline-python-wide)
   (define-key keymap "C-c z 9" 'lem-yath-test-project-outline-java)
+  (define-key keymap "C-c z 0" 'lem-yath-test-project-outline-c)
   (define-key keymap "C-c z w" 'lem-yath-test-project-outline-imenu-count)
   (define-key keymap "C-c z f" 'lem-yath-test-project-outline-fold-org))
 

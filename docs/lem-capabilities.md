@@ -419,13 +419,20 @@ Native Java buffers reproduce the pinned `Class`, `Interface`, `Enum`, and
 space self-entry displayed as `.`, the pinned `Enum` category indexes records,
 and constructors plus actual enum declarations remain absent. Annotated methods
 jump to the declaration node start. String/comment decoys stay excluded.
+Native C buffers reproduce the pinned `Enum`, `Struct`, `Union`, `Variable`,
+and `Function` sparse-tree categories. Aggregate types and variables use
+Emacs's ancestor-based top-level predicate, direct function prototypes remain
+excluded, multi-declarator statements retain their first declarator, and
+function definitions jump to the full node start, including attributes.
+Nested/local declarations and comment/string decoys stay excluded.
 
 Acceptance records one Vi jumplist entry and runs the configured Imenu feedback:
 recenter only, with no Consult Pulsar pulse. `scripts/lsp-project-test.sh` and
 `scripts/project-outline-test.sh` drive the command through physical M-x,
 successive Return selections, exact target placement, viewport change, silent
 feedback, folded Org reveal, and `C-o` return. Native indices for other
-non-LSP, non-Lisp, non-Python, non-Java modes are not yet implemented.
+non-LSP modes are not yet implemented; C++ also still needs distinct mode and
+grammar routing rather than being parsed as C.
 
 `lem-yath/src/annotations.lisp` supplies a bounded Marginalia-style layer for
 the daily prompt categories. Commands show active bindings and their first
