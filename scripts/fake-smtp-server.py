@@ -43,6 +43,7 @@ def serve() -> None:
     stream = connection.makefile("rwb", buffering=0)
     reply(stream, b"220 fake.local ESMTP")
     authenticated = False
+    tls_active = False
     mail_from = None
     recipients: list[str] = []
     while True:
@@ -60,7 +61,11 @@ def serve() -> None:
             connection = context.wrap_socket(connection, server_side=True)
             connection.settimeout(20)
             stream = connection.makefile("rwb", buffering=0)
+            tls_active = True
         elif upper.startswith(b"AUTH PLAIN"):
+            if not tls_active:
+                reply(stream, b"538 Encryption required")
+                continue
             encoded = command.split(maxsplit=2)[2] if len(command.split()) >= 3 else b""
             if not encoded:
                 reply(stream, b"334 ")
@@ -69,6 +74,9 @@ def serve() -> None:
             authenticated = decoded[-2:] == [USERNAME.encode(), PASSWORD.encode()]
             reply(stream, b"235 Authentication successful" if authenticated else b"535 Authentication failed")
         elif upper == b"AUTH LOGIN":
+            if not tls_active:
+                reply(stream, b"538 Encryption required")
+                continue
             reply(stream, b"334 VXNlcm5hbWU6")
             username = base64.b64decode(line(stream)).decode()
             reply(stream, b"334 UGFzc3dvcmQ6")
@@ -97,6 +105,7 @@ def serve() -> None:
             CAPTURE.write_text(
                 json.dumps(
                     {
+                        "tls": tls_active,
                         "authenticated": authenticated,
                         "mail_from": mail_from,
                         "recipients": recipients,

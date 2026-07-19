@@ -25,6 +25,11 @@
       ((prefix (lem-core::keymap-find map (lem-core::parse-keyspec keys))))
     (lem-core::prefix-suffix prefix)))
 
+(defun notmuch-test-active-key-command (keys)
+  (alexandria:when-let
+      ((prefix (lem-core::lookup-keybind (lem-core::parse-keyspec keys))))
+    (lem-core::prefix-suffix prefix)))
+
 (defun notmuch-test-keys-p ()
   (and
    (eq (notmuch-test-key-command *notmuch-search-mode-keymap* "Return")
@@ -43,6 +48,14 @@
        'lem-yath-notmuch-add-tag)
    (eq (notmuch-test-key-command *notmuch-search-mode-keymap* "-")
        'lem-yath-notmuch-remove-tag)
+   (eq (notmuch-test-key-command *notmuch-search-mode-keymap* "C")
+       'lem-yath-notmuch-compose)
+   (eq (notmuch-test-key-command *notmuch-search-mode-keymap* "c c")
+       'lem-yath-notmuch-compose)
+   (eq (notmuch-test-key-command *notmuch-search-mode-keymap* "c r")
+       'lem-yath-notmuch-reply-sender)
+   (eq (notmuch-test-key-command *notmuch-search-mode-keymap* "c R")
+       'lem-yath-notmuch-reply-all)
    (eq (notmuch-test-key-command *notmuch-search-mode-keymap* "q")
        'quit-active-window)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "g")
@@ -65,6 +78,18 @@
        'lem-yath-notmuch-show-add-tag)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "-")
        'lem-yath-notmuch-show-remove-tag)
+   (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "C")
+       'lem-yath-notmuch-compose)
+   (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "c c")
+       'lem-yath-notmuch-compose)
+   (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "c r")
+       'lem-yath-notmuch-reply-sender)
+   (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "c R")
+       'lem-yath-notmuch-reply-all)
+   (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-c")
+       'lem-yath-notmuch-compose-send)
+   (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-k")
+       'lem-yath-notmuch-compose-cancel)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "C-c s e")
        'lem-yath-salta-open-payment-email-from-notmuch)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "q")
@@ -151,6 +176,35 @@
          (not (uiop:directory-exists-p *notmuch-test-pdf-directory*))))
    (notmuch-test-yes-no (notmuch-test-source-exact-p))))
 
+(define-command lem-yath-notmuch-test-compose-report () ()
+  (let* ((buffer (current-buffer))
+         (text (buffer-text buffer))
+         (compose-p (eq (buffer-major-mode buffer) 'notmuch-compose-mode)))
+    (notmuch-test-log
+     "COMPOSE mode=~a from=~a to=~a subject=~a quote=~a all=~a reply=~a sent=~a fcc=~a read-only=~a keys=~a active-send=~a source=~a"
+     (notmuch-test-yes-no compose-p)
+     (notmuch-test-yes-no
+      (and compose-p
+           (search "From: \"Yanni \\\"Safe\\\"\" <yanni@example.invalid>" text)))
+     (notmuch-test-yes-no
+      (and compose-p (search "To: Bob <bob@example.invalid>" text)))
+     (notmuch-test-yes-no (and compose-p (search "Subject: Re: Second thread" text)))
+     (notmuch-test-yes-no (and compose-p (search "> Primary plain body." text)))
+     (notmuch-test-yes-no
+      (and compose-p (search "Cc: Team <team@example.invalid>" text)))
+     (notmuch-test-yes-no
+      (and compose-p (buffer-value buffer 'notmuch-compose-reply-query)))
+     (notmuch-test-yes-no
+      (and compose-p (buffer-value buffer 'notmuch-compose-sent-message)))
+     (notmuch-test-yes-no
+      (and compose-p (buffer-value buffer 'notmuch-compose-fcc-done-p)))
+     (notmuch-test-yes-no (and compose-p (buffer-read-only-p buffer)))
+     (notmuch-test-yes-no (notmuch-test-keys-p))
+     (notmuch-test-yes-no
+      (eq (notmuch-test-active-key-command "C-c C-c")
+          'lem-yath-notmuch-compose-send))
+     (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
+
 (defun notmuch-test-extraction-refusal
     (attachment &key output-limit timeout)
   (let* ((directory (notmuch-private-temp-directory))
@@ -213,6 +267,7 @@
 (define-key *global-keymap* "F3" 'lem-yath-notmuch-test-open)
 (define-key *global-keymap* "F4" 'lem-yath-notmuch-test-empty)
 (define-key *global-keymap* "F5" 'lem-yath-fetchmail)
+(define-key *global-keymap* "F6" 'lem-yath-notmuch-test-compose-report)
 (define-key *global-keymap* "F8" 'lem-yath-notmuch-test-cleanup-report)
 (define-key *global-keymap* "F9" 'lem-yath-notmuch-test-refusals)
 

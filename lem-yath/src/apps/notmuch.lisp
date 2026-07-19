@@ -2,10 +2,11 @@
 ;;;;
 ;;;; The Emacs config used `M-x notmuch` / `notmuch-search` over a
 ;;;; Proton Bridge -> mbsync (isync) -> notmuch pipeline. This port keeps the
-;;;; daily read path: a newest-first thread search list, opening a thread into
-;;;; a headers+plain-text view, Evil-collection-compatible archive/tag triage,
-;;;; owner-private PDF attachment preview, and a `mbsync -a && notmuch new`
-;;;; fetch.
+;;;; daily path: a newest-first thread search list, opening a thread into a
+;;;; headers+plain-text view, Evil-collection-compatible archive/tag triage,
+;;;; new/reply composition through the configured local SMTP bridge, Notmuch
+;;;; FCC, owner-private PDF attachment preview, and a `mbsync -a && notmuch
+;;;; new` fetch.
 ;;;;
 ;;;; All notmuch interaction is via the CLI with --format=json, parsed by yason
 ;;;; (JSON arrays -> lists, objects -> hash-tables with string keys, null -> NIL).
@@ -22,9 +23,12 @@
 (defparameter *notmuch-process-timeout* 20)
 (defparameter *notmuch-output-limit* (* 4 1024 1024))
 (defparameter *notmuch-attachment-output-limit* (* 128 1024 1024))
+(defparameter *notmuch-message-output-limit* (* 10 1024 1024))
+(defparameter *notmuch-submit-timeout* 45)
 
 (defparameter *notmuch-list-buffer-name* "*lem-yath-mail*")
 (defparameter *notmuch-fetch-buffer-name* "*lem-yath-fetchmail*")
+(defparameter *notmuch-compose-buffer-name* "*lem-yath-mail-compose*")
 
 (defstruct notmuch-attachment
   message-id
@@ -85,6 +89,63 @@ second value distinguishes a valid empty JSON array from a failed command."
     (error (condition)
       (message "notmuch failed: ~a" condition)
       nil)))
+
+(defun notmuch-command-error-text (error-output fallback)
+  "Return one bounded, single-line command error from ERROR-OUTPUT."
+  (let* ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return)
+                               (or error-output "")))
+         (single-line
+           (substitute #\Space #\Return (substitute #\Space #\Newline trimmed))))
+    (if (plusp (length single-line))
+        (subseq single-line 0 (min 500 (length single-line)))
+        fallback)))
+
+(defun notmuch-run-text (args &key input (output-limit *notmuch-output-limit*)
+                                    (timeout *notmuch-process-timeout*))
+  "Run Notmuch ARGS and return stdout, accepting optional string INPUT."
+  (let ((program (or (executable-find "notmuch")
+                     (editor-error "notmuch not found on PATH")))
+        (*project-process-timeout* timeout))
+    (multiple-value-bind (output error-output status)
+        (run-project-program
+         (cons (uiop:native-namestring program) args)
+         :directory (or (ignore-errors (buffer-directory (current-buffer)))
+                        (uiop:getcwd))
+         :input input
+         :output-limit output-limit)
+      (unless (and (integerp status) (zerop status))
+        (editor-error "notmuch failed: ~a"
+                      (notmuch-command-error-text error-output
+                                                  (format nil "exit ~a" status))))
+      output)))
+
+(defun notmuch-config-value (key)
+  "Return one required, control-free Notmuch configuration KEY."
+  (let ((value
+          (string-trim '(#\Space #\Tab #\Newline #\Return)
+                       (notmuch-run-text (list "config" "get" key)))))
+    (unless (and (plusp (length value))
+                 (<= (length value) 4096)
+                 (notany (lambda (character)
+                           (or (char= character #\Null)
+                               (char= character #\Newline)
+                               (char= character #\Return)))
+                         value))
+      (editor-error "Notmuch configuration ~a is missing or invalid" key))
+    value))
+
+(defun notmuch-from-header ()
+  "Return the configured Notmuch primary identity as an RFC 822 From value."
+  (let ((name (notmuch-config-value "user.name"))
+        (email (notmuch-config-value "user.primary_email")))
+    (format nil "\"~a\" <~a>"
+            (with-output-to-string (stream)
+              (loop :for character :across name
+                    :do (when (or (char= character #\\)
+                                  (char= character #\"))
+                          (write-char #\\ stream))
+                        (write-char character stream)))
+            email)))
 
 (defun notmuch-string (value)
   "Coerce a JSON-derived VALUE to a display string (NIL -> \"\")."
@@ -191,6 +252,8 @@ quoting here prevents notmuch's query parser from interpreting metacharacters."
   (make-keymap :description '*notmuch-search-mode-keymap*))
 (defvar *notmuch-show-mode-keymap*
   (make-keymap :description '*notmuch-show-mode-keymap*))
+(defvar *notmuch-compose-mode-keymap*
+  (make-keymap :description '*notmuch-compose-mode-keymap*))
 
 (define-major-mode notmuch-search-mode nil
     (:name "Notmuch"
@@ -203,11 +266,19 @@ quoting here prevents notmuch's query parser from interpreting metacharacters."
      :keymap *notmuch-show-mode-keymap*)
   (setf (buffer-read-only-p (current-buffer)) t))
 
+(define-major-mode notmuch-compose-mode nil
+    (:name "Notmuch-Compose"
+     :keymap *notmuch-compose-mode-keymap*)
+  "Edit a plain-text RFC 822 message for Notmuch SMTP submission.")
+
 (defmethod lem-vi-mode/core:mode-specific-keymaps ((mode notmuch-search-mode))
   (list *notmuch-search-mode-keymap*))
 
 (defmethod lem-vi-mode/core:mode-specific-keymaps ((mode notmuch-show-mode))
   (list *notmuch-show-mode-keymap*))
+
+(defmethod lem-vi-mode/core:mode-specific-keymaps ((mode notmuch-compose-mode))
+  (list *notmuch-compose-mode-keymap*))
 
 (define-key *notmuch-search-mode-keymap* "Return" 'lem-yath-notmuch-open-thread)
 (define-key *notmuch-search-mode-keymap* "q" 'quit-active-window)
@@ -218,6 +289,10 @@ quoting here prevents notmuch's query parser from interpreting metacharacters."
 (define-key *notmuch-search-mode-keymap* "=" 'lem-yath-notmuch-toggle-flagged)
 (define-key *notmuch-search-mode-keymap* "+" 'lem-yath-notmuch-add-tag)
 (define-key *notmuch-search-mode-keymap* "-" 'lem-yath-notmuch-remove-tag)
+(define-key *notmuch-search-mode-keymap* "C" 'lem-yath-notmuch-compose)
+(define-key *notmuch-search-mode-keymap* "c c" 'lem-yath-notmuch-compose)
+(define-key *notmuch-search-mode-keymap* "c r" 'lem-yath-notmuch-reply-sender)
+(define-key *notmuch-search-mode-keymap* "c R" 'lem-yath-notmuch-reply-all)
 (define-key *notmuch-show-mode-keymap* "q" 'quit-active-window)
 (define-key *notmuch-show-mode-keymap* "g" 'lem-yath-notmuch-show-refresh)
 (define-key *notmuch-show-mode-keymap* "Return" 'lem-yath-notmuch-open-part)
@@ -229,6 +304,194 @@ quoting here prevents notmuch's query parser from interpreting metacharacters."
 (define-key *notmuch-show-mode-keymap* "=" 'lem-yath-notmuch-show-toggle-flagged)
 (define-key *notmuch-show-mode-keymap* "+" 'lem-yath-notmuch-show-add-tag)
 (define-key *notmuch-show-mode-keymap* "-" 'lem-yath-notmuch-show-remove-tag)
+(define-key *notmuch-show-mode-keymap* "C" 'lem-yath-notmuch-compose)
+(define-key *notmuch-show-mode-keymap* "c c" 'lem-yath-notmuch-compose)
+(define-key *notmuch-show-mode-keymap* "c r" 'lem-yath-notmuch-reply-sender)
+(define-key *notmuch-show-mode-keymap* "c R" 'lem-yath-notmuch-reply-all)
+(define-key *notmuch-compose-mode-keymap* "C-c C-c"
+  'lem-yath-notmuch-compose-send)
+(define-key *notmuch-compose-mode-keymap* "C-c C-k"
+  'lem-yath-notmuch-compose-cancel)
+
+;;; --- compose, reply, and submit -------------------------------------------
+
+(defun notmuch-compose-existing-buffer ()
+  (alexandria:when-let ((buffer (get-buffer *notmuch-compose-buffer-name*)))
+    (unless (deleted-buffer-p buffer) buffer)))
+
+(defun notmuch-compose-position-point (buffer)
+  "Place BUFFER's point after the first editable recipient header."
+  (let ((point (buffer-point buffer)))
+    (buffer-start point)
+    (cond ((search-forward point "To:") (line-end point))
+          ((search-forward point "Subject:") (line-end point))
+          (t (buffer-end point)))))
+
+(defun notmuch-compose-open (text &key reply-query)
+  "Open TEXT in the single Notmuch composition buffer.
+
+REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
+  (alexandria:when-let ((existing (notmuch-compose-existing-buffer)))
+    (switch-to-buffer existing nil)
+    (editor-error "A Notmuch composition is already open"))
+  (let ((origin (current-buffer))
+        (buffer (make-buffer *notmuch-compose-buffer-name*)))
+    (with-buffer-read-only buffer nil
+      (erase-buffer buffer)
+      (change-buffer-mode buffer 'notmuch-compose-mode)
+      (insert-string (buffer-point buffer) text)
+      (setf (buffer-directory buffer)
+            (or (ignore-errors (buffer-directory origin)) (uiop:getcwd))
+            (buffer-value buffer 'notmuch-compose-origin) origin
+            (buffer-value buffer 'notmuch-compose-reply-query) reply-query
+            (buffer-value buffer 'notmuch-compose-sent-message) nil
+            (buffer-value buffer 'notmuch-compose-fcc-done-p) nil
+            (buffer-value buffer 'notmuch-compose-reply-tag-done-p) nil)
+      (notmuch-compose-position-point buffer))
+    (buffer-unmark buffer)
+    (switch-to-buffer buffer nil)
+    (message "Write the message, then C-c C-c to send or C-c C-k to cancel")
+    buffer))
+
+(define-command lem-yath-notmuch-compose () ()
+  "Compose new mail (`C' or `cc' in Notmuch views)."
+  (notmuch-compose-open
+   (format nil "From: ~a~%To: ~%Subject: ~%~%" (notmuch-from-header))))
+
+(defun notmuch-current-reply-query ()
+  "Return the exact message or thread query selected in a Notmuch view."
+  (let ((buffer (current-buffer)))
+    (cond
+      ((eq (buffer-major-mode buffer) 'notmuch-show-mode)
+       (alexandria:if-let ((message-id (notmuch-message-id-at-point)))
+         (notmuch-message-id-query message-id)
+         (editor-error "No message at point")))
+      ((eq (buffer-major-mode buffer) 'notmuch-search-mode)
+       (alexandria:if-let ((thread-id (notmuch-thread-id-at-point)))
+         (notmuch-thread-id-query thread-id)
+         (editor-error "No thread at point")))
+      (t (editor-error "Not in a Notmuch message or search view")))))
+
+(defun notmuch-compose-reply (reply-all-p)
+  "Compose a reply at point; include all recipients when REPLY-ALL-P."
+  (let* ((query (notmuch-current-reply-query))
+         (template
+           (notmuch-run-text
+            (list "reply" "--format=default"
+                  (if reply-all-p "--reply-to=all" "--reply-to=sender")
+                  query)
+            :output-limit *notmuch-message-output-limit*)))
+    (unless (plusp (length template))
+      (editor-error "notmuch produced an empty reply template"))
+    (notmuch-compose-open template :reply-query query)))
+
+(define-command lem-yath-notmuch-reply-sender () ()
+  "Reply to the sender at point (`cr')."
+  (notmuch-compose-reply nil))
+
+(define-command lem-yath-notmuch-reply-all () ()
+  "Reply to the sender and all recipients at point (`cR')."
+  (notmuch-compose-reply t))
+
+(defun notmuch-smtp-submit-program ()
+  (or (alexandria:when-let ((configured
+                              (uiop:getenv "LEM_YATH_SMTP_SUBMIT_PROGRAM")))
+        (and (plusp (length configured))
+             (probe-file configured)
+             configured))
+      (alexandria:when-let ((program
+                              (executable-find "lem-yath-smtp-submit")))
+        (uiop:native-namestring program))
+      (editor-error "lem-yath-smtp-submit is not available")))
+
+(defun notmuch-submit-message (raw-message)
+  "Submit RAW-MESSAGE and return the exact normalized transmitted message."
+  (unless (and (plusp (length raw-message))
+               (<= (length raw-message) *notmuch-message-output-limit*)
+               (or (search (format nil "~%~%") raw-message)
+                   (search (format nil "~c~c~c~c" #\Return #\Newline
+                                   #\Return #\Newline)
+                           raw-message)))
+    (editor-error "The message is empty, too large, or lacks a header/body separator"))
+  (let ((*project-process-timeout* *notmuch-submit-timeout*))
+    (multiple-value-bind (output error-output status)
+        (run-project-program
+         (list (notmuch-smtp-submit-program))
+         :directory (or (ignore-errors (buffer-directory (current-buffer)))
+                        (uiop:getcwd))
+         :input raw-message
+         :output-limit *notmuch-message-output-limit*)
+      (unless (and (integerp status) (zerop status) (plusp (length output)))
+        (editor-error "~a"
+                      (notmuch-command-error-text error-output
+                                                  "SMTP submission failed")))
+      output)))
+
+(defun notmuch-fcc-sent-message (message-text)
+  "Insert MESSAGE-TEXT into Notmuch's configured default `sent' folder."
+  (notmuch-run-text
+   (list "insert" "--create-folder" "--folder=sent")
+   :input message-text
+   :output-limit *notmuch-output-limit*)
+  t)
+
+(defun notmuch-close-compose (buffer)
+  (let ((origin (buffer-value buffer 'notmuch-compose-origin)))
+    (when (and origin (not (deleted-buffer-p origin)))
+      (switch-to-buffer origin nil))
+    (buffer-unmark buffer)
+    (delete-buffer buffer)))
+
+(defun notmuch-compose-send-buffer (buffer)
+  "Submit, FCC, tag, and close the Notmuch composition BUFFER.
+
+Each completed stage is recorded before the next one begins, so retrying a
+later failure cannot submit the message twice.  Stage failures are signalled to
+the interactive command so it can retain BUFFER and explain the recovery."
+  (unless (eq (buffer-major-mode buffer) 'notmuch-compose-mode)
+    (error "Not in a Notmuch composition"))
+  (unless (buffer-value buffer 'notmuch-compose-sent-message)
+    (setf (buffer-value buffer 'notmuch-compose-sent-message)
+          (notmuch-submit-message (buffer-text buffer)))
+    (buffer-unmark buffer)
+    (setf (buffer-read-only-p buffer) t))
+  (unless (buffer-value buffer 'notmuch-compose-fcc-done-p)
+    (notmuch-fcc-sent-message
+     (buffer-value buffer 'notmuch-compose-sent-message))
+    (setf (buffer-value buffer 'notmuch-compose-fcc-done-p) t))
+  (unless (buffer-value buffer 'notmuch-compose-reply-tag-done-p)
+    (alexandria:when-let
+        ((query (buffer-value buffer 'notmuch-compose-reply-query)))
+      (unless (notmuch-change-tags query '("+replied"))
+        (error "tagging the sent reply failed")))
+    (setf (buffer-value buffer 'notmuch-compose-reply-tag-done-p) t))
+  (notmuch-close-compose buffer)
+  t)
+
+(define-command lem-yath-notmuch-compose-send () ()
+  "Submit, FCC, and finish this composition (`C-c C-c')."
+  (let ((buffer (current-buffer)))
+    (handler-case
+        (when (notmuch-compose-send-buffer buffer)
+          (message "Message sent and filed in Notmuch"))
+      (error (condition)
+        (let* ((description (princ-to-string condition))
+               (bounded (subseq description 0 (min 500 (length description)))))
+          (if (buffer-value buffer 'notmuch-compose-sent-message)
+              (message "Message sent; recovery required: ~a. C-c C-c retries the fixed sent copy without SMTP"
+                       bounded)
+              (message "Mail was not sent: ~a" bounded)))
+        nil))))
+
+(define-command lem-yath-notmuch-compose-cancel () ()
+  "Discard an unsent composition, or close a sent recovery buffer (`C-c C-k')."
+  (let ((buffer (current-buffer)))
+    (unless (eq (buffer-major-mode buffer) 'notmuch-compose-mode)
+      (editor-error "Not in a Notmuch composition"))
+    (when (or (buffer-value buffer 'notmuch-compose-sent-message)
+              (not (buffer-modified-p buffer))
+              (prompt-for-y-or-n-p "Discard this unsent mail composition?"))
+      (notmuch-close-compose buffer))))
 
 (defun notmuch-render-search (buffer threads query &optional selected-id)
   "Fill BUFFER with one line per thread in THREADS (parsed search JSON).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Real-TUI acceptance for the configured Notmuch read/fetch workflow.
+# Real-TUI acceptance for the configured Notmuch read/compose/send/fetch workflow.
 set -euo pipefail
 
 # Lem/tmux key decoding requires a UTF-8 locale in the Nix sandbox.
@@ -14,6 +14,10 @@ root="$(mktemp -d "${TMPDIR:-/tmp}/lem-yath-notmuch.XXXXXX")"
 session="lem-yath-notmuch-$id"
 
 cleanup() {
+  if [[ -n ${smtp_server_pid:-} ]]; then
+    kill "$smtp_server_pid" 2>/dev/null || true
+    wait "$smtp_server_pid" 2>/dev/null || true
+  fi
   lem_stop "$session" || true
   rm -rf -- "$root"
 }
@@ -27,6 +31,9 @@ export LEM_YATH_NOTMUCH_LOG="$root/notmuch-argv.jsonl"
 export LEM_YATH_NOTMUCH_STATE="$root/state.json"
 export LEM_YATH_MBSYNC_LOG="$root/mbsync-argv"
 export LEM_YATH_NOTMUCH_OPEN_LOG="$root/xdg-open.jsonl"
+export LEM_YATH_NOTMUCH_INSERT_LOG="$root/notmuch-insert.jsonl"
+export LEM_YATH_SMTP_FAKE_LOG="$root/smtp-submit.jsonl"
+export LEM_YATH_NOTMUCH_FAIL_INSERT_ONCE="$root/fail-insert-once"
 export LEM_YATH_NOTMUCH_PDF="$root/notmuch attachment;safe.pdf"
 fakebin="$root/fake bin;safe"
 export LEM_YATH_NOTMUCH_FAKE_BIN="$fakebin"
@@ -35,16 +42,22 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$fakebin"
 : >"$LEM_YATH_NOTMUCH_LOG"
 : >"$LEM_YATH_MBSYNC_LOG"
 : >"$LEM_YATH_NOTMUCH_OPEN_LOG"
-printf '%s\n' '{"searches":0,"news":0,"tags":{"alpha@example.invalid":["inbox","unread"],"payment+safe;touch PWNED@example.invalid":["inbox","unread"],"reply/second?value@example.invalid":["inbox","unread"]}}' >"$LEM_YATH_NOTMUCH_STATE"
+: >"$LEM_YATH_NOTMUCH_INSERT_LOG"
+: >"$LEM_YATH_SMTP_FAKE_LOG"
+printf '%s\n' '{"searches":0,"news":0,"inserts":0,"tags":{"alpha@example.invalid":["inbox","unread"],"payment+safe;touch PWNED@example.invalid":["inbox","unread"],"reply/second?value@example.invalid":["inbox","unread"]}}' >"$LEM_YATH_NOTMUCH_STATE"
 cp "$here/scripts/fake-notmuch.py" "$fakebin/notmuch"
 cp "$here/scripts/fake-mbsync.sh" "$fakebin/mbsync"
 cp "$here/scripts/fake-notmuch-xdg-open.py" "$fakebin/xdg-open"
+cp "$here/scripts/fake-smtp-submit.py" "$fakebin/lem-yath-smtp-submit"
 python=$(command -v python3)
 shell=$(command -v bash)
-sed -i "1c#!$python" "$fakebin/notmuch" "$fakebin/xdg-open"
+sed -i "1c#!$python" "$fakebin/notmuch" "$fakebin/xdg-open" "$fakebin/lem-yath-smtp-submit"
 sed -i "1c#!$shell" "$fakebin/mbsync"
-chmod +x "$fakebin/notmuch" "$fakebin/mbsync" "$fakebin/xdg-open"
+chmod +x "$fakebin/notmuch" "$fakebin/mbsync" "$fakebin/xdg-open" "$fakebin/lem-yath-smtp-submit"
 export PATH="$fakebin:$PATH"
+
+real_smtp_program=${LEM_YATH_SMTP_SUBMIT_PROGRAM:?configured wrapper did not expose the SMTP helper}
+export LEM_YATH_SMTP_SUBMIT_PROGRAM="$fakebin/lem-yath-smtp-submit"
 
 source_file="$root/source file;safe.txt"
 printf 'Notmuch source remains exact\n' >"$source_file"
@@ -126,6 +139,94 @@ notmuch_tag_prompt() {
   lem_keys "$session" Enter
 }
 
+# Exercise the packaged submission helper itself against a one-shot local
+# STARTTLS server before the TUI uses a deterministic fake submitter.  This
+# proves authinfo lookup, AUTH, envelope/Bcc handling, and normalized FCC bytes
+# without contacting the owner's Bridge or the network.
+smtp_tls="$root/smtp-tls"
+mkdir -p "$smtp_tls"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=localhost' \
+  -keyout "$smtp_tls/key.pem" -out "$smtp_tls/cert.pem" >/dev/null 2>&1
+export LEM_YATH_SMTP_TEST_PORT_FILE="$smtp_tls/port"
+export LEM_YATH_SMTP_TEST_CAPTURE="$smtp_tls/capture.json"
+export LEM_YATH_SMTP_TEST_CERT="$smtp_tls/cert.pem"
+export LEM_YATH_SMTP_TEST_KEY="$smtp_tls/key.pem"
+export LEM_YATH_SMTP_TEST_USERNAME='bridge user'
+export LEM_YATH_SMTP_TEST_PASSWORD='bridge;password'
+python3 "$here/scripts/fake-smtp-server.py" >"$smtp_tls/server.log" 2>&1 &
+smtp_server_pid=$!
+for _ in $(seq 1 80); do
+  [[ -s $LEM_YATH_SMTP_TEST_PORT_FILE ]] && break
+  sleep 0.1
+done
+smtp_port=$(cat "$LEM_YATH_SMTP_TEST_PORT_FILE" 2>/dev/null || true)
+printf '%s\n' \
+  'machine unrelated.invalid login ignored password ignored' >"$HOME/.authinfo"
+printf '%s\n' \
+  'machine 127.0.0.1' \
+  "port $smtp_port" \
+  'login "bridge user"' \
+  'password "bridge;password"' >"$HOME/.netrc"
+chmod 600 "$HOME/.authinfo" "$HOME/.netrc"
+smtp_input="$smtp_tls/input.eml"
+smtp_output="$smtp_tls/output.eml"
+cat >"$smtp_input" <<'EOF'
+From: Yanni <yanni@example.invalid>
+To: Alice <alice@example.invalid>
+Bcc: Audit <audit+safe-touch-PWNED@example.invalid>
+Subject: SMTP helper; $(touch PWNED)
+
+Literal body; `touch PWNED`.
+EOF
+smtp_helper_ok=1
+LEM_YATH_SMTP_SERVER=127.0.0.1 \
+LEM_YATH_SMTP_PORT="$smtp_port" \
+  "$real_smtp_program" <"$smtp_input" >"$smtp_output" 2>"$smtp_tls/helper.err" || smtp_helper_ok=0
+wait "$smtp_server_pid" || smtp_helper_ok=0
+smtp_server_pid=
+if ((smtp_helper_ok)) && python3 - "$smtp_output" "$LEM_YATH_SMTP_TEST_CAPTURE" <<'PY'
+import json, sys
+from email import policy
+from email.parser import BytesParser
+
+output = open(sys.argv[1], "rb").read()
+capture = json.load(open(sys.argv[2]))
+message = BytesParser(policy=policy.default).parsebytes(output)
+assert capture["tls"] is True
+assert capture["authenticated"] is True
+assert capture["mail_from"] == "<yanni@example.invalid>"
+assert capture["recipients"] == [
+    "<alice@example.invalid>",
+    "<audit+safe-touch-PWNED@example.invalid>",
+]
+assert message["Bcc"] is None
+assert message["Date"] and message["Message-ID"]
+assert message.get_content_type() == "text/plain"
+assert "Literal body; `touch PWNED`." in output.decode()
+assert "Bcc:" not in capture["message"]
+assert capture["message"].encode() == output
+PY
+then
+  pass smtp-helper 'packaged STARTTLS submission authenticated privately, hid Bcc, and returned exact FCC bytes'
+else
+  fail smtp-helper 'STARTTLS, authinfo, envelope recipients, Bcc stripping, or normalized output diverged'
+fi
+invalid_smtp="$smtp_tls/invalid.eml"
+printf '%s\n' \
+  'From: Yanni <yanni@example.invalid>' \
+  'To: Alice <alice@example.invalid>' \
+  'Bcc: Audit <audit+safe;touch-PWNED@example.invalid>' \
+  'Subject: invalid recipient' '' 'body' >"$invalid_smtp"
+if ! LEM_YATH_SMTP_SERVER=127.0.0.1 \
+     LEM_YATH_SMTP_PORT="$smtp_port" \
+       "$real_smtp_program" <"$invalid_smtp" >"$smtp_tls/invalid.out" \
+       2>"$smtp_tls/invalid.err" &&
+   grep -Fq 'Bcc contains a malformed address' "$smtp_tls/invalid.err"; then
+  pass smtp-address-refusal 'malformed recipient syntax failed before any SMTP connection'
+else
+  fail smtp-address-refusal 'the helper accepted or misclassified a malformed recipient address'
+fi
+
 fixture="$(lem-yath_lisp_string "$here/scripts/notmuch-fixture.lisp")"
 lem_start "$session" "$source_file" --eval "(load #P$fixture)"
 
@@ -192,6 +293,136 @@ if wait_report REFUSAL "$before_refusal" &&
   pass pdf-refusal 'oversize, non-PDF, timeout, and invalid-ID extraction failed cleanly'
 else
   fail pdf-refusal 'an attachment extraction refusal leaked or disturbed the mail view'
+fi
+
+before_compose=$(report_count COMPOSE)
+lem_keys "$session" C
+if lem_wait_for "$session" 'Subject:' 20 >/dev/null; then
+  lem_keys "$session" F6
+fi
+new_compose_ok=0
+if wait_report COMPOSE "$before_compose" &&
+   [[ $(latest COMPOSE) == 'COMPOSE mode=yes from=yes to=no subject=no quote=no all=no reply=no sent=no fcc=no read-only=no keys=yes active-send=yes source=yes' ]]; then
+  new_compose_ok=1
+fi
+lem_keys "$session" C-c C-k
+if ((new_compose_ok)) && lem_wait_for "$session" 'Primary plain body' 20 >/dev/null; then
+  pass compose-new 'C opened the configured Notmuch identity in an editable mail buffer and C-c C-k returned'
+else
+  fail compose-new 'new-mail identity, compose mode, or cancellation diverged'
+fi
+
+before_compose=$(report_count COMPOSE)
+lem_keys "$session" c c
+if lem_wait_for "$session" 'Subject:' 20 >/dev/null; then
+  lem_keys "$session" F6
+fi
+compose_alias_ok=0
+if wait_report COMPOSE "$before_compose" &&
+   [[ $(latest COMPOSE) == 'COMPOSE mode=yes from=yes to=no subject=no quote=no all=no reply=no sent=no fcc=no read-only=no keys=yes active-send=yes source=yes' ]]; then
+  compose_alias_ok=1
+fi
+lem_keys "$session" C-c C-k
+if ((compose_alias_ok)) && lem_wait_for "$session" 'Primary plain body' 20 >/dev/null; then
+  pass compose-alias 'cc opened the same configured new-mail composition and canceled cleanly'
+else
+  fail compose-alias 'the Evil-collection cc alias did not reach new-mail composition'
+fi
+
+before_compose=$(report_count COMPOSE)
+lem_keys "$session" c R
+if lem_wait_for "$session" 'Cc: Team' 20 >/dev/null; then
+  lem_keys "$session" F6
+fi
+reply_all_ok=0
+if wait_report COMPOSE "$before_compose" &&
+   [[ $(latest COMPOSE) == 'COMPOSE mode=yes from=yes to=yes subject=yes quote=yes all=yes reply=yes sent=no fcc=no read-only=no keys=yes active-send=yes source=yes' ]]; then
+  reply_all_ok=1
+fi
+lem_keys "$session" C-c C-k
+if ((reply_all_ok)) && lem_wait_for "$session" 'Primary plain body' 20 >/dev/null &&
+   python3 - "$LEM_YATH_NOTMUCH_LOG" <<'PY'
+import json, sys
+
+calls = [json.loads(line) for line in open(sys.argv[1])]
+query = 'id:"payment+safe;touch PWNED@example.invalid"'
+assert ["reply", "--format=default", "--reply-to=all", query] in calls
+PY
+then
+  pass reply-all 'cR used the exact selected Message-ID and Notmuch all-recipient template'
+else
+  fail reply-all 'the Evil-collection cR route, Cc template, or exact reply query diverged'
+fi
+
+before_compose=$(report_count COMPOSE)
+lem_keys "$session" c r
+if lem_wait_for "$session" '> Primary plain body.' 20 >/dev/null; then
+  lem_keys "$session" F6
+fi
+if wait_report COMPOSE "$before_compose" &&
+   [[ $(latest COMPOSE) == 'COMPOSE mode=yes from=yes to=yes subject=yes quote=yes all=no reply=yes sent=no fcc=no read-only=no keys=yes active-send=yes source=yes' ]]; then
+  pass reply-template 'cr used the exact selected Message-ID and Notmuch sender-reply template'
+else
+  fail reply-template 'reply query, headers, quote, compose state, or Evil-collection keys diverged'
+fi
+
+lem_keys "$session" G o
+tmux_cmd send-keys -t "$session" -l -- 'Editor-composed reply; $(touch PWNED).'
+sleep 0.25
+lem_keys "$session" Escape
+sleep 0.25
+lem_wait_for "$session" 'NORMAL' 10 >/dev/null || true
+touch "$LEM_YATH_NOTMUCH_FAIL_INSERT_ONCE"
+before_smtp=$(wc -l <"$LEM_YATH_SMTP_FAKE_LOG")
+before_insert=$(wc -l <"$LEM_YATH_NOTMUCH_INSERT_LOG")
+before_compose=$(report_count COMPOSE)
+before_notmuch=$(wc -l <"$LEM_YATH_NOTMUCH_LOG")
+lem_keys "$session" C-c C-c
+wait_log_count "$LEM_YATH_SMTP_FAKE_LOG" "$((before_smtp + 1))" || true
+wait_log_count "$LEM_YATH_NOTMUCH_LOG" "$((before_notmuch + 1))" || true
+lem_wait_for "$session" 'Message sent; recovery required:' 20 >/dev/null || true
+lem_keys "$session" F6
+if wait_report COMPOSE "$before_compose" &&
+   [[ $(latest COMPOSE) == 'COMPOSE mode=yes from=yes to=yes subject=yes quote=yes all=no reply=yes sent=yes fcc=no read-only=yes keys=yes active-send=yes source=yes' ]] &&
+   [[ $(wc -l <"$LEM_YATH_SMTP_FAKE_LOG") -eq $((before_smtp + 1)) ]]; then
+  pass send-recovery 'an FCC failure retained a stage-safe recovery buffer after one successful SMTP submission'
+else
+  fail send-recovery 'the FCC failure lost stage state or duplicated/recorded the wrong operation'
+fi
+
+# The report is written just before its command returns.  Let the key
+# dispatcher finish that command before exercising the real recovery chord;
+# otherwise a queued C-c can be consumed as part of the preceding F6 event.
+sleep 0.5
+lem_keys "$session" C-c C-c
+wait_log_count "$LEM_YATH_NOTMUCH_INSERT_LOG" "$((before_insert + 1))" || true
+
+if lem_wait_for "$session" 'Primary plain body' 20 >/dev/null &&
+   [[ $(wc -l <"$LEM_YATH_SMTP_FAKE_LOG") -eq $((before_smtp + 1)) ]] &&
+   [[ $(wc -l <"$LEM_YATH_NOTMUCH_INSERT_LOG") -eq $((before_insert + 1)) ]] &&
+   python3 - "$LEM_YATH_SMTP_FAKE_LOG" "$LEM_YATH_NOTMUCH_INSERT_LOG" \
+     "$LEM_YATH_NOTMUCH_LOG" "$LEM_YATH_NOTMUCH_STATE" <<'PY'
+import json, sys
+
+smtp = [json.loads(line) for line in open(sys.argv[1])]
+inserted = [json.loads(line) for line in open(sys.argv[2])]
+calls = [json.loads(line) for line in open(sys.argv[3])]
+state = json.load(open(sys.argv[4]))
+assert len(smtp) == 1 and smtp[0]["argv"] == []
+assert "Editor-composed reply; $(touch PWNED)." in smtp[0]["input"]
+assert "<lem-yath-sent@example.invalid>" in smtp[0]["wire"]
+assert inserted == [smtp[0]["wire"]]
+query = 'id:"payment+safe;touch PWNED@example.invalid"'
+assert ["reply", "--format=default", "--reply-to=sender", query] in calls
+assert calls.count(["insert", "--create-folder", "--folder=sent"]) == 2
+assert ["tag", "+replied", "--", query] in calls
+assert state["inserts"] == 1
+assert "replied" in state["tags"]["payment+safe;touch PWNED@example.invalid"]
+PY
+then
+  pass send-reply 'retry performed only FCC/tag, returned to the show view, and preserved the exact transmitted message'
+else
+  fail send-reply 'SMTP, no-duplicate retry, FCC bytes, replied tag, or origin restoration diverged'
 fi
 
 lem_keys "$session" C-c s e
@@ -293,7 +524,7 @@ positions = iter(range(len(calls)))
 for wanted in expected:
     assert any(calls[index] == wanted for index in positions), wanted
 state = json.load(open(sys.argv[2]))
-assert state["tags"]["payment+safe;touch PWNED@example.invalid"] == ["flagged"]
+assert sorted(state["tags"]["payment+safe;touch PWNED@example.invalid"]) == ["flagged", "replied"]
 assert state["tags"]["reply/second?value@example.invalid"] == []
 PY
 then
@@ -362,11 +593,11 @@ positions = iter(range(len(calls)))
 for wanted in expected:
     assert any(calls[index] == wanted for index in positions), wanted
 state = json.load(open(sys.argv[2]))
-for message_id in (
-    "payment+safe;touch PWNED@example.invalid",
-    "reply/second?value@example.invalid",
-):
-    assert sorted(state["tags"][message_id]) == ["flagged", "unread"]
+assert sorted(state["tags"]["payment+safe;touch PWNED@example.invalid"]) == [
+    "flagged", "replied", "unread"
+]
+assert sorted(state["tags"]["reply/second?value@example.invalid"]) == ["flagged", "unread"]
+for message_id in ("payment+safe;touch PWNED@example.invalid", "reply/second?value@example.invalid"):
     assert "failtag" not in state["tags"][message_id]
 PY
 then

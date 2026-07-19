@@ -341,6 +341,18 @@
             notmuch
           ];
 
+          smtpSubmit = pkgs.writeShellApplication {
+            name = "lem-yath-smtp-submit";
+            runtimeInputs = with pkgs; [
+              gnupg
+              python3
+            ];
+            text = ''
+              export LEM_YATH_GPG_PROGRAM=${lib.getExe pkgs.gnupg}
+              exec ${lib.getExe' pkgs.python3 "python3"} ${./scripts/lem-yath-smtp-submit.py} "$@"
+            '';
+          };
+
           defaultRuntimeInputs =
             coreRuntimeInputs
             ++ dapRuntimeInputs
@@ -486,6 +498,7 @@
               export LEM_YATH_LEM_SOURCE=${lemPatchedSrc}
               export LEM_YATH_MCP_FETCH_PROGRAM="''${LEM_YATH_MCP_FETCH_PROGRAM:-${lib.getExe' pkgs.uv "uvx"}}"
               export LEM_YATH_MCP_DOCKER_PROGRAM="''${LEM_YATH_MCP_DOCKER_PROGRAM:-${lib.getExe pkgs.docker-client}}"
+              export LEM_YATH_SMTP_SUBMIT_PROGRAM="''${LEM_YATH_SMTP_SUBMIT_PROGRAM:-${smtpSubmit}/bin/lem-yath-smtp-submit}"
               export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
               export LEM_YATH_AOT_FASL_ROOT=${lemYathAot}
 
@@ -565,6 +578,7 @@
             paths = [
               lemYathEditor
               lemClient
+              smtpSubmit
             ];
           };
 
@@ -600,6 +614,7 @@
                   export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
                   export LEM_YATH_ASPELL_PROGRAM=${lib.getExe' aspellRuntime "aspell"}
                   export LEM_YATH_TIMEOUT_PROGRAM=${lib.getExe' pkgs.coreutils "timeout"}
+                  export LEM_YATH_SMTP_SUBMIT_PROGRAM=${smtpSubmit}/bin/lem-yath-smtp-submit
                   export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
                   exec bash ${self}/scripts/${script} "$@"
                 '';
@@ -794,9 +809,9 @@
             devdocs-test = mkTestAppWithLem lemYath "lem-yath-devdocs-test" "devdocs-test.sh";
             pg-test = mkTestAppWithLemAndInputs lemYath [ pkgs.postgresql ] "lem-yath-pg-test" "pg-test.sh";
             elfeed-test = mkTestAppWithLem lemYath "lem-yath-elfeed-test" "elfeed-test.sh";
-            notmuch-test =
-              mkTestAppWithLemAndInputs lemYath mailRuntimeInputs "lem-yath-notmuch-test"
-                "notmuch-test.sh";
+            notmuch-test = mkTestAppWithLemAndInputs lemYath (
+              mailRuntimeInputs ++ [ pkgs.openssl ]
+            ) "lem-yath-notmuch-test" "notmuch-test.sh";
             salta-test = mkTestAppWithLem lemYath "lem-yath-salta-test" "salta-test.sh";
             vundo-test = mkTestApp "lem-yath-vundo-test" "vundo-test.sh";
             actions-test = mkTestApp "lem-yath-actions-test" "actions-test.sh";
@@ -907,7 +922,9 @@
             devdocs = mkCheckWithLem lemYath "devdocs" "devdocs-test.sh";
             pg = mkCheckWithLemAndInputs lemYath [ pkgs.postgresql ] "pg" "pg-test.sh";
             elfeed = mkCheckWithLem lemYath "elfeed" "elfeed-test.sh";
-            notmuch = mkCheckWithLemAndInputs lemYath mailRuntimeInputs "notmuch" "notmuch-test.sh";
+            notmuch = mkCheckWithLemAndInputs lemYath (
+              mailRuntimeInputs ++ [ pkgs.openssl ]
+            ) "notmuch" "notmuch-test.sh";
             salta = mkCheckWithLem lemYath "salta" "salta-test.sh";
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";

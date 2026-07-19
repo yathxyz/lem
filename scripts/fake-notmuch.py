@@ -12,6 +12,7 @@ from pathlib import Path
 
 LOG = Path(os.environ["LEM_YATH_NOTMUCH_LOG"])
 STATE = Path(os.environ["LEM_YATH_NOTMUCH_STATE"])
+INSERT_LOG = Path(os.environ["LEM_YATH_NOTMUCH_INSERT_LOG"])
 
 
 def log(args: list[str]) -> None:
@@ -142,6 +143,60 @@ def main() -> int:
     if not args:
         return 2
     data = state()
+    if args[:2] == ["config", "get"] and len(args) == 3:
+        values = {
+            "user.name": 'Yanni "Safe"',
+            "user.primary_email": "yanni@example.invalid",
+        }
+        if args[2] not in values:
+            return 1
+        print(values[args[2]])
+        return 0
+    if args[0] == "reply":
+        if args[1:3] != ["--format=default", "--reply-to=sender"] and args[1:3] != [
+            "--format=default",
+            "--reply-to=all",
+        ]:
+            print("unexpected reply options", file=sys.stderr)
+            return 2
+        query = args[3]
+        ids = message_ids_from_query(query)
+        if not ids:
+            print("reply requires an exact message or thread query", file=sys.stderr)
+            return 2
+        message_id = ids[-1]
+        recipient = (
+            "Bob <bob@example.invalid>"
+            if message_id == "payment+safe;touch PWNED@example.invalid"
+            else "Yanni <yanni@example.invalid>"
+        )
+        cc = "Cc: Team <team@example.invalid>\n" if args[2] == "--reply-to=all" else ""
+        print(
+            'From: "Yanni \\"Safe\\"" <yanni@example.invalid>\n'
+            f"To: {recipient}\n"
+            f"{cc}"
+            "Subject: Re: Second thread\n"
+            f"In-Reply-To: <{message_id}>\n"
+            f"References: <{message_id}>\n\n"
+            "On Wed, 15 Jul 2026, Bob wrote:\n"
+            "> Primary plain body."
+        )
+        return 0
+    if args[0] == "insert":
+        if args != ["insert", "--create-folder", "--folder=sent"]:
+            print("unexpected insert invocation", file=sys.stderr)
+            return 2
+        raw = sys.stdin.buffer.read()
+        failure = os.environ.get("LEM_YATH_NOTMUCH_FAIL_INSERT_ONCE")
+        if failure and Path(failure).exists():
+            Path(failure).unlink()
+            print("injected FCC failure", file=sys.stderr)
+            return 9
+        with INSERT_LOG.open("ab") as stream:
+            stream.write(json.dumps(raw.decode()).encode() + b"\n")
+        data["inserts"] = data.get("inserts", 0) + 1
+        save(data)
+        return 0
     if args[0] == "search":
         query = args[-1]
         data["searches"] += 1

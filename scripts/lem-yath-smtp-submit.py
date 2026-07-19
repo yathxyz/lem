@@ -34,13 +34,6 @@ class SubmitError(RuntimeError):
     pass
 
 
-def env_choice(name: str, default: str, choices: set[str]) -> str:
-    value = os.environ.get(name, default).strip().lower()
-    if value not in choices:
-        raise SubmitError(f"{name} must be one of: {', '.join(sorted(choices))}")
-    return value
-
-
 def bounded_stdin() -> bytes:
     data = sys.stdin.buffer.read(MAX_MESSAGE_BYTES + 1)
     if len(data) > MAX_MESSAGE_BYTES:
@@ -73,9 +66,18 @@ def normalized_message(raw: bytes):
     message = BytesParser(policy=email.policy.SMTP).parsebytes(raw)
     if message.defects:
         raise SubmitError("message headers are malformed")
+    for name in ("From", "Sender", "To", "Cc", "Bcc"):
+        for header in message.get_all(name, []):
+            if getattr(header, "defects", ()):
+                raise SubmitError(f"{name} contains a malformed address")
+    if (
+        len(message.get_all("From", [])) != 1
+        or len(message.get_all("Sender", [])) > 1
+    ):
+        raise SubmitError("message must contain exactly one From and at most one Sender")
+    if message.is_multipart() or message.get_content_maintype() != "text":
+        raise SubmitError("only bounded text message composition is supported")
     from_value = message.get("Sender") or message.get("From")
-    if not from_value:
-        raise SubmitError("From is required")
     envelope_from = one_address(str(from_value), "From")
     recipients = recipient_addresses(message)
     while message.get("Bcc") is not None:
@@ -92,7 +94,10 @@ def normalized_message(raw: bytes):
         message["Content-Type"] = "text/plain; charset=utf-8"
     if message.get("Content-Transfer-Encoding") is None:
         message["Content-Transfer-Encoding"] = "8bit"
-    return envelope_from, recipients, message.as_bytes(policy=email.policy.SMTP)
+    wire = message.as_bytes(policy=email.policy.SMTP)
+    if len(wire) > MAX_MESSAGE_BYTES:
+        raise SubmitError("normalized message exceeds the 10 MiB submission limit")
+    return envelope_from, recipients, wire
 
 
 def private_authinfo(path: Path) -> bytes:
@@ -135,32 +140,55 @@ def authinfo_candidates() -> list[Path]:
     return [home / ".authinfo.gpg", home / ".authinfo", home / ".netrc"]
 
 
-def authinfo_credentials(host: str, port: int) -> tuple[str, str] | None:
-    path = next((candidate for candidate in authinfo_candidates() if candidate.exists()), None)
-    if path is None:
-        return None
+def authinfo_entries(text: str) -> list[dict[str, str]]:
     try:
-        text = private_authinfo(path).decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise SubmitError("SMTP authinfo is not UTF-8 text") from error
+        tokens = shlex.split(text, comments=True, posix=True)
+    except ValueError as error:
+        raise SubmitError("SMTP authinfo contains malformed quoting") from error
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    index = 0
+    while index < len(tokens):
+        field = tokens[index]
+        if field == "machine":
+            if index + 1 >= len(tokens):
+                raise SubmitError("SMTP authinfo has a machine without a name")
+            current = {"machine": tokens[index + 1]}
+            entries.append(current)
+            index += 2
+        elif field == "default":
+            current = {"machine": "default"}
+            entries.append(current)
+            index += 1
+        elif field == "macdef":
+            raise SubmitError("SMTP authinfo macdef entries are not supported")
+        elif current is None or index + 1 >= len(tokens):
+            raise SubmitError("SMTP authinfo contains a field outside a machine entry")
+        else:
+            current[field] = tokens[index + 1]
+            index += 2
+    return entries
+
+
+def authinfo_credentials(host: str, port: int) -> tuple[str, str] | None:
     exact_hosts = {host, f"{host}:{port}"}
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+    for path in authinfo_candidates():
+        if not path.exists():
             continue
         try:
-            tokens = shlex.split(stripped, comments=True, posix=True)
-        except ValueError as error:
-            raise SubmitError("SMTP authinfo contains malformed quoting") from error
-        fields = dict(zip(tokens[0::2], tokens[1::2]))
-        machine = fields.get("machine")
-        entry_port = fields.get("port")
-        if machine not in exact_hosts or (entry_port and entry_port != str(port)):
-            continue
-        username = fields.get("login") or fields.get("user")
-        password = fields.get("password")
-        if username and password:
-            return username, password
+            text = private_authinfo(path).decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise SubmitError("SMTP authinfo is not UTF-8 text") from error
+        for fields in authinfo_entries(text):
+            machine = fields.get("machine")
+            entry_port = fields.get("port")
+            host_matches = machine == "default" or machine in exact_hosts
+            if not host_matches or (entry_port and entry_port != str(port)):
+                continue
+            username = fields.get("login") or fields.get("user")
+            password = fields.get("password")
+            if username and password:
+                return username, password
     return None
 
 
@@ -188,7 +216,10 @@ def tls_context(host: str) -> ssl.SSLContext:
     if loopback_host(host):
         # Proton Bridge normally presents a local, self-signed certificate.
         # This exception is deliberately confined to a loopback destination.
-        return ssl._create_unverified_context()
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return context
     return ssl.create_default_context()
 
 
@@ -202,18 +233,14 @@ def submit() -> bytes:
         raise SubmitError("LEM_YATH_SMTP_PORT must be an integer") from error
     if not host or not 1 <= port <= 65535:
         raise SubmitError("SMTP host or port is invalid")
-    starttls = env_choice("LEM_YATH_SMTP_STARTTLS", "required", {"required", "off"})
-    auth = env_choice("LEM_YATH_SMTP_AUTH", "required", {"required", "none"})
-    login = credentials(host, port) if auth == "required" else None
-    if auth == "required" and login is None:
+    login = credentials(host, port)
+    if login is None:
         raise SubmitError("no matching private SMTP authinfo credentials were found")
     with smtplib.SMTP(host, port, timeout=30) as smtp:
         smtp.ehlo_or_helo_if_needed()
-        if starttls == "required":
-            smtp.starttls(context=tls_context(host))
-            smtp.ehlo()
-        if login is not None:
-            smtp.login(*login)
+        smtp.starttls(context=tls_context(host))
+        smtp.ehlo()
+        smtp.login(*login)
         smtp.sendmail(envelope_from, recipients, wire)
     return wire
 

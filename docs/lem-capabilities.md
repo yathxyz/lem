@@ -3425,6 +3425,35 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   matching next-message/next-thread/exit behavior, and failed mutations leave
   the read-only projection and cursor untouched. The fake backend intentionally
   emits real bare JSON thread IDs so query-prefix regressions cannot hide.
+
+  The configured Evil-collection mail loop is also present. `C`/`cc` opens a
+  new RFC 822 composition from Notmuch's `user.name` and
+  `user.primary_email`; `cr` and `cR` ask `notmuch reply --format=default` for
+  the exact selected message/thread's sender or all-recipient template.
+  `C-c C-c` submits through the packaged local-Bridge STARTTLS helper, files
+  the exact normalized transmitted bytes through `notmuch insert` in `sent`,
+  and applies `+replied` only after both stages succeed; `C-c C-k` cancels.
+  SMTP credentials come from a matching owner-private `.authinfo.gpg`,
+  `.authinfo`, or `.netrc` entry (or explicit paired environment variables),
+  never argv. Bcc is retained in the envelope but removed from transmitted and
+  FCC headers. The default self-signed-certificate exception is confined to a
+  loopback SMTP host; non-loopback hosts use normal certificate verification.
+  A failed FCC/tag stage leaves a read-only, stage-marked recovery buffer whose
+  retry uses the fixed transmitted bytes and cannot submit the message twice.
+  The Notmuch gate proves a real local STARTTLS/AUTH exchange plus physical
+  new/reply/send keys, exact templates and FCC bytes, malformed-recipient
+  refusal, an injected FCC failure, and duplicate-safe retry. Address
+  completion, MIME attachment composition, forwarding, draft postpone/resume,
+  and Outlook integration remain outside this bounded text-mail port.
+
+  The default Bridge credential entry has the ordinary authinfo shape
+  `machine 127.0.0.1 port 1025 login BRIDGE_USER password BRIDGE_PASSWORD`.
+  `LEM_YATH_SMTP_AUTHINFO` can select another private file;
+  `LEM_YATH_SMTP_SERVER`, `LEM_YATH_SMTP_PORT`, and
+  `LEM_YATH_SMTP_CA_FILE` override transport details. Paired
+  `LEM_YATH_SMTP_USERNAME`/`LEM_YATH_SMTP_PASSWORD` are supported for an
+  explicitly managed process environment, but the private authinfo path is the
+  preferred match for the current Emacs setup.
 - **which-key / transient menus**: `extensions/transient/` (`lem/transient`,
   `define-transient`) provides magit-style popup menus with columns and descriptions
   (`transient/transient.lisp`). Lem-yath's global `which-key-mode`
