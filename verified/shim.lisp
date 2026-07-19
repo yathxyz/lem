@@ -58,7 +58,7 @@
 ;;;;                             in-image (precedent: the iterative acl2::len
 ;;;;                             below). SBCL's compiling load eliminates the
 ;;;;                             twins' tail calls (verified empirically by
-;;;;                             tests/pbt/long-line-render.lisp at 500k depth).
+;;;;                             tests/pbt/long-line-render.lisp at 300k depth).
 ;;;;   8. (verify-guards ...)  -- proof-only event discharging guard + mbe
 ;;;;                             equality obligations deferred from a defun with
 ;;;;                             :verify-guards nil. No-op macro, body NOT

@@ -921,7 +921,8 @@ execution runs the `:exec` branch; the shim now reinterprets `mbe`
 identically (expand to `:exec`) plus `verify-guards` as a proof-only no-op —
 constructs 7 and 8 in its header, the same precedent as its iterative
 `acl2::len`. SBCL's compiling load gives the twins genuine tail-call
-elimination, verified empirically at 500k depth. The other recursions on the
+elimination, verified empirically at 300k depth by the committed
+`tests/pbt/long-line-render.lisp` pin. The other recursions on the
 render path are **not** line-length-deep (`k-wrap-row`'s explode retry and
 `k-clip`'s skip branch are tail calls; their cons-building branches recurse
 once per placed/kept object, bounded per row by the view width; `k-wrap` by
