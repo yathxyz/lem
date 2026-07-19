@@ -395,6 +395,273 @@ _None yet. P5 must not start before the P4 grounding report (SPEC-PERF)._
 |------|------|----------------------------|--------|----------------|-------|
 | —    | —    | —                          | —      | —              | —     |
 
+## P4 grounding report (PRELIMINARY — synthetic only)
+
+This is the PF-9 grounding report: the point of SPEC-PERF, the artifact that ranks
+the optimization backlog by measured data rather than intuition. It is written
+**PRELIMINARY** — from synthetic tiers (T1/T2/T3 + one soak) and sb-sprof profiles
+only. **The T0 field summary that PF-9 also requires is PENDING** (see the deviation
+and user instructions in the "T0 field section" below). Per Constraint 6 the field
+data is the arbiter, so **the backlog here is provisional and P5 stays gated** until
+the field week lands and the ranking is reconciled and finalized.
+
+### 1. Baseline pointer + performance portrait
+
+The full baseline tables are already in this ledger, above — this report does not
+duplicate them:
+
+- **T1 micro** — *P1 baseline numbers* table (fp ex44 / i5-13500 / 20c, commit
+  `07253058`).
+- **T2 macro** — *P2 T2 baseline numbers* table (committed baseline JSON at commit
+  `e073c6b2`; the section header's `5cd018a9` is the corpus-pin commit — the baseline
+  file itself records `e073c6b2`, which is the provenance used throughout this report).
+- **T3 end-to-end** — *T3 trend history* table (commit `8fbbb171`).
+- **Soak** — *T3 soak history* table (commit `fd0e83a6`).
+
+**Portrait (as measured).** The unconfigured ncurses build starts fast — warm startup
+**190 ms**, an order of magnitude under the 2 s budget — and is comfortably interactive
+for ordinary editing: in-image keystroke-to-paint p95 is **1.0 ms** on a plain buffer,
+**1.0 ms** inserting into the 10 MB file, **2.0 ms** scrolling it, all far under budget.
+The one pathological keystroke is **long-line: p95 16.4 ms** (still < 30 ms budget),
+redisplay-dominated by the certified non-tail width fold over a 16 KB single line.
+Macro throughput is dominated by full-frame redisplay over large buffers: the big-file
+page-through (10 MB, 4976 frames) runs **4234 ms** and conses **719 MB** (4 GCs,
+~33 ms pause total); isearch **2201 ms** / 437 MB / 3 GCs (~41 ms); scroll **1075 ms**;
+the edit-bound workloads are cheap (overlay-heavy 520 ms, long-line 488 ms, lisp-edit
+299 ms, undo-storm 266 ms, each ≤ 1 GC). GC behavior is benign per-session but the
+**30-min soak flagged LEAK SUSPECT** — `dynamic-usage` floor rising **+2.61 MB/min**,
+RSS **+2.20 MB/min**, **GC pause p99 131 ms** (artifacts
+`bench/results/soak-20260718223850.*`) — the one open stability question. The
+`:paranoid` edit-engine tax is **~1.2× on normal buffers** but **~13–16× on a 200 KB
+line** (the certified `wf-buffer` re-walks the line per edit); this is the datum for
+the paranoid→release soak decision (see NOTE below). Micro-level, `string-width` over
+mixed unicode (1667 µs) and syntax-scan of 500 KB Lisp (116 ms) are the heaviest T1
+primitives — both feeding the redisplay hotspot the profiles confirm.
+
+### 2. Cross-workload sb-sprof hotspot ranking
+
+Fresh 2026-07-19 sb-sprof `:cpu` profiles of all seven T2 workloads (per-workload
+sample counts — big-file **3804**, isearch **4095**, scroll **2841**, overlay-heavy
+**2636**, long-line **2629**, lisp-edit **2518**, undo-storm **2663** — every one
+clears the PF-6 ≥ 1000-sample bar). Cross-workload weight =
+Σ_workload (frame self% × that workload's committed t2 wall-ms share); shares: big-file
+46.6%, isearch 24.2%, scroll 11.8%, overlay-heavy 5.7%, long-line 5.4%, lisp-edit 3.3%,
+undo-storm 2.9% (total 9083 wall-ms). `weighted` reads as "≈ % of total editor CPU
+attributable to this frame across a wall-representative session mix" — a ranking metric,
+not an exact time budget. **Full per-workload top-10 tables and the class methodology
+are versioned in `bench/profiles-summary.md`; raw flat+graph reports are
+`bench/profiles/*-20260719*.txt` (gitignored).**
+
+Class: **kernel** = verified ACL2 `K-*` books (optimizable only under the one-source
+recertify rule); **shell** = imperative `lem`/`lem-core` code; **runtime** =
+SBCL/PCL/foreign/unattributed.
+
+| # | frame | weighted | class | dominates (self%) | field relevance |
+|--:|---|--:|---|---|---|
+| 1 | `ACL2::K-CHAR-WIDTH` | 12.14 | kernel | big-file 14.5, long-line 13.2, scroll 12.5, isearch 12.4 | **field-plausible**, weight inflated by big-file/scroll paging |
+| 2 | `ICON:ICON-CODE-P` | 7.88 | shell | big-file 13.1, scroll 10.4, long-line 10.0 | **field-plausible** (per-codepoint width shim) |
+| 3 | `STRING-WIDTH-UTILS:WIDE-INDEX` | 7.27 | shell | isearch 10.8, big-file 8.8 | **field-plausible** (width shim) |
+| 4 | `(LAMBDA .ARG0. :IN BRAID.LISP)` PCL dispatch | 5.72 | runtime | overlay-heavy 48.7, undo-storm 22.8, lisp-edit 15.8 | **field-relevant to edit latency**, weight *understated* by wall mix |
+| 5 | `ACL2::K-CONTROL-CODE-P` | 4.47 | kernel | ~5 across the 4 redisplay workloads | field-plausible (width path) |
+| 6 | `ACL2::K-ZERO-CODE-P` | 4.04 | kernel | big-file 4.9, isearch 4.2 | field-plausible (width path) |
+| 7 | `ACL2::K-AMBIGUOUS-CODE-P` | 3.68 | kernel | scroll 5.2, long-line 5.0 | field-plausible (width path) |
+| 8 | `SB-IMPL::GETHASH/EQL-HASH/FLAT` | 3.47 | runtime | big-file 4.2 | field-plausible (width memo lookups) |
+| 9 | `Unknown fn 45469` | 3.30 | runtime | isearch 12.9 only | **synthetic/unattributed — flag, do not optimize** |
+| 10 | `ACL2::K-SUM` (non-tail width fold) | 3.25 | kernel | long-line 7.5, scroll 5.0 | **field-plausible + correctness-linked** (same frame as the crash cliff) |
+| 11 | `SB-KERNEL:TWO-ARG->=` | 3.02 | runtime | ~3 across redisplay workloads | field-plausible (width predicates' fixnum compares) |
+| 12 | `STRING-WIDTH-UTILS:STRING-WIDTH` | 2.75 | shell | long-line 5.2, scroll 5.1 | field-plausible (width shim entry) |
+| 13 | `SB-KERNEL:TWO-ARG-<=` | 2.48 | runtime | long-line 3.0, isearch 2.7 | field-plausible (width path arithmetic) |
+| 14 | `ACL2::K-WIDE-CODE-P` | 2.06 | kernel | long-line 3.2, scroll 2.7 | field-plausible (width path) |
+| 15 | `LENGTH` | 1.76 | runtime | **undo-storm 32.4** | **synthetic-prominent** — 5k-edit storm; must reconcile vs real undo/redo frequency (T0) |
+
+(Rank 16–25 continue in `bench/profiles-summary.md`: `NATP`, `GENERIC-+`, `RANGE<=`,
+`%DATA-VECTOR-AND-INDEX`, `SB-SPROF::UNAVAILABLE-FRAMES` [profiler self-overhead, not an
+editor hotspot], `SEARCH`, `TEXT-OBJECT-CHAR-WIDTHS`, `DATA-VECTOR-REF`,
+`GETHASH/EQL-HASH`, `K-NAT`.)
+
+**Two actionable clusters, and why the synthetic mix must be reconciled against T0.**
+(a) **The string-width redisplay path** — ranks 1,2,3,5,6,7,8,10,11,12,13,14 plus 16/22/24
+— sums to **~55–60% of weighted cross-workload CPU**, split ~half verified kernel (`K-*`
+per-codepoint predicates + the `K-SUM` fold) and ~half the `lem/common/character` shim
+(`icon-code-p`, `wide-index`, `string-width`, `text-object-char-widths`). It dominates
+*every* redisplay-bound workload, so it is not a big-file artifact — but its cross-workload
+*weight* is inflated by big-file+scroll paging (58% of the synthetic mix is bulk-scrolling
+large buffers, which a typical editing session does far less of than the mix implies). Real
+weight is field-pending. (b) **PCL generic-function dispatch** on hot buffer/point/overlay
+generics — the single frame #4, with *zero* kernel component — dominates the edit-bound
+workloads (overlay-heavy/undo-storm/lisp-edit) and is *understated* by the wall-weighted
+mix because those workloads have small wall shares; it is exactly the cost a user feels as
+edit latency. **Class split of aggregated weight is near-even thirds** (kernel 32.86 /
+runtime 32.44 / shell 32.35), but read through these two clusters, not as three independent
+thirds. Frames explicitly marked synthetic (`Unknown fn 45469`, `UNAVAILABLE-FRAMES`) and
+synthetic-prominent (`LENGTH` in undo-storm) are **not** carried into the backlog on
+synthetic evidence alone.
+
+### 3. T0 field section — PENDING
+
+**PENDING — DEVIATION (Constraint 6 / SPEC-PERF PF-9).** PF-9 requires the grounding
+report to include a **T0 field summary** (real-session latency percentiles, stage
+decomposition, worst commands, GC pause profile, paranoid tax as actually experienced)
+and to **reconcile the sb-sprof ranking against T0** — with ≥ 1 week of field data
+(Sequencing: "P4 … requires all tiers plus ≥ 1 week of T0 field data"). At the time of
+writing that field data does not yet exist, so this report is issued PRELIMINARY on
+synthetic data only, with the field summary explicitly deferred and the backlog marked
+provisional. This deviation is recorded here per Constraint 6 rather than by weakening
+the spec.
+
+**User instructions to produce the T0 summary and finalize the report:**
+
+1. **Daily-drive the instrumented build.** `make ncurses`, then use `./lem` as your
+   normal editor for **at least a week**. T0 telemetry is always-on (no flag; the
+   editor variable defaults on), Constraint-4 budgeted, so daily use costs nothing
+   measurable.
+2. **Dumps land automatically.** On every clean exit (`exit-lem` / `C-x C-c`) the
+   session writes `(lem-home)/metrics/<session-start-timestamp>.json`. You can also
+   dump on demand mid-session with **`M-x metrics-dump`**, and read a live human
+   summary any time with **`M-x metrics-report`** (renders p50/p95/p99 latencies, the
+   t₀…t₄ stage decomposition, worst commands, GC pause distribution, and heap trend
+   into a `*metrics*` buffer). Keep the accumulated dump JSONs — do not delete
+   `(lem-home)/metrics/`.
+3. **After the week, produce the T0 summary and reconcile.** Aggregate the dumped
+   JSONs into: real-session keystroke/command/redisplay percentiles, the stage
+   decomposition, the worst commands by dispatch time, the GC pause profile, and the
+   paranoid tax as actually experienced. Then **reconcile this synthetic ranking
+   against it** — specifically test (i) whether the width path's real weight matches
+   its 55–60% synthetic share or is inflated by big-file paging that real sessions do
+   less of; (ii) whether PCL edit-path dispatch (understated here) ranks higher on
+   real edit-command frequency; (iii) whether `undo-storm`'s `LENGTH` prominence
+   survives real `undo`/`redo` frequency at all.
+4. **Finalize.** Replace this section with the field summary, re-rank the OPT backlog
+   by real impact × confidence, drop the "PRELIMINARY" marker, and only then open P5.
+
+### 4. Ranked optimization backlog (PROVISIONAL — OPT-1 … OPT-6)
+
+Ranked by **measured impact × confidence**, with **correctness outranking pure
+throughput** (priority order: Correctness first). Every item cites its motivating
+artifact; all remain provisional pending the T0 reconciliation in §3.
+
+**OPT-1 — Long-line redisplay stack-overflow cliff (correctness-grade).**
+- *Measurement:* a single text object ≳ **24 000 chars** overflows the default SBCL
+  control stack during redisplay — deterministic (recursion depth = line length),
+  confirmed by three independent harness findings: the P1 `redisplay/long-line`
+  deviation (crash between 50 k and 100 k chars), the P2 `long-line` deviation (renders
+  at 23 000, crashes at 24 000 with wrap-on + cursor-at-end), and the T3 `longline`
+  scenario cap. The shipping `./lem` binary uses the same default stack, so **this is
+  a real editor crash**, not a bench artifact. The same frame shows as raw CPU: `K-SUM`
+  #10 (long-line 7.5% / scroll 5.0% self).
+- *Root cause:* `verified/layout.lisp` `k-obj-width` → `K-SUM`, a **non-tail** left
+  fold over the object's full per-character width list.
+- *Hypothesis:* rewrite `K-SUM`/`k-obj-width` as a tail-recursive accumulator (or a
+  bounded iterative width sum) in the certified book. Lifts the cap entirely *and*
+  removes the non-tail fold from the hot width path (a bonus CPU win on long lines).
+  Expected magnitude: eliminates the crash class; small-to-moderate CPU improvement on
+  long-line/scroll.
+- *Risk / verification:* touches `verified/` → **one-source recertify** (`run-proofs.sh`)
+  and the kernel conformance PBT (`run-tests.sh`) are the behavior-preservation proof;
+  re-enable a > 24 000-char render in the T1/T2/T3 long-line harnesses once the cap
+  lifts.
+
+**OPT-2 — String-width redisplay path (largest CPU share).**
+- *Measurement:* ~**55–60% of weighted cross-workload CPU** (§2, table ranks
+  1/2/3/5/6/7/8/10/11/12/13/14); `K-CHAR-WIDTH` #1 (weighted 12.14), `ICON-CODE-P` #2
+  (7.88), `WIDE-INDEX` #3 (7.27). Dominates big-file (self 14.5/13.1/8.8),
+  isearch, scroll, long-line. Provenance: `bench/profiles-summary.md`,
+  `bench/profiles/big-file-20260719102057.txt` et al.
+- *Hypothesis:* the redisplay recomputes per-codepoint widths for text objects on every
+  full frame; cache width at the shim layer (`lem/common/character` —
+  `text-object-char-widths` / `string-width`, keyed per unchanged line/object) so
+  unchanged lines skip the kernel per-codepoint walk entirely. A gethash memo already
+  rides along the path (`GETHASH/EQL-HASH/FLAT` #8), suggesting the per-char cache
+  exists but the per-object/per-line result does not. Caching at the **shell shim**
+  avoids recertifying the kernel. Expected magnitude: large — could remove a substantial
+  fraction of redisplay CPU on all four redisplay-bound workloads (and, via less consing,
+  fewer GCs — see OPT-4).
+- *Risk / verification:* shell-level change under the frozen API; behavior-preservation =
+  T1 `width/*` + `redisplay/*` entries, T2 redisplay workloads, and the rove suites,
+  all green with the target profile share reduced. If any kernel `K-*` book is touched,
+  one-source recertify applies. **Reconcile the 55–60% weight against T0 first** — it is
+  inflated by big-file paging.
+
+**OPT-3 — PCL generic-dispatch on hot buffer/point/overlay generics (edit latency).**
+- *Measurement:* frame #4 `(LAMBDA .ARG0. :IN BRAID.LISP)` — the PCL discriminating
+  closure — is **48.7% self in overlay-heavy, 22.8% in undo-storm, 15.8% in lisp-edit**,
+  with *zero* kernel component (`bench/profiles/overlay-heavy-20260719102135.txt`). The
+  hot generics are the buffer/point/overlay protocol (`point<=`, `same-line-p`,
+  `character-offset`, overlay predicates — visible as the next frames in those profiles).
+- *Hypothesis:* seal/devirtualize the hottest buffer/point protocol generics (e.g.
+  `declaim inline` fast paths or sealed dispatch) so megamorphic edit-path calls stop
+  paying full cache-closure dispatch. Expected magnitude: large on **edit latency** —
+  the cost a user actually feels typing/undoing — even though the wall-weighted mix
+  understates it (these workloads have small wall shares).
+- *Risk / verification:* shell change beneath the frozen `lem-core` API; the buffer/
+  point/overlay rove suites + T2 edit workloads (overlay-heavy/undo-storm/lisp-edit) are
+  the behavior-preservation fence. **Must be corroborated by T0 real edit-command
+  frequency** before it is committed (its synthetic prominence rests on edit-storm
+  workloads).
+
+**OPT-4 — GC pause p99 / redisplay consing.**
+- *Measurement:* soak **GC pause p99 131 ms** (`bench/results/soak-20260718223850.*`,
+  T3 soak history row); big-file conses **719 MB** and isearch **437 MB** per workload
+  (T2 baseline), driving the 3–4 GCs those sessions incur. A 131 ms pause is a felt
+  hitch in an interactive session.
+- *Hypothesis:* the dominant consing is in the redisplay width path (OPT-2) and the
+  literal-search `points-to-string`-per-line allocation; cutting per-frame allocation
+  (chiefly via OPT-2's width cache) reduces GC frequency and pause tail. Expected
+  magnitude: p99 pause and GC count down proportional to the consing removed. Largely
+  **downstream of OPT-2** — sequence after it and re-measure.
+- *Risk / verification:* T2 `gc-count`/`gc-pause-ms` per-workload metrics + a re-run
+  soak; no API change.
+
+**OPT-5 — Soak leak suspect (daily-driver stability; TRIAGE first).**
+- *Measurement:* the 30-min soak verdict **LEAK SUSPECT** — `dynamic-usage` floor
+  **+2.61 MB/min**, RSS **+2.20 MB/min** over the run (both above the 1 MB/min
+  threshold), `bench/results/soak-20260718223850.*` (T3 soak history, commit
+  `fd0e83a6`). Trend-only, never a commit gate — recorded as a P4 candidate.
+- *Hypothesis:* **triage, not yet a fix** — determine whether the heap is still reaching
+  its steady working set over 30 min (benign) or genuinely retaining per-burst (leak).
+  Candidate sources to inspect: overlay/point retention, unbounded undo history, or a
+  ring buffer that is not actually bounded. Expected magnitude: unknown until triaged;
+  potentially high (long-session stability is the whole daily-driver point).
+- *Risk / verification:* re-run soak + the leak detector (`analyze-soak.mjs`); **low
+  confidence in root cause** is exactly why it ranks below the CPU items and why the
+  **T0 field week is the arbiter** — a real week-long session either shows the retention
+  or shows the heap settling.
+
+**OPT-6 — Long-line keystroke latency (derived; verification item).**
+- *Measurement:* T3 `longline` keystroke **p95 16.4 ms** (in-image, redisplay-dominated;
+  T3 trend history, commit `8fbbb171`) — the one keystroke scenario near its budget.
+- *Hypothesis:* **fully downstream of OPT-1 + OPT-2** (the `K-SUM` fold and the width
+  path over the 16 KB line are its entire cost). No independent change; listed so the
+  finalized report *verifies* that OPT-1/OPT-2 actually drop this measured p95 toward
+  single-digit ms in a real session, per PF-10 step 7.
+- *Risk / verification:* T3 `longline` p95 re-measured after OPT-1/OPT-2; no new surface.
+
+**NOTE (not an OPT item) — paranoid→release soak decision.** The `:paranoid` edit-engine
+tax is measured at **~1.2× on normal buffers** and **~13–16× on a 200 KB line** (T1
+edit entries, `verified/README.md` VK-4 acceptance table). Whether to drop
+`LEM_PARANOID=1` for daily driving is **the user's call**, not an optimization item — and
+SPEC-PERF makes it data-driven at P4 via this tax *and* the field latency histograms.
+Since the field histograms are PENDING (§3), the decision waits on the field week too.
+
+### 5. P5 protocol readiness
+
+PF-10 runs each backlog item OPT-n through a fixed loop: **(1) evidence** — the
+motivating T0/T2 measurement + before-profile restated in the item (the profiles under
+`bench/profiles/` and `bench/profiles-summary.md` are already attached above);
+**(2) hypothesis** — change + expected magnitude; **(3) change** beneath the frozen API,
+recertifying any touched `verified/` book under the one-source rule (OPT-1 is the one
+kernel item) and leaning on the conformance suites where shell code is touched;
+**(4) gates** — `run-tests.sh` + (if `verified/` changed) `run-proofs.sh` + `run-bench.sh
+t1 t2` green vs. baseline, with the target metric improved beyond its noise band and no
+other gated metric regressed; **(5) adversarial review** for behavior drift and
+benchmark-overfitting; **(6) ledger + one commit per item + rebaseline**; **(7) periodic
+T0 re-dump** confirming the win is felt in real sessions. The framework for all seven
+steps is live (P0–P3 landed). **What is NOT ready is the backlog itself:** it is
+provisional until the ≥ 1-week T0 field data (§3) reconciles this synthetic ranking and
+the report is finalized. **P5 must not start before that finalization** (Sequencing:
+"P5 requires P4"; PF-9 done-when: "the backlog is ranked by measured impact … P5 must
+not start early").
+
 ## Deviations from SPEC-PERF.md
 
 SPEC-PERF item 6 requires deviations to be recorded here rather than by editing
