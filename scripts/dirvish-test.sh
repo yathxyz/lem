@@ -154,7 +154,7 @@ else
 fi
 
 lem_keys "$session" C-c H
-if wait_report '^ORDINARY header=yes blank=yes modeline=yes sort=yes index=yes$'; then
+if wait_report '^ORDINARY header=yes blank=yes modeline=yes sort=yes index=yes selected=yes$'; then
   pass ordinary-chrome 'ordinary directory visits show the path, hide the blank row, and expose pinned footer data'
 else
   fail ordinary-chrome 'ordinary directory header visibility or modeline segments differed'

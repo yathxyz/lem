@@ -146,7 +146,7 @@
            (buffer (window-buffer window))
            (text (dirvish-test-modeline-text window)))
       (dirvish-test-log
-       "ORDINARY header=~a blank=~a modeline=~a sort=~a index=~a"
+       "ORDINARY header=~a blank=~a modeline=~a sort=~a index=~a selected=~a"
        (if (dirvish-test-source-path-visible-p buffer) "yes" "no")
        (if (dirvish-test-source-blank-hidden-p buffer) "yes" "no")
        (if (equal +dirvish-ordinary-modeline-format+
@@ -156,7 +156,8 @@
        (if (search (format nil "/~3d "
                            (max 0 (- (buffer-nlines buffer) 3)))
                    text)
-           "yes" "no")))))
+           "yes" "no")
+       (if (dirvish-window-selected-path window) "yes" "no")))))
 
 (define-command lem-yath-test-dirvish-symlink () ()
   (let* ((session (current-dirvish-session))

@@ -31,7 +31,7 @@
              (eq (buffer-major-mode (window-buffer window))
                  'lem/directory-mode/mode:directory-mode))
     (lem/directory-mode/internal:get-pathname
-     (lem-core::%window-point window))))
+     (window-point window))))
 
 (defun dirvish-modeline-sort (window)
   (declare (ignore window))
@@ -57,7 +57,7 @@
          (pathname (dirvish-window-selected-path window))
          (current (if pathname
                       (max 0 (- (line-number-at-point
-                                 (lem-core::%window-point window))
+                                 (window-point window))
                                 2))
                       0))
          (total (max 0 (- (buffer-nlines buffer) 3))))
