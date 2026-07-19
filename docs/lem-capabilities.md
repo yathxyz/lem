@@ -3440,10 +3440,20 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   loopback SMTP host; non-loopback hosts use normal certificate verification.
   A failed FCC/tag stage leaves a read-only, stage-marked recovery buffer whose
   retry uses the fixed transmitted bytes and cannot submit the message twice.
+  `C-x C-s` prepares a real MIME snapshot and inserts it into Notmuch's
+  `drafts` folder with `+draft`; `C-c C-p` performs that save and closes the
+  composer. Opening a `tag:draft` thread and pressing `e` removes transport
+  headers, restores editable text/MML, and extracts the saved attachment bytes
+  into a fresh owner-private directory. Resave inserts the replacement before
+  marking the old version deleted, cancel leaves the durable draft intact,
+  and send retires it only after SMTP and sent FCC have succeeded. Every close
+  path removes resumed attachment files.
   The Notmuch gate proves a real local STARTTLS/AUTH exchange plus physical
-  new/reply/send keys, exact templates and FCC bytes, malformed-recipient
-  refusal, an injected FCC failure, and duplicate-safe retry. Address
-  completion, MIME attachment composition, forwarding, draft postpone/resume,
+  new/reply/send/draft keys, exact templates and FCC bytes, malformed-recipient
+  refusal, binary attachment snapshots after source removal, private resume
+  cleanup, durable draft replacement/retirement, an injected FCC failure, and
+  duplicate-safe retry. Address completion and bounded MIME attachment
+  composition are also covered. Forwarding, non-PDF received-part actions,
   and Outlook integration remain outside this bounded text-mail port.
 
   The default Bridge credential entry has the ordinary authinfo shape

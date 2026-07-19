@@ -688,7 +688,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   bounded `multipart/mixed` message before STARTTLS submission and exact sent
   FCC. Attachment paths are never shell-expanded; submission refuses
   non-regular marker paths and files changed while being read, and both
-  individual and aggregate payloads are capped at 7 MiB
+  individual and aggregate payloads are capped at 7 MiB. Stock Notmuch draft
+  lifecycle is retained: `C-x C-s` snapshots a MIME draft in place,
+  `C-c C-p` postpones it, and `e` resumes a shown `tag:draft` message with
+  attachment bytes restored into owner-private temporary files. A resave
+  hides the previous version only after the replacement is durable; a send
+  retires the draft only after SMTP and sent FCC succeed
 - ordinary `.pdf` and `.epub` opens stay inside Lem: PDFs expose bounded
   Poppler text one page at a time, while EPUBs become bounded Markdown with
   chapter navigation. Both are read-only, never visit or overwrite the binary

@@ -32,6 +32,7 @@ export LEM_YATH_NOTMUCH_STATE="$root/state.json"
 export LEM_YATH_MBSYNC_LOG="$root/mbsync-argv"
 export LEM_YATH_NOTMUCH_OPEN_LOG="$root/xdg-open.jsonl"
 export LEM_YATH_NOTMUCH_INSERT_LOG="$root/notmuch-insert.jsonl"
+export LEM_YATH_NOTMUCH_DRAFT_LOG="$root/notmuch-draft.jsonl"
 export LEM_YATH_SMTP_FAKE_LOG="$root/smtp-submit.jsonl"
 export LEM_YATH_NOTMUCH_FAIL_INSERT_ONCE="$root/fail-insert-once"
 export LEM_YATH_NOTMUCH_PDF="$root/notmuch attachment;safe.pdf"
@@ -46,11 +47,12 @@ real_notmuch=$(command -v notmuch)
 : >"$LEM_YATH_MBSYNC_LOG"
 : >"$LEM_YATH_NOTMUCH_OPEN_LOG"
 : >"$LEM_YATH_NOTMUCH_INSERT_LOG"
+: >"$LEM_YATH_NOTMUCH_DRAFT_LOG"
 : >"$LEM_YATH_SMTP_FAKE_LOG"
 printf 'attachment bytes\000with binary\377tail\n' \
   >"$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT"
 cp "$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT" "$smtp_attachment"
-printf '%s\n' '{"searches":0,"news":0,"inserts":0,"tags":{"alpha@example.invalid":["inbox","unread"],"payment+safe;touch PWNED@example.invalid":["inbox","unread"],"reply/second?value@example.invalid":["inbox","unread"]}}' >"$LEM_YATH_NOTMUCH_STATE"
+printf '%s\n' '{"searches":0,"news":0,"inserts":0,"draft_inserts":0,"drafts":{},"tags":{"alpha@example.invalid":["inbox","unread"],"payment+safe;touch PWNED@example.invalid":["inbox","unread"],"reply/second?value@example.invalid":["inbox","unread"]}}' >"$LEM_YATH_NOTMUCH_STATE"
 cp "$here/scripts/fake-notmuch.py" "$fakebin/notmuch"
 cp "$here/scripts/fake-mbsync.sh" "$fakebin/mbsync"
 cp "$here/scripts/fake-notmuch-xdg-open.py" "$fakebin/xdg-open"
@@ -63,6 +65,7 @@ chmod +x "$fakebin/notmuch" "$fakebin/mbsync" "$fakebin/xdg-open" "$fakebin/lem-
 export PATH="$fakebin:$PATH"
 
 real_smtp_program=${LEM_YATH_SMTP_SUBMIT_PROGRAM:?configured wrapper did not expose the SMTP helper}
+export LEM_YATH_NOTMUCH_DRAFT_PROGRAM="$real_smtp_program"
 export LEM_YATH_SMTP_SUBMIT_PROGRAM="$fakebin/lem-yath-smtp-submit"
 
 source_file="$root/source file;safe.txt"
@@ -329,6 +332,61 @@ else
   fail smtp-attachment-refusal 'an unsafe attachment reached SMTP or produced the wrong refusal'
 fi
 
+# Stock Notmuch snapshots attachment bytes into a postponed MIME message.  The
+# packaged helper must therefore resume after the original path disappears,
+# while extracting only owner-private files and restoring editable MML.
+draft_helper_root="$smtp_tls/draft resume;safe"
+mkdir -m 700 "$draft_helper_root"
+draft_mime="$smtp_tls/prepared-draft.eml"
+draft_editable="$smtp_tls/resumed-draft.eml"
+draft_query='id:"reply/second?value@example.invalid"'
+draft_helper_ok=1
+"$real_smtp_program" --prepare-draft "$draft_query" \
+  <"$smtp_input" >"$draft_mime" 2>"$smtp_tls/draft-prepare.err" || draft_helper_ok=0
+rm -f -- "$smtp_attachment"
+"$real_smtp_program" --resume-draft "$draft_helper_root" \
+  <"$draft_mime" >"$draft_editable" 2>"$smtp_tls/draft-resume.err" || draft_helper_ok=0
+if ((draft_helper_ok)) && python3 - "$draft_mime" "$draft_editable" \
+     "$draft_helper_root" "$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT" "$draft_query" <<'PY'
+import html
+import os
+import re
+import stat
+import sys
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
+
+mime_path, editable_path, root_path, expected_path = map(Path, sys.argv[1:5])
+query = sys.argv[5]
+message = BytesParser(policy=policy.default).parsebytes(mime_path.read_bytes())
+assert message["X-Notmuch-Emacs-Draft"] == "True"
+assert message["X-Lem-Yath-Reply-Query"] == query
+assert message["Date"] and message["Message-ID"]
+assert message["Bcc"] is not None
+attachments = list(message.iter_attachments())
+assert len(attachments) == 1
+assert attachments[0].get_payload(decode=True) == expected_path.read_bytes()
+
+editable = editable_path.read_text()
+assert "X-Notmuch-Emacs-Draft:" not in editable
+assert "Message-ID:" not in editable and "Date:" not in editable
+assert f"X-Lem-Yath-Reply-Query: {query}" in editable
+match = re.search(r'<#part type="application/octet-stream" filename="([^"]+)" disposition=attachment>', editable)
+assert match
+extracted = Path(html.unescape(match.group(1)))
+assert extracted.parent == Path(root_path)
+assert extracted.read_bytes() == expected_path.read_bytes()
+info = extracted.lstat()
+assert stat.S_ISREG(info.st_mode) and not info.st_mode & 0o077
+assert not Path("PWNED").exists()
+PY
+then
+  pass draft-helper 'packaged draft MIME retained attachment bytes and resumed owner-private editable MML'
+else
+  fail draft-helper 'draft MIME preparation, metadata, snapshot extraction, or MML restoration diverged'
+fi
+
 fixture="$(lem-yath_lisp_string "$here/scripts/notmuch-fixture.lisp")"
 lem_start "$session" "$source_file" --eval "(load #P$fixture)"
 
@@ -483,14 +541,127 @@ PY
     lem_keys "$session" F10
   fi
   if wait_report ATTACH "$before_attachment" &&
-     [[ $(latest ATTACH) == 'ATTACH mode=yes marker=yes regular=yes bounded=yes count=1 keys=yes active=yes source=yes' ]]; then
+     [[ $(latest ATTACH) == 'ATTACH mode=yes marker=yes regular=yes bounded=yes count=1 keys=yes active=yes postpone=yes save=yes source=yes' ]]; then
     attachment_ok=1
   fi
 fi
 
-lem_keys "$session" C-c C-k
-if lem_wait_for "$session" 'Discard this unsent mail composition?' 3 >/dev/null; then
-  tmux_cmd send-keys -t "$session" -l -- 'y'
+draft_lifecycle_ok=0
+draft_postponed=0
+if ((new_compose_ok && attachment_ok)); then
+  before_draft=$(wc -l <"$LEM_YATH_NOTMUCH_DRAFT_LOG")
+  # The report is written just before F10 returns; let its key dispatch finish
+  # so the leading C-c belongs to the physical postpone chord.
+  sleep 0.5
+  lem_keys "$session" C-c
+  sleep 0.15
+  lem_keys "$session" C-p
+  wait_log_count "$LEM_YATH_NOTMUCH_DRAFT_LOG" "$((before_draft + 1))" || true
+  if lem_wait_for "$session" 'Message postponed;' 20 >/dev/null &&
+     python3 - "$LEM_YATH_NOTMUCH_DRAFT_LOG" "$LEM_YATH_NOTMUCH_LOG" \
+       "$LEM_YATH_NOTMUCH_STATE" "$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT" <<'PY'
+import json
+import sys
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
+
+drafts = [json.loads(line) for line in open(sys.argv[1])]
+calls = [json.loads(line) for line in open(sys.argv[2])]
+state = json.load(open(sys.argv[3]))
+message = BytesParser(policy=policy.default).parsebytes(drafts[-1].encode())
+assert message["X-Notmuch-Emacs-Draft"] == "True"
+assert message["Message-ID"] and message["Date"]
+assert len(list(message.iter_attachments())) == 1
+assert list(message.iter_attachments())[0].get_payload(decode=True) == Path(sys.argv[4]).read_bytes()
+assert calls[-1] == ["insert", "--create-folder", "--folder=drafts", "+draft"]
+assert state["draft_inserts"] == 1
+assert len([tags for tags in state["tags"].values() if "draft" in tags and "deleted" not in tags]) == 1
+PY
+  then
+    draft_postponed=1
+  fi
+fi
+
+if ((new_compose_ok && attachment_ok && !draft_postponed)); then
+  before_draft_report=$(report_count DRAFT)
+  lem_keys "$session" F12
+  wait_report DRAFT "$before_draft_report" || true
+fi
+
+if ((draft_postponed)); then
+  lem_keys "$session" F11
+  if lem_wait_for "$session" '\(draft\)' 20 >/dev/null; then
+    lem_keys "$session" Enter
+  fi
+  if lem_wait_for "$session" 'Tags: \(draft\)' 20 >/dev/null; then
+    lem_keys "$session" e
+  fi
+  before_draft_report=$(report_count DRAFT)
+  if lem_wait_for "$session" 'Draft resumed;' 20 >/dev/null; then
+    lem_keys "$session" F12
+  fi
+  draft_resume_ok=0
+  if wait_report DRAFT "$before_draft_report" &&
+     [[ $(latest DRAFT) == 'DRAFT mode=yes tracked=yes private=yes extracted=yes bytes=yes marker=yes keys=yes active-save=yes active-postpone=yes error=no cleaned=no source=yes' ]]; then
+    draft_resume_ok=1
+  fi
+
+  lem_keys "$session" G o
+  tmux_cmd send-keys -t "$session" -l -- 'Resaved draft; $(touch PWNED).'
+  lem_keys "$session" Escape
+  lem_wait_for "$session" 'NORMAL' 5 >/dev/null || true
+  sleep 0.25
+  before_draft=$(wc -l <"$LEM_YATH_NOTMUCH_DRAFT_LOG")
+  lem_keys "$session" C-x C-s
+  wait_log_count "$LEM_YATH_NOTMUCH_DRAFT_LOG" "$((before_draft + 1))" || true
+  draft_resave_ok=0
+  if lem_wait_for "$session" 'Draft saved in Notmuch;' 20 >/dev/null &&
+     python3 - "$LEM_YATH_NOTMUCH_DRAFT_LOG" "$LEM_YATH_NOTMUCH_LOG" \
+       "$LEM_YATH_NOTMUCH_STATE" <<'PY'
+import json
+import sys
+from email import policy
+from email.parser import BytesParser
+
+drafts = [json.loads(line) for line in open(sys.argv[1])]
+calls = [json.loads(line) for line in open(sys.argv[2])]
+state = json.load(open(sys.argv[3]))
+assert len(drafts) == 2 and state["draft_inserts"] == 2
+messages = [BytesParser(policy=policy.default).parsebytes(raw.encode()) for raw in drafts]
+ids = [str(message["Message-ID"])[1:-1] for message in messages]
+assert ids[0] != ids[1]
+assert "deleted" in state["tags"][ids[0]]
+assert state["tags"][ids[1]] == ["draft"]
+assert ["tag", "+deleted", "--", f'id:"{ids[0]}"'] in calls
+assert "Resaved draft; $(touch PWNED)." in messages[1].get_body(preferencelist=("plain",)).get_content()
+PY
+  then
+    draft_resave_ok=1
+  fi
+
+  lem_keys "$session" C-c C-k
+  before_draft_clean=$(report_count DRAFT)
+  sleep 0.5
+  lem_keys "$session" F12
+  draft_clean_ok=0
+  if wait_report DRAFT "$before_draft_clean" &&
+     [[ $(latest DRAFT) == 'DRAFT mode=no tracked=no private=no extracted=no bytes=no marker=no keys=yes active-save=no active-postpone=no error=no cleaned=yes source=yes' ]]; then
+    draft_clean_ok=1
+  fi
+  if ((draft_resume_ok && draft_resave_ok && draft_clean_ok)); then
+    draft_lifecycle_ok=1
+  fi
+
+  lem_keys "$session" F3
+  if lem_wait_for "$session" 'Second thread' 20 >/dev/null; then
+    lem_keys "$session" Enter
+  fi
+else
+  lem_keys "$session" C-c C-k
+  if lem_wait_for "$session" 'Discard this unsent mail composition?' 3 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l -- 'y'
+  fi
 fi
 if ((new_compose_ok)) && lem_wait_for "$session" 'Primary plain body' 20 >/dev/null; then
   pass compose-new 'C opened the configured Notmuch identity in an editable mail buffer and C-c C-k returned'
@@ -506,6 +677,11 @@ if ((attachment_ok)); then
   pass compose-attachment 'C-c C-a inserted one exact bounded MML attachment marker'
 else
   fail compose-attachment 'file prompt, MML marker, size guard, or active C-c C-a binding diverged'
+fi
+if ((draft_lifecycle_ok)); then
+  pass draft-postpone-resume 'C-c C-p, e, and C-x C-s snapshot, resume, replace, and clean drafts safely'
+else
+  fail draft-postpone-resume 'draft insertion, MIME snapshot, key route, replacement, or private cleanup diverged'
 fi
 
 before_compose=$(report_count COMPOSE)
@@ -620,6 +796,76 @@ then
 else
   fail send-reply 'SMTP, no-duplicate retry, FCC bytes, replied tag, or origin restoration diverged'
 fi
+
+# Reopen the second saved version after its first extraction directory was
+# removed, then send it.  The draft tag must be retired only after SMTP and
+# sent-FCC succeed, and the second extraction directory must also disappear.
+draft_send_ok=0
+lem_keys "$session" F11
+if lem_wait_for "$session" '\(draft\)' 20 >/dev/null; then
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Tags: \(draft\)' 20 >/dev/null; then
+  lem_keys "$session" e
+fi
+before_draft_report=$(report_count DRAFT)
+if lem_wait_for "$session" 'Draft resumed;' 20 >/dev/null; then
+  lem_keys "$session" F12
+fi
+draft_reopen_ok=0
+if wait_report DRAFT "$before_draft_report" &&
+   [[ $(latest DRAFT) == 'DRAFT mode=yes tracked=yes private=yes extracted=yes bytes=yes marker=yes keys=yes active-save=yes active-postpone=yes error=no cleaned=no source=yes' ]]; then
+  draft_reopen_ok=1
+fi
+
+before_draft_smtp=$(wc -l <"$LEM_YATH_SMTP_FAKE_LOG")
+before_draft_sent=$(wc -l <"$LEM_YATH_NOTMUCH_INSERT_LOG")
+sleep 0.5
+lem_keys "$session" C-c C-c
+wait_log_count "$LEM_YATH_SMTP_FAKE_LOG" "$((before_draft_smtp + 1))" || true
+wait_log_count "$LEM_YATH_NOTMUCH_INSERT_LOG" "$((before_draft_sent + 1))" || true
+before_draft_clean=$(report_count DRAFT)
+if lem_wait_for "$session" 'Message sent and filed in Notmuch' 20 >/dev/null; then
+  lem_keys "$session" F12
+fi
+if ((draft_reopen_ok)) && wait_report DRAFT "$before_draft_clean" &&
+   [[ $(latest DRAFT) == 'DRAFT mode=no tracked=no private=no extracted=no bytes=no marker=no keys=yes active-save=no active-postpone=no error=no cleaned=yes source=yes' ]] &&
+   python3 - "$LEM_YATH_SMTP_FAKE_LOG" "$LEM_YATH_NOTMUCH_INSERT_LOG" \
+     "$LEM_YATH_NOTMUCH_DRAFT_LOG" "$LEM_YATH_NOTMUCH_STATE" \
+     "$LEM_YATH_NOTMUCH_LOG" <<'PY'
+import json
+import sys
+from email import policy
+from email.parser import BytesParser
+
+smtp = [json.loads(line) for line in open(sys.argv[1])]
+sent = [json.loads(line) for line in open(sys.argv[2])]
+drafts = [json.loads(line) for line in open(sys.argv[3])]
+state = json.load(open(sys.argv[4]))
+calls = [json.loads(line) for line in open(sys.argv[5])]
+latest_draft = BytesParser(policy=policy.default).parsebytes(drafts[-1].encode())
+draft_id = str(latest_draft["Message-ID"])[1:-1]
+assert len(smtp) == 2 and smtp[-1]["argv"] == []
+assert "Resaved draft; $(touch PWNED)." in smtp[-1]["input"]
+assert "<#part type=\"application/octet-stream\"" in smtp[-1]["input"]
+assert sent[-1] == smtp[-1]["wire"]
+assert "deleted" in state["tags"][draft_id]
+assert ["tag", "+deleted", "--", f'id:"{draft_id}"'] in calls
+PY
+then
+  draft_send_ok=1
+fi
+if ((draft_send_ok)); then
+  pass draft-send 'sending a resumed snapshot retired the draft after SMTP/FCC and cleaned extraction state'
+else
+  fail draft-send 'reopen, send ordering, draft retirement, sent FCC, or extraction cleanup diverged'
+fi
+
+lem_keys "$session" F3
+if lem_wait_for "$session" 'Second thread' 20 >/dev/null; then
+  lem_keys "$session" Enter
+fi
+lem_wait_for "$session" 'Primary plain body' 20 >/dev/null || true
 
 lem_keys "$session" C-c s e
 if wait_log_count "$LEM_YATH_NOTMUCH_OPEN_LOG" 1; then

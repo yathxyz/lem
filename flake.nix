@@ -499,6 +499,7 @@
               export LEM_YATH_MCP_FETCH_PROGRAM="''${LEM_YATH_MCP_FETCH_PROGRAM:-${lib.getExe' pkgs.uv "uvx"}}"
               export LEM_YATH_MCP_DOCKER_PROGRAM="''${LEM_YATH_MCP_DOCKER_PROGRAM:-${lib.getExe pkgs.docker-client}}"
               export LEM_YATH_SMTP_SUBMIT_PROGRAM="''${LEM_YATH_SMTP_SUBMIT_PROGRAM:-${smtpSubmit}/bin/lem-yath-smtp-submit}"
+              export LEM_YATH_NOTMUCH_DRAFT_PROGRAM="''${LEM_YATH_NOTMUCH_DRAFT_PROGRAM:-${smtpSubmit}/bin/lem-yath-smtp-submit}"
               export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
               export LEM_YATH_AOT_FASL_ROOT=${lemYathAot}
 
@@ -615,6 +616,7 @@
                   export LEM_YATH_ASPELL_PROGRAM=${lib.getExe' aspellRuntime "aspell"}
                   export LEM_YATH_TIMEOUT_PROGRAM=${lib.getExe' pkgs.coreutils "timeout"}
                   export LEM_YATH_SMTP_SUBMIT_PROGRAM=${smtpSubmit}/bin/lem-yath-smtp-submit
+                  export LEM_YATH_NOTMUCH_DRAFT_PROGRAM=${smtpSubmit}/bin/lem-yath-smtp-submit
                   export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
                   exec bash ${self}/scripts/${script} "$@"
                 '';
@@ -665,6 +667,7 @@
                 export LEM_YATH_ASPELL_PROGRAM=${lib.getExe' aspellRuntime "aspell"}
                 export LEM_YATH_TIMEOUT_PROGRAM=${lib.getExe' pkgs.coreutils "timeout"}
                 export LEM_YATH_SMTP_SUBMIT_PROGRAM=${smtpSubmit}/bin/lem-yath-smtp-submit
+                export LEM_YATH_NOTMUCH_DRAFT_PROGRAM=${smtpSubmit}/bin/lem-yath-smtp-submit
                 export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
 
                 mkdir -p "$HOME" "$XDG_CACHE_HOME"

@@ -630,12 +630,17 @@ earlier recipients and their whitespace."
 (define-key *notmuch-show-mode-keymap* "c c" 'lem-yath-notmuch-compose)
 (define-key *notmuch-show-mode-keymap* "c r" 'lem-yath-notmuch-reply-sender)
 (define-key *notmuch-show-mode-keymap* "c R" 'lem-yath-notmuch-reply-all)
+(define-key *notmuch-show-mode-keymap* "e" 'lem-yath-notmuch-resume-draft)
 (define-key *notmuch-compose-mode-keymap* "C-c C-c"
   'lem-yath-notmuch-compose-send)
 (define-key *notmuch-compose-mode-keymap* "C-c C-a"
   'lem-yath-notmuch-compose-attach-file)
+(define-key *notmuch-compose-mode-keymap* "C-c C-p"
+  'lem-yath-notmuch-compose-postpone)
 (define-key *notmuch-compose-mode-keymap* "C-c C-k"
   'lem-yath-notmuch-compose-cancel)
+(define-key *notmuch-compose-mode-keymap* "C-x C-s"
+  'lem-yath-notmuch-compose-save-draft)
 
 ;;; --- compose, reply, and submit -------------------------------------------
 
@@ -737,10 +742,14 @@ earlier recipients and their whitespace."
         (message "Attached ~a; C-c C-c will build multipart MIME"
                  (file-namestring pathname))))))
 
-(defun notmuch-compose-open (text &key reply-query user-emails)
+(defun notmuch-compose-open
+    (text &key reply-query user-emails draft-query draft-directory)
   "Open TEXT in the single Notmuch composition buffer.
 
-REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
+REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed.
+DRAFT-QUERY identifies the saved version replaced by save or deleted after a
+successful send.  DRAFT-DIRECTORY owns attachment snapshots for a resumed
+draft and is removed when the composition closes."
   (alexandria:when-let ((existing (notmuch-compose-existing-buffer)))
     (switch-to-buffer existing nil)
     (editor-error "A Notmuch composition is already open"))
@@ -757,6 +766,11 @@ REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
             (buffer-value buffer 'notmuch-compose-sent-message) nil
             (buffer-value buffer 'notmuch-compose-fcc-done-p) nil
             (buffer-value buffer 'notmuch-compose-reply-tag-done-p) nil
+            (buffer-value buffer 'notmuch-compose-draft-query) draft-query
+            (buffer-value buffer 'notmuch-compose-draft-directory)
+            draft-directory
+            (buffer-value buffer 'notmuch-compose-draft-tag-done-p) nil
+            (buffer-value buffer 'notmuch-compose-draft-last-error) nil
             (buffer-value buffer 'notmuch-compose-header-limit)
             (notmuch-compose-header-limit-point buffer)
             (buffer-value buffer 'notmuch-address-user-emails)
@@ -766,10 +780,12 @@ REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
             (buffer-value buffer 'notmuch-address-generation) 0
             (buffer-value buffer 'notmuch-address-request) nil
             (buffer-value buffer 'notmuch-address-last-error) nil)
+      (add-hook (variable-value 'kill-buffer-hook :buffer buffer)
+                'notmuch-compose-kill-buffer-hook)
       (notmuch-compose-position-point buffer))
     (buffer-unmark buffer)
     (switch-to-buffer buffer nil)
-    (message "Write the message, then C-c C-c to send or C-c C-k to cancel")
+    (message "Write mail; C-c C-c sends, C-c C-p postpones, C-x C-s saves, C-c C-k cancels")
     buffer))
 
 (define-command lem-yath-notmuch-compose () ()
@@ -815,6 +831,210 @@ REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
   "Reply to the sender and all recipients at point (`cR')."
   (notmuch-compose-reply t))
 
+(defun notmuch-draft-helper-program ()
+  "Return the packaged helper used to snapshot and restore Notmuch drafts."
+  (or (alexandria:when-let
+          ((configured (uiop:getenv "LEM_YATH_NOTMUCH_DRAFT_PROGRAM")))
+        (and (plusp (length configured))
+             (probe-file configured)
+             configured))
+      (notmuch-smtp-submit-program)))
+
+(defun notmuch-draft-run-helper (arguments raw-message)
+  "Run the draft helper with direct ARGUMENTS and bounded RAW-MESSAGE input."
+  (let ((*project-process-timeout* *notmuch-submit-timeout*))
+    (multiple-value-bind (output error-output status)
+        (run-project-program
+         (cons (notmuch-draft-helper-program) arguments)
+         :directory (or (ignore-errors (buffer-directory (current-buffer)))
+                        (uiop:getcwd))
+         :input raw-message
+         :output-limit *notmuch-message-output-limit*)
+      (unless (and (integerp status) (zerop status) (plusp (length output)))
+        (editor-error "~a"
+                      (notmuch-command-error-text error-output
+                                                  "draft helper failed")))
+      output)))
+
+(defun notmuch-draft-message-id (wire)
+  "Return the bare Message-ID from a prepared draft WIRE message."
+  (dolist (raw-line (uiop:split-string wire :separator '(#\Newline)))
+    (let ((line (string-right-trim '(#\Return) raw-line)))
+      (when (zerop (length line)) (return))
+      (when (zerop (or (search "Message-ID:" line :test #'char-equal) -1))
+        (let ((value (string-trim '(#\Space #\Tab)
+                                  (subseq line (length "Message-ID:")))))
+          (when (and (> (length value) 2)
+                     (char= (char value 0) #\<)
+                     (char= (char value (1- (length value))) #\>))
+            (return (subseq value 1 (1- (length value))))))))))
+
+(defun notmuch-draft-reply-query-valid-p (query)
+  "True when QUERY is one exact quoted id: or thread: query we generated."
+  (and (stringp query)
+       (plusp (length query))
+       (<= (length query) 4105)
+       (let ((prefix-length
+               (cond ((zerop (or (search "id:\"" query) -1)) 4)
+                     ((zerop (or (search "thread:\"" query) -1)) 8))))
+         (when (and prefix-length
+                    (> (length query) (1+ prefix-length))
+                    (char= (char query (1- (length query))) #\"))
+           (loop :with escaped-p := nil
+                 :for index :from prefix-length
+                            :below (1- (length query))
+                 :for character := (char query index)
+                 :do (cond
+                       (escaped-p
+                        (unless (or (char= character #\\)
+                                    (char= character #\"))
+                          (return nil))
+                        (setf escaped-p nil))
+                       ((char= character #\\)
+                        (setf escaped-p t))
+                       ((or (char= character #\")
+                            (char= character #\Null)
+                            (char= character #\Newline)
+                            (char= character #\Return))
+                        (return nil)))
+                 :finally (return (not escaped-p)))))))
+
+(defun notmuch-draft-strip-reply-metadata (text)
+  "Remove the private reply-query header from resumed draft TEXT.
+Returns the editable text and optional query as two values."
+  (let ((prefix "X-Lem-Yath-Reply-Query:")
+        (reply-query nil)
+        (headers-p t))
+    (values
+     (with-output-to-string (stream)
+       (let ((start 0)
+             (length (length text)))
+         (loop
+           (let* ((newline (position #\Newline text :start start))
+                  (end (or newline length))
+                  (line (subseq text start end)))
+             (cond
+               ((and headers-p (zerop (length line)))
+                (setf headers-p nil)
+                (write-string line stream)
+                (when newline (write-char #\Newline stream)))
+               ((and headers-p
+                     (zerop (or (search prefix line :test #'char-equal) -1)))
+                (when reply-query
+                  (editor-error "Saved draft contains duplicate reply metadata"))
+                (setf reply-query
+                      (string-trim '(#\Space #\Tab)
+                                   (subseq line (length prefix)))))
+               (t
+                (write-string line stream)
+                (when newline (write-char #\Newline stream))))
+             (unless newline (return))
+             (setf start (1+ newline))))))
+     (progn
+       (when (and reply-query
+                  (not (notmuch-draft-reply-query-valid-p reply-query)))
+         (editor-error "Saved draft contains invalid reply metadata"))
+       reply-query))))
+
+(defun notmuch-remove-draft-directory (directory)
+  "Remove regular attachment snapshots and then private DIRECTORY."
+  (when directory
+    (dolist (pathname (or (ignore-errors (uiop:directory-files directory)) '()))
+      (ignore-errors (delete-file pathname)))
+    #+sbcl
+    (ignore-errors (sb-posix:rmdir (uiop:native-namestring directory)))))
+
+(defun notmuch-compose-kill-buffer-hook (&optional (buffer (current-buffer)))
+  "Cancel completion work and remove resumed attachment files for BUFFER."
+  (notmuch-address-cancel-request buffer)
+  (let ((directory
+          (buffer-value buffer 'notmuch-compose-draft-directory)))
+    (setf (buffer-value buffer 'notmuch-compose-draft-directory) nil)
+    (notmuch-remove-draft-directory directory)))
+
+(defun notmuch-compose-save-draft-buffer (buffer)
+  "Snapshot and index BUFFER, replacing its previously tracked draft safely."
+  (unless (eq (buffer-major-mode buffer) 'notmuch-compose-mode)
+    (error "Not in a Notmuch composition"))
+  (when (buffer-value buffer 'notmuch-compose-sent-message)
+    (error "A message already accepted by SMTP cannot be saved as a draft"))
+  (let* ((reply-query (buffer-value buffer 'notmuch-compose-reply-query))
+         (arguments (if reply-query
+                        (list "--prepare-draft" reply-query)
+                        (list "--prepare-draft")))
+         (wire (notmuch-draft-run-helper arguments (buffer-text buffer)))
+         (message-id (or (notmuch-draft-message-id wire)
+                         (error "Prepared draft has no valid Message-ID")))
+         (new-query (notmuch-message-id-query message-id))
+         (old-query (buffer-value buffer 'notmuch-compose-draft-query)))
+    (notmuch-run-text
+     (list "insert" "--create-folder" "--folder=drafts" "+draft")
+     :input wire :output-limit *notmuch-output-limit*)
+    ;; The newly inserted version is durable before the older one is hidden.
+    (setf (buffer-value buffer 'notmuch-compose-draft-query) new-query)
+    (buffer-unmark buffer)
+    (when (and old-query (not (string= old-query new-query)))
+      (unless (notmuch-change-tags old-query '("+deleted"))
+        (error "The new draft was saved, but the previous version could not be marked deleted")))
+    new-query))
+
+(defun notmuch-compose-save-draft-interactively (buffer)
+  "Save BUFFER as a draft, reporting errors without closing it."
+  (handler-case
+      (progn
+        (notmuch-compose-save-draft-buffer buffer)
+        (setf (buffer-value buffer 'notmuch-compose-draft-last-error) nil)
+        (message "Draft saved in Notmuch; C-c C-p postpones it")
+        t)
+    (error (condition)
+      (setf (buffer-value buffer 'notmuch-compose-draft-last-error)
+            (princ-to-string condition))
+      (message "Draft was not saved: ~a" condition)
+      nil)))
+
+(define-command lem-yath-notmuch-compose-save-draft () ()
+  "Save this composition in Notmuch without closing it (`C-x C-s')."
+  (notmuch-compose-save-draft-interactively (current-buffer)))
+
+(define-command lem-yath-notmuch-compose-postpone () ()
+  "Save this composition in Notmuch and close it (`C-c C-p')."
+  (let ((buffer (current-buffer)))
+    (when (notmuch-compose-save-draft-interactively buffer)
+      (notmuch-close-compose buffer)
+      (message "Message postponed; search tag:draft and press e to resume"))))
+
+(define-command lem-yath-notmuch-resume-draft () ()
+  "Resume the draft message at point (`e' in a Notmuch show buffer)."
+  (let* ((show-buffer (current-buffer))
+         (message-id (notmuch-message-id-at-point))
+         (message-object (and message-id
+                              (notmuch-message-object show-buffer message-id)))
+         (tags (and message-object (gethash "tags" message-object))))
+    (unless (and message-id
+                 (member "draft" tags :test #'string=)
+                 (not (member "deleted" tags :test #'string=)))
+      (editor-error "The message at point is not a live Notmuch draft"))
+    (let* ((query (notmuch-message-id-query message-id))
+           (raw (notmuch-run-text
+                 (list "show" "--format=raw" query)
+                 :output-limit *notmuch-message-output-limit*))
+           (directory (notmuch-private-temp-directory))
+           (keep-directory-p nil))
+      (unwind-protect
+           (multiple-value-bind (editable reply-query)
+               (notmuch-draft-strip-reply-metadata
+                (notmuch-draft-run-helper
+                 (list "--resume-draft" (uiop:native-namestring directory))
+                 raw))
+             (notmuch-compose-open editable
+                                   :reply-query reply-query
+                                   :draft-query query
+                                   :draft-directory directory)
+             (setf keep-directory-p t)
+             (message "Draft resumed; C-x C-s saves and C-c C-p postpones"))
+        (unless keep-directory-p
+          (notmuch-remove-draft-directory directory))))))
+
 (defun notmuch-smtp-submit-program ()
   (or (alexandria:when-let ((configured
                               (uiop:getenv "LEM_YATH_SMTP_SUBMIT_PROGRAM")))
@@ -858,7 +1078,6 @@ REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
   t)
 
 (defun notmuch-close-compose (buffer)
-  (notmuch-address-cancel-request buffer)
   (let ((origin (buffer-value buffer 'notmuch-compose-origin)))
     (when (and origin (not (deleted-buffer-p origin)))
       (switch-to-buffer origin nil))
@@ -888,6 +1107,12 @@ the interactive command so it can retain BUFFER and explain the recovery."
       (unless (notmuch-change-tags query '("+replied"))
         (error "tagging the sent reply failed")))
     (setf (buffer-value buffer 'notmuch-compose-reply-tag-done-p) t))
+  (unless (buffer-value buffer 'notmuch-compose-draft-tag-done-p)
+    (alexandria:when-let
+        ((query (buffer-value buffer 'notmuch-compose-draft-query)))
+      (unless (notmuch-change-tags query '("+deleted"))
+        (error "marking the sent draft deleted failed")))
+    (setf (buffer-value buffer 'notmuch-compose-draft-tag-done-p) t))
   (notmuch-close-compose buffer)
   t)
 

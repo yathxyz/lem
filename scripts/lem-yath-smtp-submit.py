@@ -181,14 +181,15 @@ def expand_mml_attachments(message) -> None:
         )
 
 
-def normalized_message(raw: bytes):
+def parsed_composition(raw: bytes, *, validate_addresses: bool = True):
     message = BytesParser(policy=email.policy.SMTP).parsebytes(raw)
     if message.defects:
         raise SubmitError("message headers are malformed")
-    for name in ("From", "Sender", "To", "Cc", "Bcc"):
-        for header in message.get_all(name, []):
-            if getattr(header, "defects", ()):
-                raise SubmitError(f"{name} contains a malformed address")
+    if validate_addresses:
+        for name in ("From", "Sender", "To", "Cc", "Bcc"):
+            for header in message.get_all(name, []):
+                if getattr(header, "defects", ()):
+                    raise SubmitError(f"{name} contains a malformed address")
     if (
         len(message.get_all("From", [])) != 1
         or len(message.get_all("Sender", [])) > 1
@@ -196,6 +197,11 @@ def normalized_message(raw: bytes):
         raise SubmitError("message must contain exactly one From and at most one Sender")
     if message.is_multipart() or message.get_content_maintype() != "text":
         raise SubmitError("only bounded text message composition is supported")
+    return message
+
+
+def normalized_message(raw: bytes):
+    message = parsed_composition(raw)
     expand_mml_attachments(message)
     from_value = message.get("Sender") or message.get("From")
     envelope_from = one_address(str(from_value), "From")
@@ -218,6 +224,205 @@ def normalized_message(raw: bytes):
     if len(wire) > MAX_MESSAGE_BYTES:
         raise SubmitError("normalized message exceeds the 10 MiB submission limit")
     return envelope_from, recipients, wire
+
+
+def prepared_draft(raw: bytes, reply_query: str | None = None) -> bytes:
+    """Return a MIME snapshot suitable for ``notmuch insert +draft``."""
+    # Drafts are intentionally allowed to contain unfinished recipient fields;
+    # normalized_message performs the strict address checks before any send.
+    message = parsed_composition(raw, validate_addresses=False)
+    expand_mml_attachments(message)
+    for name in (
+        "Date",
+        "Message-ID",
+        "X-Notmuch-Emacs-Draft",
+        "X-Lem-Yath-Reply-Query",
+    ):
+        while message.get(name) is not None:
+            del message[name]
+    if reply_query is not None:
+        if (
+            not reply_query
+            or len(reply_query) > 4096
+            or any(character in reply_query for character in "\r\n\x00")
+        ):
+            raise SubmitError("draft reply query is malformed")
+        message["X-Lem-Yath-Reply-Query"] = reply_query
+    message["Date"] = email.utils.formatdate(localtime=True)
+    message["Message-ID"] = email.utils.make_msgid(idstring="draft")
+    message["X-Notmuch-Emacs-Draft"] = "True"
+    if message.get("MIME-Version") is None:
+        message["MIME-Version"] = "1.0"
+    if message.get("Content-Type") is None:
+        message["Content-Type"] = "text/plain; charset=utf-8"
+    if not message.is_multipart() and message.get("Content-Transfer-Encoding") is None:
+        message["Content-Transfer-Encoding"] = "8bit"
+    wire = message.as_bytes(policy=email.policy.SMTP)
+    if len(wire) > MAX_MESSAGE_BYTES:
+        raise SubmitError("draft snapshot exceeds the 10 MiB limit")
+    return wire
+
+
+def decoded_text(part) -> str:
+    payload = part.get_payload(decode=True)
+    if payload is None:
+        payload = b""
+    charset = part.get_content_charset() or "utf-8"
+    try:
+        return payload.decode(charset)
+    except (LookupError, UnicodeDecodeError) as error:
+        raise SubmitError("draft body is not valid text") from error
+
+
+def private_draft_directory(value: str) -> Path:
+    directory = Path(value)
+    try:
+        info = directory.lstat()
+    except OSError as error:
+        raise SubmitError("could not inspect the draft attachment directory") from error
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_mode & 0o077
+    ):
+        raise SubmitError("draft attachment directory must be owner-private")
+    return directory
+
+
+def safe_attachment_name(value: str | None, index: int) -> str:
+    name = (value or f"attachment-{index}").replace("\\", "/").rsplit("/", 1)[-1]
+    if (
+        not name
+        or name in {".", ".."}
+        or any(character in name for character in "\r\n\x00")
+    ):
+        name = f"attachment-{index}"
+    return name[:200]
+
+
+def write_draft_attachment(
+    directory: Path, filename: str, data: bytes, index: int
+) -> Path:
+    stem, suffix = os.path.splitext(filename)
+    for collision in range(1000):
+        name = filename if collision == 0 else f"{stem}-{collision + 1}{suffix}"
+        path = directory / name
+        flags = (
+            os.O_CREAT
+            | os.O_EXCL
+            | os.O_WRONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(path, flags, 0o600)
+        except FileExistsError:
+            continue
+        except OSError as error:
+            raise SubmitError(f"could not create draft attachment {index}") from error
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb", closefd=False) as stream:
+                stream.write(data)
+                stream.flush()
+        finally:
+            os.close(descriptor)
+        return path
+    raise SubmitError("could not allocate a unique draft attachment name")
+
+
+def resumed_draft(raw: bytes, directory_value: str) -> bytes:
+    """Restore one saved MIME draft to editable text plus MML markers."""
+    if len(raw) > MAX_MESSAGE_BYTES:
+        raise SubmitError("saved draft exceeds the 10 MiB limit")
+    message = BytesParser(policy=email.policy.SMTP).parsebytes(raw)
+    if message.defects:
+        raise SubmitError("saved draft headers are malformed")
+    draft_headers = message.get_all("X-Notmuch-Emacs-Draft", [])
+    if len(draft_headers) != 1 or str(draft_headers[0]).strip().lower() != "true":
+        raise SubmitError("message is not a Lem/Notmuch draft")
+
+    directory = private_draft_directory(directory_value)
+    body = ""
+    attachment_parts = []
+    if message.is_multipart():
+        if message.get_content_type() != "multipart/mixed":
+            raise SubmitError("saved draft has an unsupported MIME structure")
+        body_parts = []
+        for part in message.iter_parts():
+            if part.get_content_disposition() == "attachment":
+                attachment_parts.append(part)
+            elif not part.is_multipart() and part.get_content_type() == "text/plain":
+                body_parts.append(part)
+            else:
+                raise SubmitError("saved draft has an unsupported MIME part")
+        if len(body_parts) != 1:
+            raise SubmitError("saved draft must contain exactly one text body")
+        body = decoded_text(body_parts[0])
+    elif message.get_content_maintype() == "text":
+        body = decoded_text(message)
+    else:
+        raise SubmitError("saved draft does not contain editable text")
+
+    if len(attachment_parts) > MAX_ATTACHMENTS:
+        raise SubmitError("saved draft contains more than 16 attachments")
+    created: list[Path] = []
+    markers: list[str] = []
+    aggregate = 0
+    try:
+        for index, part in enumerate(attachment_parts, 1):
+            data = part.get_payload(decode=True)
+            if data is None:
+                raise SubmitError("saved draft attachment is malformed")
+            aggregate += len(data)
+            if len(data) > MAX_ATTACHMENT_BYTES or aggregate > MAX_ATTACHMENT_BYTES:
+                raise SubmitError("saved draft attachments exceed the 7 MiB limit")
+            content_type = part.get_content_type()
+            if MML_ATTACHMENT.fullmatch(
+                f'<#part type="{content_type}" filename="x" disposition=attachment>'
+            ) is None:
+                raise SubmitError("saved draft attachment type is malformed")
+            filename = safe_attachment_name(part.get_filename(), index)
+            path = write_draft_attachment(directory, filename, data, index)
+            created.append(path)
+            markers.append(
+                f'<#part type="{content_type}" '
+                f'filename="{html.escape(os.fspath(path), quote=True)}" '
+                "disposition=attachment>"
+            )
+
+        excluded = {
+            "date",
+            "message-id",
+            "x-notmuch-emacs-draft",
+            "mime-version",
+            "content-type",
+            "content-transfer-encoding",
+        }
+        headers = []
+        for name, value in message.items():
+            if name.lower() in excluded:
+                continue
+            text = str(value)
+            if any(character in text for character in "\r\n\x00"):
+                raise SubmitError(f"saved draft {name} header is malformed")
+            headers.append(f"{name}: {text}")
+        editable = "\n".join(headers) + "\n\n" + body.replace("\r\n", "\n")
+        if markers:
+            if not editable.endswith("\n"):
+                editable += "\n"
+            editable += "\n".join(markers) + "\n"
+        output = editable.encode("utf-8")
+        if len(output) > MAX_MESSAGE_BYTES:
+            raise SubmitError("resumed draft exceeds the 10 MiB limit")
+        return output
+    except Exception:
+        for path in created:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        raise
 
 
 def private_authinfo(path: Path) -> bytes:
@@ -366,11 +571,25 @@ def submit() -> bytes:
 
 
 def main() -> int:
+    arguments = sys.argv[1:]
+    label = "SMTP submission failed"
     try:
-        sys.stdout.buffer.write(submit())
+        if not arguments:
+            output = submit()
+        elif arguments[:1] == ["--prepare-draft"] and len(arguments) <= 2:
+            label = "Notmuch draft preparation failed"
+            output = prepared_draft(
+                bounded_stdin(), arguments[1] if len(arguments) == 2 else None
+            )
+        elif len(arguments) == 2 and arguments[0] == "--resume-draft":
+            label = "Notmuch draft resume failed"
+            output = resumed_draft(bounded_stdin(), arguments[1])
+        else:
+            raise SubmitError("unsupported helper arguments")
+        sys.stdout.buffer.write(output)
         return 0
     except (SubmitError, OSError, smtplib.SMTPException, ssl.SSLError) as error:
-        print(f"SMTP submission failed: {error}", file=sys.stderr)
+        print(f"{label}: {error}", file=sys.stderr)
         return 1
 
 

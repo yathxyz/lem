@@ -14,6 +14,7 @@
 (defvar *notmuch-test-pdf-directory* nil)
 (defvar *notmuch-test-compose-attachment*
   (uiop:getenv "LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT"))
+(defvar *notmuch-test-draft-directory* nil)
 
 (defun notmuch-test-yes-no (value) (if value "yes" "no"))
 
@@ -88,12 +89,18 @@
        'lem-yath-notmuch-reply-sender)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "c R")
        'lem-yath-notmuch-reply-all)
+   (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "e")
+       'lem-yath-notmuch-resume-draft)
    (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-c")
        'lem-yath-notmuch-compose-send)
    (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-a")
        'lem-yath-notmuch-compose-attach-file)
    (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-k")
        'lem-yath-notmuch-compose-cancel)
+   (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-p")
+       'lem-yath-notmuch-compose-postpone)
+   (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-x C-s")
+       'lem-yath-notmuch-compose-save-draft)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "C-c s e")
        'lem-yath-salta-open-payment-email-from-notmuch)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "q")
@@ -297,7 +304,7 @@
                     (ignore-errors
                       (notmuch-compose-attachment-size pathname)))))
     (notmuch-test-log
-     "ATTACH mode=~a marker=~a regular=~a bounded=~a count=~a keys=~a active=~a source=~a"
+     "ATTACH mode=~a marker=~a regular=~a bounded=~a count=~a keys=~a active=~a postpone=~a save=~a source=~a"
      (notmuch-test-yes-no compose-p)
      (notmuch-test-yes-no
       (and compose-p marker (search marker (buffer-text buffer))))
@@ -309,6 +316,77 @@
      (notmuch-test-yes-no
       (eq (notmuch-test-active-key-command "C-c C-a")
           'lem-yath-notmuch-compose-attach-file))
+     (notmuch-test-yes-no
+      (eq (notmuch-test-active-key-command "C-c C-p")
+          'lem-yath-notmuch-compose-postpone))
+     (notmuch-test-yes-no
+      (eq (notmuch-test-active-key-command "C-x C-s")
+          'lem-yath-notmuch-compose-save-draft))
+     (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
+
+(defun notmuch-test-file-bytes-equal-p (left right)
+  (handler-case
+      (with-open-file (left-stream left :element-type '(unsigned-byte 8))
+        (with-open-file (right-stream right :element-type '(unsigned-byte 8))
+          (and (= (file-length left-stream) (file-length right-stream))
+               (loop :for left-byte := (read-byte left-stream nil nil)
+                     :for right-byte := (read-byte right-stream nil nil)
+                     :do (cond
+                           ((or (null left-byte) (null right-byte))
+                            (return (and (null left-byte)
+                                         (null right-byte))))
+                           ((/= left-byte right-byte)
+                            (return nil)))))))
+    (error () nil)))
+
+(define-command lem-yath-notmuch-test-draft-report () ()
+  (let* ((buffer (current-buffer))
+         (compose-p (eq (buffer-major-mode buffer) 'notmuch-compose-mode))
+         (directory (and compose-p
+                         (buffer-value buffer
+                                       'notmuch-compose-draft-directory)))
+         (files (and directory
+                     (ignore-errors (uiop:directory-files directory))))
+         (file (and (= (length files) 1) (first files)))
+         (directory-stat
+           (and directory
+                (ignore-errors
+                  (sb-posix:lstat (uiop:native-namestring directory))))))
+    (when directory
+      (setf *notmuch-test-draft-directory* directory))
+    (notmuch-test-log
+     "DRAFT mode=~a tracked=~a private=~a extracted=~a bytes=~a marker=~a keys=~a active-save=~a active-postpone=~a error=~a cleaned=~a source=~a"
+     (notmuch-test-yes-no compose-p)
+     (notmuch-test-yes-no
+      (and compose-p
+           (buffer-value buffer 'notmuch-compose-draft-query)))
+     (notmuch-test-yes-no
+      (and directory-stat
+           (= (logand (sb-posix:stat-mode directory-stat) sb-posix:s-ifmt)
+              sb-posix:s-ifdir)
+           (zerop (logand (sb-posix:stat-mode directory-stat) #o077))))
+     (notmuch-test-yes-no (and file (uiop:file-exists-p file)))
+     (notmuch-test-yes-no
+      (and file *notmuch-test-compose-attachment*
+           (notmuch-test-file-bytes-equal-p
+            file *notmuch-test-compose-attachment*)))
+     (notmuch-test-yes-no
+      (and compose-p
+           (= 1 (notmuch-compose-attachment-marker-count buffer))))
+     (notmuch-test-yes-no (notmuch-test-keys-p))
+     (notmuch-test-yes-no
+      (eq (notmuch-test-active-key-command "C-x C-s")
+          'lem-yath-notmuch-compose-save-draft))
+     (notmuch-test-yes-no
+      (eq (notmuch-test-active-key-command "C-c C-p")
+          'lem-yath-notmuch-compose-postpone))
+     (notmuch-test-yes-no
+      (and compose-p
+           (buffer-value buffer 'notmuch-compose-draft-last-error)))
+     (notmuch-test-yes-no
+      (and *notmuch-test-draft-directory*
+           (not (uiop:directory-exists-p
+                 *notmuch-test-draft-directory*))))
      (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
 
 (defun notmuch-test-extraction-refusal
@@ -368,6 +446,9 @@
 (define-command lem-yath-notmuch-test-empty () ()
   (notmuch-search "tag:empty"))
 
+(define-command lem-yath-notmuch-test-drafts () ()
+  (notmuch-search "tag:draft"))
+
 (define-key *global-keymap* "F1" 'lem-yath-notmuch-test-report)
 (define-key *global-keymap* "F2" 'lem-yath-notmuch-test-pdf-report)
 (define-key *global-keymap* "F3" 'lem-yath-notmuch-test-open)
@@ -378,6 +459,8 @@
 (define-key *global-keymap* "F8" 'lem-yath-notmuch-test-cleanup-report)
 (define-key *global-keymap* "F9" 'lem-yath-notmuch-test-refusals)
 (define-key *global-keymap* "F10" 'lem-yath-notmuch-test-attachment-report)
+(define-key *global-keymap* "F11" 'lem-yath-notmuch-test-drafts)
+(define-key *global-keymap* "F12" 'lem-yath-notmuch-test-draft-report)
 
 (notmuch-test-log "EXEC notmuch=~a xdg-open=~a"
                   (executable-find "notmuch")

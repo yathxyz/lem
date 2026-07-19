@@ -7,12 +7,15 @@ import json
 import os
 import re
 import sys
+import email.policy
+from email.parser import BytesParser
 from pathlib import Path
 
 
 LOG = Path(os.environ["LEM_YATH_NOTMUCH_LOG"])
 STATE = Path(os.environ["LEM_YATH_NOTMUCH_STATE"])
 INSERT_LOG = Path(os.environ["LEM_YATH_NOTMUCH_INSERT_LOG"])
+DRAFT_LOG = Path(os.environ["LEM_YATH_NOTMUCH_DRAFT_LOG"])
 
 
 def log(args: list[str]) -> None:
@@ -62,9 +65,11 @@ def thread_from_query(query: str) -> str | None:
     return decoded_query_value(match.group(1)) if match else None
 
 
-def message_ids_from_query(query: str) -> list[str]:
+def message_ids_from_query(query: str, data: dict | None = None) -> list[str]:
     thread_id = thread_from_query(query)
     if thread_id is not None:
+        if data is not None and thread_id in data.get("drafts", {}):
+            return [thread_id]
         return THREAD_MESSAGES.get(thread_id, [])
     return [
         decoded_query_value(match)
@@ -74,6 +79,24 @@ def message_ids_from_query(query: str) -> list[str]:
 
 def show_tree(thread_id: str, data: dict) -> list:
     tags = data["tags"]
+    if thread_id in data.get("drafts", {}):
+        draft = BytesParser(policy=email.policy.default).parsebytes(
+            data["drafts"][thread_id].encode()
+        )
+        body_part = draft.get_body(preferencelist=("plain",))
+        body = body_part.get_content() if body_part is not None else ""
+        value = {
+            "id": thread_id,
+            "tags": tags[thread_id],
+            "headers": {
+                "From": str(draft.get("From", "")),
+                "To": str(draft.get("To", "")),
+                "Date": str(draft.get("Date", "")),
+                "Subject": str(draft.get("Subject", "")),
+            },
+            "body": [{"content-type": "text/plain", "content": body}],
+        }
+        return [[[value, []]]]
     if thread_id != "beta":
         first = message(
             "alpha@example.invalid",
@@ -116,6 +139,8 @@ def show_tree(thread_id: str, data: dict) -> list:
 
 
 def thread_tags(data: dict, thread_id: str) -> list[str]:
+    if thread_id in data.get("drafts", {}):
+        return list(data["tags"][thread_id])
     visible = [
         data["tags"][message_id]
         for message_id in THREAD_MESSAGES[thread_id]
@@ -127,7 +152,7 @@ def thread_tags(data: dict, thread_id: str) -> list[str]:
 
 
 def apply_tag_changes(data: dict, query: str, changes: list[str]) -> None:
-    for message_id in message_ids_from_query(query):
+    for message_id in message_ids_from_query(query, data):
         tags = data["tags"][message_id]
         for change in changes:
             operation, tag = change[0], change[1:]
@@ -193,7 +218,7 @@ def main() -> int:
             print("unexpected reply options", file=sys.stderr)
             return 2
         query = args[3]
-        ids = message_ids_from_query(query)
+        ids = message_ids_from_query(query, data)
         if not ids:
             print("reply requires an exact message or thread query", file=sys.stderr)
             return 2
@@ -216,6 +241,24 @@ def main() -> int:
         )
         return 0
     if args[0] == "insert":
+        if args == ["insert", "--create-folder", "--folder=drafts", "+draft"]:
+            raw = sys.stdin.buffer.read()
+            draft = BytesParser(policy=email.policy.default).parsebytes(raw)
+            message_id = str(draft.get("Message-ID", ""))
+            if (
+                not re.fullmatch(r"<[^<>\r\n]+>", message_id)
+                or str(draft.get("X-Notmuch-Emacs-Draft", "")).lower() != "true"
+            ):
+                print("invalid draft message", file=sys.stderr)
+                return 2
+            bare_id = message_id[1:-1]
+            data.setdefault("drafts", {})[bare_id] = raw.decode()
+            data["tags"][bare_id] = ["draft"]
+            data["draft_inserts"] = data.get("draft_inserts", 0) + 1
+            with DRAFT_LOG.open("ab") as stream:
+                stream.write(json.dumps(raw.decode()).encode() + b"\n")
+            save(data)
+            return 0
         if args != ["insert", "--create-folder", "--folder=sent"]:
             print("unexpected insert invocation", file=sys.stderr)
             return 2
@@ -236,6 +279,24 @@ def main() -> int:
         save(data)
         if query == "tag:empty":
             print("[]")
+            return 0
+        if query == "tag:draft":
+            rows = []
+            for message_id, raw in data.get("drafts", {}).items():
+                tags = data["tags"][message_id]
+                if "draft" not in tags or "deleted" in tags:
+                    continue
+                draft = BytesParser(policy=email.policy.default).parsebytes(raw.encode())
+                rows.append(
+                    {
+                        "thread": message_id,
+                        "date_relative": "now",
+                        "authors": "Yanni",
+                        "subject": str(draft.get("Subject", "(no subject)")),
+                        "tags": tags,
+                    }
+                )
+            print(json.dumps(list(reversed(rows))))
             return 0
         refreshed = " refreshed" if data["searches"] > 1 else ""
         rows = [
@@ -288,6 +349,13 @@ def main() -> int:
                 )
                 return 0
             print("unexpected raw-part invocation", file=sys.stderr)
+            return 2
+        if args[1:2] == ["--format=raw"] and len(args) == 3:
+            ids = message_ids_from_query(args[2], data)
+            if len(ids) == 1 and ids[0] in data.get("drafts", {}):
+                sys.stdout.buffer.write(data["drafts"][ids[0]].encode())
+                return 0
+            print("raw show requires an exact saved draft", file=sys.stderr)
             return 2
         thread_id = thread_from_query(args[-1])
         if thread_id is None:
