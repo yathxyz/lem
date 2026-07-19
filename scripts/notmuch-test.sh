@@ -38,6 +38,7 @@ export LEM_YATH_NOTMUCH_FAIL_INSERT_ONCE="$root/fail-insert-once"
 export LEM_YATH_NOTMUCH_PDF="$root/notmuch attachment;safe.pdf"
 export LEM_YATH_NOTMUCH_BINARY="$root/received binary;safe.bin"
 export LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT="$root/compose attachment safe.bin"
+export LEM_YATH_NOTMUCH_SIGNED="$root/signed source;safe.eml"
 received_save_dir="$root/saved parts;safe"
 received_save_target="$received_save_dir/chosen output;safe.bin"
 received_save_link="$received_save_dir/link output;safe.bin"
@@ -60,7 +61,7 @@ printf 'attachment bytes\000with binary\377tail\n' \
 printf 'received bytes\000with binary\376tail\n' \
   >"$LEM_YATH_NOTMUCH_BINARY"
 cp "$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT" "$smtp_attachment"
-printf '%s\n' '{"searches":0,"news":0,"inserts":0,"draft_inserts":0,"drafts":{},"tags":{"alpha@example.invalid":["inbox","unread"],"payment+safe|touch@example.invalid":["inbox","unread"],"reply/second?value@example.invalid":["inbox","unread"]}}' >"$LEM_YATH_NOTMUCH_STATE"
+printf '%s\n' '{"searches":0,"news":0,"inserts":0,"draft_inserts":0,"drafts":{},"tags":{"alpha@example.invalid":["inbox","unread"],"payment+safe|touch@example.invalid":["inbox","unread"],"reply/second?value@example.invalid":["inbox","unread"],"signed@example.invalid":["inbox","unread"]}}' >"$LEM_YATH_NOTMUCH_STATE"
 cp "$here/scripts/fake-notmuch.py" "$fakebin/notmuch"
 cp "$here/scripts/fake-mbsync.sh" "$fakebin/mbsync"
 cp "$here/scripts/fake-notmuch-xdg-open.py" "$fakebin/xdg-open"
@@ -191,6 +192,20 @@ invoke_forward_report() {
   lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
   tmux_cmd send-keys -t "$session" -l -- \
     'lem-yath-notmuch-test-forward-report'
+  lem_keys "$session" Enter
+}
+invoke_protected_forward_report() {
+  lem_keys "$session" M-x
+  lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
+  tmux_cmd send-keys -t "$session" -l -- \
+    'lem-yath-notmuch-test-protected-forward-report'
+  lem_keys "$session" Enter
+}
+open_protected_message() {
+  lem_keys "$session" M-x
+  lem_wait_for "$session" 'Command:' 10 >/dev/null || return 1
+  tmux_cmd send-keys -t "$session" -l -- \
+    'lem-yath-notmuch-test-open-protected'
   lem_keys "$session" Enter
 }
 wait_log_count() {
@@ -442,9 +457,9 @@ else
   fail forward-helper 'inline subject/header shaping, private extraction, or attachment preservation diverged'
 fi
 
-forward_refusal_root="$smtp_tls/forward-refusal"
-mkdir -m 700 "$forward_refusal_root"
-signed_source="$smtp_tls/signed-forward.eml"
+protected_forward_root="$smtp_tls/protected-forward"
+mkdir -m 700 "$protected_forward_root"
+signed_source="$LEM_YATH_NOTMUCH_SIGNED"
 python3 - "$signed_source" <<'PY'
 import sys
 from pathlib import Path
@@ -461,15 +476,59 @@ Path(sys.argv[1]).write_bytes(
     b"--safe--\r\n"
 )
 PY
-if ! "$real_smtp_program" --prepare-forward "$forward_refusal_root" \
-       <"$signed_source" >"$smtp_tls/signed-forward.out" \
-       2>"$smtp_tls/signed-forward.err" &&
-   grep -Fq 'signed or encrypted messages require raw MIME forwarding' \
-     "$smtp_tls/signed-forward.err" &&
-   [[ -z $(find "$forward_refusal_root" -mindepth 1 -print -quit) ]]; then
-  pass forward-protected-refusal 'signed MIME failed closed without extracting or flattening protected content'
+protected_editable="$smtp_tls/signed-forward-editable.eml"
+protected_helper_ok=1
+"$real_smtp_program" --prepare-forward "$protected_forward_root" \
+  <"$signed_source" >"$protected_editable" \
+  2>"$smtp_tls/signed-forward.err" || protected_helper_ok=0
+if ((protected_helper_ok)) && python3 - "$signed_source" "$protected_editable" \
+     "$protected_forward_root" "$here/scripts/lem-yath-smtp-submit.py" <<'PY'
+import html
+import re
+import runpy
+import stat
+import sys
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
+
+source_path, editable_path, root_path, helper_path = map(Path, sys.argv[1:])
+editable = editable_path.read_text()
+assert "Subject: [Bob] Signed message" in editable
+assert "References: <signed@example.invalid>" in editable
+assert "original signed or encrypted message is attached unchanged" in editable
+assert "Protected body." not in editable and "signature" not in editable
+match = re.search(
+    r'<#part type="application/octet-stream" filename="([^"\r\n]+)" '
+    r'disposition=attachment>',
+    editable,
+)
+assert match
+extracted = Path(html.unescape(match.group(1)))
+assert extracted.parent == root_path
+assert extracted.name == "forwarded-message.eml"
+assert extracted.read_bytes() == source_path.read_bytes()
+info = extracted.lstat()
+assert stat.S_ISREG(info.st_mode) and not info.st_mode & 0o077
+normalizer = runpy.run_path(helper_path)["normalized_message"]
+composition = editable.replace(
+    "To: \n",
+    "From: Yanni <yanni@example.invalid>\nTo: Alice <alice@example.invalid>\n",
+    1,
+).encode()
+_, recipients, wire = normalizer(composition)
+assert recipients == ["alice@example.invalid"]
+message = BytesParser(policy=policy.default).parsebytes(wire)
+attachments = list(message.iter_attachments())
+assert len(attachments) == 1
+assert attachments[0].get_content_type() == "application/octet-stream"
+assert attachments[0].get_filename() == "forwarded-message.eml"
+assert attachments[0].get_payload(decode=True) == source_path.read_bytes()
+PY
+then
+  pass forward-protected-helper 'signed MIME became one private byte-exact original-message attachment'
 else
-  fail forward-protected-refusal 'signed MIME was flattened, partially extracted, or accepted'
+  fail forward-protected-helper 'protected forwarding flattened, altered, exposed, or lost the source MIME'
 fi
 
 fixture="$(lem-yath_lisp_string "$here/scripts/notmuch-fixture.lisp")"
@@ -1124,6 +1183,117 @@ else
   fail forward-message 'forward shaping, snapshot metadata, send ordering, tags, bytes, or cleanup diverged'
 fi
 
+# Protected messages take the same physical `cf' path, but retain the complete
+# source as one private .eml attachment rather than invalidating a signature by
+# flattening MIME. Prove the attachment survives postpone/resume and reaches
+# both SMTP and the exact sent FCC unchanged.
+protected_forward_ok=0
+open_protected_message || true
+lem_wait_for "$session" 'Protected body' 20 >/dev/null || true
+before_protected_report=$(report_count PROTECTED-FORWARD)
+lem_keys "$session" c f
+if lem_wait_for "$session" 'Subject: \[Bob\] Signed message' 20 >/dev/null; then
+  invoke_protected_forward_report || true
+fi
+protected_shape_ok=0
+if wait_report PROTECTED-FORWARD "$before_protected_report" &&
+   [[ $(latest PROTECTED-FORWARD) == 'PROTECTED-FORWARD mode=yes tracked=yes subject=yes reference=yes notice=yes marker=yes private=yes bytes=yes keys=yes cleaned=no source=yes' ]]; then
+  protected_shape_ok=1
+fi
+
+sleep 0.5
+lem_keys "$session" A
+tmux_cmd send-keys -t "$session" -l -- 'Alice <alice@example.invalid>'
+lem_keys "$session" Escape
+lem_wait_for "$session" 'NORMAL' 10 >/dev/null || true
+before_protected_drafts=$(wc -l <"$LEM_YATH_NOTMUCH_DRAFT_LOG")
+sleep 0.5
+lem_keys "$session" C-c
+sleep 0.15
+lem_keys "$session" C-p
+lem_wait_for "$session" 'Message postponed;' 20 >/dev/null || true
+
+lem_keys "$session" F11
+if lem_wait_for "$session" '\(draft\)' 20 >/dev/null; then
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Tags: \(draft\)' 20 >/dev/null; then
+  lem_keys "$session" e
+fi
+before_protected_resume_report=$(report_count PROTECTED-FORWARD)
+if lem_wait_for "$session" 'Draft resumed;' 20 >/dev/null; then
+  invoke_protected_forward_report || true
+fi
+protected_resume_ok=0
+if wait_report PROTECTED-FORWARD "$before_protected_resume_report" &&
+   [[ $(latest PROTECTED-FORWARD) == 'PROTECTED-FORWARD mode=yes tracked=yes subject=yes reference=yes notice=yes marker=yes private=yes bytes=yes keys=yes cleaned=no source=yes' ]]; then
+  protected_resume_ok=1
+fi
+
+before_protected_smtp=$(wc -l <"$LEM_YATH_SMTP_FAKE_LOG")
+before_protected_sent=$(wc -l <"$LEM_YATH_NOTMUCH_INSERT_LOG")
+sleep 0.5
+lem_keys "$session" C-c C-c
+wait_log_count "$LEM_YATH_SMTP_FAKE_LOG" "$((before_protected_smtp + 1))" || true
+wait_log_count "$LEM_YATH_NOTMUCH_INSERT_LOG" "$((before_protected_sent + 1))" || true
+before_protected_clean=$(report_count PROTECTED-FORWARD)
+if lem_wait_for "$session" 'Message sent and filed in Notmuch' 20 >/dev/null; then
+  invoke_protected_forward_report || true
+fi
+if ((protected_shape_ok && protected_resume_ok)) &&
+   wait_report PROTECTED-FORWARD "$before_protected_clean" &&
+   [[ $(latest PROTECTED-FORWARD) == 'PROTECTED-FORWARD mode=no tracked=no subject=no reference=no notice=no marker=no private=no bytes=no keys=yes cleaned=yes source=yes' ]] &&
+   python3 - "$LEM_YATH_SMTP_FAKE_LOG" "$LEM_YATH_NOTMUCH_INSERT_LOG" \
+     "$LEM_YATH_NOTMUCH_DRAFT_LOG" "$LEM_YATH_NOTMUCH_STATE" \
+     "$LEM_YATH_NOTMUCH_LOG" "$LEM_YATH_NOTMUCH_SIGNED" \
+     "$before_protected_smtp" "$before_protected_sent" \
+     "$before_protected_drafts" <<'PY'
+import json
+import sys
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
+
+smtp = [json.loads(line) for line in open(sys.argv[1])]
+sent = [json.loads(line) for line in open(sys.argv[2])]
+drafts = [json.loads(line) for line in open(sys.argv[3])]
+state = json.load(open(sys.argv[4]))
+calls = [json.loads(line) for line in open(sys.argv[5])]
+source = Path(sys.argv[6]).read_bytes()
+before_smtp, before_sent, before_drafts = map(int, sys.argv[7:])
+query = 'id:"signed@example.invalid"'
+assert len(smtp) == before_smtp + 1 and smtp[-1]["argv"] == []
+assert len(sent) == before_sent + 1 and sent[-1] == smtp[-1]["wire"]
+assert "To: Alice <alice@example.invalid>" in smtp[-1]["input"]
+assert "Subject: [Bob] Signed message" in smtp[-1]["input"]
+assert "original signed or encrypted message is attached unchanged" in smtp[-1]["input"]
+assert "Protected body." not in smtp[-1]["input"]
+assert '<#part type="application/octet-stream"' in smtp[-1]["input"]
+assert len(drafts) == before_drafts + 1
+draft = BytesParser(policy=policy.default).parsebytes(drafts[-1].encode())
+draft_id = str(draft["Message-ID"])[1:-1]
+assert draft["X-Lem-Yath-Forward-Query"] == query
+attachments = list(draft.iter_attachments())
+assert len(attachments) == 1
+assert attachments[0].get_content_type() == "application/octet-stream"
+assert attachments[0].get_filename() == "forwarded-message.eml"
+assert attachments[0].get_payload(decode=True) == source
+assert "forwarded" in state["tags"]["signed@example.invalid"]
+assert "deleted" in state["tags"][draft_id]
+assert ["show", "--format=raw", query] in calls
+assert ["tag", "+forwarded", "--", query] in calls
+assert ["tag", "+deleted", "--", f'id:"{draft_id}"'] in calls
+assert not Path("PWNED").exists()
+PY
+then
+  protected_forward_ok=1
+fi
+if ((protected_forward_ok)); then
+  pass forward-protected 'cf preserved protected MIME through postpone/resume, SMTP, FCC, and tagging'
+else
+  fail forward-protected 'protected cf shaping, byte fidelity, lifecycle, tagging, or cleanup diverged'
+fi
+
 # Restore the ordinary shown message for the remaining show-mode actions.
 lem_keys "$session" F3
 if lem_wait_for "$session" 'Second thread' 20 >/dev/null; then
@@ -1346,6 +1516,7 @@ assert [
 ] in calls
 assert ["show", "--format=raw", "--part=8", 'id:"bad@example.invalid"'] in calls
 assert ["show", "--format=raw", "--part=9", 'id:"slow@example.invalid"'] in calls
+assert ["show", "--format=raw", 'id:"signed@example.invalid"'] in calls
 queries = [call[-1] for call in calls if call and call[0] == "search"]
 assert 'tag:inbox and subject:"safe;touch PWNED"' in queries
 assert all(isinstance(call, list) and all(isinstance(arg, str) for arg in call) for call in calls)

@@ -3457,17 +3457,19 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   marking the old version deleted, cancel leaves the durable draft intact,
   and send retires it only after SMTP and sent FCC have succeeded. Every close
   path removes resumed attachment files. Forward metadata and attachment bytes
-  survive this same save/postpone/resume lifecycle. Signed/encrypted MIME is
-  refused rather than flattened until a raw-MIME forwarding path exists.
+  survive this same save/postpone/resume lifecycle. For signed/encrypted MIME,
+  `cf` writes the complete source into a private mode-0600
+  `forwarded-message.eml` attachment and keeps it byte-exact through draft
+  resume and outgoing MIME expansion, avoiding Emacs's default
+  signature-invalidating decode/re-encode path.
   The Notmuch gate proves a real local STARTTLS/AUTH exchange plus physical
   new/reply/forward/send/draft keys, exact templates and FCC bytes,
-  malformed-recipient and protected-MIME refusal, binary forward/draft
+  malformed-recipient refusal, binary ordinary/protected-forward and draft
   attachment snapshots after source removal, private resume cleanup, durable
   draft replacement/retirement, an injected FCC failure, and duplicate-safe
   retry. Address completion and bounded MIME attachment composition are also
-  covered. Raw signed/encrypted forwarding, the remainder of stock Notmuch's
-  richer received-part action map, and Outlook integration remain outside this
-  bounded text-mail port.
+  covered. The remainder of stock Notmuch's richer received-part action map
+  and Outlook integration remain outside this bounded text-mail port.
 
   The default Bridge credential entry has the ordinary authinfo shape
   `machine 127.0.0.1 port 1025 login BRIDGE_USER password BRIDGE_PASSWORD`.

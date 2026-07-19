@@ -114,22 +114,20 @@ def attachment_bytes(encoded_path: str) -> tuple[Path, bytes]:
             data = stream.read(MAX_ATTACHMENT_BYTES + 1)
         after = os.fstat(descriptor)
         if (
-            (
-                after.st_dev,
-                after.st_ino,
-                after.st_size,
-                after.st_mtime_ns,
-                after.st_ctime_ns,
-            )
-            != (
-                opened.st_dev,
-                opened.st_ino,
-                opened.st_size,
-                opened.st_mtime_ns,
-                opened.st_ctime_ns,
-            )
-            or len(data) != opened.st_size
-        ):
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ) != (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+            opened.st_ctime_ns,
+        ) or len(
+            data
+        ) != opened.st_size:
             raise SubmitError(f"attachment changed while being read: {path}")
     finally:
         os.close(descriptor)
@@ -186,9 +184,11 @@ def expand_mml_attachments(message) -> None:
 def escape_mml_text(text: str) -> str:
     """Quote literal attachment-looking lines while text remains editable."""
     return "".join(
-        line.replace("<#part", "<#!part", 1)
-        if line.rstrip("\r\n").startswith("<#part")
-        else line
+        (
+            line.replace("<#part", "<#!part", 1)
+            if line.rstrip("\r\n").startswith("<#part")
+            else line
+        )
         for line in text.splitlines(keepends=True)
     )
 
@@ -202,11 +202,10 @@ def parsed_composition(raw: bytes, *, validate_addresses: bool = True):
             for header in message.get_all(name, []):
                 if getattr(header, "defects", ()):
                     raise SubmitError(f"{name} contains a malformed address")
-    if (
-        len(message.get_all("From", [])) != 1
-        or len(message.get_all("Sender", [])) > 1
-    ):
-        raise SubmitError("message must contain exactly one From and at most one Sender")
+    if len(message.get_all("From", [])) != 1 or len(message.get_all("Sender", [])) > 1:
+        raise SubmitError(
+            "message must contain exactly one From and at most one Sender"
+        )
     if message.is_multipart() or message.get_content_maintype() != "text":
         raise SubmitError("only bounded text message composition is supported")
     return message
@@ -402,9 +401,12 @@ def resumed_draft(raw: bytes, directory_value: str) -> bytes:
             if len(data) > MAX_ATTACHMENT_BYTES or aggregate > MAX_ATTACHMENT_BYTES:
                 raise SubmitError("saved draft attachments exceed the 7 MiB limit")
             content_type = part.get_content_type()
-            if MML_ATTACHMENT.fullmatch(
-                f'<#part type="{content_type}" filename="x" disposition=attachment>'
-            ) is None:
+            if (
+                MML_ATTACHMENT.fullmatch(
+                    f'<#part type="{content_type}" filename="x" disposition=attachment>'
+                )
+                is None
+            ):
                 raise SubmitError("saved draft attachment type is malformed")
             filename = safe_attachment_name(part.get_filename(), index)
             path = write_draft_attachment(directory, filename, data, index)
@@ -432,9 +434,7 @@ def resumed_draft(raw: bytes, directory_value: str) -> bytes:
                 raise SubmitError(f"saved draft {name} header is malformed")
             headers.append(f"{name}: {text}")
         editable = (
-            "\n".join(headers)
-            + "\n\n"
-            + escape_mml_text(body.replace("\r\n", "\n"))
+            "\n".join(headers) + "\n\n" + escape_mml_text(body.replace("\r\n", "\n"))
         )
         if markers:
             if not editable.endswith("\n"):
@@ -454,7 +454,7 @@ def resumed_draft(raw: bytes, directory_value: str) -> bytes:
 
 
 def prepared_forward(raw: bytes, directory_value: str) -> bytes:
-    """Return the stock inline-forward shape with safe local attachment MML."""
+    """Return an editable forward without weakening protected source MIME."""
     if len(raw) > MAX_MESSAGE_BYTES:
         raise SubmitError("message to forward exceeds the 10 MiB limit")
     message = BytesParser(policy=email.policy.SMTP).parsebytes(raw)
@@ -466,8 +466,9 @@ def prepared_forward(raw: bytes, directory_value: str) -> bytes:
         "application/pkcs7-mime",
         "application/x-pkcs7-mime",
     }
-    if any(part.get_content_type() in protected_types for part in message.walk()):
-        raise SubmitError("signed or encrypted messages require raw MIME forwarding")
+    protected = any(
+        part.get_content_type() in protected_types for part in message.walk()
+    )
 
     def header(name: str, *, required: bool = False) -> str:
         values = message.get_all(name, [])
@@ -489,28 +490,56 @@ def prepared_forward(raw: bytes, directory_value: str) -> bytes:
     source = sender_name or sender_address or "(nowhere)"
     forward_subject = f"[{source}] {subject}"
 
-    body_part = message.get_body(preferencelist=("plain",))
-    if body_part is None and not message.is_multipart() and message.get_content_type() == "text/plain":
-        body_part = message
-    if body_part is None or body_part.is_multipart():
-        raise SubmitError("message to forward has no bounded text/plain body")
-    body = escape_mml_text(decoded_text(body_part).replace("\r\n", "\n"))
-
-    attachment_parts = [
-        part
-        for part in message.walk()
-        if part.get_content_disposition() == "attachment"
-    ]
-    if len(attachment_parts) > MAX_ATTACHMENTS:
-        raise SubmitError("message to forward contains more than 16 attachments")
     directory = private_draft_directory(directory_value)
     created: list[Path] = []
-    markers: list[str] = []
-    aggregate = 0
     try:
+        if protected:
+            if len(raw) > MAX_ATTACHMENT_BYTES:
+                raise SubmitError(
+                    "protected source exceeds the 7 MiB forward attachment limit"
+                )
+            path = write_draft_attachment(directory, "forwarded-message.eml", raw, 1)
+            created.append(path)
+            marker = (
+                '<#part type="application/octet-stream" '
+                f'filename="{html.escape(os.fspath(path), quote=True)}" '
+                "disposition=attachment>"
+            )
+            template = (
+                f"To: \nSubject: {forward_subject}\nReferences: {message_id}\n\n"
+                "The original signed or encrypted message is attached unchanged.\n"
+                f"{marker}\n"
+            )
+            output = template.encode("utf-8")
+            if len(output) > MAX_MESSAGE_BYTES:
+                raise SubmitError("forward composition exceeds the 10 MiB limit")
+            return output
+
+        body_part = message.get_body(preferencelist=("plain",))
+        if (
+            body_part is None
+            and not message.is_multipart()
+            and message.get_content_type() == "text/plain"
+        ):
+            body_part = message
+        if body_part is None or body_part.is_multipart():
+            raise SubmitError("message to forward has no bounded text/plain body")
+        body = escape_mml_text(decoded_text(body_part).replace("\r\n", "\n"))
+
+        attachment_parts = [
+            part
+            for part in message.walk()
+            if part.get_content_disposition() == "attachment"
+        ]
+        if len(attachment_parts) > MAX_ATTACHMENTS:
+            raise SubmitError("message to forward contains more than 16 attachments")
+        markers: list[str] = []
+        aggregate = 0
         for index, part in enumerate(attachment_parts, 1):
             if part.is_multipart():
-                raise SubmitError("message to forward has an unsupported MIME attachment")
+                raise SubmitError(
+                    "message to forward has an unsupported MIME attachment"
+                )
             data = part.get_payload(decode=True)
             if data is None:
                 raise SubmitError("message to forward has a malformed attachment")
@@ -518,9 +547,12 @@ def prepared_forward(raw: bytes, directory_value: str) -> bytes:
             if len(data) > MAX_ATTACHMENT_BYTES or aggregate > MAX_ATTACHMENT_BYTES:
                 raise SubmitError("forwarded attachments exceed the 7 MiB limit")
             content_type = part.get_content_type()
-            if MML_ATTACHMENT.fullmatch(
-                f'<#part type="{content_type}" filename="x" disposition=attachment>'
-            ) is None:
+            if (
+                MML_ATTACHMENT.fullmatch(
+                    f'<#part type="{content_type}" filename="x" disposition=attachment>'
+                )
+                is None
+            ):
                 raise SubmitError("message to forward has an invalid attachment type")
             path = write_draft_attachment(
                 directory, safe_attachment_name(part.get_filename(), index), data, index
@@ -547,7 +579,9 @@ def prepared_forward(raw: bytes, directory_value: str) -> bytes:
             forwarded += "\n"
         if markers:
             forwarded += "\n".join(markers) + "\n"
-        forwarded += "-------------------- End of forwarded message --------------------\n"
+        forwarded += (
+            "-------------------- End of forwarded message --------------------\n"
+        )
         template = (
             f"To: \nSubject: {forward_subject}\nReferences: {message_id}\n\n"
             + forwarded
@@ -571,9 +605,13 @@ def private_authinfo(path: Path) -> bytes:
     except OSError as error:
         raise SubmitError("could not inspect the SMTP authinfo file") from error
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
-        raise SubmitError("SMTP authinfo must be a regular file owned by the current user")
+        raise SubmitError(
+            "SMTP authinfo must be a regular file owned by the current user"
+        )
     if info.st_mode & 0o077:
-        raise SubmitError("SMTP authinfo permissions must not grant group or other access")
+        raise SubmitError(
+            "SMTP authinfo permissions must not grant group or other access"
+        )
     if info.st_size > MAX_AUTHINFO_BYTES:
         raise SubmitError("SMTP authinfo exceeds the 1 MiB limit")
     if path.suffix != ".gpg":
@@ -662,7 +700,11 @@ def credentials(host: str, port: int) -> tuple[str, str] | None:
     password = os.environ.get("LEM_YATH_SMTP_PASSWORD")
     if bool(username) != bool(password):
         raise SubmitError("SMTP username and password variables must be set together")
-    return (username, password) if username and password else authinfo_credentials(host, port)
+    return (
+        (username, password)
+        if username and password
+        else authinfo_credentials(host, port)
+    )
 
 
 def loopback_host(host: str) -> bool:

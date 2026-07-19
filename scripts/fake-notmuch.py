@@ -54,6 +54,7 @@ THREAD_MESSAGES = {
         "payment+safe|touch@example.invalid",
         "reply/second?value@example.invalid",
     ],
+    "protected": ["signed@example.invalid"],
 }
 
 
@@ -98,6 +99,29 @@ def show_tree(thread_id: str, data: dict) -> list:
             "body": [{"content-type": "text/plain", "content": body}],
         }
         return [[[value, []]]]
+    if thread_id == "protected":
+        protected = message(
+            "signed@example.invalid",
+            "Bob <bob@example.invalid>",
+            "Signed message",
+            [
+                {
+                    "content-type": "multipart/signed",
+                    "content": [
+                        {
+                            "content-type": "text/plain",
+                            "content": "Protected body.",
+                        },
+                        {
+                            "content-type": "application/pgp-signature",
+                            "content": "signature",
+                        },
+                    ],
+                }
+            ],
+            data["tags"]["signed@example.invalid"],
+        )
+        return [[[protected, []]]]
     if thread_id != "beta":
         first = message(
             "alpha@example.invalid",
@@ -147,6 +171,8 @@ def show_tree(thread_id: str, data: dict) -> list:
 
 
 def raw_message(message_id: str) -> bytes | None:
+    if message_id == "signed@example.invalid":
+        return Path(os.environ["LEM_YATH_NOTMUCH_SIGNED"]).read_bytes()
     if message_id == "payment+safe|touch@example.invalid":
         value = EmailMessage(policy=email.policy.SMTP)
         value["From"] = "Bob <bob@example.invalid>"
@@ -207,11 +233,15 @@ def main() -> int:
         print(values[args[2]])
         return 0
     if args[0] == "address":
-        if args[1:4] != [
-            "--format=text",
-            "--output=recipients",
-            "--deduplicate=address",
-        ] or len(args) != 5:
+        if (
+            args[1:4]
+            != [
+                "--format=text",
+                "--output=recipients",
+                "--deduplicate=address",
+            ]
+            or len(args) != 5
+        ):
             print("unexpected address options", file=sys.stderr)
             return 2
         query = args[4]
@@ -314,7 +344,9 @@ def main() -> int:
                 tags = data["tags"][message_id]
                 if "draft" not in tags or "deleted" in tags:
                     continue
-                draft = BytesParser(policy=email.policy.default).parsebytes(raw.encode())
+                draft = BytesParser(policy=email.policy.default).parsebytes(
+                    raw.encode()
+                )
                 rows.append(
                     {
                         "thread": message_id,
@@ -371,13 +403,14 @@ def main() -> int:
                     Path(os.environ["LEM_YATH_NOTMUCH_BINARY"]).read_bytes()
                 )
                 return 0
-            if args == [
-                "show", "--format=raw", "--part=8", 'id:"bad@example.invalid"'
-            ]:
+            if args == ["show", "--format=raw", "--part=8", 'id:"bad@example.invalid"']:
                 sys.stdout.buffer.write(b"not a pdf")
                 return 0
             if args == [
-                "show", "--format=raw", "--part=9", 'id:"slow@example.invalid"'
+                "show",
+                "--format=raw",
+                "--part=9",
+                'id:"slow@example.invalid"',
             ]:
                 import time
 

@@ -697,8 +697,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   `cf` prepares Notmuch's ordinary inline-forward shape with the stock
   included headers, `References`, delimiters, and regular attachment bytes.
   Forward state survives save/postpone/resume; successful SMTP/FCC applies
-  `+forwarded`. Signed/encrypted MIME fails closed until raw-MIME forwarding
-  is implemented. Received MIME leaves are selectable attachment rows: Return
+  `+forwarded`. For signed or encrypted source MIME, the same `cf` route keeps
+  the source byte-exact in a private `forwarded-message.eml` attachment instead
+  of invalidating its protection through Emacs's default decode/re-encode
+  path; that attachment survives postpone/resume and the ordinary send/FCC/tag
+  lifecycle. Received MIME leaves are selectable attachment rows: Return
   previews PDFs in-editor and otherwise prompts to save the exact decoded
   bytes, while `. s` explicitly saves any selected part. The prompt proposes
   a path-safe MIME basename and remembers the last directory; confirmed

@@ -16,6 +16,7 @@
   (uiop:getenv "LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT"))
 (defvar *notmuch-test-draft-directory* nil)
 (defvar *notmuch-test-forward-directory* nil)
+(defvar *notmuch-test-protected-forward-directory* nil)
 (defvar *notmuch-test-save-link*
   (uiop:getenv "LEM_YATH_NOTMUCH_SAVE_LINK"))
 
@@ -456,6 +457,59 @@
                  *notmuch-test-forward-directory*))))
      (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
 
+(define-command lem-yath-notmuch-test-protected-forward-report () ()
+  (let* ((buffer (current-buffer))
+         (compose-p (eq (buffer-major-mode buffer) 'notmuch-compose-mode))
+         (text (buffer-text buffer))
+         (directory (and compose-p
+                         (buffer-value buffer
+                                       'notmuch-compose-draft-directory)))
+         (files (and directory
+                     (ignore-errors (uiop:directory-files directory))))
+         (file (and (= (length files) 1) (first files)))
+         (directory-stat
+           (and directory
+                (ignore-errors
+                  (sb-posix:lstat (uiop:native-namestring directory))))))
+    (when directory
+      (setf *notmuch-test-protected-forward-directory* directory))
+    (notmuch-test-log
+     "PROTECTED-FORWARD mode=~a tracked=~a subject=~a reference=~a notice=~a marker=~a private=~a bytes=~a keys=~a cleaned=~a source=~a"
+     (notmuch-test-yes-no compose-p)
+     (notmuch-test-yes-no
+      (and compose-p
+           (string= (notmuch-string
+                     (buffer-value buffer 'notmuch-compose-forward-query))
+                    "id:\"signed@example.invalid\"")))
+     (notmuch-test-yes-no
+      (and compose-p (search "Subject: [Bob] Signed message" text)))
+     (notmuch-test-yes-no
+      (and compose-p
+           (search "References: <signed@example.invalid>" text)))
+     (notmuch-test-yes-no
+      (and compose-p
+           (search "original signed or encrypted message is attached unchanged"
+                   text)))
+     (notmuch-test-yes-no
+      (and compose-p
+           (= 1 (notmuch-compose-attachment-marker-count buffer))
+           (search "type=\"application/octet-stream\"" text)))
+     (notmuch-test-yes-no
+      (and directory-stat
+           (= (logand (sb-posix:stat-mode directory-stat) sb-posix:s-ifmt)
+              sb-posix:s-ifdir)
+           (zerop (logand (sb-posix:stat-mode directory-stat) #o077))))
+     (notmuch-test-yes-no
+      (and file
+           (notmuch-test-file-bytes-equal-p
+            file (uiop:getenv "LEM_YATH_NOTMUCH_SIGNED"))))
+     (notmuch-test-yes-no (notmuch-test-keys-p))
+     (notmuch-test-yes-no
+      (and *notmuch-test-protected-forward-directory*
+           (not (uiop:directory-exists-p
+                 *notmuch-test-protected-forward-directory*))))
+     (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
+
 (defun notmuch-test-extraction-refusal
     (attachment &key output-limit timeout)
   (let* ((directory (notmuch-private-temp-directory))
@@ -522,6 +576,9 @@
 
 (define-command lem-yath-notmuch-test-drafts () ()
   (notmuch-search "tag:draft"))
+
+(define-command lem-yath-notmuch-test-open-protected () ()
+  (notmuch-show "protected"))
 
 (define-key *global-keymap* "F1" 'lem-yath-notmuch-test-report)
 (define-key *global-keymap* "F2" 'lem-yath-notmuch-test-pdf-report)
