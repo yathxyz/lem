@@ -409,13 +409,18 @@ and reveal a folded destination. Native Markdown buffers expose nested ATX and
 Setext headings with GNU Markdown's literal `.` self entries and `-` level-gap
 groups, plus unique visible footnote definitions; YAML front matter, fenced
 content, and commented definitions stay out of the index.
+Native Python buffers use the pinned tree-sitter sparse hierarchy for nested
+functions and classes. Parent definitions retain their dedicated self-jump,
+async functions use the ordinary `def` label, decorators do not displace the
+jump from the definition node, and string/comment decoys are excluded. A ready
+Eglot document-symbol provider still takes precedence over every native index.
 
 Acceptance records one Vi jumplist entry and runs the configured Imenu feedback:
 recenter only, with no Consult Pulsar pulse. `scripts/lsp-project-test.sh` and
 `scripts/project-outline-test.sh` drive the command through physical M-x,
 successive Return selections, exact target placement, viewport change, silent
 feedback, folded Org reveal, and `C-o` return. Native indices for other
-non-LSP, non-Lisp modes are not yet implemented.
+non-LSP, non-Lisp, non-Python modes are not yet implemented.
 
 `lem-yath/src/annotations.lisp` supplies a bounded Marginalia-style layer for
 the daily prompt categories. Commands show active bindings and their first

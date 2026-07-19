@@ -366,6 +366,129 @@
               :label "Footnotes"
               :children footnotes))))))
 
+;;; --- python-ts-mode ------------------------------------------------------
+
+(defparameter *imenu-python-tree-depth* 1000
+  "Maximum syntax-tree depth searched by native Python Imenu.")
+
+(defvar *imenu-python-created-points* nil)
+
+(defun imenu-tree-sitter-current-tree (buffer)
+  "Return BUFFER's tree-sitter tree, reparsing it when its tick is stale."
+  (alexandria:when-let
+      ((parser (buffer-value buffer 'lem-yath-tree-sitter-parser)))
+    (let ((tick (buffer-modified-tick buffer)))
+      (if (and (lem-tree-sitter:treesitter-parser-tree parser)
+               (eql tick
+                    (lem-tree-sitter::treesitter-parser-cached-tick parser)))
+          (lem-tree-sitter:treesitter-parser-tree parser)
+          (reparse-lem-yath-tree-sitter-buffer
+           parser (buffer-text buffer) tick)))))
+
+(defun imenu-python-definition-type (node)
+  (let ((type (tree-sitter:node-type node)))
+    (cond
+      ((string= type "function_definition") "def")
+      ((string= type "class_definition") "class")
+      (t nil))))
+
+(defun imenu-python-definition-name (buffer node)
+  "Return NODE's first named identifier, releasing every child handle."
+  (loop :for index :below (tree-sitter:node-named-child-count node)
+        :for child := (tree-sitter:node-named-child node index)
+        :when child
+          :do (unwind-protect
+                   (when (string= (tree-sitter:node-type child) "identifier")
+                     (return (tree-sitter-node-text buffer child)))
+                (delete-tree-sitter-node child))))
+
+(defun imenu-python-node-point (buffer node)
+  (let ((point (expand-region-byte-to-point
+                buffer (tree-sitter:node-start-byte node))))
+    (push point *imenu-python-created-points*)
+    point))
+
+(defun imenu-python-leaf-candidate (buffer node type name)
+  (let ((point (imenu-python-node-point buffer node)))
+    (make-imenu-candidate
+     :label (format nil "~a (~a)" name type)
+     :detail (format nil "[Python ~a] line ~d"
+                     type (line-number-at-point point))
+     :point point)))
+
+(defun imenu-python-parent-candidate
+    (buffer node type name children)
+  (let* ((point (imenu-python-node-point buffer node))
+         (line (line-number-at-point point))
+         (jump
+           (make-imenu-candidate
+            :label (if (string= type "class")
+                       "*class definition*"
+                       "*function definition*")
+            :detail (format nil "[Python ~a] line ~d" type line)
+            :point point)))
+    (make-imenu-candidate
+     :label (format nil "~a (~a)..." name type)
+     :detail (format nil "[Python ~a] line ~d" type line)
+     :children (cons jump children))))
+
+(defun imenu-python-walk-node (buffer node depth)
+  "Return NODE's sparse Python definition forest at syntax DEPTH.
+
+Every tree-sitter node returned by the C binding owns a foreign node buffer;
+this function consumes NODE and every named-child handle it obtains."
+  (unwind-protect
+       (let* ((type (imenu-python-definition-type node))
+              (name (and type
+                         (or (imenu-python-definition-name buffer node)
+                             "Anonymous")))
+              (definition-p (and type name))
+              (children nil))
+         ;; This mirrors the explicit DEPTH argument to the pinned
+         ;; `treesit-induce-sparse-tree'.  It limits ancestry, not the number
+         ;; of definitions, so wide modules retain every sibling.
+         (when (< depth *imenu-python-tree-depth*)
+           (dotimes (index (tree-sitter:node-named-child-count node))
+             (let ((child (tree-sitter:node-named-child node index)))
+               (when child
+                 (setf children
+                       (nconc children
+                              (imenu-python-walk-node
+                               buffer child (1+ depth))))))))
+         (if definition-p
+             (list
+              (if children
+                  (imenu-python-parent-candidate
+                   buffer node type name children)
+                  (imenu-python-leaf-candidate
+                   buffer node type name)))
+             children))
+    (delete-tree-sitter-node node)))
+
+(defun imenu-python-candidates (buffer)
+  "Match pinned python-ts-mode's nested tree-sitter Imenu index."
+  (let ((*imenu-python-created-points* nil)
+        (completed-p nil))
+    (unwind-protect
+         (handler-case
+             (prog1
+                 (alexandria:when-let
+                     ((tree (imenu-tree-sitter-current-tree buffer)))
+                   (imenu-python-walk-node
+                    buffer (tree-sitter:tree-root-node tree) 0))
+               (setf completed-p t))
+           (error (condition)
+             (log:warn "Python Imenu indexing failed for ~a: ~a"
+                       (buffer-name buffer) condition)
+             nil))
+      ;; Successful points are owned by the returned candidate tree.  On a
+      ;; partial traversal failure there is no tree for `imenu' to release.
+      (unless completed-p
+        (dolist (point *imenu-python-created-points*)
+          (ignore-errors (delete-point point)))))))
+
 (register-imenu-native-provider 'org-mode 'imenu-org-candidates)
 (register-imenu-native-provider
  'lem-markdown-mode:markdown-mode 'imenu-markdown-candidates)
+(register-imenu-native-provider
+ 'lem-python-mode:python-mode 'imenu-python-candidates)

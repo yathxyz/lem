@@ -340,12 +340,14 @@ replaces the mode-local index; hierarchical `DocumentSymbol` parents and the
 older kind/container-grouped `SymbolInformation` schema are both accepted.
 The configured `imenu-after-jump-hook` recenters but does not pulse the
 destination. Lem reproduces this path for those Eglot buffers, for the pinned
-Lisp generic-expression forms, and for native Org and Markdown indices
+Lisp generic-expression forms, and for native Org, Markdown, and Python indices
 (`src/imenu.lisp`, `src/native-imenu.lisp`). Org uses the pinned depth-two
 heading tree and reveals folded destinations. Markdown includes nested ATX and
 Setext headings plus the pinned Footnotes group while excluding front matter,
-fences, and comments. Native indices for other non-LSP modes remain a provider
-gap.
+fences, and comments. Python uses the pinned tree-sitter function/class tree,
+including parent self-jumps and async definitions, while excluding definitions
+inside strings and comments. Native indices for other non-LSP modes remain a
+provider gap.
 
 The `embark-consult` load path comes from the pinned package rather than this
 configuration: its `embark.el` registers a `with-eval-after-load` form for

@@ -28,6 +28,14 @@
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_MARKDOWN")))
 
+(defvar *project-outline-test-python*
+  (uiop:parse-native-namestring
+   (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_PYTHON")))
+
+(defvar *project-outline-test-python-wide*
+  (uiop:parse-native-namestring
+   (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_PYTHON_WIDE")))
+
 (defvar *project-outline-test-reader-marker*
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_READER_MARKER")))
@@ -60,6 +68,10 @@
       ((and file (uiop:pathname-equal file *project-outline-test-org*)) "org")
       ((and file (uiop:pathname-equal
                   file *project-outline-test-markdown*)) "markdown")
+      ((and file (uiop:pathname-equal
+                  file *project-outline-test-python*)) "python")
+      ((and file (uiop:pathname-equal
+                  file *project-outline-test-python-wide*)) "python-wide")
       (t "other"))))
 
 (defun project-outline-test-command-name (state)
@@ -188,7 +200,7 @@
     (project-outline-test-log "IMENU-PATH file=~a path=~s"
                               (project-outline-test-file-label
                                (current-buffer))
-                              path)
+                              (concatenate 'string path))
     (dolist (child (imenu-candidate-children candidate))
       (project-outline-test-log-imenu-candidate child path))))
 
@@ -239,6 +251,24 @@
   (lem-lsp-mode:without-lsp-mode ()
     (find-file *project-outline-test-markdown*)))
 
+(define-command lem-yath-test-project-outline-python () ()
+  ;; Exercise the native python-ts-mode fallback without starting pyright.
+  (lem-lsp-mode:without-lsp-mode ()
+    (find-file *project-outline-test-python*)))
+
+(define-command lem-yath-test-project-outline-python-wide () ()
+  (lem-lsp-mode:without-lsp-mode ()
+    (find-file *project-outline-test-python-wide*)))
+
+(define-command lem-yath-test-project-outline-imenu-count () ()
+  (let ((candidates (imenu-candidates (current-buffer))))
+    (unwind-protect
+         (project-outline-test-log "IMENU-WIDE file=~a count=~d"
+                                   (project-outline-test-file-label
+                                    (current-buffer))
+                                   (length candidates))
+      (imenu-delete-candidates candidates))))
+
 (define-command lem-yath-test-project-outline-fold-org () ()
   (unless (eq (buffer-major-mode (current-buffer)) 'org-mode)
     (editor-error "The Org Imenu fixture is not current"))
@@ -264,6 +294,9 @@
   (define-key keymap "C-c z 4" 'lem-yath-test-project-outline-empty)
   (define-key keymap "C-c z 5" 'lem-yath-test-project-outline-org)
   (define-key keymap "C-c z 6" 'lem-yath-test-project-outline-markdown)
+  (define-key keymap "C-c z 7" 'lem-yath-test-project-outline-python)
+  (define-key keymap "C-c z 8" 'lem-yath-test-project-outline-python-wide)
+  (define-key keymap "C-c z w" 'lem-yath-test-project-outline-imenu-count)
   (define-key keymap "C-c z f" 'lem-yath-test-project-outline-fold-org))
 
 (project-outline-test-log

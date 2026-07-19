@@ -17,6 +17,8 @@ export LEM_YATH_PROJECT_OUTLINE_OUTSIDE="$root/outside/outside.el"
 export LEM_YATH_PROJECT_OUTLINE_MALICIOUS="$root/malicious/malicious.el"
 export LEM_YATH_PROJECT_OUTLINE_ORG="$root/native-imenu.org"
 export LEM_YATH_PROJECT_OUTLINE_MARKDOWN="$root/native-imenu.md"
+export LEM_YATH_PROJECT_OUTLINE_PYTHON="$root/native-imenu.py"
+export LEM_YATH_PROJECT_OUTLINE_PYTHON_WIDE="$root/native-imenu-wide.py"
 export LEM_YATH_PROJECT_OUTLINE_READER_MARKER="$root/reader-evaluated"
 mkdir -p "$HOME" "$WORKDIR" "$root/config" "$root/outside" "$root/malicious"
 
@@ -113,6 +115,36 @@ for line in $(seq 1 80); do
     *) printf 'Org body line %d\n' "$line" ;;
   esac
 done >"$LEM_YATH_PROJECT_OUTLINE_ORG"
+
+for line in $(seq 1 80); do
+  case "$line" in
+    3) printf '%s\n' 'def top(alpha):' ;;
+    4) printf '%s\n' '    """Top-level function."""' ;;
+    8) printf '%s\n' '    def nested():' ;;
+    9) printf '%s\n' '        return alpha' ;;
+    12) printf '%s\n' '    class Inner:' ;;
+    13) printf '%s\n' '        def method(self):' ;;
+    14) printf '%s\n' '            return alpha' ;;
+    18) printf '%s\n' '    return nested()' ;;
+    30) printf '%s\n' '@decorate' ;;
+    31) printf '%s\n' 'class Outer(Base):' ;;
+    35) printf '%s\n' '    @classmethod' ;;
+    36) printf '%s\n' '    async def build(cls):' ;;
+    37) printf '%s\n' '        return cls()' ;;
+    50) printf '%s\n' 'text = """' ;;
+    51) printf '%s\n' 'def fake():' ;;
+    52) printf '%s\n' 'class Fake:' ;;
+    53) printf '%s\n' '"""' ;;
+    60) printf '%s\n' 'async def tail():' ;;
+    61) printf '%s\n' '    return None' ;;
+    70) printf '%s\n' '# def comment_fake():' ;;
+    *) printf '\n' ;;
+  esac
+done >"$LEM_YATH_PROJECT_OUTLINE_PYTHON"
+
+for index in $(seq 1 1005); do
+  printf 'def item_%04d(): pass\n' "$index"
+done >"$LEM_YATH_PROJECT_OUTLINE_PYTHON_WIDE"
 
 for line in $(seq 1 80); do
   case "$line" in
@@ -520,6 +552,104 @@ if invoke_mx imenu 'Index item:'; then
   fi
 else
   fail imenu-markdown-footnote 'M-x imenu did not reopen for Footnotes'
+fi
+
+# python-ts-mode uses a sparse tree of nested function/class definitions.
+# Parent nodes retain the pinned self-jump labels, async forms share the def
+# label, decorators do not move the target, and string/comment decoys vanish.
+send_chord C-c z 7
+lem_wait_for "$session" 'def top' 10 >/dev/null || true
+send_chord C-c z i
+wait_report_count '^IMENU-INDEX file=python count=10$' 1 || true
+python_index_ok=1
+for path in \
+  'top (def)...' \
+  'top (def).../*function definition*' \
+  'top (def).../nested (def)' \
+  'top (def).../Inner (class)...' \
+  'top (def).../Inner (class).../*class definition*' \
+  'top (def).../Inner (class).../method (def)' \
+  'Outer (class)...' \
+  'Outer (class).../*class definition*' \
+  'Outer (class).../build (def)' \
+  'tail (def)'; do
+  grep -Fqx "IMENU-PATH file=python path=\"$path\"" \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" || python_index_ok=0
+done
+if [ "$python_index_ok" = 1 ] &&
+   [ "$(report_count '^IMENU-PATH file=python ')" -eq 10 ]; then
+  pass imenu-python-index 'Python Imenu matches nested def/class and decoy semantics'
+else
+  fail imenu-python-index 'Python hierarchy, labels, async forms, or exclusions differed'
+fi
+
+send_chord C-c z b
+send_chord C-c z r
+wait_report_count '^STATE file=python line=80 column=0 ' 1 || true
+python_origin="$(grep '^STATE file=python line=80 column=0 ' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+python_origin_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+  <<<"$python_origin")"
+
+if invoke_mx imenu 'Index item:'; then
+  python_top="$(lem_capture "$session")"
+  if grep -Fq 'top.(def)...' <<<"$python_top" &&
+     grep -Fq 'Outer.(class)...' <<<"$python_top" &&
+     grep -Fq 'tail.(def)' <<<"$python_top"; then
+    pass imenu-python-presentation 'Python roots use the pinned typed labels'
+  else
+    fail imenu-python-presentation 'the Python root prompt differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l Outer
+  send_chord Enter
+  sleep 0.4
+  python_outer="$(lem_capture "$session")"
+  if grep -Fq '*class.definition*' <<<"$python_outer" &&
+     grep -Fq 'build.(def)' <<<"$python_outer"; then
+    pass imenu-python-hierarchy 'a Python parent exposes its self jump and child'
+  else
+    fail imenu-python-hierarchy 'the Python class submenu differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l build
+  send_chord Enter
+  sleep 0.5
+  send_chord C-c z r
+  wait_report_count '^STATE file=python line=36 column=4 ' 1 || true
+  python_final="$(grep '^STATE file=python line=36 column=4 ' \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  python_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+    <<<"$python_final")"
+  if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+       <<<"$python_final" &&
+     [ -n "$python_origin_view" ] && [ -n "$python_view" ] &&
+     [ "$python_origin_view" != "$python_view" ]; then
+    pass imenu-python-jump 'Python Imenu lands on async def and recenters without pulse'
+  else
+    fail imenu-python-jump "the Python Imenu destination differed: $python_final"
+  fi
+  send_chord C-o
+  sleep 0.3
+  send_chord C-c z r
+  wait_report_count '^STATE file=python line=80 column=0 ' 2 || true
+  if [ "$(report_count '^STATE file=python line=80 column=0 ')" -ge 2 ]; then
+    pass imenu-python-jumplist 'C-o returns from Python Imenu to its exact origin'
+  else
+    fail imenu-python-jumplist 'Python Imenu did not record one Vi jump'
+  fi
+else
+  fail imenu-python-command 'M-x imenu did not open in the Python fixture'
+fi
+
+# The pinned treesit sparse-tree argument is a depth bound, not an item cap.
+send_chord C-c z 8
+lem_wait_for "$session" 'item_0001' 10 >/dev/null || true
+send_chord C-c z w
+wait_report_count '^IMENU-WIDE file=python-wide count=1005$' 1 || true
+if grep -q '^IMENU-WIDE file=python-wide count=1005$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-python-wide 'Python Imenu retains more than 1,000 sibling definitions'
+else
+  fail imenu-python-wide 'the sparse-tree depth bound was treated as an item cap'
 fi
 
 send_chord C-c z 2
