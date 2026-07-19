@@ -1068,6 +1068,82 @@ this function consumes NODE and every named-child handle it obtains."
                 (buffer-name buffer) condition)
       nil)))
 
+;;; --- gdscript-ts-mode ---------------------------------------------------
+
+(defun imenu-gdscript-definition-type (node)
+  (let ((type (tree-sitter:node-type node)))
+    (cond
+      ((string= type "function_definition") "def")
+      ((string= type "export_variable_statement") "e-var")
+      ((string= type "onready_variable_statement") "o-var")
+      ((string= type "variable_statement") "var")
+      ((string= type "class_definition") "class")
+      (t nil))))
+
+(defun imenu-gdscript-leaf-candidate (buffer node type name)
+  (let ((point (imenu-tree-sitter-node-point buffer node)))
+    (make-imenu-candidate
+     :label (format nil "~a (~a)" name type)
+     :detail (format nil "[GDScript ~a] line ~d"
+                     type (line-number-at-point point))
+     :point point)))
+
+(defun imenu-gdscript-parent-candidate
+    (buffer node type name children)
+  (let* ((point (imenu-tree-sitter-node-point buffer node))
+         (detail (format nil "[GDScript ~a] line ~d"
+                         type (line-number-at-point point))))
+    (make-imenu-candidate
+     :label (format nil "~a (~a)..." name type)
+     :detail detail
+     :children
+     (cons (make-imenu-candidate
+            :label (if (string= type "class")
+                       "*class definition*"
+                       "*function definition*")
+            :detail detail
+            :point point)
+           children))))
+
+(defun imenu-gdscript-walk-node (buffer node depth)
+  "Return NODE's sparse GDScript definition forest and consume NODE."
+  (unwind-protect
+       (let* ((type (imenu-gdscript-definition-type node))
+              (name (and type
+                         (or (imenu-tree-sitter-first-subtree-text
+                              buffer node "name")
+                             "Anonymous")))
+              (children nil))
+         (when (< depth *imenu-tree-sitter-depth*)
+           (dotimes (index (tree-sitter:node-named-child-count node))
+             (let ((child (tree-sitter:node-named-child node index)))
+               (when child
+                 (setf children
+                       (nconc children
+                              (imenu-gdscript-walk-node
+                               buffer child (1+ depth))))))))
+         (if type
+             (list
+              (if children
+                  (imenu-gdscript-parent-candidate
+                   buffer node type name children)
+                  (imenu-gdscript-leaf-candidate
+                   buffer node type name)))
+             children))
+    (delete-tree-sitter-node node)))
+
+(defun imenu-gdscript-candidates (buffer)
+  "Match pinned gdscript-ts-mode's nested tree-sitter Imenu index."
+  (handler-case
+      (with-imenu-tree-sitter-candidate-points
+        (alexandria:when-let ((tree (imenu-tree-sitter-current-tree buffer)))
+          (imenu-gdscript-walk-node
+           buffer (tree-sitter:tree-root-node tree) 0)))
+    (error (condition)
+      (log:warn "GDScript Imenu indexing failed for ~a: ~a"
+                (buffer-name buffer) condition)
+      nil)))
+
 (register-imenu-native-provider 'org-mode 'imenu-org-candidates)
 (register-imenu-native-provider
  'lem-markdown-mode:markdown-mode 'imenu-markdown-candidates)
@@ -1080,3 +1156,4 @@ this function consumes NODE and every named-child handle it obtains."
 (register-imenu-native-provider
  'lem-rust-mode:rust-mode 'imenu-rust-candidates)
 (register-imenu-native-provider 'lem-go-mode:go-mode 'imenu-go-candidates)
+(register-imenu-native-provider 'gdscript-mode 'imenu-gdscript-candidates)

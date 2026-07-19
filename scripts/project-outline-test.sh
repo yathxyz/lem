@@ -24,6 +24,7 @@ export LEM_YATH_PROJECT_OUTLINE_C="$root/native-imenu.c"
 export LEM_YATH_PROJECT_OUTLINE_CPP="$root/NativeImenu.cpp"
 export LEM_YATH_PROJECT_OUTLINE_RUST="$root/native-imenu.rs"
 export LEM_YATH_PROJECT_OUTLINE_GO="$root/native-imenu.go"
+export LEM_YATH_PROJECT_OUTLINE_GDSCRIPT="$root/native-imenu.gd"
 export LEM_YATH_PROJECT_OUTLINE_READER_MARKER="$root/reader-evaluated"
 mkdir -p "$HOME" "$WORKDIR" "$root/config" "$root/outside" "$root/malicious"
 
@@ -285,6 +286,29 @@ for line in $(seq 1 90); do
     *) printf '\n' ;;
   esac
 done >"$LEM_YATH_PROJECT_OUTLINE_GO"
+
+for line in $(seq 1 100); do
+  case "$line" in
+    1) printf '%s\n' 'var top_value = 1' ;;
+    3) printf '%s\n' 'export var exported_value = 2' ;;
+    5) printf '%s\n' 'onready var ready_value = $Node' ;;
+    8) printf '%s\n' 'func leaf():' ;;
+    9) printf '%s\n' '    pass' ;;
+    14) printf '%s\n' 'class Actor:' ;;
+    16) printf '%s\n' '    var health = 100' ;;
+    18) printf '%s\n' '    export var speed = 5' ;;
+    20) printf '%s\n' '    onready var child = $Child' ;;
+    23) printf '%s\n' '    func tick(delta):' ;;
+    24) printf '%s\n' '        var delta_copy = delta' ;;
+    25) printf '%s\n' '        pass' ;;
+    28) printf '%s\n' '    class Inner:' ;;
+    29) printf '%s\n' '        var enabled = true' ;;
+    33) printf '%s\n' 'var after_class = 4' ;;
+    42) printf '%s\n' 'var decoy = "func fake(): var hidden = 0"' ;;
+    46) printf '%s\n' '# class CommentFake: var hidden = 0' ;;
+    *) printf '\n' ;;
+  esac
+done >"$LEM_YATH_PROJECT_OUTLINE_GDSCRIPT"
 
 for line in $(seq 1 80); do
   case "$line" in
@@ -1374,6 +1398,131 @@ if invoke_mx imenu 'Index item:'; then
   fi
 else
   fail imenu-go-command 'M-x imenu did not open in the Go fixture'
+fi
+
+# gdscript-ts-mode uses one source-ordered sparse tree across ordinary,
+# exported, and onready variables plus functions and classes.  Every parent
+# retains the package's typed label and dedicated definition self-jump.
+send_chord C-c z d
+lem_wait_for "$session" 'var top_value' 10 >/dev/null || true
+send_chord C-c z m
+wait_report_count '^MODE file=gdscript major=GDSCRIPT-MODE tree=gdscript$' 1 || true
+if grep -q '^MODE file=gdscript major=GDSCRIPT-MODE tree=gdscript$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-gdscript-routing 'GDScript suffixes select the configured mode and grammar'
+else
+  fail imenu-gdscript-routing 'the GDScript fixture did not activate tree-sitter'
+fi
+send_chord C-c z v
+wait_report_count '^PROVIDER file=gdscript native=IMENU-GDSCRIPT-CANDIDATES lsp=none$' 1 || true
+if grep -q '^PROVIDER file=gdscript native=IMENU-GDSCRIPT-CANDIDATES lsp=none$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-gdscript-provider 'the fallback uses native GDScript symbols without LSP'
+else
+  fail imenu-gdscript-provider 'an LSP workspace or different provider owned GDScript Imenu'
+fi
+
+send_chord C-c z i
+wait_report_count '^IMENU-INDEX file=gdscript count=17$' 1 || true
+gdscript_index_ok=1
+for path in \
+  'top_value (var)' \
+  'exported_value (e-var)' \
+  'ready_value (o-var)' \
+  'leaf (def)' \
+  'Actor (class)...' \
+  'Actor (class).../*class definition*' \
+  'Actor (class).../health (var)' \
+  'Actor (class).../speed (e-var)' \
+  'Actor (class).../child (o-var)' \
+  'Actor (class).../tick (def)...' \
+  'Actor (class).../tick (def).../*function definition*' \
+  'Actor (class).../tick (def).../delta_copy (var)' \
+  'Actor (class).../Inner (class)...' \
+  'Actor (class).../Inner (class).../*class definition*' \
+  'Actor (class).../Inner (class).../enabled (var)' \
+  'after_class (var)' \
+  'decoy (var)'; do
+  grep -Fqx "IMENU-PATH file=gdscript path=\"$path\"" \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" || gdscript_index_ok=0
+done
+gdscript_root_order="$(sed -n \
+  's/^IMENU-PATH file=gdscript path="\([^/"]*\)"$/\1/p' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | paste -sd, -)"
+if [ "$gdscript_index_ok" = 1 ] &&
+   [ "$(report_count '^IMENU-PATH file=gdscript ')" -eq 17 ] &&
+   [ "$gdscript_root_order" = 'top_value (var),exported_value (e-var),ready_value (o-var),leaf (def),Actor (class)...,after_class (var),decoy (var)' ] &&
+   ! grep -Eq '^IMENU-PATH file=gdscript .*(fake|hidden|CommentFake)' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-gdscript-index 'GDScript Imenu matches pinned types, nesting, labels, and exclusions'
+else
+  fail imenu-gdscript-index 'GDScript sparse-tree structure or naming differed'
+fi
+
+send_chord C-c z b
+send_chord C-c z r
+wait_report_count '^STATE file=gdscript line=100 column=0 ' 1 || true
+gdscript_origin="$(grep '^STATE file=gdscript line=100 column=0 ' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+gdscript_origin_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+  <<<"$gdscript_origin")"
+
+if invoke_mx imenu 'Index item:'; then
+  gdscript_top="$(lem_capture "$session")"
+  if grep -Fq 'top_value.(var)' <<<"$gdscript_top" &&
+     grep -Fq 'Actor.(class)...' <<<"$gdscript_top" &&
+     grep -Fq 'after_class.(var)' <<<"$gdscript_top"; then
+    pass imenu-gdscript-presentation 'GDScript roots expose typed source-order labels'
+  else
+    fail imenu-gdscript-presentation 'the GDScript root prompt differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l Actor
+  send_chord Enter
+  sleep 0.3
+  gdscript_actor="$(lem_capture "$session")"
+  if grep -Fq '*class.definition*' <<<"$gdscript_actor" &&
+     grep -Fq 'tick.(def)...' <<<"$gdscript_actor" &&
+     grep -Fq 'Inner.(class)...' <<<"$gdscript_actor"; then
+    pass imenu-gdscript-hierarchy 'a class exposes its self jump and nested definitions'
+  else
+    fail imenu-gdscript-hierarchy 'the GDScript class submenu differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l tick
+  send_chord Enter
+  sleep 0.3
+  if grep -Fq 'delta_copy.(var)' <<<"$(lem_capture "$session")"; then
+    tmux_cmd send-keys -t "$session" -l delta_copy
+    send_chord Enter
+    sleep 0.5
+    send_chord C-c z r
+    wait_report_count '^STATE file=gdscript line=24 column=8 ' 1 || true
+    gdscript_final="$(grep '^STATE file=gdscript line=24 column=8 ' \
+      "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+    gdscript_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+      <<<"$gdscript_final")"
+    if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+         <<<"$gdscript_final" &&
+       [ -n "$gdscript_origin_view" ] && [ -n "$gdscript_view" ] &&
+       [ "$gdscript_origin_view" != "$gdscript_view" ]; then
+      pass imenu-gdscript-jump 'GDScript Imenu lands on a nested variable without pulse'
+    else
+      fail imenu-gdscript-jump "the GDScript Imenu destination differed: $gdscript_final"
+    fi
+    send_chord C-o
+    sleep 0.3
+    send_chord C-c z r
+    wait_report_count '^STATE file=gdscript line=100 column=0 ' 2 || true
+    if [ "$(report_count '^STATE file=gdscript line=100 column=0 ')" -ge 2 ]; then
+      pass imenu-gdscript-jumplist 'C-o returns from GDScript Imenu to its exact origin'
+    else
+      fail imenu-gdscript-jumplist 'GDScript Imenu did not record one Vi jump'
+    fi
+  else
+    fail imenu-gdscript-jump 'the nested function submenu omitted its local variable'
+    send_chord C-g
+  fi
+else
+  fail imenu-gdscript-command 'M-x imenu did not open in the GDScript fixture'
 fi
 
 send_chord C-c z 2

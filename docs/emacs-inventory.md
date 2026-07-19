@@ -341,7 +341,7 @@ older kind/container-grouped `SymbolInformation` schema are both accepted.
 The configured `imenu-after-jump-hook` recenters but does not pulse the
 destination. Lem reproduces this path for those Eglot buffers, for the pinned
 Lisp generic-expression forms, and for native Org, Markdown, Python, Java, C,
-C++, Rust, and Go indices (`src/imenu.lisp`, `src/native-imenu.lisp`). Org uses the pinned depth-two
+C++, Rust, Go, and GDScript indices (`src/imenu.lisp`, `src/native-imenu.lisp`). Org uses the pinned depth-two
 heading tree and reveals folded destinations. Markdown includes nested ATX and
 Setext headings plus the pinned Footnotes group while excluding front matter,
 fences, and comments. Python uses the pinned tree-sitter function/class tree,
@@ -356,7 +356,9 @@ hierarchy plus qualified function names. Rust adds the pinned ordered Module,
 Enum, Impl, Type, Struct, and Fn sparse trees, including trait-qualified impl
 labels and parent self-jumps. Go adds the pinned ordered Function, Method,
 Struct, Interface, Type, and Alias categories, receiver-qualified methods, and
-the upstream grouped-type predicate/name behavior. Native indices for other
+the upstream grouped-type predicate/name behavior. GDScript uses its pinned
+source-ordered sparse tree across ordinary, exported, and onready variables,
+functions, and classes, retaining typed labels and parent self-jumps. Native indices for other
 non-LSP modes remain a provider gap.
 
 The `embark-consult` load path comes from the pinned package rather than this

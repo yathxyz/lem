@@ -445,6 +445,12 @@ labels such as `(Record).Work`, local type declarations remain visible, and a
 mixed parenthesized type declaration follows GNU's whole-declaration predicates
 and first-spec naming, even when that repeats `GroupStruct` under multiple
 categories. A ready gopls document-symbol provider remains authoritative.
+Native GDScript buffers reproduce gdscript-ts-mode's single source-ordered
+sparse tree over ordinary, exported, and onready variables, functions, and
+classes. Entries retain the pinned `var`, `e-var`, `o-var`, `def`, and `class`
+labels; nested parents expose the exact class/function definition self-jump,
+and strings/comments do not create definitions. Ready Godot document symbols
+remain authoritative over this offline and not-yet-ready fallback.
 
 Acceptance records one Vi jumplist entry and runs the configured Imenu feedback:
 recenter only, with no Consult Pulsar pulse. `scripts/lsp-project-test.sh` and
