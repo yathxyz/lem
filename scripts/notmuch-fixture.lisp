@@ -12,6 +12,8 @@
 (defvar *notmuch-test-pdf-buffer* nil)
 (defvar *notmuch-test-pdf-path* nil)
 (defvar *notmuch-test-pdf-directory* nil)
+(defvar *notmuch-test-compose-attachment*
+  (uiop:getenv "LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT"))
 
 (defun notmuch-test-yes-no (value) (if value "yes" "no"))
 
@@ -88,6 +90,8 @@
        'lem-yath-notmuch-reply-all)
    (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-c")
        'lem-yath-notmuch-compose-send)
+   (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-a")
+       'lem-yath-notmuch-compose-attach-file)
    (eq (notmuch-test-key-command *notmuch-compose-mode-keymap* "C-c C-k")
        'lem-yath-notmuch-compose-cancel)
    (eq (notmuch-test-key-command *notmuch-show-mode-keymap* "C-c s e")
@@ -277,6 +281,36 @@
      (mapcar #'notmuch-test-yes-no matrix)
      (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
 
+(define-command lem-yath-notmuch-test-attachment-report () ()
+  (let* ((buffer (current-buffer))
+         (compose-p (eq (buffer-major-mode buffer) 'notmuch-compose-mode))
+         (pathname (and *notmuch-test-compose-attachment*
+                        (ignore-errors
+                          (truename *notmuch-test-compose-attachment*))))
+         (marker
+           (and pathname
+                (format nil
+                        "<#part type=\"application/octet-stream\" filename=\"~a\" disposition=attachment>"
+                        (notmuch-compose-mml-escape
+                         (uiop:native-namestring pathname)))))
+         (size (and pathname
+                    (ignore-errors
+                      (notmuch-compose-attachment-size pathname)))))
+    (notmuch-test-log
+     "ATTACH mode=~a marker=~a regular=~a bounded=~a count=~a keys=~a active=~a source=~a"
+     (notmuch-test-yes-no compose-p)
+     (notmuch-test-yes-no
+      (and compose-p marker (search marker (buffer-text buffer))))
+     (notmuch-test-yes-no (and size (not (minusp size))))
+     (notmuch-test-yes-no
+      (and size (<= size *notmuch-compose-attachment-byte-limit*)))
+     (if compose-p (notmuch-compose-attachment-marker-count buffer) 0)
+     (notmuch-test-yes-no (notmuch-test-keys-p))
+     (notmuch-test-yes-no
+      (eq (notmuch-test-active-key-command "C-c C-a")
+          'lem-yath-notmuch-compose-attach-file))
+     (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
+
 (defun notmuch-test-extraction-refusal
     (attachment &key output-limit timeout)
   (let* ((directory (notmuch-private-temp-directory))
@@ -343,6 +377,7 @@
 (define-key *global-keymap* "F7" 'lem-yath-notmuch-test-address-report)
 (define-key *global-keymap* "F8" 'lem-yath-notmuch-test-cleanup-report)
 (define-key *global-keymap* "F9" 'lem-yath-notmuch-test-refusals)
+(define-key *global-keymap* "F10" 'lem-yath-notmuch-test-attachment-report)
 
 (notmuch-test-log "EXEC notmuch=~a xdg-open=~a"
                   (executable-find "notmuch")

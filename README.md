@@ -682,7 +682,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   `To`, `Cc`, and `Bcc` from recipients in mail sent by the configured Notmuch
   identities after the ordinary three-character Corfu delay. Lookup is
   asynchronous, bounded, cancellable, and cached per composition; accepting a
-  candidate replaces only the current comma-separated address token
+  candidate replaces only the current comma-separated address token. In a
+  composition, `C-c C-a` prompts for a regular local file and inserts the
+  familiar visible MML part marker; `C-c C-c` converts those markers into a
+  bounded `multipart/mixed` message before STARTTLS submission and exact sent
+  FCC. Attachment paths are never shell-expanded; submission refuses
+  non-regular marker paths and files changed while being read, and both
+  individual and aggregate payloads are capped at 7 MiB
 - ordinary `.pdf` and `.epub` opens stay inside Lem: PDFs expose bounded
   Poppler text one page at a time, while EPUBs become bounded Markdown with
   chapter navigation. Both are read-only, never visit or overwrite the binary

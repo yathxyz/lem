@@ -28,6 +28,32 @@
 (defparameter *notmuch-address-prefix-length* 3)
 (defparameter *notmuch-address-result-limit* 2000)
 (defparameter *notmuch-address-output-limit* (* 1024 1024))
+(defparameter *notmuch-compose-attachment-count-limit* 16)
+(defparameter *notmuch-compose-attachment-byte-limit* (* 7 1024 1024))
+
+(defparameter *notmuch-compose-content-types*
+  '(("txt" . "text/plain")
+    ("text" . "text/plain")
+    ("md" . "text/markdown")
+    ("csv" . "text/csv")
+    ("html" . "text/html")
+    ("htm" . "text/html")
+    ("json" . "application/json")
+    ("pdf" . "application/pdf")
+    ("zip" . "application/zip")
+    ("gz" . "application/gzip")
+    ("tar" . "application/x-tar")
+    ("png" . "image/png")
+    ("jpg" . "image/jpeg")
+    ("jpeg" . "image/jpeg")
+    ("gif" . "image/gif")
+    ("webp" . "image/webp")
+    ("svg" . "image/svg+xml")
+    ("mp3" . "audio/mpeg")
+    ("mp4" . "video/mp4")
+    ("docx" . "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    ("xlsx" . "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ("pptx" . "application/vnd.openxmlformats-officedocument.presentationml.presentation")))
 
 (defparameter *notmuch-list-buffer-name* "*lem-yath-mail*")
 (defparameter *notmuch-fetch-buffer-name* "*lem-yath-fetchmail*")
@@ -606,6 +632,8 @@ earlier recipients and their whitespace."
 (define-key *notmuch-show-mode-keymap* "c R" 'lem-yath-notmuch-reply-all)
 (define-key *notmuch-compose-mode-keymap* "C-c C-c"
   'lem-yath-notmuch-compose-send)
+(define-key *notmuch-compose-mode-keymap* "C-c C-a"
+  'lem-yath-notmuch-compose-attach-file)
 (define-key *notmuch-compose-mode-keymap* "C-c C-k"
   'lem-yath-notmuch-compose-cancel)
 
@@ -622,6 +650,92 @@ earlier recipients and their whitespace."
     (cond ((search-forward point "To:") (line-end point))
           ((search-forward point "Subject:") (line-end point))
           (t (buffer-end point)))))
+
+(defun notmuch-compose-attachment-size (pathname)
+  "Return PATHNAME's size after requiring a regular file."
+  #+sbcl
+  (let ((stat (sb-posix:stat (uiop:native-namestring pathname))))
+    (unless (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
+               sb-posix:s-ifreg)
+      (editor-error "Attachment is not a regular file: ~a" pathname))
+    (sb-posix:stat-size stat))
+  #-sbcl
+  (declare (ignore pathname))
+  #-sbcl
+  (editor-error "Safe attachment composition requires the supported SBCL runtime"))
+
+(defun notmuch-compose-attachment-path (value)
+  "Return VALUE as an existing canonical, size-bounded attachment path."
+  (let ((pathname
+          (or (ignore-errors (truename value))
+              (editor-error "Attachment does not exist: ~a" value))))
+    (let ((size (notmuch-compose-attachment-size pathname)))
+      (when (> size *notmuch-compose-attachment-byte-limit*)
+        (editor-error "Attachment exceeds the ~d MiB composition limit: ~a"
+                      (floor *notmuch-compose-attachment-byte-limit* 1048576)
+                      pathname)))
+    pathname))
+
+(defun notmuch-compose-content-type (pathname)
+  (or (cdr (assoc (string-downcase (or (pathname-type pathname) ""))
+                  *notmuch-compose-content-types* :test #'string=))
+      "application/octet-stream"))
+
+(defun notmuch-compose-mml-escape (value)
+  "Escape VALUE for one double-quoted MML marker attribute."
+  (when (find-if (lambda (character)
+                   (member character '(#\Null #\Newline #\Return)))
+                 value)
+    (editor-error "Attachment path contains a control character"))
+  (with-output-to-string (stream)
+    (loop :for character :across value
+          :do (case character
+                (#\& (write-string "&amp;" stream))
+                (#\< (write-string "&lt;" stream))
+                (#\> (write-string "&gt;" stream))
+                (#\" (write-string "&quot;" stream))
+                (otherwise (write-char character stream))))))
+
+(defun notmuch-compose-attachment-marker-count (buffer)
+  (let ((text (buffer-text buffer)))
+    (loop :with offset := 0
+          :for marker := (search "<#part " text :start2 offset)
+          :while marker
+          :count marker
+          :do (setf offset (+ marker 7)))))
+
+(define-command lem-yath-notmuch-compose-attach-file () ()
+  "Attach one local file using Emacs message-mode's `C-c C-a' route."
+  (let ((buffer (current-buffer)))
+    (unless (eq (buffer-major-mode buffer) 'notmuch-compose-mode)
+      (editor-error "Not in a Notmuch composition"))
+    (when (>= (notmuch-compose-attachment-marker-count buffer)
+              *notmuch-compose-attachment-count-limit*)
+      (editor-error "A message may contain at most ~d attachments"
+                    *notmuch-compose-attachment-count-limit*))
+    (alexandria:when-let
+        ((choice
+           (prompt-for-file
+            "Attach file: "
+            :directory (or (ignore-errors (buffer-directory buffer))
+                           (uiop:getcwd))
+            :default nil :existing t)))
+      (let* ((pathname (notmuch-compose-attachment-path choice))
+             (native-name (uiop:native-namestring pathname))
+             (marker
+               (format nil
+                       "<#part type=\"~a\" filename=\"~a\" disposition=attachment>"
+                       (notmuch-compose-content-type pathname)
+                       (notmuch-compose-mml-escape native-name)))
+             (point (current-point)))
+        (unless (or (start-buffer-p point)
+                    (char= (or (character-at point -1) #\Newline) #\Newline))
+          (insert-character point #\Newline))
+        (insert-string point marker)
+        (unless (char= (or (character-at point) #\Null) #\Newline)
+          (insert-character point #\Newline))
+        (message "Attached ~a; C-c C-c will build multipart MIME"
+                 (file-namestring pathname))))))
 
 (defun notmuch-compose-open (text &key reply-query user-emails)
   "Open TEXT in the single Notmuch composition buffer.

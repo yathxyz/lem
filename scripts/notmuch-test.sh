@@ -35,6 +35,8 @@ export LEM_YATH_NOTMUCH_INSERT_LOG="$root/notmuch-insert.jsonl"
 export LEM_YATH_SMTP_FAKE_LOG="$root/smtp-submit.jsonl"
 export LEM_YATH_NOTMUCH_FAIL_INSERT_ONCE="$root/fail-insert-once"
 export LEM_YATH_NOTMUCH_PDF="$root/notmuch attachment;safe.pdf"
+export LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT="$root/compose attachment safe.bin"
+smtp_attachment="$root/"'smtp attachment;safe $(touch PWNED).bin'
 fakebin="$root/fake bin;safe"
 export LEM_YATH_NOTMUCH_FAKE_BIN="$fakebin"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$fakebin"
@@ -45,6 +47,9 @@ real_notmuch=$(command -v notmuch)
 : >"$LEM_YATH_NOTMUCH_OPEN_LOG"
 : >"$LEM_YATH_NOTMUCH_INSERT_LOG"
 : >"$LEM_YATH_SMTP_FAKE_LOG"
+printf 'attachment bytes\000with binary\377tail\n' \
+  >"$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT"
+cp "$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT" "$smtp_attachment"
 printf '%s\n' '{"searches":0,"news":0,"inserts":0,"tags":{"alpha@example.invalid":["inbox","unread"],"payment+safe;touch PWNED@example.invalid":["inbox","unread"],"reply/second?value@example.invalid":["inbox","unread"]}}' >"$LEM_YATH_NOTMUCH_STATE"
 cp "$here/scripts/fake-notmuch.py" "$fakebin/notmuch"
 cp "$here/scripts/fake-mbsync.sh" "$fakebin/mbsync"
@@ -218,27 +223,31 @@ printf '%s\n' \
 chmod 600 "$HOME/.authinfo" "$HOME/.netrc"
 smtp_input="$smtp_tls/input.eml"
 smtp_output="$smtp_tls/output.eml"
-cat >"$smtp_input" <<'EOF'
-From: Yanni <yanni@example.invalid>
-To: Alice <alice@example.invalid>
-Bcc: Audit <audit+safe-touch-PWNED@example.invalid>
-Subject: SMTP helper; $(touch PWNED)
-
-Literal body; `touch PWNED`.
-EOF
+printf '%s\n' \
+  'From: Yanni <yanni@example.invalid>' \
+  'To: Alice <alice@example.invalid>' \
+  'Bcc: Audit <audit+safe-touch-PWNED@example.invalid>' \
+  'Subject: SMTP helper; $(touch PWNED)' \
+  '' \
+  'Literal body; `touch PWNED`.' \
+  "<#part type=\"application/octet-stream\" filename=\"$smtp_attachment\" disposition=attachment>" \
+  >"$smtp_input"
 smtp_helper_ok=1
 LEM_YATH_SMTP_SERVER=127.0.0.1 \
 LEM_YATH_SMTP_PORT="$smtp_port" \
   "$real_smtp_program" <"$smtp_input" >"$smtp_output" 2>"$smtp_tls/helper.err" || smtp_helper_ok=0
 wait "$smtp_server_pid" || smtp_helper_ok=0
 smtp_server_pid=
-if ((smtp_helper_ok)) && python3 - "$smtp_output" "$LEM_YATH_SMTP_TEST_CAPTURE" <<'PY'
+if ((smtp_helper_ok)) && python3 - "$smtp_output" "$LEM_YATH_SMTP_TEST_CAPTURE" \
+     "$smtp_attachment" <<'PY'
 import json, sys
+from pathlib import Path
 from email import policy
 from email.parser import BytesParser
 
 output = open(sys.argv[1], "rb").read()
 capture = json.load(open(sys.argv[2]))
+attachment_path = Path(sys.argv[3])
 message = BytesParser(policy=policy.default).parsebytes(output)
 assert capture["tls"] is True
 assert capture["authenticated"] is True
@@ -249,15 +258,22 @@ assert capture["recipients"] == [
 ]
 assert message["Bcc"] is None
 assert message["Date"] and message["Message-ID"]
-assert message.get_content_type() == "text/plain"
-assert "Literal body; `touch PWNED`." in output.decode()
+assert message.get_content_type() == "multipart/mixed"
+body = message.get_body(preferencelist=("plain",))
+assert body is not None and "Literal body; `touch PWNED`." in body.get_content()
+assert "<#part" not in body.get_content()
+attachments = list(message.iter_attachments())
+assert len(attachments) == 1
+assert attachments[0].get_content_type() == "application/octet-stream"
+assert attachments[0].get_filename() == attachment_path.name
+assert attachments[0].get_payload(decode=True) == attachment_path.read_bytes()
 assert "Bcc:" not in capture["message"]
 assert capture["message"].encode() == output
 PY
 then
-  pass smtp-helper 'packaged STARTTLS submission authenticated privately, hid Bcc, and returned exact FCC bytes'
+  pass smtp-helper 'packaged STARTTLS submission built MIME, authenticated privately, hid Bcc, and returned exact FCC bytes'
 else
-  fail smtp-helper 'STARTTLS, authinfo, envelope recipients, Bcc stripping, or normalized output diverged'
+  fail smtp-helper 'MIME, STARTTLS, authinfo, envelope recipients, Bcc stripping, or normalized output diverged'
 fi
 invalid_smtp="$smtp_tls/invalid.eml"
 printf '%s\n' \
@@ -273,6 +289,44 @@ if ! LEM_YATH_SMTP_SERVER=127.0.0.1 \
   pass smtp-address-refusal 'malformed recipient syntax failed before any SMTP connection'
 else
   fail smtp-address-refusal 'the helper accepted or misclassified a malformed recipient address'
+fi
+
+attachment_refusal_ok=1
+unsafe_link="$smtp_tls/unsafe-link.bin"
+oversized_attachment="$smtp_tls/oversized.bin"
+ln -s "$smtp_attachment" "$unsafe_link"
+truncate -s 7340033 "$oversized_attachment"
+for refusal in symlink oversized malformed; do
+  refusal_input="$smtp_tls/$refusal.eml"
+  case "$refusal" in
+    symlink)
+      marker="<#part type=\"application/octet-stream\" filename=\"$unsafe_link\" disposition=attachment>"
+      expected='attachment is not a regular file'
+      ;;
+    oversized)
+      marker="<#part type=\"application/octet-stream\" filename=\"$oversized_attachment\" disposition=attachment>"
+      expected='attachment exceeds the 7 MiB composition limit'
+      ;;
+    malformed)
+      marker="<#part filename=\"$smtp_attachment\" disposition=attachment>"
+      expected='attachment marker is malformed'
+      ;;
+  esac
+  printf '%s\n' \
+    'From: Yanni <yanni@example.invalid>' \
+    'To: Alice <alice@example.invalid>' \
+    'Subject: attachment refusal' '' 'body' "$marker" >"$refusal_input"
+  if LEM_YATH_SMTP_SERVER=127.0.0.1 LEM_YATH_SMTP_PORT="$smtp_port" \
+       "$real_smtp_program" <"$refusal_input" \
+       >"$smtp_tls/$refusal.out" 2>"$smtp_tls/$refusal.err" ||
+     ! grep -Fq "$expected" "$smtp_tls/$refusal.err"; then
+    attachment_refusal_ok=0
+  fi
+done
+if ((attachment_refusal_ok)); then
+  pass smtp-attachment-refusal 'malformed, symlink, and oversized attachments failed before SMTP'
+else
+  fail smtp-attachment-refusal 'an unsafe attachment reached SMTP or produced the wrong refusal'
 fi
 
 fixture="$(lem-yath_lisp_string "$here/scripts/notmuch-fixture.lisp")"
@@ -355,6 +409,7 @@ if wait_report COMPOSE "$before_compose" &&
 fi
 
 address_ok=0
+attachment_ok=0
 if ((new_compose_ok)); then
   lem_keys "$session" A
   tmux_cmd send-keys -t "$session" -l -- 'ali'
@@ -416,6 +471,21 @@ PY
   then
     address_ok=1
   fi
+
+  before_attachment=$(report_count ATTACH)
+  lem_keys "$session" C-c C-a
+  if lem_wait_for "$session" 'Attach file:' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l -- \
+      "$LEM_YATH_NOTMUCH_COMPOSE_ATTACHMENT"
+    lem_keys "$session" Enter
+  fi
+  if lem_wait_for "$session" 'Attached compose attachment safe' 15 >/dev/null; then
+    lem_keys "$session" F10
+  fi
+  if wait_report ATTACH "$before_attachment" &&
+     [[ $(latest ATTACH) == 'ATTACH mode=yes marker=yes regular=yes bounded=yes count=1 keys=yes active=yes source=yes' ]]; then
+    attachment_ok=1
+  fi
 fi
 
 lem_keys "$session" C-c C-k
@@ -431,6 +501,11 @@ if ((address_ok)); then
   pass address-completion 'recipient headers completed asynchronously with exact cached argv, token bounds, and safe failure'
 else
   fail address-completion 'header scope, popup acceptance, cache, failure recovery, or direct address argv diverged'
+fi
+if ((attachment_ok)); then
+  pass compose-attachment 'C-c C-a inserted one exact bounded MML attachment marker'
+else
+  fail compose-attachment 'file prompt, MML marker, size guard, or active C-c C-a binding diverged'
 fi
 
 before_compose=$(report_count COMPOSE)

@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import email.policy
 import email.utils
+import html
 import ipaddress
 import os
+import re
 import shlex
 import shutil
 import smtplib
@@ -26,8 +28,15 @@ from pathlib import Path
 
 MAX_MESSAGE_BYTES = 10 * 1024 * 1024
 MAX_AUTHINFO_BYTES = 1024 * 1024
+MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024
+MAX_ATTACHMENTS = 16
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 1025
+
+MML_ATTACHMENT = re.compile(
+    r'<#part type="([A-Za-z0-9][A-Za-z0-9.+-]*/[A-Za-z0-9][A-Za-z0-9.+-]*)" '
+    r'filename="([^"\r\n]*)" disposition=attachment>[ \t]*'
+)
 
 
 class SubmitError(RuntimeError):
@@ -62,6 +71,116 @@ def recipient_addresses(message) -> list[str]:
     return list(dict.fromkeys(result))
 
 
+def attachment_bytes(encoded_path: str) -> tuple[Path, bytes]:
+    path_text = html.unescape(encoded_path)
+    if not path_text or any(character in path_text for character in "\r\n\x00"):
+        raise SubmitError("attachment path is malformed")
+    path = Path(os.path.abspath(os.path.expanduser(path_text)))
+    try:
+        before = path.lstat()
+    except OSError as error:
+        raise SubmitError(f"could not inspect attachment: {path}") from error
+    if not stat.S_ISREG(before.st_mode):
+        raise SubmitError(f"attachment is not a regular file: {path}")
+    if before.st_size > MAX_ATTACHMENT_BYTES:
+        raise SubmitError("attachment exceeds the 7 MiB composition limit")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise SubmitError(f"could not read attachment: {path}") from error
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (
+                opened.st_dev,
+                opened.st_ino,
+                opened.st_size,
+                opened.st_mtime_ns,
+                opened.st_ctime_ns,
+            )
+            != (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            or opened.st_size > MAX_ATTACHMENT_BYTES
+        ):
+            raise SubmitError(f"attachment changed or is unsafe: {path}")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            data = stream.read(MAX_ATTACHMENT_BYTES + 1)
+        after = os.fstat(descriptor)
+        if (
+            (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            )
+            != (
+                opened.st_dev,
+                opened.st_ino,
+                opened.st_size,
+                opened.st_mtime_ns,
+                opened.st_ctime_ns,
+            )
+            or len(data) != opened.st_size
+        ):
+            raise SubmitError(f"attachment changed while being read: {path}")
+    finally:
+        os.close(descriptor)
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise SubmitError("attachment exceeds the 7 MiB composition limit")
+    return path, data
+
+
+def expand_mml_attachments(message) -> None:
+    payload = message.get_payload(decode=True)
+    if payload is None:
+        payload = b""
+    charset = message.get_content_charset() or "utf-8"
+    try:
+        body = payload.decode(charset)
+    except (LookupError, UnicodeDecodeError) as error:
+        raise SubmitError("message body is not valid text") from error
+
+    cleaned_lines: list[str] = []
+    attachments: list[tuple[str, str]] = []
+    for line in body.splitlines(keepends=True):
+        marker = line.rstrip("\r\n")
+        if marker.startswith("<#part"):
+            match = MML_ATTACHMENT.fullmatch(marker)
+            if match is None:
+                raise SubmitError("attachment marker is malformed")
+            attachments.append((match.group(1), match.group(2)))
+            if len(attachments) > MAX_ATTACHMENTS:
+                raise SubmitError("message contains more than 16 attachments")
+        else:
+            cleaned_lines.append(line)
+    if not attachments:
+        return
+
+    subtype = message.get_content_subtype()
+    message.clear_content()
+    message.set_content(
+        "".join(cleaned_lines), subtype=subtype, charset="utf-8", cte="8bit"
+    )
+    aggregate = 0
+    for content_type, encoded_path in attachments:
+        path, data = attachment_bytes(encoded_path)
+        aggregate += len(data)
+        if aggregate > MAX_ATTACHMENT_BYTES:
+            raise SubmitError("attachments exceed the 7 MiB aggregate limit")
+        maintype, subtype = content_type.split("/", 1)
+        message.add_attachment(
+            data, maintype=maintype, subtype=subtype, filename=path.name
+        )
+
+
 def normalized_message(raw: bytes):
     message = BytesParser(policy=email.policy.SMTP).parsebytes(raw)
     if message.defects:
@@ -77,6 +196,7 @@ def normalized_message(raw: bytes):
         raise SubmitError("message must contain exactly one From and at most one Sender")
     if message.is_multipart() or message.get_content_maintype() != "text":
         raise SubmitError("only bounded text message composition is supported")
+    expand_mml_attachments(message)
     from_value = message.get("Sender") or message.get("From")
     envelope_from = one_address(str(from_value), "From")
     recipients = recipient_addresses(message)
@@ -92,7 +212,7 @@ def normalized_message(raw: bytes):
         message["MIME-Version"] = "1.0"
     if message.get("Content-Type") is None:
         message["Content-Type"] = "text/plain; charset=utf-8"
-    if message.get("Content-Transfer-Encoding") is None:
+    if not message.is_multipart() and message.get("Content-Transfer-Encoding") is None:
         message["Content-Transfer-Encoding"] = "8bit"
     wire = message.as_bytes(policy=email.policy.SMTP)
     if len(wire) > MAX_MESSAGE_BYTES:
