@@ -433,6 +433,164 @@
            (buffer-text buffer))
       (tree-sitter-test-delete-buffer buffer))))
 
+(defun tree-sitter-test-meson-point-predicate (text needle predicate)
+  (let ((buffer (make-buffer "*meson-syntax-test*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (meson-mode)
+           (tree-sitter-test-set-text buffer text)
+           (with-point ((point (buffer-start-point buffer)))
+             (and (search-forward-regexp
+                   point (cl-ppcre:quote-meta-chars needle))
+                  (character-offset point (- (max 1 (floor (length needle) 2))))
+                  (funcall predicate point))))
+      (tree-sitter-test-delete-buffer buffer))))
+
+(defun tree-sitter-test-meson-highlight (text needle)
+  (let ((buffer (make-buffer "*meson-highlight-test*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (meson-mode)
+           (tree-sitter-test-set-text buffer text)
+           (tree-sitter-test-scan buffer)
+           (tree-sitter-test-attribute buffer needle))
+      (tree-sitter-test-delete-buffer buffer))))
+
+(defun tree-sitter-test-meson-completion-items (text)
+  (let ((buffer (make-buffer "*meson-completion-test*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (meson-mode)
+           (tree-sitter-test-set-text buffer text)
+           (meson-completion-items (buffer-end-point buffer)))
+      (tree-sitter-test-delete-buffer buffer))))
+
+(defun tree-sitter-test-completion-labels (items)
+  (mapcar #'lem/completion-mode:completion-item-label items))
+
+(defun tree-sitter-test-check-meson-parity ()
+  (tree-sitter-test-check
+   (tree-sitter-test-meson-point-predicate
+    "value = 'single'" "single" #'in-string-p)
+   "meson-apostrophe-string-is-syntactic")
+  (tree-sitter-test-check
+   (tree-sitter-test-meson-point-predicate
+    (format nil "value = '''multi~%line'''") "line" #'in-string-p)
+   "meson-triple-apostrophe-string-is-syntactic")
+  (tree-sitter-test-check
+   (not (tree-sitter-test-meson-point-predicate
+         "value = \"punctuation\"" "punctuation" #'in-string-p))
+   "meson-double-quotes-remain-punctuation")
+  (tree-sitter-test-check
+   (tree-sitter-test-meson-point-predicate
+    "# comment" "comment" #'in-comment-p)
+   "meson-hash-comment-is-syntactic")
+  (tree-sitter-test-check
+   (eq 'lem:syntax-builtin-attribute
+       (tree-sitter-test-meson-highlight "project()" "project"))
+   "meson-pinned-builtin-is-highlighted")
+  (tree-sitter-test-check
+   (null (tree-sitter-test-meson-highlight "custom_call()" "custom_call"))
+   "meson-project-call-is-not-a-builtin")
+  (tree-sitter-test-check
+   (not (eq 'lem:syntax-builtin-attribute
+            (tree-sitter-test-meson-highlight
+             "meson.project()" "project")))
+   "meson-method-is-not-a-global-builtin")
+  (tree-sitter-test-check
+   (eq 'lem:syntax-variable-attribute
+       (tree-sitter-test-meson-highlight "assigned = 1" "assigned"))
+   "meson-assignment-highlights-the-variable")
+  (let* ((items (tree-sitter-test-meson-completion-items "pro"))
+         (labels (tree-sitter-test-completion-labels items)))
+    (tree-sitter-test-check
+     (and (member "project" labels :test #'string=)
+          (member "foreach" labels :test #'string=)
+          (member "meson" labels :test #'string=)
+          (not (member "project_version" labels :test #'string=)))
+     "meson-global-completion-uses-pinned-tables"))
+  (let* ((items
+           (tree-sitter-test-meson-completion-items
+            "executable('fixture', dep"))
+         (labels (tree-sitter-test-completion-labels items)))
+    (tree-sitter-test-check
+     (and (member "dependencies" labels :test #'string=)
+          (member "dependency" labels :test #'string=)
+          (not (member "foreach" labels :test #'string=)))
+     "meson-call-completion-adds-exact-keyword-arguments"))
+  (let* ((items
+           (tree-sitter-test-meson-completion-items
+            "executable('fixture', [dep"))
+         (labels (tree-sitter-test-completion-labels items)))
+    (tree-sitter-test-check
+     (and (member "dependency" labels :test #'string=)
+          (not (member "dependencies" labels :test #'string=)))
+     "meson-nested-nonround-context-matches-pinned-capf"))
+  (dolist (entry
+           '(("meson.pro" "project_version" "strip")
+             ("host_machine.cp" "cpu" "strip")
+             ("value.str" "strip" "project_version")))
+    (destructuring-bind (text included excluded) entry
+      (let ((labels
+              (tree-sitter-test-completion-labels
+               (tree-sitter-test-meson-completion-items text))))
+        (tree-sitter-test-check
+         (and (member included labels :test #'string=)
+              (not (member excluded labels :test #'string=)))
+         (format nil "meson-contextual-methods-~a" included)))))
+  (tree-sitter-test-check
+   (and (null (tree-sitter-test-meson-completion-items "message('pro"))
+        (null (tree-sitter-test-meson-completion-items "# pro")))
+   "meson-completion-is-suppressed-in-strings-and-comments")
+  (let* ((items (tree-sitter-test-meson-completion-items "pro"))
+         (project
+           (find "project" items :test #'string=
+                 :key #'lem/completion-mode:completion-item-label)))
+    (tree-sitter-test-check
+     (and project
+          (lem/completion-mode::completion-item-focus-action project)
+          (string=
+           "void project(project_name, list_of_languages, ...)"
+           (meson-function-documentation "project")))
+     "meson-completion-carries-pinned-function-documentation"))
+  (let ((buffer (make-buffer "*meson-mode-local-test*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (meson-mode)
+           (tree-sitter-test-set-text buffer "project('fixture'")
+           (tree-sitter-test-check
+            (and (typep
+                  (variable-value 'lem/language-mode:completion-spec)
+                  'lem/completion-mode::completion-spec)
+                 (eq 'meson-eldoc-idle-function
+                     (variable-value 'lem/language-mode:idle-function))
+                 (string= "project"
+                          (meson-function-at-point
+                           (buffer-end-point buffer))))
+            "meson-mode-installs-completion-and-eldoc"))
+      (tree-sitter-test-delete-buffer buffer)))
+  (dolist (entry
+           `((,(format nil "if true~%  foreach item : items~%") 4
+               "nested-block")
+             (,(format nil "if true~%  value = 1~%else~%") 2
+               "else-body")
+             (,(format nil "executable(~%") 2 "call-arguments")
+             (,(format nil "if true~%  executable(~%") 4
+               "nested-call-arguments")
+             (,(format nil "if true~%  executable(~%    'fixture',~%  )")
+               2 "closing-delimiter")
+             (,(format nil "value = left +~%") 2 "operator-continuation")
+             (,(format nil "if true~%  value = left +~%") 4
+               "nested-operator-continuation")
+             (,(format nil "value = left +~%  right~%") 0
+               "completed-continuation")
+             (,(format nil "if true~%  value = '''one~%") 2
+               "multiline-string")))
+    (destructuring-bind (text expected label) entry
+      (tree-sitter-test-check
+       (= expected (tree-sitter-test-indent-result 'meson-mode text))
+       (format nil "meson-indents-~a" label)))))
+
 (defun tree-sitter-test-check-language-modes ()
   (tree-sitter-test-check-mode-file
    ".JuStFiLe" 'just-mode :grammar "just" :width 4 :comment "#"
@@ -467,6 +625,7 @@
    "player.gd" 'gdscript-mode :grammar "gdscript" :width 4 :comment "#"
    :programming t :tabs t)
   (tree-sitter-test-check-language-highlighting)
+  (tree-sitter-test-check-meson-parity)
   (tree-sitter-test-check
    (string= (format nil "    mov~c" #\Tab)
             (tree-sitter-test-nasm-command-result "    mov" 'nasm-tab))
@@ -519,6 +678,40 @@
     (tree-sitter-test-check-eligibility)
     (tree-sitter-test-check-buffer-isolation)
     (tree-sitter-test-check-full-reparse buffer)))
+
+(defun tree-sitter-test-physical-meson-setup (text)
+  (let ((buffer
+          (tree-sitter-test-open-language-file "meson.build")))
+    (switch-to-buffer buffer)
+    (tree-sitter-test-set-text buffer text)
+    (move-point (current-point) (buffer-end-point buffer))
+    (meson-clear-eldoc)))
+
+(define-command tree-sitter-test-meson-global-setup () ()
+  (tree-sitter-test-physical-meson-setup ""))
+
+(define-command tree-sitter-test-meson-argument-setup () ()
+  (tree-sitter-test-physical-meson-setup "executable('fixture', "))
+
+(define-command tree-sitter-test-meson-physical-state () ()
+  (tree-sitter-test-log
+   "MESON-PHYSICAL text=~s mode=~a function=~s eldoc=~s idle=~s prompt=~:[no~;yes~] completion=~:[no~;yes~] popup=~:[no~;yes~]"
+   (points-to-string (buffer-start-point (current-buffer))
+                     (buffer-end-point (current-buffer)))
+   (buffer-major-mode (current-buffer))
+   (meson-function-at-point)
+   (variable-value 'meson-last-eldoc)
+   (variable-value 'lem/language-mode:idle-function :buffer)
+   (not (null (lem/prompt-window:current-prompt-window)))
+   (not (null lem/completion-mode::*completion-context*))
+   (and lem/completion-mode::*completion-context*
+        (not (null
+              (lem/completion-mode::context-popup-menu
+               lem/completion-mode::*completion-context*))))))
+
+(define-key *global-keymap* "F10" 'tree-sitter-test-meson-argument-setup)
+(define-key *global-keymap* "F11" 'tree-sitter-test-meson-physical-state)
+(define-key *global-keymap* "F12" 'tree-sitter-test-meson-global-setup)
 
 (handler-case
     (tree-sitter-test-run)

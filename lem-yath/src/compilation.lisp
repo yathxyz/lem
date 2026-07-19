@@ -557,6 +557,10 @@
 (defun compilation-location-match (line)
   "Return PATH, LINE, COLUMN, MESSAGE fields encoded as a list."
   (or
+   (cl-ppcre:register-groups-bind (path row column)
+       ("^Meson encountered an error in file (.+), line ([0-9]+), column ([0-9]+):"
+        line)
+     (list path row column line))
    (cl-ppcre:register-groups-bind (path row)
        ("^[ \t]*File \"([^\"]+)\", line ([0-9]+)(?:,.*)?$" line)
      (list path row nil line))

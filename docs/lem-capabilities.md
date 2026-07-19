@@ -2098,6 +2098,21 @@ project-local macro instructions without embedding nasm-mode's 41 KiB generated
 token snapshot; the upstream comment-gutter and custom join-line commands are
 not reproduced.
 
+`lem-yath/src/meson-mode.lisp` augments the base Meson mode with the pinned
+global builtin/keyword/variable table, receiver-specific methods, and exact
+per-function keyword arguments. Completion is suppressed in strings and
+comments, completion focus exposes the package's builtin signatures, and the
+language idle hook supplies the same signatures while point remains inside a
+call. Meson syntax uses only apostrophes (including triple-apostrophe strings),
+and highlighting is limited to the pinned keywords, builtins, builtin
+variables, and assignment targets. Its indentation follows the pinned
+two-column block, delimiter, operator-continuation, closing-delimiter, and
+multiline-string cases with a bounded structural scanner rather than a full
+SMIE parser. Compilation recognizes the package's exact Meson error-location
+line. The package defines no Imenu index, so none is invented here; its F1
+manual lookup is inactive in the audited configuration because neither default
+documentation directory exists.
+
 This approximates the configured Emacs `treesit-font-lock-level 3`; it does not
 load injection or locals queries. In particular, captures guarded by
 `#is-not? local` are omitted rather than risking false builtin highlighting.

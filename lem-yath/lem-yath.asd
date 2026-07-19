@@ -35,6 +35,7 @@
                (:file "csharp-mode")
                (:file "cpp-mode")
                (:file "language-modes")
+               (:file "meson-mode")
                (:file "tree-sitter")
                (:file "ide")
                (:file "editorconfig")

@@ -333,7 +333,7 @@ fi
 pass boot 'configured Lem opened the origin buffer in an isolated tmux socket'
 
 lem_keys "$session" F5
-if ! wait_report '^STATIC PASS .*bindings=T make=yes pinned=T drain=T .*parsed=6$'; then
+if ! wait_report '^STATIC PASS .*bindings=T make=yes pinned=T drain=T .*parsed=7$'; then
   die static-contract 'default command/runtime, parser coverage, or configured bindings diverged'
 fi
 if grep -Fq 'sb-posix:killpg' "$LEM_YATH_COMPILATION_SOURCE"; then

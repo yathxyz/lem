@@ -93,5 +93,60 @@ if ! grep -q '^SUMMARY ' "$LEM_YATH_TREE_SITTER_REPORT" 2>/dev/null; then
 fi
 
 sed -n '1,320p' "$LEM_YATH_TREE_SITTER_REPORT"
-grep -q '^SUMMARY PASS failures=0 grammars=24/24$' \
-  "$LEM_YATH_TREE_SITTER_REPORT"
+if ! grep -q '^SUMMARY PASS failures=0 grammars=24/24$' \
+  "$LEM_YATH_TREE_SITTER_REPORT"; then
+  exit 1
+fi
+
+tmux_cmd send-keys -t "$session" F12 i
+tmux_cmd send-keys -t "$session" -l 'project'
+if lem_wait_for "$session" 'project.*Meson builtin function' 10 >/dev/null; then
+  printf 'PASS meson-physical-global-completion\n'
+else
+  printf 'FAIL meson-physical-global-completion\n' >&2
+  exit 1
+fi
+
+if lem_wait_for \
+     "$session" 'void project\(project_name, list_of_languages, \.\.\.\)' \
+     10 >/dev/null; then
+  printf 'PASS meson-physical-completion-documentation\n'
+else
+  printf 'FAIL meson-physical-completion-documentation\n' >&2
+  exit 1
+fi
+
+tmux_cmd send-keys -t "$session" Enter
+tmux_cmd send-keys -t "$session" -l "('fixture'"
+sleep 1
+tmux_cmd send-keys -t "$session" F11
+for _ in $(seq 1 40); do
+  if grep -q '^MESON-PHYSICAL text=.*project.*fixture.* mode=MESON-MODE .*eldoc=.*void project.*' \
+       "$LEM_YATH_TREE_SITTER_REPORT"; then
+    break
+  fi
+  sleep 0.25
+done
+if grep -q '^MESON-PHYSICAL text=.*project.*fixture.* mode=MESON-MODE .*eldoc=.*void project.*' \
+     "$LEM_YATH_TREE_SITTER_REPORT"; then
+  printf 'PASS meson-physical-idle-signature\n'
+else
+  printf 'FAIL meson-physical-idle-signature\n' >&2
+  grep '^MESON-PHYSICAL ' "$LEM_YATH_TREE_SITTER_REPORT" >&2 || true
+  lem_capture "$session" >&2 || true
+  exit 1
+fi
+
+tmux_cmd send-keys -t "$session" F10
+if ! lem_wait_for "$session" "executable.*fixture" 10 >/dev/null; then
+  printf 'FAIL meson-physical-keyword-argument-setup\n' >&2
+  lem_capture "$session" >&2 || true
+  exit 1
+fi
+tmux_cmd send-keys -t "$session" -l 'dep'
+if lem_wait_for "$session" 'dependencies.*Meson keyword argument' 10 >/dev/null; then
+  printf 'PASS meson-physical-keyword-argument-completion\n'
+else
+  printf 'FAIL meson-physical-keyword-argument-completion\n' >&2
+  exit 1
+fi

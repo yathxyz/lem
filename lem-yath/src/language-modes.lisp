@@ -138,14 +138,6 @@
   "Match pinned nasm-mode's zero-column forms and four-column code field."
   (if (nasm-zero-column-line-p (line-string point)) 0 4))
 
-(defun meson-calc-indent (point)
-  (language-simple-indent
-   point 2
-   :open-pattern
-   "(?:^[ \\t]*(?:if|foreach|else|elif)\\b|[({\\[][ \\t]*(?:#.*)?$)"
-   :close-pattern
-   "^[ \\t]*(?:(?:endif|endforeach|else|elif)\\b|[]})])"))
-
 (defun nginx-calc-indent (point)
   (language-simple-indent
    point 4
@@ -240,15 +232,16 @@
   (let ((table
           (make-syntax-table
            :space-chars '(#\Space #\Tab #\Newline)
-           :symbol-chars '(#\_ #\-)
+           :symbol-chars '(#\_)
            :paren-pairs '((#\( . #\)) (#\{ . #\}) (#\[ . #\]))
-           :string-quote-chars '(#\' #\")
+           :string-quote-chars '(#\')
+           :block-string-pairs '(("'''" . "'''"))
            :line-comment-string "#")))
     (set-syntax-parser
      table
      (make-configured-language-tmlanguage
       :line-comment "#"
-      :strings '("'" "\"")
+      :strings '("'''" "'")
       :keywords '("and" "break" "continue" "elif" "else" "endforeach"
                   "endif" "false" "foreach" "if" "in" "not" "or" "true")
       :extra-patterns

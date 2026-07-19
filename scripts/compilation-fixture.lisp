@@ -207,7 +207,12 @@
                      (merge-pathnames "test_sample.py" *compilation-test-root*)))
             (format nil "error: bad at ~a:7:4"
                     (uiop:native-namestring
-                     (merge-pathnames "default.nix" *compilation-test-root*)))))
+                     (merge-pathnames "default.nix" *compilation-test-root*)))
+            (format nil
+                    "Meson encountered an error in file ~a, line 8, column 9:"
+                    (uiop:native-namestring
+                     (merge-pathnames "meson.build"
+                                      *compilation-test-root*)))))
          (parsed
            (loop :for sample :in samples
                  :for output-line :from 1

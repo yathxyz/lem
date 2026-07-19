@@ -297,6 +297,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   Nu, and Typst use packaged tree-sitter highlighting while Meson and nginx
   retain bounded TextMate fallbacks. GDScript automatically connects to the
   running Godot language server using the project-derived editor-settings port
+- Meson completion with the pinned global, method, and per-call keyword tables,
+  Corfu documentation, idle signatures, apostrophe-only strings, and
+  structure-aware two-column indentation
 - relative line numbers in programming buffers only, matching the Emacs
   `prog-mode` scope while leaving prose and utility buffers clean
 - the current Modus Vivendi Tinted palette, truncated long lines, no global
