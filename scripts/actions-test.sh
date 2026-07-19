@@ -44,6 +44,9 @@ printf '%s\n' \
   'https://example.invalid/action?q=lem' \
   './relative/target.txt' \
   'fixture_identifier ' \
+  'aa BLOCK one' \
+  'x' \
+  'cc BLOCK three' \
   '' >"$LEM_YATH_ACTIONS_SOURCE"
 printf 'RELATIVE FILE ACTION TARGET\n' \
   >"$LEM_YATH_ACTIONS_ROOT/relative/target.txt"
@@ -284,7 +287,8 @@ fi
 if ! cmp -s "$LEM_YATH_ACTIONS_SOURCE" \
   <(printf '%s\n' 'prefix REGION_TARGET suffix' \
     'https://example.invalid/action?q=lem' './relative/target.txt' \
-    'fixture_identifier ' ''); then
+    'fixture_identifier ' 'aa BLOCK one' 'x' \
+    'cc BLOCK three' ''); then
   die visual-forward-copy 'forward visual action mutated the file'
 fi
 pass visual-forward-priority 'forward visual region outranked the identifier target'
@@ -305,6 +309,37 @@ if ! record_state ||
 fi
 pass visual-reverse-priority 'reverse visual orientation retained region priority'
 pass visual-reverse-copy 'reverse visual copy preserved the source byte-for-byte'
+
+goto_source_line 5
+send_keys 3 l C-v 2 j 4 l
+open_actions
+if ! wait_screen 'copy region' || lem_capture "$session" | grep -qi 'find definitions'; then
+  die visual-block-priority 'the forward Visual Block did not become a region target'
+fi
+lem_keys "$session" w
+sleep 0.25
+if ! record_state ||
+   ! tail -n 1 "$LEM_YATH_ACTIONS_REPORT" | grep -qE \
+     '^STATE .*visual=block .*kill=BLOCK one\\nx\\ncc BLOCK text='; then
+  die visual-block-copy 'the forward block did not copy the linear Embark region'
+fi
+pass visual-block-priority 'Visual Block outranked point-local targets as an active region'
+pass visual-block-copy 'forward Visual Block copied the exact Evil-expanded linear region'
+
+goto_source_line 7
+send_keys 7 l C-v 2 k 4 h
+open_actions
+if ! wait_screen 'copy region'; then
+  die visual-block-reverse 'the reverse Visual Block did not become a region target'
+fi
+lem_keys "$session" w
+sleep 0.25
+if ! record_state ||
+   ! tail -n 1 "$LEM_YATH_ACTIONS_REPORT" | grep -qE \
+     '^STATE .*visual=block .*kill=BLOCK one\\nx\\ncc BLOCK text='; then
+  die visual-block-reverse 'the reverse block changed the expanded region text or state'
+fi
+pass visual-block-reverse 'reverse Visual Block retained the same exact region target and state'
 
 goto_source_line 3
 open_actions

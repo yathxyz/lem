@@ -386,6 +386,7 @@ is displayed."
 ;;; --- target classification ------------------------------------------------
 
 (defun action-region-bounds (buffer)
+  "Return the active contiguous region in BUFFER, excluding Visual Blocks."
   (cond
     ((and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
           (lem-vi-mode/visual:visual-p buffer)
@@ -405,13 +406,51 @@ is displayed."
      (values (cursor-region-beginning (buffer-point buffer))
              (cursor-region-end (buffer-point buffer))))))
 
+(defun action-visual-block-text (buffer)
+  "Return Evil/Embark's contiguous text target for a Visual Block.
+
+Embark reads the ordinary active region after Evil expands the block.  That is
+the linear buffer span from the first selected row's left edge through the last
+selected row's right edge, not a newline-joined rectangle.  Lem's block
+overlays already encode the inclusive right edge and short-row clipping, so
+derive the two outer buffer positions from those exact row ranges."
+  (let ((first-position nil)
+        (last-position nil))
+    (lem-vi-mode/visual:apply-visual-range
+     (lambda (row-start row-end)
+       (let ((start (position-at-point row-start))
+             (end (position-at-point row-end)))
+         (when (> start end)
+           (rotatef start end))
+         (setf first-position
+               (if first-position (min first-position start) start)
+               last-position
+               (if last-position (max last-position end) end))))
+     buffer)
+    (when (and first-position
+               last-position
+               (< first-position last-position))
+      (with-point ((start (buffer-start-point buffer))
+                   (end (buffer-start-point buffer)))
+        (when (and (move-to-position start first-position)
+                   (move-to-position end last-position))
+          (points-to-string start end))))))
+
+(defun action-region-text (buffer)
+  (if (and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
+           (lem-vi-mode/visual:visual-block-p buffer))
+      (action-visual-block-text buffer)
+      (multiple-value-bind (start end) (action-region-bounds buffer)
+        (when start
+          (points-to-string start end)))))
+
 (defun region-action-target-provider (origin)
-  (multiple-value-bind (start end)
-      (action-region-bounds (action-origin-buffer origin))
-    (when start
+  (alexandria:when-let
+      ((text (action-region-text (action-origin-buffer origin))))
+    (when (plusp (length text))
       (make-instance 'region-action-target
                      :origin origin
-                     :text (points-to-string start end)))))
+                     :text text))))
 
 (defun find-name-action-target-provider (origin)
   (with-point ((point (action-origin-point origin)))

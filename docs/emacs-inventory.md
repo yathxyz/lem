@@ -351,6 +351,11 @@ The `embark-consult` load path comes from the pinned package rather than this
 configuration: its `embark.el` registers a `with-eval-after-load` form for
 Consult and then requires the installed integration library.  It is therefore
 effective after both packages have loaded, not merely an unused declaration.
+The active-region target calls `use-region-p` and snapshots the ordinary
+buffer substring.  Before `embark-act` runs in Evil Visual Block, Evil expands
+the block endpoints to an ordinary contiguous region; the effective Embark
+target is therefore the linear text from the upper-left edge through the
+inclusive lower-right edge, not a newline-joined rectangle.
 
 The audited Emacs 31 `project-switch-project` menu uses `f` find file, `g` find
 regexp, `d` directory, `v` `project-vc-dir`, `e` `project-eshell`, and `o`

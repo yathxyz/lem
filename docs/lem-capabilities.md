@@ -550,7 +550,8 @@ Lem-yath adds typed target and action records plus ordered provider and action
 registries.  `register-action-target-provider` and `register-action` replace an
 entry by stable ID, so reloading built-ins remains idempotent without deleting
 unrelated third-party registrations.  `SPC e a` resolves the current context in
-this order: an active contiguous region, a property-backed `*Find*` path, a
+this order: an active contiguous region, including an Evil Visual Block expanded
+to the same linear span seen by pinned Embark, a property-backed `*Find*` path, a
 movable peek-source row, an HTTP(S) URL or existing local path at point, a syntax
 identifier, and finally the current buffer.  Outside completion it retains every
 unique result in that order, deduplicated by typed target identity.  Repeating
@@ -590,7 +591,8 @@ The registry and bindings can be reloaded without accumulating duplicate
 providers, actions, or keys.
 
 `scripts/actions-test.sh` exercises the normal/visual leader binding, forward
-and reverse regions, labeled transient dispatch and cancellation, exact-chord
+and reverse character regions, forward and reverse Visual Blocks with exact
+expanded text and retained block state, labeled transient dispatch and cancellation, exact-chord
 URL/identifier/buffer cycling and wraparound, action dispatch after cycling,
 shared-origin cleanup including provider abort, URL copying, exact one-argument
 external URL/file launching, relative and property-backed file navigation,
@@ -603,9 +605,9 @@ stdio JSON-RPC.  It proves a starting workspace withholds the action and cannot
 let the document-highlight timer interrupt the transient before capabilities
 are ready.
 
-This is intentionally partial Embark parity.  Visual-block selections are not
-region targets.  Act-all, collect/export/live views, arbitrary Embark action-map
-composition, and the richer embark-consult adapter set are not implemented.
+This is intentionally partial Embark parity.  Act-all, collect/export/live
+views, arbitrary Embark action-map composition, and the richer embark-consult
+adapter set are not implemented.
 
 ### Project-scoped LSP workspaces and symbols (verified)
 

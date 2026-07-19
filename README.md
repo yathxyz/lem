@@ -206,9 +206,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   final insertion and post-accept callbacks are explicit, tracked replacement
   ranges survive filtering, and stale asynchronous results are rejected
 - an Embark-style, typed action dispatcher on `SPC e a` covers contiguous
-  regions, URLs, existing local files, identifiers, buffers, native mode menus,
-  completion candidates, and search locations; repeating `SPC e a` cycles every
-  valid target at point and wraps before dispatch, while completion-local
+  regions—including Evil Visual Blocks expanded exactly like the pinned
+  Evil/Embark path—URLs, existing local files, identifiers, buffers, native mode
+  menus, completion candidates, and search locations; repeating `SPC e a`
+  cycles every valid target at point and wraps before dispatch, while completion-local
   `C-c a` can copy without closing the popup or accept the captured candidate
   exactly once; external URL/file opening, buffer copy/save/revert/kill, and
   ready-project LSP code actions are physically covered
