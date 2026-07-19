@@ -79,6 +79,7 @@
                (:file "dirvish")
                (:file "find-name")
                (:file "buffer-list")
+               (:file "rectangle")
                (:file "tools")
                (:file "lisp-eval")
                (:file "llm-tools")

@@ -1312,7 +1312,7 @@ reload, killed windows and buffers, wide-tree pruning, mutating hooks,
 stale-reference rejection, asymmetric route refusal, after-save descendants,
 direct and re-entrant teardown, prior bottom panes, and read-only failures.
 Vundo's internal debug keys `i`/`D` are not implemented.
-Rectangle/Copilot-style speculative paths do not yet use the constrained
+Rectangle/Copilot-style paths do not yet use the constrained
 retained-undo change-group API, so their intermediate transactions remain in
 history.
 
@@ -1424,8 +1424,31 @@ reverse Vi character selections, V-LINE state, and Paredit's mode-local structur
 override. It also reproduces the pinned Emacs/Evil V-BLOCK quirk: because Evil
 does not enable `rectangle-mark-mode` or an ordinary active region, `M-j`
 duplicates the active cursor line, keeps V-BLOCK live, and lets the opposite
-corner track inserted text. Lem still has no separate Emacs-style
-`rectangle-mark-mode` whose `M-j` duplicates the rectangle to its right.
+corner track inserted text.
+
+### GNU rectangle editing — `scripts/rectangle-test.sh` (verified)
+
+`C-x SPC` starts a separate buffer-local rectangle mark, preserves virtual
+columns across uneven lines, and paints each nonempty visible row. `C-n`,
+`C-p`, arrows, and `C-x C-x` retain rectangular corner geometry; ordinary edits
+deactivate the mark as in Emacs. The stock rectangle surface used by this
+configuration is present on `C-x r`: kill, copy, delete, clear, open, prompted
+string replacement, safe integer numbering, and multiline yank. Operations
+precompute every row before mutation, coerce tab or wide-character boundary
+cells to spaces, honor prefix fill behavior on short lines, and refuse embedded
+newlines or unsafe number formats before editing. Rectangle `M-j` duplicates
+every row to the right with its count, preserves both corners and the mark, and
+undoes in one step.
+
+The focused gate compares exact text, point, corner, padded-kill, numbering,
+tab-boundary, and short-line results with the pinned Emacs oracle, then drives
+physical `C-x SPC`, movement, counted `M-j`, undo, `C-x r k`, and the editable
+`C-x r t` prompt through ncurses. Evil retains priority for its normal-state
+`C-o`/`C-t`, exactly as in the configured Emacs; open and string rectangle stay
+available on `C-x r o`/`t`. A terminal row with zero width or entirely beyond
+EOL cannot show a region face, although its virtual geometry and subsequent
+edits are retained. Lem also lacks Emacs's live string-rectangle minibuffer
+preview; submission and cancellation remain transactional.
 
 ### Electric pairs and self-insert selection replacement — `lem-yath/src/electric-pair.lisp` (verified)
 

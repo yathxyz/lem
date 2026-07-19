@@ -201,7 +201,7 @@ Status legend:
   Lem additionally caps retained history at 65,536 nodes, 262,144 edits, and
   128 MiB of UTF-8 route-validation work. Retained states restore their
   historical source point for ordinary undo/redo and Vundo preview. Vundo's
-  internal `i`/`D` debug commands remain absent. Speculative rectangle/Copilot-style paths
+  internal `i`/`D` debug commands remain absent. Rectangle/Copilot-style paths
   do not yet use the constrained retained-undo change-group API, so their
   intermediate transactions remain in history.
 - **Embark scope**: completion uses `C-c a` because the ncurses input path cannot
@@ -271,12 +271,15 @@ Status legend:
   prompt names and applies per-entry and 32 MiB aggregate budgets; oversized
   kills or query strings remain live but are not written. Baseline-aware
   concurrent merging preserves independent additions and intentional removals.
-- **Rectangle duplication**: `M-j` matches line and contiguous-region behavior,
-  including Vi character/line selections. It also matches the pinned Evil
-  V-BLOCK behavior: the block is not an Emacs rectangle or ordinary active
-  region, so the cursor line is duplicated while the block and both corners
-  remain live. A separate Emacs-style `rectangle-mark-mode` and its
-  duplicate-to-the-right behavior remain absent.
+- **Rectangle editing**: `C-x SPC` starts a buffer-local GNU-style rectangular
+  mark with virtual columns and persistent per-row highlighting. The configured
+  `C-x r k`/`M-w`/`d`/`c`/`o`/`t`/`N`/`y` operations handle uneven rows, tabs,
+  numbering, and multiline yank; rectangle `M-j` duplicates to the right with
+  a count while retaining both corners. Ordinary line/region duplication and
+  the pinned Evil V-BLOCK cursor-line quirk remain distinct and exact. The
+  terminal cannot paint a zero-width or wholly beyond-EOL row, and string
+  replacement has no live minibuffer preview, but both cases retain correct
+  edit geometry.
 - **Electric-pair scope**: syntax-table pairs, Unicode smart quotes, numeric
   prefixes, escapes, syntax-domain-aware forward balance scanning and
   closer reuse/skip, preflighted adjacent-pair Backspace, and recovery after a

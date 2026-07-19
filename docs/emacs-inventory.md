@@ -283,6 +283,11 @@ over hiding and ordinary filters. `K` hides visible ordinary-marked lines until
 - **Undo**: `evil-undo-system 'undo-redo` (built-in). `vundo` for a visual undo tree (`SPC u`), `vundo-glyph-alist = vundo-unicode-symbols`. Undo limits raised: `undo-limit` 13*160000, `undo-strong-limit` 13*240000, `undo-outer-limit` 2*24000000.
 - **multiple-cursors**: declared in nix; **no keybindings or config**. Only used *internally* by `init-ai.el` to draw a fake cursor overlay during gptel streaming (`mc/make-cursor-overlay-at-point`). Not an interactive editing feature here.
 - **expreg**: region expansion (see §1.5).
+- **Rectangle editing**: stock `C-x SPC` enables `rectangle-mark-mode`;
+  `C-x r c`/`k`/`d`/`y`/`o`/`t`/`N` and `C-x r M-w` provide clear, kill,
+  delete, yank, open, string, number, and copy operations. In the active Evil
+  Normal map, `C-o` remains jump-back and `C-t` remains tag-pop rather than the
+  rectangle-local shortcuts, so open/string remain reachable through `C-x r`.
 - **Misc**: `kill-do-not-save-duplicates t`, `set-mark-command-repeat-pop t`, no lockfiles, no backup files, no auto-save. `M-j` = `duplicate-dwim`. In the pinned Emacs/Evil combination, Evil Visual Block leaves both `rectangle-mark-mode` and the ordinary region inactive, so `M-j` duplicates the active cursor line while retaining the block; only a native Emacs rectangular region takes `duplicate-dwim`'s duplicate-to-the-right path. `delete-selection-mode`.
 
 ---

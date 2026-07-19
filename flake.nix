@@ -789,6 +789,7 @@
             formatting-test = mkTestApp "lem-yath-formatting-test" "formatting-test.sh";
             prompt-completion-test = mkTestApp "lem-yath-prompt-completion-test" "prompt-completion-test.sh";
             daily-workflows-test = mkTestApp "lem-yath-daily-workflows-test" "daily-workflows-test.sh";
+            rectangle-test = mkTestApp "lem-yath-rectangle-test" "rectangle-test.sh";
             dirvish-test = mkTestAppWithLemAndInputs lemYath [
               pkgs.pandoc
               pkgs.poppler-utils
@@ -913,6 +914,7 @@
             formatting = mkCheck "formatting" "formatting-test.sh";
             prompt-completion = mkCheck "prompt-completion" "prompt-completion-test.sh";
             daily-workflows = mkCheck "daily-workflows" "daily-workflows-test.sh";
+            rectangle = mkCheck "rectangle" "rectangle-test.sh";
             dirvish = mkCheckWithLemAndInputs lemYath [
               pkgs.pandoc
               pkgs.poppler-utils

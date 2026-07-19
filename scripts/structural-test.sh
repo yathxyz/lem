@@ -48,7 +48,7 @@ keys() { # keys <session> <key...>
   done
 }
 
-screen_has() { lem_capture "$1" | grep -qE "$2"; }
+screen_has() { lem_wait_for "$1" "$2" 5 >/dev/null; }
 
 # 01: Paredit activates in every Lisp language configured in Emacs.
 mode_ok=1

@@ -127,6 +127,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   comment operator (`gc`) plus Lispyville-compatible,
   delimiter-safe structural editing in Common Lisp, Clojure, Scheme/Racket,
   and Emacs Lisp buffers
+- GNU-style rectangle editing: `C-x SPC` retains virtual rectangular corners;
+  `C-x r k`/`M-w`/`d`/`c`/`o`/`t`/`N`/`y` cover the configured kill, copy,
+  delete, clear, open, string, number, and yank workflows, while `M-j`
+  duplicates the live rectangle to its right with count and one-step undo
 - `SPC m e e` evaluates exactly the preceding Common Lisp form through Lem's
   native self-connected SLIME environment in Normal or Visual state; an active
   Visual selection is preserved rather than being evaluated as a region

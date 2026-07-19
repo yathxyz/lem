@@ -108,15 +108,19 @@
         (setf (lem-vi-mode/core:buffer-state buffer) visual-state)))))
 
 (define-command lem-yath-duplicate-dwim (&optional (count 1)) (:universal)
-  "Duplicate an active contiguous region or the current line COUNT times."
+  "Duplicate an active rectangle/region or the current line COUNT times."
   (let ((count (or count 1))
         (buffer (current-buffer)))
     (when (plusp count)
-      (if (and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
-               (lem-vi-mode/visual:visual-block-p buffer))
-          (duplicate-visual-block-current-line buffer count)
-          (multiple-value-bind (start end)
-              (duplicate-region-bounds buffer)
-            (if start
-                (duplicate-active-region start end count)
-                (duplicate-current-line count)))))))
+      (cond
+        ((rectangle-mode-active-p buffer)
+         (rectangle-duplicate-right count))
+        ((and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
+              (lem-vi-mode/visual:visual-block-p buffer))
+         (duplicate-visual-block-current-line buffer count))
+        (t
+         (multiple-value-bind (start end)
+             (duplicate-region-bounds buffer)
+           (if start
+               (duplicate-active-region start end count)
+               (duplicate-current-line count))))))))
