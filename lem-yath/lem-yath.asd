@@ -41,6 +41,7 @@
                (:file "editorconfig")
                (:file "formatting")
                (:file "git")
+               (:file "git-rebase")
                (:file "forge")
                (:file "project-history")
                (:file "project")

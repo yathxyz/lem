@@ -473,7 +473,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   Evil-collection git-timemachine map, including revision selection, hash copy,
   and blame. Legit's Vi-normal file/hunk staging, commit,
   push/pull, branch, and stash workflows are driven end-to-end against isolated
-  real remotes by the VCS acceptance gate. Packaged `gh` also backs
+  real remotes by the VCS acceptance gate. Interactive reword/fixup uses an
+  owner-private, signal-free sequence-editor handshake and Git's real commit
+  editor through the reusable Lem client; consecutive reword sessions are
+  physically covered. Packaged `gh` also backs
   command-accessible GitHub Forge lists, detail views, multiline creation and
   comments, close/reopen actions, external browsing, and cache-only Legit
   status previews without taking ownership of credentials

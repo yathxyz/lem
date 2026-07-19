@@ -577,14 +577,22 @@
   (vcs-test-position-legit-file "untracked.txt"))
 
 (define-command lem-yath-test-vcs-porcelain-commit () ()
-  (let* ((subject "porcelain commit from Lem")
-         (active (lem/legit::legit-status-active-p))
+  (let* ((active (lem/legit::legit-status-active-p))
          (status-buffer
            (and active (window-buffer lem/legit::*peek-window*)))
+         (status-text (and status-buffer (buffer-text status-buffer)))
+         (subject
+           (and status-text
+                (find-if (lambda (candidate)
+                           (search candidate status-text))
+                         '("porcelain commit reworded in Lem"
+                           "porcelain commit from Lem"))))
          (row (and status-buffer (buffer-start-point status-buffer))))
-    (when row
+    (when (and row subject)
       (unless (search-forward row subject)
         (setf row nil)))
+    (unless subject
+      (setf row nil))
     (when row
       (line-start row)
       (setf (current-window) lem/legit::*peek-window*)
@@ -600,7 +608,8 @@
           'lem/legit::legit-rebase-interactive))
      (vcs-test-yes-no
       (and row
-           (search subject (buffer-text status-buffer)))))))
+           subject
+           (search subject status-text))))))
 
 (define-command lem-yath-test-vcs-rebase-state () ()
   (let* ((buffer (current-buffer))
@@ -610,14 +619,17 @@
      (concatenate
       'string
       "REBASE mode=~a file=~a first=~a second=~a "
-      "fixup=~a continue=~a abort=~a modified=~a")
+      "point=~a fixup=~a continue=~a abort=~a modified=~a")
      (vcs-test-yes-no
       (eq (buffer-major-mode buffer) 'lem/legit::legit-rebase-mode))
      (vcs-test-yes-no
       (and filename
            (string= (file-namestring filename) "git-rebase-todo")))
-     (vcs-test-yes-no (search "porcelain commit from Lem" text))
+     (vcs-test-yes-no
+      (or (search "porcelain commit from Lem" text)
+          (search "porcelain commit reworded in Lem" text)))
      (vcs-test-yes-no (search "porcelain-peer" text))
+     (vcs-test-yes-no (= (line-number-at-point (buffer-point buffer)) 1))
      (vcs-test-yes-no
       (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap* "f")
           'lem/legit::rebase-mark-line-fixup))
@@ -646,7 +658,8 @@
            (string= (file-namestring filename) "COMMIT_EDITMSG")))
      (vcs-test-yes-no (server-buffer-requests buffer))
      (vcs-test-yes-no
-      (search "porcelain commit from Lem" (buffer-text buffer)))
+      (or (search "porcelain commit from Lem" (buffer-text buffer))
+          (search "porcelain commit reworded in Lem" (buffer-text buffer))))
      (vcs-test-yes-no
       (eq (vcs-test-key-command lem/legit::*legit-commit-mode-keymap*
                                 "C-c C-c")

@@ -2185,13 +2185,16 @@ motions or operators. It also repairs pinned Legit's hunk path: `s` and `u`
 construct a complete Git patch in a private temporary file, apply only the
 selected hunk to the index, and refresh status after success. Validating the
 transient commit buffer no longer asks whether to save or kill it after Git has
-already committed. Interactive rebase uses Git's dedicated sequence-editor
-override, embeds and refreshes its signal-waiting helper independently of
-frontend reader features, and resolves `bash` through the packaged runtime
-`PATH`; this avoids both recursive sequence-editor launches and `/bin/bash`
-assumptions. A `reword` stop opens Git's real `COMMIT_EDITMSG` through the
-owner-private blocking client. The commit-mode confirm and abort keys detect
-that request and save/release or abort Git instead of starting a nested commit.
+already committed. Interactive rebase launches Git with a child-only
+environment and a per-session owner-private control file: the sequence editor
+exits normally after Lem publishes `continue` or `abort`, without signalling a
+PID or mutating Lem's process-wide environment. This avoids recursive editor
+launches and remains safe while the reusable-editor server thread is active.
+The retained asynchronous Git process is reaped and explicitly closed before
+another session starts. A `reword` stop opens Git's real `COMMIT_EDITMSG`
+through the owner-private blocking client. The commit-mode confirm and abort
+keys detect that request and save/release or abort Git instead of starting a
+nested commit.
 
 ### Porcelain coverage vs magit — `legit/README.md`
 Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkout/
@@ -2213,10 +2216,11 @@ saves the first row as `reword` and the second as `fixup`, continues with
 `C-c C-c`, edits the actual server-owned `COMMIT_EDITMSG`, confirms through
 the mode-local key, and verifies the rewritten two-commit history, new subject,
 clean index/worktree, and retained content from both commits. The fixture uses
-an isolated private server socket so it cannot target another running Lem.
-Starting another interactive rebase immediately after the first is not part of
-this claim: the pinned signal-waiting helper does not expose a reapable process
-lifecycle, and that back-to-back edge remains open alongside edit stops.
+an isolated private server socket so it cannot target another running Lem. It
+then immediately opens a fresh one-row rebase, rewords the rewritten commit
+again through a second blocking client callback, and proves clean history after
+the second session. Rebase `edit` stops and the amend/continue workflow remain
+outside this claim.
 
 ### Configured VCS dispatch and time travel — `lem-yath/src/git.lisp`, `src/apps/timemachine.lisp`
 

@@ -391,6 +391,29 @@ porcelain_rebase_complete() {
     "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
 }
 
+porcelain_repeat_rebase_todo_ready() {
+  local todo="$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge/git-rebase-todo"
+  [ -f "$todo" ] &&
+    [ "$(grep -c '^pick ' "$todo")" -eq 1 ] &&
+    grep -q 'porcelain commit reworded in Lem' "$todo"
+}
+
+porcelain_repeat_rebase_todo_reword() {
+  local todo="$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge/git-rebase-todo"
+  [ -f "$todo" ] &&
+    [ "$(sed -n '1s/^reword .*/reword/p' "$todo")" = reword ]
+}
+
+porcelain_repeat_rebase_complete() {
+  [ ! -d "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge" ] &&
+    [ "$($git_bin -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-list --count HEAD)" -eq 2 ] &&
+    porcelain_subject_is 'porcelain commit reworded twice in Lem' &&
+    grep -q 'peer-pull-probe' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt" &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
 send_keys() {
   local session=$1 key
   shift
@@ -1014,7 +1037,7 @@ if wait_until "$WAIT_TIMEOUT" porcelain_rebase_todo_ready; then
 fi
 if wait_report_count '^REBASE ' "$((rebase_before + 1))" &&
    [[ $(latest_report '^REBASE ') == \
-      'REBASE mode=yes file=yes first=yes second=yes fixup=yes continue=yes abort=yes modified=no' ]]; then
+      'REBASE mode=yes file=yes first=yes second=yes point=yes fixup=yes continue=yes abort=yes modified=no' ]]; then
   pass legit-rebase-open 'r i opened the two-commit todo in the native rebase mode'
 else
   fail legit-rebase-open 'interactive rebase did not expose the expected todo mode' \
@@ -1055,6 +1078,77 @@ if wait_until "$WAIT_TIMEOUT" porcelain_rebase_complete; then
 else
   fail legit-rebase-continue \
     'the client-backed reword/fixup did not produce the expected clean history' \
+    "$porcelain_session"
+fi
+
+commit_before=$(report_count '^PORCELAIN-COMMIT ')
+send_keys "$porcelain_session" Escape Space g G
+if wait_legit "$porcelain_session" porcelain; then
+  send_keys "$porcelain_session" C-c r
+fi
+if wait_report_count '^PORCELAIN-COMMIT ' "$((commit_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-COMMIT ') == \
+      'PORCELAIN-COMMIT row=yes hash=yes rebase=yes subject=yes' ]]; then
+  pass legit-repeat-rebase-position \
+    'the rewritten commit was immediately selectable for another rebase'
+else
+  fail legit-repeat-rebase-position \
+    'the rewritten commit could not be selected in a refreshed Legit status' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" r i
+rebase_before=$(report_count '^REBASE ')
+if wait_until "$WAIT_TIMEOUT" porcelain_repeat_rebase_todo_ready; then
+  send_keys "$porcelain_session" C-c v
+fi
+if wait_report_count '^REBASE ' "$((rebase_before + 1))" &&
+   [[ $(latest_report '^REBASE ') == \
+      'REBASE mode=yes file=yes first=yes second=no point=yes fixup=yes continue=yes abort=yes modified=no' ]]; then
+  pass legit-repeat-rebase-open \
+    'an immediate second r i opened a fresh one-commit todo'
+else
+  fail legit-repeat-rebase-open \
+    'the immediate second interactive rebase did not open a fresh todo' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" r
+if wait_until "$WAIT_TIMEOUT" porcelain_repeat_rebase_todo_reword; then
+  pass legit-repeat-rebase-action 'the fresh todo accepted a second reword action'
+else
+  fail legit-repeat-rebase-action \
+    'the fresh todo did not persist the second reword action' \
+    "$porcelain_session"
+fi
+
+reword_before=$(report_count '^REWORD ')
+send_keys "$porcelain_session" C-c C-c
+if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" C-c v
+fi
+if wait_report_count '^REWORD ' "$((reword_before + 1))" &&
+   [[ $(latest_report '^REWORD ') == \
+      'REWORD mode=yes file=yes server=yes subject=yes continue=yes abort=yes' ]]; then
+  pass legit-repeat-reword-open \
+    'the second Git editor callback reused the blocking Lem client safely'
+else
+  fail legit-repeat-reword-open \
+    'the second Git editor callback did not produce a usable message buffer' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g g d d i
+tmux_cmd send-keys -t "$porcelain_session" -l -- \
+  'porcelain commit reworded twice in Lem'
+send_keys "$porcelain_session" Escape C-c C-c
+if wait_until "$WAIT_TIMEOUT" porcelain_repeat_rebase_complete; then
+  pass legit-repeat-rebase-continue \
+    'two consecutive client-backed rewords completed with clean history'
+else
+  fail legit-repeat-rebase-continue \
+    'the second client-backed reword did not complete cleanly' \
     "$porcelain_session"
 fi
 lem_stop "$porcelain_session"
