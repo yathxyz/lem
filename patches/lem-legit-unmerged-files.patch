@@ -1,0 +1,34 @@
+diff --git a/extensions/legit/porcelain-git.lisp b/extensions/legit/porcelain-git.lisp
+index 59fcf85..df209d1 100644
+--- a/extensions/legit/porcelain-git.lisp
++++ b/extensions/legit/porcelain-git.lisp
+@@ -107,19 +107,29 @@ allows to learn about the file state: modified, deleted, ignored… "
+   (loop for line in (str:lines (porcelain))
+         for file = (subseq line 3)
+         for status = (subseq line 0 2)
++        for conflicted = (member status
++                                 '("DD" "AU" "UD" "UA" "DU" "AA" "UU")
++                                 :test #'string=)
+         unless (str:blankp line)
++        if conflicted
++        collect (list :file file :type :modified) into modified-unstaged-files
++        unless conflicted
+         if (equal (elt status 0) #\M)
+         collect (list :file file :type :modified) into modified-staged-files
++        unless conflicted
+         if (equal (elt status 0) #\A)
+         collect (list :file file :type :added) into modified-staged-files
++        unless conflicted
+         if (equal (elt status 0) #\D)
+         collect (list :file file :type :deleted) into modified-staged-files
++        unless conflicted
+         if (equal (elt status 1) #\M)
+         collect (list :file file :type :modified) into modified-unstaged-files
++        unless conflicted
+         if (equal (elt status 1) #\D)
+         collect (list :file file :type :deleted) into modified-unstaged-files
+         if (str:starts-with-p "??" status)
+         collect file into untracked-files
+         finally (return (values untracked-files
+                                 modified-unstaged-files
+                                 modified-staged-files))))

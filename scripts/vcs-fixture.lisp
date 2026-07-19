@@ -613,6 +613,64 @@
            subject
            (search subject status-text))))))
 
+(define-command lem-yath-test-vcs-cherry-state () ()
+  (lem/legit::with-current-project (vcs)
+    (declare (ignore vcs))
+    (let* ((status-map lem/legit::*peek-legit-keymap*)
+           (diff-map lem/legit::*legit-diff-mode-keymap*)
+           (subjects '("cherry-success-source"
+                       "cherry-apply-source"
+                       "cherry-continue-source"
+                       "cherry-abort-source"
+                       "cherry-skip-source"))
+           (candidates
+             (handler-case (legit-cherry-pick-candidates)
+               (error () nil))))
+      (vcs-test-log
+       "CHERRY active=~a pick=~a apply=~a skip=~a diff=~a candidate=~a"
+       (vcs-test-yes-no (legit-cherry-pick-in-progress-p))
+       (vcs-test-yes-no
+        (eq (vcs-test-key-command status-map "A A")
+            'lem-yath-legit-cherry-pick-or-continue))
+       (vcs-test-yes-no
+        (eq (vcs-test-key-command status-map "A a")
+            'lem-yath-legit-cherry-apply-or-abort))
+       (vcs-test-yes-no
+        (eq (vcs-test-key-command status-map "A s")
+            'lem-yath-legit-cherry-skip))
+       (vcs-test-yes-no
+        (and
+         (eq (vcs-test-key-command diff-map "A A")
+             'lem-yath-legit-cherry-pick-or-continue)
+         (eq (vcs-test-key-command diff-map "A a")
+             'lem-yath-legit-cherry-apply-or-abort)
+         (eq (vcs-test-key-command diff-map "A s")
+             'lem-yath-legit-cherry-skip)))
+       (vcs-test-yes-no
+        (and candidates
+             (every (lambda (subject)
+                      (some (lambda (candidate)
+                              (search subject (car candidate)))
+                            candidates))
+                    subjects)))))))
+
+(define-command lem-yath-test-vcs-cherry-position () ()
+  (let* ((status-buffer
+           (and (lem/legit::legit-status-active-p)
+                (window-buffer lem/legit::*peek-window*)))
+         (status-text (and status-buffer (buffer-text status-buffer)))
+         (filename
+           (and status-text
+                (find-if (lambda (candidate)
+                           (search candidate status-text))
+                         '("cherry-continue.txt"
+                           "cherry-abort.txt"
+                           "cherry-skip.txt")))))
+    (if filename
+        (vcs-test-position-legit-file filename)
+        (vcs-test-log
+         "PORCELAIN-POSITION file=cherry-conflict row=no diff=no mode=no focused=no"))))
+
 (define-command lem-yath-test-vcs-rebase-state () ()
   (let* ((buffer (current-buffer))
          (text (buffer-text buffer))
@@ -1033,6 +1091,8 @@
 (define-key *global-keymap* "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
 (define-key *global-keymap* "C-c r" 'lem-yath-test-vcs-porcelain-commit)
 (define-key *global-keymap* "C-c v" 'lem-yath-test-vcs-rebase-state)
+(define-key *global-keymap* "C-c y" 'lem-yath-test-vcs-cherry-state)
+(define-key *global-keymap* "C-c Y" 'lem-yath-test-vcs-cherry-position)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c t" 'lem-yath-test-vcs-todo-preview)
 (define-key lem/legit::*peek-legit-keymap*
@@ -1045,6 +1105,10 @@
   "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c r" 'lem-yath-test-vcs-porcelain-commit)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c y" 'lem-yath-test-vcs-cherry-state)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c Y" 'lem-yath-test-vcs-cherry-position)
 (define-key lem/legit::*legit-diff-mode-keymap*
   "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key lem/legit::*legit-diff-mode-keymap*
@@ -1053,6 +1117,10 @@
   "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
 (define-key lem/legit::*legit-diff-mode-keymap*
   "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "C-c y" 'lem-yath-test-vcs-cherry-state)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "C-c Y" 'lem-yath-test-vcs-cherry-position)
 (define-key lem/legit::*legit-rebase-mode-keymap*
   "C-c v" 'lem-yath-test-vcs-rebase-state)
 (define-key lem/legit::*legit-commit-mode-keymap*

@@ -478,7 +478,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   editor through the reusable Lem client; consecutive reword sessions are
   physically covered. An `edit` stop can be changed and staged through Legit,
   amended with Magit's `c a` in a prefilled commit buffer, and completed with
-  `r c`. Ordinary commits use the matching `c c` dispatch.
+  `r c`. Ordinary commits use the matching `c c` dispatch. Magit's core
+  cherry-pick dispatch is also present in status and diff panes: `A A` picks
+  or continues, `A a` applies without committing or aborts, and `A s` skips
+  an active conflicting pick; unmerged files remain visible and stageable in
+  Legit while the sequence is stopped.
   Packaged `gh` also backs
   command-accessible GitHub Forge lists, detail views, multiline creation and
   comments, close/reopen actions, external browsing, and cache-only Legit

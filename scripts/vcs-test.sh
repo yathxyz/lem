@@ -471,6 +471,178 @@ porcelain_edit_rebase_complete() {
     "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
 }
 
+porcelain_cherry_active() {
+  local metadata
+  metadata=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse --git-path CHERRY_PICK_HEAD) || return 1
+  case "$metadata" in
+    /*) [ -f "$metadata" ] ;;
+    *) [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/$metadata" ] ;;
+  esac
+}
+
+porcelain_cherry_conflicted() {
+  porcelain_cherry_active &&
+    [ "$porcelain_conflict_head" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ -n "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      ls-files -u -- "$1")" ]
+}
+
+porcelain_cherry_clean() {
+  ! porcelain_cherry_active &&
+    [ -z "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" ls-files -u)" ] &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_cherry_success() {
+  porcelain_subject_is 'cherry-success-source' &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-success.txt")" = \
+      'picked successfully' ] &&
+    porcelain_cherry_clean
+}
+
+porcelain_cherry_applied() {
+  [ "$cherry_success_head" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-apply.txt")" = \
+      'applied without commit' ] &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --cached --quiet -- cherry-apply.txt &&
+    ! porcelain_cherry_active
+}
+
+porcelain_cherry_continued() {
+  porcelain_subject_is 'cherry-continue-source' &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-continue.txt")" = \
+      'continue resolved' ] &&
+    porcelain_cherry_clean
+}
+
+porcelain_cherry_aborted() {
+  [ "$porcelain_conflict_head" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-abort.txt")" = \
+      'main abort value' ] &&
+    porcelain_cherry_clean
+}
+
+porcelain_cherry_skipped() {
+  [ "$porcelain_conflict_head" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-skip.txt")" = \
+      'main skip value' ] &&
+    porcelain_cherry_clean
+}
+
+enter_cherry_revision() {
+  local session=$1 revision=$2
+  local index
+  for index in $(seq 1 48); do
+    lem_keys "$session" BSpace
+  done
+  tmux_cmd send-keys -t "$session" -l -- "$revision"
+  send_keys "$session" Enter
+}
+
+prepare_porcelain_cherry_fixture() {
+  local target_branch baseline
+  target_branch=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    branch --show-current) || return 1
+  [ -n "$target_branch" ] || return 1
+
+  printf 'base continue value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-continue.txt"
+  printf 'base abort value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-abort.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-continue.txt cherry-abort.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-baseline \
+    '2001-01-06T00:00:00+0000' || return 1
+  baseline=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    test-cherry-continue "$baseline" || return 1
+  printf 'source continue value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-continue.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-continue.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-continue-source \
+    '2001-01-07T00:00:00+0000' || return 1
+  cherry_continue_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    test-cherry-abort "$baseline" || return 1
+  printf 'source abort value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-abort.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-abort.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-abort-source \
+    '2001-01-08T00:00:00+0000' || return 1
+  cherry_abort_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    test-cherry-skip "$baseline" || return 1
+  printf 'source skip value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-skip.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-skip.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-skip-source \
+    '2001-01-09T00:00:00+0000' || return 1
+  cherry_skip_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
+    "$target_branch" || return 1
+  printf 'main continue value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-continue.txt"
+  printf 'main abort value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-abort.txt"
+  printf 'main skip value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-skip.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-continue.txt cherry-abort.txt cherry-skip.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-conflict-main \
+    '2001-01-10T00:00:00+0000' || return 1
+  cherry_main_head=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    test-cherry-success "$cherry_main_head" || return 1
+  printf 'picked successfully\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-success.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-success.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-success-source \
+    '2001-01-11T00:00:00+0000' || return 1
+  cherry_success_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
+    "$target_branch" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    test-cherry-apply "$cherry_main_head" || return 1
+  printf 'applied without commit\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-apply.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-apply.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-apply-source \
+    '2001-01-12T00:00:00+0000' || return 1
+  cherry_apply_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
+    "$target_branch" || return 1
+  [ "$cherry_main_head" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    porcelain_cherry_clean
+}
+
 send_keys() {
   local session=$1 key
   shift
@@ -1335,6 +1507,190 @@ if wait_until "$WAIT_TIMEOUT" porcelain_edit_rebase_complete; then
 else
   fail legit-edit-rebase-continue \
     'the amended edit stop did not continue to a clean final history' \
+    "$porcelain_session"
+fi
+
+if prepare_porcelain_cherry_fixture; then
+  pass legit-cherry-fixture \
+    'prepared clean, no-commit, and three conflicting source refs'
+else
+  fail legit-cherry-fixture \
+    'could not prepare the isolated cherry-pick histories' \
+    "$porcelain_session"
+  lem_stop "$porcelain_session"
+  printf '\n'
+  cat "$LEM_YATH_VCS_REPORT" 2>/dev/null || true
+  echo 'VCS TEST FAILED'
+  exit 1
+fi
+
+send_keys "$porcelain_session" Escape Space g G
+if wait_legit "$porcelain_session" porcelain; then
+  cherry_before=$(report_count '^CHERRY ')
+  send_keys "$porcelain_session" C-c y
+else
+  cherry_before=$(report_count '^CHERRY ')
+fi
+if wait_report_count '^CHERRY ' "$((cherry_before + 1))" &&
+   [[ $(latest_report '^CHERRY ') == \
+      'CHERRY active=no pick=yes apply=yes skip=yes diff=yes candidate=yes' ]]; then
+  pass legit-cherry-dispatch \
+    'A exposes Magit pick/apply/skip bindings and all-ref completion'
+else
+  fail legit-cherry-dispatch \
+    'the dispatch, diff bindings, or all-ref candidates were incomplete' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" A A
+if lem_wait_for "$porcelain_session" 'Cherry-pick:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_cherry_revision "$porcelain_session" "$cherry_success_hash"
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_success; then
+  pass legit-cherry-pick \
+    'A A selected an all-ref commit and applied it with Magit-compatible --ff'
+else
+  fail legit-cherry-pick \
+    'A A did not produce the expected clean picked commit' \
+    "$porcelain_session"
+fi
+cherry_success_head=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+  rev-parse HEAD)
+
+send_keys "$porcelain_session" A a
+if lem_wait_for "$porcelain_session" 'Apply changes from commit:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_cherry_revision "$porcelain_session" "$cherry_apply_hash"
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_applied; then
+  pass legit-cherry-apply \
+    'A a applied the selected commit to the index without moving HEAD'
+else
+  fail legit-cherry-apply \
+    'A a did not preserve HEAD with the selected change staged' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard HEAD
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" clean -fq -- cherry-apply.txt
+send_keys "$porcelain_session" g
+
+porcelain_conflict_head=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+  rev-parse HEAD)
+send_keys "$porcelain_session" A A
+if lem_wait_for "$porcelain_session" 'Cherry-pick:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_cherry_revision "$porcelain_session" "$cherry_continue_hash"
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_conflicted \
+     cherry-continue.txt; then
+  pass legit-cherry-conflict \
+    'A A retained a real unmerged index and CHERRY_PICK_HEAD on conflict'
+else
+  fail legit-cherry-conflict \
+    'the conflicting pick did not enter Git sequencer state' \
+    "$porcelain_session"
+fi
+
+cherry_before=$(report_count '^CHERRY ')
+send_keys "$porcelain_session" C-c y
+if wait_report_count '^CHERRY ' "$((cherry_before + 1))" &&
+   [[ $(latest_report '^CHERRY ') == \
+      'CHERRY active=yes pick=yes apply=yes skip=yes diff=yes candidate=yes' ]]; then
+  pass legit-cherry-in-progress \
+    'the dispatch detected the active cherry-pick and changed action semantics'
+else
+  fail legit-cherry-in-progress \
+    'the active cherry-pick was not reflected by the dispatch state' \
+    "$porcelain_session"
+fi
+
+printf 'continue resolved\n' \
+  >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-continue.txt"
+position_before=$(report_count '^PORCELAIN-POSITION ')
+send_keys "$porcelain_session" g C-c Y
+if wait_report_count '^PORCELAIN-POSITION ' "$((position_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-POSITION ') == \
+      'PORCELAIN-POSITION file=cherry-continue.txt row=yes diff=yes mode=yes focused=no' ]]; then
+  send_keys "$porcelain_session" s
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_active &&
+   [ -z "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+     ls-files -u -- cherry-continue.txt)" ] &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+     diff --quiet -- cherry-continue.txt &&
+   ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+     diff --cached --quiet -- cherry-continue.txt; then
+  pass legit-cherry-resolve-stage \
+    'Legit displayed the unmerged row and staged its resolved file'
+else
+  fail legit-cherry-resolve-stage \
+    'the unmerged row was hidden or could not stage its resolution' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" A A
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_continued; then
+  pass legit-cherry-continue \
+    'A A continued the resolved pick without opening a nested editor'
+else
+  fail legit-cherry-continue \
+    'the resolved pick did not complete with its original commit subject' \
+    "$porcelain_session"
+fi
+
+porcelain_conflict_head=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+  rev-parse HEAD)
+send_keys "$porcelain_session" A A
+if lem_wait_for "$porcelain_session" 'Cherry-pick:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_cherry_revision "$porcelain_session" "$cherry_abort_hash"
+fi
+wait_until "$WAIT_TIMEOUT" porcelain_cherry_conflicted \
+  cherry-abort.txt || true
+send_keys "$porcelain_session" A a
+if lem_wait_for "$porcelain_session" 'Abort cherry-pick?' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_aborted; then
+  pass legit-cherry-abort \
+    'in-progress A a aborted and restored the exact pre-pick tree and HEAD'
+else
+  fail legit-cherry-abort \
+    'A a did not cleanly restore the pre-pick state' \
+    "$porcelain_session"
+fi
+
+porcelain_conflict_head=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+  rev-parse HEAD)
+send_keys "$porcelain_session" A A
+if lem_wait_for "$porcelain_session" 'Cherry-pick:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_cherry_revision "$porcelain_session" "$cherry_skip_hash"
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_conflicted \
+     cherry-skip.txt; then
+  position_before=$(report_count '^PORCELAIN-POSITION ')
+  send_keys "$porcelain_session" g C-c Y
+  if wait_report_count '^PORCELAIN-POSITION ' "$((position_before + 1))" &&
+     [[ $(latest_report '^PORCELAIN-POSITION ') == \
+        PORCELAIN-POSITION\ file=cherry-skip.txt\ row=yes\ * ]]; then
+    pass legit-cherry-add-add-row \
+      'Legit rendered the add/add conflict despite its U-free AA status'
+  else
+    fail legit-cherry-add-add-row \
+      'the add/add conflict was absent from Legit status' \
+      "$porcelain_session"
+  fi
+  send_keys "$porcelain_session" A s
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_skipped; then
+  pass legit-cherry-skip \
+    'in-progress A s skipped the conflicting commit and cleaned the sequencer'
+else
+  fail legit-cherry-skip \
+    'A s did not retain HEAD and clean the conflicting pick' \
     "$porcelain_session"
 fi
 lem_stop "$porcelain_session"

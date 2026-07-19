@@ -2180,6 +2180,10 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
 - **Commit / amend dispatch**: `c c` opens an ordinary commit buffer and `c a`
   opens the current message in a transient amend buffer;
   finish with `C-c C-c` or abort with `M-q`/`C-c C-k`.
+- **Cherry-pick dispatch**: `A A` picks a prompted commit or continues an active
+  pick; `A a` applies a prompted commit without committing or aborts an active
+  pick; `A s` skips only while a pick is active. Completion is bounded to 200
+  commits across all refs and accepts an arbitrary whitespace-free revision.
 - Refresh `g`, navigate `n`/`p`/`M-n`/`M-p`, help `?`/`C-x ?`, quit `q`.
 
 Lem-yath registers the diff, commit, and rebase major-mode maps ahead of Vi's
@@ -2202,14 +2206,21 @@ process, then opens a prefilled transient message. A successful amend returns
 focus explicitly to Legit's status pane so `r c` continues the same rebase.
 The local commit dispatch deliberately replaces Legit's direct `c` command
 with Magit's configured `c c`/`c a` muscle memory in status and diff panes.
+The matching `A` prefix supplies Magit's core cherry-pick lifecycle in both
+panes. Git's editor is suppressed only in the child process, so synchronous
+Lem remains responsive. A conflict is treated as a normal stopped state rather
+than a blocking error popup, and the pinned Legit parser is patched to render
+every Git unmerged status once in the unstaged section so its resolved file can
+be staged before continuing.
 
 ### Porcelain coverage vs magit — `legit/README.md`
 Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkout/
 create), push, pull/fetch, commits log with pagination, **stash push/pop**, interactive
 rebase (pick/reword/edit/fixup/squash/drop/exec/break/label/reset/merge).
 Also basic Fossil + Mercurial. **Gaps vs magit:** no region-precise staging,
-no multi-file staging, limited switches/transient submenus, no blame/bisect/cherry-pick
-UI, no log graph filtering. Customize via `lem/porcelain:*git-base-arglist*`,
+no multi-file staging, limited switches/transient submenus, no blame/bisect,
+no cherry-pick harvest/donate/spinout/spinoff or argument-toggle UI, and no log
+graph filtering. Customize via `lem/porcelain:*git-base-arglist*`,
 `*commits-log-page-size*`, `*nb-latest-commits*`, `*branch-sort-by*`,
 `lem/legit:*vcs-existence-order*`.
 
@@ -2230,7 +2241,12 @@ the second session. Finally it starts another one-row rebase, marks `edit`,
 waits for Git's real stop, changes and stages a file through Legit, opens `c a`,
 edits and confirms the prefilled subject, and uses `r c` to prove the amended
 content and message in a clean two-commit history. The amend path also proves
-the stopped asynchronous process is reaped before the next Git subprocess.
+the stopped asynchronous process is reaped before the next Git subprocess. It
+then creates five commits reachable only through side refs and drives `A A`
+clean pick, `A a` no-commit apply, and genuine content plus add/add conflicts through
+resolution plus status-row staging/continue, abort, and skip. Each path verifies
+HEAD, index, worktree, sequencer cleanup, dispatch state, and non-modal conflict
+handling against real Git.
 
 ### Configured VCS dispatch and time travel — `lem-yath/src/git.lisp`, `src/apps/timemachine.lisp`
 

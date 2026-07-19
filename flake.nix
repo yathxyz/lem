@@ -57,6 +57,7 @@
               ./patches/lem-word-boundary-wrap.patch
               ./patches/lem-git-worktree.patch
               ./patches/lem-legit-status-sections.patch
+              ./patches/lem-legit-unmerged-files.patch
               ./patches/lem-hidden-lines.patch
               ./patches/lem-buffer-write-function.patch
               ./patches/lem-display-line-transformer.patch
