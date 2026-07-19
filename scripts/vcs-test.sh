@@ -414,6 +414,63 @@ porcelain_repeat_rebase_complete() {
     "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
 }
 
+porcelain_edit_rebase_todo_ready() {
+  local todo="$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge/git-rebase-todo"
+  [ -f "$todo" ] &&
+    [ "$(grep -c '^pick ' "$todo")" -eq 1 ] &&
+    grep -q 'porcelain commit reworded twice in Lem' "$todo"
+}
+
+porcelain_edit_rebase_todo_marked() {
+  local todo="$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge/git-rebase-todo"
+  [ -f "$todo" ] &&
+    [ "$(sed -n '1s/^edit .*/edit/p' "$todo")" = edit ]
+}
+
+porcelain_edit_rebase_stopped() {
+  [ -d "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge" ] &&
+    [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge/stopped-sha" ] &&
+    porcelain_subject_is 'porcelain commit reworded twice in Lem' &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_edit_amend_staged() {
+  local diff
+  diff=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    diff --cached -- porcelain.txt) || return 1
+  grep -q 'edit-stop-amendment' <<<"$diff" &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet
+}
+
+porcelain_edit_amend_aborted() {
+  [ -d "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge" ] &&
+    porcelain_subject_is 'porcelain commit reworded twice in Lem' &&
+    porcelain_edit_amend_staged
+}
+
+porcelain_edit_amended() {
+  [ -d "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge" ] &&
+    porcelain_subject_is 'porcelain commit edited in Lem' &&
+    grep -q 'edit-stop-amendment' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt" &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_edit_rebase_complete() {
+  [ ! -d "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/rebase-merge" ] &&
+    [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      rev-list --count HEAD)" -eq 2 ] &&
+    porcelain_subject_is 'porcelain commit edited in Lem' &&
+    grep -q 'edit-stop-amendment' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt" &&
+    grep -q 'peer-pull-probe' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt" &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
 send_keys() {
   local session=$1 key
   shift
@@ -1037,7 +1094,7 @@ if wait_until "$WAIT_TIMEOUT" porcelain_rebase_todo_ready; then
 fi
 if wait_report_count '^REBASE ' "$((rebase_before + 1))" &&
    [[ $(latest_report '^REBASE ') == \
-      'REBASE mode=yes file=yes first=yes second=yes point=yes fixup=yes continue=yes abort=yes modified=no' ]]; then
+      'REBASE mode=yes file=yes first=yes second=yes point=yes fixup=yes edit=yes amend=yes continue=yes abort=yes modified=no' ]]; then
   pass legit-rebase-open 'r i opened the two-commit todo in the native rebase mode'
 else
   fail legit-rebase-open 'interactive rebase did not expose the expected todo mode' \
@@ -1104,7 +1161,7 @@ if wait_until "$WAIT_TIMEOUT" porcelain_repeat_rebase_todo_ready; then
 fi
 if wait_report_count '^REBASE ' "$((rebase_before + 1))" &&
    [[ $(latest_report '^REBASE ') == \
-      'REBASE mode=yes file=yes first=yes second=no point=yes fixup=yes continue=yes abort=yes modified=no' ]]; then
+      'REBASE mode=yes file=yes first=yes second=no point=yes fixup=yes edit=yes amend=yes continue=yes abort=yes modified=no' ]]; then
   pass legit-repeat-rebase-open \
     'an immediate second r i opened a fresh one-commit todo'
 else
@@ -1149,6 +1206,135 @@ if wait_until "$WAIT_TIMEOUT" porcelain_repeat_rebase_complete; then
 else
   fail legit-repeat-rebase-continue \
     'the second client-backed reword did not complete cleanly' \
+    "$porcelain_session"
+fi
+
+commit_before=$(report_count '^PORCELAIN-COMMIT ')
+send_keys "$porcelain_session" Escape Space g G
+if wait_legit "$porcelain_session" porcelain; then
+  send_keys "$porcelain_session" C-c r
+fi
+if wait_report_count '^PORCELAIN-COMMIT ' "$((commit_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-COMMIT ') == \
+      'PORCELAIN-COMMIT row=yes hash=yes rebase=yes subject=yes' ]]; then
+  pass legit-edit-rebase-position \
+    'the twice-rewritten commit remained selectable for an edit stop'
+else
+  fail legit-edit-rebase-position \
+    'the twice-rewritten commit could not start the edit-stop workflow' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" r i
+if wait_until "$WAIT_TIMEOUT" porcelain_edit_rebase_todo_ready; then
+  send_keys "$porcelain_session" e
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_edit_rebase_todo_marked; then
+  pass legit-edit-rebase-action 'e persisted a real edit action in the todo'
+else
+  fail legit-edit-rebase-action \
+    'the rebase todo did not persist the edit action' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" C-c C-c
+if wait_until "$WAIT_TIMEOUT" porcelain_edit_rebase_stopped; then
+  pass legit-edit-rebase-stop \
+    'Git stopped at the selected commit with a clean amend baseline'
+else
+  fail legit-edit-rebase-stop \
+    'the interactive rebase did not reach a clean edit stop' \
+    "$porcelain_session"
+fi
+
+printf 'edit-stop-amendment\n' >>"$LEM_YATH_VCS_PORCELAIN_FILE"
+position_before=$(report_count '^PORCELAIN-POSITION ')
+send_keys "$porcelain_session" Escape Space g G
+if wait_legit "$porcelain_session" porcelain; then
+  send_keys "$porcelain_session" C-c m
+fi
+if wait_report_count '^PORCELAIN-POSITION ' "$((position_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-POSITION ') == \
+      'PORCELAIN-POSITION file=porcelain.txt row=yes diff=yes mode=yes focused=no' ]]; then
+  send_keys "$porcelain_session" s
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_edit_amend_staged; then
+  pass legit-edit-rebase-stage \
+    'Legit staged the edit-stop change before amending'
+else
+  fail legit-edit-rebase-stage \
+    'the edit-stop change was not staged through Legit status' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" A
+amend_before=$(report_count '^AMEND ')
+if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" C-c v
+fi
+if wait_report_count '^AMEND ' "$((amend_before + 1))" &&
+   [[ $(latest_report '^AMEND ') == \
+      'AMEND mode=yes file=no name=yes action=yes subject=yes clean=yes continue=yes abort=yes binding=yes' ]]; then
+  pass legit-edit-rebase-amend-open \
+    'A opened a prefilled transient amend message in Legit commit mode'
+else
+  fail legit-edit-rebase-amend-open \
+    'the amend action did not open the expected safe transient buffer' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" C-c C-k
+if lem_wait_for "$porcelain_session" 'Abort amend?' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_edit_amend_aborted; then
+  pass legit-edit-rebase-amend-abort \
+    'aborting the amend preserved the staged edit-stop change'
+else
+  fail legit-edit-rebase-amend-abort \
+    'amend abort changed the commit, index, or rebase state' \
+    "$porcelain_session"
+fi
+
+amend_before=$(report_count '^AMEND ')
+send_keys "$porcelain_session" A
+if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" C-c v
+fi
+if wait_report_count '^AMEND ' "$((amend_before + 1))" &&
+   [[ $(latest_report '^AMEND ') == \
+      'AMEND mode=yes file=no name=yes action=yes subject=yes clean=yes continue=yes abort=yes binding=yes' ]]; then
+  pass legit-edit-rebase-amend-reopen \
+    'A reopened a fresh prefilled amend buffer after abort'
+else
+  fail legit-edit-rebase-amend-reopen \
+    'the aborted amend buffer leaked or did not return focus to status' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g g d d i
+tmux_cmd send-keys -t "$porcelain_session" -l -- \
+  'porcelain commit edited in Lem'
+send_keys "$porcelain_session" Escape C-c C-c
+if wait_until "$WAIT_TIMEOUT" porcelain_edit_amended; then
+  pass legit-edit-rebase-amend \
+    'the staged content and edited subject amended HEAD cleanly'
+else
+  fail legit-edit-rebase-amend \
+    'the transient amend did not update HEAD and clean the index' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" r c
+if wait_until "$WAIT_TIMEOUT" porcelain_edit_rebase_complete; then
+  pass legit-edit-rebase-continue \
+    'r c completed the edit-stop rebase with amended content and message'
+else
+  fail legit-edit-rebase-continue \
+    'the amended edit stop did not continue to a clean final history' \
     "$porcelain_session"
 fi
 lem_stop "$porcelain_session"

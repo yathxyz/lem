@@ -2177,6 +2177,8 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
 - **Interactive rebase**: `r i`; abort/continue/skip `r a`/`r c`/`r s`
   (`legit.lisp:105-108`); full rebase-todo editing mode with `p r e s f x b d l t m`
   keys (`legit-rebase.lisp:49-77`).
+- **Amend HEAD**: `A` opens the current message in a transient commit buffer;
+  finish with `C-c C-c` or abort with `M-q`/`C-c C-k`.
 - Refresh `g`, navigate `n`/`p`/`M-n`/`M-p`, help `?`/`C-x ?`, quit `q`.
 
 Lem-yath registers the diff, commit, and rebase major-mode maps ahead of Vi's
@@ -2194,13 +2196,17 @@ The retained asynchronous Git process is reaped and explicitly closed before
 another session starts. A `reword` stop opens Git's real `COMMIT_EDITMSG`
 through the owner-private blocking client. The commit-mode confirm and abort
 keys detect that request and save/release or abort Git instead of starting a
-nested commit.
+nested commit. At an `edit` stop, `A` first reaps and closes the stopped rebase
+process, then opens a prefilled transient message. A successful amend returns
+focus explicitly to Legit's status pane so `r c` continues the same rebase.
+The dedicated `A` binding preserves Legit's existing direct `c` command; Lem's
+keymap cannot make `c` both an immediate command and the prefix of `c a`.
 
 ### Porcelain coverage vs magit — `legit/README.md`
 Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkout/
 create), push, pull/fetch, commits log with pagination, **stash push/pop**, interactive
-rebase (pick/reword/fixup/squash/drop/exec/break/label/reset/merge; edit is NOT yet
-supported). Also basic Fossil + Mercurial. **Gaps vs magit:** no region-precise staging,
+rebase (pick/reword/edit/fixup/squash/drop/exec/break/label/reset/merge).
+Also basic Fossil + Mercurial. **Gaps vs magit:** no region-precise staging,
 no multi-file staging, limited switches/transient submenus, no blame/bisect/cherry-pick
 UI, no log graph filtering. Customize via `lem/porcelain:*git-base-arglist*`,
 `*commits-log-page-size*`, `*nb-latest-commits*`, `*branch-sort-by*`,
@@ -2219,8 +2225,11 @@ clean index/worktree, and retained content from both commits. The fixture uses
 an isolated private server socket so it cannot target another running Lem. It
 then immediately opens a fresh one-row rebase, rewords the rewritten commit
 again through a second blocking client callback, and proves clean history after
-the second session. Rebase `edit` stops and the amend/continue workflow remain
-outside this claim.
+the second session. Finally it starts another one-row rebase, marks `edit`,
+waits for Git's real stop, changes and stages a file through Legit, opens `A`,
+edits and confirms the prefilled subject, and uses `r c` to prove the amended
+content and message in a clean two-commit history. The amend path also proves
+the stopped asynchronous process is reaped before the next Git subprocess.
 
 ### Configured VCS dispatch and time travel — `lem-yath/src/git.lisp`, `src/apps/timemachine.lisp`
 
@@ -4111,8 +4120,9 @@ for ~15 languages (go, python, ts/js, clojure, zig, lua, kotlin, elixir, erlang,
 terraform, perl, vue, lisp) with hover/goto/refs/rename/code-action/format/diagnostics —
 but **Rust, Nix, SQL, Dart have no active spec** and need a one-line
 `define-language-spec` in `init.lisp`. **legit** is a credible magit-lite: status, hunk
-staging, commit, branch, push/pull, log, **stash**, and **interactive rebase** (edit
-stops excepted; lem-yath adds client-backed reword editing). Grep result rows are editable with immediate source-buffer
+staging, commit, branch, push/pull, log, **stash**, and **interactive rebase**
+(lem-yath adds client-backed reword plus edit-stop amend/continue integration).
+Grep result rows are editable with immediate source-buffer
 write-through. Common Lisp gets a full
 SLIME (micros): REPL, SLDB, inspector, macroexpand, autodoc. Extras shipped in-tree:
 libvterm **terminal**, **Copilot**, **Claude Code**, MCP server, transient (which-key-ish)

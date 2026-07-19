@@ -108,27 +108,39 @@
       (apply-legit-git-hunk t)
       (lem/legit::legit-unstage-hunk)))
 
+(declaim (ftype function
+                legit-amend-buffer-p
+                legit-amend-continue
+                legit-amend-abort))
+
 (define-command lem-yath-legit-commit-continue () ()
-  (if (server-buffer-requests)
-      ;; Git invokes the packaged blocking client for reword.  COMMIT_EDITMSG
-      ;; still selects Legit's commit major mode, so its ordinary command would
-      ;; incorrectly start a second `git commit'.  Save the file and release
-      ;; the waiting Git process instead.
-      (lem-yath-server-save-done)
-      (progn
-        ;; This is a transient message buffer, not a file that needs saving.
-        ;; Pinned Legit otherwise commits successfully and then prompts before
-        ;; killing it.
-        (unless (str:blankp
-                 (lem/legit::clean-commit-message
-                  (buffer-text (current-buffer))))
-          (buffer-unmark (current-buffer)))
-        (lem/legit::commit-continue))))
+  (cond
+    ((server-buffer-requests)
+     ;; Git invokes the packaged blocking client for reword.  COMMIT_EDITMSG
+     ;; still selects Legit's commit major mode, so its ordinary command would
+     ;; incorrectly start a second `git commit'.  Save the file and release
+     ;; the waiting Git process instead.
+     (lem-yath-server-save-done))
+    ((legit-amend-buffer-p)
+     (legit-amend-continue))
+    (t
+     ;; This is a transient message buffer, not a file that needs saving.
+     ;; Pinned Legit otherwise commits successfully and then prompts before
+     ;; killing it.
+     (unless (str:blankp
+              (lem/legit::clean-commit-message
+               (buffer-text (current-buffer))))
+       (buffer-unmark (current-buffer)))
+     (lem/legit::commit-continue))))
 
 (define-command lem-yath-legit-commit-abort () ()
-  (if (server-buffer-requests)
-      (lem-yath-server-abort)
-      (lem/legit::commit-abort)))
+  (cond
+    ((server-buffer-requests)
+     (lem-yath-server-abort))
+    ((legit-amend-buffer-p)
+     (legit-amend-abort))
+    (t
+     (lem/legit::commit-abort))))
 
 (define-key lem/legit::*legit-diff-mode-keymap*
   "s" 'lem-yath-legit-stage-hunk)

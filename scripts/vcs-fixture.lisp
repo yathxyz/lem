@@ -585,7 +585,9 @@
            (and status-text
                 (find-if (lambda (candidate)
                            (search candidate status-text))
-                         '("porcelain commit reworded in Lem"
+                         '("porcelain commit edited in Lem"
+                           "porcelain commit reworded twice in Lem"
+                           "porcelain commit reworded in Lem"
                            "porcelain commit from Lem"))))
          (row (and status-buffer (buffer-start-point status-buffer))))
     (when (and row subject)
@@ -619,7 +621,7 @@
      (concatenate
       'string
       "REBASE mode=~a file=~a first=~a second=~a "
-      "point=~a fixup=~a continue=~a abort=~a modified=~a")
+      "point=~a fixup=~a edit=~a amend=~a continue=~a abort=~a modified=~a")
      (vcs-test-yes-no
       (eq (buffer-major-mode buffer) 'lem/legit::legit-rebase-mode))
      (vcs-test-yes-no
@@ -634,6 +636,12 @@
       (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap* "f")
           'lem/legit::rebase-mark-line-fixup))
      (vcs-test-yes-no
+      (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap* "e")
+          'lem/legit::rebase-mark-line-edit))
+     (vcs-test-yes-no
+      (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "A")
+          'lem-yath-legit-amend))
+     (vcs-test-yes-no
       (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap*
                                 "C-c C-c")
           'lem/legit::rebase-continue))
@@ -646,28 +654,61 @@
 (define-command lem-yath-test-vcs-reword-state () ()
   (let* ((buffer (current-buffer))
          (filename (buffer-filename buffer)))
-    (vcs-test-log
-     (concatenate
-      'string
-      "REWORD mode=~a file=~a server=~a subject=~a "
-      "continue=~a abort=~a")
-     (vcs-test-yes-no
-      (eq (buffer-major-mode buffer) 'lem/legit::legit-commit-mode))
-     (vcs-test-yes-no
-      (and filename
-           (string= (file-namestring filename) "COMMIT_EDITMSG")))
-     (vcs-test-yes-no (server-buffer-requests buffer))
-     (vcs-test-yes-no
-      (or (search "porcelain commit from Lem" (buffer-text buffer))
-          (search "porcelain commit reworded in Lem" (buffer-text buffer))))
-     (vcs-test-yes-no
-      (eq (vcs-test-key-command lem/legit::*legit-commit-mode-keymap*
-                                "C-c C-c")
-          'lem-yath-legit-commit-continue))
-     (vcs-test-yes-no
-      (eq (vcs-test-key-command lem/legit::*legit-commit-mode-keymap*
-                                "C-c C-k")
-          'lem-yath-legit-commit-abort)))))
+    (if (legit-amend-buffer-p buffer)
+        (let ((clean
+                (string-right-trim
+                 '(#\Space #\Tab #\Newline #\Return)
+                 (lem/legit::clean-commit-message
+                  (buffer-text buffer)))))
+          (vcs-test-log
+           (concatenate
+            'string
+            "AMEND mode=~a file=~a name=~a action=~a subject=~a clean=~a "
+            "continue=~a abort=~a binding=~a")
+         (vcs-test-yes-no
+          (eq (buffer-major-mode buffer) 'lem/legit::legit-commit-mode))
+         (vcs-test-yes-no filename)
+         (vcs-test-yes-no (string= (buffer-name buffer) "*legit-amend*"))
+         (vcs-test-yes-no (legit-amend-buffer-p buffer))
+         (vcs-test-yes-no
+          (search "porcelain commit reworded twice in Lem"
+                  (buffer-text buffer)))
+         (vcs-test-yes-no
+          (string= clean "porcelain commit reworded twice in Lem"))
+         (vcs-test-yes-no
+          (eq (vcs-test-key-command lem/legit::*legit-commit-mode-keymap*
+                                    "C-c C-c")
+              'lem-yath-legit-commit-continue))
+         (vcs-test-yes-no
+          (eq (vcs-test-key-command lem/legit::*legit-commit-mode-keymap*
+                                    "C-c C-k")
+              'lem-yath-legit-commit-abort))
+         (vcs-test-yes-no
+          (eq (vcs-test-key-command lem/legit::*peek-legit-keymap* "A")
+              'lem-yath-legit-amend))))
+        (vcs-test-log
+         (concatenate
+          'string
+          "REWORD mode=~a file=~a server=~a subject=~a "
+          "continue=~a abort=~a")
+         (vcs-test-yes-no
+          (eq (buffer-major-mode buffer) 'lem/legit::legit-commit-mode))
+         (vcs-test-yes-no
+          (and filename
+               (string= (file-namestring filename) "COMMIT_EDITMSG")))
+         (vcs-test-yes-no (server-buffer-requests buffer))
+         (vcs-test-yes-no
+          (or (search "porcelain commit from Lem" (buffer-text buffer))
+              (search "porcelain commit reworded in Lem"
+                      (buffer-text buffer))))
+         (vcs-test-yes-no
+          (eq (vcs-test-key-command lem/legit::*legit-commit-mode-keymap*
+                                    "C-c C-c")
+              'lem-yath-legit-commit-continue))
+         (vcs-test-yes-no
+          (eq (vcs-test-key-command lem/legit::*legit-commit-mode-keymap*
+                                    "C-c C-k")
+              'lem-yath-legit-commit-abort))))))
 
 (defun vcs-test-restore-source-point ()
   (let ((point (buffer-point *vcs-test-source-buffer*)))

@@ -215,6 +215,97 @@ esac
     (t
      (lem/porcelain:porcelain-error "No Git rebase is in progress."))))
 
+(defvar *legit-amend-operation-key* 'lem-yath-legit-amend-operation)
+
+(defparameter *legit-amend-buffer-help*
+  "
+
+# Please enter the commit message for your changes.
+# Lines starting with '#' are discarded; an empty message does nothing.
+# Validate with C-c C-c; quit with M-q or C-c C-k.
+")
+
+(defun legit-amend-buffer-p (&optional (buffer (current-buffer)))
+  (eq (buffer-value buffer *legit-amend-operation-key*) :amend))
+
+(defun legit-command-error-text (output error-output)
+  (cond
+    ((str:non-blank-string-p error-output) error-output)
+    ((str:non-blank-string-p output) output)
+    (t "Git did not explain why the operation failed.")))
+
+(defun show-legit-amend-buffer (message directory)
+  "Open a transient commit buffer prefilled with HEAD's current message."
+  (when (get-buffer "*legit-amend*")
+    (editor-error "An amend message buffer is already open."))
+  (let ((buffer (make-buffer "*legit-amend*")))
+    (setf (buffer-directory buffer) directory
+          (buffer-read-only-p buffer) nil
+          (buffer-value buffer *legit-amend-operation-key*) :amend)
+    (erase-buffer buffer)
+    (insert-string
+     (buffer-point buffer)
+     (format nil "~a~a"
+             (string-right-trim '(#\Newline #\Return) message)
+             *legit-amend-buffer-help*))
+    (change-buffer-mode buffer 'lem/legit::legit-commit-mode)
+    (buffer-start (buffer-point buffer))
+    (next-window)
+    (switch-to-buffer buffer)))
+
+(define-command lem-yath-legit-amend () ()
+  "Amend HEAD from a prefilled Legit commit-message buffer."
+  (lem/legit::with-current-project (vcs)
+    (unless (typep vcs 'lem/porcelain/git::vcs-git)
+      (editor-error "Amend is available only in a Git repository."))
+    (when (release-finished-legit-rebase-session vcs :wait t)
+      (editor-error
+       "The interactive rebase is still reaching its edit stop. Please retry."))
+    (multiple-value-bind (output error-output status)
+        (lem/porcelain/git::run-git '("log" "-1" "--format=%B"))
+      (if (zerop status)
+          (show-legit-amend-buffer output (uiop:getcwd))
+          (editor-error "~a"
+                        (legit-command-error-text output error-output))))))
+
+(defun legit-amend-continue ()
+  "Commit the current transient buffer as an amended HEAD."
+  (let* ((buffer (current-buffer))
+         (message
+           (lem/legit::clean-commit-message (buffer-text buffer))))
+    (when (str:blankp message)
+      (message "No commit message; amend was not run.")
+      (return-from legit-amend-continue nil))
+    (lem/legit::with-current-project (vcs)
+      (unless (typep vcs 'lem/porcelain/git::vcs-git)
+        (editor-error "Amend is available only in a Git repository."))
+      (multiple-value-bind (output error-output status)
+          (lem/porcelain/git::run-git
+           (list "commit" "--amend" "-m" message))
+        (if (zerop status)
+            (progn
+              (buffer-unmark buffer)
+              (kill-buffer buffer)
+              (when (lem/legit::legit-status-active-p)
+                (setf (current-window) lem/legit::*peek-window*))
+              (lem/legit::show-legit-status)
+              (message "Amended HEAD."))
+            (lem/legit::pop-up-message
+             (legit-command-error-text output error-output)))))))
+
+(defun legit-amend-abort ()
+  "Discard the current transient amend message after confirmation."
+  (when (or (not lem/legit::*prompt-to-abort-commit*)
+            (prompt-for-y-or-n-p "Abort amend?"))
+    (let ((buffer (current-buffer)))
+      (buffer-unmark buffer)
+      (kill-buffer buffer)
+      (when (lem/legit::legit-status-active-p)
+        (setf (current-window) lem/legit::*peek-window*)))))
+
+(define-key lem/legit::*peek-legit-keymap* "A" 'lem-yath-legit-amend)
+(define-key lem/legit::*legit-diff-mode-keymap* "A" 'lem-yath-legit-amend)
+
 (defun position-legit-rebase-todo-at-first-command (buffer)
   "Do not restore a stale cursor row when Git creates a fresh todo file."
   (alexandria:when-let ((filename (buffer-filename buffer)))

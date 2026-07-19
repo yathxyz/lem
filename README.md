@@ -476,7 +476,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   real remotes by the VCS acceptance gate. Interactive reword/fixup uses an
   owner-private, signal-free sequence-editor handshake and Git's real commit
   editor through the reusable Lem client; consecutive reword sessions are
-  physically covered. Packaged `gh` also backs
+  physically covered. An `edit` stop can be changed and staged through Legit,
+  amended with `A` in a prefilled commit buffer, and completed with `r c`.
+  Packaged `gh` also backs
   command-accessible GitHub Forge lists, detail views, multiline creation and
   comments, close/reopen actions, external browsing, and cache-only Legit
   status previews without taking ownership of credentials
