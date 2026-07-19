@@ -25,6 +25,9 @@
 (defparameter *notmuch-attachment-output-limit* (* 128 1024 1024))
 (defparameter *notmuch-message-output-limit* (* 10 1024 1024))
 (defparameter *notmuch-submit-timeout* 45)
+(defparameter *notmuch-address-prefix-length* 3)
+(defparameter *notmuch-address-result-limit* 2000)
+(defparameter *notmuch-address-output-limit* (* 1024 1024))
 
 (defparameter *notmuch-list-buffer-name* "*lem-yath-mail*")
 (defparameter *notmuch-fetch-buffer-name* "*lem-yath-fetchmail*")
@@ -134,10 +137,31 @@ second value distinguishes a valid empty JSON array from a failed command."
       (editor-error "Notmuch configuration ~a is missing or invalid" key))
     value))
 
-(defun notmuch-from-header ()
+(defun notmuch-optional-config-values (key)
+  "Return bounded, nonempty lines from optional Notmuch configuration KEY."
+  (handler-case
+      (loop :for line :in (uiop:split-string
+                            (notmuch-run-text (list "config" "get" key))
+                            :separator '(#\Newline))
+            :for value := (string-trim '(#\Space #\Tab #\Return) line)
+            :when (and (plusp (length value))
+                       (<= (length value) 4096)
+                       (not (find #\Null value)))
+              :collect value)
+    (error () nil)))
+
+(defun notmuch-user-emails ()
+  "Return the primary and alternate Notmuch identities in configured order."
+  (remove-duplicates
+   (cons (notmuch-config-value "user.primary_email")
+         (notmuch-optional-config-values "user.other_email"))
+   :test #'string-equal))
+
+(defun notmuch-from-header (&optional primary-email)
   "Return the configured Notmuch primary identity as an RFC 822 From value."
   (let ((name (notmuch-config-value "user.name"))
-        (email (notmuch-config-value "user.primary_email")))
+        (email (or primary-email
+                   (notmuch-config-value "user.primary_email"))))
     (format nil "\"~a\" <~a>"
             (with-output-to-string (stream)
               (loop :for character :across name
@@ -246,6 +270,275 @@ quoting here prevents notmuch's query parser from interpreting metacharacters."
   (let ((tail (member current-id ids :test #'string=)))
     (second tail)))
 
+;;; --- address completion ---------------------------------------------------
+
+(defun notmuch-address-header-name-p (name)
+  (member name '("To" "Cc" "Bcc") :test #'string-equal))
+
+(defun notmuch-address-context (point)
+  "Return replacement points and input at POINT in a recipient header.
+
+Only To, Cc, and Bcc before the composition's header/body separator qualify.
+The replacement starts after the nearest comma or header colon, preserving all
+earlier recipients and their whitespace."
+  (let* ((buffer (point-buffer point))
+         (header-limit (buffer-value buffer 'notmuch-compose-header-limit)))
+    (when (and (eq (buffer-major-mode buffer) 'notmuch-compose-mode)
+               header-limit
+               (alive-point-p header-limit)
+               (eq buffer (point-buffer header-limit))
+               (point< point header-limit))
+      (with-point ((line-start-point point))
+        (line-start line-start-point)
+        (let* ((before (points-to-string line-start-point point))
+               (colon (position #\: before)))
+          (when (and colon
+                     (notmuch-address-header-name-p
+                      (subseq before 0 colon)))
+            (let* ((comma (position #\, before :start (1+ colon)
+                                                :from-end t))
+                   (start-index (1+ (or comma colon))))
+              (loop :while (and (< start-index (length before))
+                                (let ((character
+                                        (char before start-index)))
+                                  (or (char= character #\Space)
+                                      (char= character #\Tab))))
+                    :do (incf start-index))
+              (let ((prefix (subseq before start-index))
+                    (start (copy-point line-start-point :right-inserting))
+                    (end (copy-point point :left-inserting)))
+                (character-offset start start-index)
+                (values start end prefix)))))))))
+
+(defun notmuch-compose-header-limit-point (buffer)
+  "Return a tracked point at BUFFER's first header/body separator."
+  (let* ((text (buffer-text buffer))
+         (lf (search (format nil "~%~%") text))
+         (crlf (search (format nil "~c~c~c~c"
+                               #\Return #\Newline #\Return #\Newline)
+                       text))
+         (offset (cond ((and lf crlf) (min lf crlf))
+                       (lf lf)
+                       (crlf crlf))))
+    (when offset
+      (let ((point (copy-point (buffer-start-point buffer) :right-inserting)))
+        (character-offset point offset)
+        point))))
+
+(defun notmuch-address-query (prefix user-emails)
+  "Build the safe sent-mail recipient query for PREFIX and USER-EMAILS."
+  (unless user-emails
+    (error "Notmuch has no configured user email addresses"))
+  (unless (and (= (length prefix) *notmuch-address-prefix-length*)
+               (every (lambda (character)
+                        (or (char<= #\a (char-downcase character) #\z)
+                            (char<= #\0 character #\9)
+                            (char= character #\_)))
+                      prefix))
+    (error "Notmuch address prefix is not a safe wildcard term"))
+  (format nil "(~{~a~^ or ~}) and (to:~a*)"
+          (mapcar (lambda (email)
+                    (notmuch-query-value "from:" email "user email"))
+                  user-emails)
+          prefix))
+
+(defun notmuch-address-valid-result-p (value)
+  (and (plusp (length value))
+       (<= (length value) 4096)
+       (notany (lambda (character)
+                 (or (char= character #\Null)
+                     (char= character #\Newline)
+                     (char= character #\Return)))
+               value)))
+
+(defun notmuch-address-results (output)
+  "Parse bounded text OUTPUT into distinct mailbox candidates."
+  (let ((seen (make-hash-table :test #'equalp))
+        (results '()))
+    (dolist (line (uiop:split-string output :separator '(#\Newline))
+                  (nreverse results))
+      (let ((value (string-trim '(#\Space #\Tab #\Return) line)))
+        (when (and (< (length results) *notmuch-address-result-limit*)
+                   (notmuch-address-valid-result-p value)
+                   (not (gethash value seen)))
+          (setf (gethash value seen) t)
+          (push value results))))))
+
+(defun notmuch-run-address-query (program directory query request)
+  "Run one cancellable, bounded Notmuch address QUERY off the editor thread."
+  (let ((*project-process-timeout* *notmuch-process-timeout*))
+    (multiple-value-bind (output error-output status)
+        (run-project-program
+         (list program "address" "--format=text" "--output=recipients"
+               "--deduplicate=address" query)
+         :directory directory
+         :request request
+         :output-limit *notmuch-address-output-limit*)
+      (unless (and (integerp status) (zerop status))
+        (error "~a"
+               (notmuch-command-error-text error-output
+                                           "notmuch address failed")))
+      (notmuch-address-results output))))
+
+(defun notmuch-address-items (mailboxes start end)
+  (mapcar
+   (lambda (mailbox)
+     (lem/completion-mode:make-completion-item
+      :label mailbox
+      :filter-text mailbox
+      :insert-text mailbox
+      :detail "Notmuch address"
+      :start start
+      :end end))
+   mailboxes))
+
+(defun notmuch-address-delete-points (&rest points)
+  (dolist (point points)
+    (when (and point (alive-point-p point))
+      (ignore-errors (delete-point point)))))
+
+(defun notmuch-address-return (then mailboxes start end)
+  "Call completion callback THEN and release its provider-owned range."
+  (unwind-protect
+       (funcall then
+                (and mailboxes
+                     (notmuch-address-items mailboxes start end)))
+    (notmuch-address-delete-points start end)))
+
+(defun notmuch-address-cancel-request (buffer)
+  (let ((request (buffer-value buffer 'notmuch-address-request))
+        (start (buffer-value buffer 'notmuch-address-request-start))
+        (end (buffer-value buffer 'notmuch-address-request-end)))
+    (setf (buffer-value buffer 'notmuch-address-request) nil
+          (buffer-value buffer 'notmuch-address-request-key) nil
+          (buffer-value buffer 'notmuch-address-request-callback) nil
+          (buffer-value buffer 'notmuch-address-request-start) nil
+          (buffer-value buffer 'notmuch-address-request-end) nil)
+    (notmuch-address-delete-points start end)
+    (and request (cancel-project-request request))))
+
+(defun notmuch-address-deliver (buffer request mailboxes error-text)
+  "Publish one address result only while REQUEST still belongs to BUFFER."
+  (when (and (not (deleted-buffer-p buffer))
+             (eq request (buffer-value buffer 'notmuch-address-request)))
+    (let ((key (buffer-value buffer 'notmuch-address-request-key))
+          (then (buffer-value buffer 'notmuch-address-request-callback))
+          (start (buffer-value buffer 'notmuch-address-request-start))
+          (end (buffer-value buffer 'notmuch-address-request-end)))
+      (setf (buffer-value buffer 'notmuch-address-request) nil
+            (buffer-value buffer 'notmuch-address-request-key) nil
+            (buffer-value buffer 'notmuch-address-request-callback) nil
+            (buffer-value buffer 'notmuch-address-request-start) nil
+            (buffer-value buffer 'notmuch-address-request-end) nil
+            (buffer-value buffer 'notmuch-address-last-error) error-text)
+      ;; Remember empty and failed prefixes for this composition as well.
+      ;; Otherwise every command after a transient failure can respawn the
+      ;; same process while the unchanged header still has focus.
+      (setf (gethash key (buffer-value buffer 'notmuch-address-cache))
+            mailboxes)
+      (when then
+        (if (and (null error-text)
+                 start end
+                 (alive-point-p start)
+                 (alive-point-p end))
+            (notmuch-address-return then mailboxes start end)
+            (progn
+              (notmuch-address-delete-points start end)
+              (funcall then nil)))))))
+
+(defun notmuch-address-start-request
+    (buffer key query start end then)
+  "Start the single latest address request for BUFFER."
+  (notmuch-address-cancel-request buffer)
+  (let* ((generation
+           (1+ (or (buffer-value buffer 'notmuch-address-generation) 0)))
+         (request (make-live-project-request generation nil))
+         (program (or (executable-find "notmuch")
+                      (error "notmuch not found on PATH")))
+         (directory (or (ignore-errors (buffer-directory buffer))
+                        (uiop:getcwd))))
+    (setf (buffer-value buffer 'notmuch-address-generation) generation
+          (buffer-value buffer 'notmuch-address-request) request
+          (buffer-value buffer 'notmuch-address-request-key) key
+          (buffer-value buffer 'notmuch-address-request-callback) then
+          (buffer-value buffer 'notmuch-address-request-start) start
+          (buffer-value buffer 'notmuch-address-request-end) end
+          (buffer-value buffer 'notmuch-address-last-error) nil)
+    (bt2:make-thread
+     (lambda ()
+       (handler-case
+           (let ((mailboxes
+                   (notmuch-run-address-query
+                    (uiop:native-namestring program) directory query request)))
+             (send-event
+              (lambda ()
+                (notmuch-address-deliver buffer request mailboxes nil))))
+         (project-request-cancelled () nil)
+         (error (condition)
+           (let ((text (notmuch-command-error-text
+                        (princ-to-string condition)
+                        "notmuch address failed")))
+             (send-event
+              (lambda ()
+                (notmuch-address-deliver buffer request nil text)))))))
+     :name "lem-yath/notmuch-address")))
+
+(defun notmuch-address-completion-provider (point then)
+  "Asynchronously complete the current recipient token at POINT."
+  (multiple-value-bind (start end prefix)
+      (notmuch-address-context point)
+    (declare (ignore prefix))
+    (multiple-value-bind (symbol-start symbol-end symbol-prefix)
+        (auto-completion-symbol-bounds point)
+      (declare (ignore symbol-start symbol-end))
+      (if (or (null start)
+              (< (length symbol-prefix) *notmuch-address-prefix-length*))
+        (progn
+          (notmuch-address-delete-points start end)
+          (funcall then nil))
+        (let* ((buffer (point-buffer point))
+               (key (string-downcase
+                     (subseq symbol-prefix
+                             0 *notmuch-address-prefix-length*)))
+               (cache (buffer-value buffer 'notmuch-address-cache)))
+          (multiple-value-bind (mailboxes present-p) (gethash key cache)
+            (cond
+              (present-p
+               (notmuch-address-return then mailboxes start end))
+              ((and (buffer-value buffer 'notmuch-address-request)
+                    (string= key
+                             (buffer-value buffer
+                                           'notmuch-address-request-key)))
+               ;; Keep one subprocess for an extending prefix, but publish to
+               ;; the newest completion generation and replacement range.
+               (notmuch-address-delete-points
+                (buffer-value buffer 'notmuch-address-request-start)
+                (buffer-value buffer 'notmuch-address-request-end))
+               (setf (buffer-value buffer 'notmuch-address-request-callback)
+                     then
+                     (buffer-value buffer 'notmuch-address-request-start) start
+                     (buffer-value buffer 'notmuch-address-request-end) end))
+              (t
+               (handler-case
+                   (notmuch-address-start-request
+                    buffer key
+                    (notmuch-address-query
+                     key (buffer-value buffer 'notmuch-address-user-emails))
+                    start end then)
+                 (error (condition)
+                   (setf (buffer-value buffer 'notmuch-address-last-error)
+                         (notmuch-command-error-text
+                          (princ-to-string condition)
+                          "notmuch address failed"))
+                   (notmuch-address-delete-points start end)
+                   (funcall then nil)))))))))))
+
+(defun notmuch-address-completion-spec ()
+  (lem/completion-mode:make-completion-spec
+   #'notmuch-address-completion-provider
+   :async t
+   :test-function #'auto-completion-case-fold-input-valid-p))
+
 ;;; --- thread list buffer ----------------------------------------------------
 
 (defvar *notmuch-search-mode-keymap*
@@ -269,7 +562,10 @@ quoting here prevents notmuch's query parser from interpreting metacharacters."
 (define-major-mode notmuch-compose-mode nil
     (:name "Notmuch-Compose"
      :keymap *notmuch-compose-mode-keymap*)
-  "Edit a plain-text RFC 822 message for Notmuch SMTP submission.")
+  "Edit a plain-text RFC 822 message for Notmuch SMTP submission."
+  (setf (variable-value 'lem/language-mode:completion-spec
+                        :buffer (current-buffer))
+        (notmuch-address-completion-spec)))
 
 (defmethod lem-vi-mode/core:mode-specific-keymaps ((mode notmuch-search-mode))
   (list *notmuch-search-mode-keymap*))
@@ -327,7 +623,7 @@ quoting here prevents notmuch's query parser from interpreting metacharacters."
           ((search-forward point "Subject:") (line-end point))
           (t (buffer-end point)))))
 
-(defun notmuch-compose-open (text &key reply-query)
+(defun notmuch-compose-open (text &key reply-query user-emails)
   "Open TEXT in the single Notmuch composition buffer.
 
 REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
@@ -346,7 +642,16 @@ REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
             (buffer-value buffer 'notmuch-compose-reply-query) reply-query
             (buffer-value buffer 'notmuch-compose-sent-message) nil
             (buffer-value buffer 'notmuch-compose-fcc-done-p) nil
-            (buffer-value buffer 'notmuch-compose-reply-tag-done-p) nil)
+            (buffer-value buffer 'notmuch-compose-reply-tag-done-p) nil
+            (buffer-value buffer 'notmuch-compose-header-limit)
+            (notmuch-compose-header-limit-point buffer)
+            (buffer-value buffer 'notmuch-address-user-emails)
+            (or user-emails (notmuch-user-emails))
+            (buffer-value buffer 'notmuch-address-cache)
+            (make-hash-table :test #'equal)
+            (buffer-value buffer 'notmuch-address-generation) 0
+            (buffer-value buffer 'notmuch-address-request) nil
+            (buffer-value buffer 'notmuch-address-last-error) nil)
       (notmuch-compose-position-point buffer))
     (buffer-unmark buffer)
     (switch-to-buffer buffer nil)
@@ -355,8 +660,11 @@ REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
 
 (define-command lem-yath-notmuch-compose () ()
   "Compose new mail (`C' or `cc' in Notmuch views)."
-  (notmuch-compose-open
-   (format nil "From: ~a~%To: ~%Subject: ~%~%" (notmuch-from-header))))
+  (let ((user-emails (notmuch-user-emails)))
+    (notmuch-compose-open
+     (format nil "From: ~a~%To: ~%Subject: ~%~%"
+             (notmuch-from-header (first user-emails)))
+     :user-emails user-emails)))
 
 (defun notmuch-current-reply-query ()
   "Return the exact message or thread query selected in a Notmuch view."
@@ -436,6 +744,7 @@ REPLY-QUERY is tagged `+replied' only after SMTP and FCC both succeed."
   t)
 
 (defun notmuch-close-compose (buffer)
+  (notmuch-address-cancel-request buffer)
   (let ((origin (buffer-value buffer 'notmuch-compose-origin)))
     (when (and origin (not (deleted-buffer-p origin)))
       (switch-to-buffer origin nil))

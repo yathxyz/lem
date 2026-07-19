@@ -38,6 +38,7 @@ export LEM_YATH_NOTMUCH_PDF="$root/notmuch attachment;safe.pdf"
 fakebin="$root/fake bin;safe"
 export LEM_YATH_NOTMUCH_FAKE_BIN="$fakebin"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$fakebin"
+real_notmuch=$(command -v notmuch)
 : >"$LEM_YATH_NOTMUCH_REPORT"
 : >"$LEM_YATH_NOTMUCH_LOG"
 : >"$LEM_YATH_MBSYNC_LOG"
@@ -104,6 +105,53 @@ fail() {
   sed -n '1,120p' "$LEM_YATH_NOTMUCH_LOG" 2>/dev/null || true
   sed -n '1,40p' "$LEM_YATH_NOTMUCH_STATE" 2>/dev/null || true
 }
+
+# Keep the fake backend strict for editor argv/state coverage, but first prove
+# the pinned real Notmuch accepts the completion query grammar and emits the
+# mailbox form consumed by the provider.
+real_address_root="$root/real-address"
+mkdir -p "$real_address_root/mail/cur" "$real_address_root/mail/new" \
+  "$real_address_root/mail/tmp"
+cat >"$real_address_root/config" <<EOF
+[database]
+path=$real_address_root/mail
+[user]
+name=Yanni
+primary_email=yanni@example.invalid
+other_email=alias@example.invalid
+[new]
+tags=unread;inbox;
+ignore=
+[search]
+exclude_tags=deleted;spam;
+[maildir]
+synchronize_flags=true
+EOF
+cat >"$real_address_root/mail/new/message" <<'EOF'
+From: Yanni <yanni@example.invalid>
+To: Alice Real <alice.real@example.invalid>
+Date: Wed, 15 Jul 2026 20:00:00 +0100
+Message-ID: <real-address@example.invalid>
+Subject: Real address fixture
+
+Address completion fixture.
+EOF
+real_address_query='(from:"yanni@example.invalid" or from:"alias@example.invalid") and (to:ali*)'
+if NOTMUCH_CONFIG="$real_address_root/config" "$real_notmuch" new \
+     >"$real_address_root/new.out" 2>"$real_address_root/new.err" &&
+   NOTMUCH_CONFIG="$real_address_root/config" "$real_notmuch" address \
+     --format=text --output=recipients --deduplicate=address \
+     "$real_address_query" >"$real_address_root/address.out" \
+     2>"$real_address_root/address.err" &&
+   grep -Fxq 'Alice Real <alice.real@example.invalid>' \
+     "$real_address_root/address.out"; then
+  pass address-real-cli 'pinned Notmuch accepted the safe wildcard query and returned a mailbox candidate'
+else
+  sed -n '1,40p' "$real_address_root/new.out" \
+    "$real_address_root/new.err" "$real_address_root/address.out" \
+    "$real_address_root/address.err" >&2
+  fail address-real-cli 'real Notmuch query grammar or address output diverged'
+fi
 
 report_count() { grep -c "^$1" "$LEM_YATH_NOTMUCH_REPORT" 2>/dev/null || true; }
 wait_report() {
@@ -305,11 +353,84 @@ if wait_report COMPOSE "$before_compose" &&
    [[ $(latest COMPOSE) == 'COMPOSE mode=yes from=yes to=no subject=no quote=no all=no reply=no sent=no fcc=no read-only=no keys=yes active-send=yes source=yes' ]]; then
   new_compose_ok=1
 fi
+
+address_ok=0
+if ((new_compose_ok)); then
+  lem_keys "$session" A
+  tmux_cmd send-keys -t "$session" -l -- 'ali'
+  if lem_wait_for "$session" 'Alice Example <alice@example.invalid>' 20 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l -- 'c'
+    sleep 0.4
+    lem_keys "$session" C-n Enter
+    sleep 0.5
+    tmux_cmd send-keys -t "$session" -l -- ', tea'
+  fi
+  if lem_wait_for "$session" 'Team Address <team@example.invalid>' 20 >/dev/null; then
+    lem_keys "$session" C-n Enter
+    sleep 0.5
+    before_err_log=$(wc -l <"$LEM_YATH_NOTMUCH_LOG")
+    tmux_cmd send-keys -t "$session" -l -- ', err'
+    wait_log_count "$LEM_YATH_NOTMUCH_LOG" "$((before_err_log + 1))" || true
+  fi
+  sleep 0.5
+  address_calls=$(python3 - "$LEM_YATH_NOTMUCH_LOG" <<'PY'
+import json, sys
+print(sum(1 for line in open(sys.argv[1]) if json.loads(line)[:1] == ["address"]))
+PY
+)
+  lem_keys "$session" Escape
+  lem_wait_for "$session" 'NORMAL' 5 >/dev/null || true
+  lem_keys "$session" j A
+  tmux_cmd send-keys -t "$session" -l -- 'ali'
+  sleep 0.8
+  lem_keys "$session" Escape
+  lem_wait_for "$session" 'NORMAL' 5 >/dev/null || true
+  lem_keys "$session" G o
+  tmux_cmd send-keys -t "$session" -l -- 'ali'
+  sleep 0.8
+  lem_keys "$session" Escape
+  lem_wait_for "$session" 'NORMAL' 5 >/dev/null || true
+  after_nonheader_calls=$(python3 - "$LEM_YATH_NOTMUCH_LOG" <<'PY'
+import json, sys
+print(sum(1 for line in open(sys.argv[1]) if json.loads(line)[:1] == ["address"]))
+PY
+)
+  before_address=$(report_count ADDRESS)
+  lem_keys "$session" F7
+  if wait_report ADDRESS "$before_address" &&
+     [[ $(latest ADDRESS) == 'ADDRESS mode=yes to=yes subject=yes body=yes spec=yes cache=yes failure=yes idle=yes matrix=yes contexts=yes,yes,yes,yes,yes source=yes' ]] &&
+     [[ $after_nonheader_calls -eq $address_calls ]] &&
+     python3 - "$LEM_YATH_NOTMUCH_LOG" <<'PY'
+import json, sys
+
+calls = [json.loads(line) for line in open(sys.argv[1])]
+addresses = [call for call in calls if call[:1] == ["address"]]
+base = '(from:"yanni@example.invalid" or from:"alias@example.invalid") and (to:{}*)'
+expected = [
+    ["address", "--format=text", "--output=recipients", "--deduplicate=address", base.format("ali")],
+    ["address", "--format=text", "--output=recipients", "--deduplicate=address", base.format("tea")],
+    ["address", "--format=text", "--output=recipients", "--deduplicate=address", base.format("err")],
+]
+assert addresses == expected, addresses
+PY
+  then
+    address_ok=1
+  fi
+fi
+
 lem_keys "$session" C-c C-k
+if lem_wait_for "$session" 'Discard this unsent mail composition?' 3 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l -- 'y'
+fi
 if ((new_compose_ok)) && lem_wait_for "$session" 'Primary plain body' 20 >/dev/null; then
   pass compose-new 'C opened the configured Notmuch identity in an editable mail buffer and C-c C-k returned'
 else
   fail compose-new 'new-mail identity, compose mode, or cancellation diverged'
+fi
+if ((address_ok)); then
+  pass address-completion 'recipient headers completed asynchronously with exact cached argv, token bounds, and safe failure'
+else
+  fail address-completion 'header scope, popup acceptance, cache, failure recovery, or direct address argv diverged'
 fi
 
 before_compose=$(report_count COMPOSE)

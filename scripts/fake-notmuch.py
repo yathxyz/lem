@@ -147,10 +147,43 @@ def main() -> int:
         values = {
             "user.name": 'Yanni "Safe"',
             "user.primary_email": "yanni@example.invalid",
+            "user.other_email": "alias@example.invalid",
         }
         if args[2] not in values:
             return 1
         print(values[args[2]])
+        return 0
+    if args[0] == "address":
+        if args[1:4] != [
+            "--format=text",
+            "--output=recipients",
+            "--deduplicate=address",
+        ] or len(args) != 5:
+            print("unexpected address options", file=sys.stderr)
+            return 2
+        query = args[4]
+        match = re.fullmatch(
+            r'\(from:"yanni@example\.invalid" or '
+            r'from:"alias@example\.invalid"\) and \(to:([A-Za-z0-9_]{3})\*\)',
+            query,
+        )
+        if not match:
+            print("address requires the exact sent-mail prefix query", file=sys.stderr)
+            return 2
+        prefix = match.group(1).lower()
+        candidates = {
+            "ali": [
+                "Alice Example <alice@example.invalid>",
+                "Alina Safe; $(touch PWNED) <alina@example.invalid>",
+            ],
+            "tea": ["Team Address <team@example.invalid>"],
+            "bob": ["Bob Example <bob@example.invalid>"],
+        }
+        if prefix == "err":
+            print("injected address failure", file=sys.stderr)
+            return 9
+        for candidate in candidates.get(prefix, []):
+            print(candidate)
         return 0
     if args[0] == "reply":
         if args[1:3] != ["--format=default", "--reply-to=sender"] and args[1:3] != [

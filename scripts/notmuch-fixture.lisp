@@ -205,6 +205,78 @@
           'lem-yath-notmuch-compose-send))
      (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
 
+(defun notmuch-test-address-context-for (text token expected)
+  (let ((buffer (make-buffer "*notmuch-address-context-test*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (erase-buffer buffer)
+           (change-buffer-mode buffer 'notmuch-compose-mode)
+           (insert-string (buffer-point buffer) text)
+           (setf (buffer-value buffer 'notmuch-compose-header-limit)
+                 (notmuch-compose-header-limit-point buffer))
+           (let ((offset (search token text))
+                 (point (buffer-point buffer)))
+             (buffer-start point)
+             (and offset
+                  (progn
+                    (character-offset point (+ offset (length token)))
+                    (multiple-value-bind (start end prefix)
+                        (notmuch-address-context point)
+                      (prog1 (if expected
+                                 (and start end (string= prefix token))
+                                 (null start))
+                        (when start (delete-point start))
+                        (when end (delete-point end))))))))
+      (buffer-unmark buffer)
+      (delete-buffer buffer))))
+
+(defun notmuch-test-address-context-matrix ()
+  (list
+   (notmuch-test-address-context-for
+    (format nil "From: Me <me@unit.test>~%To: ali~%Subject: x~%~%body")
+    "ali" t)
+   (notmuch-test-address-context-for
+    (format nil "From: Me <me@unit.test>~%Cc: ali~%Subject: x~%~%body")
+    "ali" t)
+   (notmuch-test-address-context-for
+    (format nil "From: Me <me@unit.test>~%Bcc: ali~%Subject: x~%~%body")
+    "ali" t)
+   (notmuch-test-address-context-for
+    (format nil "From: Me <me@unit.test>~%Subject: ali~%~%body")
+    "ali" nil)
+   (notmuch-test-address-context-for
+    (format nil "From: Me <me@unit.test>~%Subject: x~%~%To: ali")
+    "ali" nil)))
+
+(define-command lem-yath-notmuch-test-address-report () ()
+  (let* ((buffer (current-buffer))
+         (text (buffer-text buffer))
+         (cache (buffer-value buffer 'notmuch-address-cache))
+         (error-text (buffer-value buffer 'notmuch-address-last-error))
+         (matrix (notmuch-test-address-context-matrix)))
+    (notmuch-test-log
+     "ADDRESS mode=~a to=~a subject=~a body=~a spec=~a cache=~a failure=~a idle=~a matrix=~a contexts=~{~a~^,~} source=~a"
+     (notmuch-test-yes-no
+      (eq (buffer-major-mode buffer) 'notmuch-compose-mode))
+     (notmuch-test-yes-no
+      (search "To: Alice Example <alice@example.invalid>, Team Address <team@example.invalid>, err"
+              text))
+     (notmuch-test-yes-no (search "Subject: ali" text))
+     (notmuch-test-yes-no (search (format nil "~%~%ali") text))
+     (notmuch-test-yes-no
+      (variable-value 'lem/language-mode:completion-spec :buffer buffer))
+     (notmuch-test-yes-no
+      (and cache
+           (nth-value 1 (gethash "ali" cache))
+           (nth-value 1 (gethash "tea" cache))))
+     (notmuch-test-yes-no
+      (and error-text (search "injected address failure" error-text)))
+     (notmuch-test-yes-no
+      (null (buffer-value buffer 'notmuch-address-request)))
+     (notmuch-test-yes-no (every #'identity matrix))
+     (mapcar #'notmuch-test-yes-no matrix)
+     (notmuch-test-yes-no (notmuch-test-source-exact-p)))))
+
 (defun notmuch-test-extraction-refusal
     (attachment &key output-limit timeout)
   (let* ((directory (notmuch-private-temp-directory))
@@ -268,6 +340,7 @@
 (define-key *global-keymap* "F4" 'lem-yath-notmuch-test-empty)
 (define-key *global-keymap* "F5" 'lem-yath-fetchmail)
 (define-key *global-keymap* "F6" 'lem-yath-notmuch-test-compose-report)
+(define-key *global-keymap* "F7" 'lem-yath-notmuch-test-address-report)
 (define-key *global-keymap* "F8" 'lem-yath-notmuch-test-cleanup-report)
 (define-key *global-keymap* "F9" 'lem-yath-notmuch-test-refusals)
 

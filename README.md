@@ -678,7 +678,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   to archive, `d`/`!`/`=` to toggle deleted/unread/flagged, and `+`/`-` for
   tags; show buffers retain message-level `a`/`x`/`d`/`=`/`+`/`-` plus
   thread-level `A`/`X`. Mutations are bounded direct argv calls and update the
-  read-only view only after Notmuch succeeds
+  read-only view only after Notmuch succeeds. New/reply composition completes
+  `To`, `Cc`, and `Bcc` from recipients in mail sent by the configured Notmuch
+  identities after the ordinary three-character Corfu delay. Lookup is
+  asynchronous, bounded, cancellable, and cached per composition; accepting a
+  candidate replaces only the current comma-separated address token
 - ordinary `.pdf` and `.epub` opens stay inside Lem: PDFs expose bounded
   Poppler text one page at a time, while EPUBs become bounded Markdown with
   chapter navigation. Both are read-only, never visit or overwrite the binary
