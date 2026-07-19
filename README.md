@@ -300,6 +300,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
 - Meson completion with the pinned global, method, and per-call keyword tables,
   Corfu documentation, idle signatures, apostrophe-only strings, and
   structure-aware two-column indentation
+- nginx editing with the pinned double-quote/comment syntax, directive,
+  rewrite-result, variable, constant, and block-context highlighting,
+  backward-scanned four-column indentation, newline-and-indent, and a final
+  newline on save unless EditorConfig explicitly disables it
 - relative line numbers in programming buffers only, matching the Emacs
   `prog-mode` scope while leaving prose and utility buffers clean
 - the current Modus Vivendi Tinted palette, truncated long lines, no global

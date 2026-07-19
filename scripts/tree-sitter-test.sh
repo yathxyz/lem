@@ -150,3 +150,52 @@ else
   printf 'FAIL meson-physical-keyword-argument-completion\n' >&2
   exit 1
 fi
+
+tmux_cmd send-keys -t "$session" C-g Escape
+if ! lem_wait_for "$session" 'NORMAL.*meson.build' 10 >/dev/null; then
+  printf 'FAIL nginx-physical-normal-state-setup\n' >&2
+  lem_capture "$session" >&2 || true
+  exit 1
+fi
+tmux_cmd send-keys -t "$session" F9
+if ! lem_wait_for "$session" 'server \{' 10 >/dev/null; then
+  printf 'FAIL nginx-physical-return-setup\n' >&2
+  lem_capture "$session" >&2 || true
+  exit 1
+fi
+tmux_cmd send-keys -t "$session" A
+if ! lem_wait_for "$session" 'INSERT.*site.conf' 10 >/dev/null; then
+  printf 'FAIL nginx-physical-insert-state-setup\n' >&2
+  lem_capture "$session" >&2 || true
+  exit 1
+fi
+tmux_cmd send-keys -t "$session" Enter
+tmux_cmd send-keys -t "$session" -l 'listen 80'
+tmux_cmd send-keys -t "$session" -H 3b
+if ! lem_wait_for "$session" 'listen 80;' 10 >/dev/null; then
+  printf 'FAIL nginx-physical-line-input\n' >&2
+  lem_capture "$session" >&2 || true
+  exit 1
+fi
+tmux_cmd send-keys -t "$session" F8
+for _ in $(seq 1 40); do
+  if grep -q '^NGINX-PHYSICAL mode=NGINX-MODE indent=4 text=yes newline=yes$' \
+       "$LEM_YATH_TREE_SITTER_REPORT"; then
+    break
+  fi
+  sleep 0.25
+done
+nginx_final_byte=$(
+  tail -c 1 "$LEM_YATH_LANGUAGE_MODE_ROOT/nginx/sites/site.conf" \
+    | od -An -t u1 \
+    | tr -d ' \n'
+)
+if grep -q '^NGINX-PHYSICAL mode=NGINX-MODE indent=4 text=yes newline=yes$' \
+     "$LEM_YATH_TREE_SITTER_REPORT" && [ "$nginx_final_byte" = 10 ]; then
+  printf 'PASS nginx-physical-return-and-final-newline\n'
+else
+  printf 'FAIL nginx-physical-return-and-final-newline\n' >&2
+  grep '^NGINX-PHYSICAL ' "$LEM_YATH_TREE_SITTER_REPORT" >&2 || true
+  lem_capture "$session" >&2 || true
+  exit 1
+fi

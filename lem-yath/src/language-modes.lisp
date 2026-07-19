@@ -138,11 +138,60 @@
   "Match pinned nasm-mode's zero-column forms and four-column code field."
   (if (nasm-zero-column-line-p (line-string point)) 0 4))
 
+(defun nginx-comment-line-p (point)
+  (with-point ((line point))
+    (line-start line)
+    (back-to-indentation line)
+    (eql (character-at line) #\#)))
+
+(defun nginx-brace-depth-before-line (point)
+  "Return nginx-mode's syntactic brace depth at the start of POINT's line."
+  (with-point ((scan (buffer-start-point (point-buffer point)))
+               (limit point))
+    (line-start limit)
+    (loop :with depth := 0
+          :while (point< scan limit)
+          :for character := (character-at scan)
+          :when (and (not (in-string-or-comment-p scan))
+                     (member character '(#\{ #\})))
+            :do (if (eql character #\{)
+                    (incf depth)
+                    (setf depth (max 0 (1- depth))))
+          :do (character-offset scan 1)
+          :finally (return depth))))
+
+(defun nginx-line-indentation (point)
+  (with-point ((line point))
+    (back-to-indentation line)
+    (point-column line)))
+
 (defun nginx-calc-indent (point)
-  (language-simple-indent
-   point 4
-   :open-pattern "\\{[ \\t]*(?:#.*)?$"
-   :close-pattern "^[ \\t]*\\}"))
+  "Reproduce pinned nginx-mode's backward indentation-hint scan."
+  (with-point ((line point))
+    (line-start line)
+    (when (start-buffer-p line)
+      (return-from nginx-calc-indent 0))
+    (with-point ((content line))
+      (back-to-indentation content)
+      (when (eql (character-at content) #\})
+        (return-from nginx-calc-indent
+          (* 4 (max 0 (1- (nginx-brace-depth-before-line line)))))))
+    (with-point ((scan line))
+      (loop
+        (unless (line-offset scan -1)
+          (return 0))
+        (let ((text (line-string scan))
+              (indent (nginx-line-indentation scan)))
+          (cond
+            ((nginx-comment-line-p scan)
+             (when (start-buffer-p scan)
+               (return 0)))
+            ((ppcre:scan "^[ \\t]*\\}" text)
+             (return indent))
+            ((ppcre:scan "^.*\\{[^}]*$" text)
+             (return (+ indent 4)))
+            ((start-buffer-p scan)
+             (return 0))))))))
 
 (defun nushell-calc-indent (point)
   (language-simple-indent
@@ -258,21 +307,34 @@
            :space-chars '(#\Space #\Tab #\Newline)
            :symbol-chars '(#\_ #\- #\$)
            :paren-pairs '((#\( . #\)) (#\{ . #\}) (#\[ . #\]))
-           :string-quote-chars '(#\' #\")
+           :string-quote-chars '(#\")
            :line-comment-string "#")))
     (set-syntax-parser
      table
-     (make-configured-language-tmlanguage
-      :line-comment "#"
-      :strings '("'" "\"")
-      :keywords '("break" "http" "if" "last" "location" "off" "on"
-                  "permanent" "redirect" "server" "upstream")
-      :extra-patterns
-      (list
+     (make-tmlanguage
+      :patterns
+      (make-tm-patterns
+       (lem/language-mode-tools:make-tm-line-comment-region "#")
+       (lem/language-mode-tools:make-tm-string-region "\"")
+       (make-tm-match
+        "^[ \\t]*([A-Za-z09_]+)"
+        :captures (vector nil (make-tm-name 'syntax-keyword-attribute)))
+       (make-tm-match
+        "^[ \\t]*rewrite[ \\t]+.+[ \\t]+(permanent|redirect|break|last);$"
+        :captures
+        (vector nil (make-tm-name 'syntax-function-name-attribute)))
+       (make-tm-match
+        "(\\$[0-9]+)[^0-9]"
+        :captures (vector nil (make-tm-name 'syntax-constant-attribute)))
        (make-tm-match "\\$[A-Za-z0-9_-]+"
                       :name 'syntax-variable-attribute)
-       (make-tm-match "^[ \\t]*[A-Za-z0-9_-]+"
-                      :name 'syntax-keyword-attribute))))
+       (make-tm-match
+        "[ \\t]+(on|off);$"
+        :captures (vector nil (make-tm-name 'syntax-constant-attribute)))
+       (make-tm-match
+        "[A-Za-z0-9_-]+(?:[ \\t]+[^ \\t\\n]+)?[ \\t]+([^ \\t\\n]+)[ \\t]+\\{"
+        :captures
+        (vector nil (make-tm-name 'syntax-function-name-attribute))))))
     table))
 
 (defvar *nushell-syntax-table*
@@ -378,7 +440,7 @@
 (define-configured-language-mode
  meson-mode "Meson" *meson-syntax-table* *meson-mode-hook* 2 "#" meson-calc-indent)
 (define-configured-language-mode
- nginx-mode "nginx" *nginx-syntax-table* *nginx-mode-hook* 4 "#" nginx-calc-indent)
+ nginx-mode "Nginx" *nginx-syntax-table* *nginx-mode-hook* 4 "#" nginx-calc-indent)
 (define-configured-language-mode
  nushell-mode "Nushell" *nushell-syntax-table* *nushell-mode-hook* 2 "#" nushell-calc-indent)
 (define-configured-language-mode
@@ -422,6 +484,15 @@
 
 (define-key *nasm-mode-keymap* "Tab" 'nasm-tab)
 (define-key *nasm-mode-keymap* ":" 'nasm-colon)
+
+(define-editor-variable lem-yath-require-final-newline nil)
+
+(defun configure-nginx-mode-parity ()
+  (setf (variable-value 'lem-yath-require-final-newline) t))
+
+(remove-hook *nginx-mode-hook* 'configure-nginx-mode-parity)
+(add-hook *nginx-mode-hook* 'configure-nginx-mode-parity)
+(define-key *nginx-mode-keymap* "Return" 'lem/language-mode:newline-and-indent)
 
 (defun language-mode-buffer-prefix (buffer limit)
   (with-point ((start (buffer-start-point buffer))

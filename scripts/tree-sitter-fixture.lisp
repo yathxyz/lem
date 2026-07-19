@@ -456,6 +456,47 @@
            (tree-sitter-test-attribute buffer needle))
       (tree-sitter-test-delete-buffer buffer))))
 
+(defun tree-sitter-test-nginx-point-predicate (text needle predicate)
+  (let ((buffer (make-buffer "*nginx-syntax-test*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (nginx-mode)
+           (tree-sitter-test-set-text buffer text)
+           (with-point ((point (buffer-start-point buffer)))
+             (and (search-forward-regexp
+                   point (cl-ppcre:quote-meta-chars needle))
+                  (character-offset point (- (max 1 (floor (length needle) 2))))
+                  (funcall predicate point))))
+      (tree-sitter-test-delete-buffer buffer))))
+
+(defun tree-sitter-test-nginx-highlight (text needle)
+  (let ((buffer (make-buffer "*nginx-highlight-test*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (nginx-mode)
+           (tree-sitter-test-set-text buffer text)
+           (tree-sitter-test-scan buffer)
+           (tree-sitter-test-attribute buffer needle))
+      (tree-sitter-test-delete-buffer buffer))))
+
+(defun tree-sitter-test-key-command (keymap keys)
+  (alexandria:when-let
+      ((prefix
+         (lem-core::keymap-find keymap (lem-core::parse-keyspec keys))))
+    (lem-core::prefix-suffix prefix)))
+
+(defun tree-sitter-test-nginx-normalized-text (properties)
+  (let ((buffer (make-buffer "*nginx-final-newline-test*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (nginx-mode)
+           (tree-sitter-test-set-text buffer "listen 80;")
+           (setf (buffer-value buffer 'lem-yath-editorconfig-properties)
+                 properties)
+           (editorconfig-normalize-buffer buffer)
+           (buffer-text buffer))
+      (tree-sitter-test-delete-buffer buffer))))
+
 (defun tree-sitter-test-meson-completion-items (text)
   (let ((buffer (make-buffer "*meson-completion-test*")))
     (unwind-protect
@@ -591,6 +632,77 @@
        (= expected (tree-sitter-test-indent-result 'meson-mode text))
        (format nil "meson-indents-~a" label)))))
 
+(defun tree-sitter-test-check-nginx-parity ()
+  (tree-sitter-test-check
+   (tree-sitter-test-nginx-point-predicate
+    "set \"$host\";" "$host" #'in-string-p)
+   "nginx-double-quote-string-is-syntactic")
+  (tree-sitter-test-check
+   (not (tree-sitter-test-nginx-point-predicate
+         "set '$host';" "$host" #'in-string-p))
+   "nginx-apostrophe-remains-punctuation")
+  (tree-sitter-test-check
+   (tree-sitter-test-nginx-point-predicate
+    "# comment" "comment" #'in-comment-p)
+   "nginx-hash-comment-is-syntactic")
+  (dolist (entry
+           '(("listen 80;" "listen" lem:syntax-keyword-attribute
+              "directive")
+             ("rewrite ^ /new last;" "last"
+              lem:syntax-function-name-attribute "rewrite-result")
+             ("set $1 value;" "$1" lem:syntax-constant-attribute
+              "numeric-capture")
+             ("set $host value;" "$host" lem:syntax-variable-attribute
+              "named-variable")
+             ("feature on;" "on" lem:syntax-constant-attribute
+              "boolean")
+             ("location /api {" "/api" lem:syntax-function-name-attribute
+              "block-context")
+             ("set '$host';" "$host" lem:syntax-variable-attribute
+              "apostrophe-variable")))
+    (destructuring-bind (text needle expected label) entry
+      (tree-sitter-test-check
+       (eq expected (tree-sitter-test-nginx-highlight text needle))
+       (format nil "nginx-highlights-~a" label))))
+  (tree-sitter-test-check
+   (not (eq 'lem:syntax-variable-attribute
+            (tree-sitter-test-nginx-highlight "# set $host" "$host")))
+   "nginx-comment-suppresses-variable-highlighting")
+  (let ((buffer (make-buffer "*nginx-mode-local-test*")))
+    (unwind-protect
+         (with-current-buffer buffer
+           (nginx-mode)
+           (tree-sitter-test-check
+            (and (variable-value 'lem-yath-require-final-newline)
+                 (eq 'lem/language-mode:newline-and-indent
+                     (tree-sitter-test-key-command
+                      *nginx-mode-keymap* "Return")))
+            "nginx-mode-installs-final-newline-and-return"))
+      (tree-sitter-test-delete-buffer buffer)))
+  (let ((normalized (tree-sitter-test-nginx-normalized-text nil)))
+    (tree-sitter-test-check
+     (string= (format nil "listen 80;~%") normalized)
+     "nginx-mode-requires-a-final-newline"
+     (format nil "normalized=~s" normalized)))
+  (tree-sitter-test-check
+   (string= "listen 80;"
+            (tree-sitter-test-nginx-normalized-text
+             '(("insert_final_newline" . "false"))))
+   "nginx-editorconfig-false-overrides-final-newline")
+  (dolist (entry
+           `(("listen 80;" 0 "first-line")
+             (,(format nil "server {~%listen 80;") 4 "block")
+             (,(format nil "http {~%    server {~%listen 80;") 8 "nested")
+             (,(format nil "server {~%    listen 80;~%}") 0 "close")
+             (,(format nil "server {~%# comment~%listen 80;") 4
+               "comment-scan")
+             (,(format nil "http {~%    server {~%    }~%next;") 4
+               "after-close")))
+    (destructuring-bind (text expected label) entry
+      (tree-sitter-test-check
+       (= expected (tree-sitter-test-indent-result 'nginx-mode text))
+       (format nil "nginx-indents-~a" label)))))
+
 (defun tree-sitter-test-check-language-modes ()
   (tree-sitter-test-check-mode-file
    ".JuStFiLe" 'just-mode :grammar "just" :width 4 :comment "#"
@@ -626,6 +738,7 @@
    :programming t :tabs t)
   (tree-sitter-test-check-language-highlighting)
   (tree-sitter-test-check-meson-parity)
+  (tree-sitter-test-check-nginx-parity)
   (tree-sitter-test-check
    (string= (format nil "    mov~c" #\Tab)
             (tree-sitter-test-nasm-command-result "    mov" 'nasm-tab))
@@ -709,6 +822,30 @@
               (lem/completion-mode::context-popup-menu
                lem/completion-mode::*completion-context*))))))
 
+(define-command tree-sitter-test-nginx-setup () ()
+  (let ((buffer
+          (tree-sitter-test-open-language-file "nginx/sites/site.conf")))
+    (switch-to-buffer buffer)
+    (tree-sitter-test-set-text buffer "server {")
+    (move-point (current-point) (buffer-end-point buffer))))
+
+(define-command tree-sitter-test-nginx-save-state () ()
+  (save-buffer (current-buffer))
+  (let ((indent
+          (with-point ((line (buffer-start-point (current-buffer))))
+            (line-offset line 1)
+            (back-to-indentation line)
+            (point-column line)))
+        (text (buffer-text (current-buffer))))
+    (tree-sitter-test-log
+     "NGINX-PHYSICAL mode=~a indent=~d text=~:[no~;yes~] newline=~:[no~;yes~]"
+     (buffer-major-mode (current-buffer))
+     indent
+     (string= (format nil "server {~%    listen 80;~%") text)
+     (start-line-p (buffer-end-point (current-buffer))))))
+
+(define-key *global-keymap* "F8" 'tree-sitter-test-nginx-save-state)
+(define-key *global-keymap* "F9" 'tree-sitter-test-nginx-setup)
 (define-key *global-keymap* "F10" 'tree-sitter-test-meson-argument-setup)
 (define-key *global-keymap* "F11" 'tree-sitter-test-meson-physical-state)
 (define-key *global-keymap* "F12" 'tree-sitter-test-meson-global-setup)

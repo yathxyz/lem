@@ -505,14 +505,23 @@ On CLI failure, retain every previously applied property and buffer setting."
           (insert-character end #\Newline))))))
 
 (defun editorconfig-normalize-buffer (buffer)
-  (let ((properties (editorconfig-buffer-properties buffer)))
+  (let* ((properties (editorconfig-buffer-properties buffer))
+         (final-newline
+           (editorconfig-property-value properties "insert_final_newline")))
     (when (buffer-value buffer 'lem-yath-editorconfig-trim)
       (editorconfig-trim-whole-buffer buffer))
-    ;; Deliberately mirror Emacs `require-final-newline': false and absent do
-    ;; not remove a newline which is already present.
-    (when (editorconfig-boolean-property
-           buffer properties "insert_final_newline")
-      (editorconfig-ensure-final-newline buffer))))
+    ;; An explicit EditorConfig value overrides a mode default.  False and
+    ;; absent never remove a newline which is already present.
+    (cond
+      ((string= final-newline "true")
+       (editorconfig-ensure-final-newline buffer))
+      ((string= final-newline "false"))
+      ((null final-newline)
+       (when (variable-value 'lem-yath-require-final-newline :buffer buffer)
+         (editorconfig-ensure-final-newline buffer)))
+      (t
+       (editorconfig-boolean-property
+        buffer properties "insert_final_newline")))))
 
 (defun editorconfig-before-save (&optional (buffer (current-buffer)))
   (when (editorconfig-local-file-buffer-p buffer)

@@ -2113,6 +2113,17 @@ line. The package defines no Imenu index, so none is invented here; its F1
 manual lookup is inactive in the audited configuration because neither default
 documentation directory exists.
 
+The nginx mode reproduces the pinned package's double-quote string syntax,
+apostrophe punctuation, hash comments, directive, rewrite-result, numeric and
+named variable, trailing on/off, and block-context highlighting. Its
+four-column indentation uses the package's backward hint scan, including
+comment-only-line skipping and closing-brace behavior. Return inserts a newline
+and indents it, and saves require a final newline unless an explicit
+`insert_final_newline = false` EditorConfig property overrides the mode. The
+pinned package defines neither completion nor Imenu, so Lem-yath invents
+neither. Lem's generic filling layer does not reproduce nginx-mode's
+comment-only auto-fill restriction or its exact paragraph separator variables.
+
 This approximates the configured Emacs `treesit-font-lock-level 3`; it does not
 load injection or locals queries. In particular, captures guarded by
 `#is-not? local` are omitted rather than risking false builtin highlighting.
