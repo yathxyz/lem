@@ -152,6 +152,10 @@
             "${treeSitterGrammars.tree-sitter-javascript}/queries/highlights-jsx.scm"
             "${treeSitterGrammars.tree-sitter-typescript.src}/queries/highlights.scm"
           ];
+          cppHighlights = pkgs.concatText "lem-yath-cpp-highlights.scm" [
+            "${treeSitterGrammars.tree-sitter-c}/queries/highlights.scm"
+            "${treeSitterGrammars.tree-sitter-cpp}/queries/highlights.scm"
+          ];
           treeSitterSpecs = [
             {
               name = "bash";
@@ -160,6 +164,11 @@
             {
               name = "c";
               grammar = treeSitterGrammars.tree-sitter-c;
+            }
+            {
+              name = "cpp";
+              grammar = treeSitterGrammars.tree-sitter-cpp;
+              query = cppHighlights;
             }
             {
               name = "c_sharp";

@@ -21,6 +21,7 @@ export LEM_YATH_PROJECT_OUTLINE_PYTHON="$root/native-imenu.py"
 export LEM_YATH_PROJECT_OUTLINE_PYTHON_WIDE="$root/native-imenu-wide.py"
 export LEM_YATH_PROJECT_OUTLINE_JAVA="$root/NativeImenu.java"
 export LEM_YATH_PROJECT_OUTLINE_C="$root/native-imenu.c"
+export LEM_YATH_PROJECT_OUTLINE_CPP="$root/NativeImenu.cpp"
 export LEM_YATH_PROJECT_OUTLINE_READER_MARKER="$root/reader-evaluated"
 mkdir -p "$HOME" "$WORKDIR" "$root/config" "$root/outside" "$root/malicious"
 
@@ -198,6 +199,41 @@ for line in $(seq 1 90); do
     *) printf '\n' ;;
   esac
 done >"$LEM_YATH_PROJECT_OUTLINE_C"
+
+for line in $(seq 1 100); do
+  case "$line" in
+    3) printf '%s\n' 'enum class Shade { Red, Blue };' ;;
+    8) printf '%s\n' 'union Value { int integer; double real; };' ;;
+    14) printf '%s\n' 'class Outer {' ;;
+    15) printf '%s\n' 'public:' ;;
+    17) printf '%s\n' '  Outer() {}' ;;
+    20) printf '%s\n' '  void method() {}' ;;
+    23) printf '%s\n' '  class Inner {' ;;
+    24) printf '%s\n' '  public:' ;;
+    26) printf '%s\n' '    int inner() { return 1; }' ;;
+    28) printf '%s\n' '  };' ;;
+    30) printf '%s\n' '  int qualified();' ;;
+    32) printf '%s\n' '};' ;;
+    37) printf '%s\n' 'struct Record { int value; };' ;;
+    42) printf '%s\n' 'int global_count = 1;' ;;
+    43) printf '%s\n' 'const char *label = "cpp";' ;;
+    46) printf '%s\n' 'int declared(int value);' ;;
+    49) printf '%s\n' 'namespace demo {' ;;
+    51) printf '%s\n' 'int scoped = 2;' ;;
+    54) printf '%s\n' 'int helper() { return scoped; }' ;;
+    57) printf '%s\n' 'class NamespaceClass {};' ;;
+    59) printf '%s\n' '}' ;;
+    64) printf '%s\n' 'int Outer::qualified() { return 3; }' ;;
+    70) printf '%s\n' 'int free_function() {' ;;
+    71) printf '%s\n' '  int local = 0;' ;;
+    72) printf '%s\n' '  class LocalClass {};' ;;
+    73) printf '%s\n' '  return local;' ;;
+    74) printf '%s\n' '}' ;;
+    82) printf '%s\n' '// class CommentFake { void nope() {} };' ;;
+    84) printf '%s\n' 'const char *decoy_cpp = "class StringFake {};";' ;;
+    *) printf '\n' ;;
+  esac
+done >"$LEM_YATH_PROJECT_OUTLINE_CPP"
 
 for line in $(seq 1 80); do
   case "$line" in
@@ -906,6 +942,138 @@ if invoke_mx imenu 'Index item:'; then
   fi
 else
   fail imenu-c-command 'M-x imenu did not reopen for a function jump'
+fi
+
+send_chord C-c z p
+lem_wait_for "$session" 'enum class Shade' 10 >/dev/null || true
+send_chord C-c z m
+wait_report_count '^MODE file=cpp major=C++-MODE tree=cpp$' 1 || true
+if grep -q '^MODE file=cpp major=C++-MODE tree=cpp$' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-cpp-routing 'C++ suffixes select the distinct mode and C++ grammar'
+else
+  fail imenu-cpp-routing 'the C++ fixture reused C mode or the C grammar'
+fi
+
+send_chord C-c z i
+wait_report_count '^IMENU-INDEX file=cpp count=28$' 1 || true
+cpp_index_ok=1
+for path in \
+  'Enum' \
+  'Enum/Shade' \
+  'Struct' \
+  'Struct/Record' \
+  'Union' \
+  'Union/Value' \
+  'Variable' \
+  'Variable/global_count' \
+  'Variable/label' \
+  'Variable/scoped' \
+  'Variable/decoy_cpp' \
+  'Function' \
+  'Function/Outer' \
+  'Function/method' \
+  'Function/inner' \
+  'Function/helper' \
+  'Function/Outer::qualified' \
+  'Function/free_function' \
+  'Class' \
+  'Class/Outer' \
+  'Class/Outer/ ' \
+  'Class/Outer/Outer' \
+  'Class/Outer/method' \
+  'Class/Outer/Inner' \
+  'Class/Outer/Inner/ ' \
+  'Class/Outer/Inner/inner' \
+  'Class/NamespaceClass' \
+  'Class/LocalClass'; do
+  grep -Fqx "IMENU-PATH file=cpp path=\"$path\"" \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" || cpp_index_ok=0
+done
+cpp_root_order="$(sed -n \
+  's/^IMENU-PATH file=cpp path="\([^/"]*\)"$/\1/p' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | paste -sd, -)"
+if [ "$cpp_index_ok" = 1 ] &&
+   [ "$(report_count '^IMENU-PATH file=cpp ')" -eq 28 ] &&
+   [ "$cpp_root_order" = 'Enum,Struct,Union,Variable,Function,Class' ] &&
+   ! grep -Eq '^IMENU-PATH file=cpp .*(declared|/local"|CommentFake|StringFake|nope)' \
+     "$LEM_YATH_PROJECT_OUTLINE_REPORT"; then
+  pass imenu-cpp-index 'C++ Imenu matches pinned categories, hierarchy, and exclusions'
+else
+  fail imenu-cpp-index 'C++ categories, qualified names, or predicates differed'
+fi
+
+send_chord C-c z b
+if invoke_mx imenu 'Index item:'; then
+  cpp_top="$(lem_capture "$session")"
+  if grep -Fq 'Enum' <<<"$cpp_top" &&
+     grep -Fq 'Struct' <<<"$cpp_top" &&
+     grep -Fq 'Union' <<<"$cpp_top" &&
+     grep -Fq 'Variable' <<<"$cpp_top" &&
+     grep -Fq 'Function' <<<"$cpp_top" &&
+     grep -Fq 'Class' <<<"$cpp_top"; then
+    pass imenu-cpp-presentation 'C++ roots expose every pinned category'
+  else
+    fail imenu-cpp-presentation 'the C++ category prompt differed'
+  fi
+  tmux_cmd send-keys -t "$session" -l Class
+  send_chord Enter
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" -l Outer
+  send_chord Enter
+  sleep 0.4
+  cpp_class="$(lem_capture "$session")"
+  if grep -Fq 'Inner' <<<"$cpp_class" &&
+     grep -Fq 'method' <<<"$cpp_class"; then
+    pass imenu-cpp-hierarchy 'a C++ class opens its self/member hierarchy'
+  else
+    fail imenu-cpp-hierarchy 'the C++ class hierarchy prompt differed'
+  fi
+  send_chord C-g
+else
+  fail imenu-cpp-command 'M-x imenu did not open in the C++ fixture'
+fi
+
+send_chord C-c z b
+send_chord C-c z r
+wait_report_count '^STATE file=cpp line=100 column=0 ' 1 || true
+cpp_origin="$(grep '^STATE file=cpp line=100 column=0 ' \
+  "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+cpp_origin_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+  <<<"$cpp_origin")"
+
+if invoke_mx imenu 'Index item:'; then
+  tmux_cmd send-keys -t "$session" -l Function
+  send_chord Enter
+  sleep 0.3
+  tmux_cmd send-keys -t "$session" -l 'Outer::qualified'
+  send_chord Enter
+  sleep 0.5
+  send_chord C-c z r
+  wait_report_count '^STATE file=cpp line=64 column=0 ' 1 || true
+  cpp_final="$(grep '^STATE file=cpp line=64 column=0 ' \
+    "$LEM_YATH_PROJECT_OUTLINE_REPORT" | tail -1)"
+  cpp_view="$(sed -n 's/^.* view=\([^ ]*\) minor.*$/\1/p' \
+    <<<"$cpp_final")"
+  if grep -q 'pulse=no pulse-stage=none .*pulse-overlays=0' \
+       <<<"$cpp_final" &&
+     [ -n "$cpp_origin_view" ] && [ -n "$cpp_view" ] &&
+     [ "$cpp_origin_view" != "$cpp_view" ]; then
+    pass imenu-cpp-jump 'C++ Imenu lands on a qualified definition without pulse'
+  else
+    fail imenu-cpp-jump "the C++ Imenu destination differed: $cpp_final"
+  fi
+  send_chord C-o
+  sleep 0.3
+  send_chord C-c z r
+  wait_report_count '^STATE file=cpp line=100 column=0 ' 2 || true
+  if [ "$(report_count '^STATE file=cpp line=100 column=0 ')" -ge 2 ]; then
+    pass imenu-cpp-jumplist 'C-o returns from C++ Imenu to its exact origin'
+  else
+    fail imenu-cpp-jumplist 'C++ Imenu did not record one Vi jump'
+  fi
+else
+  fail imenu-cpp-command 'M-x imenu did not reopen for a qualified jump'
 fi
 
 send_chord C-c z 2

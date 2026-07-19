@@ -57,6 +57,10 @@ printf '%s\n' \
   >"$LEM_YATH_LINT_ROOT/main.py"
 printf '%s\n' 'int main(void) { return missing; }' \
   >"$LEM_YATH_LINT_ROOT/main.c"
+printf '%s\n' \
+  '#include <vector>' \
+  'int main() { std::vector<int> values; return missing_cpp; }' \
+  >"$LEM_YATH_LINT_ROOT/main.cpp"
 printf '%s\n' 'if true; then' '  echo nope' \
   >"$LEM_YATH_LINT_ROOT/main.sh"
 printf '%s\n' '{"value": }' >"$LEM_YATH_LINT_ROOT/main.json"

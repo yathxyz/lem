@@ -166,7 +166,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   joins its reader, and reaps the broker; terminal status does not wait for a
   descendant that merely retains inherited stdout
 - Expreg-style `SPC v` region growth through lexical tiers and syntax nodes
-  from every one of the 23 packaged tree-sitter modes, including balanced list
+  from every one of the 24 packaged tree-sitter modes, including balanced list
   interiors inside ordinary and block strings; arbitrary Visual selections use
   their active endpoint and retain contained generated tiers for contraction.
   The configured unbound
@@ -288,7 +288,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   chains; checks run on mode enable, save, newline, or 500 ms idle change,
   reuse the LSP overlay/list/navigation UI, refuse SOPS plaintext, and yield
   diagnostics completely while an LSP workspace owns the buffer
-- automatic per-buffer tree-sitter highlighting from 23 packaged grammar/query
+- automatic per-buffer tree-sitter highlighting from 24 packaged grammar/query
   pairs across existing language modes, with predicate-aware capture
   precedence, Unicode-safe reparsing, and the original mode parser as fallback;
   indentation, LSP, and structural editing remain owned by their normal modes
@@ -416,7 +416,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   optional Lisp-v2 connections remain globally selected when loaded
 - generic `M-x imenu` for Eglot document symbols, Lisp-family definitions,
   native Org headings, native Markdown headings and footnotes, and nested
-  Python functions/classes plus categorized Java and C declarations when no
+  Python functions/classes plus categorized Java, C, and C++ declarations when no
   ready LSP symbol provider is available, with GNU Imenu's successive hierarchy
   prompts, Prescient filtering, exact source placement, configured
   recenter-only feedback, and Vi `C-o` return

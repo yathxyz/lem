@@ -92,7 +92,7 @@
      "deterministic-bundle-is-present"
      root)
     (tree-sitter-test-check
-     (and (= 23 (length *tree-sitter-specs*))
+     (and (= 24 (length *tree-sitter-specs*))
           (every
            (lambda (spec)
              (and (probe-file (tree-sitter-spec-parser-path spec))

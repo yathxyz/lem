@@ -1265,10 +1265,5 @@
 (define-key *lint-command-keymap* "p" 'lem-yath-previous-diagnostic)
 (define-key *lint-command-keymap* "l" 'lem-yath-list-diagnostics)
 
-;; Lem's bundled C mode omits common C++ suffixes even though the same grammar
-;; and clang-format integration handle them adequately.
-(define-file-type ("cc" "cp" "cpp" "cxx" "c++" "hh" "hpp" "hxx" "h++")
-  lem-c-mode:c-mode)
-
 (lint-install-hooks)
 (initialize-editor-feature 'lint-initialize-editor)

@@ -425,14 +425,20 @@ Emacs's ancestor-based top-level predicate, direct function prototypes remain
 excluded, multi-declarator statements retain their first declarator, and
 function definitions jump to the full node start, including attributes.
 Nested/local declarations and comment/string decoys stay excluded.
+Native `.cc`, `.cpp`, `.cxx`, and C++ header buffers now use a distinct
+`c++-mode` and packaged C++ grammar rather than borrowing C parsing. Their
+index adds the pinned `Class` category: nested classes and in-class function
+definitions form sparse subtrees with literal-space self entries, while
+qualified out-of-class definitions keep names such as `Outer::qualified`.
+Namespace declarations remain visible according to Emacs's predicates, and
+local classes remain Class entries exactly as in the pinned mode.
 
 Acceptance records one Vi jumplist entry and runs the configured Imenu feedback:
 recenter only, with no Consult Pulsar pulse. `scripts/lsp-project-test.sh` and
 `scripts/project-outline-test.sh` drive the command through physical M-x,
 successive Return selections, exact target placement, viewport change, silent
 feedback, folded Org reveal, and `C-o` return. Native indices for other
-non-LSP modes are not yet implemented; C++ also still needs distinct mode and
-grammar routing rather than being parsed as C.
+non-LSP modes are not yet implemented.
 
 `lem-yath/src/annotations.lisp` supplies a bounded Marginalia-style layer for
 the daily prompt categories. Commands show active bindings and their first
@@ -2012,9 +2018,9 @@ below but does not automatically wire it into language modes.
 ### Lem-yath automatic policy — `lem-yath/src/tree-sitter.lisp`
 
 The installed wrapper exports a deterministic bundle containing a parser and
-`highlights.scm` query for **Bash, C, C#, Clojure, CSS, Go, HTML, Java,
+`highlights.scm` query for **Bash, C, C++, C#, Clojure, CSS, Go, HTML, Java,
 GDScript, JavaScript, JSON, Just, Lua, Markdown, Nix, Nu, Python, Rust, TOML,
-TypeScript, TSX, Typst, and YAML** (23 grammar/query pairs). Eligible buffers automatically receive a
+TypeScript, TSX, Typst, and YAML** (24 grammar/query pairs). Eligible buffers automatically receive a
 fresh parser when their existing Lem major mode has a corresponding entry.
 File-backed buffers are eligible regardless of name; fileless buffers whose
 names begin with a space or `*` are excluded, matching the configured Emacs

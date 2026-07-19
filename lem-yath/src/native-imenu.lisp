@@ -581,7 +581,9 @@ this function consumes NODE and every named-child handle it obtains."
   '("identifier" "field_identifier" "attributed_declarator"
     "parenthesized_declarator" "pointer_declarator"
     "reference_declarator" "function_declarator" "array_declarator"
-    "init_declarator"))
+    "init_declarator" "qualified_identifier"
+    "structured_binding_declarator" "template_function"
+    "template_method" "operator_name" "destructor_name"))
 
 (defun imenu-c-first-named-child-of-types (node types)
   "Return NODE's first direct named child whose type is in TYPES."
@@ -631,7 +633,7 @@ this function consumes NODE and every named-child handle it obtains."
            (delete-tree-sitter-node declarator)))))
     (t t)))
 
-(defun imenu-c-declarator-name (buffer node)
+(defun imenu-c-declarator-name (buffer node &optional qualified-p)
   "Return pinned c-ts-mode's identifier for declarator NODE."
   (let ((type (tree-sitter:node-type node)))
     (cond
@@ -640,7 +642,7 @@ this function consumes NODE and every named-child handle it obtains."
        (let ((child (tree-sitter:node-named-child node 0)))
          (when child
            (unwind-protect
-                (imenu-c-declarator-name buffer child)
+                (imenu-c-declarator-name buffer child qualified-p)
              (delete-tree-sitter-node child)))))
       ((member type '("pointer_declarator" "reference_declarator")
                :test #'string=)
@@ -648,7 +650,7 @@ this function consumes NODE and every named-child handle it obtains."
                      node (1- (tree-sitter:node-child-count node)))))
          (when child
            (unwind-protect
-                (imenu-c-declarator-name buffer child)
+                (imenu-c-declarator-name buffer child qualified-p)
              (delete-tree-sitter-node child)))))
       ((member type '("function_declarator" "array_declarator"
                       "init_declarator")
@@ -656,8 +658,10 @@ this function consumes NODE and every named-child handle it obtains."
        (let ((child (imenu-c-declarator-child node)))
          (when child
            (unwind-protect
-                (imenu-c-declarator-name buffer child)
+                (imenu-c-declarator-name buffer child qualified-p)
              (delete-tree-sitter-node child)))))
+      ((and qualified-p (string= type "qualified_identifier"))
+       (tree-sitter-node-text buffer node))
       ((member type '("identifier" "field_identifier") :test #'string=)
        (tree-sitter-node-text buffer node)))))
 
@@ -674,14 +678,15 @@ this function consumes NODE and every named-child handle it obtains."
     (when child
       (unwind-protect
            (if declarator-p
-               (imenu-c-declarator-name buffer child)
+               (imenu-c-declarator-name buffer child t)
                (tree-sitter-node-text buffer child))
         (delete-tree-sitter-node child)))))
 
-(defun imenu-c-entry-candidate (buffer node category name children)
+(defun imenu-c-entry-candidate
+    (buffer node language category name children)
   (let* ((point (imenu-tree-sitter-node-point buffer node))
-         (detail (format nil "[C ~a] line ~d"
-                         category (line-number-at-point point))))
+         (detail (format nil "[~a ~a] line ~d"
+                         language category (line-number-at-point point))))
     (if children
         (make-imenu-candidate
          :label name
@@ -697,10 +702,15 @@ this function consumes NODE and every named-child handle it obtains."
          :detail detail
          :point point))))
 
-(defun imenu-c-walk-category (buffer node category node-type depth)
-  "Return NODE's sparse C forest for CATEGORY and consume NODE."
+(defun imenu-c-walk-category
+    (buffer node language category node-types valid-function depth)
+  "Return NODE's sparse C-family forest for CATEGORY and consume NODE."
   (unwind-protect
-       (let ((matching-p (string= (tree-sitter:node-type node) node-type))
+       (let ((matching-p
+               (if (listp node-types)
+                   (member (tree-sitter:node-type node) node-types
+                           :test #'string=)
+                   (string= (tree-sitter:node-type node) node-types)))
              (children nil))
          (when (< depth *imenu-tree-sitter-depth*)
            (dotimes (index (tree-sitter:node-named-child-count node))
@@ -709,12 +719,12 @@ this function consumes NODE and every named-child handle it obtains."
                  (setf children
                        (nconc children
                               (imenu-c-walk-category
-                               buffer child category node-type
-                               (1+ depth))))))))
-         (if (and matching-p (imenu-c-valid-p node category))
+                               buffer child language category node-types
+                               valid-function (1+ depth))))))))
+         (if (and matching-p (funcall valid-function node category))
              (list
               (imenu-c-entry-candidate
-               buffer node category
+               buffer node language category
                (or (imenu-c-node-name buffer node) "Anonymous")
                children))
              children))
@@ -729,13 +739,63 @@ this function consumes NODE and every named-child handle it obtains."
                 :for children :=
                   (imenu-c-walk-category
                    buffer (tree-sitter:tree-root-node tree)
-                   category node-type 0)
+                   "C" category node-type #'imenu-c-valid-p 0)
                 :when children
                   :collect (make-imenu-candidate
                             :label category
                             :children children))))
     (error (condition)
       (log:warn "C Imenu indexing failed for ~a: ~a"
+                (buffer-name buffer) condition)
+      nil)))
+
+;;; --- c++-ts-mode --------------------------------------------------------
+
+(defparameter *imenu-c++-settings*
+  '(("Enum" . "enum_specifier")
+    ("Struct" . "struct_specifier")
+    ("Union" . "union_specifier")
+    ("Variable" . "declaration")
+    ("Function" . "function_definition")
+    ("Class" . ("class_specifier" "function_definition"))))
+
+(defun imenu-c++-function-in-class-p (node)
+  (let ((parent (tree-sitter:node-parent node)))
+    (loop :while parent
+          :do (let ((next-parent nil))
+                (unwind-protect
+                     (progn
+                       (when (string= (tree-sitter:node-type parent)
+                                      "class_specifier")
+                         (return-from imenu-c++-function-in-class-p t))
+                       (setf next-parent (tree-sitter:node-parent parent)))
+                  (delete-tree-sitter-node parent))
+                (setf parent next-parent)))
+    nil))
+
+(defun imenu-c++-valid-p (node category)
+  (if (string= category "Class")
+      (or (string= (tree-sitter:node-type node) "class_specifier")
+          (and (string= (tree-sitter:node-type node) "function_definition")
+               (imenu-c++-function-in-class-p node)))
+      (imenu-c-valid-p node category)))
+
+(defun imenu-c++-candidates (buffer)
+  "Match pinned c++-ts-mode's categorized tree-sitter Imenu index."
+  (handler-case
+      (with-imenu-tree-sitter-candidate-points
+        (alexandria:when-let ((tree (imenu-tree-sitter-current-tree buffer)))
+          (loop :for (category . node-types) :in *imenu-c++-settings*
+                :for children :=
+                  (imenu-c-walk-category
+                   buffer (tree-sitter:tree-root-node tree)
+                   "C++" category node-types #'imenu-c++-valid-p 0)
+                :when children
+                  :collect (make-imenu-candidate
+                            :label category
+                            :children children))))
+    (error (condition)
+      (log:warn "C++ Imenu indexing failed for ~a: ~a"
                 (buffer-name buffer) condition)
       nil)))
 
@@ -747,3 +807,4 @@ this function consumes NODE and every named-child handle it obtains."
 (register-imenu-native-provider
  'lem-java-mode:java-mode 'imenu-java-candidates)
 (register-imenu-native-provider 'lem-c-mode:c-mode 'imenu-c-candidates)
+(register-imenu-native-provider 'c++-mode 'imenu-c++-candidates)

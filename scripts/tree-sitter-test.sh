@@ -91,5 +91,5 @@ if ! grep -q '^SUMMARY ' "$LEM_YATH_TREE_SITTER_REPORT" 2>/dev/null; then
 fi
 
 sed -n '1,320p' "$LEM_YATH_TREE_SITTER_REPORT"
-grep -q '^SUMMARY PASS failures=0 grammars=23/23$' \
+grep -q '^SUMMARY PASS failures=0 grammars=24/24$' \
   "$LEM_YATH_TREE_SITTER_REPORT"

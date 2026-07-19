@@ -381,7 +381,7 @@
       ((eq mode 'lem-python-mode:python-mode) :python)
       ((eq mode 'lem-go-mode:go-mode) :go)
       ((eq mode 'lem-rust-mode:rust-mode) :rust)
-      ((eq mode 'lem-c-mode:c-mode)
+      ((typep (ensure-mode-object mode) 'lem-c-mode:c-mode)
        (if (member type '("cc" "cp" "cxx" "cpp" "c++" "hh" "hpp" "hxx")
                    :test #'string=)
            :cpp

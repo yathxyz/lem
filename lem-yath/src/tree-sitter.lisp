@@ -20,6 +20,8 @@
    (make-tree-sitter-spec
     :mode 'lem-c-mode:c-mode :language "c")
    (make-tree-sitter-spec
+    :mode 'c++-mode :language "cpp")
+   (make-tree-sitter-spec
     :mode 'csharp-mode :language "c_sharp")
    (make-tree-sitter-spec
     :mode 'lem-clojure-mode:clojure-mode :language "clojure")

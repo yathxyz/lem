@@ -44,6 +44,10 @@
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_C")))
 
+(defvar *project-outline-test-cpp*
+  (uiop:parse-native-namestring
+   (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_CPP")))
+
 (defvar *project-outline-test-reader-marker*
   (uiop:parse-native-namestring
    (uiop:getenv "LEM_YATH_PROJECT_OUTLINE_READER_MARKER")))
@@ -84,6 +88,8 @@
                   file *project-outline-test-java*)) "java")
       ((and file (uiop:pathname-equal
                   file *project-outline-test-c*)) "c")
+      ((and file (uiop:pathname-equal
+                  file *project-outline-test-cpp*)) "cpp")
       (t "other"))))
 
 (defun project-outline-test-command-name (state)
@@ -234,6 +240,14 @@
              (project-outline-test-log-imenu-candidate candidate nil)))
       (imenu-delete-candidates candidates))))
 
+(define-command lem-yath-test-project-outline-mode () ()
+  (project-outline-test-log
+   "MODE file=~a major=~a tree=~a"
+   (project-outline-test-file-label (current-buffer))
+   (buffer-major-mode (current-buffer))
+   (or (buffer-value (current-buffer) 'lem-yath-tree-sitter-language)
+       "none")))
+
 (define-command lem-yath-test-project-outline-bottom () ()
   (let ((point (buffer-point (current-buffer))))
     (move-point point (buffer-end-point (current-buffer)))
@@ -282,6 +296,10 @@
   (lem-lsp-mode:without-lsp-mode ()
     (find-file *project-outline-test-c*)))
 
+(define-command lem-yath-test-project-outline-cpp () ()
+  (lem-lsp-mode:without-lsp-mode ()
+    (find-file *project-outline-test-cpp*)))
+
 (define-command lem-yath-test-project-outline-imenu-count () ()
   (let ((candidates (imenu-candidates (current-buffer))))
     (unwind-protect
@@ -309,6 +327,7 @@
   (define-key keymap "C-c z r" 'lem-yath-test-project-outline-report)
   (define-key keymap "C-c z c" 'lem-yath-test-project-outline-candidates)
   (define-key keymap "C-c z i" 'lem-yath-test-project-outline-imenu-index)
+  (define-key keymap "C-c z m" 'lem-yath-test-project-outline-mode)
   (define-key keymap "C-c z b" 'lem-yath-test-project-outline-bottom)
   (define-key keymap "C-c z 1" 'lem-yath-test-project-outline-main)
   (define-key keymap "C-c z 2" 'lem-yath-test-project-outline-outside)
@@ -320,6 +339,7 @@
   (define-key keymap "C-c z 8" 'lem-yath-test-project-outline-python-wide)
   (define-key keymap "C-c z 9" 'lem-yath-test-project-outline-java)
   (define-key keymap "C-c z 0" 'lem-yath-test-project-outline-c)
+  (define-key keymap "C-c z p" 'lem-yath-test-project-outline-cpp)
   (define-key keymap "C-c z w" 'lem-yath-test-project-outline-imenu-count)
   (define-key keymap "C-c z f" 'lem-yath-test-project-outline-fold-org))
 

@@ -70,13 +70,19 @@
       (erase-buffer buffer)
       (insert-string (buffer-start-point buffer) text))))
 
-(defun lint-test-run-case (label relative expected-checkers expected-checker)
+(defun lint-test-run-case
+    (label relative expected-checkers expected-checker &optional expected-mode)
   (let ((buffer nil)
         (request nil))
     (unwind-protect
          (progn
            (let ((lem-lsp-mode::*disable* t))
              (setf buffer (find-file-buffer (lint-test-file relative))))
+           (when expected-mode
+             (lint-test-check
+              (eq expected-mode (buffer-major-mode buffer))
+              (format nil "~a-selects-mode" label)
+              (buffer-major-mode buffer)))
            (with-current-buffer buffer
              (when (mode-active-p buffer 'lem-yath-lint-mode)
                (lem-yath-lint-mode nil)))
@@ -249,6 +255,7 @@
 
 (defun lint-test-run-real-checkers ()
   (lint-test-run-case "c" "main.c" '(:clang) :clang)
+  (lint-test-run-case "cpp" "main.cpp" '(:clang) :clang 'c++-mode)
   (lint-test-run-case "shell" "main.sh" '(:bash) :bash)
   (lint-test-run-case "json" "main.json" '(:json) :json)
   (lint-test-run-case "nix" "default.nix" '(:nix) :nix)
