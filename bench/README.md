@@ -387,9 +387,17 @@ under `bench/results/` (gitignored).
 |------|-------------|--------|----------|--------------------------|---------------|--------------|---------|-------|
 | 2026-07-18 | ex44 / i5-13500 / 20c | fd0e83a6 | 30 min (1800 s) | 659→692 MB med-of-halves, **2.20 MB/min** (raw first/last 411→777 MB; 181 samples) | 305→345 MB, **2.61 MB/min** (130 samples) | 131.1 ms (348 GCs) | **LEAK SUSPECT** | First full soak (Milestone P3, PF-8), against the real ncurses `./lem` at `fd0e83a6`, cycling key analogs of the seven PF-5 workload actions over the 10 MB `mixed-10m` file with 12 s idle rests. **Trend-only, NOT a commit gate** (PF-8, like all T3 wall/soak numbers — only the in-image keystroke/startup budgets ever hard-fail). Both signals clear the 1 MB/min threshold so the detector flags: recorded here as a **P4 backlog candidate** (leak triage — P5/optimization must wait for the P4 grounding report, so it is NOT investigated or fixed here). The DU floor (retained-memory lower envelope) rising ~40 MB over 30 min is the sensitive signal; RSS corroborates. To triage at P4: heap still reaching steady working set over the run vs. genuine per-burst retention. The detector *itself* is validated by `soak-self-test.sh` (200 s ×2 arms): CLEAN arm → CLEAN (exit 0, DU floor 0.02 MB/min, RSS −33 MB/min munmap dip correctly not flagged), injected-leak arm → LEAK SUSPECT (exit 1, DU floor 26.25 MB/min) — so PF-8's done-when (one full soak recorded + analyzed **and** the detector catches a deliberately-injected leak) is satisfied. Artifacts (CSV, dump copy, analysis) under `bench/results/` (gitignored); sandbox + private tmux socket torn down by the harness trap. |
 
+### Bug fixes (out-of-band correctness, NOT P5 optimization entries)
+
+| Item | Date | Fingerprint | Evidence | Change | Before → After | Notes |
+|------|------|-------------|----------|--------|----------------|-------|
+| OPT-1 crash fix | 2026-07-19 | ex44 / i5-13500 / 20c | P1/P2/P3 deviations (the ~24k redisplay cliff); mapping probe at the pre-fix HEAD: `redraw-buffer` of a single line overflows at **50 651** chars (wrap off) / **50 653** (wrap on), backtrace ~99% `ACL2::K-SUM` frames; `redraw-display` full command path crashed at **24 000** (P2 measurement) | `verified/layout.lisp`: `k-sum`, `k-firstn`, `k-clip-chars` — the three render-path recursions with depth = line length — converted to ACL2 `mbe` with tail-recursive accumulator `:exec` twins (`k-sum-acc`, `k-firstn-acc`, `k-clip-chars-acc`), proved equal to the unchanged `:logic` recursions at guard verification; shim learned `mbe` (expands to `:exec`, matching ACL2's guard-verified execution) + `verify-guards` (no-op) — see `verified/README.md`. All 12 books recertified; no theorem statement changed | crash at ≥ 24k chars (editor CRASH, deterministic) → **500k-char single line renders clean** in every config (wrap on/off × cursor start/mid/end); 300k pinned by the new rove suite `tests/pbt/long-line-render.lisp` (kernel-oracle content equality + exec-twin = naive-recursion PBT) | **Bug fix, not an optimization** — P5 remains gated on the T0 field week. T1/T2/T3 long-line workload sizes and budgets unchanged (16 KB / 50 KB caps kept for baseline comparability; see the updated deviation notes). t1/t2 gates PASS vs the committed baselines after the fix (no entry outside band) |
+
 ### Optimizations (OPT-n)
 
-_None yet. P5 must not start before the P4 grounding report (SPEC-PERF)._
+_None yet. P5 must not start before the P4 grounding report (SPEC-PERF). (The
+OPT-1 crash was fixed out-of-band as a correctness bug fix — see the Bug fixes
+table above — not as the start of the P5 loop.)_
 
 | Item | Date | Evidence (T0/T2 + profile) | Change | Before → After | Notes |
 |------|------|----------------------------|--------|----------------|-------|
@@ -540,26 +548,31 @@ Ranked by **measured impact × confidence**, with **correctness outranking pure
 throughput** (priority order: Correctness first). Every item cites its motivating
 artifact; all remain provisional pending the T0 reconciliation in §3.
 
-**OPT-1 — Long-line redisplay stack-overflow cliff (correctness-grade).**
-- *Measurement:* a single text object ≳ **24 000 chars** overflows the default SBCL
-  control stack during redisplay — deterministic (recursion depth = line length),
-  confirmed by three independent harness findings: the P1 `redisplay/long-line`
+**OPT-1 — Long-line redisplay stack-overflow cliff (correctness-grade). — ✅ FIXED
+2026-07-19 (out-of-band bug fix; see the *Bug fixes* ledger table).**
+- *Measurement (historical):* a single text object ≳ **24 000 chars** overflowed the
+  default SBCL control stack during redisplay — deterministic (recursion depth = line
+  length), confirmed by three independent harness findings: the P1 `redisplay/long-line`
   deviation (crash between 50 k and 100 k chars), the P2 `long-line` deviation (renders
   at 23 000, crashes at 24 000 with wrap-on + cursor-at-end), and the T3 `longline`
-  scenario cap. The shipping `./lem` binary uses the same default stack, so **this is
+  scenario cap. The shipping `./lem` binary uses the same default stack, so **this was
   a real editor crash**, not a bench artifact. The same frame shows as raw CPU: `K-SUM`
   #10 (long-line 7.5% / scroll 5.0% self).
-- *Root cause:* `verified/layout.lisp` `k-obj-width` → `K-SUM`, a **non-tail** left
-  fold over the object's full per-character width list.
-- *Hypothesis:* rewrite `K-SUM`/`k-obj-width` as a tail-recursive accumulator (or a
-  bounded iterative width sum) in the certified book. Lifts the cap entirely *and*
-  removes the non-tail fold from the hot width path (a bonus CPU win on long lines).
-  Expected magnitude: eliminates the crash class; small-to-moderate CPU improvement on
-  long-line/scroll.
-- *Risk / verification:* touches `verified/` → **one-source recertify** (`run-proofs.sh`)
-  and the kernel conformance PBT (`run-tests.sh`) are the behavior-preservation proof;
-  re-enable a > 24 000-char render in the T1/T2/T3 long-line harnesses once the cap
-  lifts.
+- *Root cause (as mapped by the fix's probe):* three `verified/layout.lisp` recursions
+  with depth = line length on the render path — `k-obj-width` → `K-SUM` (every width
+  measurement; the frame filling ~99% of the overflow backtrace), `K-FIRSTN` (explode
+  halving, wrap path), `K-CLIP-CHARS` (per-char clip scan, horizontal-scroll path).
+- *Fix:* the three folds are now ACL2 `mbe` definitions — unchanged `:logic` recursion
+  (every theorem re-certifies), tail-recursive accumulator `:exec` twins proved equal
+  at guard verification and executed in-image via the shim's `mbe` reinterpretation.
+  Before → after: crash at ≥ 24k (command path) / 50 650 (`redraw-buffer`) → clean at
+  500k in every wrap/cursor config; 300k pinned by `tests/pbt/long-line-render.lisp`.
+- *Verification (done):* full 12-book recertification (`run-proofs.sh`), full rove suite
+  incl. layout-conformance + screen-projection + the new long-line pin
+  (`run-tests.sh`), t1 + t2 PASS vs the committed baselines, `make ncurses`. Bench
+  long-line sizes/budgets deliberately unchanged (perf-motivated now, not
+  crash-motivated — resizing awaits OPT-2/OPT-6 and the T0-reconciled report). The
+  residual *CPU* cost of the width path stays tracked by OPT-2/OPT-6.
 
 **OPT-2 — String-width redisplay path (largest CPU share).**
 - *Measurement:* ~**55–60% of weighted cross-workload CPU** (§2, table ranks
@@ -765,6 +778,11 @@ the spec.
   path feeding the layout kernel) non-recursive would lift the cap. Measuring
   under an artificially enlarged stack was rejected — it would report a number
   the shipping editor cannot actually achieve.
+  **UPDATE 2026-07-19: the crash is FIXED** (OPT-1 bug fix — mbe tail-recursive
+  layout folds; see the *Bug fixes* ledger table and
+  `tests/pbt/long-line-render.lisp`, which pins a 300k-char render). The 50 KB
+  entry size is **kept** for baseline comparability — a perf/rebaseline
+  decision pending OPT-2/OPT-6, no longer a crash cap.
 
 - **`syntax` loads `extensions/lisp-mode/grammar.lisp` directly, not the whole
   `lem-lisp-mode` system** (PF-4). PF-4 wants the "tmlanguage path" over a large
@@ -850,6 +868,10 @@ the spec.
   margin below the 24 000-char cliff. The kernel is **not** fixed here (out of
   P2 scope); the ≥ ~24 000-char single-object redisplay stays the OPT-candidate
   the P1 ledger already records.
+  **UPDATE 2026-07-19: the cliff is FIXED** (OPT-1 bug fix, *Bug fixes* ledger
+  table; 300k-char render pinned by `tests/pbt/long-line-render.lisp`). The
+  16 KB workload size and its committed baseline are **kept** — comparability,
+  not a crash cap; resizing awaits OPT-2/OPT-6.
 
 - **The T2 result schema extends the PF-3 entry with three additive fields**
   (PF-5). PF-3 defines one entry shape — `{name, unit, min, median, p90,
@@ -975,6 +997,10 @@ the spec.
   (its p50 is 8 ms, redisplay-dominated) without crashing the driven editor. The
   kernel is not fixed here (out of P3 scope); the ≥ ~24 000-char single-object
   redisplay remains the OPT-candidate the P1/P2 ledger already records.
+  **UPDATE 2026-07-19: the cliff is FIXED** (OPT-1 bug fix, *Bug fixes* ledger
+  table). The 16 KB scenario is **kept** so the longline p95 trend rows stay
+  comparable; resizing is a perf decision for OPT-2/OPT-6, no longer a crash
+  cap.
 
 - **Keys are driven ONE AT A TIME (~25 ms apart), not in fast bursts** (PF-7).
   PF-7 says "small sleep between bursts so the editor keeps up". The editor
@@ -1092,3 +1118,6 @@ the spec.
   The soak workload never constructs a single line past the ~24 000-char
   redisplay stack-exhaustion cliff (it edits within the `mixed-10m` corpus and
   inserts short strings), so the 30-min run cannot hit the known crash.
+  **UPDATE 2026-07-19: the cliff is FIXED** (OPT-1 bug fix, *Bug fixes* ledger
+  table); the soak workload is unchanged (it was shaped around realism, and the
+  avoidance note is now historical rather than load-bearing).

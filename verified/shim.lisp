@@ -45,6 +45,24 @@
 ;;;;                             execution mv IS CL `values` and mv-let IS
 ;;;;                             `multiple-value-bind` (ACL2 axioms.lisp raw-mode
 ;;;;                             definitions); reinterpreted identically here.
+;;;;   7. (mbe :logic L :exec E) -- ACL2 must-be-equal: L is the definitional
+;;;;                             axiom (what every defthm is proved about), E is
+;;;;                             proved EQUAL to L on guarded inputs at guard
+;;;;                             verification, and guard-verified ACL2 execution
+;;;;                             runs E. Reinterpreted as expansion to E --
+;;;;                             exactly ACL2's guard-verified raw-Lisp behavior
+;;;;                             (books use mbe only in guard-verified defuns).
+;;;;                             This is the sanctioned stack-safety idiom: a
+;;;;                             non-tail :logic fold with a tail-recursive
+;;;;                             accumulator :exec twin executes iteratively
+;;;;                             in-image (precedent: the iterative acl2::len
+;;;;                             below). SBCL's compiling load eliminates the
+;;;;                             twins' tail calls (verified empirically by
+;;;;                             tests/pbt/long-line-render.lisp at 500k depth).
+;;;;   8. (verify-guards ...)  -- proof-only event discharging guard + mbe
+;;;;                             equality obligations deferred from a defun with
+;;;;                             :verify-guards nil. No-op macro, body NOT
+;;;;                             evaluated (like defthm/in-theory).
 ;;;;
 ;;;; ACL2 BASE-FUNCTION WHITELIST: the small set of ACL2 built-ins (natp, len,
 ;;;;   true-listp, ...) that are ACL2 defuns, do NOT exist in CL, and are
@@ -134,6 +152,20 @@
 
 (defmacro acl2::mv-let (vars form &rest body)
   `(multiple-value-bind ,vars ,form ,@body))
+
+;;; ---- (7) mbe: guard-verified dual bodies ----------------------------------
+;;; See header item 7: expansion to the :exec branch matches ACL2's own
+;;; guard-verified raw-Lisp execution; ACL2 certification proves
+;;; :logic = :exec on guarded inputs (the mbe guard obligation), so the
+;;; in-image behavior is the certified one.
+(defmacro acl2::mbe (&key logic exec)
+  (declare (ignore logic))
+  exec)
+
+;;; ---- (8) verify-guards: proof-only, no-op, body NOT evaluated -------------
+(defmacro acl2::verify-guards (&rest ignored)
+  (declare (ignore ignored))
+  nil)
 
 ;;; ---- ACL2 base-function whitelist ---------------------------------------
 ;;; Define ONLY built-ins actually used by some book's exec path. Each is a

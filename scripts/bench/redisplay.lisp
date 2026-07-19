@@ -18,17 +18,17 @@
 ;;;;   redisplay/many-overlay -- 300 lines with 1000 registered overlays
 ;;;;
 ;;;; DEVIATION (recorded in bench/README.md): the long-line buffer is 50 KB, not
-;;;; the 200 KB of PF-4's edit/points long line.  Redisplaying a single text
-;;;; object of >= ~100 000 chars exhausts the default control stack: the certified
-;;;; `k-clip'/`k-wrap' path computes the object's total width via `k-obj-width' ->
-;;;; `k-sum', a NON-tail fold over the object's whole per-char width list, so its
-;;;; recursion depth is the line length.  (A plain single line renders fine at
-;;;; 50 000 chars and stack-overflows by 100 000 on this build's default stack.)
-;;;; 50 KB sits comfortably below that boundary, still exercises the long-line
-;;;; clip path (a single ~50 000-wide text object clipped to the 200-col window),
-;;;; and is gate-stable.  The 200 KB single-object redisplay is logged as an
-;;;; OPT-candidate finding in the ledger, not benchmarked here (it would crash
-;;;; the suite).
+;;;; the 200 KB of PF-4's edit/points long line.  HISTORICAL: when this entry was
+;;;; sized, redisplaying a single text object of >= ~50 650 chars exhausted the
+;;;; default control stack (the certified layout folds `k-sum'/`k-firstn'/
+;;;; `k-clip-chars' recursed non-tail with depth = line length).  That crash is
+;;;; FIXED (OPT-1 bug fix, bench/README.md ledger): the folds are mbe
+;;;; tail-recursive :exec twins, and a 300k-char render is pinned crash-free by
+;;;; tests/pbt/long-line-render.lisp.  The 50 KB size is KEPT for baseline
+;;;; comparability -- the committed median/band were measured at this size, and
+;;;; the entry's job (the single-huge-object clip path) does not need a longer
+;;;; line; resizing it is a perf/rebaseline decision for OPT-2/OPT-6, not a
+;;;; crash cap.
 ;;;;
 ;;;; The recording interface is installed as the process implementation once at
 ;;;; load time (the timed op runs outside any `with-recording-interface' dynamic

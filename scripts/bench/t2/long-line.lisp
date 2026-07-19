@@ -8,22 +8,18 @@
 ;;;;
 ;;;; -------------------------------------------------------------------------
 ;;;; SIZE CAP (documented deviation -- see bench/README.md): the line is 16 KB
-;;;; (16 000 chars), NOT the 80 KB the P2 task text names.  Rendering a single
-;;;; text object of that length EXHAUSTS THE DEFAULT CONTROL STACK: the certified
-;;;; clip/wrap layout path (verified/layout.lisp `k-obj-width' -> `k-sum') is a
-;;;; NON-TAIL fold whose recursion depth equals the line length.  Measured on
-;;;; this build's default control stack, driving the real command path
-;;;; (`redraw-display' with wrap ON and the cursor at end-of-line -- the deepest
-;;;; case): 23 000 chars render fine, 24 000 chars STACK-OVERFLOW (deterministic,
-;;;; since depth = line length).  That boundary is LOWER than the T1 redisplay
-;;;; entry's 50 KB because this workload exercises the full editing path
-;;;; (redraw-display + wrap-on + cursor-at-end), which recurses deeper than the
-;;;; T1 entry's direct `redraw-buffer' call with the cursor at column 0, wrap
-;;;; off.  SPEC-PERF Constraint / the P2 task both mandate "workloads must NOT
-;;;; crash", which is paramount over the specific 80 KB figure, so 16 KB is used
-;;;; for a comfortable (~30%) margin below the 24 000-char cliff.  The kernel is
-;;;; NOT fixed here (out of scope for P2); the >=~24 000-char single-object
-;;;; redisplay remains the OPT-candidate the P1 ledger already records.
+;;;; (16 000 chars), NOT the 80 KB the P2 task text names.  HISTORICAL: when
+;;;; this workload was sized, rendering a single text object of >= 24 000 chars
+;;;; through the real command path (`redraw-display', wrap ON, cursor at
+;;;; end-of-line) EXHAUSTED THE DEFAULT CONTROL STACK -- the certified layout
+;;;; folds (verified/layout.lisp `k-sum'/`k-firstn'/`k-clip-chars') recursed
+;;;; non-tail with depth = line length; 23 000 rendered fine, 24 000 crashed.
+;;;; That crash is FIXED (OPT-1 bug fix, bench/README.md ledger): the folds are
+;;;; now mbe tail-recursive :exec twins, and a 300k-char single-line render is
+;;;; pinned crash-free by tests/pbt/long-line-render.lisp.  The 16 KB size is
+;;;; KEPT: the committed baseline median/band were measured at this size, so
+;;;; growing the line is a perf/rebaseline decision (a longer line only scales
+;;;; the same redisplay cost OPT-2/OPT-6 track), no longer a crash cap.
 ;;;; -------------------------------------------------------------------------
 ;;;;
 ;;;; Replayability: RUN restores the buffer (net-zero edits: insert a char then
@@ -33,8 +29,9 @@
 (in-package :cl-user)
 
 (defparameter *bench-t2-long-line-length* 16000
-  "Single-line length in characters (16 KB).  Render-safe with margin below the
-measured ~24 000-char control-stack cliff; see the file header.")
+  "Single-line length in characters (16 KB).  Kept at the size the committed
+baseline was measured at; the former ~24 000-char control-stack cliff is fixed
+(OPT-1) -- see the file header.")
 
 (defparameter *bench-t2-long-line-sweep-step* 500
   "Cursor sweep stride, in characters (32 steps cover the 16 KB line).")

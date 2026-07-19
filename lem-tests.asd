@@ -42,6 +42,7 @@
                              (:file "width-vectors")
                              (:file "width-conformance")
                              (:file "layout-conformance")
+                             (:file "long-line-render")
                              (:file "redisplay-cache")
                              (:file "screen-projection")
                              (:file "interrupt-stress")

@@ -23,7 +23,7 @@ Milestone V0 (toolchain bring-up) is what lives here today:
 | `interrupt-model.lisp` | VK-8 interrupt-delivery protocol model: `without-interrupts`/`check-interrupt`/`interrupt` as a total step function over traces, with the liveness/safety/nesting/force obligations certified over all interleavings. |
 | `layout.lisp` | VK-11 line-layout kernel: `k-wrap`/`k-clip`/`k-scroll-adjust` transcribing `separate-objects-by-width`/`clip-objects-to-display-range`, with content-preservation, width-bound, termination and clip/auto-scroll theorems. |
 | `event-queue-model.lisp` | VK-9 event-queue + idle-timer model: producer/consumer traces over the `concurrent-queue` with `receive-event`'s exact dispatch (`:resize` coalescing, thunk execution), plus the `get-next-timer-timing-ms`/`update-idle-timers` arithmetic over a virtual ms clock; no-loss/FIFO/coalescing/consumer-only-thunks and sleep-bound/fires-iff-overdue theorems. |
-| `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — ~200 lines (exports list is the only thing that grows), every reinterpreted construct listed in its header. **Not a book**; the proof runner skips it. |
+| `shim.lisp` | Dual-load shim (V0-3). Lets the ACL2 books load in a plain SBCL image. Part of the trust base — ~300 lines incl. header docs (the exports list and the documented construct list are what grow), every reinterpreted construct listed in its header (incl. `mbe`/`verify-guards` since the OPT-1 fix). **Not a book**; the proof runner skips it. |
 | `shim-loader.lisp` | Sole component of the `lem-verified-kernel` ASDF system (`lem-verified-kernel.asd` at the repo root): loads the shim + the books production depends on. **Not a book**; the proof runner skips `shim*.lisp`. |
 | `README.md` | This file. |
 
@@ -899,6 +899,39 @@ whitelist changes (the exec path uses only CL homonyms +
 loaded by `shim-loader.lisp` (production wraps and clips through it since the
 VK-4 swap).
 
+**OPT-1 stack-safety fix (2026-07-19; bench/README.md ledger, "Bug fixes").**
+Redisplaying any single line ≥ ~24 000 chars CRASHED the editor with a
+control-stack overflow: three exec-path recursions of this book run with depth
+= line length from the production render path — `k-sum` (every `k-obj-width`
+measurement; ~99% of the overflow backtrace), `k-firstn` (the explode halving
+on the wrap path) and `k-clip-chars` (the per-char clip scan on the
+horizontal-scroll path). Measured pre-fix boundaries on the default SBCL
+control stack: `redraw-buffer` overflows at 50 651 chars (wrap off) / 50 653
+(wrap on); the full `redraw-display` command path at 24 000 (the P2 bench
+finding). The fix is ACL2's own **`mbe`** idiom, not a shadow implementation
+(the one-source rule holds): each function keeps its original recursion as the
+`:logic` body — the definitional axiom, so **every existing theorem
+re-certifies unchanged** — and gains a tail-recursive accumulator `:exec` twin
+(`k-sum-acc`, `k-firstn-acc`, `k-clip-chars-acc`) that guard verification
+proves EQUAL on guarded inputs (new lemmas `k-sum-acc-removal`,
+`k-firstn-acc-removal`, `k-clip-chars-shape`, `k-clip-chars-acc-removal`;
+guards: `t` for `k-sum`/`k-firstn`, numeric bounds + `true-listp widths` for
+`k-clip-chars` — production satisfies them by construction). Certified ACL2
+execution runs the `:exec` branch; the shim now reinterprets `mbe`
+identically (expand to `:exec`) plus `verify-guards` as a proof-only no-op —
+constructs 7 and 8 in its header, the same precedent as its iterative
+`acl2::len`. SBCL's compiling load gives the twins genuine tail-call
+elimination, verified empirically at 500k depth. The other recursions on the
+render path are **not** line-length-deep (`k-wrap-row`'s explode retry and
+`k-clip`'s skip branch are tail calls; their cons-building branches recurse
+once per placed/kept object, bounded per row by the view width; `k-wrap` by
+fuel) — see the book's STACK SAFETY header note. Post-fix: a 500k-char single
+line renders clean in every wrap/cursor config. Regression pin:
+`tests/pbt/long-line-render.lisp` — a 300k-char line through the full
+`redraw-buffer` path on the recording fake interface (wrap on/off, cursor
+mid/end) asserted against the certified kernel as content oracle, plus an
+exec-twin = naive-recursion equality PBT over random width lists.
+
 **Differential/PBT acceptance:** `tests/pbt/layout-conformance.lisp` — random
 drawing-object lists (narrow/wide/emoji runs, mixed-width Greek+CJK runs,
 single tabs, control characters, zero-width combining runs, zero-width opaque
@@ -1287,7 +1320,13 @@ trusting, unproven, is:
    execution; a shim bug could make certified code behave differently in-image.
    Mitigation: it is tiny, reviewed line by line, lists every construct it
    touches, and every kernel book gets an in-image rove test exercising the same
-   functions ACL2 certified.
+   functions ACL2 certified. Two semantic notes: `acl2::len` is iterative
+   (semantics identical; ACL2's recursive definition would overflow on 200K-char
+   lines), and `mbe` expands to its `:exec` branch — the same branch
+   guard-verified ACL2 execution runs, with the `:logic` = `:exec` equality an
+   ACL2-proved guard obligation of each book that uses it (introduced by the
+   OPT-1 layout stack-safety fix; `verify-guards` is a proof-only no-op like
+   `defthm`).
 4. **The imperative shell** — the mutation/IO code that materializes
    kernel-computed results (kept small, conformance-tested, not proven).
 5. **ncurses / libc / the OS kernel** — everything below Lem. For VK-6 this
@@ -1363,6 +1402,7 @@ are one.
 | Idle-timer double-fire: `nconc` splice re-fired processed repeat timers in the same idle period | VK-9 | VK-4 hardening | `timer-double-fire-regression`; VK-9 section |
 | Checkpoint writer never fsynced: renamed-in checkpoint could tear to a prefix on power loss | VK-6 | VK-4 hardening | crash-safety theorems strengthened to equality; VK-6 section |
 | Kernel-side: `recompute-edit-offset` crashed on separator elements (inhibited path) | VK-3 | VK-3 | INHIBITED suite is the pin; VK-3 section |
+| Redisplay control-stack overflow (editor crash) on any single line ≥ ~24k chars: `k-sum`/`k-firstn`/`k-clip-chars` recursed non-tail with depth = line length | SPEC-PERF P1/P2/P3 benches (OPT-1) | OPT-1 bug fix (mbe tail-recursive `:exec` twins) | `tests/pbt/long-line-render.lisp` is the pin; VK-11 section, bench/README.md ledger |
 
 ### Production bugs / refuted claims: found and documented (not fixed)
 

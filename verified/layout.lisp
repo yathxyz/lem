@@ -88,6 +88,25 @@
 ;;;;   uses zp (as width.lisp's k-take does): it loads in-image but is never
 ;;;;   called there -- calling it would fail loudly, which is the shim's
 ;;;;   intended enforcement.
+;;;;
+;;;; STACK SAFETY (OPT-1 bug fix; bench/README.md ledger).  Redisplay reaches
+;;;;   this book with per-char lists as long as the logical line, so any
+;;;;   non-tail recursion of that depth overflows the default SBCL control
+;;;;   stack (production crash: a single line >= ~24k chars through
+;;;;   redraw-display, ~50k through redraw-buffer).  The three recursions whose
+;;;;   depth equals the line length on the render path -- `k-sum' (every
+;;;;   object-width measurement), `k-firstn' (explode halving) and
+;;;;   `k-clip-chars' (per-char clip scan) -- are therefore defined with
+;;;;   ACL2's `mbe': the :logic body is the original recursion (every theorem
+;;;;   and the definitional axiom are unchanged), the :exec body a
+;;;;   tail-recursive accumulator twin proved EQUAL at guard verification and
+;;;;   run by certified execution (and, via the shim's mbe expansion, by the
+;;;;   image -- SBCL's compiling load eliminates the tail calls).  The other
+;;;;   recursions on the path are not line-length-deep: `k-wrap-row's explode
+;;;;   retry and `k-clip's skip-before-range branch are genuine tail calls,
+;;;;   their cons-building branches recurse once per PLACED/KEPT object (bounded
+;;;;   by the view width per row / range), and `k-wrap' recurses once per fuel
+;;;;   row.  Pinned at 300k chars by tests/pbt/long-line-render.lisp.
 
 (in-package "ACL2")
 
@@ -124,7 +143,10 @@
 ;;; ===========================================================================
 
 ;; Nat coercion (nfix is ACL2-only, not CL-loadable; this is its exec twin).
+;; Guard-verified (trivially) so the guard-verified mbe functions below may
+;; call it.
 (defun k-nat (x)
+  (declare (xargs :guard t))
   (if (natp x) x 0))
 
 (defun k-text (codes widths tag)
@@ -151,12 +173,35 @@
 (defun k-opaque-tag (obj)
   (car (cdr (cdr obj))))
 
-;; Sum of a width list (junk entries count 0, so widths are naturals with no
-;; hypotheses anywhere downstream).
-(defun k-sum (l)
+;; Tail-recursive accumulator twin of k-sum (the :exec body below).  Redisplay
+;; measures every text object through k-sum over its FULL per-char width list,
+;; so a non-tail fold's stack depth equals the line length (the OPT-1 crash;
+;; see the STACK SAFETY header note).
+(defun k-sum-acc (l acc)
+  (declare (xargs :guard (natp acc)))
   (if (atom l)
-      0
-      (+ (k-nat (car l)) (k-sum (cdr l)))))
+      acc
+      (k-sum-acc (cdr l) (+ (k-nat (car l)) acc))))
+
+;; Sum of a width list (junk entries count 0, so widths are naturals with no
+;; hypotheses anywhere downstream).  :logic is the original recursion (the
+;; definitional axiom every theorem below is proved about); :exec is the
+;; accumulator twin, proved equal at guard verification (below) and run by
+;; certified execution.
+(defun k-sum (l)
+  (declare (xargs :guard t :verify-guards nil))
+  (mbe :logic (if (atom l)
+                  0
+                  (+ (k-nat (car l)) (k-sum (cdr l))))
+       :exec (k-sum-acc l 0)))
+
+(defthm k-sum-acc-removal
+  (implies (natp acc)
+           (equal (k-sum-acc l acc)
+                  (+ acc (k-sum l))))
+  :hints (("Goal" :induct (k-sum-acc l acc))))
+
+(verify-guards k-sum)
 
 ;; Production object-width: for a text object, string-width of its string --
 ;; here by construction the sum of the per-char widths; for an opaque object,
@@ -178,11 +223,30 @@
 ;;; Halving (production explode-object)
 ;;; ===========================================================================
 
+;; Tail-recursive accumulator twin of k-firstn (the :exec body below).
+;; k-explode calls k-firstn with half the object's codes/widths, so a non-tail
+;; recursion is line-length-deep on the wrap path (OPT-1; STACK SAFETY note).
+(defun k-firstn-acc (n l acc)
+  (declare (xargs :guard (true-listp acc)))
+  (if (or (not (natp n)) (equal n 0) (atom l))
+      (revappend acc nil)
+      (k-firstn-acc (- n 1) (cdr l) (cons (car l) acc))))
+
 ;; First N elements (CL has no `take'; nil-terminated by construction).
 (defun k-firstn (n l)
-  (if (or (not (natp n)) (equal n 0) (atom l))
-      nil
-      (cons (car l) (k-firstn (- n 1) (cdr l)))))
+  (declare (xargs :guard t :verify-guards nil))
+  (mbe :logic (if (or (not (natp n)) (equal n 0) (atom l))
+                  nil
+                  (cons (car l) (k-firstn (- n 1) (cdr l))))
+       :exec (k-firstn-acc n l nil)))
+
+(defthm k-firstn-acc-removal
+  (implies (true-listp acc)
+           (equal (k-firstn-acc n l acc)
+                  (revappend acc (k-firstn n l))))
+  :hints (("Goal" :induct (k-firstn-acc n l acc))))
+
+(verify-guards k-firstn)
 
 ;; explode-object: split the run at (floor len 2); both halves inherit the tag
 ;; (production: same attribute, char-type of the first char -- recorded in the
@@ -583,20 +647,71 @@
 ;;; char-x + width <= end-x (production's start-idx/end-idx interval is exactly
 ;;; this set: the kept chars are contiguous because the column is monotone).
 
+;; Tail-recursive accumulator twin of k-clip-chars (the :exec body below).
+;; The clip scan walks the straddling object's chars up to end-x, so a
+;; non-tail recursion is line-length-deep on the horizontal-scroll path
+;; (OPT-1; STACK SAFETY note).  Same per-char keep condition, kept chars
+;; accumulated in reverse and restored by revappend.
+(defun k-clip-chars-acc (codes widths x start-x end-x acc-codes acc-widths)
+  (declare (xargs :guard (and (natp x) (integerp start-x) (integerp end-x)
+                              (true-listp widths)
+                              (true-listp acc-codes)
+                              (true-listp acc-widths))))
+  (if (or (atom codes)
+          (<= end-x x))
+      (mv (revappend acc-codes nil) (revappend acc-widths nil))
+      (let ((cw (k-nat (car widths))))
+        (if (and (<= start-x x)
+                 (<= (+ x cw) end-x))
+            (k-clip-chars-acc (cdr codes) (cdr widths) (+ x cw) start-x end-x
+                              (cons (car codes) acc-codes)
+                              (cons (car widths) acc-widths))
+            (k-clip-chars-acc (cdr codes) (cdr widths) (+ x cw) start-x end-x
+                              acc-codes acc-widths)))))
+
 (defun k-clip-chars (codes widths x start-x end-x)
-  (if (atom codes)
-      (mv nil nil)
-      (if (<= end-x x)                  ; production: (>= char-x end-x) -> return
-          (mv nil nil)
-          (let ((cw (k-nat (car widths))))
-            (mv-let (sel-codes sel-widths)
-                    (k-clip-chars (cdr codes) (cdr widths)
-                                  (+ x cw) start-x end-x)
-              (if (and (<= start-x x)
-                       (<= (+ x cw) end-x))
-                  (mv (cons (car codes) sel-codes)
-                      (cons (car widths) sel-widths))
-                  (mv sel-codes sel-widths)))))))
+  (declare (xargs :guard (and (natp x) (integerp start-x) (integerp end-x)
+                              (true-listp widths))
+                  :verify-guards nil))
+  (mbe :logic
+       (if (atom codes)
+           (mv nil nil)
+           (if (<= end-x x)             ; production: (>= char-x end-x) -> return
+               (mv nil nil)
+               (let ((cw (k-nat (car widths))))
+                 (mv-let (sel-codes sel-widths)
+                         (k-clip-chars (cdr codes) (cdr widths)
+                                       (+ x cw) start-x end-x)
+                   (if (and (<= start-x x)
+                            (<= (+ x cw) end-x))
+                       (mv (cons (car codes) sel-codes)
+                           (cons (car widths) sel-widths))
+                       (mv sel-codes sel-widths))))))
+       :exec (k-clip-chars-acc codes widths x start-x end-x nil nil)))
+
+;; A k-clip-chars value IS the two-element list of its components (every
+;; return site is an (mv a b)); lets the removal lemma rebuild the whole
+;; value from the car/mv-nth components.
+(defthm k-clip-chars-shape
+  (equal (list (car (k-clip-chars codes widths x start-x end-x))
+               (mv-nth 1 (k-clip-chars codes widths x start-x end-x)))
+         (k-clip-chars codes widths x start-x end-x))
+  :hints (("Goal" :induct (k-clip-chars codes widths x start-x end-x))))
+
+(defthm k-clip-chars-acc-removal
+  (implies (and (true-listp acc-codes)
+                (true-listp acc-widths))
+           (equal (k-clip-chars-acc codes widths x start-x end-x
+                                    acc-codes acc-widths)
+                  (mv (revappend acc-codes
+                                 (car (k-clip-chars codes widths x start-x end-x)))
+                      (revappend acc-widths
+                                 (mv-nth 1 (k-clip-chars codes widths x
+                                                         start-x end-x))))))
+  :hints (("Goal" :induct (k-clip-chars-acc codes widths x start-x end-x
+                                            acc-codes acc-widths))))
+
+(verify-guards k-clip-chars)
 
 ;; clip-objects-to-display-range: X is the running column (callers start at 0).
 ;;   - object entirely left of the range: skipped;

@@ -7,10 +7,12 @@
 #   (c) longline   inserts into a 16 KB single line               budget p95 < 30ms
 #   (d) scroll     next-line held down through the 10 MB file     budget p95 < 30ms
 #
-# The 16 KB single line is DEVIATED from PF-7's "200 KB line": a single text
-# object >= ~24 000 chars stack-overflows redisplay (the P2 cliff -- see
-# bench/README.md); 16 KB keeps a ~30% margin below it, matching the T2
-# long-line workload's cap.
+# The 16 KB single line is DEVIATED from PF-7's "200 KB line".  HISTORICAL: a
+# single text object >= ~24 000 chars used to stack-overflow redisplay (the P2
+# cliff); that crash is FIXED (OPT-1 bug fix -- see bench/README.md ledger and
+# tests/pbt/long-line-render.lisp).  16 KB is KEPT so the longline p95 trend
+# stays comparable across runs; resizing is a perf decision for OPT-2/OPT-6,
+# no longer a crash cap.
 #
 # Each scenario drives N>=100 keys ONE AT A TIME with a small inter-key sleep,
 # because redisplay coalesces while the input queue is non-empty (interp.lisp:
