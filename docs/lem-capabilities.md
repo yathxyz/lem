@@ -2192,6 +2192,12 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
   mark new, old, a prompted visible term, or skip; `r` confirms reset and `s`
   runs an explicit bounded shell predicate. Status shows the tested revision,
   active terms, and a bounded parsed log.
+- **Fetch dispatch**: `f` keeps Magit's `- p` prune, `- t` tags, `- u`
+  unshallow, and `- F` force toggles. `p`/`u`/`e`/`a` fetch the configured push
+  remote, current upstream, another remote or URL, or all remotes; `o` fetches
+  one branch, `r` an explicit refspec, and `m` populated submodules with the
+  default verbose four-job policy. A missing push remote is selected and
+  persisted before fetching.
 - Refresh `g`, navigate `n`/`p`/`M-n`/`M-p`, help `?`/`C-x ?`, quit `q`.
 
 Lem-yath registers the diff, commit, and rebase major-mode maps ahead of Vi's

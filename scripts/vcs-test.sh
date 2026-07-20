@@ -39,6 +39,7 @@ export LEM_YATH_VCS_PORCELAIN_ROOT="$root/repos/porcelain worktree;safe/"
 export LEM_YATH_VCS_PORCELAIN_FILE="${LEM_YATH_VCS_PORCELAIN_ROOT}porcelain.txt"
 export LEM_YATH_VCS_PORCELAIN_REMOTE="$root/repos/porcelain-remote.git"
 export LEM_YATH_VCS_PORCELAIN_PEER="$root/repos/porcelain-peer"
+export LEM_YATH_VCS_FETCH_REMOTE="$root/repos/fetch remote;safe.git"
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR" "$LEM_HOME" \
   "$LEM_YATH_VCS_COLOCATED_ROOT/nested/deeper" \
@@ -384,6 +385,31 @@ porcelain_remote_matches_head() {
   [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" = \
     "$("$git_bin" --git-dir="$LEM_YATH_VCS_PORCELAIN_REMOTE" \
       rev-parse refs/heads/main)" ]
+}
+
+porcelain_fetch_complete() {
+  [ "$fetch_original_head" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$fetch_topic_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        rev-parse refs/remotes/origin/fetch-topic)" ] &&
+    [ "$fetch_tag_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        rev-parse refs/tags/fetch-tag)" ] &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      show-ref --verify --quiet refs/remotes/origin/stale &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_elsewhere_fetched() {
+  [ "$fetch_original_head" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$fetch_elsewhere_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        rev-parse FETCH_HEAD)" ] &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
 }
 
 porcelain_branch_is() {
@@ -934,7 +960,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -1489,6 +1515,106 @@ if wait_until "$WAIT_TIMEOUT" porcelain_remote_matches_head; then
   pass legit-push 'P p pushed the current tracked branch to origin'
 else
   fail legit-push 'P p did not update the bare remote' "$porcelain_session"
+fi
+
+fetch_original_head=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+  rev-parse HEAD)
+if "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" pull -q --ff-only &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" switch -qc fetch-topic &&
+   printf 'fetch-only branch\n' \
+     >"$LEM_YATH_VCS_PORCELAIN_PEER/fetch-topic.txt" &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" add -- fetch-topic.txt &&
+   git_commit "$LEM_YATH_VCS_PORCELAIN_PEER" fetch-topic \
+     '2001-01-04T12:00:00+0000' &&
+   fetch_topic_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" \
+     rev-parse HEAD) &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" push -qu origin fetch-topic &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" switch -qc tag-only &&
+   printf 'tag-only history\n' \
+     >"$LEM_YATH_VCS_PORCELAIN_PEER/tag-only.txt" &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" add -- tag-only.txt &&
+   git_commit "$LEM_YATH_VCS_PORCELAIN_PEER" tag-only \
+     '2001-01-04T13:00:00+0000' &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" tag fetch-tag &&
+   fetch_tag_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" \
+     rev-parse HEAD) &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" push -q origin fetch-tag &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" switch -q main &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" update-ref \
+     refs/remotes/origin/stale "$fetch_original_head"; then
+  send_keys "$porcelain_session" f
+  if lem_wait_for "$porcelain_session" 'Fetch' "$WAIT_TIMEOUT" >/dev/null; then
+    tmux_cmd send-keys -t "$porcelain_session" -l -- '-'
+    send_keys "$porcelain_session" p
+    tmux_cmd send-keys -t "$porcelain_session" -l -- '-'
+    send_keys "$porcelain_session" t
+    tmux_cmd send-keys -t "$porcelain_session" -l -- '-'
+    send_keys "$porcelain_session" F
+    send_keys "$porcelain_session" u
+  fi
+  if wait_until "$WAIT_TIMEOUT" porcelain_fetch_complete; then
+    pass legit-fetch \
+      'f toggles prune/tags/force and fetches the current upstream without moving HEAD'
+  else
+    fail legit-fetch \
+      'the upstream fetch lost options, refs, cleanliness, or the original HEAD' \
+      "$porcelain_session"
+  fi
+  send_keys "$porcelain_session" f p
+  if lem_wait_for "$porcelain_session" 'Set push remote and fetch' \
+       "$WAIT_TIMEOUT" >/dev/null; then
+    tmux_cmd send-keys -t "$porcelain_session" -l -- origin
+    send_keys "$porcelain_session" Enter
+  fi
+  if lem_wait_for "$porcelain_session" 'Fetched from origin' \
+       "$WAIT_TIMEOUT" >/dev/null &&
+     [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+       config --get branch.main.pushRemote)" = origin ]; then
+    pass legit-fetch-pushremote \
+      'f p configured the missing branch push remote and fetched it'
+  else
+    fail legit-fetch-pushremote \
+      'f p did not preserve Magit missing-push-remote configuration behavior' \
+      "$porcelain_session"
+  fi
+  if "$git_bin" init --bare -q "$LEM_YATH_VCS_FETCH_REMOTE" &&
+     "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" switch -qc \
+       elsewhere-source main &&
+     printf 'elsewhere-only history\n' \
+       >"$LEM_YATH_VCS_PORCELAIN_PEER/elsewhere.txt" &&
+     "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" add -- elsewhere.txt &&
+     git_commit "$LEM_YATH_VCS_PORCELAIN_PEER" elsewhere-source \
+       '2001-01-04T14:00:00+0000' &&
+     fetch_elsewhere_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" \
+       rev-parse HEAD) &&
+     "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" push -q \
+       "$LEM_YATH_VCS_FETCH_REMOTE" HEAD:main &&
+     "$git_bin" --git-dir="$LEM_YATH_VCS_FETCH_REMOTE" symbolic-ref \
+       HEAD refs/heads/main &&
+     "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" switch -q main; then
+    send_keys "$porcelain_session" f e
+    if lem_wait_for "$porcelain_session" 'Fetch remote:' \
+         "$WAIT_TIMEOUT" >/dev/null; then
+      tmux_cmd send-keys -t "$porcelain_session" -l -- \
+        "$LEM_YATH_VCS_FETCH_REMOTE"
+      send_keys "$porcelain_session" Enter
+    fi
+    if wait_until "$WAIT_TIMEOUT" porcelain_elsewhere_fetched; then
+      pass legit-fetch-elsewhere \
+        'f e fetched a direct-argv path containing a space and semicolon'
+    else
+      fail legit-fetch-elsewhere \
+        'f e rejected or misparsed a valid metacharacter-bearing Git path' \
+        "$porcelain_session"
+    fi
+  else
+    fail legit-fetch-elsewhere \
+      'could not prepare the metacharacter-bearing fetch remote' \
+      "$porcelain_session"
+  fi
+else
+  fail legit-fetch 'could not prepare the independent fetch refs' \
+    "$porcelain_session"
 fi
 
 send_keys "$porcelain_session" b c

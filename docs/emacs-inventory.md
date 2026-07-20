@@ -593,6 +593,17 @@ and `s` runs a predicate. Git status shows the tested revision, terms, and a
 bounded parsed log. This is the configured core lifecycle rather than Magit's
 wider graph and process-buffer presentation.
 
+The matching `f` fetch dispatch is available in status and diff panes. Its
+`- p`, `- t`, `- u`, and `- F` toggles retain prune, all-tags, unshallow, and
+force arguments. Actions `p`/`u`/`e`/`a` fetch the configured push remote,
+current upstream, a selected remote or URL, or every remote; `o` fetches one
+branch, `r` accepts an explicit refspec, and `m` fetches populated submodules
+with Magit's default verbose four-job policy. If no push remote is configured,
+`p` prompts and persists the selected configured remote. Lem performs the
+bounded operation synchronously and refreshes Legit instead of opening Magit's
+asynchronous process buffer; the nested `C` branch-configuration UI and the
+submodule argument sub-transient remain outside this port.
+
 `vc-handled-backends '(Git)` only. `magit`/`magit-todos`/`forge`/`git-gutter`/`git-timemachine` all loaded via `init-evil`.
 
 ---

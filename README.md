@@ -491,7 +491,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   Magit's core bisect lifecycle: start or start-and-run, `--no-checkout`,
   `--first-parent`, custom old/new terms, good/bad/custom marking, skip, and
   confirmed reset. Active state and a bounded bisect log appear directly in
-  Git status.
+  Git status. Magit's `f` fetch dispatch is also available in status and diff:
+  it retains prune/tags/unshallow/force toggles and fetches a push remote,
+  upstream, selected remote, all remotes, one branch, an explicit refspec, or
+  populated submodules without moving `HEAD`.
   Packaged `gh` also backs
   command-accessible GitHub Forge lists, detail views, multiline creation and
   comments, close/reopen actions, external browsing, and cache-only Legit
