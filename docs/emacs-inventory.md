@@ -637,6 +637,18 @@ a Forge-created pull-request-only remote. This checkpoint accepts one merge
 head and runs synchronously rather than through Magit's process buffer;
 comma-separated octopus input remains a gap.
 
+The Evil Collection Magit map deliberately moves revert from `V` to `_`, maps
+direct no-commit revert to `-`, and leaves `V` available for Visual Line.
+Lem matches that split in status and diff panes. The `_` dispatch exposes
+mainline, edit/no-edit, strategy, GPG-sign, and signoff arguments; `_` reverts
+and commits, while `v` applies without committing. A clean edit opens Git's
+prefilled `COMMIT_EDITMSG` in Legit's native commit mode. Active conflict or
+sequence state changes the same dispatch to `_` continue, `s` skip, and `a`
+confirmed abort. Direct argv execution is bounded to 120 seconds and 4 MiB,
+message input to 1 MiB, and a comma-separated prompt to 64 verified commits.
+Unlike Magit, Lem does not collect commits from a visual status region and
+runs the operation synchronously without a process buffer.
+
 `vc-handled-backends '(Git)` only. `magit`/`magit-todos`/`forge`/`git-gutter`/`git-timemachine` all loaded via `init-evil`.
 
 ---

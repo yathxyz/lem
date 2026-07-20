@@ -2217,6 +2217,17 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
   stale leases stop before merging, and failed merges retain their source.
   Automatic deletion of a Forge pull-request-only remote and octopus input
   remain explicit gaps at this checkpoint.
+- **Revert dispatch**: Evil Collection remaps Magit's entry to `_`, preserves
+  `V` for Visual Line, and exposes direct no-commit revert on `-`; Lem matches
+  those keys in status and diff panes. The transient keeps mainline,
+  edit/no-edit, strategy, GPG-sign, and signoff arguments plus `_` commit and
+  `v` no-commit actions. Clean edited reverts open Git's prepared message in
+  native commit mode. A stopped sequence switches to `_` continue, `s` skip,
+  and confirmed `a` abort while retaining unmerged rows for resolution. Calls
+  use direct argv with 120-second / 4-MiB bounds, messages are capped at 1 MiB,
+  and one prompt accepts at most 64 comma-separated verified commits. Magit's
+  visual commit-region selection and asynchronous process presentation remain
+  outside this port.
 - Refresh `g`, navigate `n`/`p`/`M-n`/`M-p`, help `?`/`C-x ?`, quit `q`.
 
 Lem-yath registers the diff, commit, and rebase major-mode maps ahead of Vi's

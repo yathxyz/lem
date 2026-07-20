@@ -1097,6 +1097,215 @@ prepare_porcelain_merge_fixture() {
   porcelain_merge_clean_at_main
 }
 
+porcelain_revert_metadata_absent() {
+  [ ! -f "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/REVERT_HEAD" ] &&
+    [ ! -f "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/sequencer/todo" ]
+}
+
+porcelain_revert_conflicted() {
+  [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/REVERT_HEAD" ] &&
+    [ -n "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      ls-files --unmerged -- merge-conflict.txt)" ]
+}
+
+porcelain_revert_noedit_complete() {
+  porcelain_branch_is revert-noedit &&
+    [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/revert-noedit.txt" ] &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" log -1 --format=%B |
+      grep -q '^Signed-off-by: Lem Yath Test <lem-yath-test@example.invalid>$' &&
+    porcelain_revert_metadata_absent &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_revert_subject_is() {
+  [ "$1" = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    log -1 --format=%s)" ]
+}
+
+porcelain_revert_no_commit_complete() {
+  [ "$revert_nocommit_hash" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/revert-nocommit.txt" ] &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --cached --quiet -- revert-nocommit.txt &&
+    [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/REVERT_HEAD" ] &&
+    [ ! -f "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/sequencer/todo" ]
+}
+
+porcelain_revert_multi_complete() {
+  [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/revert-multi-a.txt" ] &&
+    [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/revert-multi-b.txt" ] &&
+    [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+       rev-list --count "$merge_main_hash..HEAD")" = 4 ] &&
+    porcelain_revert_metadata_absent &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_revert_merge_complete() {
+  [ -e "$LEM_YATH_VCS_PORCELAIN_ROOT/revert-merge-main.txt" ] &&
+    [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/revert-merge-side.txt" ] &&
+    porcelain_revert_metadata_absent &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_revert_abort_complete() {
+  [ "$revert_conflict_tip" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt")" = \
+      'revert later value' ] &&
+    porcelain_revert_metadata_absent &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_revert_continue_complete() {
+  porcelain_revert_subject_is 'Revert "revert-conflict-target"' &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt")" = \
+      'merge main value' ] &&
+    porcelain_revert_metadata_absent &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_revert_skip_complete() {
+  [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt")" = \
+      'skip later value' ] &&
+    [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/revert-skip.txt" ] &&
+    porcelain_revert_metadata_absent &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+prepare_porcelain_revert_fixture() {
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q main || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+    "$merge_main_hash" || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    revert-noedit "$merge_main_hash" || return 1
+  printf 'revert no-edit value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/revert-noedit.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- revert-noedit.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-noedit \
+    '2001-05-01T00:00:00+0000' || return 1
+  revert_noedit_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    revert-edit "$merge_main_hash" || return 1
+  printf 'revert edit value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/revert-edit.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- revert-edit.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-edit \
+    '2001-05-02T00:00:00+0000' || return 1
+  revert_edit_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    revert-nocommit "$merge_main_hash" || return 1
+  printf 'revert no-commit value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/revert-nocommit.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- revert-nocommit.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-nocommit \
+    '2001-05-03T00:00:00+0000' || return 1
+  revert_nocommit_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    revert-multi "$merge_main_hash" || return 1
+  printf 'revert multi a\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/revert-multi-a.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- revert-multi-a.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-multi-a \
+    '2001-05-04T00:00:00+0000' || return 1
+  revert_multi_a_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+  printf 'revert multi b\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/revert-multi-b.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- revert-multi-b.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-multi-b \
+    '2001-05-05T00:00:00+0000' || return 1
+  revert_multi_b_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    revert-merge-side "$merge_main_hash" || return 1
+  printf 'revert merge side\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/revert-merge-side.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    revert-merge-side.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-merge-side \
+    '2001-05-06T00:00:00+0000' || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    revert-merge "$merge_main_hash" || return 1
+  printf 'revert merge main\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/revert-merge-main.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    revert-merge-main.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-merge-main \
+    '2001-05-07T00:00:00+0000' || return 1
+  GIT_AUTHOR_DATE='2001-05-08T00:00:00+0000' \
+    GIT_COMMITTER_DATE='2001-05-08T00:00:00+0000' \
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" merge -q --no-ff \
+      -m revert-merge-commit revert-merge-side || return 1
+  revert_merge_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    revert-conflict "$merge_main_hash" || return 1
+  printf 'revert target value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    merge-conflict.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-conflict-target \
+    '2001-05-09T00:00:00+0000' || return 1
+  revert_conflict_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+  printf 'revert later value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    merge-conflict.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-conflict-later \
+    '2001-05-10T00:00:00+0000' || return 1
+  revert_conflict_tip=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    revert-skip "$merge_main_hash" || return 1
+  printf 'skip target value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    merge-conflict.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-skip-conflict \
+    '2001-05-11T00:00:00+0000' || return 1
+  revert_skip_conflict_hash=$("$git_bin" \
+    -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD) || return 1
+  printf 'revert skip value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/revert-skip.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- revert-skip.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-skip-clean \
+    '2001-05-12T00:00:00+0000' || return 1
+  revert_skip_clean_hash=$("$git_bin" \
+    -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD) || return 1
+  printf 'skip later value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    merge-conflict.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" revert-skip-later \
+    '2001-05-13T00:00:00+0000' || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q revert-noedit
+}
+
 enter_prompt_value() {
   local session=$1 value=$2 index
   for index in $(seq 1 80); do
@@ -1284,7 +1493,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes merge=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes merge=yes revert=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -3132,6 +3341,253 @@ else
     'resolved merge did not commit with the edited message and content' \
     "$porcelain_session"
 fi
+
+if prepare_porcelain_revert_fixture; then
+  pass legit-revert-fixture \
+    'prepared clean, merge, multi-commit, and conflicting revert histories'
+else
+  fail legit-revert-fixture 'could not prepare the isolated revert histories' \
+    "$porcelain_session"
+fi
+send_keys "$porcelain_session" g _
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - E
+fi
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" + s
+fi
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" _
+fi
+if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$revert_noedit_hash" 'Revert commit\(s\):'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_noedit_complete; then
+  pass legit-revert-noedit \
+    '_ _ created a signed-off reverse commit without opening an editor'
+else
+  fail legit-revert-noedit \
+    'non-editing revert lost its commit, signoff, tree, or clean boundary' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q revert-edit
+send_keys "$porcelain_session" g _
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" _
+fi
+if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$revert_edit_hash" 'Revert commit\(s\):'
+fi
+if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" g g d d i
+  tmux_cmd send-keys -t "$porcelain_session" -l -- \
+    'revert message edited in Lem'
+  send_keys "$porcelain_session" Enter Enter
+  send_keys "$porcelain_session" Escape C-c C-c
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_subject_is \
+     'revert message edited in Lem' &&
+   [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/revert-edit.txt" ]; then
+  pass legit-revert-edit \
+    'default _ _ opened and committed a prefilled native message buffer'
+else
+  fail legit-revert-edit \
+    'editable revert did not commit the edited message and reverse tree' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q revert-nocommit
+send_keys "$porcelain_session" g -
+if lem_wait_for "$porcelain_session" 'Revert changes from:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$revert_nocommit_hash" 'Revert changes from:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_no_commit_complete; then
+  pass legit-revert-no-commit \
+    'direct - staged the inverse tree without moving HEAD and retained abort state'
+else
+  fail legit-revert-no-commit \
+    'no-commit revert moved HEAD or lost its staged active boundary' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$revert_nocommit_hash"
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q revert-multi
+send_keys "$porcelain_session" g _
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - E
+fi
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" _
+fi
+if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$revert_multi_b_hash,$revert_multi_a_hash" 'Revert commit\(s\):'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_multi_complete; then
+  pass legit-revert-multiple \
+    'comma-separated _ _ reverted two commits in the requested order'
+else
+  fail legit-revert-multiple \
+    'multi-commit revert lost ordering, commit count, or exact trees' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q revert-merge
+send_keys "$porcelain_session" g _
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - m
+fi
+if lem_wait_for "$porcelain_session" 'Mainline parent:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" 1
+fi
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - E
+fi
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" _
+fi
+if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$revert_merge_hash" 'Revert commit\(s\):'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_merge_complete; then
+  pass legit-revert-mainline \
+    '_ -m reverted a merge relative to parent one and retained mainline content'
+else
+  fail legit-revert-mainline \
+    'merge revert ignored or misapplied its selected mainline parent' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q revert-conflict
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$revert_conflict_tip"
+send_keys "$porcelain_session" g _
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - E
+fi
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" _
+fi
+if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$revert_conflict_hash" 'Revert commit\(s\):'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_conflicted; then
+  pass legit-revert-conflict \
+    'a conflicting _ _ retained REVERT_HEAD and the unmerged index'
+else
+  fail legit-revert-conflict \
+    'conflicting revert did not retain recoverable sequencer state' \
+    "$porcelain_session"
+fi
+send_keys "$porcelain_session" g _
+if lem_wait_for "$porcelain_session" 'abort revert' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" a
+fi
+if lem_wait_for "$porcelain_session" 'Really abort revert' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_abort_complete; then
+  pass legit-revert-abort \
+    'active _ a restored the exact pre-revert HEAD, index, and worktree'
+else
+  fail legit-revert-abort \
+    'revert abort did not restore the exact conflict baseline' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g _
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" _
+fi
+if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$revert_conflict_hash" 'Revert commit\(s\):'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_conflicted; then
+  printf 'merge main value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- merge-conflict.txt
+  send_keys "$porcelain_session" g _
+fi
+if lem_wait_for "$porcelain_session" 'continue revert' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" _
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_continue_complete; then
+  pass legit-revert-continue \
+    'active _ _ committed a physically resolved revert with Git prepared text'
+else
+  fail legit-revert-continue \
+    'resolved revert did not continue with the prepared sequencer message' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q revert-skip
+send_keys "$porcelain_session" g _
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - E
+fi
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" _
+fi
+if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$revert_skip_conflict_hash,$revert_skip_clean_hash" \
+    'Revert commit\(s\):'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_conflicted; then
+  send_keys "$porcelain_session" g _
+fi
+if lem_wait_for "$porcelain_session" 'skip commit' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" s
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_skip_complete; then
+  pass legit-revert-skip \
+    'active _ s skipped the conflict and reverted the remaining clean commit'
+else
+  fail legit-revert-skip \
+    'revert skip lost the current tree or failed to continue the sequence' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q main
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$merge_main_hash"
+send_keys "$porcelain_session" g
 
 "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
   "$merge_main_hash"

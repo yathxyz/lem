@@ -47,6 +47,7 @@
                (:file "git-fetch")
                (:file "git-reset")
                (:file "git-merge")
+               (:file "git-revert")
                (:file "git-blame")
                (:file "forge")
                (:file "project-history")

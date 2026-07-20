@@ -514,6 +514,14 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   preserve the source on conflicts or stale leases. The current checkpoint
   accepts one merge head; comma-separated octopus input and Forge's automatic
   pull-request-only remote deletion remain tracked gaps.
+  Evil Collection's configured Magit revert keys are present in status and
+  diff panes: `_` opens the argument/action dispatch, `-` directly stages a
+  reverse application without committing, and `V` remains Visual Line for
+  selected-line staging. The dispatch retains edit/no-edit, mainline,
+  strategy, GPG-sign, and signoff arguments; clean edited reverts use Legit's
+  native prefilled commit buffer, while conflicts switch `_` to
+  continue/skip/confirmed-abort actions. One prompt accepts up to 64
+  comma-separated commits; visual commit-region selection remains a gap.
   Packaged `gh` also backs
   command-accessible GitHub Forge lists, detail views, multiline creation and
   comments, close/reopen actions, external browsing, and cache-only Legit

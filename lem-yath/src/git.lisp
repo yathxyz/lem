@@ -328,7 +328,10 @@
 (declaim (ftype function
                 legit-amend-buffer-p
                 legit-amend-continue
-                legit-amend-abort))
+                legit-amend-abort
+                legit-revert-message-buffer-p
+                legit-revert-message-continue
+                legit-revert-message-abort))
 
 (define-command lem-yath-legit-commit-continue () ()
   (cond
@@ -340,6 +343,9 @@
      (lem-yath-server-save-done))
     ((legit-amend-buffer-p)
      (legit-amend-continue))
+    ((and (fboundp 'legit-revert-message-buffer-p)
+          (legit-revert-message-buffer-p))
+     (legit-revert-message-continue))
     (t
      ;; This is a transient message buffer, not a file that needs saving.
      ;; Pinned Legit otherwise commits successfully and then prompts before
@@ -356,6 +362,9 @@
      (lem-yath-server-abort))
     ((legit-amend-buffer-p)
      (legit-amend-abort))
+    ((and (fboundp 'legit-revert-message-buffer-p)
+          (legit-revert-message-buffer-p))
+     (legit-revert-message-abort))
     (t
      (lem/legit::commit-abort))))
 
