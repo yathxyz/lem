@@ -260,8 +260,27 @@
         (dolist (key '("_" "s" "a" "q"))
           (check (eq 'nop-command
                      (vcs-test-key-command
-                      (legit-revert-popup-keymap options t) key))
+                     (legit-revert-popup-keymap options t) key))
                  (format nil "magit-revert-active-~a" key))))
+      (check (eq 'lem-yath-legit-branch
+                 (vcs-test-key-command lem/legit::*peek-legit-keymap* "b"))
+             "magit-branch-status-dispatch")
+      (check (eq 'lem-yath-legit-branch
+                 (vcs-test-key-command
+                  lem/legit::*legit-diff-mode-keymap* "b"))
+             "magit-branch-diff-dispatch")
+      (let ((options (make-legit-branch-options)))
+        (dolist (key '("d" "u" "r" "p" "R" "P" "- r" "b" "l"
+                       "o" "c" "s" "n" "S" "C" "m" "X" "x" "q"))
+          (check (eq 'nop-command
+                     (vcs-test-key-command
+                      (legit-branch-popup-keymap options "main") key))
+                 (format nil "magit-branch-initial-~a" key)))
+        (dolist (key '("d" "u" "r" "p" "R" "P" "a m" "a r" "q"))
+          (check (eq 'nop-command
+                     (vcs-test-key-command
+                      (legit-branch-config-popup-keymap "main") key))
+                 (format nil "magit-branch-config-~a" key))))
       (check (typep (vcs-test-key-command *lem-yath-jj-view-keymap* "g")
                     'lem-core::keymap)
              "jj-g-is-prefix")
@@ -1292,6 +1311,7 @@
    :reset (vcs-test-key-command lem/legit::*peek-legit-keymap* "X")
    :merge (vcs-test-key-command lem/legit::*peek-legit-keymap* "m")
    :revert (vcs-test-key-command lem/legit::*peek-legit-keymap* "_")
+   :branch (vcs-test-key-command lem/legit::*peek-legit-keymap* "b")
    :smart (leader-binding-command lem-vi-mode:*normal-keymap* "g g")
    :git (leader-binding-command lem-vi-mode:*normal-keymap* "g G")
    :jj (leader-binding-command lem-vi-mode:*normal-keymap* "g J")
@@ -1324,6 +1344,7 @@
           (load (merge-pathnames "src/git-reset.lisp" source))
           (load (merge-pathnames "src/git-merge.lisp" source))
           (load (merge-pathnames "src/git-revert.lisp" source))
+          (load (merge-pathnames "src/git-branch.lisp" source))
           (load (merge-pathnames "src/git-blame.lisp" source))
           (load (merge-pathnames "src/apps/timemachine.lisp" source)))
         (let ((after (vcs-test-reload-state)))
@@ -1332,7 +1353,7 @@
             'string
             "RELOAD same=~a find=~d post=~d save=~d change=~d kill=~d "
             "global=~d source=~d directory=~d root-marker=~d todo-hook=~d "
-            "bisect-hook=~d bisect=~a fetch=~a reset=~a merge=~a revert=~a smart=~a git=~a jj=~a time=~a "
+            "bisect-hook=~d bisect=~a fetch=~a reset=~a merge=~a revert=~a branch=~a smart=~a git=~a jj=~a time=~a "
             "jj-refresh=~a jj-quit=~a "
             "older=~a newer=~a nth=~a fuzzy=~a short=~a full=~a blame=~a "
             "blame-quit=~a p=~a n=~a t=~a quit=~a")
@@ -1358,6 +1379,8 @@
             (eq (getf after :merge) 'lem-yath-legit-merge))
            (vcs-test-yes-no
             (eq (getf after :revert) 'lem-yath-legit-revert))
+           (vcs-test-yes-no
+            (eq (getf after :branch) 'lem-yath-legit-branch))
            (vcs-test-yes-no (eq (getf after :smart) 'lem-yath-vcs-status))
            (vcs-test-yes-no (eq (getf after :git) 'lem-yath-legit-status))
            (vcs-test-yes-no (eq (getf after :jj) 'lem-yath-jj-log))

@@ -604,6 +604,22 @@ bounded operation synchronously and refreshes Legit instead of opening Magit's
 asynchronous process buffer; the nested `C` branch-configuration UI and the
 submodule argument sub-transient remain outside this port.
 
+The matching `b` branch dispatch is available in status and diff panes. It
+retains checkout by revision (`b`), local or remote-tracking checkout (`l`),
+orphan creation (`o`), upstream-first create-and-checkout/create (`c`/`n`),
+spin-off/spin-out (`s`/`S`), nested configuration (`C`), rename (`m`), reset
+(`X`), and guarded local deletion (`x`) after Evil Collection's reset/delete
+remap. Direct configuration exposes description, upstream, pull-rebase, and
+push-remote values for the current branch plus repository pull-rebase and push
+defaults; the nested view also exposes automatic merge/rebase setup. Remote
+checkout configures both upstream and push remote, unmerged deletion requires
+confirmation, deleting the checked-out branch first switches or detaches, and
+a dirty spin-out becomes a checked-out spin-off without losing edits. The
+recurse-submodules checkout argument is retained. Worktrees, shelve/unshelve,
+default-branch migration, remote-side rename/deletion, and Magit's visual
+commit-region spin boundary remain outside this port; execution is bounded and
+synchronous rather than process-buffer based.
+
 The matching `X` reset dispatch is also available in status and diff panes.
 It retains Magit's `b` branch and `f` file actions plus `m` mixed, `s` soft,
 `h` hard, `k` keep, `i` index-only, and `w` worktree-only reset boundaries.

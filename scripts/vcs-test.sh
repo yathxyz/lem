@@ -1179,6 +1179,221 @@ porcelain_revert_skip_complete() {
     "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
 }
 
+porcelain_branch_current_is() {
+  [ "$1" = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    symbolic-ref --quiet --short HEAD 2>/dev/null)" ]
+}
+
+porcelain_branch_remote_checkout_complete() {
+  porcelain_branch_current_is remote-topic &&
+    [ "$branch_remote_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "origin/remote-topic" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        for-each-ref --format='%(upstream:short)' refs/heads/remote-topic)" ] &&
+    [ origin = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      config --get branch.remote-topic.pushRemote)" ]
+}
+
+porcelain_branch_created_complete() {
+  porcelain_branch_current_is branch-created &&
+    [ "$merge_main_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ]
+}
+
+porcelain_branch_no_checkout_complete() {
+  porcelain_branch_current_is branch-created &&
+    [ "$merge_main_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        rev-parse refs/heads/branch-no-checkout)" ]
+}
+
+porcelain_branch_orphan_complete() {
+  porcelain_branch_current_is branch-orphan &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      rev-parse --verify HEAD >/dev/null 2>&1 &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_branch_renamed_complete() {
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    show-ref --verify --quiet refs/heads/branch-renamed &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      show-ref --verify --quiet refs/heads/branch-no-checkout
+}
+
+porcelain_branch_config_complete() {
+  [ 'configured branch description' = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      config --get branch.branch-renamed.description)" ] &&
+    [ 'origin/remote-topic' = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        for-each-ref --format='%(upstream:short)' \
+        refs/heads/branch-renamed)" ] &&
+    [ true = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      config --get branch.branch-renamed.rebase)" ] &&
+    [ origin = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      config --get branch.branch-renamed.pushRemote)" ] &&
+    [ true = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      config --get pull.rebase)" ] &&
+    [ origin = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      config --get remote.pushDefault)" ] &&
+    [ always = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      config --get branch.autoSetupMerge)" ] &&
+    [ remote = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      config --get branch.autoSetupRebase)" ]
+}
+
+porcelain_branch_reset_complete() {
+  [ "$branch_remote_hash" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      rev-parse refs/heads/branch-renamed)" ] &&
+    porcelain_branch_current_is branch-created
+}
+
+porcelain_branch_absent() {
+  ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    show-ref --verify --quiet "refs/heads/$1"
+}
+
+porcelain_branch_spinoff_complete() {
+  porcelain_branch_current_is branch-spun-off &&
+    [ "$branch_spinoff_tip" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$merge_main_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        rev-parse refs/heads/branch-spinoff-source)" ] &&
+    [ 'origin/spin-base' = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        for-each-ref --format='%(upstream:short)' \
+        refs/heads/branch-spun-off)" ] &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_branch_spinout_complete() {
+  porcelain_branch_current_is branch-spinout-source &&
+    [ "$merge_main_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$branch_spinout_tip" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        rev-parse refs/heads/branch-spun-out)" ] &&
+    [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/branch-spinout.txt" ] &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_branch_dirty_spinout_complete() {
+  porcelain_branch_current_is branch-dirty-spin &&
+    [ "$branch_dirty_tip" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$merge_main_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        rev-parse refs/heads/branch-dirty-source)" ] &&
+    grep -q '^dirty worktree survives$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/branch-dirty.txt" &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet -- \
+      branch-dirty.txt
+}
+
+prepare_porcelain_branch_fixture() {
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q main || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+    "$merge_main_hash" || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" update-ref \
+    refs/heads/branch-checkout "$merge_main_hash" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" update-ref \
+    refs/heads/branch-delete-merged "$merge_main_hash" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" update-ref \
+    refs/heads/branch-current-delete "$merge_main_hash" || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    branch-remote-build "$merge_main_hash" || return 1
+  printf 'remote branch value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-remote.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- branch-remote.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" branch-remote \
+    '2001-06-01T00:00:00+0000' || return 1
+  branch_remote_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" push -q origin \
+    HEAD:refs/heads/remote-topic || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" update-ref \
+    refs/remotes/origin/remote-topic "$branch_remote_hash" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q main || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch -D \
+    branch-remote-build >/dev/null || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    branch-delete-unmerged "$merge_main_hash" || return 1
+  printf 'unmerged branch value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-unmerged.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- branch-unmerged.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" branch-unmerged \
+    '2001-06-02T00:00:00+0000' || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" push -q origin \
+    "$merge_main_hash":refs/heads/spin-base || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" update-ref \
+    refs/remotes/origin/spin-base "$merge_main_hash" || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    branch-spinoff-source "$merge_main_hash" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch \
+    --set-upstream-to=origin/spin-base branch-spinoff-source >/dev/null ||
+    return 1
+  printf 'spin off one\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-spinoff-a.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    branch-spinoff-a.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" branch-spinoff-a \
+    '2001-06-03T00:00:00+0000' || return 1
+  printf 'spin off two\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-spinoff-b.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    branch-spinoff-b.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" branch-spinoff-b \
+    '2001-06-04T00:00:00+0000' || return 1
+  branch_spinoff_tip=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    branch-spinout-source "$merge_main_hash" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch \
+    --set-upstream-to=origin/spin-base branch-spinout-source >/dev/null ||
+    return 1
+  printf 'spin out value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-spinout.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    branch-spinout.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" branch-spinout \
+    '2001-06-05T00:00:00+0000' || return 1
+  branch_spinout_tip=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    branch-dirty-source "$merge_main_hash" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch \
+    --set-upstream-to=origin/spin-base branch-dirty-source >/dev/null ||
+    return 1
+  printf 'committed dirty source\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-dirty.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- branch-dirty.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" branch-dirty \
+    '2001-06-06T00:00:00+0000' || return 1
+  branch_dirty_tip=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q main || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+    "$merge_main_hash" || return 1
+  porcelain_branch_current_is main
+}
+
 prepare_porcelain_revert_fixture() {
   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q main || return 1
   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
@@ -1493,7 +1708,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes merge=yes revert=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes merge=yes revert=yes branch=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -2151,14 +2366,15 @@ else
 fi
 
 send_keys "$porcelain_session" b c
-if lem_wait_for "$porcelain_session" 'New branch name:' \
+if lem_wait_for "$porcelain_session" \
+     'Create and checkout branch starting at:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  tmux_cmd send-keys -t "$porcelain_session" -l -- vcs-feature
-  send_keys "$porcelain_session" Enter
-  if lem_wait_for "$porcelain_session" 'Base branch:' \
+  enter_completion_prompt_value "$porcelain_session" main \
+    'Create and checkout branch starting at:'
+  if lem_wait_for "$porcelain_session" \
+       'Name for create and checkout branch:' \
        "$WAIT_TIMEOUT" >/dev/null; then
-    tmux_cmd send-keys -t "$porcelain_session" -l -- main
-    send_keys "$porcelain_session" Enter
+    enter_prompt_value "$porcelain_session" vcs-feature
   fi
 fi
 if wait_until "$WAIT_TIMEOUT" porcelain_branch_is vcs-feature; then
@@ -2169,12 +2385,10 @@ else
 fi
 
 send_keys "$porcelain_session" b b
-if lem_wait_for "$porcelain_session" 'Branch:' "$WAIT_TIMEOUT" >/dev/null; then
-  for _ in $(seq 1 11); do
-    lem_keys "$porcelain_session" BSpace
-  done
-  tmux_cmd send-keys -t "$porcelain_session" -l -- main
-  send_keys "$porcelain_session" Enter
+if lem_wait_for "$porcelain_session" 'Checkout branch or revision:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" main \
+    'Checkout branch or revision:'
 fi
 if wait_until "$WAIT_TIMEOUT" porcelain_branch_is main; then
   pass legit-branch-checkout 'b b checked out the selected existing branch'
@@ -3583,6 +3797,427 @@ else
     'revert skip lost the current tree or failed to continue the sequence' \
     "$porcelain_session"
 fi
+
+if prepare_porcelain_branch_fixture; then
+  pass legit-branch-fixture \
+    'prepared local, remote, unmerged, current, and spin branch histories'
+else
+  fail legit-branch-fixture 'could not prepare isolated branch histories' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" b
+fi
+if lem_wait_for "$porcelain_session" 'Checkout branch or revision:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" branch-checkout \
+    'Checkout branch or revision:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_current_is branch-checkout; then
+  pass legit-branch-checkout 'b b checked out the selected branch/revision'
+else
+  fail legit-branch-checkout 'branch/revision checkout did not move HEAD' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" l
+fi
+if lem_wait_for "$porcelain_session" 'Checkout local branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" origin/remote-topic \
+    'Checkout local branch:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_remote_checkout_complete; then
+  pass legit-branch-remote-checkout \
+    'b l created a local tracking branch and configured its push remote'
+else
+  fail legit-branch-remote-checkout \
+    'remote checkout lost its hash, upstream, local name, or push remote' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" c
+fi
+if lem_wait_for "$porcelain_session" \
+     'Create and checkout branch starting at:' "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" "$merge_main_hash" \
+    'Create and checkout branch starting at:'
+fi
+if lem_wait_for "$porcelain_session" \
+     'Name for create and checkout branch:' "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" branch-created
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_created_complete; then
+  pass legit-branch-create-checkout \
+    'b c used Magit upstream-first prompting and checked out the new branch'
+else
+  fail legit-branch-create-checkout \
+    'create-and-checkout lost its selected start point or branch' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" n
+fi
+if lem_wait_for "$porcelain_session" 'Create branch starting at:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" "$merge_main_hash" \
+    'Create branch starting at:'
+fi
+if lem_wait_for "$porcelain_session" 'Name for create branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" branch-no-checkout
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_no_checkout_complete; then
+  pass legit-branch-create \
+    'b n created the selected branch without moving HEAD'
+else
+  fail legit-branch-create \
+    'create-without-checkout moved HEAD or used the wrong start point' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" o
+fi
+if lem_wait_for "$porcelain_session" \
+     'Create and checkout orphan branch starting at:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" "$merge_main_hash" \
+    'Create and checkout orphan branch starting at:'
+fi
+if lem_wait_for "$porcelain_session" \
+     'Name for create and checkout orphan branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" branch-orphan
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_orphan_complete; then
+  pass legit-branch-orphan \
+    'b o created an unborn orphan HEAD with the selected staged tree'
+else
+  fail legit-branch-orphan \
+    'orphan checkout retained a parent or lost its staged starting tree' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -f branch-created
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$merge_main_hash"
+send_keys "$porcelain_session" g
+
+send_keys "$porcelain_session" b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" m
+fi
+if lem_wait_for "$porcelain_session" 'Rename branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" branch-no-checkout \
+    'Rename branch:'
+fi
+if lem_wait_for "$porcelain_session" \
+     "Rename branch 'branch-no-checkout' to:" \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" branch-renamed
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_renamed_complete; then
+  pass legit-branch-rename 'b m renamed the selected non-current branch'
+else
+  fail legit-branch-rename 'branch rename retained the old ref or lost the new ref' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" C
+fi
+if lem_wait_for "$porcelain_session" 'Configure branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" branch-renamed \
+    'Configure branch:'
+fi
+if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" d
+fi
+if lem_wait_for "$porcelain_session" \
+     'Description for branch-renamed' "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" 'configured branch description'
+fi
+if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" u
+fi
+if lem_wait_for "$porcelain_session" 'Upstream for branch-renamed:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" origin/remote-topic \
+    'Upstream for branch-renamed:'
+fi
+if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" r
+fi
+if lem_wait_for "$porcelain_session" 'Rebase when pulling branch-renamed:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" true \
+    'Rebase when pulling branch-renamed:'
+fi
+if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" p
+fi
+if lem_wait_for "$porcelain_session" 'Push remote for branch-renamed:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" origin \
+    'Push remote for branch-renamed:'
+fi
+if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" R
+fi
+if lem_wait_for "$porcelain_session" 'Repository pull.rebase:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" true \
+    'Repository pull.rebase:'
+fi
+if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" P
+fi
+if lem_wait_for "$porcelain_session" 'Repository push default:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" origin \
+    'Repository push default:'
+fi
+if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" a m
+fi
+if lem_wait_for "$porcelain_session" 'Automatic upstream setup:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" always \
+    'Automatic upstream setup:'
+fi
+if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" a r
+fi
+if lem_wait_for "$porcelain_session" 'Automatic rebase setup:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" remote \
+    'Automatic rebase setup:'
+fi
+if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" q
+fi
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" q
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_config_complete; then
+  pass legit-branch-configure \
+    'b C persisted branch and repository configuration through the live popup'
+else
+  fail legit-branch-configure \
+    'branch configuration lost description, upstream, rebase, or remote values' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" X
+fi
+if lem_wait_for "$porcelain_session" 'Reset branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" branch-renamed \
+    'Reset branch:'
+fi
+if lem_wait_for "$porcelain_session" 'Reset branch-renamed to:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" "$branch_remote_hash" \
+    'Reset branch-renamed to:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_reset_complete; then
+  pass legit-branch-reset \
+    'Evil-remapped b X reset a non-current branch without moving HEAD'
+else
+  fail legit-branch-reset 'branch reset changed HEAD or used the wrong target' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" x
+fi
+if lem_wait_for "$porcelain_session" 'Delete branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" branch-delete-merged \
+    'Delete branch:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_absent branch-delete-merged; then
+  pass legit-branch-delete-merged \
+    'Evil-remapped b x deleted a branch already merged into HEAD'
+else
+  fail legit-branch-delete-merged 'safe branch deletion retained its ref' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" x
+fi
+if lem_wait_for "$porcelain_session" 'Delete branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" branch-delete-unmerged \
+    'Delete branch:'
+fi
+if lem_wait_for "$porcelain_session" 'Force delete' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" n
+fi
+if "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+     show-ref --verify --quiet refs/heads/branch-delete-unmerged; then
+  pass legit-branch-delete-decline \
+    'b x retained an unmerged branch when force deletion was declined'
+else
+  fail legit-branch-delete-decline \
+    'declining unmerged deletion still removed the branch' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" x
+fi
+if lem_wait_for "$porcelain_session" 'Delete branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" branch-delete-unmerged \
+    'Delete branch:'
+fi
+if lem_wait_for "$porcelain_session" 'Force delete' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_absent branch-delete-unmerged; then
+  pass legit-branch-delete-force \
+    'b x force-deleted the unmerged branch only after confirmation'
+else
+  fail legit-branch-delete-force 'confirmed unmerged deletion retained the ref' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
+  branch-current-delete
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" x
+fi
+if lem_wait_for "$porcelain_session" 'Delete branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" branch-current-delete \
+    'Delete branch:'
+fi
+if lem_wait_for "$porcelain_session" 'switch before deleting:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" branch-created \
+    'switch before deleting:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_current_is branch-created &&
+   porcelain_branch_absent branch-current-delete; then
+  pass legit-branch-delete-current \
+    'b x switched away before deleting the current branch'
+else
+  fail legit-branch-delete-current \
+    'current-branch deletion lost its selected safe checkout boundary' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
+  branch-spinoff-source
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" s
+fi
+if lem_wait_for "$porcelain_session" 'Spin off branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" branch-spun-off
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_spinoff_complete; then
+  pass legit-branch-spinoff \
+    'b s moved unpushed commits to a new checked-out tracking branch'
+else
+  fail legit-branch-spinoff \
+    'spin-off lost commits, upstream, source reset, or checkout state' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
+  branch-spinout-source
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" S
+fi
+if lem_wait_for "$porcelain_session" 'Spin out branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" branch-spun-out
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_spinout_complete; then
+  pass legit-branch-spinout \
+    'b S retained the source checkout while moving its unpushed commits'
+else
+  fail legit-branch-spinout \
+    'spin-out lost its source checkout, new tip, reset, or clean tree' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
+  branch-dirty-source
+printf 'dirty worktree survives\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-dirty.txt"
+send_keys "$porcelain_session" g b
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" S
+fi
+if lem_wait_for "$porcelain_session" 'Spin out branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" branch-dirty-spin
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_dirty_spinout_complete; then
+  pass legit-branch-spinout-dirty \
+    'dirty b S followed Magit by checking out the new branch and retaining edits'
+else
+  fail legit-branch-spinout-dirty \
+    'dirty spin-out lost the worktree, source reset, new tip, or checkout' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -f main
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$merge_main_hash"
+send_keys "$porcelain_session" g
 
 "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q main
 "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \

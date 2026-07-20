@@ -48,6 +48,7 @@
                (:file "git-reset")
                (:file "git-merge")
                (:file "git-revert")
+               (:file "git-branch")
                (:file "git-blame")
                (:file "forge")
                (:file "project-history")

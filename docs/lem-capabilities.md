@@ -2198,6 +2198,19 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
   one branch, `r` an explicit refspec, and `m` populated submodules with the
   default verbose four-job policy. A missing push remote is selected and
   persisted before fetching.
+- **Branch dispatch**: `b` replaces Legit's direct branch bindings in status
+  and diff with Magit's configured checkout, local/remote tracking checkout,
+  orphan, upstream-first create, spin-off/spin-out, configure, rename, reset,
+  and guarded local-delete lifecycle. Direct configuration covers the current
+  branch description, upstream, rebase, and push remote plus repository pull
+  and push defaults; nested `C` also covers automatic merge/rebase setup.
+  Evil Collection's `X` reset and `x` delete mapping is retained. Remote
+  checkout records upstream and push remote, checked-out deletion switches or
+  detaches first, unmerged deletion confirms, and dirty spin-out preserves
+  edits by becoming spin-off. The `- r` checkout submodule argument is present.
+  Worktrees, shelve/unshelve, default-branch migration, remote-side
+  rename/deletion, visual commit-region spin selection, and asynchronous
+  process presentation remain gaps.
 - **Reset dispatch**: `X` exposes `b` branch, `f` file, `m` mixed, `s` soft,
   `h` hard, `k` keep, `i` index-only, and `w` worktree-only actions in status
   and diff panes. Revision, branch, and revision-tree file completion is
