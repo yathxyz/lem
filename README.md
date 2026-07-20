@@ -522,6 +522,16 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   resulting status root. Visual commit-region spin boundaries remain an
   explicit gap, and Git mutations remain synchronous instead of using Magit's
   process buffers.
+  Evil Collection's uppercase `Z` stash dispatch is available in status and
+  diff panes, matching its configured move away from lowercase `z`. `- u`/`- a`
+  select untracked or ignored files; `z`/`i`/`w`/`x` stash both layers, only
+  the index, only the worktree, or both while retaining the index;
+  `Z`/`I`/`W` create non-cleaning snapshots and `r` updates branch-scoped WIP
+  refs. Apply, pop, drop, list, show, branch-from-base, branch-here, and
+  format-patch actions retain their Magit state boundaries. Legit does not yet
+  implement Magit's section folds and retains its upstream `z z`/`z p` direct
+  aliases; the normally hidden level-5 pathspec push sub-transient also remains
+  outside this port.
   Magit's `X` reset dispatch is likewise available in status and diff panes:
   `b` resets a selected local branch, `f` checks out one revision path, and
   `m`/`s`/`h`/`k`/`i`/`w` preserve the mixed, soft, hard, keep, index-only,

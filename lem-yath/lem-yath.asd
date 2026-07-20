@@ -51,6 +51,7 @@
                (:file "git-branch")
                (:file "git-worktree")
                (:file "git-push")
+               (:file "git-stash")
                (:file "git-blame")
                (:file "forge")
                (:file "project-history")

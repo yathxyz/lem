@@ -638,6 +638,23 @@ spin-off without losing edits. The recurse-submodules checkout argument is
 retained. Magit's visual commit-region spin boundary remains outside this port;
 execution is bounded and synchronous rather than process-buffer based.
 
+Evil Collection reserves lowercase `z` for Magit section folds and moves the
+stash dispatch to uppercase `Z`; Lem matches that status/diff stash binding. The
+dispatch retains `- u` include-untracked and `- a` include-all, mutually
+exclusive at runtime. Actions `z`, `i`, `w`, and `x` save both index/worktree,
+index only, worktree only, or both while keeping the index. `Z`, `I`, and `W`
+create the corresponding non-cleaning snapshots, while `r` updates the
+branch-scoped `refs/wip/index/...` and `refs/wip/wtree/...` histories. `a`,
+`p`, `k`, `l`, and `v` apply, pop, drop, list, and show a selected stash;
+`b` creates at the stash base and drops after clean application, `B` creates
+at current `HEAD` and retains the stash, and `f` writes Magit's derived patch
+name. Staged/worktree separation uses temporary-index and commit-tree plumbing
+rather than broader `git stash` approximations. Calls are synchronous and
+bounded to 120 seconds, 4 MiB, 5000 paths, and 4096-character prompt values.
+Legit has no section-fold primitives and retains its upstream `z z`/`z p`
+direct aliases. Magit's normally hidden level-5 pathspec push sub-transient and
+asynchronous process presentation remain outside this port.
+
 Evil Collection's remapped `%` opens the separate worktree dispatch in status
 and diff panes. Its configured `b`, `c`, `m`, `k`, and `g` actions check out a
 revision into a new worktree, create a branch plus worktree, move, delete, and

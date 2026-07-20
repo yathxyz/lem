@@ -441,6 +441,129 @@ porcelain_stash_restored() {
     ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet
 }
 
+porcelain_stash_count_is() {
+  [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash list | wc -l)" \
+    -eq "$1" ]
+}
+
+porcelain_stash_all_saved() {
+  porcelain_stash_count_is 1 &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet &&
+    [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/stash-untracked.txt" ] &&
+    [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/stash-ignored.txt" ] &&
+    [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      rev-list --parents -n 1 refs/stash | wc -w)" -eq 4 ]
+}
+
+porcelain_stash_all_restored() {
+  porcelain_stash_count_is 0 &&
+    grep -q '^stash-both-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt" &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/stash-untracked.txt")" = \
+      stash-untracked ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/stash-ignored.txt")" = \
+      stash-ignored ]
+}
+
+porcelain_stash_index_saved() {
+  porcelain_stash_count_is 1 &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet &&
+    ! grep -q '^stash-index-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt" &&
+    grep -q '^stash-unstaged-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt"
+}
+
+porcelain_stash_index_restored() {
+  porcelain_stash_count_is 0 &&
+    grep -q '^stash-index-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt" &&
+    grep -q '^stash-unstaged-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt" &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --cached --quiet -- auxiliary.txt
+}
+
+porcelain_stash_worktree_saved() {
+  porcelain_stash_count_is 1 &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --cached --quiet -- auxiliary.txt &&
+    grep -q '^stash-index-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt" &&
+    ! grep -q '^stash-unstaged-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt" &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --quiet -- porcelain.txt
+}
+
+porcelain_stash_worktree_restored() {
+  porcelain_stash_count_is 0 &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --cached --quiet -- auxiliary.txt &&
+    grep -q '^stash-unstaged-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt"
+}
+
+porcelain_stash_snapshot_preserved() {
+  porcelain_stash_count_is 1 &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --cached --quiet -- auxiliary.txt &&
+    grep -q '^stash-index-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt" &&
+    grep -q '^stash-unstaged-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt"
+}
+
+porcelain_stash_wip_saved() {
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse --verify refs/wip/index/refs/heads/main >/dev/null 2>&1 &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      rev-parse --verify refs/wip/wtree/refs/heads/main >/dev/null 2>&1 &&
+    [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      rev-parse refs/wip/index/refs/heads/main^{tree})" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" write-tree)" ] &&
+    grep -q '^stash-index-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt" &&
+    grep -q '^stash-unstaged-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt"
+}
+
+porcelain_stash_applied() {
+  porcelain_stash_count_is 1 &&
+    grep -q '^stash-inspect-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+}
+
+porcelain_stash_tracked_saved() {
+  porcelain_stash_count_is 1 &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_stash_patch_created() {
+  [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/0001-lem-stash-inspect.patch" ] &&
+    grep -q '^+stash-inspect-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/0001-lem-stash-inspect.patch" &&
+    porcelain_stash_count_is 1
+}
+
+porcelain_stash_branch_complete() {
+  [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    branch --show-current)" = stash-branch-base ] &&
+    porcelain_stash_count_is 0 &&
+    grep -q '^stash-inspect-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+}
+
+porcelain_stash_branch_here_complete() {
+  [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    branch --show-current)" = stash-branch-here ] &&
+    porcelain_stash_count_is 1 &&
+    grep -q '^stash-here-probe$' \
+      "$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+}
+
 porcelain_peer_pulled() {
   [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" = \
     "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" rev-parse HEAD)" ] &&
@@ -2041,7 +2164,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes merge=yes revert=yes branch=yes worktree=yes push=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes merge=yes revert=yes branch=yes worktree=yes push=yes stash=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -2743,33 +2866,353 @@ else
   fail legit-branch-checkout 'b b did not return to main' "$porcelain_session"
 fi
 
-printf 'stash-probe\n' >>"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
-send_keys "$porcelain_session" g z z
+printf 'stash-ignored.txt\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/.git/info/exclude"
+printf 'stash-both-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+printf 'stash-untracked\n' \
+  >"$LEM_YATH_VCS_PORCELAIN_ROOT/stash-untracked.txt"
+printf 'stash-ignored\n' \
+  >"$LEM_YATH_VCS_PORCELAIN_ROOT/stash-ignored.txt"
+send_keys "$porcelain_session" g Z - a z
 if lem_wait_for "$porcelain_session" 'Stash message:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-stash
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-stash-all
   send_keys "$porcelain_session" Enter
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_stashed; then
-  pass legit-stash-push 'z z stashed tracked worktree changes with a message'
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_all_saved; then
+  pass legit-stash-both-all \
+    'Z - a z stashed tracked, untracked, and ignored state with three parents'
 else
-  fail legit-stash-push 'z z did not create a clean stash' \
+  fail legit-stash-both-all \
+    'Z - a z did not preserve the complete stash topology and clean boundary' \
     "$porcelain_session"
 fi
 
-send_keys "$porcelain_session" z p
-if lem_wait_for "$porcelain_session" 'Pop the latest stash' \
+send_keys "$porcelain_session" Z p
+if lem_wait_for "$porcelain_session" 'Pop stash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_all_restored; then
+  pass legit-stash-pop-all \
+    'Z p restored tracked, untracked, and ignored state and removed the stash'
+else
+  fail legit-stash-pop-all 'Z p did not restore the complete selected stash' \
+    "$porcelain_session"
+fi
+
+rm -f "$LEM_YATH_VCS_PORCELAIN_ROOT/stash-untracked.txt" \
+  "$LEM_YATH_VCS_PORCELAIN_ROOT/stash-ignored.txt"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" restore -- \
+  auxiliary.txt porcelain.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q HEAD -- \
+  auxiliary.txt porcelain.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash clear
+
+printf 'stash-index-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- auxiliary.txt
+printf 'stash-unstaged-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt"
+send_keys "$porcelain_session" g Z i
+if lem_wait_for "$porcelain_session" 'Stash message:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-stash-index
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_index_saved; then
+  pass legit-stash-index \
+    'Z i removed only staged content while retaining an unrelated unstaged file'
+else
+  fail legit-stash-index 'Z i crossed the staged/worktree state boundary' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" Z p
+if lem_wait_for "$porcelain_session" 'Pop stash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_index_restored; then
+  pass legit-stash-index-pop \
+    'Z p restored the index-only stash to the index without losing unstaged state'
+else
+  fail legit-stash-index-pop 'the index-only stash did not invert cleanly' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q HEAD -- \
+  auxiliary.txt porcelain.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" restore -- \
+  auxiliary.txt porcelain.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash clear
+
+printf 'stash-index-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- auxiliary.txt
+printf 'stash-unstaged-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt"
+send_keys "$porcelain_session" g Z w
+if lem_wait_for "$porcelain_session" 'Stash message:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-stash-worktree
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_worktree_saved; then
+  pass legit-stash-worktree \
+    'Z w removed only unstaged content while preserving the exact index'
+else
+  fail legit-stash-worktree 'Z w crossed the worktree/index state boundary' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" Z p
+if lem_wait_for "$porcelain_session" 'Pop stash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_worktree_restored; then
+  pass legit-stash-worktree-pop \
+    'Z p restored the worktree-only stash without changing the staged file'
+else
+  fail legit-stash-worktree-pop 'the worktree-only stash did not invert cleanly' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q HEAD -- \
+  auxiliary.txt porcelain.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" restore -- \
+  auxiliary.txt porcelain.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash clear
+
+printf 'stash-index-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- auxiliary.txt
+printf 'stash-unstaged-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt"
+send_keys "$porcelain_session" g Z x
+if lem_wait_for "$porcelain_session" 'Stash message:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-stash-keep-index
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_worktree_saved; then
+  pass legit-stash-keep-index \
+    'Z x stashed both layers while retaining the exact staged index'
+else
+  fail legit-stash-keep-index 'Z x did not preserve the index boundary' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash clear
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q HEAD -- \
+  auxiliary.txt porcelain.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" restore -- \
+  auxiliary.txt porcelain.txt
+
+printf 'stash-index-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- auxiliary.txt
+printf 'stash-unstaged-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/porcelain.txt"
+send_keys "$porcelain_session" g Z Z
+if lem_wait_for "$porcelain_session" 'Stash message:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-snapshot-both
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_snapshot_preserved; then
+  pass legit-stash-snapshot \
+    'Z Z recorded both layers without changing either live state'
+else
+  fail legit-stash-snapshot 'Z Z mutated the live index or worktree' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" Z k
+if lem_wait_for "$porcelain_session" 'Drop stash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" Enter
+fi
+if lem_wait_for "$porcelain_session" 'Drop stash@{0}?' \
      "$WAIT_TIMEOUT" >/dev/null; then
   lem_keys "$porcelain_session" y
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_stash_restored; then
-  pass legit-stash-pop 'z p restored and removed the latest stash'
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_count_is 0; then
+  pass legit-stash-drop 'Z k selected, confirmed, and dropped the snapshot'
 else
-  fail legit-stash-pop 'z p did not restore the latest stash' \
+  fail legit-stash-drop 'Z k did not remove the selected snapshot' \
     "$porcelain_session"
 fi
 
+send_keys "$porcelain_session" Z I
+if lem_wait_for "$porcelain_session" 'Stash message:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-snapshot-index
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_snapshot_preserved; then
+  pass legit-stash-snapshot-index \
+    'Z I recorded the index without mutating live staged or unstaged content'
+else
+  fail legit-stash-snapshot-index 'Z I changed live repository state' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash clear
+
+send_keys "$porcelain_session" Z W
+if lem_wait_for "$porcelain_session" 'Stash message:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-snapshot-worktree
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_snapshot_preserved; then
+  pass legit-stash-snapshot-worktree \
+    'Z W recorded the worktree without mutating live staged or unstaged content'
+else
+  fail legit-stash-snapshot-worktree 'Z W changed live repository state' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash clear
+
+send_keys "$porcelain_session" Z r
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_wip_saved; then
+  pass legit-stash-wip \
+    'Z r updated branch-scoped index/worktree WIP refs without cleaning live state'
+else
+  fail legit-stash-wip 'Z r did not preserve exact WIP ref and live-state boundaries' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q HEAD -- \
+  auxiliary.txt porcelain.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" restore -- \
+  auxiliary.txt porcelain.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash clear
+
+printf 'stash-inspect-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+send_keys "$porcelain_session" g Z z
+if lem_wait_for "$porcelain_session" 'Stash message:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-stash-inspect
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_tracked_saved; then
+  pass legit-stash-inspect-fixture \
+    'prepared one selected stash for apply, inspect, patch, and branch actions'
+else
+  fail legit-stash-inspect-fixture \
+    'could not prepare the inspect/transform stash' "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" Z a
+if lem_wait_for "$porcelain_session" 'Apply stash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_applied; then
+  pass legit-stash-apply \
+    'Z a restored the selected stash while retaining its reflog entry'
+else
+  fail legit-stash-apply 'Z a did not preserve apply-versus-pop semantics' \
+    "$porcelain_session"
+fi
 "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" restore -- auxiliary.txt
+
+send_keys "$porcelain_session" g Z v
+if lem_wait_for "$porcelain_session" 'Show stash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" Enter
+fi
+if lem_wait_for "$porcelain_session" 'stash-inspect-probe' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  pass legit-stash-show "Z v rendered the selected stash patch in Legit's diff pane"
+else
+  fail legit-stash-show 'Z v did not render the selected stash patch' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" Z f
+if lem_wait_for "$porcelain_session" 'Create patch from stash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_patch_created; then
+  pass legit-stash-format-patch \
+    'Z f created Magit-named patch content without dropping the stash'
+else
+  fail legit-stash-format-patch 'Z f did not write the selected stash patch' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" Z l
+if lem_wait_for "$porcelain_session" 'lem-stash-inspect' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  pass legit-stash-list 'Z l displayed the bounded stash reflog entry'
+else
+  fail legit-stash-list 'Z l did not display the stash list' \
+    "$porcelain_session"
+fi
+tmux_cmd send-keys -t "$porcelain_session" -l -- ' '
+sleep 0.2
+
+send_keys "$porcelain_session" Z b
+if lem_wait_for "$porcelain_session" 'Branch from stash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" Enter
+fi
+if lem_wait_for "$porcelain_session" 'New branch name:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" stash-branch-base
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_branch_complete; then
+  pass legit-stash-branch \
+    'Z b created at the stash base, applied cleanly, and dropped the stash'
+else
+  fail legit-stash-branch 'Z b did not preserve stash-base branch semantics' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" restore -- auxiliary.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q main
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch -D stash-branch-base \
+  >/dev/null
+rm -f "$LEM_YATH_VCS_PORCELAIN_ROOT/0001-lem-stash-inspect.patch"
+
+printf 'stash-here-probe\n' \
+  >>"$LEM_YATH_VCS_PORCELAIN_ROOT/auxiliary.txt"
+send_keys "$porcelain_session" g Z z
+if lem_wait_for "$porcelain_session" 'Stash message:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- lem-stash-here
+  send_keys "$porcelain_session" Enter
+fi
+if ! wait_until "$WAIT_TIMEOUT" porcelain_stash_tracked_saved; then
+  fail legit-stash-branch-here-fixture \
+    'could not prepare the branch-here stash' "$porcelain_session"
+fi
+send_keys "$porcelain_session" Z B
+if lem_wait_for "$porcelain_session" 'Branch from stash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" Enter
+fi
+if lem_wait_for "$porcelain_session" 'New branch name:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" stash-branch-here
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_stash_branch_here_complete; then
+  pass legit-stash-branch-here \
+    'Z B branched at current HEAD, applied the stash, and retained its reflog entry'
+else
+  fail legit-stash-branch-here \
+    'Z B did not preserve branch-here or retained-stash semantics' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" restore -- auxiliary.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q main
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch -D stash-branch-here \
+  >/dev/null
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" stash clear
 send_keys "$porcelain_session" g
 if "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_PEER" pull -q --ff-only &&
    printf 'peer-pull-probe\n' \

@@ -2176,7 +2176,16 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
 - Push/Pull: lowercase `p` opens lem-yath's Evil Collection push dispatch
   (`p p` is the ordinary push-remote action); pull remains `F p`.
 - Log: `l l`, last/first page `l F` / pagination (`legit.lisp:86-87`).
-- **Stash**: push `z z`, pop `z p` (`legit.lisp:111-112`).
+- **Stash dispatch**: Evil Collection's uppercase `Z` opens the complete
+  normally visible Magit stash map in status and diff while lowercase `z`
+  is reserved for folds in the Emacs target. `- u`/`- a` select untracked/all files;
+  `z`/`i`/`w`/`x` stash both, index, worktree, or keep-index state;
+  `Z`/`I`/`W` snapshot without cleaning; and `r` updates branch-scoped WIP
+  refs. `a`/`p`/`k`, `l`/`v`, `b`/`B`, and `f` cover apply/pop/drop,
+  list/show, base/current branch creation, and format-patch. Staged/worktree
+  separation uses temporary-index commit-tree plumbing. The hidden level-5
+  pathspec push sub-transient is not exposed. Legit has no matching section-fold
+  primitives, and upstream `z z`/`z p` remain as direct aliases.
 - **Interactive rebase**: `r i`; abort/continue/skip `r a`/`r c`/`r s`
   (`legit.lisp:105-108`); full rebase-todo editing mode with `p r e s f x b d l t m`
   keys (`legit-rebase.lisp:49-77`).
@@ -2303,7 +2312,8 @@ be staged before continuing.
 
 ### Porcelain coverage vs magit — `legit/README.md`
 Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkout/
-create), push, pull/fetch, commits log with pagination, **stash push/pop**, interactive
+create), push, pull/fetch, commits log with pagination, the configured
+**stash dispatch**, interactive
 rebase (pick/reword/edit/fixup/squash/drop/exec/break/label/reset/merge).
 Also basic Fossil + Mercurial. **Gaps vs magit:** no multi-file staging,
 limited switches/transient submenus, no graphical remaining-revisions or process view,
@@ -2320,8 +2330,9 @@ keystrokes and three isolated repositories. It verifies exact Visual-line
 stage/unstage of one replacement within a multi-change hunk, partial unstage
 from that cached hunk, one selection spanning separated hunks, ordinary hunk
 fallback, tracked and untracked file staging, commit editing and
-validation, push to a bare remote, branch creation and checkout, stash
-push/pop, and a pull from an independent peer clone. It then selects an older
+validation, push to a bare remote, branch creation and checkout, every visible
+stash action with exact index/worktree/untracked/snapshot/WIP boundaries, and
+a pull from an independent peer clone. It then selects an older
 status commit and opens a real two-row interactive-rebase todo with `r i`. It
 saves the first row as `reword` and the second as `fixup`, continues with
 `C-c C-c`, edits the actual server-owned `COMMIT_EDITMSG`, confirms through
