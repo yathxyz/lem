@@ -2223,7 +2223,7 @@ Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkou
 create), push, pull/fetch, commits log with pagination, **stash push/pop**, interactive
 rebase (pick/reword/edit/fixup/squash/drop/exec/break/label/reset/merge).
 Also basic Fossil + Mercurial. **Gaps vs magit:** no multi-file staging,
-limited switches/transient submenus, no blame/bisect,
+limited switches/transient submenus, no bisect,
 no cherry-pick harvest/donate/spinout/spinoff or argument-toggle UI, and no log
 graph filtering. Selected-line staging is verified for ordinary tracked textual
 diffs; untracked, binary, and combined-conflict diffs still require whole-file
@@ -2256,6 +2256,19 @@ clean pick, `A a` no-commit apply, and genuine content plus add/add conflicts th
 resolution plus status-row staging/continue, abort, and skip. Each path verifies
 HEAD, index, worktree, sequencer cleanup, dispatch state, and non-modal conflict
 handling against real Git.
+
+`lem-yath/src/git-blame.lisp` adds the configured everyday current-file blame
+workflow independently of Legit: `C-c M-g b` follows Magit's file dispatch and
+`SPC g B` opens it directly. Git receives the live buffer through bounded
+`--contents -` input, including unsaved lines, and line-porcelain output is
+rendered in a read-only chunked view. Ordinary `j`/`k` remain Vi movement;
+`gj`/`gk` and `C-j`/`C-k` move by chunk, `gJ`/`gK` find the next/previous chunk
+from the same commit, `M-w` copies the full hash (or an active region), `RET`
+opens a bounded `git show` child, and nested `q` returns through the exact source
+buffer and point. The physical gate covers an unsaved Lisp edit, external-line
+attribution, navigation, copy, commit inspection, cleanup, and source undo.
+Removal/reverse/style/recursive-reblame, inline diff preview, and bisect remain
+outside this focused addition-blame implementation.
 
 ### Configured VCS dispatch and time travel — `lem-yath/src/git.lisp`, `src/apps/timemachine.lisp`
 
@@ -4164,7 +4177,9 @@ only dynamic abbrev `M-/`; lem-yath adds the bounded data-only subset in §4),
 no Orderless/Prescient framework**, **upstream tree-sitter is a manual API**
 (lem-yath supplies 19 automatic grammar/query mappings for existing modes, with
 the limitations in §6), **vi-mode
-lacks surround/sneak/easymotion**, **legit lacks blame/bisect/cherry-pick/region-staging**,
+lacks surround/sneak/easymotion**, **upstream Legit lacks
+blame/bisect/cherry-pick/region-staging** (lem-yath supplies bounded addition
+blame, the core cherry-pick lifecycle, and changed-line staging; bisect remains absent),
 and the **nix image cannot freely `ql:quickload` new deps at runtime** (extension-manager
 is compiled out), so anything outside `lem/extensions` must be added at image/ASDF time.
 Config language is Common Lisp in package `:lem-user`, single `init.lisp` in

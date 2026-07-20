@@ -71,6 +71,7 @@
   ;; git (magit / majutsu dispatch)
   ("g g" 'lem-yath-vcs-status)               ; SPC g g
   ("g G" 'lem-yath-legit-status)             ; SPC g G
+  ("g B" 'lem-yath-git-blame)                ; SPC g B
   ("g J" 'lem-yath-jj-log)                   ; SPC g J
   ("g t" 'lem-yath-git-timemachine)          ; SPC g t
 
@@ -189,6 +190,35 @@
 
 ;; normal state: C-c c opens the project-aware Claude Code query buffer
 (define-key lem-vi-mode:*normal-keymap* "C-c c" 'lem-yath-claude-code)
+
+;; Magit's default file dispatch is global in Emacs.  Vi state already owns a
+;; C-c prefix, so install the same prefix in every state as well as globally.
+(dolist (keymap (list *global-keymap*
+                      lem-vi-mode:*normal-keymap*
+                      lem-vi-mode:*visual-keymap*
+                      lem-vi-mode:*insert-keymap*))
+  (define-key keymap "C-c M-g" *git-file-dispatch-keymap*))
+
+(defun install-magit-file-dispatch-in-mode (mode)
+  "Merge Magit's file prefix into MODE without replacing occupied bindings."
+  (alexandria:when-let ((keymap (mode-keymap mode)))
+    (let ((prefix
+            (lem-core::keymap-find
+             keymap (lem-core::parse-keyspec "C-c M-g"))))
+      (cond
+        ((null prefix)
+         (define-key keymap "C-c M-g" *git-file-dispatch-keymap*))
+        ((typep (lem-core::prefix-suffix prefix) 'lem-core::keymap)
+         (let ((suffix (lem-core::prefix-suffix prefix)))
+           (unless (lem-core::keymap-find suffix
+                                          (lem-core::parse-keyspec "b"))
+             (define-key suffix "b" 'lem-yath-git-blame))))))))
+
+;; Lem chooses one C-c subtree before it has read the later M-g b suffix.
+;; Merge into every already-registered major-mode subtree at this final load
+;; stage; a mode that owns C-c M-g or its b suffix keeps that binding.
+(dolist (mode (major-modes))
+  (install-magit-file-dispatch-in-mode mode))
 
 ;; globals from the `use-package emacs` block
 (define-key *global-keymap* "M-o" 'next-window)        ; other-window

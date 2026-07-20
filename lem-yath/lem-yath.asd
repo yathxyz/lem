@@ -43,6 +43,7 @@
                (:file "git")
                (:file "git-rebase")
                (:file "git-cherry-pick")
+               (:file "git-blame")
                (:file "forge")
                (:file "project-history")
                (:file "project")

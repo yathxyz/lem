@@ -102,6 +102,9 @@
         (check (eq 'lem-yath-legit-status
                    (leader-binding-command keymap "g G"))
                "SPC-g-G-git")
+        (check (eq 'lem-yath-git-blame
+                   (leader-binding-command keymap "g B"))
+               "SPC-g-B-blame")
         (check (eq 'lem-yath-jj-log
                    (leader-binding-command keymap "g J"))
                "SPC-g-J-jj")
@@ -140,6 +143,37 @@
                  (vcs-test-key-command
                   *lem-yath-timemachine-blame-keymap* "q"))
              "timemachine-blame-q")
+      (dolist (keymap (list *global-keymap*
+                            lem-vi-mode:*normal-keymap*
+                            lem-vi-mode:*visual-keymap*
+                            lem-vi-mode:*insert-keymap*))
+        (check (eq 'lem-yath-git-blame
+                   (vcs-test-key-command keymap "C-c M-g b"))
+               "magit-file-dispatch-blame"))
+      (check (eq 'lem-yath-git-blame
+                 (vcs-test-key-command
+                  (mode-keymap (buffer-major-mode *vcs-test-source-buffer*))
+                  "C-c M-g b"))
+             "magit-file-dispatch-major-mode")
+      (dolist (binding '(("g j" lem-yath-git-blame-next-chunk)
+                         ("g k" lem-yath-git-blame-previous-chunk)
+                         ("g J" lem-yath-git-blame-next-chunk-same-commit)
+                         ("g K" lem-yath-git-blame-previous-chunk-same-commit)
+                         ("C-j" lem-yath-git-blame-next-chunk)
+                         ("C-k" lem-yath-git-blame-previous-chunk)
+                         ("Return" lem-yath-git-blame-show-commit)
+                         ("M-w" lem-yath-git-blame-copy-hash)
+                         ("q" lem-yath-git-blame-quit)))
+        (check (eq (second binding)
+                   (vcs-test-key-command *git-blame-mode-keymap*
+                                         (first binding)))
+               (format nil "magit-blame-~a" (first binding))))
+      (dolist (key '("j" "k"))
+        (check (null (vcs-test-key-command *git-blame-mode-keymap* key))
+               (format nil "magit-blame-does-not-shadow-~a" key)))
+      (check (eq 'lem-yath-git-blame-commit-quit
+                 (vcs-test-key-command *git-blame-commit-mode-keymap* "q"))
+             "magit-blame-commit-q")
       (check (typep (vcs-test-key-command *lem-yath-jj-view-keymap* "g")
                     'lem-core::keymap)
              "jj-g-is-prefix")
@@ -916,6 +950,62 @@
      (vcs-test-yes-no (search "vcs-history :old" text))
      (count-if #'tm-blame-buffer-p (buffer-list)))))
 
+(define-command lem-yath-test-vcs-git-blame-state () ()
+  (let* ((buffer (current-buffer))
+         (blame (git-blame-buffer-p buffer))
+         (commit (git-blame-commit-buffer-p buffer))
+         (parent (and commit
+                      (buffer-value buffer *git-blame-commit-parent-key*)))
+         (blame-buffer (cond (blame buffer)
+                             ((git-blame-buffer-p parent) parent)))
+         (record (and blame-buffer
+                      (git-blame-current-record
+                       (buffer-point blame-buffer))))
+         (hash (and record (git-blame-record-hash record)))
+         (origin (and blame-buffer
+                      (buffer-value blame-buffer
+                                    *git-blame-origin-buffer-key*)))
+         (origin-point
+           (and blame-buffer
+                (buffer-value blame-buffer *git-blame-origin-point-key*)))
+         (text (buffer-text buffer))
+         (head (vcs-test-killring-head)))
+    (vcs-test-log
+     (concatenate
+      'string
+      "BLAME kind=~a blame=~d commit=~d zero=~a external=~a live=~a "
+      "origin=~a origin-point=~a read-only=~a copied=~a show=~a source=~a")
+     (cond (blame "blame") (commit "commit") (t "source"))
+     (count-if #'git-blame-buffer-p (buffer-list))
+     (count-if #'git-blame-commit-buffer-p (buffer-list))
+     (vcs-test-yes-no (and hash (git-blame-zero-hash-p hash)))
+     (vcs-test-yes-no
+      (and record
+           (string= "External file (--contents)"
+                    (git-blame-record-author record))))
+     (vcs-test-yes-no (search "UNSAVED-BLAME-" text))
+     (vcs-test-yes-no (eq origin *vcs-test-source-buffer*))
+     (vcs-test-yes-no
+      (and origin-point
+           (eq (point-buffer origin-point) *vcs-test-source-buffer*)
+           (= (position-at-point origin-point)
+              (position-at-point
+               (buffer-point *vcs-test-source-buffer*)))))
+     (vcs-test-yes-no (buffer-read-only-p buffer))
+     (vcs-test-yes-no (and hash (string= hash head)))
+     (vcs-test-yes-no (and commit
+                            hash
+                            (search (format nil "commit ~a" hash) text)))
+     (vcs-test-yes-no (eq buffer *vcs-test-source-buffer*)))))
+
+(define-command lem-yath-test-vcs-history-view-state () ()
+  (if (or (git-blame-buffer-p (current-buffer))
+          (git-blame-commit-buffer-p (current-buffer))
+          (and (eq (current-buffer) *vcs-test-source-buffer*)
+               (search "UNSAVED-BLAME-" (buffer-text (current-buffer)))))
+      (lem-yath-test-vcs-git-blame-state)
+      (lem-yath-test-vcs-timemachine-state)))
+
 (define-command lem-yath-test-vcs-source-state () ()
   (let ((buffer *vcs-test-source-buffer*))
     (vcs-test-log
@@ -1052,6 +1142,7 @@
         (dotimes (index 2)
           (declare (ignore index))
           (load (merge-pathnames "src/git.lisp" source))
+          (load (merge-pathnames "src/git-blame.lisp" source))
           (load (merge-pathnames "src/apps/timemachine.lisp" source)))
         (let ((after (vcs-test-reload-state)))
           (vcs-test-log
@@ -1105,7 +1196,7 @@
 (define-key *global-keymap* "F2" 'lem-yath-test-vcs-gutter)
 (define-key *global-keymap* "F3" 'lem-yath-test-vcs-dispatch-state)
 (define-key *global-keymap* "F4" 'lem-yath-test-vcs-legit-state)
-(define-key *global-keymap* "F5" 'lem-yath-test-vcs-timemachine-state)
+(define-key *global-keymap* "F5" 'lem-yath-test-vcs-history-view-state)
 (define-key *global-keymap* "F6" 'lem-yath-test-vcs-restore-source)
 (define-key *global-keymap* "F7" 'lem-yath-test-vcs-source-state)
 (define-key *global-keymap* "F8" 'lem-yath-test-vcs-reload)

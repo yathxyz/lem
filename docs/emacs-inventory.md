@@ -574,6 +574,16 @@ Lem now implements that complete configured map. Its blame command uses a
 focused read-only child buffer rather than Magit's overlays and returns to the
 unchanged history view with `q`.
 
+The everyday Magit current-file route is implemented separately: `C-c M-g b`
+matches `magit-file-dispatch` followed by `magit-blame-addition`, while
+`SPC g B` is a direct alias. It blames the live buffer with `--contents -`, so
+unsaved lines remain visible as external worktree content. The focused view
+keeps ordinary `j`/`k`, binds `gj`/`gk` and `C-j`/`C-k` to adjacent chunks,
+`gJ`/`gK` to adjacent chunks from the same commit, `M-w` to hash copy, `RET` to
+a bounded commit view, and `q` to exact nested/source restoration. Removal,
+reverse, style, recursive-reblame, inline diff-preview, and bisect surfaces are
+outside this focused addition-blame port.
+
 `vc-handled-backends '(Git)` only. `magit`/`magit-todos`/`forge`/`git-gutter`/`git-timemachine` all loaded via `init-evil`.
 
 ---

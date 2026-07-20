@@ -469,7 +469,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   undo/redo, confirmed abandon, diff, refresh, and navigation keys,
   while programming buffers get buffer-local Git markers and Git status includes
   navigable tracked-file
-  TODO/FIXME rows, and `SPC g t` supplies the complete configured
+  TODO/FIXME rows. Magit's configured current-file dispatch is available as
+  `C-c M-g b` (with direct leader alias `SPC g B`): it blames the live buffer,
+  including unsaved lines, and supplies ordinary `j`/`k`, chunk `gj`/`gk`,
+  same-commit `gJ`/`gK`, hash copy with `M-w`, commit inspection with `RET`,
+  and nested `q` restoration. `SPC g t` supplies the complete configured
   Evil-collection git-timemachine map, including revision selection, hash copy,
   and blame. Legit's Vi-normal file/hunk staging, Visual selected-line staging
   and unstaging across one or several hunks, commit,

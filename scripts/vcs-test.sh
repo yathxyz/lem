@@ -944,6 +944,91 @@ else
     "$git_session"
 fi
 
+# Magit's default file dispatch is C-c M-g, then b.  Make a real unsaved edit
+# first: the blame must consume the live Lem buffer through --contents -, keep
+# ordinary j/k available, and return through a real commit child lifecycle.
+lem_keys "$git_session" i
+tmux_cmd send-keys -t "$git_session" -l -- ';; UNSAVED-BLAME- '
+# The first Escape dismisses any completion popup; the second is the actual
+# Evil insert-to-normal transition when completion was visible.  Keep a real
+# event boundary between them and verify the state before exercising Magit.
+send_keys "$git_session" Escape Escape
+lem_wait_for "$git_session" 'NORMAL' "$WAIT_TIMEOUT" >/dev/null ||
+  fail git-blame-normal-state 'the unsaved edit did not leave Insert state' \
+    "$git_session"
+send_keys "$git_session" C-c M-g b
+if lem_wait_for "$git_session" 'Blame:' "$WAIT_TIMEOUT" >/dev/null &&
+   lem_wait_for "$git_session" 'UNSAVED-BLAME-' "$WAIT_TIMEOUT" >/dev/null &&
+   press_report "$git_session" F5 '^BLAME ' &&
+   [[ $(latest_report '^BLAME ') == \
+      'BLAME kind=blame blame=1 commit=0 zero=yes external=yes live=yes origin=yes origin-point=yes read-only=yes copied=no show=no source=no' ]]; then
+  pass git-blame-live-buffer 'C-c M-g b blamed the real unsaved Lem contents at point'
+else
+  fail git-blame-live-buffer 'file dispatch did not produce live-buffer blame' \
+    "$git_session"
+fi
+
+send_keys "$git_session" g j
+if press_report "$git_session" F5 '^BLAME ' &&
+   [[ $(latest_report '^BLAME ') == \
+      'BLAME kind=blame blame=1 commit=0 zero=no external=no live=yes origin=yes origin-point=yes read-only=yes copied=no show=no source=no' ]]; then
+  pass git-blame-next-chunk 'g j moved from the unsaved chunk to committed history'
+else
+  fail git-blame-next-chunk 'g j did not select the next distinct blame chunk' \
+    "$git_session"
+fi
+
+send_keys "$git_session" M-w
+if press_report "$git_session" F5 '^BLAME ' &&
+   [[ $(latest_report '^BLAME ') == \
+      'BLAME kind=blame blame=1 commit=0 zero=no external=no live=yes origin=yes origin-point=yes read-only=yes copied=yes show=no source=no' ]]; then
+  pass git-blame-copy 'M-w copied the selected chunk full hash'
+else
+  fail git-blame-copy 'M-w did not copy the current blame hash' "$git_session"
+fi
+
+send_keys "$git_session" Enter
+if lem_wait_for "$git_session" 'commit ' "$WAIT_TIMEOUT" >/dev/null &&
+   press_report "$git_session" F5 '^BLAME ' &&
+   [[ $(latest_report '^BLAME ') == \
+      'BLAME kind=commit blame=1 commit=1 zero=no external=no live=no origin=yes origin-point=yes read-only=yes copied=yes show=yes source=no' ]]; then
+  pass git-blame-show-commit 'RET opened the exact committed chunk in a read-only child'
+else
+  fail git-blame-show-commit 'RET did not open the selected blame commit' \
+    "$git_session"
+fi
+
+send_keys "$git_session" q g k
+if press_report "$git_session" F5 '^BLAME ' &&
+   [[ $(latest_report '^BLAME ') == \
+      'BLAME kind=blame blame=1 commit=0 zero=yes external=yes live=yes origin=yes origin-point=yes read-only=yes copied=no show=no source=no' ]]; then
+  pass git-blame-previous-chunk 'q and g k returned from the commit to the prior unsaved chunk'
+else
+  fail git-blame-previous-chunk 'commit return or previous-chunk navigation failed' \
+    "$git_session"
+fi
+
+send_keys "$git_session" q
+if press_report "$git_session" F5 '^BLAME ' &&
+   [[ $(latest_report '^BLAME ') == \
+      'BLAME kind=source blame=0 commit=0 zero=no external=no live=yes origin=no origin-point=no read-only=no copied=no show=no source=yes' ]]; then
+  pass git-blame-quit 'q restored the live modified source and removed blame children'
+else
+  fail git-blame-quit 'q did not restore the exact live source lifecycle' \
+    "$git_session"
+fi
+
+send_keys "$git_session" u F6
+sleep 1
+if press_report "$git_session" F7 '^SOURCE ' &&
+   [[ $(latest_report '^SOURCE ') == \
+      'SOURCE current=yes live=yes text=yes point=yes mode=yes modified=yes filename=yes timemachine-live=0' ]]; then
+  pass git-blame-source-undo 'undo restored the pre-blame source baseline'
+else
+  fail git-blame-source-undo 'source state did not survive blame and undo exactly' \
+    "$git_session"
+fi
+
 if press_report "$git_session" F10 '^INVOKE ' &&
    grep -q '^INVOKE source=yes other=yes point=7:8$' "$LEM_YATH_VCS_REPORT"; then
   pass timemachine-invocation 'a shifted anchor and unrelated prior buffer were prepared'
