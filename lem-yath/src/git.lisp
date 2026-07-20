@@ -329,6 +329,9 @@
                 legit-amend-buffer-p
                 legit-amend-continue
                 legit-amend-abort
+                legit-cherry-message-buffer-p
+                legit-cherry-message-continue
+                legit-cherry-message-abort
                 legit-revert-message-buffer-p
                 legit-revert-message-continue
                 legit-revert-message-abort))
@@ -343,6 +346,9 @@
      (lem-yath-server-save-done))
     ((legit-amend-buffer-p)
      (legit-amend-continue))
+    ((and (fboundp 'legit-cherry-message-buffer-p)
+          (legit-cherry-message-buffer-p))
+     (legit-cherry-message-continue))
     ((and (fboundp 'legit-revert-message-buffer-p)
           (legit-revert-message-buffer-p))
      (legit-revert-message-continue))
@@ -362,6 +368,9 @@
      (lem-yath-server-abort))
     ((legit-amend-buffer-p)
      (legit-amend-abort))
+    ((and (fboundp 'legit-cherry-message-buffer-p)
+          (legit-cherry-message-buffer-p))
+     (legit-cherry-message-abort))
     ((and (fboundp 'legit-revert-message-buffer-p)
           (legit-revert-message-buffer-p))
      (legit-revert-message-abort))

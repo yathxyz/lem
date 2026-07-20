@@ -483,11 +483,15 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   editor through the reusable Lem client; consecutive reword sessions are
   physically covered. An `edit` stop can be changed and staged through Legit,
   amended with Magit's `c a` in a prefilled commit buffer, and completed with
-  `r c`. Ordinary commits use the matching `c c` dispatch. Magit's core
-  cherry-pick dispatch is also present in status and diff panes: `A A` picks
-  or continues, `A a` applies without committing or aborts, and `A s` skips
-  an active conflicting pick; unmerged files remain visible and stageable in
-  Legit while the sequence is stopped. The matching `B` dispatch covers
+  `r c`. Ordinary commits use the matching `c c` dispatch. Magit's complete
+  normally visible cherry-pick dispatch is also present in status and diff
+  panes. Mainline, strategy, fast-forward, source-reference, native message
+  editing, GPG-signing, and signoff arguments feed pick/apply, harvest,
+  squash, donate, spinout, and spinoff actions. During a stopped sequence,
+  `A A` continues, `A a` aborts, and `A s` skips; unmerged files remain visible
+  and stageable in Legit. Branch-moving actions copy successfully before
+  lease-checking and rewriting their source, so a failed destination never
+  loses source history. The matching `B` dispatch covers
   Magit's core bisect lifecycle: start or start-and-run, `--no-checkout`,
   `--first-parent`, custom old/new terms, good/bad/custom marking, skip, and
   confirmed reset. Active state and a bounded bisect log appear directly in

@@ -1021,27 +1021,43 @@
                        "cherry-skip-source"))
            (candidates
              (handler-case (legit-cherry-pick-candidates)
-               (error () nil))))
+               (error () nil)))
+           (known
+             (find-if (lambda (candidate)
+                        (search "cherry-success-source" (car candidate)))
+                      candidates))
+           (initial-map
+             (legit-cherry-popup-keymap (make-legit-cherry-options) nil))
+           (active-map
+             (legit-cherry-popup-keymap (make-legit-cherry-options) t))
+           (option-vector
+             (and known
+                  (legit-cherry-option-arguments
+                   (make-legit-cherry-options
+                    :strategy "ort" :fast-forward-p nil :reference-p t
+                    :edit-p t :gpg-sign "" :signoff-p t)
+                   (list (cdr known))))))
       (vcs-test-log
-       "CHERRY active=~a pick=~a apply=~a skip=~a diff=~a candidate=~a"
+       "CHERRY active=~a dispatch=~a initial=~a active-map=~a options=~a candidate=~a"
        (vcs-test-yes-no (legit-cherry-pick-in-progress-p))
        (vcs-test-yes-no
-        (eq (vcs-test-key-command status-map "A A")
-            'lem-yath-legit-cherry-pick-or-continue))
+        (and (eq (vcs-test-key-command status-map "A")
+                 'lem-yath-legit-cherry-pick)
+             (eq (vcs-test-key-command diff-map "A")
+                 'lem-yath-legit-cherry-pick)))
        (vcs-test-yes-no
-        (eq (vcs-test-key-command status-map "A a")
-            'lem-yath-legit-cherry-apply-or-abort))
+        (every (lambda (key)
+                 (eq (vcs-test-key-command initial-map key) 'nop-command))
+               '("- m" "= s" "- F" "- x" "- e" "- S" "+ s"
+                 "A" "a" "h" "m" "d" "n" "s" "q")))
        (vcs-test-yes-no
-        (eq (vcs-test-key-command status-map "A s")
-            'lem-yath-legit-cherry-skip))
+        (every (lambda (key)
+                 (eq (vcs-test-key-command active-map key) 'nop-command))
+               '("A" "a" "s" "q")))
        (vcs-test-yes-no
-        (and
-         (eq (vcs-test-key-command diff-map "A A")
-             'lem-yath-legit-cherry-pick-or-continue)
-         (eq (vcs-test-key-command diff-map "A a")
-             'lem-yath-legit-cherry-apply-or-abort)
-         (eq (vcs-test-key-command diff-map "A s")
-             'lem-yath-legit-cherry-skip)))
+        (equal option-vector
+               '("--strategy=ort" "-x" "--edit" "--gpg-sign"
+                 "--signoff")))
        (vcs-test-yes-no
         (and candidates
              (every (lambda (subject)

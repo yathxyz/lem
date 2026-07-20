@@ -584,6 +584,22 @@ a bounded commit view, and `q` to exact nested/source restoration. Removal,
 reverse, style, recursive-reblame, and inline diff-preview are outside this
 focused addition-blame port.
 
+Status and diff panes expose the complete normally visible Magit `A`
+cherry-pick dispatch. `- m`, `= s`, `- F`, `- x`, `- e`, `- S`, and `+ s`
+retain mainline, strategy, fast-forward, source-reference, native message
+editing, GPG-signing, and signoff arguments. `A` picks, `a` applies without a
+commit, `h` harvests from another branch, `m` squash-merges into the index,
+`d` donates to an existing branch, and `n`/`s` spin out/off to a new branch.
+An active sequence changes the same map to continue, abort, and skip. Moving
+commits copies the destination first, verifies that the source tip has not
+moved, then resets tip commits or rebases away interior commits; spinoff and
+harvest restore the requested destination checkout only after source cleanup.
+Lem accepts up to 64 comma-separated commits instead of Magit's visual commit
+region, requires a completely clean repository before cross-branch moves,
+refuses topology-unsafe source removal of merge commits, and runs synchronously
+without Magit's process buffer. If source cleanup itself conflicts, its real
+Git rebase is retained for manual completion rather than hidden or rolled back.
+
 Legit status and diff panes expose Magit's `B` bisect dispatch. Before a
 session, `- n` toggles no-checkout, `- p` toggles first-parent, `= o` and `= n`
 set the old/good and new/bad terms, `B` starts, and `s` starts then runs an

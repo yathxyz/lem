@@ -2339,12 +2339,27 @@ process, then opens a prefilled transient message. A successful amend returns
 focus explicitly to Legit's status pane so `r c` continues the same rebase.
 The local commit dispatch deliberately replaces Legit's direct `c` command
 with Magit's configured `c c`/`c a` muscle memory in status and diff panes.
-The matching `A` prefix supplies Magit's core cherry-pick lifecycle in both
-panes. Git's editor is suppressed only in the child process, so synchronous
-Lem remains responsive. A conflict is treated as a normal stopped state rather
-than a blocking error popup, and the pinned Legit parser is patched to render
-every Git unmerged status once in the unstaged section so its resolved file can
-be staged before continuing.
+The matching `A` prefix supplies Magit's complete normally visible cherry-pick
+surface in both panes. `- m`, `= s`, `- F`, `- x`, `- e`, `- S`, and `+ s`
+retain mainline, strategy, fast-forward, source-reference, native message
+editing, GPG-signing, and signoff arguments. Actions pick, apply without a
+commit, harvest, squash, donate, spin out, and spin off; an active sequence
+changes to continue, abort, and skip. Exact prepared messages open in Legit's
+commit mode and a multi-commit edit advances through Git's real sequencer one
+message at a time. A conflict is treated as a normal stopped state, and the
+pinned Legit parser renders every Git unmerged status once in the unstaged
+section so its resolved file can be staged before continuing.
+
+Cross-branch moves require a clean index, worktree, and untracked set. The
+destination is committed first; only then does a source-tip lease permit tip
+reset or an interior `rebase --onto`, after which harvest/spinoff restore the
+requested destination checkout. A failed destination therefore never removes
+source history, and a source-cleanup conflict remains a real manually
+completable rebase. Up to 64 comma-separated commits replace Magit's visual
+commit-region collection. Source removal of merge commits fails closed rather
+than flattening uncertain topology, execution is synchronous without a process
+buffer, and a Lem restart during a stopped branch-moving sequence cannot retain
+its in-memory post-success source-cleanup intent.
 
 ### Porcelain coverage vs magit — `legit/README.md`
 Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkout/
@@ -2353,8 +2368,8 @@ create), push, pull/fetch, commits log with pagination, the configured
 rebase (pick/reword/edit/fixup/squash/drop/exec/break/label/reset/merge).
 Also basic Fossil + Mercurial. **Gaps vs magit:** no multi-file staging,
 limited switches/transient submenus, no graphical remaining-revisions or process view,
-no cherry-pick harvest/donate/spinout/spinoff, no complete argument surfaces
-outside the explicitly ported dispatches, and no log graph filtering.
+no complete argument surfaces outside the explicitly ported dispatches, and
+no log graph filtering.
 Selected-line staging is verified for ordinary tracked textual
 diffs; untracked, binary, and combined-conflict diffs still require whole-file
 handling. Customize via `lem/porcelain:*git-base-arglist*`,

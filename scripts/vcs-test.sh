@@ -864,6 +864,94 @@ porcelain_cherry_skipped() {
     porcelain_cherry_clean
 }
 
+porcelain_cherry_current_is() {
+  [ "$1" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch --show-current)" ]
+}
+
+porcelain_cherry_spinout_complete() {
+  porcelain_cherry_current_is "$cherry_move_main_branch" &&
+    [ "$cherry_spinout_parent" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse \
+        "$cherry_move_main_branch")" ] &&
+    [ "$cherry_spinout_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse \
+        cherry-spinout-destination)" ] &&
+    porcelain_cherry_clean
+}
+
+porcelain_cherry_spinoff_complete() {
+  porcelain_cherry_current_is cherry-spinoff-destination &&
+    [ "$cherry_spinoff_parent" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse \
+        "$cherry_move_main_branch")" ] &&
+    [ "$cherry_spinoff_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse \
+        cherry-spinoff-destination)" ] &&
+    porcelain_cherry_clean
+}
+
+porcelain_cherry_donate_complete() {
+  porcelain_cherry_current_is "$cherry_move_main_branch" &&
+    [ "$cherry_donate_parent" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse \
+        "$cherry_move_main_branch")" ] &&
+    [ "$cherry_donate_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse \
+        cherry-donate-destination)" ] &&
+    porcelain_cherry_clean
+}
+
+porcelain_cherry_harvest_complete() {
+  local source_tip
+  source_tip=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse cherry-harvest-source) || return 1
+  porcelain_cherry_current_is "$cherry_move_main_branch" &&
+    [ "$cherry_harvest_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse \
+        "$cherry_move_main_branch")" ] &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" merge-base \
+      --is-ancestor "$cherry_harvest_hash" cherry-harvest-source &&
+    [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" show \
+      "$source_tip:cherry-harvest-retained.txt")" = 'retained on source' ] &&
+    porcelain_cherry_clean
+}
+
+porcelain_cherry_squash_complete() {
+  [ "$cherry_harvest_hash" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-squash.txt")" = \
+      'squashed into index' ] &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --cached --quiet -- cherry-squash.txt
+}
+
+porcelain_cherry_edit_complete() {
+  local body
+  body=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" log -1 --format=%B) ||
+    return 1
+  porcelain_cherry_current_is "$cherry_move_main_branch" &&
+    [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" log -1 --format=%s)" = \
+      'cherry message edited in Lem' ] &&
+    printf '%s\n' "$body" | grep -Fq \
+      "(cherry picked from commit $cherry_edit_hash)" &&
+    printf '%s\n' "$body" | grep -Fq \
+      'Signed-off-by: Lem Yath Test <lem-yath-test@example.invalid>' &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-edit.txt")" = \
+      'edited cherry content' ] &&
+    porcelain_cherry_clean
+}
+
+porcelain_cherry_mainline_complete() {
+  [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" log -1 --format=%s)" = \
+    'cherry-merge-source' ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-merge-side.txt")" = \
+      'merge second-parent content' ] &&
+    [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-list \
+      --parents -n 1 HEAD | awk '{print NF}')" -eq 2 ] &&
+    porcelain_cherry_clean
+}
+
 enter_cherry_revision() {
   local session=$1 revision=$2
   local index
@@ -968,6 +1056,122 @@ prepare_porcelain_cherry_fixture() {
   [ "$cherry_main_head" = \
     "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
     porcelain_cherry_clean
+}
+
+prepare_porcelain_cherry_move_fixture() {
+  local baseline
+  cherry_move_main_branch=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    branch --show-current) || return 1
+  [ -n "$cherry_move_main_branch" ] || return 1
+  baseline=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD) ||
+    return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    cherry-harvest-source "$baseline" || return 1
+  printf 'harvested content\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-harvest.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-harvest.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-harvest-selected \
+    '2001-01-13T00:00:00+0000' || return 1
+  cherry_harvest_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+  printf 'retained on source\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-harvest-retained.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-harvest-retained.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-harvest-retained \
+    '2001-01-14T00:00:00+0000' || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
+    "$cherry_move_main_branch" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    cherry-squash-source "$baseline" || return 1
+  printf 'squashed into index\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-squash.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-squash.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-squash-source \
+    '2001-01-15T00:00:00+0000' || return 1
+  cherry_squash_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
+    "$cherry_move_main_branch" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    cherry-edit-source "$baseline" || return 1
+  printf 'edited cherry content\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-edit.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-edit.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-edit-source \
+    '2001-01-16T00:00:00+0000' || return 1
+  cherry_edit_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
+    "$cherry_move_main_branch" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    cherry-merge-source "$baseline" || return 1
+  printf 'merge first-parent content\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-merge-first.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-merge-first.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-merge-first \
+    '2001-01-17T00:00:00+0000' || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    cherry-merge-side "$baseline" || return 1
+  printf 'merge second-parent content\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-merge-side.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-merge-side.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-merge-side \
+    '2001-01-18T00:00:00+0000' || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
+    cherry-merge-source || return 1
+  GIT_AUTHOR_DATE='2001-01-19T00:00:00+0000' \
+  GIT_COMMITTER_DATE='2001-01-19T00:00:00+0000' \
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" merge -q --no-ff \
+      -m cherry-merge-source cherry-merge-side || return 1
+  cherry_merge_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
+    "$cherry_move_main_branch" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch \
+    cherry-donate-destination "$baseline" || return 1
+  cherry_donate_parent=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+  printf 'donated content\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-donate.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-donate.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-donate-source \
+    '2001-01-20T00:00:00+0000' || return 1
+  cherry_donate_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  cherry_spinoff_parent=$cherry_donate_hash
+  printf 'spin-off content\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-spinoff.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-spinoff.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-spinoff-source \
+    '2001-01-21T00:00:00+0000' || return 1
+  cherry_spinoff_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  cherry_spinout_parent=$cherry_spinoff_hash
+  printf 'spin-out content\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-spinout.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-spinout.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-spinout-source \
+    '2001-01-22T00:00:00+0000' || return 1
+  cherry_spinout_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  porcelain_cherry_clean
 }
 
 porcelain_bisect_active() {
@@ -3874,9 +4078,9 @@ else
 fi
 if wait_report_count '^CHERRY ' "$((cherry_before + 1))" &&
    [[ $(latest_report '^CHERRY ') == \
-      'CHERRY active=no pick=yes apply=yes skip=yes diff=yes candidate=yes' ]]; then
+      'CHERRY active=no dispatch=yes initial=yes active-map=yes options=yes candidate=yes' ]]; then
   pass legit-cherry-dispatch \
-    'A exposes Magit pick/apply/skip bindings and all-ref completion'
+    'A exposes the complete Magit argument/action maps and all-ref completion'
 else
   fail legit-cherry-dispatch \
     'the dispatch, diff bindings, or all-ref candidates were incomplete' \
@@ -3937,7 +4141,7 @@ cherry_before=$(report_count '^CHERRY ')
 send_keys "$porcelain_session" C-c y
 if wait_report_count '^CHERRY ' "$((cherry_before + 1))" &&
    [[ $(latest_report '^CHERRY ') == \
-      'CHERRY active=yes pick=yes apply=yes skip=yes diff=yes candidate=yes' ]]; then
+      'CHERRY active=yes dispatch=yes initial=yes active-map=yes options=yes candidate=yes' ]]; then
   pass legit-cherry-in-progress \
     'the dispatch detected the active cherry-pick and changed action semantics'
 else
@@ -4032,6 +4236,201 @@ if wait_until "$WAIT_TIMEOUT" porcelain_cherry_skipped; then
 else
   fail legit-cherry-skip \
     'A s did not retain HEAD and clean the conflicting pick' \
+    "$porcelain_session"
+fi
+
+if prepare_porcelain_cherry_move_fixture; then
+  pass legit-cherry-move-fixture \
+    'prepared source, destination, interior, squash, and editable cherry histories'
+else
+  fail legit-cherry-move-fixture \
+    'could not prepare the cherry-pick histories' \
+    "$porcelain_session"
+fi
+send_keys "$porcelain_session" g
+
+send_keys "$porcelain_session" A n
+if lem_wait_for "$porcelain_session" 'Move cherry:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$cherry_spinout_hash" 'Move cherry:'
+fi
+if lem_wait_for "$porcelain_session" 'Spin out to new branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_atomic_prompt_value "$porcelain_session" cherry-spinout-destination
+fi
+if lem_wait_for "$porcelain_session" 'Starting point for new branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_atomic_prompt_value "$porcelain_session" "$cherry_spinout_parent"
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_spinout_complete; then
+  pass legit-cherry-spinout \
+    'A n moved the tip to a new branch, reset the source, and stayed on source'
+else
+  fail legit-cherry-spinout \
+    'spinout lost its destination, source reset, checkout, or clean boundary' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" A s
+if lem_wait_for "$porcelain_session" 'Move cherry:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$cherry_spinoff_hash" 'Move cherry:'
+fi
+if lem_wait_for "$porcelain_session" 'Spin off to new branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_atomic_prompt_value "$porcelain_session" cherry-spinoff-destination
+fi
+if lem_wait_for "$porcelain_session" 'Starting point for new branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_atomic_prompt_value "$porcelain_session" "$cherry_spinoff_parent"
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_spinoff_complete; then
+  pass legit-cherry-spinoff \
+    'A s moved the tip, reset the source, and checked out the new branch'
+else
+  fail legit-cherry-spinoff \
+    'spinoff lost its destination, source reset, checkout, or clean boundary' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" b l
+if lem_wait_for "$porcelain_session" 'Checkout local branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$cherry_move_main_branch" 'Checkout local branch:'
+fi
+if ! wait_until "$WAIT_TIMEOUT" porcelain_cherry_current_is \
+     "$cherry_move_main_branch"; then
+  fail legit-cherry-return-source \
+    'could not return from the spun-off branch to the source' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" A d
+if lem_wait_for "$porcelain_session" 'Donate cherry:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$cherry_donate_hash" 'Donate cherry:'
+fi
+if lem_wait_for "$porcelain_session" 'Move cherry to branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    cherry-donate-destination 'Move cherry to branch:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_donate_complete; then
+  pass legit-cherry-donate \
+    'A d moved the tip to an existing branch and stayed on the reset source'
+else
+  fail legit-cherry-donate \
+    'donate lost its destination, source reset, checkout, or clean boundary' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" A h
+if lem_wait_for "$porcelain_session" 'Harvest cherry:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$cherry_harvest_hash" 'Harvest cherry:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_harvest_complete; then
+  pass legit-cherry-harvest \
+    'A h picked here, rebased an interior source commit away, and returned'
+else
+  fail legit-cherry-harvest \
+    'harvest lost its picked commit, retained descendant, or checkout state' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" A m
+if lem_wait_for "$porcelain_session" 'Squash:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$cherry_squash_hash" 'Squash:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_squash_complete; then
+  pass legit-cherry-squash \
+    'A m applied a selected ref through git merge --squash without moving HEAD'
+else
+  fail legit-cherry-squash \
+    'squash did not preserve HEAD with the selected tree staged' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard HEAD
+send_keys "$porcelain_session" g
+
+send_keys "$porcelain_session" A
+if lem_wait_for "$porcelain_session" '\[Apply\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" = s
+fi
+if lem_wait_for "$porcelain_session" 'Cherry-pick strategy:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" ort \
+    'Cherry-pick strategy:'
+fi
+if lem_wait_for "$porcelain_session" '\[Apply\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - x
+fi
+if lem_wait_for "$porcelain_session" '\[Apply\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - e
+fi
+if lem_wait_for "$porcelain_session" '\[Apply\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" + s
+fi
+if lem_wait_for "$porcelain_session" '\[Apply\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" A
+fi
+if lem_wait_for "$porcelain_session" 'Cherry-pick:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$cherry_edit_hash" 'Cherry-pick:'
+fi
+if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" g g d d i
+  tmux_cmd send-keys -t "$porcelain_session" -l -- \
+    'cherry message edited in Lem'
+  send_keys "$porcelain_session" Enter Enter Escape C-c C-c
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_edit_complete; then
+  pass legit-cherry-edit-arguments \
+    'A =s -x -e +s A edited natively with strategy, reference, and signoff'
+else
+  fail legit-cherry-edit-arguments \
+    'editable cherry-pick lost its message trailers, content, or clean state' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" A
+if lem_wait_for "$porcelain_session" '\[Apply\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - m
+fi
+if lem_wait_for "$porcelain_session" 'Mainline parent:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_atomic_prompt_value "$porcelain_session" 1
+fi
+if lem_wait_for "$porcelain_session" '\[Apply\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" A
+fi
+if lem_wait_for "$porcelain_session" 'Cherry-pick:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    "$cherry_merge_hash" 'Cherry-pick:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_mainline_complete; then
+  pass legit-cherry-mainline \
+    'A -m A replayed a real merge relative to parent one as a linear commit'
+else
+  fail legit-cherry-mainline \
+    'mainline replay lost its selected-parent tree or clean linear boundary' \
     "$porcelain_session"
 fi
 
