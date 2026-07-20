@@ -581,8 +581,17 @@ unsaved lines remain visible as external worktree content. The focused view
 keeps ordinary `j`/`k`, binds `gj`/`gk` and `C-j`/`C-k` to adjacent chunks,
 `gJ`/`gK` to adjacent chunks from the same commit, `M-w` to hash copy, `RET` to
 a bounded commit view, and `q` to exact nested/source restoration. Removal,
-reverse, style, recursive-reblame, inline diff-preview, and bisect surfaces are
-outside this focused addition-blame port.
+reverse, style, recursive-reblame, and inline diff-preview are outside this
+focused addition-blame port.
+
+Legit status and diff panes expose Magit's `B` bisect dispatch. Before a
+session, `- n` toggles no-checkout, `- p` toggles first-parent, `= o` and `= n`
+set the old/good and new/bad terms, `B` starts, and `s` starts then runs an
+explicit shell predicate. During a session, `B` and `g` mark new/bad and
+old/good, `m` prompts using the visible terms, `k` skips, `r` confirms reset,
+and `s` runs a predicate. Git status shows the tested revision, terms, and a
+bounded parsed log. This is the configured core lifecycle rather than Magit's
+wider graph and process-buffer presentation.
 
 `vc-handled-backends '(Git)` only. `magit`/`magit-todos`/`forge`/`git-gutter`/`git-timemachine` all loaded via `init-evil`.
 

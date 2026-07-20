@@ -2186,6 +2186,12 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
   pick; `A a` applies a prompted commit without committing or aborts an active
   pick; `A s` skips only while a pick is active. Completion is bounded to 200
   commits across all refs and accepts an arbitrary whitespace-free revision.
+- **Bisect dispatch**: `B` opens Magit's initial or active action map. Initial
+  `- n`, `- p`, `= o`, and `= n` configure no-checkout, first-parent, and
+  custom terms before `B` starts or `s` starts-and-runs. Active `B`/`g`/`m`/`k`
+  mark new, old, a prompted visible term, or skip; `r` confirms reset and `s`
+  runs an explicit bounded shell predicate. Status shows the tested revision,
+  active terms, and a bounded parsed log.
 - Refresh `g`, navigate `n`/`p`/`M-n`/`M-p`, help `?`/`C-x ?`, quit `q`.
 
 Lem-yath registers the diff, commit, and rebase major-mode maps ahead of Vi's
@@ -2223,7 +2229,7 @@ Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkou
 create), push, pull/fetch, commits log with pagination, **stash push/pop**, interactive
 rebase (pick/reword/edit/fixup/squash/drop/exec/break/label/reset/merge).
 Also basic Fossil + Mercurial. **Gaps vs magit:** no multi-file staging,
-limited switches/transient submenus, no bisect,
+limited switches/transient submenus, no graphical remaining-revisions or process view,
 no cherry-pick harvest/donate/spinout/spinoff or argument-toggle UI, and no log
 graph filtering. Selected-line staging is verified for ordinary tracked textual
 diffs; untracked, binary, and combined-conflict diffs still require whole-file
@@ -2267,8 +2273,9 @@ from the same commit, `M-w` copies the full hash (or an active region), `RET`
 opens a bounded `git show` child, and nested `q` returns through the exact source
 buffer and point. The physical gate covers an unsaved Lisp edit, external-line
 attribution, navigation, copy, commit inspection, cleanup, and source undo.
-Removal/reverse/style/recursive-reblame, inline diff preview, and bisect remain
-outside this focused addition-blame implementation.
+Removal/reverse/style/recursive-reblame and inline diff preview remain outside
+this focused addition-blame implementation. Bisect is supplied separately by
+the Legit integration described above.
 
 ### Configured VCS dispatch and time travel — `lem-yath/src/git.lisp`, `src/apps/timemachine.lisp`
 
@@ -4179,7 +4186,7 @@ no Orderless/Prescient framework**, **upstream tree-sitter is a manual API**
 the limitations in §6), **vi-mode
 lacks surround/sneak/easymotion**, **upstream Legit lacks
 blame/bisect/cherry-pick/region-staging** (lem-yath supplies bounded addition
-blame, the core cherry-pick lifecycle, and changed-line staging; bisect remains absent),
+blame, core bisect and cherry-pick lifecycles, and changed-line staging),
 and the **nix image cannot freely `ql:quickload` new deps at runtime** (extension-manager
 is compiled out), so anything outside `lem/extensions` must be added at image/ASDF time.
 Config language is Common Lisp in package `:lem-user`, single `init.lisp` in

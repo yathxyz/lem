@@ -685,6 +685,91 @@ prepare_porcelain_cherry_fixture() {
     porcelain_cherry_clean
 }
 
+porcelain_bisect_active() {
+  local metadata
+  metadata=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse --git-path BISECT_LOG) || return 1
+  case "$metadata" in
+    /*) [ -f "$metadata" ] ;;
+    *) [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/$metadata" ] ;;
+  esac
+}
+
+porcelain_bisect_no_checkout() {
+  local metadata
+  porcelain_bisect_active || return 1
+  metadata=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse --git-path BISECT_HEAD) || return 1
+  case "$metadata" in
+    /*) [ -f "$metadata" ] ;;
+    *) [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/$metadata" ] ;;
+  esac
+}
+
+porcelain_bisect_reset() {
+  ! porcelain_bisect_active &&
+    [ "$bisect_bad_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_bisect_first_bad() {
+  porcelain_bisect_active &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" bisect log |
+      grep -Fq "# first bad commit: [$bisect_first_bad_hash]"
+}
+
+porcelain_bisect_log_has() {
+  porcelain_bisect_active &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" bisect log |
+      grep -Fq "git bisect $1"
+}
+
+prepare_porcelain_bisect_fixture() {
+  local index timestamp
+  porcelain_cherry_clean || return 1
+  printf 'healthy state\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/bisect-probe.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- bisect-probe.txt ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" bisect-good-0 \
+    '2001-02-01T00:00:00+0000' || return 1
+  bisect_good_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  for index in 1 2 3 4 5 6 7 8; do
+    if [ "$index" -eq 4 ]; then
+      printf 'BUG introduced here\n' \
+        >>"$LEM_YATH_VCS_PORCELAIN_ROOT/bisect-probe.txt"
+    else
+      printf 'revision %s\n' "$index" \
+        >>"$LEM_YATH_VCS_PORCELAIN_ROOT/bisect-probe.txt"
+    fi
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- bisect-probe.txt ||
+      return 1
+    timestamp=$(printf '2001-02-%02dT00:00:00+0000' "$((index + 1))")
+    git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" "bisect-step-$index" \
+      "$timestamp" || return 1
+    if [ "$index" -eq 4 ]; then
+      bisect_first_bad_hash=$("$git_bin" \
+        -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD) || return 1
+    fi
+  done
+  bisect_bad_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+  porcelain_cherry_clean
+}
+
+enter_prompt_value() {
+  local session=$1 value=$2 index
+  for index in $(seq 1 80); do
+    lem_keys "$session" BSpace
+  done
+  tmux_cmd send-keys -t "$session" -l -- "$value"
+  send_keys "$session" Enter
+}
+
 send_keys() {
   local session=$1 key
   shift
@@ -849,7 +934,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -1929,6 +2014,167 @@ if wait_until "$WAIT_TIMEOUT" porcelain_cherry_skipped; then
 else
   fail legit-cherry-skip \
     'A s did not retain HEAD and clean the conflicting pick' \
+    "$porcelain_session"
+fi
+
+if prepare_porcelain_bisect_fixture; then
+  pass legit-bisect-fixture \
+    'prepared a clean nine-commit history with one known first-bad commit'
+else
+  fail legit-bisect-fixture \
+    'could not prepare the isolated linear bisect history' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" Escape Space g G
+wait_legit "$porcelain_session" porcelain ||
+  fail legit-bisect-focus 'could not refocus Legit after fixture creation' \
+    "$porcelain_session"
+send_keys "$porcelain_session" F4
+if wait_report_count '^BISECT ' 1 &&
+   [[ $(latest_report '^BISECT ') == \
+      'BISECT active=no status=yes diff=yes initial=yes actions=yes section=no terms=none no-checkout=no first-parent=no first-bad=no hook=1' ]]; then
+  pass legit-bisect-dispatch \
+    'B exposes the complete initial and in-progress Magit action maps'
+else
+  fail legit-bisect-dispatch \
+    'the bisect binding, popup arguments, actions, or hook were incomplete' \
+    "$porcelain_session"
+fi
+
+# Exercise Magit's initial transient arguments before starting: --no-checkout,
+# --first-parent, and custom old/new terms all remain live until the B action.
+send_keys "$porcelain_session" B
+if lem_wait_for "$porcelain_session" 'Bisect' "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- '-'
+  send_keys "$porcelain_session" n
+  tmux_cmd send-keys -t "$porcelain_session" -l -- '-'
+  send_keys "$porcelain_session" p
+  tmux_cmd send-keys -t "$porcelain_session" -l -- '='
+  send_keys "$porcelain_session" o
+fi
+if lem_wait_for "$porcelain_session" 'Old/good term' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" old
+  tmux_cmd send-keys -t "$porcelain_session" -l -- '='
+  send_keys "$porcelain_session" n
+fi
+if lem_wait_for "$porcelain_session" 'New/bad term' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" new
+  send_keys "$porcelain_session" B
+fi
+if lem_wait_for "$porcelain_session" 'Start bisect with bad revision' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" "$bisect_bad_hash"
+fi
+if lem_wait_for "$porcelain_session" 'Good revision' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" "$bisect_good_hash"
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_bisect_no_checkout; then
+  bisect_before=$(report_count '^BISECT ')
+  send_keys "$porcelain_session" F4
+else
+  bisect_before=$(report_count '^BISECT ')
+fi
+if wait_report_count '^BISECT ' "$((bisect_before + 1))" &&
+   [[ $(latest_report '^BISECT ') == \
+      'BISECT active=yes status=yes diff=yes initial=yes actions=yes section=yes terms=old/new no-checkout=yes first-parent=yes first-bad=no hook=1' ]]; then
+  pass legit-bisect-start \
+    'B B started with no-checkout, first-parent, custom terms, and a live status section'
+else
+  fail legit-bisect-start \
+    'the configured start arguments or active status rendering were lost' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" B g
+if wait_until "$WAIT_TIMEOUT" porcelain_bisect_log_has old; then
+  pass legit-bisect-good 'B g marked the no-checkout candidate with the old term'
+else
+  fail legit-bisect-good 'B g did not advance the custom-term bisect' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" B k
+if wait_until "$WAIT_TIMEOUT" porcelain_bisect_log_has skip; then
+  pass legit-bisect-skip 'B k skipped the current candidate and advanced'
+else
+  fail legit-bisect-skip 'B k did not record a skipped bisect candidate' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" B m
+if lem_wait_for "$porcelain_session" 'Mark current revision as' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" n
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_bisect_log_has new; then
+  pass legit-bisect-mark 'B m n marked the candidate using the visible new term'
+else
+  fail legit-bisect-mark 'B m did not expose or apply custom terms' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" B r
+if lem_wait_for "$porcelain_session" 'Reset bisect' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_bisect_reset; then
+  pass legit-bisect-reset \
+    'B r confirmed, removed metadata, and restored the exact original HEAD'
+else
+  fail legit-bisect-reset 'B r did not cleanly restore the pre-bisect state' \
+    "$porcelain_session"
+fi
+
+# The inactive s action combines start with `git bisect run`.  Use only shell
+# builtins so the check proves the wrapper need not inherit host utilities.
+send_keys "$porcelain_session" B s
+if lem_wait_for "$porcelain_session" 'Start bisect with bad revision' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" "$bisect_bad_hash"
+fi
+if lem_wait_for "$porcelain_session" 'Good revision' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" "$bisect_good_hash"
+fi
+if lem_wait_for "$porcelain_session" 'Bisect shell command' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  tmux_cmd send-keys -t "$porcelain_session" -l -- \
+    'while IFS= read -r line; do [ "$line" = "BUG introduced here" ] && exit 1; done < bisect-probe.txt; exit 0'
+  send_keys "$porcelain_session" Enter
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_bisect_first_bad; then
+  bisect_before=$(report_count '^BISECT ')
+  send_keys "$porcelain_session" F4
+else
+  bisect_before=$(report_count '^BISECT ')
+fi
+if wait_report_count '^BISECT ' "$((bisect_before + 1))" &&
+   [[ $(latest_report '^BISECT ') == \
+      'BISECT active=yes status=yes diff=yes initial=yes actions=yes section=yes terms=good/bad no-checkout=no first-parent=no first-bad=yes hook=1' ]]; then
+  pass legit-bisect-run \
+    'B s ran the explicit shell predicate and found the exact first bad commit'
+else
+  fail legit-bisect-run \
+    'scripted bisect did not converge or render its first-bad result' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" B r
+if lem_wait_for "$porcelain_session" 'Reset bisect' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_bisect_reset; then
+  pass legit-bisect-run-reset \
+    'the completed scripted bisect remained resettable through B r'
+else
+  fail legit-bisect-run-reset \
+    'completed scripted bisect metadata or HEAD survived reset' \
     "$porcelain_session"
 fi
 lem_stop "$porcelain_session"

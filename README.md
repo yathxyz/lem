@@ -487,7 +487,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   cherry-pick dispatch is also present in status and diff panes: `A A` picks
   or continues, `A a` applies without committing or aborts, and `A s` skips
   an active conflicting pick; unmerged files remain visible and stageable in
-  Legit while the sequence is stopped.
+  Legit while the sequence is stopped. The matching `B` dispatch covers
+  Magit's core bisect lifecycle: start or start-and-run, `--no-checkout`,
+  `--first-parent`, custom old/new terms, good/bad/custom marking, skip, and
+  confirmed reset. Active state and a bounded bisect log appear directly in
+  Git status.
   Packaged `gh` also backs
   command-accessible GitHub Forge lists, detail views, multiline creation and
   comments, close/reopen actions, external browsing, and cache-only Legit

@@ -174,6 +174,24 @@
       (check (eq 'lem-yath-git-blame-commit-quit
                  (vcs-test-key-command *git-blame-commit-mode-keymap* "q"))
              "magit-blame-commit-q")
+      (check (eq 'lem-yath-legit-bisect
+                 (vcs-test-key-command lem/legit::*peek-legit-keymap* "B"))
+             "magit-bisect-status-dispatch")
+      (check (eq 'lem-yath-legit-bisect
+                 (vcs-test-key-command
+                  lem/legit::*legit-diff-mode-keymap* "B"))
+             "magit-bisect-diff-dispatch")
+      (let ((options (make-legit-bisect-options)))
+        (dolist (key '("- n" "- p" "= o" "= n" "B" "s" "q"))
+          (check (eq 'nop-command
+                     (vcs-test-key-command
+                      (legit-bisect-popup-keymap options nil) key))
+                 (format nil "magit-bisect-initial-~a" key)))
+        (dolist (key '("B" "g" "m" "k" "r" "s" "q"))
+          (check (eq 'nop-command
+                     (vcs-test-key-command
+                      (legit-bisect-popup-keymap options t) key))
+                 (format nil "magit-bisect-active-~a" key))))
       (check (typep (vcs-test-key-command *lem-yath-jj-view-keymap* "g")
                     'lem-core::keymap)
              "jj-g-is-prefix")
@@ -737,6 +755,87 @@
         (vcs-test-log
          "PORCELAIN-POSITION file=cherry-conflict row=no diff=no mode=no focused=no"))))
 
+(define-command lem-yath-test-vcs-bisect-state () ()
+  (lem/legit::with-current-project (vcs)
+    (declare (ignore vcs))
+    (let* ((active (legit-bisect-in-progress-p))
+           (status-buffer
+             (and (lem/legit::legit-status-active-p)
+                  (window-buffer lem/legit::*peek-window*)))
+           (status-text (and status-buffer (buffer-text status-buffer)))
+           (options (make-legit-bisect-options))
+           (initial-map (legit-bisect-popup-keymap options nil))
+           (active-map (legit-bisect-popup-keymap options t))
+           (terms (and active (multiple-value-list (legit-bisect-terms))))
+           (log-output
+             (and active
+                  (multiple-value-bind (output error-output status)
+                      (legit-bisect-run-program '("bisect" "log"))
+                    (declare (ignore error-output))
+                    (and (eql status 0) output))))
+           (data
+             (and active
+                  (handler-case
+                      (multiple-value-list (legit-bisect-status-data))
+                    (error () nil))))
+           (entries (third data)))
+      ;; The reporter is also the test harness's deterministic transition into
+      ;; the already-open status pane.  Legit may refresh an existing peek
+      ;; window without selecting it when invoked from another pane.
+      (when status-buffer
+        (switch-to-window lem/legit::*peek-window*))
+      (vcs-test-log
+       (concatenate
+        'string
+        "BISECT active=~a status=~a diff=~a initial=~a actions=~a "
+        "section=~a terms=~a no-checkout=~a first-parent=~a "
+        "first-bad=~a hook=~d")
+       (vcs-test-yes-no active)
+       (vcs-test-yes-no
+        (eq 'lem-yath-legit-bisect
+            (vcs-test-key-command lem/legit::*peek-legit-keymap* "B")))
+       (vcs-test-yes-no
+        (eq 'lem-yath-legit-bisect
+            (vcs-test-key-command
+             lem/legit::*legit-diff-mode-keymap* "B")))
+       (vcs-test-yes-no
+        (every (lambda (key)
+                 (eq 'nop-command
+                     (vcs-test-key-command initial-map key)))
+               '("- n" "- p" "= o" "= n" "B" "s" "q")))
+       (vcs-test-yes-no
+        (every (lambda (key)
+                 (eq 'nop-command
+                     (vcs-test-key-command active-map key)))
+               '("B" "g" "m" "k" "r" "s" "q")))
+       (vcs-test-yes-no
+        (and active status-text
+             (search "Bisect:" status-text)
+             (search "Bisect log:" status-text)))
+       (if terms
+           (format nil "~a/~a" (second terms) (first terms))
+           "none")
+       (vcs-test-yes-no
+        (and active (legit-git-metadata-path-exists-p "BISECT_HEAD")))
+       (vcs-test-yes-no
+        (and log-output (search "--first-parent" log-output)))
+       (vcs-test-yes-no
+        (find "first bad" entries
+              :key #'legit-bisect-log-entry-term
+              :test #'string=))
+       (count 'insert-legit-bisect-section
+              lem/legit::*status-section-functions*
+              :key #'car :test #'eq)))))
+
+(define-command lem-yath-test-vcs-legit-and-bisect-state () ()
+  (lem-yath-test-vcs-legit-state)
+  (when (string= *vcs-test-phase* "porcelain")
+    (handler-case
+        (lem-yath-test-vcs-bisect-state)
+      (error (condition)
+        (vcs-test-log "BISECT error=~a"
+                      (vcs-test-encode (princ-to-string condition)))))))
+
 (define-command lem-yath-test-vcs-rebase-state () ()
   (let* ((buffer (current-buffer))
          (text (buffer-text buffer))
@@ -1115,6 +1214,10 @@
    :todo-hook (count 'insert-legit-todo-section
                      lem/legit::*status-section-functions*
                      :key #'car :test #'eq)
+   :bisect-hook (count 'insert-legit-bisect-section
+                       lem/legit::*status-section-functions*
+                       :key #'car :test #'eq)
+   :bisect (vcs-test-key-command lem/legit::*peek-legit-keymap* "B")
    :smart (leader-binding-command lem-vi-mode:*normal-keymap* "g g")
    :git (leader-binding-command lem-vi-mode:*normal-keymap* "g G")
    :jj (leader-binding-command lem-vi-mode:*normal-keymap* "g J")
@@ -1142,6 +1245,7 @@
         (dotimes (index 2)
           (declare (ignore index))
           (load (merge-pathnames "src/git.lisp" source))
+          (load (merge-pathnames "src/git-bisect.lisp" source))
           (load (merge-pathnames "src/git-blame.lisp" source))
           (load (merge-pathnames "src/apps/timemachine.lisp" source)))
         (let ((after (vcs-test-reload-state)))
@@ -1150,7 +1254,8 @@
             'string
             "RELOAD same=~a find=~d post=~d save=~d change=~d kill=~d "
             "global=~d source=~d directory=~d root-marker=~d todo-hook=~d "
-            "smart=~a git=~a jj=~a time=~a jj-refresh=~a jj-quit=~a "
+            "bisect-hook=~d bisect=~a smart=~a git=~a jj=~a time=~a "
+            "jj-refresh=~a jj-quit=~a "
             "older=~a newer=~a nth=~a fuzzy=~a short=~a full=~a blame=~a "
             "blame-quit=~a p=~a n=~a t=~a quit=~a")
            (vcs-test-yes-no (equal before after))
@@ -1164,6 +1269,9 @@
            (getf after :directory)
            (getf after :root-marker)
            (getf after :todo-hook)
+           (getf after :bisect-hook)
+           (vcs-test-yes-no
+            (eq (getf after :bisect) 'lem-yath-legit-bisect))
            (vcs-test-yes-no (eq (getf after :smart) 'lem-yath-vcs-status))
            (vcs-test-yes-no (eq (getf after :git) 'lem-yath-legit-status))
            (vcs-test-yes-no (eq (getf after :jj) 'lem-yath-jj-log))
@@ -1195,7 +1303,7 @@
 (define-key *global-keymap* "F1" 'lem-yath-test-vcs-static)
 (define-key *global-keymap* "F2" 'lem-yath-test-vcs-gutter)
 (define-key *global-keymap* "F3" 'lem-yath-test-vcs-dispatch-state)
-(define-key *global-keymap* "F4" 'lem-yath-test-vcs-legit-state)
+(define-key *global-keymap* "F4" 'lem-yath-test-vcs-legit-and-bisect-state)
 (define-key *global-keymap* "F5" 'lem-yath-test-vcs-history-view-state)
 (define-key *global-keymap* "F6" 'lem-yath-test-vcs-restore-source)
 (define-key *global-keymap* "F7" 'lem-yath-test-vcs-source-state)
