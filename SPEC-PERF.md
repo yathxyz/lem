@@ -111,7 +111,7 @@ decomposes into attributable stages:
 
 | Stage | Point in code |
 |-------|---------------|
-| t₀ byte read | ncurses input thread, byte(s) read from tty |
+| t₀ input arrives | frontend input thread: tty byte(s) read (ncurses) or key RPC received (lem-server/webview) |
 | t₁ event enqueued | `send-event` into the editor queue |
 | t₂ event dequeued | main loop picks it up |
 | t₃ command done | command dispatch returns |
@@ -119,8 +119,8 @@ decomposes into attributable stages:
 
 Recorded per-event into T0 histograms (queue-wait = t₂−t₁, command = t₃−t₂,
 redisplay = t₄−t₃). Timestamps use a monotonic clock; the carrying mechanism must not
-change any `lem-core` API (attach to the event object or a thread-local, frontends
-other than ncurses simply never set t₀).
+change any `lem-core` API (attach to the event object or a thread-local; frontends
+that never pass a t₀ are simply unaffected).
 
 **Done when:** `metrics-report` shows the stage decomposition for a live session;
 conformance: total ≈ sum of stages within measurement error on a scripted run.

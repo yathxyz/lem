@@ -369,9 +369,48 @@ to the ring and pause histogram.  Allocation-free."
 
 (defvar *heap-log* (%make-heap-log))
 
+#+(and sbcl win32)
+(progn
+  (sb-alien:define-alien-type nil
+      (sb-alien:struct process-memory-counters
+                       (cb (sb-alien:unsigned 32))
+                       (page-fault-count (sb-alien:unsigned 32))
+                       (peak-working-set-size (sb-alien:unsigned 64))
+                       (working-set-size (sb-alien:unsigned 64))
+                       (quota-peak-paged-pool-usage (sb-alien:unsigned 64))
+                       (quota-paged-pool-usage (sb-alien:unsigned 64))
+                       (quota-peak-non-paged-pool-usage (sb-alien:unsigned 64))
+                       (quota-non-paged-pool-usage (sb-alien:unsigned 64))
+                       (pagefile-usage (sb-alien:unsigned 64))
+                       (peak-pagefile-usage (sb-alien:unsigned 64))))
+  (sb-alien:define-alien-routine ("GetCurrentProcess" %get-current-process)
+      sb-alien:system-area-pointer)
+  ;; The K32 alias lives in kernel32.dll (always loaded), so no psapi.dll
+  ;; load-time dependency is added to the deployed binary.
+  (sb-alien:define-alien-routine ("K32GetProcessMemoryInfo" %get-process-memory-info)
+      sb-alien:int
+    (process sb-alien:system-area-pointer)
+    (counters (* (sb-alien:struct process-memory-counters)))
+    (cb (sb-alien:unsigned 32))))
+
 (defun read-vmrss-bytes ()
-  "Return resident set size in bytes from /proc/self/status, or 0 when
-unavailable (non-Linux, or the field is missing)."
+  "Return resident set size in bytes -- from /proc/self/status on Linux,
+from GetProcessMemoryInfo's WorkingSetSize on Windows -- or 0 when
+unavailable."
+  #+(and sbcl win32)
+  (handler-case
+      (sb-alien:with-alien ((pmc (sb-alien:struct process-memory-counters)))
+        (let ((cb (sb-alien:alien-size (sb-alien:struct process-memory-counters)
+                                       :bytes)))
+          (setf (sb-alien:slot pmc 'cb) cb)
+          (if (zerop (%get-process-memory-info (%get-current-process)
+                                               (sb-alien:addr pmc)
+                                               cb))
+              0
+              (let ((wss (sb-alien:slot pmc 'working-set-size)))
+                (if (typep wss 'fixnum) wss most-positive-fixnum)))))
+    (error () 0))
+  #-(and sbcl win32)
   (handler-case
       (with-open-file (in "/proc/self/status" :if-does-not-exist nil)
         (if (null in)

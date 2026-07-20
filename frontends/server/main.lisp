@@ -798,8 +798,12 @@ same hash."
            (lem:send-abort-event (jsonrpc-editor-thread jsonrpc) nil))
           ("key"
            (when value
-             (let ((key (convert-keyevent value)))
-               (lem:send-event key))))
+             ;; t0: the key's JSON-RPC message is now in hand -- this
+             ;; frontend's closest analogue of ncurses' "tty bytes read".
+             (let ((read-time (when (lem:pipeline-recording-p)
+                                (lem:pipeline-now)))
+                   (key (convert-keyevent value)))
+               (lem:send-input-event key read-time))))
           ("clipboard-paste"
            (lem:send-event
             (lambda ()

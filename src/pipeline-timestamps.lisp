@@ -5,8 +5,10 @@
 ;;;; Five monotonic timestamps are threaded through the keystroke pipeline so
 ;;;; end-to-end latency decomposes into attributable stages:
 ;;;;
-;;;;   t0  byte(s) read from tty        (ncurses input thread)
-;;;;   t1  event enqueued via send-event (ncurses input thread)
+;;;;   t0  input arrives in-process     (frontend input thread: tty bytes
+;;;;                                     read on ncurses, key RPC received
+;;;;                                     on lem-server/webview)
+;;;;   t1  event enqueued via send-event (frontend input thread)
 ;;;;   t2  event dequeued               (editor thread, receive-event)
 ;;;;   t3  command dispatch returns      (editor thread, command loop)
 ;;;;   t4  redisplay done               (editor thread, redraw-display)
@@ -19,9 +21,11 @@
 ;;;; t0/t1 cross the thread boundary attached to a `pipeline-event' wrapper on
 ;;;; the event queue (this changes no `lem-core' API: the wrapper is unwrapped
 ;;;; in `receive-event' before any consumer sees it).  t2/t3/t4 are editor-
-;;;; thread state, touched only from the single command loop.  Frontends other
-;;;; than ncurses never wrap events, so they simply never set t0/t1 and every
-;;;; note below is guarded off for them.
+;;;; thread state, touched only from the single command loop.  The ncurses and
+;;;; lem-server (webview) input paths wrap key events; any other queue producer
+;;;; enqueues raw events, never sets t0/t1, and every note below is guarded off
+;;;; for it.  On webview, t4 is core paint done -- the browser's own render
+;;;; falls outside the pipeline, so keystroke there is not glass-to-glass.
 ;;;;
 ;;;; The histogram backend (`lem/metrics') is loaded after this file, so the
 ;;;; recording is reached through an installed sink function rather than a
@@ -41,11 +45,11 @@ stage deltas are meaningful."
 
 (defstruct (pipeline-event (:constructor make-pipeline-event (payload t0 t1)))
   "Carries an input event (a key) from a frontend input thread across the
-event queue together with its pipeline timestamps T0 (tty byte read) and T1
-(enqueued).  `receive-event' unwraps it, recording the queue wait and
-retaining the stamps for the command and redisplay stages; only the ncurses
-input path produces these, and every other queue producer enqueues raw
-events that pass through unchanged."
+event queue together with its pipeline timestamps T0 (input arrived
+in-process) and T1 (enqueued).  `receive-event' unwraps it, recording the
+queue wait and retaining the stamps for the command and redisplay stages;
+the ncurses and lem-server key paths produce these, and every other queue
+producer enqueues raw events that pass through unchanged."
   (payload nil)
   (t0 0 :type fixnum)
   (t1 0 :type fixnum))
@@ -77,7 +81,7 @@ Frontends read this to skip timestamp capture entirely when telemetry is off."
 
 (defun note-event-dequeued (event)
   "Handle EVENT as it is pulled off the event queue by `receive-event'.
-When EVENT is a `pipeline-event' (a timestamped ncurses key), record its
+When EVENT is a `pipeline-event' (a timestamped key), record its
 queue wait (t2-t1), retain its stamps for the command/redisplay stages, and
 return the unwrapped payload.  Any other object is returned unchanged."
   (if (pipeline-event-p event)
@@ -129,11 +133,11 @@ A no-op for redisplays that were not driven by a keystroke command."
 
 (defun send-input-event (event read-time)
   "Enqueue an input EVENT read by a frontend input thread.  READ-TIME is the
-t0 stamp (monotonic microseconds at which the tty byte(s) were read), or NIL
-when telemetry is off.  Key events are wrapped with pipeline timestamps so the
-editor thread can decompose their input->paint latency; every other event is
-enqueued verbatim, leaving non-key events and non-ncurses frontends
-unaffected."
+t0 stamp (monotonic microseconds at which the input arrived in-process), or
+NIL when telemetry is off.  Key events are wrapped with pipeline timestamps so
+the editor thread can decompose their input->paint latency; every other event
+is enqueued verbatim, leaving non-key events and frontends that never pass a
+READ-TIME unaffected."
   (if (and read-time (key-p event))
       (send-event (make-pipeline-event event read-time (pipeline-now)))
       (send-event event)))
