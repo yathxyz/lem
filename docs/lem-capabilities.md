@@ -2204,6 +2204,16 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
   bounded; every mutation uses direct argv. Current dirty branch reset has
   Magit's loss confirmation, non-current branches move through reflogged
   `update-ref`, and worktree-only reset uses a private temporary index.
+- **Merge dispatch**: `m` exposes fast-forward, strategy, strategy-option,
+  whitespace, diff-algorithm, signing, and signoff arguments plus ordinary,
+  edited-message, no-commit, preview, and squash actions in status and diff.
+  The preview focuses a read-only prospective merge-tree without mutation;
+  edited and active merges use Legit's native prefilled commit buffer. A live
+  `MERGE_HEAD` reduces the dispatch to commit or confirmed abort, and conflict
+  stops retain the unmerged index for ordinary Legit resolution. Execution is
+  direct argv and bounded to 120 seconds / 4 MiB, with 1-MiB message input.
+  Octopus input and Magit's force-pushing/deleting absorb and dissolve actions
+  remain explicit gaps at this checkpoint.
 - Refresh `g`, navigate `n`/`p`/`M-n`/`M-p`, help `?`/`C-x ?`, quit `q`.
 
 Lem-yath registers the diff, commit, and rebase major-mode maps ahead of Vi's

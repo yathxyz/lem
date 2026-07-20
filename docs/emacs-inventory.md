@@ -616,6 +616,22 @@ reset message into Emacs' git-commit message ring, and Legit lacks Magit's
 section-level current-file default, so the file action always presents its
 bounded tree prompt.
 
+Status and diff panes also expose the matching `m` merge dispatch. Before a
+merge, `- f` and `- n` select mutually exclusive fast-forward policies; `- s`,
+`- X`, `- b`, `- w`, and `- A` cover strategy, strategy option, whitespace,
+and diff-algorithm arguments, while `- S` and `+ s` retain GPG-sign and signoff.
+Actions `m`, `e`, `n`, `p`, and `s` merge normally, prepare a native prefilled
+message buffer, stop before committing, focus a non-mutating merge-tree
+preview, or stage a squash without moving HEAD. A real `MERGE_HEAD` changes the
+dispatch to native commit-message continuation or confirmed `git merge
+--abort`; conflicts remain visible through Legit's ordinary unmerged rows.
+Calls use direct argv with a 120-second and 4-MiB process boundary, and prepared
+messages are limited to 1 MiB. This checkpoint accepts one merge head and runs
+synchronously rather than through Magit's process buffer. Comma-separated
+octopus input and Magit's `a` absorb / `d` dissolve actions remain gaps; the
+latter force-push and delete branches or pull-request remotes and are being
+handled as a separate destructive boundary.
+
 `vc-handled-backends '(Git)` only. `magit`/`magit-todos`/`forge`/`git-gutter`/`git-timemachine` all loaded via `init-evil`.
 
 ---

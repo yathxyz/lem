@@ -501,6 +501,15 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   and worktree-only state boundaries. Current dirty branches require the
   matching confirmation, while worktree-only reset uses a private temporary
   index so the real index is unchanged.
+  Magit's `m` merge dispatch is present in both panes as well. It retains
+  mutually exclusive fast-forward modes, strategy and strategy-option input,
+  whitespace/diff-algorithm choices, GPG signing, and signoff; `m`, `e`, `n`,
+  `p`, and `s` perform ordinary, edited-message, no-commit, preview, and squash
+  merges. A stopped merge changes the same dispatch to commit or confirmed
+  abort, and conflicts remain visible in Legit for resolution. The current
+  checkpoint accepts one merge head; Magit's comma-separated octopus input and
+  its force-pushing, branch-deleting `a` absorb / `d` dissolve actions remain
+  tracked gaps rather than being approximated unsafely.
   Packaged `gh` also backs
   command-accessible GitHub Forge lists, detail views, multiline creation and
   comments, close/reopen actions, external browsing, and cache-only Legit

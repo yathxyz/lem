@@ -914,6 +914,105 @@ prepare_porcelain_reset_fixture() {
   porcelain_reset_clean_at "$reset_step_hash"
 }
 
+porcelain_merge_metadata_absent() {
+  [ ! -f "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/MERGE_HEAD" ]
+}
+
+porcelain_merge_clean_at_main() {
+  [ "$merge_main_hash" = \
+    "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    porcelain_merge_metadata_absent &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_merge_plain_complete() {
+  [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+       rev-list --parents -1 HEAD | awk '{print NF}')" = 3 ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/merge-plain.txt")" = \
+      'plain branch value' ] &&
+    porcelain_merge_metadata_absent &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
+porcelain_merge_squashed() {
+  porcelain_merge_metadata_absent &&
+    [ "$merge_main_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/merge-squash.txt")" = \
+      'squash branch value' ] &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --cached --quiet -- merge-squash.txt &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --quiet -- merge-squash.txt
+}
+
+porcelain_merge_no_commit() {
+  [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/MERGE_HEAD" ] &&
+    [ "$merge_main_hash" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/merge-nocommit.txt")" = \
+      'no commit branch value' ] &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --cached --quiet -- merge-nocommit.txt
+}
+
+porcelain_merge_conflicted() {
+  [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/MERGE_HEAD" ] &&
+    [ -n "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      ls-files --unmerged -- merge-conflict.txt)" ]
+}
+
+porcelain_merge_subject_is() {
+  [ "$1" = "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    log -1 --format=%s)" ]
+}
+
+create_porcelain_merge_branch() {
+  local branch=$1 filename=$2 content=$3 timestamp=$4
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    "$branch" "$reset_step_hash" || return 1
+  printf '%s\n' "$content" \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/$filename"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- "$filename" ||
+    return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" "$branch" "$timestamp"
+}
+
+prepare_porcelain_merge_fixture() {
+  rm -f -- "$LEM_YATH_VCS_PORCELAIN_ROOT/reset-untracked.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+    "$reset_step_hash" || return 1
+  printf 'merge main value\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    merge-conflict.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" merge-main \
+    '2001-04-01T00:00:00+0000' || return 1
+  merge_main_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  create_porcelain_merge_branch merge-plain merge-plain.txt \
+    'plain branch value' '2001-04-02T00:00:00+0000' || return 1
+  create_porcelain_merge_branch merge-nocommit merge-nocommit.txt \
+    'no commit branch value' '2001-04-03T00:00:00+0000' || return 1
+  create_porcelain_merge_branch merge-edit merge-edit.txt \
+    'edit branch value' '2001-04-04T00:00:00+0000' || return 1
+  create_porcelain_merge_branch merge-squash merge-squash.txt \
+    'squash branch value' '2001-04-05T00:00:00+0000' || return 1
+  create_porcelain_merge_branch merge-preview merge-preview.txt \
+    'preview branch value' '2001-04-06T00:00:00+0000' || return 1
+  create_porcelain_merge_branch merge-conflict merge-conflict.txt \
+    'merge side value' '2001-04-07T00:00:00+0000' || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
+    "$reset_current_branch" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+    "$merge_main_hash" || return 1
+  porcelain_merge_clean_at_main
+}
+
 enter_prompt_value() {
   local session=$1 value=$2 index
   for index in $(seq 1 80); do
@@ -1101,7 +1200,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes merge=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -2725,6 +2824,228 @@ if wait_until "$WAIT_TIMEOUT" porcelain_reset_clean_at "$reset_base_hash" &&
 else
   fail legit-reset-branch-untracked \
     'untracked-only state prompted, blocked, or was removed by branch reset' \
+    "$porcelain_session"
+fi
+
+if prepare_porcelain_merge_fixture; then
+  pass legit-merge-fixture \
+    'prepared divergent plain, edit, squash, preview, and conflict branches'
+else
+  fail legit-merge-fixture 'could not prepare the isolated merge history' \
+    "$porcelain_session"
+fi
+send_keys "$porcelain_session" g
+
+printf 'dirty merge guard\n' \
+  >"$LEM_YATH_VCS_PORCELAIN_ROOT/reset-keep.txt"
+send_keys "$porcelain_session" g m
+if lem_wait_for "$porcelain_session" '\[Merge\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" m
+fi
+if lem_wait_for "$porcelain_session" 'Merge:' "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    merge-plain 'Merge:'
+fi
+if lem_wait_for "$porcelain_session" 'Merging with dirty worktree is risky' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" n
+fi
+if [ "$merge_main_hash" = \
+     "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+   [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/reset-keep.txt")" = \
+     'dirty merge guard' ]; then
+  pass legit-merge-dirty-decline \
+    'm m preserved HEAD and tracked worktree state when risk was declined'
+else
+  fail legit-merge-dirty-decline \
+    'declining the dirty-worktree warning still changed repository state' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -- \
+  reset-keep.txt
+send_keys "$porcelain_session" g
+
+send_keys "$porcelain_session" m
+if lem_wait_for "$porcelain_session" '\[Merge\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - n
+fi
+if lem_wait_for "$porcelain_session" '\[Merge\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" + s
+fi
+if lem_wait_for "$porcelain_session" '\[Merge\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" m
+fi
+if lem_wait_for "$porcelain_session" 'Merge:' "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    merge-plain 'Merge:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_plain_complete &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" log -1 --format=%B |
+     grep -q '^Signed-off-by: Lem Yath Test <lem-yath-test@example.invalid>$'; then
+  pass legit-merge-plain \
+    'm m merged with persistent no-ff/signoff options and a two-parent commit'
+else
+  fail legit-merge-plain \
+    'plain merge lost its branch, parent, cleanliness, or option semantics' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$merge_main_hash"
+send_keys "$porcelain_session" g
+
+send_keys "$porcelain_session" m
+if lem_wait_for "$porcelain_session" '\[Merge\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" p
+fi
+if lem_wait_for "$porcelain_session" 'Preview merge:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    merge-preview 'Preview merge:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_clean_at_main &&
+   lem_wait_for "$porcelain_session" 'merge-preview.txt' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  pass legit-merge-preview \
+    'm p rendered the prospective merge tree without changing repository state'
+else
+  fail legit-merge-preview \
+    'merge preview mutated state or omitted the prospective branch change' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" m
+if lem_wait_for "$porcelain_session" '\[Merge\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" s
+fi
+if lem_wait_for "$porcelain_session" 'Squash:' "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    merge-squash 'Squash:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_squashed; then
+  pass legit-merge-squash \
+    'm s staged the selected tree without moving HEAD or creating MERGE_HEAD'
+else
+  fail legit-merge-squash \
+    'squash merge moved HEAD, created merge metadata, or lost staged content' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$merge_main_hash"
+send_keys "$porcelain_session" g
+
+send_keys "$porcelain_session" m
+if lem_wait_for "$porcelain_session" '\[Merge\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" n
+fi
+if lem_wait_for "$porcelain_session" 'Merge without committing:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    merge-nocommit 'Merge without committing:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_no_commit; then
+  pass legit-merge-nocommit \
+    'm n retained HEAD and prepared an explicit in-progress merge'
+else
+  fail legit-merge-nocommit \
+    'no-commit merge failed to preserve the expected merge boundary' \
+    "$porcelain_session"
+fi
+send_keys "$porcelain_session" m
+if lem_wait_for "$porcelain_session" 'abort merge' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" a
+fi
+if lem_wait_for "$porcelain_session" 'Abort merge' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_clean_at_main; then
+  pass legit-merge-abort \
+    'in-progress m a restored the exact pre-merge HEAD, index, and worktree'
+else
+  fail legit-merge-abort \
+    'merge abort retained metadata or changed the pre-merge state' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" g m
+if lem_wait_for "$porcelain_session" '\[Merge\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" e
+fi
+if lem_wait_for "$porcelain_session" 'Merge without committing:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    merge-edit 'Merge without committing:'
+fi
+if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" g g d d i
+  tmux_cmd send-keys -t "$porcelain_session" -l -- \
+    'merge message edited in Lem'
+  send_keys "$porcelain_session" Escape C-c C-c
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_subject_is \
+     'merge message edited in Lem'; then
+  pass legit-merge-edit \
+    'm e opened the prefilled Legit message buffer and committed its edit'
+else
+  fail legit-merge-edit \
+    'merge edit did not create the user-edited merge commit' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$merge_main_hash"
+send_keys "$porcelain_session" g
+
+send_keys "$porcelain_session" m
+if lem_wait_for "$porcelain_session" '\[Merge\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" m
+fi
+if lem_wait_for "$porcelain_session" 'Merge:' "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    merge-conflict 'Merge:'
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_conflicted; then
+  pass legit-merge-conflict \
+    'm m retained a real unmerged index and MERGE_HEAD on conflict'
+else
+  fail legit-merge-conflict \
+    'conflicting merge did not remain available for resolution' \
+    "$porcelain_session"
+fi
+printf 'resolved merge value\n' \
+  >"$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- merge-conflict.txt
+send_keys "$porcelain_session" g m
+if lem_wait_for "$porcelain_session" 'commit merge' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" m
+fi
+if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" g g d d i
+  tmux_cmd send-keys -t "$porcelain_session" -l -- \
+    'resolved merge committed in Lem'
+  send_keys "$porcelain_session" Escape C-c C-c
+fi
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_subject_is \
+     'resolved merge committed in Lem' &&
+   [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt")" = \
+     'resolved merge value' ]; then
+  pass legit-merge-continue \
+    'in-progress m m committed the resolved merge through the native buffer'
+else
+  fail legit-merge-continue \
+    'resolved merge did not commit with the edited message and content' \
     "$porcelain_session"
 fi
 lem_stop "$porcelain_session"
