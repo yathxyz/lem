@@ -29,6 +29,7 @@ export NO_COLOR=1
 # Host direnv bookkeeping would otherwise restore an unrelated parent PATH.
 unset DIRENV_DIFF DIRENV_DIR DIRENV_FILE DIRENV_WATCHES
 export LEM_YATH_VCS_REPORT="$root/report"
+export LEM_YATH_VCS_PROMPT_INPUT="$root/prompt-input"
 export LEM_YATH_VCS_COLOCATED_ROOT="$root/repos/colocated repo;safe/"
 export LEM_YATH_VCS_GIT_MAIN="$root/repos/git main;safe/"
 export LEM_YATH_VCS_GIT_ROOT="$root/repos/git worktree;safe/"
@@ -41,6 +42,12 @@ export LEM_YATH_VCS_PORCELAIN_REMOTE="$root/repos/porcelain-remote.git"
 export LEM_YATH_VCS_PORCELAIN_PEER="$root/repos/porcelain-peer"
 export LEM_YATH_VCS_FETCH_REMOTE="$root/repos/fetch remote;safe.git"
 export LEM_YATH_VCS_PUSH_REMOTE="$root/repos/push-target.git"
+export LEM_YATH_VCS_WORKTREE_CHECKOUT="$root/repos/wt checkout;safe"
+export LEM_YATH_VCS_WORKTREE_CREATED="$root/repos/wt created;safe"
+export LEM_YATH_VCS_WORKTREE_MOVE_CONTAINER="$root/repos/wt container;safe"
+export LEM_YATH_VCS_WORKTREE_MOVED="${LEM_YATH_VCS_WORKTREE_MOVE_CONTAINER}/wt created;safe"
+export LEM_YATH_VCS_WORKTREE_LOCKED="$root/repos/wt locked;safe"
+export LEM_YATH_VCS_WORKTREE_STALE="$root/repos/wt stale;safe"
 
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR" "$LEM_HOME" \
   "$LEM_YATH_VCS_COLOCATED_ROOT/nested/deeper" \
@@ -50,6 +57,7 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKDIR" "$LEM_HOME" \
   "$LEM_YATH_VCS_GIT_MAIN/nested/docs" \
   "$LEM_YATH_VCS_PORCELAIN_ROOT/raw directory;sentinel"
 : >"$LEM_YATH_VCS_REPORT"
+: >"$LEM_YATH_VCS_PROMPT_INPUT"
 printf '%s\n' \
   'user.name = "Lem Yath Test"' \
   'user.email = "lem-yath-test@example.invalid"' \
@@ -1743,6 +1751,23 @@ enter_completion_prompt_value() {
   fi
 }
 
+enter_path_prompt_value() {
+  local session=$1 value=$2 prompt=$3
+  # Directory completion can rewrite its buffer while a burst of Backspace
+  # and literal key events is still queued.  Load the exact value into Lem's
+  # kill ring, then exercise the editor's ordinary prompt yank path atomically.
+  printf '%s' "$value" >"$LEM_YATH_VCS_PROMPT_INPUT"
+  send_keys "$session" C-a C-k
+  send_keys "$session" F12
+  send_keys "$session" C-y
+  sleep 0.5
+  send_keys "$session" Enter
+  sleep 0.25
+  if lem_wait_for "$session" "$prompt" 1 >/dev/null 2>&1; then
+    send_keys "$session" Enter
+  fi
+}
+
 enter_completion_prompt_value_until() {
   local session=$1 value=$2 next_prompt=$3 index
   for index in $(seq 1 80); do
@@ -1923,7 +1948,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes merge=yes revert=yes branch=yes push=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes reset=yes merge=yes revert=yes branch=yes worktree=yes push=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -4869,6 +4894,300 @@ else
     'a rejected lease still merged, deleted, or overwrote the remote branch' \
     "$porcelain_session"
 fi
+
+# The worktree dispatch is deliberately isolated in its own module.  The
+# expected stale-lease failure above leaves Legit's process error popup active,
+# while create, move, visit, and current-worktree deletion replace the status
+# root by design.  Start a fresh installed editor at this boundary so neither
+# state can consume the first `%` dispatch event.
+lem_stop "$porcelain_session"
+porcelain_session="lem-yath-vcs-worktree-$id"
+if start_phase porcelain "$LEM_YATH_VCS_PORCELAIN_FILE" \
+  "$porcelain_session"; then
+  pass porcelain-worktree-restart \
+    'restarted the installed wrapper at the isolated worktree boundary'
+else
+  fail porcelain-worktree-restart \
+    'the isolated worktree editor did not become ready' "$porcelain_session"
+fi
+send_keys "$porcelain_session" Space g G
+if wait_legit "$porcelain_session" porcelain; then
+  pass legit-worktree-status \
+    'the fresh editor opened the primary repository in Legit'
+else
+  fail legit-worktree-status \
+    'the fresh worktree status did not become interactive' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -f main
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$merge_main_hash"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch -f \
+  worktree-checkout "$merge_main_hash"
+
+tmux_cmd send-keys -t "$porcelain_session" -l -- '%'
+if lem_wait_for "$porcelain_session" '\[Worktree\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" b
+fi
+if lem_wait_for "$porcelain_session" 'In new worktree; checkout:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value_until "$porcelain_session" \
+    worktree-checkout 'Checkout worktree-checkout in new worktree:'
+fi
+if lem_wait_for "$porcelain_session" \
+     'Checkout worktree-checkout in new worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_path_prompt_value "$porcelain_session" \
+    "$LEM_YATH_VCS_WORKTREE_CHECKOUT" \
+    'Checkout worktree-checkout in new worktree:'
+fi
+if wait_until "$WAIT_TIMEOUT" test -f \
+     "$LEM_YATH_VCS_WORKTREE_CHECKOUT/.git" &&
+   [ "$("$git_bin" -C "$LEM_YATH_VCS_WORKTREE_CHECKOUT" \
+       branch --show-current)" = worktree-checkout ] &&
+   lem_wait_for "$porcelain_session" 'Branch: worktree-checkout' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  pass legit-worktree-checkout \
+    '% b created, registered, visited, and displayed a metacharacter path'
+else
+  fail legit-worktree-checkout \
+    '% b did not create and visit the selected branch worktree' \
+    "$porcelain_session"
+fi
+
+tmux_cmd send-keys -t "$porcelain_session" -l -- '%'
+if lem_wait_for "$porcelain_session" '\[Worktree\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" g
+fi
+if lem_wait_for "$porcelain_session" 'Show status for worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    porcelain 'Show status for worktree:'
+fi
+if lem_wait_for "$porcelain_session" 'Branch: main' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  pass legit-worktree-visit \
+    '% g replaced the active status with the selected primary worktree'
+else
+  fail legit-worktree-visit \
+    '% g did not visit and display the primary worktree' "$porcelain_session"
+fi
+
+tmux_cmd send-keys -t "$porcelain_session" -l -- '%'
+if lem_wait_for "$porcelain_session" '\[Worktree\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" c
+fi
+if lem_wait_for "$porcelain_session" \
+     'Create branch and worktree starting at:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" "$merge_main_hash" \
+    'Create branch and worktree starting at:'
+fi
+if lem_wait_for "$porcelain_session" \
+     'Name for create branch and worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" worktree-created
+fi
+if lem_wait_for "$porcelain_session" \
+     'Checkout worktree-created in new worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_path_prompt_value "$porcelain_session" \
+    "$LEM_YATH_VCS_WORKTREE_CREATED" \
+    'Checkout worktree-created in new worktree:'
+fi
+if wait_until "$WAIT_TIMEOUT" test -f \
+     "$LEM_YATH_VCS_WORKTREE_CREATED/.git" &&
+   [ "$("$git_bin" -C "$LEM_YATH_VCS_WORKTREE_CREATED" \
+       branch --show-current)" = worktree-created ] &&
+   lem_wait_for "$porcelain_session" 'Branch: worktree-created' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  pass legit-worktree-create \
+    '% c created the branch and worktree at the selected start point'
+else
+  fail legit-worktree-create \
+    '% c lost the new branch, selected revision, path, or active status' \
+    "$porcelain_session"
+fi
+
+tmux_cmd send-keys -t "$porcelain_session" -l -- '%'
+if lem_wait_for "$porcelain_session" '\[Worktree\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" m
+fi
+if lem_wait_for "$porcelain_session" 'Move worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    created 'Move worktree:'
+fi
+if lem_wait_for "$porcelain_session" 'Move worktree to:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  printf '%s' "$LEM_YATH_VCS_WORKTREE_MOVE_CONTAINER" \
+    >"$LEM_YATH_VCS_PROMPT_INPUT"
+  send_keys "$porcelain_session" C-a C-k F12 C-y
+  # Keep completion empty while the long metacharacter path is inserted, then
+  # create the destination before Git observes it so move-to-container is real.
+  mkdir -p "$LEM_YATH_VCS_WORKTREE_MOVE_CONTAINER"
+  send_keys "$porcelain_session" Enter
+  sleep 0.25
+  if lem_wait_for "$porcelain_session" 'Move worktree to:' 1 \
+       >/dev/null 2>&1; then
+    send_keys "$porcelain_session" Enter
+  fi
+fi
+if wait_until "$WAIT_TIMEOUT" test -f \
+     "$LEM_YATH_VCS_WORKTREE_MOVED/.git" &&
+   [ ! -e "$LEM_YATH_VCS_WORKTREE_CREATED" ] &&
+   [ "$("$git_bin" -C "$LEM_YATH_VCS_WORKTREE_MOVED" \
+       branch --show-current)" = worktree-created ] &&
+   lem_wait_for "$porcelain_session" 'Branch: worktree-created' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  pass legit-worktree-move \
+    '% m nested into an existing container and followed the resulting status root'
+else
+  fail legit-worktree-move \
+    '% m did not preserve registration, branch, path, and active status' \
+    "$porcelain_session"
+fi
+
+printf 'uncommitted worktree edge\n' \
+  >"$LEM_YATH_VCS_WORKTREE_MOVED/untracked edge;safe.txt"
+tmux_cmd send-keys -t "$porcelain_session" -l -- '%'
+if lem_wait_for "$porcelain_session" '\[Worktree\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" k
+fi
+if lem_wait_for "$porcelain_session" 'Delete worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    container 'Delete worktree:'
+fi
+if lem_wait_for "$porcelain_session" 'despite uncommitted changes' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" n
+fi
+if [ -f "$LEM_YATH_VCS_WORKTREE_MOVED/untracked edge;safe.txt" ] &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" worktree list \
+     --porcelain | grep -Fqx \
+       "worktree $LEM_YATH_VCS_WORKTREE_MOVED"; then
+  pass legit-worktree-dirty-decline \
+    '% k retained a dirty current worktree when deletion was declined'
+else
+  fail legit-worktree-dirty-decline \
+    'declining dirty worktree deletion still removed content or registration' \
+    "$porcelain_session"
+fi
+
+tmux_cmd send-keys -t "$porcelain_session" -l -- '%'
+if lem_wait_for "$porcelain_session" '\[Worktree\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" k
+fi
+if lem_wait_for "$porcelain_session" 'Delete worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    container 'Delete worktree:'
+fi
+if lem_wait_for "$porcelain_session" 'despite uncommitted changes' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" test ! -e \
+     "$LEM_YATH_VCS_WORKTREE_MOVED" &&
+   ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" worktree list \
+      --porcelain | grep -Fqx \
+        "worktree $LEM_YATH_VCS_WORKTREE_MOVED" &&
+   lem_wait_for "$porcelain_session" 'Branch: main' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  pass legit-worktree-dirty-force \
+    '% k force-removed dirty content only after confirmation and returned home'
+else
+  fail legit-worktree-dirty-force \
+    'confirmed dirty deletion failed to remove or return to the primary status' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" worktree add -q \
+  -b worktree-locked "$LEM_YATH_VCS_WORKTREE_LOCKED" "$merge_main_hash"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" worktree lock \
+  --reason lem-yath-test "$LEM_YATH_VCS_WORKTREE_LOCKED"
+tmux_cmd send-keys -t "$porcelain_session" -l -- '%'
+if lem_wait_for "$porcelain_session" '\[Worktree\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" k
+fi
+if lem_wait_for "$porcelain_session" 'Delete worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    locked 'Delete worktree:'
+fi
+if lem_wait_for "$porcelain_session" 'Unlock the selected worktree' \
+     "$WAIT_TIMEOUT" >/dev/null &&
+   [ -f "$LEM_YATH_VCS_WORKTREE_LOCKED/.git" ]; then
+  pass legit-worktree-locked \
+    '% k refused a locked worktree before presenting a destructive prompt'
+else
+  fail legit-worktree-locked \
+    'locked-worktree deletion was not rejected safely' "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" worktree add -q \
+  -b worktree-stale "$LEM_YATH_VCS_WORKTREE_STALE" "$merge_main_hash"
+rm -rf -- "$LEM_YATH_VCS_WORKTREE_STALE"
+tmux_cmd send-keys -t "$porcelain_session" -l -- '%'
+if lem_wait_for "$porcelain_session" '\[Worktree\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" k
+fi
+if lem_wait_for "$porcelain_session" 'Delete worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    stale 'Delete worktree:'
+fi
+if wait_until "$WAIT_TIMEOUT" sh -c \
+     "! '$git_bin' -C '$LEM_YATH_VCS_PORCELAIN_ROOT' worktree list --porcelain | grep -Fqx 'worktree $LEM_YATH_VCS_WORKTREE_STALE'"; then
+  pass legit-worktree-stale \
+    '% k pruned missing worktree metadata without a destructive prompt'
+else
+  fail legit-worktree-stale \
+    'missing worktree metadata remained registered after prune' \
+    "$porcelain_session"
+fi
+
+# The primary is never offered by move/delete.  Remove the remaining clean
+# checkout through the dispatch, then clean the locked edge fixture directly.
+tmux_cmd send-keys -t "$porcelain_session" -l -- '%'
+if lem_wait_for "$porcelain_session" '\[Worktree\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" k
+fi
+if lem_wait_for "$porcelain_session" 'Delete worktree:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" \
+    checkout 'Delete worktree:'
+fi
+if lem_wait_for "$porcelain_session" \
+     "Delete worktree $LEM_YATH_VCS_WORKTREE_CHECKOUT" \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" y
+fi
+if wait_until "$WAIT_TIMEOUT" test ! -e \
+     "$LEM_YATH_VCS_WORKTREE_CHECKOUT" &&
+   [ -d "$LEM_YATH_VCS_PORCELAIN_ROOT/.git" ]; then
+  pass legit-worktree-clean-delete \
+    '% k confirmed clean linked-worktree deletion while preserving primary Git'
+else
+  fail legit-worktree-clean-delete \
+    'clean linked deletion failed or affected the primary worktree' \
+    "$porcelain_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" worktree unlock \
+  "$LEM_YATH_VCS_WORKTREE_LOCKED" || true
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" worktree remove --force \
+  "$LEM_YATH_VCS_WORKTREE_LOCKED" || true
 lem_stop "$porcelain_session"
 
 printf '\n'

@@ -2221,9 +2221,21 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
   checkout records upstream and push remote, checked-out deletion switches or
   detaches first, unmerged deletion confirms, and dirty spin-out preserves
   edits by becoming spin-off. The `- r` checkout submodule argument is present.
-  Worktrees, shelve/unshelve, default-branch migration, remote-side
-  rename/deletion, visual commit-region spin selection, and asynchronous
-  process presentation remain gaps.
+  Worktrees are covered by the separate `%` dispatch below. Shelve/unshelve,
+  default-branch migration, remote-side rename/deletion, visual commit-region
+  spin selection, and asynchronous process presentation remain gaps.
+- **Worktree dispatch**: Evil Collection's `%` opens Magit's focused worktree
+  map in status and diff. `b` checks out a branch, remote branch, or resolved
+  commit in a new sibling-style path; `c` creates a branch and worktree from a
+  selected revision; `m` moves a linked worktree; `k` deletes or prunes one;
+  and `g` replaces the active Legit status with the selected worktree. The
+  primary is excluded from move/delete, dirty deletion requires explicit
+  confirmation, locked deletion fails closed, stale entries prune without a
+  destructive prompt, and move/delete of the active linked worktree follows
+  its new or primary status root. NUL-delimited porcelain, direct absolute
+  argv paths, and 120-second / 4-MiB / 5000-candidate / 4096-character bounds
+  retain paths containing whitespace and shell metacharacters. Execution is
+  synchronous and Lem opens Legit rather than Magit's Dired fallback.
 - **Reset dispatch**: `X` exposes `b` branch, `f` file, `m` mixed, `s` soft,
   `h` hard, `k` keep, `i` index-only, and `w` worktree-only actions in status
   and diff panes. Revision, branch, and revision-tree file completion is

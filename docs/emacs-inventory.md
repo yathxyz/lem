@@ -632,10 +632,20 @@ defaults; the nested view also exposes automatic merge/rebase setup. Remote
 checkout configures both upstream and push remote, unmerged deletion requires
 confirmation, deleting the checked-out branch first switches or detaches, and
 a dirty spin-out becomes a checked-out spin-off without losing edits. The
-recurse-submodules checkout argument is retained. Worktrees, shelve/unshelve,
+recurse-submodules checkout argument is retained. Shelve/unshelve,
 default-branch migration, remote-side rename/deletion, and Magit's visual
 commit-region spin boundary remain outside this port; execution is bounded and
 synchronous rather than process-buffer based.
+
+Evil Collection's remapped `%` opens the separate worktree dispatch in status
+and diff panes. Its configured `b`, `c`, `m`, `k`, and `g` actions check out a
+revision into a new worktree, create a branch plus worktree, move, delete, and
+visit. Primary worktrees cannot be selected for move/delete; dirty removal is
+confirmed, locked removal is refused, stale registrations are pruned, and an
+active linked worktree follows its new path or returns to primary status after
+move/delete. Git's NUL-delimited porcelain and direct absolute argv preserve
+spaces and shell metacharacters. Unlike Magit, the visit action consistently
+opens Legit instead of falling back to Dired, and operations are synchronous.
 
 The matching `X` reset dispatch is also available in status and diff panes.
 It retains Magit's `b` branch and `f` file actions plus `m` mixed, `s` soft,

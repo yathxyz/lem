@@ -281,6 +281,48 @@
                      (vcs-test-key-command
                       (legit-branch-config-popup-keymap "main") key))
                  (format nil "magit-branch-config-~a" key))))
+      (check (eq 'lem-yath-legit-worktree
+                 (vcs-test-key-command lem/legit::*peek-legit-keymap* "%"))
+             "magit-worktree-status-dispatch")
+      (check (eq 'lem-yath-legit-worktree
+                 (vcs-test-key-command
+                  lem/legit::*legit-diff-mode-keymap* "%"))
+             "magit-worktree-diff-dispatch")
+      (dolist (key '("b" "c" "m" "k" "g" "q"))
+        (check (eq 'nop-command
+                   (vcs-test-key-command
+                    (legit-worktree-popup-keymap) key))
+               (format nil "magit-worktree-~a" key)))
+      (let* ((nul (string (code-char 0)))
+             (fields
+               (legit-worktree-split-nul
+                (concatenate
+                 'string
+                 "worktree /tmp/path with ; marker" nul
+                 "HEAD abc" nul
+                 "branch refs/heads/topic/path" nul
+                 "locked test reason" nul
+                 "prunable missing directory" nul nul)))
+             (record (legit-worktree-parse-record (subseq fields 0 5))))
+        (check (equal fields
+                      '("worktree /tmp/path with ; marker"
+                        "HEAD abc"
+                        "branch refs/heads/topic/path"
+                        "locked test reason"
+                        "prunable missing directory"
+                        "" ""))
+               "magit-worktree-nul-record-boundaries")
+        (check (and (string= "/tmp/path with ; marker"
+                             (legit-worktree-path record))
+                    (string= "abc" (legit-worktree-head record))
+                    (string= "topic/path" (legit-worktree-branch record))
+                    (legit-worktree-locked-p record)
+                    (legit-worktree-prunable-p record))
+               "magit-worktree-porcelain-fields"))
+      (check (string= "/tmp/worktree path;safe"
+                      (legit-worktree-normalize-path
+                       ".//tmp/worktree path;safe"))
+             "magit-worktree-rooted-directory-prompt")
       (check (eq 'lem-yath-legit-push
                  (vcs-test-key-command lem/legit::*peek-legit-keymap* "p"))
              "magit-push-status-dispatch")
@@ -1326,6 +1368,7 @@
    :merge (vcs-test-key-command lem/legit::*peek-legit-keymap* "m")
    :revert (vcs-test-key-command lem/legit::*peek-legit-keymap* "_")
    :branch (vcs-test-key-command lem/legit::*peek-legit-keymap* "b")
+   :worktree (vcs-test-key-command lem/legit::*peek-legit-keymap* "%")
    :push (vcs-test-key-command lem/legit::*peek-legit-keymap* "p")
    :smart (leader-binding-command lem-vi-mode:*normal-keymap* "g g")
    :git (leader-binding-command lem-vi-mode:*normal-keymap* "g G")
@@ -1360,6 +1403,7 @@
           (load (merge-pathnames "src/git-merge.lisp" source))
           (load (merge-pathnames "src/git-revert.lisp" source))
           (load (merge-pathnames "src/git-branch.lisp" source))
+          (load (merge-pathnames "src/git-worktree.lisp" source))
           (load (merge-pathnames "src/git-push.lisp" source))
           (load (merge-pathnames "src/git-blame.lisp" source))
           (load (merge-pathnames "src/apps/timemachine.lisp" source)))
@@ -1369,7 +1413,7 @@
             'string
             "RELOAD same=~a find=~d post=~d save=~d change=~d kill=~d "
             "global=~d source=~d directory=~d root-marker=~d todo-hook=~d "
-            "bisect-hook=~d bisect=~a fetch=~a reset=~a merge=~a revert=~a branch=~a push=~a smart=~a git=~a jj=~a time=~a "
+            "bisect-hook=~d bisect=~a fetch=~a reset=~a merge=~a revert=~a branch=~a worktree=~a push=~a smart=~a git=~a jj=~a time=~a "
             "jj-refresh=~a jj-quit=~a "
             "older=~a newer=~a nth=~a fuzzy=~a short=~a full=~a blame=~a "
             "blame-quit=~a p=~a n=~a t=~a quit=~a")
@@ -1397,6 +1441,8 @@
             (eq (getf after :revert) 'lem-yath-legit-revert))
            (vcs-test-yes-no
             (eq (getf after :branch) 'lem-yath-legit-branch))
+           (vcs-test-yes-no
+            (eq (getf after :worktree) 'lem-yath-legit-worktree))
            (vcs-test-yes-no
             (eq (getf after :push) 'lem-yath-legit-push))
            (vcs-test-yes-no (eq (getf after :smart) 'lem-yath-vcs-status))
@@ -1438,7 +1484,21 @@
 (define-key *global-keymap* "F9" 'lem-yath-test-vcs-roots)
 (define-key *global-keymap* "F10" 'lem-yath-test-vcs-prepare-invocation)
 (define-key *global-keymap* "F11" 'lem-yath-test-vcs-detour-timemachine)
-(define-key *global-keymap* "F12" 'lem-yath-test-vcs-debounce-state)
+(defun vcs-test-load-prompt-input ()
+  (let ((path (uiop:getenv "LEM_YATH_VCS_PROMPT_INPUT")))
+    (when (and path (probe-file path))
+      (let ((value (uiop:read-file-string path)))
+        (when (plusp (length value))
+          (lem/common/killring:push-killring-item
+           (current-killring) value)
+          t)))))
+
+(define-command lem-yath-test-vcs-f12 () ()
+  "Report debounce state or load the acceptance driver's prompt value."
+  (unless (vcs-test-load-prompt-input)
+    (lem-yath-test-vcs-debounce-state)))
+
+(define-key *global-keymap* "F12" 'lem-yath-test-vcs-f12)
 (define-key *global-keymap* "C-c u" 'lem-yath-test-vcs-untracked-state)
 (define-key *global-keymap* "C-c h"
   'lem-yath-test-vcs-timemachine-extra-state)

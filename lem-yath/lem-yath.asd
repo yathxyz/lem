@@ -49,6 +49,7 @@
                (:file "git-merge")
                (:file "git-revert")
                (:file "git-branch")
+               (:file "git-worktree")
                (:file "git-push")
                (:file "git-blame")
                (:file "forge")
