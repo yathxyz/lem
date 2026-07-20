@@ -570,6 +570,38 @@
   (vcs-test-position-legit-file
    "porcelain.txt" :focus-diff t :section (format nil "~%Staged changes (")))
 
+(defun vcs-test-position-legit-region (staged-p)
+  "Focus the first replacement's removed row in an unstaged or staged diff."
+  (vcs-test-position-legit-file
+   "porcelain.txt"
+   :focus-diff t
+   :section (and staged-p (format nil "~%Staged changes (")))
+  (let* ((diff-buffer (window-buffer lem/legit::*source-window*))
+         (point (and diff-buffer (buffer-start-point diff-buffer))))
+    (when point
+      (unless (search-forward point "-porcelain-line-02")
+        (setf point nil)))
+    (when point
+      (line-start point)
+      (setf (current-window) lem/legit::*source-window*)
+      (move-point (buffer-point diff-buffer) point))
+    (vcs-test-log
+     "PORCELAIN-REGION staged=~a line=~a mode=~a focused=~a"
+     (vcs-test-yes-no staged-p)
+     (vcs-test-yes-no point)
+     (vcs-test-yes-no
+      (and diff-buffer
+           (eq (buffer-major-mode diff-buffer)
+               'lem/legit::legit-diff-mode)))
+     (vcs-test-yes-no
+      (eq (current-window) lem/legit::*source-window*)))))
+
+(define-command lem-yath-test-vcs-porcelain-region () ()
+  (vcs-test-position-legit-region nil))
+
+(define-command lem-yath-test-vcs-porcelain-staged-region () ()
+  (vcs-test-position-legit-region t))
+
 (define-command lem-yath-test-vcs-porcelain-tracked () ()
   (vcs-test-position-legit-file "porcelain.txt"))
 
@@ -1087,6 +1119,8 @@
 (define-key *global-keymap* "C-c t" 'lem-yath-test-vcs-todo-preview)
 (define-key *global-keymap* "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key *global-keymap* "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)
+(define-key *global-keymap* "C-c w" 'lem-yath-test-vcs-porcelain-region)
+(define-key *global-keymap* "C-c W" 'lem-yath-test-vcs-porcelain-staged-region)
 (define-key *global-keymap* "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
 (define-key *global-keymap* "C-c a" 'lem-yath-test-vcs-porcelain-untracked)
 (define-key *global-keymap* "C-c r" 'lem-yath-test-vcs-porcelain-commit)
@@ -1099,6 +1133,10 @@
   "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c w" 'lem-yath-test-vcs-porcelain-region)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c W" 'lem-yath-test-vcs-porcelain-staged-region)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
 (define-key lem/legit::*peek-legit-keymap*
@@ -1113,6 +1151,10 @@
   "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key lem/legit::*legit-diff-mode-keymap*
   "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "C-c w" 'lem-yath-test-vcs-porcelain-region)
+(define-key lem/legit::*legit-diff-mode-keymap*
+  "C-c W" 'lem-yath-test-vcs-porcelain-staged-region)
 (define-key lem/legit::*legit-diff-mode-keymap*
   "C-c m" 'lem-yath-test-vcs-porcelain-tracked)
 (define-key lem/legit::*legit-diff-mode-keymap*

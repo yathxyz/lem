@@ -63,49 +63,266 @@
               (points-to-string header start)
               (points-to-string start end)))))
 
+(defun git-diff-lines-with-endings (text)
+  "Return TEXT as lines while retaining every existing newline."
+  (let ((start 0)
+        (length (length text))
+        (lines '()))
+    (loop :while (< start length)
+          :for newline := (position #\Newline text :start start)
+          :do (if newline
+                  (progn
+                    (push (subseq text start (1+ newline)) lines)
+                    (setf start (1+ newline)))
+                  (progn
+                    (push (subseq text start length) lines)
+                    (setf start length))))
+    (nreverse lines)))
+
+(defun git-diff-parse-hunk-header (line)
+  "Parse a unified Git hunk header into old/new starts, lengths, and suffix."
+  (cl-ppcre:register-groups-bind
+      (old-start old-length new-start new-length suffix)
+      ("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@(.*?)(?:\\n)?$"
+       line)
+    (when old-start
+      (list (parse-integer old-start)
+            (parse-integer (or old-length "1"))
+            (parse-integer new-start)
+            (parse-integer (or new-length "1"))
+            (or suffix "")))))
+
+(defun git-diff-format-range (start length)
+  (if (= length 1)
+      (princ-to-string start)
+      (format nil "~d,~d" start length)))
+
+(defun legit-git-partial-hunk-patch (lines selected-indices)
+  "Build a valid patch for the changed lines selected from hunk LINES."
+  (let* ((parsed (git-diff-parse-hunk-header (first lines)))
+         (old-length 0)
+         (new-length 0)
+         (has-change nil)
+         (previous-included-p nil)
+         (body '()))
+    (unless parsed
+      (editor-error "Unsupported Git hunk header"))
+    (loop :for line :in (rest lines)
+          :for index :from 1
+          :for type :=
+            (and (plusp (length line))
+                 (case (char line 0)
+                   (#\Space :context)
+                   (#\+ :added)
+                   (#\- :removed)
+                   (#\\ :meta)))
+          :for selected-p := (member index selected-indices)
+          :for included-line := nil
+          :do
+             (case type
+               (:context
+                (incf old-length)
+                (incf new-length)
+                (setf included-line line
+                      previous-included-p t))
+               (:added
+                (if selected-p
+                    (progn
+                      (incf new-length)
+                      (setf has-change t
+                            included-line line
+                            previous-included-p t))
+                    (setf previous-included-p nil)))
+               (:removed
+                (incf old-length)
+                (incf new-length)
+                (if selected-p
+                    (progn
+                      (decf new-length)
+                      (setf has-change t
+                            included-line line))
+                    (setf included-line
+                          (concatenate 'string " " (subseq line 1))))
+                (setf previous-included-p t))
+               (:meta
+                (when previous-included-p
+                  (setf included-line line))))
+             (when included-line
+               (push included-line body)))
+    (when has-change
+      (destructuring-bind (old-start ignored-old new-start ignored-new suffix)
+          parsed
+        (declare (ignore ignored-old ignored-new))
+        (concatenate
+         'string
+         (format nil "@@ -~a +~a @@~a~%"
+                 (git-diff-format-range old-start old-length)
+                 (git-diff-format-range new-start new-length)
+                 suffix)
+         (apply #'concatenate 'string (nreverse body)))))))
+
+(defun legit-git-region-bounds ()
+  "Return the first and last selected diff lines."
+  (let* ((buffer (current-buffer))
+         (visual-p
+           (and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
+                (lem-vi-mode/visual:visual-p buffer))))
+    (when (and visual-p (lem-vi-mode/visual:visual-block-p buffer))
+      (editor-error "Blockwise regions cannot select a Git patch"))
+    (unless (or visual-p (buffer-mark-p buffer))
+      (editor-error "No active region in the Git diff"))
+    (let* ((bounds
+             (if visual-p
+                 (lem-vi-mode/visual:visual-range buffer)
+                 (list (copy-point (region-beginning buffer))
+                       (copy-point (region-end buffer)))))
+           (start (point-min (first bounds) (second bounds)))
+           (end (point-max (first bounds) (second bounds))))
+      (when (point= start end)
+        (editor-error "The active Git diff region is empty"))
+      (with-point ((first-line start)
+                   (last-line end))
+        (line-start first-line)
+        ;; Both Lem regions and Vi Visual ranges use an exclusive upper bound.
+        (character-offset last-line -1)
+        (line-start last-line)
+        (values first-line last-line)))))
+
+(defun legit-git-region-patch ()
+  "Return a complete Git patch for selected changed lines across local hunks."
+  (multiple-value-bind (region-start region-end)
+      (legit-git-region-bounds)
+    (with-point ((header region-start)
+                 (file-end region-start))
+      (unless (search-backward-regexp header "^diff --git ")
+        (editor-error "The selected region has no Git patch header"))
+      (move-point file-end header)
+      (line-offset file-end 1)
+      (unless (search-forward-regexp file-end "^diff --git ")
+        (move-point file-end (buffer-end-point (current-buffer))))
+      (when (point>= region-end file-end)
+        (editor-error "A Git diff region must stay within one file"))
+      (let* ((header-line (line-number-at-point header))
+             (first-line (line-number-at-point region-start))
+             (last-line (line-number-at-point region-end))
+             (lines
+               (git-diff-lines-with-endings
+                (points-to-string header file-end)))
+             (file-header '())
+             (hunk-lines nil)
+             (hunk-start nil)
+             (patches '()))
+        (labels
+            ((flush-hunk ()
+               (when hunk-lines
+                 (let* ((ordered (nreverse hunk-lines))
+                        (selected
+                          (loop :for line :in (rest ordered)
+                                :for relative :from 1
+                                :for absolute :=
+                                  (+ header-line hunk-start relative)
+                                :when
+                                  (and (<= first-line absolute last-line)
+                                       (plusp (length line))
+                                       (member (char line 0) '(#\+ #\-)))
+                                  :collect relative))
+                        (patch
+                          (and selected
+                               (legit-git-partial-hunk-patch
+                                ordered selected))))
+                   (when patch (push patch patches)))
+                 (setf hunk-lines nil
+                       hunk-start nil)))
+             (append-line (line index)
+               (if (str:starts-with-p "@@ " line)
+                   (progn
+                     (flush-hunk)
+                     (setf hunk-lines (list line)
+                           hunk-start index))
+                   (if hunk-lines
+                       (push line hunk-lines)
+                       (push line file-header)))))
+          (loop :for line :in lines
+                :for index :from 0
+                :do (append-line line index))
+          (flush-hunk))
+        (unless patches
+          (editor-error "The region contains no changed Git lines"))
+        (concatenate
+         'string
+         (apply #'concatenate 'string (nreverse file-header))
+         (apply #'concatenate 'string (nreverse patches)))))))
+
 (defun legit-git-diff-p ()
   (with-point ((point (current-point)))
     (not (null (search-backward-regexp point "^diff --git ")))))
 
+(defun apply-legit-git-patch (patch reverse &key region-p)
+  "Apply PATCH to Git's index, reversing when REVERSE."
+  (uiop:with-temporary-file
+      (:pathname patch-path :stream patch-stream
+       :direction :output :element-type 'character)
+    (write-string patch patch-stream)
+    (finish-output patch-stream)
+    (close patch-stream)
+    (lem/legit::with-current-project (vcs)
+      (declare (ignore vcs))
+      (multiple-value-bind (output error-output status)
+          (run-project-program
+           (append
+            (list (uiop:native-namestring
+                   (or (executable-find "git")
+                       (editor-error "Git is unavailable")))
+                  "apply" "--ignore-space-change" "-C0"
+                  "--index" "--cached")
+            (when reverse (list "--reverse"))
+            (list (uiop:native-namestring patch-path)))
+           :directory (uiop:getcwd))
+        (if (zerop status)
+            (progn
+              (when region-p
+                (if (and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
+                         (lem-vi-mode/visual:visual-p (current-buffer)))
+                    (lem-vi-mode/visual:vi-visual-end)
+                    (buffer-mark-cancel (current-buffer))))
+              (lem/legit::show-legit-status)
+              (message
+               (cond
+                 ((and region-p reverse) "Unstaged selected lines")
+                 (region-p "Staged selected lines")
+                 (reverse "Unstaged hunk")
+                 (t "Staged hunk")))
+              t)
+            (lem/legit::pop-up-message
+             (if (plusp (length error-output))
+                 error-output
+                 output)))))))
+
 (defun apply-legit-git-hunk (reverse)
   "Apply the current Legit hunk to Git's index, reversing when REVERSE."
-  (let ((patch (legit-git-hunk-patch)))
-    (uiop:with-temporary-file
-        (:pathname patch-path :stream patch-stream
-         :direction :output :element-type 'character)
-      (write-string patch patch-stream)
-      (finish-output patch-stream)
-      (close patch-stream)
-      (lem/legit::with-current-project (vcs)
-        (declare (ignore vcs))
-        (multiple-value-bind (output error-output status)
-            (run-project-program
-             (append
-              (list (uiop:native-namestring
-                     (or (executable-find "git")
-                         (editor-error "Git is unavailable")))
-                    "apply" "--ignore-space-change" "-C0"
-                    "--index" "--cached")
-              (when reverse (list "--reverse"))
-              (list (uiop:native-namestring patch-path)))
-             :directory (uiop:getcwd))
-          (if (zerop status)
-              (progn
-                (lem/legit::show-legit-status)
-                (message (if reverse "Unstaged hunk" "Staged hunk")))
-              (lem/legit::pop-up-message
-               (if (plusp (length error-output))
-                   error-output
-                   output))))))))
+  (apply-legit-git-patch (legit-git-hunk-patch) reverse))
+
+(defun apply-legit-git-region (reverse)
+  "Apply selected changed lines to Git's index, reversing when REVERSE."
+  (apply-legit-git-patch
+   (legit-git-region-patch) reverse :region-p t))
 
 (define-command lem-yath-legit-stage-hunk () ()
   (if (legit-git-diff-p)
-      (apply-legit-git-hunk nil)
+      (if (or (buffer-mark-p (current-buffer))
+              (and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
+                   (lem-vi-mode/visual:visual-p (current-buffer))))
+          (apply-legit-git-region nil)
+          (apply-legit-git-hunk nil))
       (lem/legit::legit-stage-hunk)))
 
 (define-command lem-yath-legit-unstage-hunk () ()
   (if (legit-git-diff-p)
-      (apply-legit-git-hunk t)
+      (if (or (buffer-mark-p (current-buffer))
+              (and (typep (current-global-mode) 'lem-vi-mode:vi-mode)
+                   (lem-vi-mode/visual:visual-p (current-buffer))))
+          (apply-legit-git-region t)
+          (apply-legit-git-hunk t))
       (lem/legit::legit-unstage-hunk)))
 
 (declaim (ftype function
@@ -1669,22 +1886,6 @@ When TOGGLE-P is true, selecting the identical row again clears CATEGORY."
   (jj-execute-duplicate
    (jj-current-root) (jj-selected-revision) :parent))
 
-(defun jj-lines-with-endings (text)
-  "Return TEXT as lines while retaining every existing newline."
-  (let ((start 0)
-        (length (length text))
-        (lines '()))
-    (loop :while (< start length)
-          :for newline := (position #\Newline text :start start)
-          :do (if newline
-                  (progn
-                    (push (subseq text start (1+ newline)) lines)
-                    (setf start (1+ newline)))
-                  (progn
-                    (push (subseq text start length) lines)
-                    (setf start length))))
-    (nreverse lines)))
-
 (defun parse-jj-split-hunks (output)
   "Parse Git-format jj diff OUTPUT into ordered textual hunks."
   (let ((file nil)
@@ -1704,7 +1905,7 @@ When TOGGLE-P is true, selecting the identical row again clears CATEGORY."
                        hunks)
                  (incf next-id)
                  (setf body nil))))
-      (dolist (line (jj-lines-with-endings output))
+      (dolist (line (git-diff-lines-with-endings output))
         (cond
           ((uiop:string-prefix-p "diff --git " line)
            (flush-hunk)
@@ -1724,7 +1925,7 @@ When TOGGLE-P is true, selecting the identical row again clears CATEGORY."
 
 (defun jj-split-hunk-lines (hunk)
   "Return HUNK body entries as (INDEX LINE)."
-  (loop :for line :in (jj-lines-with-endings (jj-split-hunk-body hunk))
+  (loop :for line :in (git-diff-lines-with-endings (jj-split-hunk-body hunk))
         :for index :from 0
         :collect (list index line)))
 
@@ -1961,28 +2162,10 @@ When TOGGLE-P is true, selecting the identical row again clears CATEGORY."
 (define-command lem-yath-jj-split-previous-hunk () ()
   (jj-split-move-hunk -1))
 
-(defun jj-split-parse-hunk-header (line)
-  "Parse a Git hunk header LINE into numeric ranges and suffix."
-  (cl-ppcre:register-groups-bind
-      (old-start old-length new-start new-length suffix)
-      ("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@(.*?)(?:\\n)?$"
-       line)
-    (when old-start
-      (list (parse-integer old-start)
-            (parse-integer (or old-length "1"))
-            (parse-integer new-start)
-            (parse-integer (or new-length "1"))
-            (or suffix "")))))
-
-(defun jj-split-format-range (start length)
-  (if (= length 1)
-      (princ-to-string start)
-      (format nil "~d,~d" start length)))
-
 (defun jj-split-partial-hunk-patch (hunk indices)
   "Build HUNK patch containing only changed lines at INDICES."
   (let* ((entries (jj-split-hunk-lines hunk))
-         (parsed (jj-split-parse-hunk-header (second (first entries))))
+         (parsed (git-diff-parse-hunk-header (second (first entries))))
          (old-length 0)
          (new-length 0)
          (has-change nil)
@@ -2037,8 +2220,8 @@ When TOGGLE-P is true, selecting the identical row again clears CATEGORY."
         (concatenate
          'string
          (format nil "@@ -~a +~a @@~a~%"
-                 (jj-split-format-range old-start old-length)
-                 (jj-split-format-range new-start new-length)
+                 (git-diff-format-range old-start old-length)
+                 (git-diff-format-range new-start new-length)
                  suffix)
          (apply #'concatenate 'string (nreverse body)))))))
 

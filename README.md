@@ -471,7 +471,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   navigable tracked-file
   TODO/FIXME rows, and `SPC g t` supplies the complete configured
   Evil-collection git-timemachine map, including revision selection, hash copy,
-  and blame. Legit's Vi-normal file/hunk staging, commit,
+  and blame. Legit's Vi-normal file/hunk staging, Visual selected-line staging
+  and unstaging across one or several hunks, commit,
   push/pull, branch, and stash workflows are driven end-to-end against isolated
   real remotes by the VCS acceptance gate. Interactive reword/fixup uses an
   owner-private, signal-free sequence-editor handshake and Git's real commit

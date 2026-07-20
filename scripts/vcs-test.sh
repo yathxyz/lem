@@ -223,6 +223,8 @@ fi
   user.email 'lem-yath-peer@example.invalid'
 sed -i '2s/.*/porcelain-line-02 changed-first-hunk/' \
   "$LEM_YATH_VCS_PORCELAIN_FILE"
+sed -i '5s/.*/porcelain-line-05 changed-nearby-hunk/' \
+  "$LEM_YATH_VCS_PORCELAIN_FILE"
 sed -i '35s/.*/porcelain-line-35 changed-second-hunk/' \
   "$LEM_YATH_VCS_PORCELAIN_FILE"
 printf 'porcelain untracked file\n' \
@@ -319,7 +321,47 @@ porcelain_first_hunk_only() {
   diff=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
     diff --cached --unified=0 -- porcelain.txt) || return 1
   grep -q 'changed-first-hunk' <<<"$diff" &&
+    grep -q 'changed-nearby-hunk' <<<"$diff" &&
     ! grep -q 'changed-second-hunk' <<<"$diff"
+}
+
+porcelain_first_region_only() {
+  local diff
+  diff=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    diff --cached --unified=0 -- porcelain.txt) || return 1
+  grep -q 'changed-first-hunk' <<<"$diff" &&
+    ! grep -q 'changed-nearby-hunk' <<<"$diff" &&
+    ! grep -q 'changed-second-hunk' <<<"$diff"
+}
+
+porcelain_first_region_unstaged() {
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet &&
+    ! "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --quiet -- porcelain.txt
+}
+
+porcelain_region_partially_unstaged() {
+  local staged unstaged
+  staged=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    diff --cached --unified=0 -- porcelain.txt) || return 1
+  unstaged=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    diff --unified=0 -- porcelain.txt) || return 1
+  ! grep -q 'changed-first-hunk' <<<"$staged" &&
+    grep -q 'changed-nearby-hunk' <<<"$staged" &&
+    ! grep -q 'changed-second-hunk' <<<"$staged" &&
+    grep -q 'changed-first-hunk' <<<"$unstaged" &&
+    grep -q 'changed-second-hunk' <<<"$unstaged"
+}
+
+porcelain_all_hunks_staged() {
+  local diff
+  diff=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    diff --cached --unified=0 -- porcelain.txt) || return 1
+  grep -q 'changed-first-hunk' <<<"$diff" &&
+    grep -q 'changed-nearby-hunk' <<<"$diff" &&
+    grep -q 'changed-second-hunk' <<<"$diff" &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      diff --quiet -- porcelain.txt
 }
 
 porcelain_index_empty() {
@@ -1097,6 +1139,48 @@ else
     "$porcelain_session"
 fi
 
+region_before=$(report_count '^PORCELAIN-REGION ')
+region_staged=0
+send_keys "$porcelain_session" C-c w
+if wait_report_count '^PORCELAIN-REGION ' "$((region_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-REGION ') == \
+      'PORCELAIN-REGION staged=no line=yes mode=yes focused=yes' ]]; then
+  send_keys "$porcelain_session" V j s
+  if wait_until "$WAIT_TIMEOUT" porcelain_first_region_only; then
+    pass legit-stage-region \
+      'Visual-line s staged one replacement without its nearby hunk change'
+    region_staged=1
+  else
+    fail legit-stage-region \
+      'Visual-line s did not stage exactly the selected replacement' \
+      "$porcelain_session"
+  fi
+else
+  fail legit-stage-region \
+    'could not focus the first replacement in the real unstaged diff' \
+    "$porcelain_session"
+fi
+
+region_before=$(report_count '^PORCELAIN-REGION ')
+if [ "$region_staged" = 1 ]; then
+  send_keys "$porcelain_session" C-c W
+fi
+if [ "$region_staged" = 1 ] &&
+   wait_report_count '^PORCELAIN-REGION ' "$((region_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-REGION ') == \
+      'PORCELAIN-REGION staged=yes line=yes mode=yes focused=yes' ]]; then
+  send_keys "$porcelain_session" V j u
+fi
+if [ "$region_staged" = 1 ] &&
+   wait_until "$WAIT_TIMEOUT" porcelain_first_region_unstaged; then
+  pass legit-unstage-region \
+    'Visual-line u returned the selected replacement to the worktree'
+else
+  fail legit-unstage-region \
+    'Visual-line u did not empty the index while retaining worktree changes' \
+    "$porcelain_session"
+fi
+
 position_before=$(report_count '^PORCELAIN-POSITION ')
 hunk_staged=0
 send_keys "$porcelain_session" C-c d
@@ -1105,7 +1189,8 @@ if wait_report_count '^PORCELAIN-POSITION ' "$((position_before + 1))" &&
       'PORCELAIN-POSITION file=porcelain.txt row=yes diff=yes mode=yes focused=yes' ]]; then
   lem_keys "$porcelain_session" s
   if wait_until "$WAIT_TIMEOUT" porcelain_first_hunk_only; then
-    pass legit-stage-hunk 's in a Vi-normal Legit diff staged only the selected hunk'
+    pass legit-stage-hunk \
+      'normal-state s retained whole-hunk staging beside region staging'
     hunk_staged=1
   else
     fail legit-stage-hunk 'diff-mode s did not stage exactly the selected hunk' \
@@ -1116,21 +1201,89 @@ else
     "$porcelain_session"
 fi
 
-position_before=$(report_count '^PORCELAIN-POSITION ')
+region_before=$(report_count '^PORCELAIN-REGION ')
+region_unstaged=0
 if [ "$hunk_staged" = 1 ]; then
-  send_keys "$porcelain_session" C-c e
+  send_keys "$porcelain_session" C-c W
 fi
 if [ "$hunk_staged" = 1 ] &&
+   wait_report_count '^PORCELAIN-REGION ' "$((region_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-REGION ') == \
+      'PORCELAIN-REGION staged=yes line=yes mode=yes focused=yes' ]]; then
+  send_keys "$porcelain_session" V j u
+  if wait_until "$WAIT_TIMEOUT" porcelain_region_partially_unstaged; then
+    pass legit-unstage-region-partial \
+      'Visual-line u removed one replacement from a staged multi-change hunk'
+    region_unstaged=1
+  else
+    fail legit-unstage-region-partial \
+      'Visual-line u disturbed the wrong staged or unstaged lines' \
+      "$porcelain_session"
+  fi
+else
+  fail legit-unstage-region-partial \
+    'could not focus the replacement in the real staged diff' \
+    "$porcelain_session"
+fi
+
+position_before=$(report_count '^PORCELAIN-POSITION ')
+if [ "$region_unstaged" = 1 ]; then
+  send_keys "$porcelain_session" C-c e
+fi
+if [ "$region_unstaged" = 1 ] &&
    wait_report_count '^PORCELAIN-POSITION ' "$((position_before + 1))" &&
    [[ $(latest_report '^PORCELAIN-POSITION ') == \
       'PORCELAIN-POSITION file=porcelain.txt row=yes diff=yes mode=yes focused=yes' ]]; then
   lem_keys "$porcelain_session" u
 fi
-if [ "$hunk_staged" = 1 ] &&
+if [ "$region_unstaged" = 1 ] &&
    wait_until "$WAIT_TIMEOUT" porcelain_index_empty; then
-  pass legit-unstage-hunk 'u in a staged Vi-normal diff unstaged the selected hunk'
+  pass legit-unstage-hunk \
+    'normal-state u retained whole-hunk unstaging after a partial unstage'
 else
-  fail legit-unstage-hunk 'could not focus and unstage the selected cached hunk' \
+  fail legit-unstage-hunk 'could not unstage the remaining cached hunk' \
+    "$porcelain_session"
+fi
+
+region_before=$(report_count '^PORCELAIN-REGION ')
+multi_hunk_staged=0
+send_keys "$porcelain_session" C-c w
+if wait_report_count '^PORCELAIN-REGION ' "$((region_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-REGION ') == \
+      'PORCELAIN-REGION staged=no line=yes mode=yes focused=yes' ]]; then
+  send_keys "$porcelain_session" V G s
+  if wait_until "$WAIT_TIMEOUT" porcelain_all_hunks_staged; then
+    pass legit-stage-region-multi \
+      'one Visual selection staged changed lines across separated hunks'
+    multi_hunk_staged=1
+  else
+    fail legit-stage-region-multi \
+      'the spanning Visual selection did not assemble both hunks safely' \
+      "$porcelain_session"
+  fi
+else
+  fail legit-stage-region-multi \
+    'could not focus the spanning unstaged selection' \
+    "$porcelain_session"
+fi
+
+region_before=$(report_count '^PORCELAIN-REGION ')
+if [ "$multi_hunk_staged" = 1 ]; then
+  send_keys "$porcelain_session" C-c W
+fi
+if [ "$multi_hunk_staged" = 1 ] &&
+   wait_report_count '^PORCELAIN-REGION ' "$((region_before + 1))" &&
+   [[ $(latest_report '^PORCELAIN-REGION ') == \
+      'PORCELAIN-REGION staged=yes line=yes mode=yes focused=yes' ]]; then
+  send_keys "$porcelain_session" V G u
+fi
+if [ "$multi_hunk_staged" = 1 ] &&
+   wait_until "$WAIT_TIMEOUT" porcelain_first_region_unstaged; then
+  pass legit-unstage-region-multi \
+    'one Visual selection unstaged changed lines across separated hunks'
+else
+  fail legit-unstage-region-multi \
+    'the spanning Visual unstage did not restore the clean index' \
     "$porcelain_session"
 fi
 

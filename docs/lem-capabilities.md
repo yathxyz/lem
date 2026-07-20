@@ -2166,8 +2166,10 @@ major mode remain separate mode gaps. The installed-runtime gate is
 Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
 
 ### Workflow / bindings (in the legit/peek-legit status window) — `legit/legit.lisp`, `peek-legit.lisp`
-- Stage/unstage/discard file: `s` / `u` / `k` (`peek-legit.lisp:26-28`); hunk-level
-  stage/unstage: `s`/`u` in the diff window (`legit.lisp:66-67`).
+- Stage/unstage/discard file: `s` / `u` / `k` (`peek-legit.lisp:26-28`);
+  hunk-level stage/unstage uses `s`/`u` in the diff window, while the same
+  keys in a characterwise or linewise Visual selection affect only selected
+  changed lines and may span several hunks in that file.
 - Commit: lem-yath replaces upstream Legit's direct `c` with `c c`; finish
   `C-c C-c`, abort `M-q`/`C-c C-k` (`legit-commit.lisp:38-41`).
 - Branches: checkout `b b`, create `b c` (`legit.lisp:74-76`).
@@ -2188,9 +2190,12 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
 
 Lem-yath registers the diff, commit, and rebase major-mode maps ahead of Vi's
 normal-state map, so these native porcelain keys are not interpreted as Vim
-motions or operators. It also repairs pinned Legit's hunk path: `s` and `u`
-construct a complete Git patch in a private temporary file, apply only the
-selected hunk to the index, and refresh status after success. Validating the
+motions or operators. It also repairs pinned Legit's patch path: normal-state
+`s` and `u` construct a complete hunk patch, while an active characterwise or
+linewise region constructs range-correct partial hunks and preserves
+unselected removals as context. A region can span separated hunks but not
+files; blockwise selection fails closed. Both paths use a private temporary
+file, mutate only Git's index, and refresh status after success. Validating the
 transient commit buffer no longer asks whether to save or kill it after Git has
 already committed. Interactive rebase launches Git with a child-only
 environment and a per-session owner-private control file: the sequence editor
@@ -2217,16 +2222,20 @@ be staged before continuing.
 Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkout/
 create), push, pull/fetch, commits log with pagination, **stash push/pop**, interactive
 rebase (pick/reword/edit/fixup/squash/drop/exec/break/label/reset/merge).
-Also basic Fossil + Mercurial. **Gaps vs magit:** no region-precise staging,
-no multi-file staging, limited switches/transient submenus, no blame/bisect,
+Also basic Fossil + Mercurial. **Gaps vs magit:** no multi-file staging,
+limited switches/transient submenus, no blame/bisect,
 no cherry-pick harvest/donate/spinout/spinoff or argument-toggle UI, and no log
-graph filtering. Customize via `lem/porcelain:*git-base-arglist*`,
+graph filtering. Selected-line staging is verified for ordinary tracked textual
+diffs; untracked, binary, and combined-conflict diffs still require whole-file
+handling. Customize via `lem/porcelain:*git-base-arglist*`,
 `*commits-log-page-size*`, `*nb-latest-commits*`, `*branch-sort-by*`,
 `lem/legit:*vcs-existence-order*`.
 
 The installed-wrapper acceptance gate in `scripts/vcs-test.sh` uses real
-keystrokes and three isolated repositories. It verifies selective hunk
-stage/unstage, tracked and untracked file staging, commit editing and
+keystrokes and three isolated repositories. It verifies exact Visual-line
+stage/unstage of one replacement within a multi-change hunk, partial unstage
+from that cached hunk, one selection spanning separated hunks, ordinary hunk
+fallback, tracked and untracked file staging, commit editing and
 validation, push to a bare remote, branch creation and checkout, stash
 push/pop, and a pull from an independent peer clone. It then selects an older
 status commit and opens a real two-row interactive-rebase todo with `r i`. It
