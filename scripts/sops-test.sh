@@ -12,8 +12,16 @@ export LEM_YATH_SOPS_CONTROL="$root/control"
 export LEM_YATH_SOPS_REPORT="$root/report"
 export LEM_YATH_SOPS_FAILED_FILE="$WORKDIR/failed.yaml"
 export LEM_YATH_SOPS_PLAIN_FILE="$WORKDIR/plain.yaml"
+export LEM_YATH_SOPS_CREATE_FILE="$WORKDIR/created.yaml"
+export LEM_YATH_SOPS_CREATE_FAILURE_FILE="$WORKDIR/create-failure.env"
+export LEM_YATH_SOPS_MISSING_PARENT_FILE="$WORKDIR/missing/secret.yaml"
+export LEM_YATH_SOPS_MISSING_POLICY_FILE="$root/no-policy/secret.yaml"
+export LEM_YATH_SOPS_OLD_VERSION_FILE="$WORKDIR/old-version.yaml"
+export LEM_YATH_SOPS_MALFORMED_VERSION_FILE="$WORKDIR/malformed-version.yaml"
+export LEM_YATH_SOPS_PREFLIGHT_REPORT="$root/preflight-report"
 export LEM_YATH_SOPS_SOURCE="${LEM_YATH_SOPS_SOURCE:-${LEM_YATH_SOURCE:-$here/lem-yath}/src/sops.lisp}"
-mkdir -p "$HOME" "$WORKDIR/roam" "$root/bin"
+mkdir -p "$HOME" "$WORKDIR/roam" "$root/bin" "$root/no-policy"
+: > "$WORKDIR/.sops.yaml"
 cp "$here/scripts/sops-fake.sh" "$root/bin/sops"
 chmod +x "$root/bin/sops"
 export LEM_YATH_SOPS_PROGRAM="$(command -v bash)"
@@ -75,7 +83,7 @@ else
 fi
 
 lem_keys "$session" F5
-if lem_wait_for "$session" 'SOPS-STATE active=yes failed=no readonly=no modified=no' 10 >/dev/null; then
+if lem_wait_for "$session" 'SOPS-STATE active=yes creating=no failed=no readonly=no modified=no' 10 >/dev/null; then
   pass activation 'the decrypted buffer is writable and clean'
 else
   fail activation 'SOPS buffer state was not activated safely' "$session"
@@ -106,7 +114,7 @@ sleep 0.5
 state=$(sed -n '1p' "$LEM_YATH_SOPS_REPORT")
 if [[ $before_failure == "$after_failure" ]] \
     && [[ $control_state == encrypt-fail ]] \
-    && grep -q 'active=T.*failed=NIL.*readonly=NIL.*modified=T' <<<"$state" \
+    && grep -q 'active=T.*creating=NIL.*failed=NIL.*readonly=NIL.*modified=T' <<<"$state" \
     && ! lem_capture "$session" | grep -q 'ZYZZYVA-SOPS-ERROR-MUST-NOT-RENDER'; then
   pass encrypt-failure 'failed encryption preserved disk and editable plaintext without stderr leakage'
 else
@@ -136,7 +144,7 @@ fi
 
 enter_normal
 lem_keys "$session" F3
-if lem_wait_for "$session" 'SOPS-STATE active=no failed=yes readonly=yes modified=no' 10 >/dev/null \
+if lem_wait_for "$session" 'SOPS-STATE active=no creating=no failed=yes readonly=yes modified=no' 10 >/dev/null \
     && ! lem_capture "$session" | grep -q 'ZYZZYVA-SOPS-ERROR-MUST-NOT-RENDER'; then
   pass decrypt-failure 'failed decryption left ciphertext read-only without stderr leakage'
 else
@@ -154,11 +162,91 @@ fi
 
 enter_normal
 lem_keys "$session" F1
-if lem_wait_for "$session" 'SOPS-STATE active=no failed=no readonly=no modified=no' 10 >/dev/null \
+if lem_wait_for "$session" 'SOPS-STATE active=no creating=no failed=no readonly=no modified=no' 10 >/dev/null \
     && lem_capture "$session" | grep -q 'ordinary: plaintext'; then
   pass plaintext 'ordinary matching files remain ordinary buffers'
 else
   fail plaintext 'prefiltered plaintext file was intercepted' "$session"
+fi
+
+enter_normal
+lem_keys "$session" F11
+if lem_wait_for "$session" 'SOPS-PREFLIGHT templates=yes missing-parent=yes missing-policy=yes directory=yes old-version=yes malformed-version=yes' 10 >/dev/null \
+    && grep -q 'templates=T missing-parent=T missing-policy=T directory=T old-version=T malformed-version=T' "$LEM_YATH_SOPS_PREFLIGHT_REPORT"; then
+  pass creation-preflight 'templates match and invalid creation fails before mutation'
+else
+  [ -f "$LEM_YATH_SOPS_PREFLIGHT_REPORT" ] && sed -n '1p' "$LEM_YATH_SOPS_PREFLIGHT_REPORT" >&2
+  fail creation-preflight 'creation validation mutated editor or filesystem state' "$session"
+fi
+
+enter_normal
+lem_keys "$session" M-x
+tmux_cmd send-keys -t "$session" -l 'sops-find-file'
+lem_keys "$session" Enter
+if lem_wait_for "$session" 'Find SOPS file:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l "$LEM_YATH_SOPS_CREATE_FILE"
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Welcome to SOPS!' 10 >/dev/null; then
+  lem_keys "$session" F5
+  sleep 0.5
+  state=$(sed -n '1p' "$LEM_YATH_SOPS_REPORT")
+  if grep -q 'active=T.*creating=T.*failed=NIL.*readonly=NIL.*modified=NIL' <<<"$state" \
+      && [[ ! -e $LEM_YATH_SOPS_CREATE_FILE ]]; then
+    pass creation-open 'M-x seeded a clean encrypted-creation buffer without touching disk'
+  else
+    printf 'state=%s disk=%s\n' "$state" "$([[ -e $LEM_YATH_SOPS_CREATE_FILE ]] && printf yes || printf no)" >&2
+    fail creation-open 'guided creation did not preserve the clean no-disk state' "$session"
+  fi
+else
+  fail creation-open 'M-x sops-find-file did not seed the YAML example' "$session"
+fi
+
+save_current
+lem_keys "$session" F5
+sleep 0.5
+state=$(sed -n '1p' "$LEM_YATH_SOPS_REPORT")
+if grep -q 'ciphertext: CREATED' "$LEM_YATH_SOPS_CREATE_FILE" \
+    && ! grep -q 'Welcome to SOPS!' "$LEM_YATH_SOPS_CREATE_FILE" \
+    && grep -q 'active=T.*creating=NIL.*failed=NIL.*readonly=NIL.*modified=NIL' <<<"$state" \
+    && lem_capture "$session" | grep -q 'Welcome to SOPS!'; then
+  pass creation-save 'a clean first save wrote ciphertext and transitioned in place'
+else
+  [ -f "$LEM_YATH_SOPS_CREATE_FILE" ] && sed -n '1,6p' "$LEM_YATH_SOPS_CREATE_FILE" >&2
+  printf 'state=%s\n' "$state" >&2
+  fail creation-save 'clean first save leaked plaintext or failed to transition' "$session"
+fi
+
+enter_normal
+lem_keys "$session" F6
+lem_wait_for "$session" 'SOPS-CONTROL encrypt-fail' 10 >/dev/null
+lem_keys "$session" F10
+if lem_wait_for "$session" 'SOPS-CREATE-FAILURE-OPEN' 10 >/dev/null; then
+  append_line 'FIRST-SAVE-FAILURE'
+  save_current
+  lem_keys "$session" F5
+  sleep 0.5
+  state=$(sed -n '1p' "$LEM_YATH_SOPS_REPORT")
+  if [[ ! -e $LEM_YATH_SOPS_CREATE_FAILURE_FILE ]] \
+      && grep -q 'active=T.*creating=T.*failed=NIL.*readonly=NIL.*modified=T' <<<"$state" \
+      && ! lem_capture "$session" | grep -q 'ZYZZYVA-SOPS-ERROR-MUST-NOT-RENDER'; then
+    pass creation-failure 'failed first encryption retained editable plaintext and created no file'
+  else
+    printf 'state=%s disk=%s\n' "$state" "$([[ -e $LEM_YATH_SOPS_CREATE_FAILURE_FILE ]] && printf yes || printf no)" >&2
+    fail creation-failure 'failed first encryption leaked or lost creation state' "$session"
+  fi
+else
+  fail creation-failure 'could not open the failure-path creation buffer' "$session"
+fi
+
+lem_keys "$session" F7
+lem_wait_for "$session" 'SOPS-CONTROL clear' 10 >/dev/null
+save_current
+if grep -q 'ciphertext: CREATE-RECOVERED' "$LEM_YATH_SOPS_CREATE_FAILURE_FILE" \
+    && ! grep -q 'FIRST-SAVE-FAILURE' "$LEM_YATH_SOPS_CREATE_FAILURE_FILE"; then
+  pass creation-retry 'a later first save encrypted the retained creation buffer'
+else
+  fail creation-retry 'creation did not recover after encryption failure' "$session"
 fi
 
 enter_normal

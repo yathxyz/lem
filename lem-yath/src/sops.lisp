@@ -7,11 +7,50 @@
 
 (defparameter *sops-timeout-seconds* 300)
 (defparameter *sops-output-limit* (* 64 1024 1024))
+(defparameter *sops-minimum-version* '(3 9 0))
 (defvar *sops-program*
   (or (uiop:getenv "LEM_YATH_SOPS_PROGRAM") :unknown))
 (defvar *sops-program-argument*
   (uiop:getenv "LEM_YATH_SOPS_PROGRAM_ARGUMENT"))
 (defvar *sops-timeout-program* :unknown)
+(defvar *sops-version-cache* nil)
+
+(defparameter *sops-creation-examples*
+  '(("yaml" . "hello: Welcome to SOPS! Edit this file as you please!
+example_key: example_value
+# Example comment
+example_array:
+    - example_value1
+    - example_value2
+example_number: 1234.56789
+example_booleans:
+    - true
+    - false
+")
+    ("json" . "{
+    \"hello\": \"Welcome to SOPS! Edit this file as you please!\",
+    \"example_key\": \"example_value\",
+    \"example_array\": [
+        \"example_value1\",
+        \"example_value2\"
+    ],
+    \"example_number\": 1234.56789,
+    \"example_booleans\": [
+        true,
+        false
+    ]
+}
+")
+    ("dotenv" . "# Welcome to SOPS! Edit this file as you please!
+example_key=example_value
+")
+    ("ini" . "[Welcome!]
+; This is an example file.
+hello=Welcome to SOPS! Edit this file as you please!
+example_key=example_value
+")
+    ("txt" . "hello from emacs sops-mode!
+")))
 
 (defun sops-resolve-program (name cache-symbol)
   (let ((cached (symbol-value cache-symbol)))
@@ -60,6 +99,43 @@ contain secret material and is never included in a Lem diagnostic."
     (when (> (length stdout) *sops-output-limit*)
       (error "sops output exceeded the configured limit"))
     (values stdout status)))
+
+(defun sops-parse-version (output)
+  (handler-case
+      (cl-ppcre:register-groups-bind (major minor patch)
+          ("([0-9]+)\\.([0-9]+)\\.([0-9]+)" output)
+        (and major minor patch
+             (list (parse-integer major)
+                   (parse-integer minor)
+                   (parse-integer patch))))
+    (error () nil)))
+
+(defun sops-version-at-least-p (version minimum)
+  (loop :for actual :in version
+        :for required :in minimum
+        :when (> actual required) :return t
+        :when (< actual required) :return nil
+        :finally (return t)))
+
+(defun sops-ensure-version ()
+  "Verify the configured SOPS is at least 3.9.0 before creating a file."
+  (let* ((program (sops-resolve-program "sops" '*sops-program*))
+         (key (and program
+                   (list (namestring program) *sops-program-argument*))))
+    (unless program
+      (editor-error "SOPS executable not found"))
+    (unless (equal key (car *sops-version-cache*))
+      (multiple-value-bind (output status)
+          (sops-run '("--version"))
+        (let ((version (and (zerop status) (sops-parse-version output))))
+          (unless (and version
+                       (sops-version-at-least-p version *sops-minimum-version*))
+            (editor-error "SOPS >= 3.9.0 is required; found ~a"
+                          (or (and version
+                                   (format nil "~{~d~^.~}" version))
+                              "unknown")))
+          (setf *sops-version-cache* (cons key version)))))
+    (cdr *sops-version-cache*)))
 
 (defun sops-prefilter-p (filename)
   (and filename
@@ -152,7 +228,8 @@ contain secret material and is never included in a Lem diagnostic."
                       :directory (buffer-directory buffer))
           (unless (and (zerop status) (plusp (length ciphertext)))
             (editor-error "SOPS encryption failed; file was not written"))
-          (sops-write-ciphertext filename ciphertext))
+          (sops-write-ciphertext filename ciphertext)
+          (setf (buffer-value buffer 'lem-yath-sops-creating) nil))
       (editor-error (condition) (error condition))
       (error ()
         (editor-error "SOPS encryption failed; file was not written")))))
@@ -163,6 +240,54 @@ contain secret material and is never included in a Lem diagnostic."
         #'sops-write-buffer
         (lem-core/commands/file:revert-buffer-function buffer)
         #'sops-revert-buffer))
+
+(defun sops-creation-format (filename)
+  (let ((extension (string-downcase (or (pathname-type filename) ""))))
+    (cond ((member extension '("yaml" "yml") :test #'string=) "yaml")
+          ((string= extension "json") "json")
+          ((string= extension "env") "dotenv")
+          ((string= extension "ini") "ini")
+          ((string= extension "txt") "txt"))))
+
+(defun sops-start-creation (buffer format)
+  (sops-replace-buffer-text
+   buffer
+   (or (cdr (assoc format *sops-creation-examples* :test #'string=)) ""))
+  (setf (buffer-value buffer 'lem-yath-sops-creating) t)
+  (sops-activate-buffer buffer))
+
+(defun sops-open-path (path)
+  "Visit PATH, preparing a missing local file for encrypted first save."
+  (when (or (null path) (zerop (length path)))
+    (editor-error "Sops-find-file: not a file path: ~a" (or path "")))
+  (when (uiop:directory-pathname-p (pathname path))
+    (editor-error "Sops-find-file: not a file path: ~a" path))
+  (let ((filename (expand-file-name path (buffer-directory))))
+    (if (probe-file filename)
+        (find-file filename)
+        (let ((parent (directory-namestring filename)))
+          (unless (uiop:directory-exists-p parent)
+            (editor-error
+             "Sops-find-file: parent directory does not exist: ~a" parent))
+          (unless (find-up parent ".sops.yaml")
+            (editor-error
+             "Sops-find-file: no .sops.yaml found in any ancestor of ~a"
+             parent))
+          (sops-ensure-version)
+          (let ((buffer (find-file-buffer filename)))
+            (sops-start-creation buffer (sops-creation-format filename))
+            (switch-to-buffer buffer t nil)
+            buffer)))))
+
+(define-command sops-find-file () ()
+  "Visit an existing file or prepare a missing path for SOPS encryption."
+  (alexandria:when-let
+      ((path (prompt-for-file
+              "Find SOPS file: "
+              :directory (buffer-directory)
+              :default nil
+              :existing nil)))
+    (sops-open-path path)))
 
 (defun sops-protect-failed-buffer (buffer)
   (setf (buffer-read-only-p buffer) t
@@ -203,6 +328,9 @@ contain secret material and is never included in a Lem diagnostic."
 
 (defun sops-buffer-active-p (&optional (buffer (current-buffer)))
   (not (null (buffer-value buffer 'lem-yath-sops-active))))
+
+(defun sops-buffer-creating-p (&optional (buffer (current-buffer)))
+  (not (null (buffer-value buffer 'lem-yath-sops-creating))))
 
 (remove-hook *find-file-hook* 'sops-find-file-hook)
 (add-hook *find-file-hook* 'sops-find-file-hook 15000)

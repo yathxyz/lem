@@ -6,6 +6,15 @@ command=${1:?}
 shift
 
 case "$command" in
+  --version)
+    if grep -qx 'old-version' "$control" 2>/dev/null; then
+      printf 'sops 3.8.9\n'
+    elif grep -qx 'malformed-version' "$control" 2>/dev/null; then
+      printf 'sops development build\n'
+    else
+      printf 'sops 3.13.1\n'
+    fi
+    ;;
   filestatus)
     file=${1:?}
     if grep -Eq '(^sops:|"sops")' "$file"; then
@@ -39,8 +48,10 @@ case "$command" in
       exit 8
     fi
     marker=BASE
+    grep -Fq 'Welcome to SOPS!' <<<"$plaintext" && marker=CREATED
     grep -Fq 'EDITED-SOPS' <<<"$plaintext" && marker=EDITED
     grep -Fq 'FAILURE-RETAINED' <<<"$plaintext" && marker=RECOVERED
+    grep -Fq 'FIRST-SAVE-FAILURE' <<<"$plaintext" && marker=CREATE-RECOVERED
     trailing=no
     grep -Fq 'trailing: keep   ' <<<"$plaintext" && trailing=yes
     printf 'sops:\n  mac: fake\nciphertext: %s\ntrailing-preserved: %s\n' "$marker" "$trailing"

@@ -1917,9 +1917,15 @@ ciphertext and the modified plaintext buffer. SOPS stderr is drained but never
 shown because it may contain secret material. Calls use direct argv boundaries,
 a 300-second GNU timeout, and a 64 MiB accepted-output limit. The ncurses gate
 in `scripts/sops-test.sh` exercises successful open/save, plaintext fall-through,
-format inhibition, both failure/retry paths, external revert, and reload. Guided
-encrypted-file creation, custom input-type maps, remote files, and filesystem
-notifications remain outside this implementation.
+format inhibition, both failure/retry paths, external revert, and reload.
+`M-x sops-find-file` now matches the configured package's guided local creation
+path: it validates the parent, ancestor `.sops.yaml`, and SOPS 3.9 minimum
+before allocating a buffer; seeds the package's exact YAML, JSON, dotenv, INI,
+or text example (and an empty buffer for unknown extensions); and keeps the
+seeded buffer clean and off disk until a ciphertext-only first save. A failed
+first encryption creates no file and remains retryable. Custom input-type maps
+and remote files remain outside this implementation; the audited Emacs
+configuration sets no input-type overrides.
 
 ---
 

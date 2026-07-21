@@ -61,6 +61,7 @@
               ./patches/lem-legit-unmerged-files.patch
               ./patches/lem-hidden-lines.patch
               ./patches/lem-buffer-write-function.patch
+              ./patches/lem-save-new-file.patch
               ./patches/lem-display-line-transformer.patch
               ./patches/lem-directory-buffer-clean.patch
               ./patches/lem-completion-validity.patch
