@@ -58,6 +58,9 @@ send_keys() { tmux_cmd send-keys -t "$session" "$@"; }
 
 printf '%s\n' \
   '* TODO Past dispatch sentinel                                      :FLAGGED:' \
+  ':PROPERTIES:' \
+  ':THEFLAGGINGNOTE: review\nsource' \
+  ':END:' \
   'DEADLINE: <2026-07-10 Fri>' \
   '* TODO Monday dispatch sentinel' \
   'SCHEDULED: <2026-07-13 Mon>' \
@@ -164,10 +167,16 @@ send_keys Space m a
 lem_wait_for "$session" '\? flagged, # stuck' 10 >/dev/null || true
 send_keys '?'
 lem_wait_for "$session" 'Headlines with TAGS match: \+FLAGGED' 30 >/dev/null || true
+send_keys g j
+if lem_wait_for "$session" 'FLAGGING-NOTE \(\[\?\] for more info\): review//source' 10 >/dev/null; then
+  pass flagged-note 'moving onto a flagged row echoed its normalized THEFLAGGINGNOTE'
+else
+  fail flagged-note 'flagged-row movement did not echo the source property'
+fi
 send_keys C-c z d
-wait_report '^STATE command=TAGS .*rows=1 ' || true
-if grep -q '^STATE command=TAGS .*rows=1 .*Past dispatch sentinel' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
-   ! grep -q '^STATE command=TAGS .*Active project' "$LEM_YATH_AGENDA_DISPATCH_REPORT"; then
+wait_report '^STATE command=FLAGGED .*rows=1 ' || true
+if grep -q '^STATE command=FLAGGED .*rows=1 .*Past dispatch sentinel' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
+   ! grep -q '^STATE command=FLAGGED .*Active project' "$LEM_YATH_AGENDA_DISPATCH_REPORT"; then
   pass flagged '? reused the exact +FLAGGED tag matcher'
 else
   fail flagged '? did not isolate the flagged heading'
@@ -209,7 +218,7 @@ lem_wait_for "$session" 'Past dispatch sentinel' 10 >/dev/null || true
 send_keys Space m a
 lem_wait_for "$session" 'Agenda and all TODOs' 20 >/dev/null || true
 send_keys n
-lem_wait_for "$session" 'Unscheduled dispatch sentinel' 30 >/dev/null || true
+lem_wait_for "$session" '│TODOs' 30 >/dev/null || true
 send_keys C-c z d
 wait_report '^STATE command=SUMMARY span=SUMMARY keyword=NIL ' || true
 if grep -q '^STATE command=SUMMARY span=SUMMARY keyword=NIL .*Unscheduled dispatch sentinel' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
@@ -235,8 +244,8 @@ lem_wait_for "$session" 'subtree; < restrict' 10 >/dev/null || true
 send_keys t
 lem_wait_for "$session" 'Global list of TODO items of type: ALL' 30 >/dev/null || true
 send_keys C-c z d
-wait_report 'restriction=SUBTREE range=1\.\.2$' || true
-if grep -q '^STATE command=TODO .*rows=1 .*Past dispatch sentinel.*restriction=SUBTREE range=1\.\.2$' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
+wait_report 'restriction=SUBTREE range=1\.\.5$' || true
+if grep -q '^STATE command=TODO .*rows=1 .*Past dispatch sentinel.*restriction=SUBTREE range=1\.\.5$' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
    ! grep -q '^STATE command=TODO .*rows=1 .*Monday dispatch sentinel.*restriction=SUBTREE' "$LEM_YATH_AGENDA_DISPATCH_REPORT"; then
   pass subtree-restrict '< < t retained only the source subtree and its exact line range'
 else
@@ -254,8 +263,8 @@ lem_wait_for "$session" 'region; < restrict' 10 >/dev/null || true
 send_keys t
 lem_wait_for "$session" 'Global list of TODO items of type: ALL' 30 >/dev/null || true
 send_keys C-c z d
-wait_report 'restriction=REGION range=3\.\.6$' || true
-if grep -q '^STATE command=TODO .*rows=2 .*Monday dispatch sentinel.*Today dispatch sentinel.*restriction=REGION range=3\.\.6$' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
+wait_report 'restriction=REGION range=6\.\.9$' || true
+if grep -q '^STATE command=TODO .*rows=2 .*Monday dispatch sentinel.*Today dispatch sentinel.*restriction=REGION range=6\.\.9$' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
    ! grep -q '^STATE command=TODO .*rows=2 .*Past dispatch sentinel.*restriction=REGION' "$LEM_YATH_AGENDA_DISPATCH_REPORT"; then
   pass region-restrict 'active-region < < t included both and only selected headings'
 else

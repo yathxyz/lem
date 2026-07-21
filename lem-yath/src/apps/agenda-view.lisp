@@ -33,7 +33,7 @@
            :span span
            :start-date (agenda-view-canonical-start span today)
            :todo-keyword (and (eq command :todo) command-argument)
-           :query (and (member command '(:tags :tags-todo :search))
+           :query (and (member command '(:tags :tags-todo :search :flagged))
                        command-argument)))))
 
 (defun agenda-view-days-in-month (date)
@@ -96,6 +96,7 @@
         ((member command '(:tags :tags-todo))
          (format nil "TAGS ~a"
                  (agenda-tags-query-raw (agenda-view-state-query state))))
+        ((eq command :flagged) "Headlines with TAGS match: +FLAGGED")
         ((eq command :search)
          (format nil "SEARCH ~a"
                  (agenda-search-query-raw (agenda-view-state-query state))))
@@ -203,7 +204,7 @@
 (defun agenda-view-query-sections (state items)
   (let* ((command (agenda-view-state-command state))
          (query (agenda-view-state-query state))
-         (tags-p (member command '(:tags :tags-todo))))
+         (tags-p (member command '(:tags :tags-todo :flagged))))
     (list
      (make-agenda-section
       :key (if tags-p :tags :search)
@@ -229,7 +230,8 @@
     (cond
       ((eq (agenda-view-state-command state) :todo)
        (agenda-view-todo-sections state items))
-      ((member (agenda-view-state-command state) '(:tags :tags-todo :search))
+      ((member (agenda-view-state-command state)
+               '(:tags :tags-todo :search :flagged))
        (agenda-view-query-sections state items))
       ((eq (agenda-view-state-command state) :stuck)
        (agenda-view-stuck-sections items))
@@ -418,7 +420,7 @@
                  ((string= key "?")
                   (return
                    (agenda-open-command
-                    :tags (agenda-compile-tags-query "+FLAGGED")
+                    :flagged (agenda-compile-tags-query "+FLAGGED")
                     restriction)))
                  ((string= key "#")
                   (return (agenda-open-command :stuck nil restriction)))

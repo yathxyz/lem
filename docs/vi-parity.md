@@ -50,7 +50,9 @@ refreshes, and clock reports use the same exact file/line boundary; the TUI
 gate includes partial-entry region ends so body text beyond the region cannot
 influence a restricted search. The same dispatcher exposes stock `?` flagged
 entries and `#` stuck projects; the latter matches Org's default level-two
-project rule and raw `TODO`/`NEXT`/`NEXTACTION` subtree tokens.
+project rule and raw `TODO`/`NEXT`/`NEXTACTION` subtree tokens. Moving with
+`gj`/`gk` or `C-j`/`C-k` onto a flagged row also echoes its
+`THEFLAGGINGNOTE`, including Org's stored `\\n` to `//` display conversion.
 
 ## Remaining capability gaps
 

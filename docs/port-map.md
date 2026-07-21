@@ -201,7 +201,10 @@ Status legend:
   `?` reuses the exact `+FLAGGED` matcher, while `#` applies Org 9.8.5's
   unchanged level-two stuck-project definition and recognizes literal
   `NEXTACTION` children even though that word is outside the configured TODO
-  vocabulary.
+  vocabulary. In the flagged view, item motion also echoes the selected row's
+  `THEFLAGGINGNOTE` with Org's literal `\\n` to `//` normalization. This is
+  intentionally motion-triggered rather than a global post-command hook so it
+  cannot replace unrelated mutation or error messages.
 - **Completion previews**: the grouped project picker and directory-local
   Elisp outline provide reversible Consult-style preview. Generic command,
   file, buffer, and LSP-symbol prompts still do not preview their targets.

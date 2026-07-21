@@ -55,6 +55,9 @@
 (defvar *agenda-post-render-functions* nil
   "Functions called with an agenda buffer after a successful render.")
 
+(defvar *agenda-item-motion-functions* nil
+  "Functions called after point moves between source-backed agenda rows.")
+
 (defvar *agenda-item-projection-function* nil
   "Optional function projecting parsed ITEMS for agenda display.
 
@@ -1302,6 +1305,8 @@ completed unscheduled tasks stay out of the TODO section."
       (put-text-property start point :agenda-effort (agenda-item-effort item))
       (put-text-property start point :agenda-top-headline
                          (agenda-item-top-headline item))
+      (put-text-property start point :agenda-properties
+                         (copy-tree (agenda-item-properties item)))
       (put-text-property start point :agenda-timestamp-line
                          (agenda-item-timestamp-line item))
       (put-text-property start point :agenda-timestamp-source-line
@@ -1688,7 +1693,10 @@ completed unscheduled tasks stay out of the TODO section."
           ((target (agenda-find-item-point (current-point) direction)))
         (move-point (current-point) target)
         (return)))
-    (move-to-column (current-point) column)))
+    (move-to-column (current-point) column)
+    (when (agenda-source-row-p (current-point))
+      (dolist (function *agenda-item-motion-functions*)
+        (funcall function (current-buffer) (current-point))))))
 
 (define-command lem-yath-agenda-next-item (&optional (count 1)) (:universal)
   "Move to the next source-backed agenda row."
