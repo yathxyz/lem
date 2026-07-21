@@ -401,6 +401,7 @@
 (defparameter *legit-todo-timeout* 5)
 (defparameter *legit-todo-auto-group-items* 20)
 (defparameter *legit-todo-max-items* 10)
+(defparameter *legit-todo-buffer-item-factor* 10)
 (defparameter *legit-todo-ref-limit* 5000)
 (defparameter *legit-todo-keywords*
   '("HOLD" "TODO" "NEXT" "THEM" "PROG" "OKAY" "DONT" "FAIL"
@@ -495,7 +496,13 @@
 (defun legit-todo-top-section-p (section)
   (let ((key (legit-todo-section-key section)))
     (or (and (= 2 (length key)) (eq :worktree (second key)))
-        (and (= 3 (length key)) (eq :branch (second key))))))
+        (and (= 3 (length key)) (eq :branch (second key)))
+        (and (= 3 (length key))
+             (eq :list (second key))
+             (eq :worktree (third key)))
+        (and (= 4 (length key))
+             (eq :list (second key))
+             (eq :branch (third key))))))
 
 (defun legit-todo-point-in-section-p (point section)
   (or (same-line-p point (legit-todo-section-heading section))
@@ -540,7 +547,8 @@
       *legit-todo-max-items*
       (floor *legit-todo-max-items* (* depth 2))))
 
-(defun call-with-legit-todo-section (buffer key heading count depth function)
+(defun call-with-legit-todo-section
+    (buffer key heading count depth function &optional visit-function)
   (let* ((point (buffer-point buffer))
          (heading-point (copy-point point :right-inserting)))
     (lem/legit::collector-insert
@@ -548,6 +556,9 @@
              (make-string (* 2 depth) :initial-element #\Space)
              heading count)
      :header t)
+    (when visit-function
+      (lem/legit::set-visit-file-function
+       heading-point (buffer-point buffer) visit-function))
     (let ((content-start (copy-point point :right-inserting)))
       (funcall function)
       (register-legit-todo-section
@@ -905,7 +916,8 @@
                 (dolist (todo path-todos)
                   (insert-legit-todo-row root todo 3 nil)))))))))))
 
-(defun insert-one-legit-todo-list (buffer root section-key heading todos)
+(defun insert-one-legit-todo-list
+    (buffer root section-key heading todos &optional visit-function)
   (when todos
     (lem/legit::collector-insert "")
     (call-with-legit-todo-section
@@ -914,38 +926,97 @@
        (if (> (length todos) *legit-todo-auto-group-items*)
            (insert-grouped-legit-todos buffer root section-key todos)
            (dolist (todo todos)
-             (insert-legit-todo-row root todo 1 t)))))))
+             (insert-legit-todo-row root todo 1 t))))
+     visit-function)))
+
+(defun render-legit-todo-lists (buffer root &key dedicated-p)
+  (let* ((root-key (uiop:native-namestring root))
+         (key-prefix (if dedicated-p
+                         (list root-key :list)
+                         (list root-key)))
+         (visit-function
+           (lambda ()
+             (render-legit-todo-list root)
+             nil)))
+    (insert-one-legit-todo-list
+     buffer root (append key-prefix (list :worktree)) "Todos"
+     (collect-legit-todos root) visit-function)
+    (multiple-value-bind (branch-todos main-branch)
+        (collect-legit-branch-todos root)
+      (when branch-todos
+        (insert-one-legit-todo-list
+         buffer root (append key-prefix (list :branch main-branch))
+         (format nil "Todos (branched from ~a)" main-branch)
+         branch-todos visit-function)))))
+
+(defun render-legit-todo-list (root)
+  "Render the current repository's dedicated Magit-Todos-style list."
+  (let ((root (uiop:ensure-directory-pathname root)))
+    (lem/legit::with-collecting-sources
+        (collector :buffer :status :minor-mode 'lem/legit::peek-legit-mode)
+      (let* ((buffer (lem/legit::collector-buffer collector))
+             (*legit-todo-max-items*
+               (* *legit-todo-max-items* *legit-todo-buffer-item-factor*))
+             (*legit-todo-auto-group-items*
+               (* *legit-todo-auto-group-items*
+                  *legit-todo-buffer-item-factor*)))
+        (clear-legit-todo-sections buffer)
+        (setf (buffer-directory buffer) root
+              (buffer-value buffer 'lem-yath-legit-todo-list-root)
+              (uiop:native-namestring root)
+              (variable-value 'lem-core::line-hidden-function :buffer buffer)
+              'legit-todo-line-hidden-p)
+        (lem/legit::collector-insert
+         (format nil "TODOs for ~a" (uiop:native-namestring root))
+         :header t)
+        (render-legit-todo-lists buffer root :dedicated-p t)))))
+
+(defun legit-todo-list-root (&optional (buffer (current-buffer)))
+  (buffer-value buffer 'lem-yath-legit-todo-list-root))
+
+(defun refresh-legit-todo-context (root)
+  (if (legit-todo-list-root)
+      (render-legit-todo-list root)
+      (lem/legit::show-legit-status)))
 
 (defun insert-legit-todo-section (vcs collector)
   "Append configured Magit-Todos matches to Legit status."
   (let ((buffer (lem/legit::collector-buffer collector)))
     (clear-legit-todo-sections buffer)
+    (setf (buffer-value buffer 'lem-yath-legit-todo-list-root) nil)
     (unless (string-equal "git" (lem/porcelain::vcs-name vcs))
       (setf (variable-value 'lem-core::line-hidden-function :buffer buffer)
             nil)
       (return-from insert-legit-todo-section)))
   (let* ((buffer (lem/legit::collector-buffer collector))
-         (root (uiop:ensure-directory-pathname (truename (uiop:getcwd))))
-         (root-key (uiop:native-namestring root)))
+         (root (uiop:ensure-directory-pathname (truename (uiop:getcwd)))))
     (setf (variable-value 'lem-core::line-hidden-function :buffer buffer)
           'legit-todo-line-hidden-p)
     (handler-case
-        (progn
-          (insert-one-legit-todo-list
-           buffer root (list root-key :worktree) "Todos"
-           (collect-legit-todos root))
-          (multiple-value-bind (branch-todos main-branch)
-              (collect-legit-branch-todos root)
-            (when branch-todos
-              (insert-one-legit-todo-list
-               buffer root (list root-key :branch main-branch)
-               (format nil "Todos (branched from ~a)" main-branch)
-               branch-todos))))
+        (render-legit-todo-lists buffer root)
       (error (condition)
         (lem/legit::collector-insert "")
         (lem/legit::collector-insert "Todos (unavailable):" :header t)
         (lem/legit::collector-insert
          (completion-bounded-annotation (princ-to-string condition)))))))
+
+(define-command lem-yath-legit-todo-list () ()
+  "Open the dedicated TODO list for the active repository."
+  (alexandria:if-let ((root (legit-todo-context-root (current-point))))
+    (render-legit-todo-list root)
+    (editor-error "Point is not in a TODO section.")))
+
+(define-command lem-yath-legit-refresh-or-todo-list () ()
+  "Refresh the dedicated TODO list or ordinary Legit status."
+  (alexandria:if-let ((root (legit-todo-list-root)))
+    (render-legit-todo-list root)
+    (lem/legit::legit-refresh)))
+
+(define-command lem-yath-legit-quit-or-todo-status () ()
+  "Return from a TODO list to status, or quit ordinary Legit."
+  (if (legit-todo-list-root)
+      (lem/legit::show-legit-status)
+      (lem/legit::legit-quit)))
 
 (define-command lem-yath-legit-toggle-todo-section () ()
   "Toggle the TODO section at point, otherwise retain Legit's pane switch."
@@ -978,7 +1049,7 @@
   (alexandria:if-let ((root (legit-todo-context-root (current-point))))
     (let ((new-policy (not (legit-todo-branch-policy root))))
       (setf (legit-todo-branch-policy root) new-policy)
-      (lem/legit::show-legit-status)
+      (refresh-legit-todo-context root)
       (message "Branch TODOs ~:[disabled~;enabled~]." new-policy))
     (editor-error "Point is not in a TODO section.")))
 
@@ -996,7 +1067,7 @@
         (unless (legit-todo-valid-commit-ref-p root ref)
           (editor-error "Not a commit ref: ~a" ref))
         (setf (legit-todo-merge-base-ref root) ref)
-        (lem/legit::show-legit-status)
+        (refresh-legit-todo-context root)
         (message "Branch TODO baseline: ~a" ref)))
     (editor-error "Point is not in a TODO section.")))
 
@@ -1039,6 +1110,10 @@
   "M-n" 'lem-yath-legit-next-visible-header)
 (define-key lem/legit::*peek-legit-keymap*
   "M-p" 'lem-yath-legit-previous-visible-header)
+(define-key lem/legit::*peek-legit-keymap*
+  "g" 'lem-yath-legit-refresh-or-todo-list)
+(define-key lem/legit::*peek-legit-keymap*
+  "q" 'lem-yath-legit-quit-or-todo-status)
 
 (remove-hook lem/legit::*status-bottom-section-functions*
              'insert-legit-todo-section)

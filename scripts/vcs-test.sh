@@ -2923,6 +2923,40 @@ else
     "$git_session"
 fi
 
+todo_list_before=$(report_count '^TODO-LIST ')
+send_keys "$git_session" C-c P Enter C-c Q
+if wait_report_count '^TODO-LIST ' "$((todo_list_before + 1))" &&
+   [[ $(latest_report '^TODO-LIST ') == \
+      'TODO-LIST active=yes root=yes top=yes hidden=no grouped=no title=yes latest=no' ]]; then
+  pass legit-todo-dedicated-list \
+    'Return on the TODO heading opened the expanded dedicated list'
+else
+  fail legit-todo-dedicated-list \
+    'the TODO heading did not open the dedicated 10x-threshold list' \
+    "$git_session"
+fi
+
+send_keys "$git_session" g C-c Q
+if wait_report_count '^TODO-LIST ' "$((todo_list_before + 2))" &&
+   [[ $(latest_report '^TODO-LIST ') == \
+      'TODO-LIST active=yes root=yes top=yes hidden=no grouped=no title=yes latest=no' ]]; then
+  pass legit-todo-dedicated-refresh 'g refreshed the dedicated TODO list in place'
+else
+  fail legit-todo-dedicated-refresh \
+    'g left or corrupted the dedicated TODO list' "$git_session"
+fi
+
+send_keys "$git_session" q C-c Q
+if wait_report_count '^TODO-LIST ' "$((todo_list_before + 3))" &&
+   [[ $(latest_report '^TODO-LIST ') == \
+      'TODO-LIST active=yes root=no top=no hidden=no grouped=no title=no latest=yes' ]]; then
+  pass legit-todo-dedicated-quit \
+    'q returned from the TODO list to ordinary Git status for the same repository'
+else
+  fail legit-todo-dedicated-quit \
+    'q retained dedicated-list state or did not restore Git status' "$git_session"
+fi
+
 todo_sections_before=$(report_count '^TODO-SECTIONS ')
 send_keys "$git_session" C-c T
 if wait_report_count '^TODO-SECTIONS ' "$((todo_sections_before + 1))" &&

@@ -2677,7 +2677,11 @@ non-ignored text files. It uses packaged ripgrep, matching the installed
 package's automatically selected first scanner: tracked and untracked files
 are included, native ignore rules are honored, and declared submodule paths
 are excluded by default. Moving onto a row previews the exact source line and
-visiting it opens that file. The scanner uses the installed package's 16
+visiting it opens that file. `Return` on either top-level TODO heading opens a
+dedicated TODO-only view for the same repository. Like the installed package,
+that view multiplies the flat-list and grouping thresholds by ten (100 and
+200 items); `g` refreshes it in place and `q` returns to ordinary Git status.
+The scanner uses the installed package's 16
 effective default keywords in package order, including literal `XXXX*`, its
 Org-heading form, and its required colon with optional parenthesized/bracketed
 suffix elsewhere;

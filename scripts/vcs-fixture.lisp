@@ -179,6 +179,8 @@
                  (vcs-test-key-command lem/legit::*peek-legit-keymap* "B"))
              "magit-bisect-status-dispatch")
       (dolist (binding '(("Tab" lem-yath-legit-toggle-todo-section)
+                         ("g" lem-yath-legit-refresh-or-todo-list)
+                         ("q" lem-yath-legit-quit-or-todo-status)
                          ("n" lem-yath-legit-next-visible-item)
                          ("C-p" lem-yath-legit-previous-visible-item)
                          ("M-n" lem-yath-legit-next-visible-header)
@@ -1140,6 +1142,37 @@
       (move-point (buffer-point buffer)
                   (legit-todo-section-heading section)))))
 
+(define-command lem-yath-test-vcs-todo-list-state () ()
+  (let* ((active (lem/legit::legit-status-active-p))
+         (buffer (and active (window-buffer lem/legit::*peek-window*)))
+         (root (and buffer (legit-todo-list-root buffer)))
+         (sections (and buffer (legit-todo-buffer-sections buffer)))
+         (top
+           (and sections
+                (find-if
+                 (lambda (section)
+                   (let ((key (legit-todo-section-key section)))
+                     (and (= 3 (length key))
+                          (eq :list (second key))
+                          (eq :worktree (third key)))))
+                 sections)))
+         (grouped
+           (and sections
+                (find-if (lambda (section)
+                           (member :keyword
+                                   (legit-todo-section-key section)))
+                         sections)))
+         (text (and buffer (buffer-text buffer))))
+    (vcs-test-log
+     "TODO-LIST active=~a root=~a top=~a hidden=~a grouped=~a title=~a latest=~a"
+     (vcs-test-yes-no active)
+     (vcs-test-yes-no root)
+     (vcs-test-yes-no top)
+     (vcs-test-yes-no (and top (legit-todo-section-hidden-p top)))
+     (vcs-test-yes-no grouped)
+     (vcs-test-yes-no (and text (search "TODOs for " text)))
+     (vcs-test-yes-no (and text (search "Latest commits:" text))))))
+
 (define-command lem-yath-test-vcs-status-context () ()
   "Report whether physical focus is outside a TODO section in Legit status."
   (let ((status-p
@@ -2028,6 +2061,7 @@
 (define-key *global-keymap* "C-c T" 'lem-yath-test-vcs-todo-sections)
 (define-key *global-keymap* "C-c P" 'lem-yath-test-vcs-position-todo-heading)
 (define-key *global-keymap* "C-c O" 'lem-yath-test-vcs-status-context)
+(define-key *global-keymap* "C-c Q" 'lem-yath-test-vcs-todo-list-state)
 (define-key *global-keymap* "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key *global-keymap* "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)
 (define-key *global-keymap* "C-c f" 'lem-yath-test-vcs-focus-legit)
@@ -2048,6 +2082,8 @@
   "C-c P" 'lem-yath-test-vcs-position-todo-heading)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c O" 'lem-yath-test-vcs-status-context)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c Q" 'lem-yath-test-vcs-todo-list-state)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key lem/legit::*peek-legit-keymap*
