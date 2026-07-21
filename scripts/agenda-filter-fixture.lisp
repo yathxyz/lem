@@ -40,6 +40,13 @@
  (agenda-filter-duration-minutes "1h 30min")
  (agenda-filter-duration-minutes "1h 0:30"))
 
+(multiple-value-bind (categories tags efforts regexps ignored)
+    (agenda-filter-general-parse "+Shared" '("Shared") '("Shared") nil)
+  (agenda-filter-test-log
+   "GENERAL-PARSE categories=~d tags=~d efforts=~d regexps=~d ignored=~d"
+   (length categories) (length tags) (length efforts) (length regexps)
+   (length ignored)))
+
 (defun agenda-filter-test-command-name (keys)
   (let ((command (find-keybind (lem-core::parse-keyspec keys))))
     (if (symbolp command) (symbol-name command) (princ-to-string command))))
@@ -122,28 +129,60 @@
   "base-category")
 (define-agenda-filter-test-log-command lem-yath-test-filter-log-base-clear
   "base-clear")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general
+  "general")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general-negated
+  "general-negated")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general-stack
+  "general-stack")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general-shortcut
+  "general-shortcut")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general-category
+  "general-category")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general-category-or
+  "general-category-or")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general-ignored
+  "general-ignored")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general-invalid
+  "general-invalid")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general-refresh
+  "general-refresh")
+(define-agenda-filter-test-log-command lem-yath-test-filter-log-general-autoexclude
+  "general-autoexclude")
 
 (define-command lem-yath-test-filter-log-normal-keys () ()
   (agenda-filter-test-log
-   "KEYS normal sc=~a sr=~a se=~a st=~a s^=~a ss=~a S=~a"
+   "KEYS normal sc=~a sr=~a se=~a st=~a s^=~a ss=~a S=~a slash=~a"
    (agenda-filter-test-command-name "s c")
    (agenda-filter-test-command-name "s r")
    (agenda-filter-test-command-name "s e")
    (agenda-filter-test-command-name "s t")
    (agenda-filter-test-command-name "s ^")
    (agenda-filter-test-command-name "s s")
-   (agenda-filter-test-command-name "S")))
+   (agenda-filter-test-command-name "S")
+   (agenda-filter-test-command-name "/")))
 
 (define-command lem-yath-test-filter-log-base-keys () ()
   (agenda-filter-test-log
-   "KEYS emacs backslash=~a underscore=~a equals=~a bar=~a tilde=~a less=~a caret=~a"
+   "KEYS emacs backslash=~a underscore=~a equals=~a slash=~a bar=~a tilde=~a less=~a caret=~a"
    (agenda-filter-test-command-name "\\")
    (agenda-filter-test-command-name "_")
    (agenda-filter-test-command-name "=")
+   (agenda-filter-test-command-name "/")
    (agenda-filter-test-command-name "|")
    (agenda-filter-test-command-name "~")
    (agenda-filter-test-command-name "<")
-   (agenda-filter-test-command-name "^")))
+   (agenda-filter-test-command-name "^"))
+  (handler-case
+      (agenda-filter-test-log
+       "GENERAL-COMPLETIONS plus=~s root=~s effort=~s quoted-exact=~s"
+       (agenda-filter-general-completions (current-buffer) "+")
+       (agenda-filter-general-completions (current-buffer) "+Roo")
+       (agenda-filter-general-completions (current-buffer) "<1")
+       (agenda-filter-general-completions
+        (current-buffer) "+\"File-Cat\""))
+    (error (condition)
+      (agenda-filter-test-log "GENERAL-COMPLETIONS error=~s" condition))))
 
 (let ((keymap *lem-yath-agenda-mode-keymap*))
   (define-key keymap "C-c z a" 'lem-yath-test-filter-alpha-child)
@@ -166,4 +205,14 @@
   (define-key keymap "C-c z c" 'lem-yath-test-filter-log-base-category)
   (define-key keymap "C-c z C" 'lem-yath-test-filter-log-base-clear)
   (define-key keymap "C-c z n" 'lem-yath-test-filter-log-normal-keys)
-  (define-key keymap "C-c z m" 'lem-yath-test-filter-log-base-keys))
+  (define-key keymap "C-c z m" 'lem-yath-test-filter-log-base-keys)
+  (define-key keymap "C-c z g" 'lem-yath-test-filter-log-general)
+  (define-key keymap "C-c z h" 'lem-yath-test-filter-log-general-negated)
+  (define-key keymap "C-c z i" 'lem-yath-test-filter-log-general-stack)
+  (define-key keymap "C-c z j" 'lem-yath-test-filter-log-general-shortcut)
+  (define-key keymap "C-c z k" 'lem-yath-test-filter-log-general-category)
+  (define-key keymap "C-c z o" 'lem-yath-test-filter-log-general-category-or)
+  (define-key keymap "C-c z p" 'lem-yath-test-filter-log-general-ignored)
+  (define-key keymap "C-c z q" 'lem-yath-test-filter-log-general-invalid)
+  (define-key keymap "C-c z r" 'lem-yath-test-filter-log-general-refresh)
+  (define-key keymap "C-c z s" 'lem-yath-test-filter-log-general-autoexclude))

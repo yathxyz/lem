@@ -3555,7 +3555,8 @@ retention, and stale unsaved-source refusal.
 `src/apps/agenda-filter.lisp` adds Evil-Org's complete effective filter chord
 family: `sc` category, `sr` regexp, `se` Effort, `st` tag, `s^` top headline,
 `ss` temporary limiting, and `S` clear. C-z Emacs state retains GNU Org's
-corresponding `</=/_/\\/^/~/|` aliases. The off-thread agenda scan annotates
+corresponding `</=/_/\\/^/~/|` aliases plus the general `/` matcher. Normal-state
+`/` remains Evil search. The off-thread agenda scan annotates
 each item with GNU-style effective category (nearest `CATEGORY`, then
 `#+CATEGORY`, then filename), inherited `#+FILETAGS` and ancestor/local tags,
 local `Effort`, and the normalized top-level headline. These values are copied
@@ -3577,12 +3578,28 @@ for the current scan generation, `C-u ss` removes it, and a source refresh
 rebuilds the full view. Agenda-local `C-u` is a universal prefix, matching the
 user's default `evil-want-C-u-scroll=nil` configuration.
 
+The general `/` prompt combines represented categories, tags, Effort
+comparisons, and case-folded display regexps in one expression. Tags win when
+a name is both a tag and a category; unknown names are reported and ignored.
+Hyphenated or spaced categories use quotes, multiple positive categories use
+GNU Org's OR semantics, and conditions of other types remain conjunctive.
+Prescient completes the active quote/regexp-aware component without changing
+an exact submitted expression. `C-u /` negates the complete expression,
+`C-u C-u /` accumulates it with the active stack, and leading `+-`/`++` provides
+GNU's accumulation shortcut. Parsing and regexp compilation finish before the
+live state changes, so malformed regexps leave the old filter intact. The
+unconfigured `C-u C-u C-u /` auto-exclusion route fails explicitly and also
+preserves state.
+
 `scripts/agenda-filter-test.sh` physically drives both state maps, inherited
 metadata, positive and negative categories, refresh-stable top-headline
 selection, tag completion and double-prefix accumulation, regexp toggle,
 Effort comparison/removal, temporary limiting, and full filter clearing. It
-also compares the Org source byte-for-byte after the session. The arbitrary
-GNU `/` filter expression language, configured tag-group expansion, filter
+also drives general `/` completion and all four combined condition types,
+whole-expression negation, prefix and leading-sign accumulation, quoted and
+multi-positive categories, tag priority, ignored names, refresh persistence,
+invalid-regexp atomicity, and the unconfigured auto-exclusion refusal before
+comparing the Org source byte-for-byte. Configured tag-group expansion, filter
 presets, and auto-exclusion callbacks are not claimed.
 
 `scripts/agenda-view-test.sh` physically drives the effective `gD`, `[[`,
@@ -3599,7 +3616,7 @@ configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive
 sibling/tag commands, bulk archive-sibling/scatter/arbitrary-function/persistent-
 mark variants, clock recent-task/prefix variants, custom numeric report spans,
-general `/` matcher expressions, tag-group/preset/auto-exclusion filtering,
+tag-group/preset/configured-auto-exclusion filtering,
 the other `gD` display toggles (time grid, diary, inactive timestamps, follow,
 log, archive, and entry text), `p` timestamp editing, custom commands, and the
 wider org-super-agenda presentation remain explicit gaps.

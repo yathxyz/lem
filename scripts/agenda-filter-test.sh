@@ -64,7 +64,7 @@ send_keys() {
 }
 
 printf '%s\n' \
-  '#+CATEGORY: FileCat' \
+  '#+CATEGORY: File-Cat' \
   '#+FILETAGS: :filetag:' \
   '* TODO Alpha root filter sentinel :root:' \
   ':PROPERTIES:' \
@@ -107,9 +107,13 @@ wait_report '^KEYS normal ' || true
 metadata_ok=1
 grep -q '^STATE initial rows=7 .*cat="RootCat" .*tags=("filetag" "root" "child") effort="1:00" top="Alpha root filter sentinel"' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || metadata_ok=0
-grep -q '^KEYS normal sc=LEM-YATH-AGENDA-FILTER-BY-CATEGORY sr=LEM-YATH-AGENDA-FILTER-BY-REGEXP se=LEM-YATH-AGENDA-FILTER-BY-EFFORT st=LEM-YATH-AGENDA-FILTER-BY-TAG s\^=LEM-YATH-AGENDA-FILTER-BY-TOP-HEADLINE ss=LEM-YATH-AGENDA-LIMIT-INTERACTIVELY S=LEM-YATH-AGENDA-FILTER-REMOVE-ALL$' \
+grep -q '^KEYS normal sc=LEM-YATH-AGENDA-FILTER-BY-CATEGORY sr=LEM-YATH-AGENDA-FILTER-BY-REGEXP se=LEM-YATH-AGENDA-FILTER-BY-EFFORT st=LEM-YATH-AGENDA-FILTER-BY-TAG s\^=LEM-YATH-AGENDA-FILTER-BY-TOP-HEADLINE ss=LEM-YATH-AGENDA-LIMIT-INTERACTIVELY S=LEM-YATH-AGENDA-FILTER-REMOVE-ALL slash=' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || metadata_ok=0
+grep -q '^KEYS normal .*slash=LEM-YATH-AGENDA-FILTER-GENERAL$' \
+  "$LEM_YATH_AGENDA_FILTER_REPORT" && metadata_ok=0
 grep -q '^DURATION units=90.0 mixed=90.0$' \
+  "$LEM_YATH_AGENDA_FILTER_REPORT" || metadata_ok=0
+grep -q '^GENERAL-PARSE categories=0 tags=1 efforts=0 regexps=0 ignored=0$' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || metadata_ok=0
 if [ "$metadata_ok" = 1 ]; then
   pass metadata-keymaps 'effective metadata and all Evil-Org chords are live'
@@ -278,7 +282,9 @@ send_keys C-z
 send_keys C-c z m
 wait_report '^KEYS emacs ' || true
 base_keys_ok=1
-grep -q '^KEYS emacs backslash=LEM-YATH-AGENDA-FILTER-BY-TAG underscore=LEM-YATH-AGENDA-FILTER-BY-EFFORT equals=LEM-YATH-AGENDA-FILTER-BY-REGEXP bar=LEM-YATH-AGENDA-FILTER-REMOVE-ALL tilde=LEM-YATH-AGENDA-LIMIT-INTERACTIVELY less=LEM-YATH-AGENDA-FILTER-BY-CATEGORY caret=LEM-YATH-AGENDA-FILTER-BY-TOP-HEADLINE$' \
+grep -q '^KEYS emacs backslash=LEM-YATH-AGENDA-FILTER-BY-TAG underscore=LEM-YATH-AGENDA-FILTER-BY-EFFORT equals=LEM-YATH-AGENDA-FILTER-BY-REGEXP slash=LEM-YATH-AGENDA-FILTER-GENERAL bar=LEM-YATH-AGENDA-FILTER-REMOVE-ALL tilde=LEM-YATH-AGENDA-LIMIT-INTERACTIVELY less=LEM-YATH-AGENDA-FILTER-BY-CATEGORY caret=LEM-YATH-AGENDA-FILTER-BY-TOP-HEADLINE$' \
+  "$LEM_YATH_AGENDA_FILTER_REPORT" || base_keys_ok=0
+grep -q '^GENERAL-COMPLETIONS .* quoted-exact=NIL$' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || base_keys_ok=0
 send_keys '<'
 send_keys C-c z c
@@ -292,6 +298,160 @@ if [ "$base_keys_ok" = 1 ]; then
   pass base-aliases 'C-z exposed GNU aliases and their category/clear actions'
 else
   fail base-aliases 'GNU base bindings or actions differed'
+fi
+
+general_ok=1
+send_keys '/'
+if lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null; then
+  send_keys -l '+Roo'
+  send_keys Tab
+  send_keys -l '+chi'
+  send_keys Tab
+  send_keys -l '<1:'
+  send_keys Tab
+  send_keys -l '/Alpha child/'
+  send_keys Enter
+else
+  fail general-prompt 'base / did not open the general filter prompt'
+  general_ok=0
+fi
+send_keys C-c z g
+wait_report '^STATE general ' || true
+grep -q '^STATE general rows=1 header="Agenda  (2026-07-17)  \[Cat:+RootCat Tag:+child Re:+Alpha child Eff:+<1:00\]' \
+  "$LEM_YATH_AGENDA_FILTER_REPORT" || general_ok=0
+send_keys C-z
+send_keys g r
+lem_wait_for "$session" 'Alpha child filter sentinel' 20 >/dev/null || true
+send_keys C-z
+send_keys C-c z r
+wait_report '^STATE general-refresh ' || true
+grep -q '^STATE general-refresh rows=1 header="Agenda  (2026-07-17)  \[Cat:+RootCat Tag:+child Re:+Alpha child Eff:+<1:00\]' \
+  "$LEM_YATH_AGENDA_FILTER_REPORT" || general_ok=0
+if [ "$general_ok" = 1 ]; then
+  pass general-filter 'base / completed and combined all four filter types across refresh'
+else
+  fail general-filter 'combined general filtering, completion, or refresh differed'
+fi
+
+send_keys C-u '/'
+lem_wait_for "$session" 'Negative filter' 10 >/dev/null || true
+send_keys C-a C-k
+send_keys -l '+RootCat'
+send_keys Enter
+send_keys C-c z h
+wait_report '^STATE general-negated ' || true
+if grep -q '^STATE general-negated rows=4 header="Agenda  (2026-07-17)  \[Cat:-RootCat\]' \
+     "$LEM_YATH_AGENDA_FILTER_REPORT"; then
+  pass general-negated 'C-u / negated the complete entered filter'
+else
+  fail general-negated 'whole-filter prefix negation differed'
+fi
+
+send_keys '|'
+send_keys '/'
+lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null || true
+send_keys -l '+child'
+send_keys Enter
+send_keys C-u C-u '/'
+lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null || true
+send_keys C-e
+send_keys -l '+/Alpha child/'
+send_keys Enter
+send_keys C-c z i
+wait_report '^STATE general-stack ' || true
+if grep -q '^STATE general-stack rows=1 header="Agenda  (2026-07-17)  \[Tag:+child Re:+Alpha child\]' \
+     "$LEM_YATH_AGENDA_FILTER_REPORT"; then
+  pass general-stack 'C-u C-u / accumulated a regexp with an existing tag'
+else
+  fail general-stack 'double-prefix accumulation differed'
+fi
+
+send_keys '|'
+send_keys '/'
+lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null || true
+send_keys -l '+child'
+send_keys Enter
+send_keys '/'
+lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null || true
+send_keys C-a C-k
+send_keys -l '+-beta'
+send_keys Enter
+send_keys C-c z j
+wait_report '^STATE general-shortcut ' || true
+if grep -q '^STATE general-shortcut rows=1 header="Agenda  (2026-07-17)  \[Tag:+child Tag:-beta\]' \
+     "$LEM_YATH_AGENDA_FILTER_REPORT"; then
+  pass general-shortcut 'leading +- accumulated a negative tag without a prefix'
+else
+  fail general-shortcut 'leading-plus accumulation shortcut differed'
+fi
+
+send_keys '|'
+send_keys '/'
+lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null || true
+send_keys -l '+"File-Cat"'
+send_keys Enter
+send_keys C-c z k
+wait_report '^STATE general-category ' || true
+category_general_ok=1
+grep -q '^STATE general-category rows=2 header="Agenda  (2026-07-17)  \[Cat:+File-Cat\]' \
+  "$LEM_YATH_AGENDA_FILTER_REPORT" || category_general_ok=0
+send_keys '/'
+lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null || true
+send_keys C-a C-k
+send_keys -l '+"File-Cat"+RootCat'
+send_keys Enter
+send_keys C-c z o
+wait_report '^STATE general-category-or ' || true
+grep -q '^STATE general-category-or rows=5 header="Agenda  (2026-07-17)  \[Cat:+File-Cat Cat:+RootCat\]' \
+  "$LEM_YATH_AGENDA_FILTER_REPORT" || category_general_ok=0
+if [ "$category_general_ok" = 1 ]; then
+  pass general-categories 'quoted hyphenated and multiple positive categories matched with OR semantics'
+else
+  fail general-categories 'general category quoting or positive OR semantics differed'
+fi
+
+send_keys '/'
+lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null || true
+send_keys C-a C-k
+send_keys -l '+NotRepresented'
+send_keys Enter
+send_keys C-c z p
+wait_report '^STATE general-ignored ' || true
+if grep -q '^STATE general-ignored rows=7 header="Agenda  (2026-07-17)"' \
+     "$LEM_YATH_AGENDA_FILTER_REPORT"; then
+  pass general-ignored 'an unrepresented name was ignored while replacement cleared old filters'
+else
+  fail general-ignored 'unrepresented-name handling differed'
+fi
+
+send_keys '/'
+lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null || true
+send_keys -l '+"File-Cat"'
+send_keys Enter
+send_keys '/'
+lem_wait_for "$session" 'Filter \[\+cat' 10 >/dev/null || true
+send_keys C-a C-k
+send_keys -l '/[/'
+send_keys Enter
+lem_wait_for "$session" 'Invalid agenda regexp' 10 >/dev/null || true
+send_keys C-c z q
+wait_report '^STATE general-invalid ' || true
+if grep -q '^STATE general-invalid rows=2 header="Agenda  (2026-07-17)  \[Cat:+File-Cat\]' \
+     "$LEM_YATH_AGENDA_FILTER_REPORT"; then
+  pass general-invalid 'invalid regexp refusal preserved the active filter atomically'
+else
+  fail general-invalid 'invalid general regexp changed the prior filter state'
+fi
+
+send_keys C-u C-u C-u '/'
+lem_wait_for "$session" 'Agenda auto-exclude function is not configured' 10 >/dev/null || true
+send_keys C-c z s
+wait_report '^STATE general-autoexclude ' || true
+if grep -q '^STATE general-autoexclude rows=2 header="Agenda  (2026-07-17)  \[Cat:+File-Cat\]' \
+     "$LEM_YATH_AGENDA_FILTER_REPORT"; then
+  pass general-autoexclude 'unconfigured triple-prefix auto-exclude failed without changing filters'
+else
+  fail general-autoexclude 'triple-prefix refusal changed the prior filter state'
 fi
 
 if cmp -s "$work_file" "$original_file"; then

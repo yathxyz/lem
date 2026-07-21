@@ -91,11 +91,24 @@
       (not matched-p)
       matched-p))
 
-(defun agenda-filter-category-match-p (condition item)
-  (agenda-filter-condition-match-p
-   condition
-   (string= (agenda-filter-condition-value condition)
-            (or (agenda-item-category item) ""))))
+(defun agenda-filter-categories-match-p (conditions item)
+  "Match GNU Org's OR-positive and AND-negative category semantics."
+  (let ((category (or (agenda-item-category item) ""))
+        (positive '())
+        (negative '()))
+    (dolist (condition conditions)
+      (if (agenda-filter-condition-negative-p condition)
+          (push condition negative)
+          (push condition positive)))
+    (and (or (null positive)
+             (some (lambda (condition)
+                     (string= category
+                              (agenda-filter-condition-value condition)))
+                   positive))
+         (every (lambda (condition)
+                  (not (string= category
+                                (agenda-filter-condition-value condition))))
+                negative))))
 
 (defun agenda-filter-top-headline-match-p (condition item)
   (agenda-filter-condition-match-p
@@ -136,9 +149,8 @@
   "Whether ITEM satisfies every active agenda filter in BUFFER."
   (let ((state (agenda-filter-state buffer)))
     (and
-     (or (null (agenda-filter-state-category state))
-         (agenda-filter-category-match-p
-          (agenda-filter-state-category state) item))
+     (agenda-filter-categories-match-p
+      (agenda-filter-state-category state) item)
      (or (null (agenda-filter-state-top-headline state))
          (agenda-filter-top-headline-match-p
           (agenda-filter-state-top-headline state) item))
@@ -199,9 +211,9 @@
   (let* ((state (agenda-filter-state buffer))
          (parts
            (append
-            (when (agenda-filter-state-category state)
-              (list (agenda-filter-condition-label
-                     (agenda-filter-state-category state) "Cat:")))
+            (mapcar (lambda (condition)
+                      (agenda-filter-condition-label condition "Cat:"))
+                    (agenda-filter-state-category state))
             (mapcar (lambda (condition)
                       (agenda-filter-condition-label condition "Tag:"))
                     (agenda-filter-state-tags state))
@@ -243,6 +255,303 @@
         (message "No ~a on this agenda line" description)
         nil)))
 
+(defun agenda-filter-known-categories (buffer)
+  (sort
+   (agenda-unique-strings
+    (loop :for item :in (buffer-value buffer 'lem-yath-agenda-cached-items)
+          :for category := (agenda-item-category item)
+          :when category :collect category))
+   #'string-lessp))
+
+(defun agenda-filter-general-name-delimiter-p (character)
+  (member character '(#\Space #\Tab #\Return #\Newline
+                      #\+ #\- #\< #\> #\= #\/)
+          :test #'char=))
+
+(defun agenda-filter-general-quoted-category (category)
+  (if (or (find #\" category)
+          (not (find-if #'agenda-filter-general-name-delimiter-p category)))
+      category
+      (format nil "\"~a\"" category)))
+
+(defun agenda-filter-general-completion-candidates (buffer)
+  "Return represented general-filter names with tag priority."
+  (remove-duplicates
+   (append
+    (remove-if (lambda (tag)
+                 (find-if #'agenda-filter-general-name-delimiter-p tag))
+               (agenda-filter-known-tags buffer))
+    (mapcar #'agenda-filter-general-quoted-category
+            (agenda-filter-known-categories buffer)))
+   :test #'string=))
+
+(defun agenda-filter-general-completion-boundary (input)
+  "Return the last active component delimiter in general filter INPUT.
+
+Quoted category punctuation and regexp contents are data, not boundaries."
+  (let ((boundary nil)
+        (quoted-p nil)
+        (regexp-p nil))
+    (loop :for character :across input
+          :for index :from 0
+          :do
+             (cond
+               (regexp-p
+                (when (char= character #\/)
+                  (setf regexp-p nil)))
+               (quoted-p
+                (when (char= character #\")
+                  (setf quoted-p nil)))
+               ((char= character #\")
+                (setf quoted-p t))
+               ((char= character #\/)
+                (setf boundary index
+                      regexp-p t))
+               ((member character '(#\+ #\- #\< #\> #\=)
+                        :test #'char=)
+                (setf boundary index))))
+    boundary))
+
+(defun agenda-filter-general-completions (buffer input)
+  "Complete the active name or Effort component of general filter INPUT."
+  ;; Lem opens a synchronous completion provider while the prompt's editable
+  ;; field is still empty.  Returning candidates at that instant asks the
+  ;; completion range code to inspect a nonexistent preceding character.
+  (when (zerop (length input))
+    (return-from agenda-filter-general-completions nil))
+  (let* ((boundary (agenda-filter-general-completion-boundary input))
+         (operator (and boundary (char input boundary)))
+         (start (if boundary (1+ boundary) 0))
+         (prefix (subseq input 0 start))
+         (needle (subseq input start))
+         (candidates
+           (cond
+             ((member operator '(#\< #\> #\=) :test #'char=)
+              *agenda-filter-effort-values*)
+             ((and operator (char= operator #\/)) nil)
+             (t (agenda-filter-general-completion-candidates buffer)))))
+    (let ((completions
+            (mapcar (lambda (candidate)
+                      (concatenate 'string prefix candidate))
+                    (prescient-filter needle candidates))))
+      ;; An exact expression is ready for the prompt's Return command.  Leaving
+      ;; an exact singleton displayed would make the first Return merely accept
+      ;; the already-present candidate and require an Emacs-incongruent second
+      ;; Return to apply the filter.
+      (unless (member input completions :test #'string=)
+        completions))))
+
+(defun agenda-filter-condition-equal-p (left right)
+  (and (string= (agenda-filter-condition-value left)
+                (agenda-filter-condition-value right))
+       (eql (agenda-filter-condition-negative-p left)
+            (agenda-filter-condition-negative-p right))
+       (eql (agenda-filter-condition-operator left)
+            (agenda-filter-condition-operator right))))
+
+(defun agenda-filter-merge-conditions (existing additions)
+  (remove-duplicates (append existing additions)
+                     :test #'agenda-filter-condition-equal-p
+                     :from-end t))
+
+(defun agenda-filter-general-condition-label (condition &key regexp-p)
+  (format nil "~c~a~a~a"
+          (if (agenda-filter-condition-negative-p condition) #\- #\+)
+          (or (agenda-filter-condition-operator condition) "")
+          (if regexp-p "/" "")
+          (if regexp-p
+              (concatenate 'string
+                           (agenda-filter-condition-value condition) "/")
+              (agenda-filter-condition-value condition))))
+
+(defun agenda-filter-general-current-input (state)
+  (with-output-to-string (stream)
+    (dolist (condition (agenda-filter-state-category state))
+      (write-string
+       (agenda-filter-general-condition-label
+        (make-agenda-filter-condition
+         :value (agenda-filter-general-quoted-category
+                 (agenda-filter-condition-value condition))
+         :negative-p (agenda-filter-condition-negative-p condition)))
+       stream))
+    (dolist (condition (agenda-filter-state-tags state))
+      (write-string (agenda-filter-general-condition-label condition) stream))
+    (dolist (condition (agenda-filter-state-efforts state))
+      (write-string (agenda-filter-general-condition-label condition) stream))
+    (dolist (condition (agenda-filter-state-regexps state))
+      (write-string
+       (agenda-filter-general-condition-label condition :regexp-p t)
+       stream))))
+
+(defun agenda-filter-general-parse (input tags categories negate-p)
+  "Parse GNU Org general filter INPUT without evaluating Lisp.
+
+Return category, tag, Effort, and regexp conditions plus ignored names."
+  (let ((index 0)
+        (length (length input))
+        (category-conditions '())
+        (tag-conditions '())
+        (effort-conditions '())
+        (regexp-conditions '())
+        (ignored '()))
+    (labels
+        ((skip-space ()
+           (loop :while (and (< index length)
+                             (member (char input index)
+                                     '(#\Space #\Tab #\Return #\Newline)
+                                     :test #'char=))
+                 :do (incf index)))
+         (negative-p (explicit-negative-p)
+           (if negate-p (not explicit-negative-p) explicit-negative-p))
+         (add-name (name explicit-negative-p)
+           (let ((condition
+                   (make-agenda-filter-condition
+                    :value name
+                    :negative-p (negative-p explicit-negative-p))))
+             (cond
+               ((member name tags :test #'string=)
+                (push condition tag-conditions))
+               ((member name categories :test #'string=)
+                (push condition category-conditions))
+               (t (push name ignored)))))
+         (read-name ()
+           (if (and (< index length) (char= (char input index) #\"))
+               (let ((end (position #\" input :start (1+ index))))
+                 (if end
+                     (prog1 (subseq input (1+ index) end)
+                       (setf index (1+ end)))
+                     (prog1 nil (setf index length))))
+               (let ((start index))
+                 (loop :while (and (< index length)
+                                   (not (agenda-filter-general-name-delimiter-p
+                                         (char input index))))
+                       :do (incf index))
+                 (and (< start index) (subseq input start index)))))
+         (read-effort (operator explicit-negative-p)
+           (let ((start index))
+             (loop :while (and (< index length)
+                               (or (digit-char-p (char input index))
+                                   (char= (char input index) #\:)))
+                   :do (incf index))
+             (if (= start index)
+                 (push (subseq input start) ignored)
+                 (let ((value (subseq input start index)))
+                   (handler-case
+                       (push
+                        (make-agenda-filter-condition
+                         :value value
+                         :negative-p (negative-p explicit-negative-p)
+                         :operator operator
+                         :minutes (agenda-filter-duration-minutes value))
+                        effort-conditions)
+                     (error ()
+                       (editor-error "Invalid agenda Effort: ~a" value)))))))
+         (read-regexp (explicit-negative-p)
+           (incf index)
+           (let* ((start index)
+                  (end (or (position #\/ input :start index) length))
+                  (pattern (subseq input start end)))
+             (setf index (if (< end length) (1+ end) end))
+             (if (zerop (length pattern))
+                 (push pattern ignored)
+                 (let ((scanner
+                         (handler-case
+                             (ppcre:create-scanner
+                              (project-regexp-to-extended pattern)
+                              :case-insensitive-mode t)
+                           (error ()
+                             (editor-error
+                              "Invalid agenda regexp: ~a" pattern)))))
+                   (push
+                    (make-agenda-filter-condition
+                     :value pattern
+                     :negative-p (negative-p explicit-negative-p)
+                     :scanner scanner)
+                    regexp-conditions))))))
+      (loop
+        (skip-space)
+        (when (>= index length) (return))
+        (let ((explicit-negative-p nil))
+          (when (member (char input index) '(#\+ #\-) :test #'char=)
+            (setf explicit-negative-p (char= (char input index) #\-))
+            (incf index))
+          (when (>= index length) (return))
+          (let ((character (char input index)))
+            (cond
+              ((member character '(#\< #\> #\=) :test #'char=)
+               (incf index)
+               (read-effort character explicit-negative-p))
+              ((char= character #\/)
+               (read-regexp explicit-negative-p))
+              (t
+               (alexandria:if-let ((name (read-name)))
+                 (add-name name explicit-negative-p)
+                 (progn
+                   (push (subseq input index) ignored)
+                   (setf index length)))))))))
+    (values (nreverse category-conditions)
+            (nreverse tag-conditions)
+            (nreverse effort-conditions)
+            (nreverse regexp-conditions)
+            (nreverse ignored))))
+
+(define-command lem-yath-agenda-filter-general (&optional argument)
+    (:universal-nil)
+  "Prompt for GNU Org's combined category/tag/Effort/regexp filter."
+  (let* ((buffer (current-buffer))
+         (state (agenda-filter-state buffer))
+         (magnitude (agenda-filter-prefix-magnitude argument)))
+    (when (= magnitude 64)
+      (editor-error "Agenda auto-exclude function is not configured"))
+    (let* ((initial (agenda-filter-general-current-input state))
+           (raw-input
+             (prompt-for-string
+              (if (= magnitude 4)
+                  "Negative filter [+cat-tag<0:10-/regexp/]: "
+                  "Filter [+cat-tag<0:10-/regexp/]: ")
+              :initial-value initial
+              :completion-function
+              (lambda (input)
+                (agenda-filter-general-completions buffer input))
+              :history-symbol 'lem-yath-agenda-general-filters))
+           (shortcut-p
+             (and (> (length raw-input) 1)
+                  (char= (char raw-input 0) #\+)
+                  (member (char raw-input 1) '(#\+ #\-) :test #'char=)))
+           (input (if shortcut-p (subseq raw-input 1) raw-input))
+           (accumulate-p (or (= magnitude 16) shortcut-p)))
+      (multiple-value-bind (categories tags efforts regexps ignored)
+          (agenda-filter-general-parse
+           input
+           (agenda-filter-known-tags buffer)
+           (agenda-filter-known-categories buffer)
+           (= magnitude 4))
+        (setf (agenda-filter-state-category state)
+              (if accumulate-p
+                  (agenda-filter-merge-conditions
+                   (agenda-filter-state-category state) categories)
+                  categories)
+              (agenda-filter-state-tags state)
+              (if accumulate-p
+                  (agenda-filter-merge-conditions
+                   (agenda-filter-state-tags state) tags)
+                  tags)
+              (agenda-filter-state-efforts state)
+              (if accumulate-p
+                  (agenda-filter-merge-conditions
+                   (agenda-filter-state-efforts state) efforts)
+                  efforts)
+              (agenda-filter-state-regexps state)
+              (if accumulate-p
+                  (agenda-filter-merge-conditions
+                   (agenda-filter-state-regexps state) regexps)
+                  regexps)
+              (agenda-filter-state-top-headline state) nil)
+        (agenda-filter-rerender buffer)
+        (if ignored
+            (message "Agenda filter applied; ignored: ~{~s~^, ~}" ignored)
+            (message "Agenda filter applied"))))))
+
 (define-command lem-yath-agenda-filter-by-category (&optional argument)
     (:universal-nil)
   "Toggle a positive or prefix-negative filter for the category at point."
@@ -257,8 +566,9 @@
             ((category (agenda-filter-current-value
                         :agenda-category "category")))
           (setf (agenda-filter-state-category state)
-                (make-agenda-filter-condition
-                 :value category :negative-p (not (null argument))))
+                (list
+                 (make-agenda-filter-condition
+                  :value category :negative-p (not (null argument)))))
           (agenda-filter-rerender buffer)
           (message "Category filter: ~a~a"
                    (if argument "exclude " "") category)))))
@@ -512,6 +822,8 @@
   'lem-yath-agenda-filter-by-effort)
 (define-key *lem-yath-agenda-mode-keymap* "="
   'lem-yath-agenda-filter-by-regexp)
+(define-key *lem-yath-agenda-mode-keymap* "/"
+  'lem-yath-agenda-filter-general)
 (define-key *lem-yath-agenda-mode-keymap* "|"
   'lem-yath-agenda-filter-remove-all)
 (define-key *lem-yath-agenda-mode-keymap* "~"
