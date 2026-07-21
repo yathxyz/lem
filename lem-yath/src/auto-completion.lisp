@@ -345,6 +345,7 @@ directory already exists."
   "Start configured mode/Cape completion without the automatic threshold."
   (lem/completion-mode:run-completion
    (auto-completion-provider (current-point) t)
+   :narrowing nil
    :max-display-items *auto-completion-max-display-items*
    :cycle nil))
 

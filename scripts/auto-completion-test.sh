@@ -163,7 +163,9 @@ if run_fixture_command lem-yath-test-auto-manual-tab-setup &&
   tmux_cmd send-keys -t "$session" -l al
   lem_keys "$session" Tab
   if lem_wait_for "$session" 'alphaCandidate[0-9][0-9]' 10 >/dev/null; then
+    manual_state_before=$(grep -c '^STATE context ' "$LEM_YATH_AUTO_COMPLETION_REPORT" 2>/dev/null || true)
     lem_keys "$session" F5
+    wait_report_count '^STATE context ' $((manual_state_before + 1)) 5 || true
     manual_tab_state=$(grep '^STATE context ' "$LEM_YATH_AUTO_COMPLETION_REPORT" | tail -n 1)
     if grep -q 'automatic=NIL max=10 cycle=NIL items=12 .*buffer=al' \
          <<<"$manual_tab_state"; then
