@@ -123,6 +123,13 @@ lifecycle, stale-source refusal, and exact popup return. The resulting source
 edit deliberately remains unsaved, belongs to ordinary source undo, and is not
 registered with agenda remote undo, matching the installed Emacs command.
 
+The separate `src/apps/agenda-capture.lisp` bridge adds Evil-Org `C` and base
+`k` without duplicating the general capture implementation. It supplies pinned
+Org's displayed agenda date to the configured `i/t/p/r` templates: midnight by
+default, the row/current clock time for numeric prefix 1, and actual current
+time on undated rows. Source-backed rows carry the bounded local annotation;
+finalize and abort restore the exact agenda point, window, and Vi state.
+
 ## Behavioral divergences worth knowing
 
 - **Display palette and delimiters**: Lem retains the configured Modus hex

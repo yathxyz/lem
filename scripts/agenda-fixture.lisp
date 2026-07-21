@@ -4,10 +4,13 @@
       (lambda () (encode-universal-time 0 0 12 12 7 2026 0)))
 (setf *agenda-note-time-function*
       (lambda () (encode-universal-time 0 34 9 12 7 2026 0)))
+(setf *org-capture-time-function*
+      (lambda () (encode-universal-time 0 0 12 12 7 2026 0)))
 
 (defvar *agenda-test-report-serial* 0)
 (defvar *agenda-test-preview-report-serial* 0)
 (defvar *agenda-test-note-report-serial* 0)
+(defvar *agenda-test-capture-report-serial* 0)
 (defvar *agenda-test-original-top-level-org-files* nil)
 (defvar *agenda-test-stale-source* nil)
 
@@ -75,7 +78,7 @@
      (concatenate
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
-      "return=~a gr=~a gR=~a t=~a p=~a a=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
+      "return=~a gr=~a gR=~a t=~a p=~a a=~a C=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
       "J=~a K=~a H=~a L=~a dd=~a ce=~a shift-left=~a shift-right=~a "
       "dA=~a da=~a dollar=~a archive=~a refile=~a kill-hooks=~d "
       "modified=~a undo=~a "
@@ -92,6 +95,7 @@
      (agenda-test-command-name "t")
      (agenda-test-command-name "p")
      (agenda-test-command-name "a")
+     (agenda-test-command-name "C")
      (agenda-test-command-name "C-c C-s")
      (agenda-test-command-name "C-c C-d")
      (agenda-test-command-name "c t")
@@ -174,6 +178,75 @@
 (define-command lem-yath-test-agenda-goto-note () ()
   (move-point (current-point)
               (agenda-test-find-line "Note action sentinel")))
+
+(define-command lem-yath-test-agenda-goto-capture () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Body event sentinel")))
+
+(defun agenda-test-time-string (time)
+  (multiple-value-bind (second minute hour day month year)
+      (decode-universal-time time)
+    (declare (ignore second))
+    (format nil "~4,'0d-~2,'0d-~2,'0dT~2,'0d:~2,'0d"
+            year month day hour minute)))
+
+(define-command lem-yath-test-agenda-capture-report () ()
+  (let* ((session (or *org-capture-session*
+                      (error "No active Org capture session")))
+         (request (org-capture-session-request session))
+         (origin (org-capture-request-origin-buffer request))
+         (origin-point (org-capture-request-origin-point request))
+         (text (buffer-text (current-buffer)))
+         (serial (incf *agenda-test-capture-report-serial*)))
+    (with-current-buffer origin
+      (with-point ((unscheduled (buffer-start-point origin))
+                   (projected (buffer-start-point origin)))
+        (unless (search-forward-regexp
+                 unscheduled
+                 (ppcre:quote-meta-chars "Work unscheduled sentinel"))
+          (error "Unscheduled agenda test row is missing"))
+        (line-start unscheduled)
+        (unless (search-forward-regexp
+                 projected
+                 (ppcre:quote-meta-chars "Upcoming work sentinel"))
+          (error "Projected agenda test row is missing"))
+        (line-start projected)
+        (agenda-test-log
+         (concatenate
+          'string
+          "CAPTURE-REPORT serial=~d mode=~a timestamp=~a annotation=~a "
+          "origin=~a default=~a prefixed=~a fallback=~a projected=~a")
+         serial
+         (symbol-name (buffer-major-mode (org-capture-session-capture-buffer
+                                          session)))
+         (if (search "[2026-07-13 Mon 00:00]" text) "yes" "no")
+         (if (search "[[file:" text) "yes" "no")
+         (if (search "Body event sentinel" (line-string origin-point))
+             "yes" "no")
+         (agenda-test-time-string
+          (org-capture-request-default-time request))
+         (agenda-test-time-string
+          (agenda-capture-default-time origin-point t))
+         (agenda-test-time-string
+          (agenda-capture-default-time unscheduled nil))
+         (agenda-test-time-string
+          (agenda-capture-default-time projected nil)))))))
+
+(define-command lem-yath-test-agenda-capture-target-report () ()
+  (let* ((path (merge-pathnames "todo.org" (workdir)))
+         (text (if (uiop:probe-file* path) (uiop:read-file-string path) "")))
+    (agenda-test-log
+     (concatenate
+      'string
+      "CAPTURE-TARGET mode=~a origin=~a content=~a timestamp=~a "
+      "annotation=~a session=~a")
+     (symbol-name (buffer-major-mode (current-buffer)))
+     (if (search "Body event sentinel" (line-string (current-point)))
+         "yes" "no")
+     (if (search "Agenda cursor date capture" text) "yes" "no")
+     (if (search "[2026-07-13 Mon 00:00]" text) "yes" "no")
+     (if (search "[[file:" text) "yes" "no")
+     (if *org-capture-session* "yes" "no"))))
 
 (defun agenda-test-note-source-text ()
   (let* ((point (current-point))
@@ -527,6 +600,10 @@
   'lem-yath-test-agenda-goto-effort)
 (define-key *lem-yath-agenda-vi-keymap* "C-c 1"
   'lem-yath-test-agenda-goto-note)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 4"
+  'lem-yath-test-agenda-goto-capture)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 5"
+  'lem-yath-test-agenda-capture-target-report)
 (define-key *lem-yath-agenda-vi-keymap* "C-c 2"
   'lem-yath-test-agenda-note-report)
 (define-key *lem-yath-agenda-vi-keymap* "C-c 3"
@@ -581,3 +658,5 @@
   'lem-yath-test-agenda-note-session-report)
 (define-key *agenda-note-mode-keymap* "F8"
   'lem-yath-test-agenda-note-kill-buffer)
+(define-key *org-capture-mode-keymap* "F9"
+  'lem-yath-test-agenda-capture-report)

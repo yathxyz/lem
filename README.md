@@ -770,6 +770,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   property metadata and remains an unsaved ordinary source edit: agenda `u`
   leaves it alone, while source-buffer `u` removes it. Stale finalization keeps
   the draft available instead of changing the wrong heading.
+  Evil-Org `C` (or GNU-state `k`) opens the same configured `i/t/p/r` capture
+  selector with Org's agenda cursor-date override. A dated row or date header
+  supplies midnight on that displayed date to `%U`; numeric prefix 1 retains
+  the row's time, or the current clock time when the row is untimed. Undated
+  rows use the actual current time. Finalize and abort restore the exact agenda
+  row and Vi state, and row captures carry the bounded local source annotation.
   `ct`/`C-c C-q`
   provide completion-backed local-tag
   replacement and clearing. Planning and tag commands persist immediately.

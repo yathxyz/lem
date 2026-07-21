@@ -951,6 +951,15 @@ the trailing text-ready space. The profile binds no other org-journal command
   so the source remains modified and unsaved, agenda `u` leaves it alone, and
   ordinary source-buffer `u` removes it as one edit. Lem preserves that exact
   boundary and keeps a draft open when its source heading has gone stale.
+- Evil-Org `C` runs `org-agenda-capture`; the stock base-map key is `k`. Pinned
+  Org calls the configured `i/t/p/r` capture workflow with the agenda cursor's
+  displayed date as its default time. Without prefix, a dated row or date
+  header therefore expands `%U` at midnight on that date; numeric prefix 1
+  uses the row's `HH:MM`, or the current `HH:MM` for an untimed dated row.
+  Undated rows fall back to the actual current time. Lem reproduces those
+  boundaries, includes its bounded local source annotation on source-backed
+  rows, and restores the exact agenda point, window, and modal state after
+  finalize or abort.
 - Lem now covers the configured mutation paths exposed by that map: `dd`
   deletes a complete subtree with GNU Org's multi-line confirmation threshold,
   `ce` sets `Effort`, and `H`/`L` move the selected planning or ordinary-event

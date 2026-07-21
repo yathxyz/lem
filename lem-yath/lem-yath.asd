@@ -132,6 +132,7 @@
                              (:file "agenda-query")
                              (:file "agenda-stuck")
                              (:file "agenda-view")
+                             (:file "agenda-capture")
                              (:file "agenda-flagged")
                              (:file "agenda-preview")
                              (:file "agenda-note")

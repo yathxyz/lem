@@ -68,6 +68,14 @@ buffer teardown, exact agenda-row/window restoration, and the effective
 unsaved source-undo versus non-remote agenda-undo boundary are physically
 covered by `agenda-test.sh`.
 
+Evil-Org agenda `C`, plus GNU-state `k`, opens the configured `i/t/p/r` capture
+selector with the agenda cursor date. Dated rows and headers expand `%U` at
+midnight; numeric prefix 1 retains the row time or current time, while undated
+rows use the actual current time. Source-backed rows retain their bounded local
+annotation, and finalize/abort restore the exact agenda point, window, and Vi
+state. The physical agenda gate covers both state-specific bindings, the date,
+timed-prefix and undated boundaries, target persistence, and cleanup.
+
 ## Remaining capability gaps
 
 These bindings are intentionally not mapped to unrelated commands:

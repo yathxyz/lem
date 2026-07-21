@@ -24,7 +24,8 @@
   origin-point
   origin-state
   initial-text
-  annotation)
+  annotation
+  default-time)
 
 (defstruct org-capture-session
   request
@@ -65,15 +66,18 @@
                   (write-char #\\ output))
                 (write-char character output)))))
 
+(defun org-capture-file-annotation (filename line)
+  "Return the configured bounded %a annotation for FILENAME at LINE."
+  (let* ((path (uiop:native-namestring (pathname filename)))
+         (label (format nil "~a:~d" (file-namestring path) line)))
+    (format nil "[[file:~a::~d][~a]]"
+            (org-capture-link-escape path) line
+            (org-capture-link-escape label))))
+
 (defun org-capture-origin-annotation (buffer point)
   "Return the useful local-file subset of Org capture's %a annotation."
   (alexandria:when-let ((filename (ignore-errors (buffer-filename buffer))))
-    (let* ((path (uiop:native-namestring (pathname filename)))
-           (line (line-number-at-point point))
-           (label (format nil "~a:~d" (file-namestring path) line)))
-      (format nil "[[file:~a::~d][~a]]"
-              (org-capture-link-escape path) line
-              (org-capture-link-escape label)))))
+    (org-capture-file-annotation filename (line-number-at-point point))))
 
 (defun org-capture-restore-origin (request)
   (unless (org-capture-request-origin-live-p request)
@@ -174,7 +178,9 @@
            (stars (if publicp "*" "**"))
            (heading-prefix (format nil "~a ~@[~a~]" stars prefix))
            (timestamp
-             (inactive-org-timestamp (funcall *org-capture-time-function*)))
+             (inactive-org-timestamp
+              (or (org-capture-request-default-time request)
+                  (funcall *org-capture-time-function*))))
            (id (and publicp (funcall *org-capture-id-function*)))
            (initial (or (org-capture-request-initial-text request) ""))
            (annotation (or (org-capture-request-annotation request) ""))
@@ -398,14 +404,12 @@
            t)
          (progn (org-capture-clear-request request) nil)))))
 
-(define-command lem-yath-capture () ()
-  "Start the configured one-key i/t/p/r Org capture workflow."
+(defun org-capture-start (initial annotation &optional default-time)
+  "Start configured capture with explicit context and DEFAULT-TIME."
   (when (org-capture-focus-existing)
-    (return-from lem-yath-capture nil))
+    (return-from org-capture-start nil))
   (let* ((buffer (current-buffer))
          (point (current-point))
-         (initial (org-capture-active-region-text buffer))
-         (annotation (org-capture-origin-annotation buffer point))
          (request
            (make-org-capture-request
             :origin-buffer buffer
@@ -413,7 +417,8 @@
             :origin-point (copy-point point :right-inserting)
             :origin-state (lem-vi-mode/core:current-state)
             :initial-text initial
-            :annotation annotation)))
+            :annotation annotation
+            :default-time default-time)))
     (setf *org-capture-request* request)
     (add-hook (variable-value 'kill-buffer-hook :buffer buffer)
               'org-capture-origin-kill-buffer-hook)
@@ -423,6 +428,14 @@
                 (remove 'lem-yath-org-capture-template-mode
                         (buffer-minor-modes buffer))))
     (org-capture-template-message)))
+
+(define-command lem-yath-capture () ()
+  "Start the configured one-key i/t/p/r Org capture workflow."
+  (let ((buffer (current-buffer))
+        (point (current-point)))
+    (org-capture-start
+     (org-capture-active-region-text buffer)
+     (org-capture-origin-annotation buffer point))))
 
 (defun org-capture-cleanup-for-reload ()
   (alexandria:when-let ((session *org-capture-session*))

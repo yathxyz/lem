@@ -3469,6 +3469,15 @@ does not include `org-agenda-date-prompt`. Its asynchronous refresh consumes the
 modified live-buffer snapshot, so automatic and later `gr` refreshes show the
 unsaved result while disk remains unchanged.
 
+`src/apps/agenda-capture.lisp` implements Evil-Org `C` and the GNU-state `k`
+route through the existing configured `i/t/p/r` capture engine. It matches
+pinned `org-agenda-capture` cursor-date semantics: dated rows and date headers
+use midnight on the displayed date, numeric prefix 1 uses the row time or the
+current clock time, and undated rows retain the actual current time. A
+source-backed row contributes the bounded local file/line annotation. The
+shared capture session retains its private-buffer ownership, save guard,
+finalize/abort cleanup, and exact agenda point/window/Vi-state restoration.
+
 `src/apps/agenda-note.lisp` implements Evil-Org `a` and the GNU-state
 `z`/`C-c C-z` aliases as an isolated private Org-mode note session. `C-c C-c`
 stores the configured `Note taken on` timestamp/list syntax newest-first after

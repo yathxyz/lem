@@ -242,7 +242,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT gr=LEM-YATH-AGENDA-REFRESH gR=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO p=LEM-YATH-AGENDA-DATE-PROMPT a=LEM-YATH-AGENDA-ADD-NOTE schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT gr=LEM-YATH-AGENDA-REFRESH gR=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO p=LEM-YATH-AGENDA-DATE-PROMPT a=LEM-YATH-AGENDA-ADD-NOTE C=LEM-YATH-AGENDA-CAPTURE schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -452,6 +452,55 @@ if lem_wait_for "$session" 'Insert note for this entry' 10 >/dev/null; then
 else
   fail agenda-note-kill 'the teardown probe could not open a note session'
 fi
+
+# Evil-Org C delegates to the configured capture templates but pins %U to the
+# displayed agenda day.  Its numeric-prefix-1 helper retains an event time,
+# while undated rows fall back to the actual current time.
+tmux_cmd send-keys -t "$session" C-c 4 C
+if lem_wait_for "$session" 'Org capture:.*Inbox.*TODO' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" t
+  if lem_wait_for "$session" 'C-c C-c finalizes' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" F9
+    wait_report '^CAPTURE-REPORT serial=1 ' || true
+    if grep -q '^CAPTURE-REPORT serial=1 mode=ORG-MODE timestamp=yes annotation=yes origin=yes default=2026-07-13T00:00 prefixed=2026-07-13T10:00 fallback=2026-07-12T12:00 projected=2026-07-12T00:00$' "$LEM_YATH_AGENDA_REPORT"; then
+      pass agenda-capture-date 'C opened the configured template with exact cursor-date semantics'
+    else
+      fail agenda-capture-date 'agenda capture lost its date, source annotation, or prefix boundary'
+    fi
+    type_slow 'Agenda cursor date capture'
+    tmux_cmd send-keys -t "$session" C-c C-c
+    if lem_wait_for "$session" 'Captured to todo.org' 10 >/dev/null; then
+      tmux_cmd send-keys -t "$session" C-c 5
+      wait_report '^CAPTURE-TARGET ' || true
+      if grep -q '^CAPTURE-TARGET mode=LEM-YATH-AGENDA-MODE origin=yes content=yes timestamp=yes annotation=yes session=no$' "$LEM_YATH_AGENDA_REPORT"; then
+        pass agenda-capture-finalize 'capture saved once and restored the exact agenda row'
+      else
+        fail agenda-capture-finalize 'finalize lost the target content or agenda lifecycle'
+      fi
+    else
+      fail agenda-capture-finalize 'agenda capture did not finalize to the configured target'
+    fi
+  else
+    fail agenda-capture-template 'agenda capture did not open its editable template'
+  fi
+else
+  fail agenda-capture-open 'Evil-Org C did not open the configured selector'
+fi
+
+# The underlying GNU agenda map retains k for capture in Emacs state; aborting
+# at the selector must restore that state without opening a second session.
+tmux_cmd send-keys -t "$session" C-z k
+if lem_wait_for "$session" 'Org capture:.*Inbox.*TODO' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" C-g
+  if lem_wait_for "$session" 'Org capture cancelled' 10 >/dev/null; then
+    pass agenda-capture-base-key 'C-z k exposes the stock agenda capture route'
+  else
+    fail agenda-capture-base-key 'base-map capture cancellation leaked its selector'
+  fi
+else
+  fail agenda-capture-base-key 'C-z k did not resolve to agenda capture'
+fi
+tmux_cmd send-keys -t "$session" C-z
 
 tmux_cmd send-keys -t "$session" C-c e
 if ! lem_wait_for "$session" 'Effort action sentinel' 10 >/dev/null; then
