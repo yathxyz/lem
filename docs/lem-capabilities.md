@@ -3355,7 +3355,10 @@ form expands yearly with `%d` ages, inherited category/tag metadata, and an
 exact source-line visit; arbitrary Lisp diary sexps are never evaluated.
 COMMENT and ARCHIVE subtrees, drawers, source blocks, and comment lines are
 excluded, while completed headings can still contribute timestamp events as
-in GNU Org.
+in GNU Org. Rendered source rows show the effective category as their leading
+field and inherited/local tags in canonical Org syntax at the end; the exact
+file and line are retained as navigation properties rather than printed debug
+text.
 
 `src/apps/agenda-reminder.lisp` separately projects the pinned stock Org
 planning reminders over that immutable parse result. Open deadlines appear

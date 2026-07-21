@@ -107,6 +107,9 @@ wait_report '^KEYS normal ' || true
 metadata_ok=1
 grep -q '^STATE initial rows=7 .*cat="RootCat" .*tags=("filetag" "root" "child") effort="1:00" top="Alpha root filter sentinel"' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || metadata_ok=0
+grep -q 'RootCat:[[:space:]]*TODO[[:space:]]*Alpha child filter sentinel :filetag:root:child:' \
+  "$LEM_YATH_AGENDA_FILTER_REPORT" || metadata_ok=0
+grep -q '(filter.org:[0-9][0-9]*)' "$LEM_YATH_AGENDA_FILTER_REPORT" && metadata_ok=0
 grep -q '^KEYS normal sc=LEM-YATH-AGENDA-FILTER-BY-CATEGORY sr=LEM-YATH-AGENDA-FILTER-BY-REGEXP se=LEM-YATH-AGENDA-FILTER-BY-EFFORT st=LEM-YATH-AGENDA-FILTER-BY-TAG s\^=LEM-YATH-AGENDA-FILTER-BY-TOP-HEADLINE ss=LEM-YATH-AGENDA-LIMIT-INTERACTIVELY S=LEM-YATH-AGENDA-FILTER-REMOVE-ALL slash=' \
   "$LEM_YATH_AGENDA_FILTER_REPORT" || metadata_ok=0
 grep -q '^KEYS normal .*slash=LEM-YATH-AGENDA-FILTER-GENERAL$' \

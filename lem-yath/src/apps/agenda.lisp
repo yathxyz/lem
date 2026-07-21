@@ -1117,6 +1117,18 @@ completed unscheduled tasks stay out of the TODO section."
     (and start
          (if end (format nil "~a-~a" start end) start))))
 
+(defun agenda-item-display-text (item)
+  "Return ITEM text without the source headline's local tag cookie."
+  (let* ((text (agenda-item-text item))
+         (heading (agenda-item-heading item))
+         (local-tags (if heading (agenda-heading-tag-string heading) "")))
+    (if (and (plusp (length local-tags))
+             (alexandria:ends-with-subseq local-tags text))
+        (string-right-trim
+         '(#\Space #\Tab)
+         (subseq text 0 (- (length text) (length local-tags))))
+        text)))
+
 (defun agenda-display-line (item)
   "One display line for ITEM, including planning kind/date when present."
   (let ((planning
@@ -1144,15 +1156,16 @@ completed unscheduled tasks stay out of the TODO section."
                            (format nil "~d/~d"
                                    (agenda-item-occurrence-index item)
                                    (agenda-item-occurrence-count item))))
-              "")))
-    (format nil "~9a ~a~a   (~a:~a)"
+              ""))
+        (tags (agenda-item-tags item)))
+    (format nil "~12a ~9a ~a~a~@[ ~a~]"
+            (format nil "~a:" (or (agenda-item-category item) ""))
             (if (string= (agenda-item-kind item) "DIARY")
-                (format nil "~a:" (or (agenda-item-category item) ""))
+                ""
                 (or (agenda-item-keyword item) ""))
-            (agenda-item-text item)
+            (agenda-item-display-text item)
             planning
-            (file-namestring (agenda-item-file item))
-            (agenda-item-line item))))
+            (and tags (agenda-tag-string tags)))))
 
 (defun agenda-item-mark-base-key (item)
   "Return ITEM's source-aware identity, excluding duplicate render position."

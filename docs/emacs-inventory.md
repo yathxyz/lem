@@ -920,6 +920,9 @@ the trailing text-ready space. The profile binds no other org-journal command
 - The live top-level `notes.org` contains two `org-anniversary` diary sexps
   under category `Ann`. Lem expands that configured form yearly, including
   `%d` ages and inherited metadata, without evaluating arbitrary Lisp sexps.
+- Agenda rows expose GNU-style effective category prefixes and inherited/local
+  tag suffixes; their exact file and line remain navigation properties instead
+  of visible debug text.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
 - Evil-Org `Tab`, Shift-Return, and `g TAB` run `org-agenda-goto`, opening the
