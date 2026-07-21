@@ -204,7 +204,11 @@ Status legend:
   vocabulary. In the flagged view, item motion also echoes the selected row's
   `THEFLAGGINGNOTE` with Org's literal `\\n` to `//` normalization. This is
   intentionally motion-triggered rather than a global post-command hook so it
-  cannot replace unrelated mutation or error messages.
+  cannot replace unrelated mutation or error messages. Agenda `?` itself
+  pushes the raw note to the kill ring, displays its expanded multiline form
+  in a non-selected `*Flagging Note*` split, and on a consecutive invocation
+  offers to remove `FLAGGED`, `THEFLAGGINGNOTE`, and an emptied drawer. The
+  source mutation saves immediately and participates in remote `u`.
 - **Completion previews**: the grouped project picker and directory-local
   Elisp outline provide reversible Consult-style preview. Generic command,
   file, buffer, and LSP-symbol prompts still do not preview their targets.

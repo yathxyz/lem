@@ -48,6 +48,19 @@
      (and restriction (agenda-restriction-start-line restriction))
      (and restriction (agenda-restriction-end-line restriction)))))
 
+(define-command lem-yath-test-agenda-flagging-note-state () ()
+  (let ((buffer (get-buffer "*Flagging Note*")))
+    (multiple-value-bind (kill-text options)
+        (lem/common/killring:peek-killring-item (current-killring) 0)
+      (declare (ignore options))
+      (agenda-dispatch-test-log
+       "NOTE focus=~a buffer=~a multiline=~a kill-raw=~a"
+       (string= (buffer-name (current-buffer)) "*lem-yath-agenda*")
+       (not (null buffer))
+       (and buffer
+            (string= (buffer-text buffer) (format nil "review~%source")))
+       (and kill-text (string= kill-text "review\\nsource"))))))
+
 (define-command lem-yath-test-agenda-dispatch-region () ()
   "Activate an exact source region spanning the second and third headings."
   (let ((buffer (current-buffer)))
@@ -74,6 +87,9 @@
 
 (define-key *lem-yath-agenda-mode-keymap* "C-c z d"
   'lem-yath-test-agenda-dispatch-state)
+
+(define-key *lem-yath-agenda-mode-keymap* "C-c z f"
+  'lem-yath-test-agenda-flagging-note-state)
 
 (define-key *org-mode-keymap* "C-c z r"
   'lem-yath-test-agenda-dispatch-region)

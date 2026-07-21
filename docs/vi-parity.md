@@ -53,6 +53,9 @@ entries and `#` stuck projects; the latter matches Org's default level-two
 project rule and raw `TODO`/`NEXT`/`NEXTACTION` subtree tokens. Moving with
 `gj`/`gk` or `C-j`/`C-k` onto a flagged row also echoes its
 `THEFLAGGINGNOTE`, including Org's stored `\\n` to `//` display conversion.
+Agenda `?` opens and copies the full note while retaining focus; a consecutive
+`?` offers the stock unflag operation, with the saved mutation available to
+remote `u` in the live source buffer.
 
 ## Remaining capability gaps
 

@@ -737,9 +737,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   totals without leaking another file or out-of-region body line. Stock `?`
   lists `FLAGGED` headings; moving onto one with a `THEFLAGGINGNOTE` property
   echoes Org's `FLAGGING-NOTE` feedback and converts stored `\\n` separators
-  to `//`. Stock `#` applies the default level-two stuck-project definition
-  including raw `NEXTACTION` headings outside the configured TODO vocabulary.
-  It also has
+  to `//`. On a row, `?` copies the raw property to the kill ring and opens its
+  multiline `*Flagging Note*` split without taking agenda focus; a consecutive
+  `?` can durably remove the tag, note, and an emptied property drawer as one
+  remote-undo transaction. Stock `#` applies the default level-two
+  stuck-project definition including raw `NEXTACTION` headings outside the
+  configured TODO vocabulary. It also has
   modal Return/`gr`/q navigation, Evil-Org `Tab`/`g Tab`/Shift-Return source
   visits in another window, decoration-skipping `gj`/`gk` and `C-j`/`C-k`
   item motion, and Evil-Org-style `t` fast TODO selection plus

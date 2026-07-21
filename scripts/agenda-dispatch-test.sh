@@ -173,6 +173,15 @@ if lem_wait_for "$session" 'FLAGGING-NOTE \(\[\?\] for more info\): review//sour
 else
   fail flagged-note 'flagged-row movement did not echo the source property'
 fi
+send_keys '?'
+lem_wait_for "$session" "Flagging note pushed to kill ring\. Press '\?' again" 10 >/dev/null || true
+send_keys C-c z f
+wait_report '^NOTE focus=T buffer=T multiline=T kill-raw=T$' || true
+if grep -q '^NOTE focus=T buffer=T multiline=T kill-raw=T$' "$LEM_YATH_AGENDA_DISPATCH_REPORT"; then
+  pass flagged-detail '? kept agenda focus, showed a multiline note, and copied its raw value'
+else
+  fail flagged-detail '? changed focus or produced the wrong detail/kill-ring representation'
+fi
 send_keys C-c z d
 wait_report '^STATE command=FLAGGED .*rows=1 ' || true
 if grep -q '^STATE command=FLAGGED .*rows=1 .*Past dispatch sentinel' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
@@ -218,7 +227,7 @@ lem_wait_for "$session" 'Past dispatch sentinel' 10 >/dev/null || true
 send_keys Space m a
 lem_wait_for "$session" 'Agenda and all TODOs' 20 >/dev/null || true
 send_keys n
-lem_wait_for "$session" '│TODOs' 30 >/dev/null || true
+lem_wait_for "$session" '^Agenda  \(2026-07-17\)' 30 >/dev/null || true
 send_keys C-c z d
 wait_report '^STATE command=SUMMARY span=SUMMARY keyword=NIL ' || true
 if grep -q '^STATE command=SUMMARY span=SUMMARY keyword=NIL .*Unscheduled dispatch sentinel' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
@@ -333,6 +342,37 @@ fi
 
 cmp -s "$work_file" "$original_file" ||
   fail safety 'dispatcher views changed their Org source'
+
+# A consecutive second ? is the one intentional mutation in this fixture:
+# Org offers to remove both the tag and note, closes the detail split, saves,
+# and refreshes the now-empty +FLAGGED view.
+send_keys q
+lem_wait_for "$session" 'Past dispatch sentinel' 10 >/dev/null || true
+send_keys Space m a
+lem_wait_for "$session" '\? flagged, # stuck' 10 >/dev/null || true
+send_keys '?'
+lem_wait_for "$session" 'Headlines with TAGS match: \+FLAGGED' 30 >/dev/null || true
+send_keys g j '?'
+lem_wait_for "$session" "Flagging note pushed to kill ring\. Press '\?' again" 10 >/dev/null || true
+send_keys '?'
+lem_wait_for "$session" 'Unflag and remove any flagging note\?' 10 >/dev/null || true
+send_keys y
+if lem_wait_for "$session" 'Entry unflagged' 10 >/dev/null &&
+   grep -qx '\* TODO Past dispatch sentinel' "$work_file" &&
+   ! grep -q 'FLAGGED\|THEFLAGGINGNOTE\|^:PROPERTIES:$\|^:END:$' "$work_file" &&
+   ! lem_capture "$session" | grep -q '\*Flagging Note\*'; then
+  pass flagged-remove 'consecutive ? removed tag, note, empty drawer, and detail split'
+else
+  fail flagged-remove 'consecutive ? did not persist the exact unflag mutation'
+fi
+
+send_keys u
+if lem_wait_for "$session" 'Past dispatch sentinel.*FLAGGED' 30 >/dev/null &&
+   ! grep -q 'FLAGGED\|THEFLAGGINGNOTE\|^:PROPERTIES:$\|^:END:$' "$work_file"; then
+  pass flagged-undo 'u restored the complete flagging metadata live without rewriting disk'
+else
+  fail flagged-undo 'remote undo lost metadata or crossed the saved-file boundary'
+fi
 
 if [ "$FAILED" -ne 0 ]; then
   printf '\nAgenda dispatcher tests failed.\n' >&2
