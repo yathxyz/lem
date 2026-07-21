@@ -3350,7 +3350,11 @@ non-hidden lowercase `.org` files. The parser recognizes the configured TODO
 sequence plus immediate Org planning lines, preserves separate SCHEDULED and
 DEADLINE rows, and groups entries into overdue, today, seven-day upcoming, and
 unscheduled TODO sections. Ordinary active timestamps on headings or body text
-join the today/upcoming sections; inactive timestamps do not. Timed events
+join the today/upcoming sections. Inactive timestamps stay hidden by default;
+Evil-Org Normal-state `+` or `-` includes them for that one asynchronous redo,
+preserves the logical row, and leaves every source byte-identical. A later
+ordinary `gr` returns to the configured nil default, while Emacs-state `+` and
+`-` retain the GNU priority commands. Timed events
 retain their start and optional same-day end time, date ranges expand
 inclusively with occurrence indices and per-day endpoint times, and `+`, `++`,
 and `.+` hour/day/week/month/year repeaters generate the same agenda
@@ -3737,7 +3741,7 @@ prefix/cache variants, custom archive destinations and local archive
 sibling/tag commands, bulk archive-sibling/scatter/arbitrary-function/persistent-
 mark variants, clock recent-task/prefix variants, custom numeric report spans,
 tag-group/preset/configured-auto-exclusion filtering,
-the other `gD` display toggles (time grid, diary, inactive timestamps, follow,
+the other `gD` display toggles (time grid, diary, follow,
 log, archive, and entry text), `p` timestamp editing, and the
 wider org-super-agenda presentation remain explicit gaps.
 

@@ -91,7 +91,7 @@ called with a source file and source line.")
   category tags effort top-headline level properties search-text
   planning-suffix metadata-line
   anniversary-year anniversary-month anniversary-day
-  display-date reminder-kind reminder-days)
+  display-date reminder-kind reminder-days inactive-p)
 
 (defstruct (agenda-item-metadata (:constructor make-agenda-item-metadata))
   category tags effort top-headline level properties search-text)
@@ -125,6 +125,11 @@ called with a source file and source line.")
 (defvar *active-timestamp-scanner*
   (ppcre:create-scanner "<([^>\\r\\n]+)>(?:--<([^>\\r\\n]+)>)?")
   "Matches one active Org timestamp or timestamp range.")
+
+(defvar *inactive-timestamp-scanner*
+  (ppcre:create-scanner
+   "\\[((?:\\d{4}-\\d{2}-\\d{2})[^]\\r\\n]*)\\](?:--\\[((?:\\d{4}-\\d{2}-\\d{2})[^]\\r\\n]*)\\])?")
+  "Matches one inactive Org timestamp or timestamp range.")
 
 (defvar *timestamp-date-scanner*
   (ppcre:create-scanner "^(\\d{4}-\\d{2}-\\d{2})(?:\\s|$)")
@@ -409,8 +414,51 @@ called with a source file and source line.")
               (setf offset end))
         :finally (return (nreverse specs))))
 
+(defun agenda-inactive-timestamp-specs (line)
+  "Return valid inactive timestamp specifications found in LINE.
+
+Bracket pairs belonging to an Org link are not timestamps."
+  (loop :with offset = 0
+        :with specs
+        :while (< offset (length line))
+        :do (multiple-value-bind (start end registers register-ends)
+                (ppcre:scan *inactive-timestamp-scanner* line :start offset)
+              (unless start (return (nreverse specs)))
+              (unless (or (and (plusp start)
+                               (char= (char line (1- start)) #\[))
+                          (and (< end (length line))
+                               (char= (char line end) #\])))
+                (let ((first
+                        (subseq line (aref registers 0)
+                                (aref register-ends 0)))
+                      (second
+                        (and (aref registers 1)
+                             (subseq line (aref registers 1)
+                                     (aref register-ends 1)))))
+                  (multiple-value-bind (date time end-time repeater)
+                      (agenda-parse-active-timestamp first)
+                    (when date
+                      (multiple-value-bind (end-date range-end-time)
+                          (if second
+                              (agenda-parse-active-timestamp second)
+                              (values nil nil))
+                        (push (list :date date :time time
+                                    :end-time end-time
+                                    :range-end-time range-end-time
+                                    :repeater repeater
+                                    :end-date end-date
+                                    :first-raw (format nil "[~a]" first)
+                                    :second-raw
+                                    (and second (format nil "[~a]" second))
+                                    :start start
+                                    :raw (subseq line start end))
+                              specs))))))
+              (setf offset end))
+        :finally (return (nreverse specs))))
+
 (defun agenda-item-with-event
-    (item spec source-line-number source-line &optional heading-line-p)
+    (item spec source-line-number source-line
+     &optional heading-line-p inactive-p)
   (let ((text
           (if (and heading-line-p (null (getf spec :end-date)))
               (string-trim
@@ -441,7 +489,8 @@ called with a source file and source line.")
        :timestamp-raw (getf spec :raw)
        :timestamp-first-raw (getf spec :first-raw)
        :timestamp-second-raw (getf spec :second-raw)
-       :timestamp-heading-line-p heading-line-p))))
+       :timestamp-heading-line-p heading-line-p
+       :inactive-p inactive-p))))
 
 (defun parse-org-stream (in path)
   "Return parsed agenda items and, as a second value, parser warnings.
@@ -465,6 +514,12 @@ Ordinary active timestamps belong to their containing visible heading."
                           (push (agenda-item-with-event
                                  current spec lineno line
                                  (string= line (agenda-item-heading current)))
+                                items))
+                        (dolist (spec (agenda-inactive-timestamp-specs line))
+                          (push (agenda-item-with-event
+                                 current spec lineno line
+                                 (string= line (agenda-item-heading current))
+                                 t)
                                 items))))
                     (comment-heading-p (text)
                       (or (string= text "COMMENT")
@@ -1385,22 +1440,29 @@ completed unscheduled tasks stay out of the TODO section."
       (unless (line-offset point 1)
         (return nil)))))
 
-(defun render-agenda (buffer items &optional failures clock-report)
+(defun render-agenda
+    (buffer items &optional failures clock-report include-inactive-p)
   "Fill BUFFER with grouped ITEMS and any source FAILURES on the editor thread."
-  (let ((now (funcall *agenda-now-function*))
+  (let* ((now (funcall *agenda-now-function*))
         (restore-key (buffer-value buffer 'lem-yath-agenda-restore-entry))
         (duplicate-counts (make-hash-table :test #'equal))
+        (eligible-items
+          (if include-inactive-p
+              items
+              (remove-if #'agenda-item-inactive-p items)))
         (visible-items
           (if *agenda-item-filter-function*
               (remove-if-not
                (lambda (item)
                  (funcall *agenda-item-filter-function* buffer item))
-               items)
-              items)))
+               eligible-items)
+              eligible-items)))
     (setf (buffer-value buffer 'lem-yath-agenda-cached-items) items
           (buffer-value buffer 'lem-yath-agenda-cached-failures) failures
           (buffer-value buffer 'lem-yath-agenda-cached-clock-report)
           clock-report
+          (buffer-value buffer 'lem-yath-agenda-render-includes-inactive)
+          include-inactive-p
           (buffer-value buffer 'lem-yath-agenda-cache-ready) t)
     (setf (buffer-value buffer 'lem-yath-agenda-restore-entry) nil)
     (with-buffer-read-only buffer nil
@@ -1516,7 +1578,12 @@ completed unscheduled tasks stay out of the TODO section."
   (when (and (agenda-buffer-live-p buffer)
              (mode-active-p buffer 'lem-yath-agenda-mode)
              (= generation (agenda-buffer-generation buffer)))
-    (render-agenda buffer items failures clock-report)
+    (render-agenda
+     buffer items failures clock-report
+     (= generation
+        (or (buffer-value
+             buffer 'lem-yath-agenda-include-inactive-generation)
+            -1)))
     t))
 
 (defun agenda-scan-running-p (buffer)
@@ -2396,6 +2463,10 @@ suffix."
 (define-key *lem-yath-agenda-vi-keymap* "J" 'lem-yath-agenda-priority-down)
 (define-key *lem-yath-agenda-vi-keymap* "c t" 'lem-yath-agenda-set-tags)
 (define-key *lem-yath-agenda-vi-keymap* "g t" 'lem-yath-agenda-show-tags)
+(define-key *lem-yath-agenda-vi-keymap* "+"
+  'lem-yath-agenda-include-inactive-timestamps)
+(define-key *lem-yath-agenda-vi-keymap* "-"
+  'lem-yath-agenda-include-inactive-timestamps)
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-q" 'lem-yath-agenda-set-tags)
 (define-key *lem-yath-agenda-vi-keymap* "q" 'quit-active-window)
 

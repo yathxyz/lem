@@ -13,6 +13,8 @@
 (defvar *agenda-test-capture-report-serial* 0)
 (defvar *agenda-test-drag-report-serial* 0)
 (defvar *agenda-test-todo-set-report-serial* 0)
+(defvar *agenda-test-inactive-report-serial* 0)
+(defvar *agenda-test-inactive-last-generation* nil)
 (defvar *agenda-test-original-top-level-org-files* nil)
 (defvar *agenda-test-stale-source* nil)
 
@@ -165,6 +167,11 @@
      (agenda-test-command-name "C-c L"))
     (agenda-test-log "INSPECT-BINDINGS serial=~d tags=~a"
                      serial (agenda-test-command-name "g t"))
+    (agenda-test-log
+     "QUERY-BINDINGS serial=~d add=~a subtract=~a"
+     serial
+     (agenda-test-command-name "+")
+     (agenda-test-command-name "-"))
     (loop :for directory :in directories
           :for index :from 1
           :do (agenda-test-log "ROOT serial=~d index=~d path=~a"
@@ -214,6 +221,24 @@
      (text-property-at point :agenda-heading)
      (if (point= original point) "yes" "no")
      (if (buffer-modified-p (current-buffer)) "yes" "no"))))
+
+(define-command lem-yath-test-agenda-inactive-report () ()
+  (let ((generation (agenda-buffer-generation (current-buffer))))
+    (unless (or (agenda-scan-running-p (current-buffer))
+                (eql generation *agenda-test-inactive-last-generation*))
+      (setf *agenda-test-inactive-last-generation* generation)
+      (let ((count 0)
+            (current (line-string (current-point)))
+            (serial (incf *agenda-test-inactive-report-serial*)))
+      (with-point ((point (buffer-start-point (current-buffer))))
+        (loop
+          (when (search "Inactive event exclusion sentinel"
+                        (line-string point))
+            (incf count))
+          (unless (line-offset point 1) (return))))
+      (agenda-test-log
+       "INACTIVE serial=~d count=~d current=~s generation=~d"
+       serial count current generation)))))
 
 (define-command lem-yath-test-agenda-goto-effort () ()
   (move-point (current-point)
@@ -696,6 +721,8 @@
   'lem-yath-test-agenda-goto-todo-set)
 (define-key *lem-yath-agenda-vi-keymap* "C-c 9"
   'lem-yath-test-agenda-todo-set-report)
+(define-key *lem-yath-agenda-vi-keymap* "C-c I"
+  'lem-yath-test-agenda-inactive-report)
 (define-key *lem-yath-agenda-vi-keymap* "C-c D"
   'lem-yath-test-agenda-goto-diary-guard)
 (define-key *lem-yath-agenda-vi-keymap* "C-c e"

@@ -932,6 +932,13 @@ the trailing text-ready space. The profile binds no other org-journal command
   applicable tag list in inherited-to-local order or the stock no-tags message
   without changing agenda or source state. Lem reproduces both messages from
   the row metadata already used for rendering and filtering.
+- Evil-Org motion-state `+` and `-` both run pinned
+  `org-agenda-manipulate-query`. In an agenda date view, either command rebuilds
+  that one display with inactive timestamps included and reports the stock
+  message; the next ordinary `gr` rebuild returns to the configured nil
+  `org-agenda-include-inactive-timestamps` default. Lem preserves that
+  generation-local behavior and point while Emacs-state `+`/`-` retain GNU
+  Org's priority commands.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
 - Evil-Org `Tab`, Shift-Return, and `g TAB` run `org-agenda-goto`, opening the

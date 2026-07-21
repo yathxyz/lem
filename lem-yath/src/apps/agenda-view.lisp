@@ -276,6 +276,23 @@
   (setf (agenda-view-state-pending-date state) pending-date)
   (agenda-start-scan (current-buffer)))
 
+(defun agenda-date-view-p (buffer)
+  "Return true when BUFFER is displaying an agenda date block."
+  (member (agenda-view-state-command (agenda-view-state buffer))
+          '(:agenda :summary :span)))
+
+(define-command lem-yath-agenda-include-inactive-timestamps () ()
+  "Redo a date agenda with inactive timestamps, like Evil-Org + and -."
+  (let ((buffer (current-buffer)))
+    (when (agenda-date-view-p buffer)
+      (setf (buffer-value buffer 'lem-yath-agenda-restore-entry)
+            (agenda-entry-key-at-point (buffer-point buffer))
+            (buffer-value
+             buffer 'lem-yath-agenda-include-inactive-generation)
+            (1+ (agenda-buffer-generation buffer)))
+      (agenda-start-scan buffer)
+      (message "Display now includes inactive timestamps as well"))))
+
 (defun agenda-view-change-span (span)
   (let* ((state (agenda-view-state))
          (date (agenda-view-current-date state))

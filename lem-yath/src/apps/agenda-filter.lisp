@@ -246,7 +246,8 @@
           (render-agenda
            buffer items
            (buffer-value buffer 'lem-yath-agenda-cached-failures)
-           (buffer-value buffer 'lem-yath-agenda-cached-clock-report))
+           (buffer-value buffer 'lem-yath-agenda-cached-clock-report)
+           (buffer-value buffer 'lem-yath-agenda-render-includes-inactive))
           t))))
 
 (defun agenda-filter-current-value (property description)

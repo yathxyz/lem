@@ -157,7 +157,7 @@ printf '%s\n' \
   '* Monthly repeat sentinel <2026-06-15 Mon +1m>' \
   '* Yearly repeat sentinel <2025-07-15 Tue +1y>' \
   '* DONE Completed event sentinel <2026-07-13 Mon>' \
-  '* Inactive event exclusion sentinel [2026-07-14 Tue]' \
+  '* Inactive event exclusion sentinel [2026-07-14 Tue] [[2026-07-15][date decoy]]' \
   '* COMMENT Comment subtree exclusion sentinel <2026-07-13 Mon>' \
   '** TODO Comment child exclusion sentinel' \
   '* Archived subtree exclusion sentinel :ARCHIVE:' \
@@ -253,6 +253,7 @@ else
   grep -q '^OPEN-MOTION serial=1 tab=LEM-YATH-AGENDA-GOTO shift-return=LEM-YATH-AGENDA-GOTO gtab=LEM-YATH-AGENDA-GOTO gj=LEM-YATH-AGENDA-NEXT-ITEM gk=LEM-YATH-AGENDA-PREVIOUS-ITEM Cj=LEM-YATH-AGENDA-NEXT-ITEM Ck=LEM-YATH-AGENDA-PREVIOUS-ITEM Mj=LEM-YATH-AGENDA-DRAG-LINE-FORWARD Mk=LEM-YATH-AGENDA-DRAG-LINE-BACKWARD space=LEM-YATH-AGENDA-SHOW-AND-SCROLL-UP backspace=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN delete=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN mret=LEM-YATH-AGENDA-RECENTER-SOURCE P=LEM-YATH-AGENDA-SHOW-FLAGGING-NOTE$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TODO-SET-BINDINGS serial=1 previous=LEM-YATH-AGENDA-TODO-PREVIOUSSET next=LEM-YATH-AGENDA-TODO-NEXTSET fallback-previous=LEM-YATH-AGENDA-TODO-PREVIOUSSET fallback-next=LEM-YATH-AGENDA-TODO-NEXTSET$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^INSPECT-BINDINGS serial=1 tags=LEM-YATH-AGENDA-SHOW-TAGS$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -q '^QUERY-BINDINGS serial=1 add=LEM-YATH-AGENDA-INCLUDE-INACTIVE-TIMESTAMPS subtract=LEM-YATH-AGENDA-INCLUDE-INACTIVE-TIMESTAMPS$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,movetag,parenttag,shared,targettag items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 39 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -294,6 +295,59 @@ else
   else
     fail sources "source set, grouping, or effective keymap differed"
   fi
+fi
+
+# In Evil-Org motion state, + and - both rerun a date agenda with inactive
+# timestamps.  The dynamic Org setting applies to that redo only: an ordinary
+# gr rebuild returns to the configured nil default.  Emacs-state +/- retain
+# the base agenda priority bindings because the Vi map is inactive there.
+inactive_source_before="$(sha256sum "$work_file" | cut -d' ' -f1)"
+tmux_cmd send-keys -t "$session" F12 +
+for _ in $(seq 1 120); do
+  tmux_cmd send-keys -t "$session" C-c I
+  grep -q '^INACTIVE serial=1 ' "$LEM_YATH_AGENDA_REPORT" 2>/dev/null && break
+  sleep 0.1
+done
+if grep -q '^INACTIVE serial=1 count=1 current=.*Work unscheduled sentinel.*generation=[1-9][0-9]*$' \
+     "$LEM_YATH_AGENDA_REPORT"; then
+  pass agenda-inactive-add '+ included the inactive timestamp and restored point'
+else
+  fail agenda-inactive-add '+ did not perform the pinned one-redo inclusion'
+fi
+
+tmux_cmd send-keys -t "$session" g r
+for _ in $(seq 1 120); do
+  tmux_cmd send-keys -t "$session" C-c I
+  grep -q '^INACTIVE serial=2 ' "$LEM_YATH_AGENDA_REPORT" 2>/dev/null && break
+  sleep 0.1
+done
+if grep -q '^INACTIVE serial=2 count=0 ' "$LEM_YATH_AGENDA_REPORT"; then
+  pass agenda-inactive-reset 'gr restored the configured inactive-timestamp default'
+else
+  fail agenda-inactive-reset 'inactive timestamps leaked into a later refresh'
+fi
+
+tmux_cmd send-keys -t "$session" -
+for _ in $(seq 1 120); do
+  tmux_cmd send-keys -t "$session" C-c I
+  grep -q '^INACTIVE serial=3 ' "$LEM_YATH_AGENDA_REPORT" 2>/dev/null && break
+  sleep 0.1
+done
+inactive_source_after="$(sha256sum "$work_file" | cut -d' ' -f1)"
+if grep -q '^INACTIVE serial=3 count=1 ' "$LEM_YATH_AGENDA_REPORT" &&
+   [ "$inactive_source_before" = "$inactive_source_after" ]; then
+  pass agenda-inactive-subtract '- included inactive timestamps without mutation'
+else
+  fail agenda-inactive-subtract '- changed source state or failed to include the row'
+fi
+tmux_cmd send-keys -t "$session" g r
+for _ in $(seq 1 120); do
+  tmux_cmd send-keys -t "$session" C-c I
+  grep -q '^INACTIVE serial=4 ' "$LEM_YATH_AGENDA_REPORT" 2>/dev/null && break
+  sleep 0.1
+done
+if ! grep -q '^INACTIVE serial=4 count=0 ' "$LEM_YATH_AGENDA_REPORT"; then
+  fail agenda-inactive-cleanup 'final refresh did not settle before later agenda commands'
 fi
 
 # Evil-Org g t reports the effective inherited/local tags at point and handles
