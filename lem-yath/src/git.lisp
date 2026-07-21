@@ -955,6 +955,8 @@
     (lem/legit::with-collecting-sources
         (collector :buffer :status :minor-mode 'lem/legit::peek-legit-mode)
       (let* ((buffer (lem/legit::collector-buffer collector))
+             (*legit-todo-result-limit*
+               (* *legit-todo-result-limit* *legit-todo-buffer-item-factor*))
              (*legit-todo-max-items*
                (* *legit-todo-max-items* *legit-todo-buffer-item-factor*))
              (*legit-todo-auto-group-items*

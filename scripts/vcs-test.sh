@@ -2927,7 +2927,7 @@ todo_list_before=$(report_count '^TODO-LIST ')
 send_keys "$git_session" C-c P Enter C-c Q
 if wait_report_count '^TODO-LIST ' "$((todo_list_before + 1))" &&
    [[ $(latest_report '^TODO-LIST ') == \
-      'TODO-LIST active=yes root=yes top=yes hidden=no grouped=no title=yes latest=no' ]]; then
+      'TODO-LIST active=yes root=yes top=yes hidden=no grouped=no large=no title=yes latest=no' ]]; then
   pass legit-todo-dedicated-list \
     'Return on the TODO heading opened the expanded dedicated list'
 else
@@ -2939,7 +2939,7 @@ fi
 send_keys "$git_session" g C-c Q
 if wait_report_count '^TODO-LIST ' "$((todo_list_before + 2))" &&
    [[ $(latest_report '^TODO-LIST ') == \
-      'TODO-LIST active=yes root=yes top=yes hidden=no grouped=no title=yes latest=no' ]]; then
+      'TODO-LIST active=yes root=yes top=yes hidden=no grouped=no large=no title=yes latest=no' ]]; then
   pass legit-todo-dedicated-refresh 'g refreshed the dedicated TODO list in place'
 else
   fail legit-todo-dedicated-refresh \
@@ -2949,7 +2949,7 @@ fi
 send_keys "$git_session" q C-c Q
 if wait_report_count '^TODO-LIST ' "$((todo_list_before + 3))" &&
    [[ $(latest_report '^TODO-LIST ') == \
-      'TODO-LIST active=yes root=no top=no hidden=no grouped=no title=no latest=yes' ]]; then
+      'TODO-LIST active=yes root=no top=no hidden=no grouped=no large=no title=no latest=yes' ]]; then
   pass legit-todo-dedicated-quit \
     'q returned from the TODO list to ordinary Git status for the same repository'
 else
@@ -3103,6 +3103,35 @@ if wait_report_count '^TODO-SECTIONS ' "$((todo_sections_before + 10))" &&
   pass legit-todo-branch-toggle-on 'a second b forced branch TODOs back on'
 else
   fail legit-todo-branch-toggle-on 'b did not re-enable branch TODO presentation' \
+    "$git_session"
+fi
+
+dedicated_extra=0
+while ((dedicated_extra < 183)); do
+  printf 'TODO: dedicated list threshold %03d\n' "$dedicated_extra"
+  dedicated_extra=$((dedicated_extra + 1))
+done >>"$LEM_YATH_VCS_GIT_ROOT/nested/docs/keywords.txt"
+todo_list_large_before=$(report_count '^TODO-LIST ')
+send_keys "$git_session" g C-c P Enter C-c Q
+if wait_report_count '^TODO-LIST ' "$((todo_list_large_before + 1))" &&
+   [[ $(latest_report '^TODO-LIST ') == \
+      'TODO-LIST active=yes root=yes top=yes hidden=yes grouped=yes large=yes title=yes latest=no' ]]; then
+  pass legit-todo-dedicated-thresholds \
+    'the dedicated list retained 201 items and applied its exact 100/200 thresholds'
+else
+  fail legit-todo-dedicated-thresholds \
+    'the dedicated list truncated before or missed its tenfold thresholds' \
+    "$git_session"
+fi
+send_keys "$git_session" q C-c Q
+if wait_report_count '^TODO-LIST ' "$((todo_list_large_before + 2))" &&
+   [[ $(latest_report '^TODO-LIST ') == \
+      'TODO-LIST active=yes root=no top=no hidden=no grouped=yes large=no title=no latest=yes' ]]; then
+  pass legit-todo-dedicated-large-quit \
+    'q restored ordinary capped status after the large dedicated list'
+else
+  fail legit-todo-dedicated-large-quit \
+    'q did not restore ordinary status after the large dedicated list' \
     "$git_session"
 fi
 "$git_bin" -C "$LEM_YATH_VCS_GIT_ROOT" restore -- nested/docs/keywords.txt

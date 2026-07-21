@@ -1164,12 +1164,13 @@
                          sections)))
          (text (and buffer (buffer-text buffer))))
     (vcs-test-log
-     "TODO-LIST active=~a root=~a top=~a hidden=~a grouped=~a title=~a latest=~a"
+     "TODO-LIST active=~a root=~a top=~a hidden=~a grouped=~a large=~a title=~a latest=~a"
      (vcs-test-yes-no active)
      (vcs-test-yes-no root)
      (vcs-test-yes-no top)
      (vcs-test-yes-no (and top (legit-todo-section-hidden-p top)))
      (vcs-test-yes-no grouped)
+     (vcs-test-yes-no (and text (search "Todos (201):" text)))
      (vcs-test-yes-no (and text (search "TODOs for " text)))
      (vcs-test-yes-no (and text (search "Latest commits:" text))))))
 

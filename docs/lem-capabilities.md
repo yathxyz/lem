@@ -2687,7 +2687,9 @@ Org-heading form, and its required colon with optional parenthesized/bracketed
 suffix elsewhere;
 configured ignored `NOTE` and `DONE` plus bare prose are excluded. The
 synchronous ripgrep scan runs at the package's default `nice -n5` priority and
-stops at 200 rendered results, 1 MiB of output, or five seconds. Lists stay
+stops at 200 rendered status results, 1 MiB of output, or five seconds. The
+dedicated view raises only the result bound tenfold to 2,000 so its 200-item
+grouping threshold remains reachable. Lists stay
 flat through 20 items and then group by keyword and
 filename. The top-level section initially folds above 10 items, nested limits
 shrink with depth, `Tab` toggles a TODO heading without replacing Legit's
