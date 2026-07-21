@@ -133,6 +133,7 @@
                              (:file "agenda-query")
                              (:file "agenda-stuck")
                              (:file "agenda-view")
+                             (:file "agenda-diary")
                              (:file "agenda-capture")
                              (:file "agenda-drag")
                              (:file "agenda-flagged")

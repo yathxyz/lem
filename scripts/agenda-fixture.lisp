@@ -17,6 +17,7 @@
 (defvar *agenda-test-inactive-last-generation* nil)
 (defvar *agenda-test-lifecycle-report-serial* 0)
 (defvar *agenda-test-timer-report-serial* 0)
+(defvar *agenda-test-diary-report-serial* 0)
 (defvar *agenda-test-original-top-level-org-files* nil)
 (defvar *agenda-test-stale-source* nil)
 
@@ -197,6 +198,22 @@
      (org-countdown-input-seconds "5")
      (org-countdown-input-seconds "1:30")
      (org-countdown-input-seconds "1:02:03"))
+    (agenda-test-log
+     (concatenate
+      'string
+      "DIARY-BINDINGS serial=~d i=~a base=~a "
+      "formats=~a|~a|~a|~a|~a|~a|~a nonmark=~a")
+     serial
+     (agenda-test-command-name "i")
+     (agenda-test-map-command-name *lem-yath-agenda-mode-keymap* "i")
+     (agenda-diary-entry-prefix :day "2026-07-21")
+     (agenda-diary-entry-prefix :weekly "2026-07-21")
+     (agenda-diary-entry-prefix :monthly "2026-07-21")
+     (agenda-diary-entry-prefix :yearly "2026-07-21")
+     (agenda-diary-entry-prefix :anniversary "2026-07-21")
+     (agenda-diary-entry-prefix :cyclic "2026-07-21" nil 3)
+     (agenda-diary-entry-prefix :block "2026-07-22" "2026-07-20")
+     (agenda-diary-entry-text "Jul 21, 2026" t nil))
     (loop :for directory :in directories
           :for index :from 1
           :do (agenda-test-log "ROOT serial=~d index=~d path=~a"
@@ -235,6 +252,17 @@
 (define-command lem-yath-test-agenda-goto-diary-guard () ()
   (move-point (current-point)
               (agenda-test-find-line "Diary guard sentinel")))
+
+(define-command lem-yath-test-agenda-goto-diary-entry () ()
+  (with-point ((point (buffer-start-point (current-buffer))))
+    (loop
+      (when (and (search "Upcoming work sentinel" (line-string point))
+                 (equal (agenda-view-date-at-point point) "2026-07-15"))
+        (move-point (current-point) point)
+        (return))
+      (unless (line-offset point 1)
+        (error "Dated diary test row was not rendered"))))
+  (agenda-test-log "DIARY-READY date=~a" (agenda-view-date-at-point)))
 
 (define-command lem-yath-test-agenda-todo-set-report () ()
   (let* ((original (copy-point (current-point) :temporary))
@@ -288,6 +316,33 @@
      (or remaining "nil")
      *org-countdown-title*
      (org-countdown-modeline (current-window)))))
+
+(define-command lem-yath-test-agenda-diary-report () ()
+  (let* ((buffer (current-buffer))
+         (path (agenda-diary-file))
+         (contents (points-to-string (buffer-start-point buffer)
+                                     (buffer-end-point buffer)))
+         (disk (and (probe-file path) (uiop:read-file-string path))))
+    (agenda-test-log
+     (concatenate
+      'string
+      "DIARY serial=~d path=~a modified=~a order=~a point=~a disk=~a")
+     (incf *agenda-test-diary-report-serial*)
+     (agenda-test-path path)
+     (if (buffer-modified-p buffer) "yes" "no")
+     (if (search
+          (format nil "Existing diary sentinel~%Jul 15, 2026 ~%Local Variables:")
+          contents)
+         "yes" "no")
+     (if (and (string= (line-string (current-point)) "Jul 15, 2026 ")
+              (= (point-charpos (current-point))
+                 (1- (length "Jul 15, 2026 "))))
+         "yes" "no")
+     (if (and disk
+              (string= disk
+                       (format nil
+                               "Existing diary sentinel~%Local Variables:~%mode: text~%End:~%")))
+         "yes" "no"))))
 
 (define-command lem-yath-test-agenda-goto-note () ()
   (move-point (current-point)
@@ -771,6 +826,8 @@
   'lem-yath-test-agenda-inactive-report)
 (define-key *lem-yath-agenda-vi-keymap* "C-c D"
   'lem-yath-test-agenda-goto-diary-guard)
+(define-key *lem-yath-agenda-vi-keymap* "C-c E"
+  'lem-yath-test-agenda-goto-diary-entry)
 (define-key *lem-yath-agenda-vi-keymap* "C-c e"
   'lem-yath-test-agenda-goto-effort)
 (define-key *lem-yath-agenda-vi-keymap* "C-c T"
@@ -837,6 +894,8 @@
   'lem-yath-test-agenda-lifecycle-report)
 (define-key *org-vi-insert-keymap* "F7" 'lem-yath-test-agenda-source-report)
 (define-key *org-vi-insert-keymap* "F8" 'lem-yath-test-agenda-return)
+(define-key *global-keymap* "F7" 'lem-yath-test-agenda-diary-report)
+(define-key *global-keymap* "F8" 'lem-yath-test-agenda-return)
 (define-key *agenda-note-mode-keymap* "F5"
   'lem-yath-test-agenda-note-make-stale)
 (define-key *agenda-note-mode-keymap* "F6"

@@ -951,6 +951,13 @@ the trailing text-ready space. The profile binds no other org-journal command
   modeline counts down once per second and completion reports the normalized
   Org heading before removing both timer and modeline ownership. The ordinary
   Org `C-c C-x ;` alias shares that lifecycle.
+- Evil-Org and base-map `i` open the standard diary-entry selector for the
+  displayed agenda date. The effective Emacs default resolves to
+  `~/.emacs.d/diary`; Lem inserts the same day, weekly, monthly, yearly,
+  anniversary, block, or cyclic prefix there, including universal-prefix `&`
+  nonmarking entries. It leaves the diary buffer modified and unsaved with the
+  cursor on the trailing text-ready space, and preserves a trailing Local
+  Variables block. A block entry requires a second date in the active mark.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
 - Evil-Org `Tab`, Shift-Return, and `g TAB` run `org-agenda-goto`, opening the

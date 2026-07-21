@@ -14,6 +14,7 @@ export LEM_YATH_AGENDA_REPORT="$root/report"
 export TZ=UTC
 mkdir -p \
   "$HOME" \
+  "$HOME/.emacs.d" \
   "$WORKDIR/roam" \
   "$PUBLIC_ORG_DIR/nested" \
   "$PUBLIC_ORG_DIR/mcp"
@@ -25,6 +26,7 @@ public_file="$PUBLIC_ORG_DIR/same.org"
 mcp_file="$PUBLIC_ORG_DIR/mcp/mcp.org"
 timestamp_file="$WORKDIR/timestamp-edit.org"
 timer_file="$WORKDIR/timer.org"
+diary_file="$HOME/.emacs.d/diary"
 archive_file="${work_file}_archive"
 session="lem-agenda-$id"
 FAILED=0
@@ -123,6 +125,13 @@ printf '%s\n' \
   '' \
   'Agenda source buffer sentinel.' \
   >"$source_file"
+
+printf '%s\n' \
+  'Existing diary sentinel' \
+  'Local Variables:' \
+  'mode: text' \
+  'End:' \
+  >"$diary_file"
 
 printf '%s\n' \
   '* TODO Work unscheduled sentinel' \
@@ -257,6 +266,7 @@ else
   grep -q '^QUERY-BINDINGS serial=1 add=LEM-YATH-AGENDA-INCLUDE-INACTIVE-TIMESTAMPS subtract=LEM-YATH-AGENDA-INCLUDE-INACTIVE-TIMESTAMPS$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^LIFECYCLE-BINDINGS serial=1 q=LEM-YATH-AGENDA-QUIT ZZ=LEM-YATH-AGENDA-QUIT ZQ=LEM-YATH-AGENDA-EXIT$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TIMER-BINDINGS serial=1 cT=LEM-YATH-ORG-SET-TIMER base=LEM-YATH-ORG-SET-TIMER org=LEM-YATH-ORG-SET-TIMER parser=300,90,3723$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qF 'DIARY-BINDINGS serial=1 i=LEM-YATH-AGENDA-DIARY-ENTRY base=LEM-YATH-AGENDA-DIARY-ENTRY formats=Jul 21, 2026|Tuesday|* 21|Jul 21|%%(diary-anniversary 7 21 2026)|%%(diary-cyclic 3 7 21 2026)|%%(diary-block 7 20 2026 7 22 2026) nonmark=&Jul 21, 2026 ' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,movetag,parenttag,shared,targettag items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 39 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -577,6 +587,30 @@ if lem_wait_for "$session" 'How much time left' 10 >/dev/null; then
   fi
 else
   fail agenda-timer-prompt 'the replacement timer did not read a duration'
+fi
+
+# Evil-Org `i` uses the displayed agenda date, inserts the stock Emacs diary
+# prefix before a trailing Local Variables block, and leaves the diary buffer
+# modified but unsaved for the user to complete.
+tmux_cmd send-keys -t "$session" C-c E
+wait_report '^DIARY-READY date=2026-07-15$' || true
+tmux_cmd send-keys -t "$session" i
+if lem_wait_for "$session" 'Diary entry:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" d
+  if lem_wait_for "$session" 'Jul 15, 2026' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" F7
+    if wait_report "^DIARY serial=1 path=$diary_file modified=yes order=yes point=yes disk=yes$"; then
+      pass agenda-diary 'i opened an exact unsaved day entry before local variables'
+    else
+      fail agenda-diary 'the diary buffer path, syntax, point, or save boundary differed'
+    fi
+    tmux_cmd send-keys -t "$session" F8
+    lem_wait_for "$session" 'Upcoming work sentinel' 10 >/dev/null || true
+  else
+    fail agenda-diary-open 'the day selector did not open the dated diary entry'
+  fi
+else
+  fail agenda-diary-prompt 'i did not open the standard diary selector'
 fi
 
 # Evil-Org `a` opens a real editable Org note buffer.  Finalization follows
