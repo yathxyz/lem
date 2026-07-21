@@ -2,9 +2,12 @@
 
 (setf *agenda-now-function*
       (lambda () (encode-universal-time 0 0 12 12 7 2026 0)))
+(setf *agenda-note-time-function*
+      (lambda () (encode-universal-time 0 34 9 12 7 2026 0)))
 
 (defvar *agenda-test-report-serial* 0)
 (defvar *agenda-test-preview-report-serial* 0)
+(defvar *agenda-test-note-report-serial* 0)
 (defvar *agenda-test-original-top-level-org-files* nil)
 (defvar *agenda-test-stale-source* nil)
 
@@ -72,7 +75,7 @@
      (concatenate
       'string
       "STATIC serial=~d mode=~a date=~a roots=~d files=~d generation=~d "
-      "return=~a gr=~a gR=~a t=~a p=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
+      "return=~a gr=~a gR=~a t=~a p=~a a=~a schedule=~a deadline=~a ct=~a tags=~a q=~a "
       "J=~a K=~a H=~a L=~a dd=~a ce=~a shift-left=~a shift-right=~a "
       "dA=~a da=~a dollar=~a archive=~a refile=~a kill-hooks=~d "
       "modified=~a undo=~a "
@@ -88,6 +91,7 @@
      (agenda-test-command-name "g R")
      (agenda-test-command-name "t")
      (agenda-test-command-name "p")
+     (agenda-test-command-name "a")
      (agenda-test-command-name "C-c C-s")
      (agenda-test-command-name "C-c C-d")
      (agenda-test-command-name "c t")
@@ -166,6 +170,108 @@
 (define-command lem-yath-test-agenda-goto-effort () ()
   (move-point (current-point)
               (agenda-test-find-line "Effort action sentinel")))
+
+(define-command lem-yath-test-agenda-goto-note () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Note action sentinel")))
+
+(defun agenda-test-note-source-text ()
+  (let* ((point (current-point))
+         (file (text-property-at point :agenda-file))
+         (line (text-property-at point :agenda-line))
+         (heading (text-property-at point :agenda-heading)))
+    (multiple-value-bind (buffer source-point)
+        (agenda-source-heading-point file line heading "reporting its note")
+      (with-current-buffer buffer
+        (let ((end (org-subtree-end-point source-point)))
+          (values buffer file (points-to-string source-point end)))))))
+
+(define-command lem-yath-test-agenda-note-report () ()
+  (multiple-value-bind (buffer file text) (agenda-test-note-source-text)
+    (let* ((disk (uiop:read-file-string file))
+           (planning (search "SCHEDULED:" text))
+           (properties (search ":PROPERTIES:" text))
+           (property-end (search ":END:" text))
+           (note (search "- Note taken on" text))
+           (timestamp (search "Note taken on [2026-07-12 Sun 09:34]" text))
+           (first-line (search "Agenda note first line" text))
+           (second-line (search "Agenda note second line" text))
+           (continuation-backslashes
+             (and note first-line
+                  (count #\\ text :start note :end first-line)))
+           (body (search "Original note body sentinel." text))
+           (serial (incf *agenda-test-note-report-serial*)))
+      (agenda-test-log
+       (concatenate
+        'string
+        "NOTE-REPORT serial=~d mode=~a modified=~a disk-note=~a notes=~d "
+        "content=~a cancelled=~a order=~a undo-records=~d session=~a private=~a")
+       serial
+       (symbol-name (buffer-major-mode (current-buffer)))
+       (if (buffer-modified-p buffer) "yes" "no")
+       (if (search "Note taken on" disk) "yes" "no")
+       (/ (length (ppcre:all-matches "Note taken on" text)) 2)
+       (if (and timestamp first-line second-line
+                (= continuation-backslashes 2)
+                (< timestamp first-line second-line))
+           "yes" "no")
+       (if (search "Cancelled agenda note text" text) "yes" "no")
+       (if (and planning properties property-end note body
+                (< planning properties property-end note body))
+           "yes" "no")
+       (length (agenda-undo-records (current-buffer)))
+       (if *agenda-note-session* "yes" "no")
+       (if (find *agenda-note-buffer-name* (buffer-list)
+                 :key #'buffer-name :test #'string=)
+           "yes" "no")))))
+
+(define-command lem-yath-test-agenda-note-make-stale () ()
+  (let* ((session (or *agenda-note-session*
+                      (error "No active agenda note")))
+         (source (agenda-note-session-source-buffer session))
+         (point (agenda-note-session-source-point session)))
+    (with-current-buffer source
+      (with-point ((end point))
+        (line-end end)
+        (insert-string end " stale")))
+    (agenda-test-log "NOTE-STALE made=yes")))
+
+(define-command lem-yath-test-agenda-note-restore-heading () ()
+  (let* ((session (or *agenda-note-session*
+                      (error "No active agenda note")))
+         (source (agenda-note-session-source-buffer session))
+         (point (agenda-note-session-source-point session)))
+    (with-current-buffer source
+      (with-point ((end point)
+                   (start point))
+        (line-end end)
+        (move-point start end)
+        (character-offset start -6)
+        (unless (string= (points-to-string start end) " stale")
+          (error "The agenda note stale suffix changed"))
+        (delete-between-points start end)))
+    (agenda-test-log "NOTE-STALE restored=yes")))
+
+(define-command lem-yath-test-agenda-note-session-report () ()
+  (let ((session *agenda-note-session*))
+    (agenda-test-log
+     "NOTE-SESSION active=~a mode=~a draft=~a"
+     (if session "yes" "no")
+     (symbol-name (buffer-major-mode (current-buffer)))
+     (if (and session
+              (search "Stale draft sentinel"
+                      (buffer-text (agenda-note-session-note-buffer session))))
+         "yes" "no"))))
+
+(define-command lem-yath-test-agenda-note-kill-buffer () ()
+  (delete-buffer (current-buffer)))
+
+(define-command lem-yath-test-agenda-stale-preview-report () ()
+  (agenda-test-log
+   "STALE-PREVIEW focus=~a live=~a"
+   (if (eq (buffer-major-mode (current-buffer)) 'lem-yath-agenda-mode)
+       "agenda" "other")
+   (if (agenda-preview-window-live-p) "yes" "no")))
 
 (define-command lem-yath-test-agenda-mutations-ready () ()
   (handler-case
@@ -318,7 +424,16 @@
 
 (define-command lem-yath-test-agenda-return () ()
   (alexandria:if-let ((buffer (get-buffer *agenda-buffer-name*)))
-    (switch-to-buffer buffer)
+    (let ((agenda-window
+            (find-if (lambda (window)
+                       (and (not (eq window (current-window)))
+                            (eq (window-buffer window) buffer)))
+                     (get-buffer-windows buffer))))
+      (if agenda-window
+          (progn
+            (quit-active-window)
+            (setf (current-window) agenda-window))
+          (switch-to-buffer buffer)))
     (error "Agenda buffer no longer exists")))
 
 (defun agenda-test-race-item (text)
@@ -410,6 +525,12 @@
   'lem-yath-test-agenda-goto-work-todo)
 (define-key *lem-yath-agenda-vi-keymap* "C-c e"
   'lem-yath-test-agenda-goto-effort)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 1"
+  'lem-yath-test-agenda-goto-note)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 2"
+  'lem-yath-test-agenda-note-report)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 3"
+  'lem-yath-test-agenda-stale-preview-report)
 (define-key *lem-yath-agenda-vi-keymap* "C-c m"
   'lem-yath-test-agenda-mutations-ready)
 (define-key *lem-yath-agenda-vi-keymap* "C-c f"
@@ -452,3 +573,11 @@
 (define-key *org-vi-normal-keymap* "F8" 'lem-yath-test-agenda-return)
 (define-key *org-vi-insert-keymap* "F7" 'lem-yath-test-agenda-source-report)
 (define-key *org-vi-insert-keymap* "F8" 'lem-yath-test-agenda-return)
+(define-key *agenda-note-mode-keymap* "F5"
+  'lem-yath-test-agenda-note-make-stale)
+(define-key *agenda-note-mode-keymap* "F6"
+  'lem-yath-test-agenda-note-restore-heading)
+(define-key *agenda-note-mode-keymap* "F7"
+  'lem-yath-test-agenda-note-session-report)
+(define-key *agenda-note-mode-keymap* "F8"
+  'lem-yath-test-agenda-note-kill-buffer)

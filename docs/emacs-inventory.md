@@ -941,6 +941,16 @@ the trailing text-ready space. The profile binds no other org-journal command
   `apps/agenda-preview.lisp` module and refuses stale stored line identities.
 - Evil-Org `P` and the stock base-map `?` both expose the full flagging-note
   detail/removal workflow described by the agenda dispatcher inventory.
+- Evil-Org `a` runs `org-agenda-add-note`; the stock base-map aliases are `z`
+  and `C-c C-z`. Lem opens the same private `*Org Note*` workflow in Org mode:
+  `C-c C-c` stores the configured `- Note taken on %t` entry, `C-c C-k`
+  aborts, and `C-x C-s` refuses to bypass finalization. With the effective
+  defaults, a multiline note is inserted newest-first after planning and the
+  property drawer and before prior notes or body text. This command is absent
+  from both the configured agenda-save advice and Org's remote-undo wrapper,
+  so the source remains modified and unsaved, agenda `u` leaves it alone, and
+  ordinary source-buffer `u` removes it as one edit. Lem preserves that exact
+  boundary and keeps a draft open when its source heading has gone stale.
 - Lem now covers the configured mutation paths exposed by that map: `dd`
   deletes a complete subtree with GNU Org's multi-line confirmation threshold,
   `ce` sets `Effort`, and `H`/`L` move the selected planning or ordinary-event

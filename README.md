@@ -764,6 +764,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   post-command state, bulk actions unwind one source row at a time, and archive
   undo restores the source while retaining the already-saved archive copy.
   Explicit `gr` starts a fresh remote-undo history, matching pinned Org.
+  Evil-Org `a` (or GNU-state `z`/`C-c C-z`) opens a private Org note buffer;
+  `C-c C-c` stores the configured timestamped note and `C-c C-k` aborts, while
+  direct save is guarded. The note is placed newest-first after planning and
+  property metadata and remains an unsaved ordinary source edit: agenda `u`
+  leaves it alone, while source-buffer `u` removes it. Stale finalization keeps
+  the draft available instead of changing the wrong heading.
   `ct`/`C-c C-q`
   provide completion-backed local-tag
   replacement and clearing. Planning and tag commands persist immediately.

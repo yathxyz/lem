@@ -60,6 +60,14 @@ previews the selected row's exact source without taking focus, a directly
 repeated `SPC` and Backspace/Delete page its remembered window, and `M-Return`
 recenters that source. Stale rendered line identities fail closed.
 
+Evil-Org agenda `a`, plus the GNU-state `z` and `C-c C-z` aliases, opens a
+private Org-mode note session. `C-c C-c` inserts the configured timestamped
+note after planning/property metadata, `C-c C-k` aborts, and `C-x C-s` is
+guarded. Empty and multiline notes, stale-source draft retention, direct
+buffer teardown, exact agenda-row/window restoration, and the effective
+unsaved source-undo versus non-remote agenda-undo boundary are physically
+covered by `agenda-test.sh`.
+
 ## Remaining capability gaps
 
 These bindings are intentionally not mapped to unrelated commands:

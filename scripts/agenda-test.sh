@@ -242,7 +242,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT gr=LEM-YATH-AGENDA-REFRESH gR=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO p=LEM-YATH-AGENDA-DATE-PROMPT schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT gr=LEM-YATH-AGENDA-REFRESH gR=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO p=LEM-YATH-AGENDA-DATE-PROMPT a=LEM-YATH-AGENDA-ADD-NOTE schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -298,6 +298,12 @@ fi
 # these focused commands do not weaken the established 39-row oracle.
 printf '%s\n' \
   '* TODO Effort action sentinel' \
+  '* TODO Note action sentinel' \
+  'SCHEDULED: <2026-07-12 Sun>' \
+  ':PROPERTIES:' \
+  ':CUSTOM: keep' \
+  ':END:' \
+  'Original note body sentinel.' \
   '* TODO Delete action sentinel' \
   'Delete body sentinel.' \
   '** Delete child sentinel' \
@@ -314,6 +320,139 @@ for _ in $(seq 1 120); do
   grep -q '^MUTATIONS-READY$' "$LEM_YATH_AGENDA_REPORT" 2>/dev/null && break
   sleep 0.1
 done
+
+# Evil-Org `a` opens a real editable Org note buffer.  Finalization follows
+# the configured default log syntax after planning and properties, returns to
+# the same agenda row, and deliberately leaves both disk and agenda remote
+# undo untouched because this command is absent from the save advice and from
+# Org's `org-with-remote-undo` paths.
+tmux_cmd send-keys -t "$session" C-c 1 a
+if lem_wait_for "$session" 'Insert note for this entry' 10 >/dev/null; then
+  type_slow 'Agenda note first line'
+  tmux_cmd send-keys -t "$session" Enter
+  type_slow 'Agenda note second line'
+  tmux_cmd send-keys -t "$session" C-c C-c
+  if lem_wait_for "$session" 'Note action sentinel' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" C-c 2
+    wait_report '^NOTE-REPORT serial=1 ' || true
+    if grep -q '^NOTE-REPORT serial=1 mode=LEM-YATH-AGENDA-MODE modified=yes disk-note=no notes=1 content=yes cancelled=no order=yes undo-records=0 session=no private=no$' "$LEM_YATH_AGENDA_REPORT"; then
+      pass agenda-note 'a stored exact multiline syntax as one unsaved source edit'
+    else
+      fail agenda-note 'a did not preserve note syntax, placement, focus, or save semantics'
+    fi
+  else
+    fail agenda-note-return 'finalizing the note did not restore the agenda row'
+  fi
+else
+  fail agenda-note-open 'a did not open the editable Org note session'
+fi
+
+tmux_cmd send-keys -t "$session" u C-c 2
+wait_report '^NOTE-REPORT serial=2 ' || true
+if grep -q '^NOTE-REPORT serial=2 mode=LEM-YATH-AGENDA-MODE modified=yes disk-note=no notes=1 content=yes cancelled=no order=yes undo-records=0 session=no private=no$' "$LEM_YATH_AGENDA_REPORT"; then
+  pass agenda-note-remote-undo 'agenda u correctly left the non-remote note edit alone'
+else
+  fail agenda-note-remote-undo 'agenda u incorrectly removed or registered the note edit'
+fi
+
+# C-c C-k and direct private-buffer teardown both discard the draft and clean
+# the singleton session.  Neither path mutates or saves the source.
+tmux_cmd send-keys -t "$session" a
+if lem_wait_for "$session" 'Insert note for this entry' 10 >/dev/null; then
+  type_slow 'Cancelled agenda note text'
+  tmux_cmd send-keys -t "$session" C-c C-k
+  tmux_cmd send-keys -t "$session" C-c 2
+  wait_report '^NOTE-REPORT serial=3 ' || true
+  if grep -q '^NOTE-REPORT serial=3 mode=LEM-YATH-AGENDA-MODE modified=yes disk-note=no notes=1 content=yes cancelled=no order=yes undo-records=0 session=no private=no$' "$LEM_YATH_AGENDA_REPORT"; then
+    pass agenda-note-abort 'C-c C-k discarded the draft and restored the agenda'
+  else
+    fail agenda-note-abort 'the aborted draft leaked into source or session state'
+  fi
+else
+  fail agenda-note-abort 'the abort probe could not open a note session'
+fi
+
+# GNU Org stores a timestamp-only note when an empty note is finalized.  It is
+# a separate ordinary source undo group, so source `u` removes only that note.
+tmux_cmd send-keys -t "$session" a
+if lem_wait_for "$session" 'Insert note for this entry' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" C-c C-c
+  tmux_cmd send-keys -t "$session" C-c 2
+  wait_report '^NOTE-REPORT serial=4 ' || true
+  if grep -q '^NOTE-REPORT serial=4 mode=LEM-YATH-AGENDA-MODE modified=yes disk-note=no notes=2 content=yes cancelled=no order=yes undo-records=0 session=no private=no$' "$LEM_YATH_AGENDA_REPORT"; then
+    pass agenda-note-empty 'empty finalize stored the configured timestamp-only note'
+  else
+    fail agenda-note-empty 'empty finalize did not create one isolated note record'
+  fi
+else
+  fail agenda-note-empty 'the empty-note probe could not open a note session'
+fi
+
+tmux_cmd send-keys -t "$session" Tab
+if lem_wait_for "$session" 'Original note body sentinel' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" Escape
+  sleep 0.25
+  tmux_cmd send-keys -t "$session" u
+  sleep 0.5
+  tmux_cmd send-keys -t "$session" F8
+  lem_wait_for "$session" 'Note action sentinel' 10 >/dev/null || true
+  tmux_cmd send-keys -t "$session" C-c 2
+  wait_report '^NOTE-REPORT serial=5 ' || true
+  if grep -q '^NOTE-REPORT serial=5 mode=LEM-YATH-AGENDA-MODE modified=yes disk-note=no notes=1 content=yes cancelled=no order=yes undo-records=0 session=no private=no$' "$LEM_YATH_AGENDA_REPORT"; then
+    pass agenda-note-source-undo 'ordinary source u removed only the newest empty note'
+  else
+    fail agenda-note-source-undo 'source undo did not retain the earlier multiline note'
+  fi
+else
+  fail agenda-note-source-undo 'Tab did not expose the live unsaved note source'
+fi
+
+# If the live source heading changes while the transient is open, finalization
+# fails closed and keeps the draft available.  Restoring the heading then
+# aborting must leave the previously stored note as the only note.
+tmux_cmd send-keys -t "$session" a
+if lem_wait_for "$session" 'Insert note for this entry' 10 >/dev/null; then
+  type_slow 'Stale draft sentinel'
+  tmux_cmd send-keys -t "$session" F5 C-c C-c
+  if lem_wait_for "$session" 'Agenda source changed; the note was not stored' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" F7
+    wait_report '^NOTE-SESSION active=yes mode=ORG-MODE draft=yes$' || true
+    tmux_cmd send-keys -t "$session" F6 C-c C-k
+    tmux_cmd send-keys -t "$session" C-c 2
+    wait_report '^NOTE-REPORT serial=6 ' || true
+    if grep -q '^NOTE-SESSION active=yes mode=ORG-MODE draft=yes$' "$LEM_YATH_AGENDA_REPORT" &&
+       grep -q '^NOTE-REPORT serial=6 mode=LEM-YATH-AGENDA-MODE modified=yes disk-note=no notes=1 content=yes cancelled=no order=yes undo-records=0 session=no private=no$' "$LEM_YATH_AGENDA_REPORT"; then
+      pass agenda-note-stale 'stale finalization preserved the draft and refused source mutation'
+    else
+      fail agenda-note-stale 'stale refusal lost the draft or changed source/session state'
+    fi
+  else
+    fail agenda-note-stale 'a changed source heading was accepted during finalize'
+    tmux_cmd send-keys -t "$session" F6 C-c C-k
+  fi
+else
+  fail agenda-note-stale 'the stale-source probe could not open a note session'
+fi
+
+tmux_cmd send-keys -t "$session" a
+if lem_wait_for "$session" 'Insert note for this entry' 10 >/dev/null; then
+  type_slow 'Killed private draft sentinel'
+  tmux_cmd send-keys -t "$session" F8
+  if lem_wait_for "$session" 'Note action sentinel' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" C-c 2
+    wait_report '^NOTE-REPORT serial=7 ' || true
+    if grep -q '^NOTE-REPORT serial=7 mode=LEM-YATH-AGENDA-MODE modified=yes disk-note=no notes=1 content=yes cancelled=no order=yes undo-records=0 session=no private=no$' "$LEM_YATH_AGENDA_REPORT"; then
+      pass agenda-note-kill 'killing the private buffer restored and cleaned the session'
+    else
+      fail agenda-note-kill 'private-buffer teardown leaked draft or singleton state'
+    fi
+  else
+    fail agenda-note-kill 'killing the private buffer did not restore the agenda'
+  fi
+else
+  fail agenda-note-kill 'the teardown probe could not open a note session'
+fi
+
 tmux_cmd send-keys -t "$session" C-c e
 if ! lem_wait_for "$session" 'Effort action sentinel' 10 >/dev/null; then
   fail agenda-mutations-setup "new agenda mutation fixtures did not refresh"
@@ -1056,8 +1195,8 @@ else
 fi
 tmux_cmd send-keys -t "$session" Space
 sleep 0.4
-tmux_cmd send-keys -t "$session" F2
-if lem_capture "$session" | grep -q 'Agenda preview failed: Agenda source changed' &&
+tmux_cmd send-keys -t "$session" C-c 3 F2
+if wait_report '^STALE-PREVIEW focus=agenda live=no$' &&
    wait_report_count '^STALE-SOURCE modified=yes first="# unsaved stale line" second="\* NEXT Work unscheduled sentinel"$' 6; then
   pass preview-stale "SPC refused to preview the wrong line from a stale agenda row"
 else

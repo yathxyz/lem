@@ -3469,6 +3469,19 @@ does not include `org-agenda-date-prompt`. Its asynchronous refresh consumes the
 modified live-buffer snapshot, so automatic and later `gr` refreshes show the
 unsaved result while disk remains unchanged.
 
+`src/apps/agenda-note.lisp` implements Evil-Org `a` and the GNU-state
+`z`/`C-c C-z` aliases as an isolated private Org-mode note session. `C-c C-c`
+stores the configured `Note taken on` timestamp/list syntax newest-first after
+planning and property metadata, `C-c C-k` aborts, and `C-x C-s` is guarded.
+Finalization validates the exact live source heading again and retains a stale
+draft on refusal. Empty and multiline notes, direct private-buffer teardown,
+exact agenda row/Vi/window/popup restoration, and the 1 MiB input bound are
+covered by the installed-wrapper agenda gate. Dedicated source, agenda, and
+reload hooks clean an outstanding singleton session. The source remains
+modified and unsaved and the edit is one ordinary source-buffer undo group; it
+is intentionally absent from agenda remote undo, matching the installed Emacs
+save advice and Org wrapper paths.
+
 `src/apps/agenda-undo.lisp` supplies the source-buffer transaction core before
 the agenda mutation modules compile; `src/apps/agenda-undo-command.lisp` adds
 the Evil-Org motion-state `u` command after those modules and their keymaps

@@ -134,6 +134,7 @@
                              (:file "agenda-view")
                              (:file "agenda-flagged")
                              (:file "agenda-preview")
+                             (:file "agenda-note")
                              (:file "agenda-time-grid")
                              (:file "citar")
                              (:file "devdocs")

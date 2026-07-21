@@ -116,6 +116,13 @@ Status legend:
 | notmuch-outlook | gap | the WSL-specific Outlook integration remains external |
 | nodes-org-sync | ported/partial | `src/org/nodes-sync.lisp` reproduces the configured default-`nova`/environment host allowlist, canonical `$WORKDIR` containment, Syncthing-conflict refusal, buffer-local before/after-save lifecycle, default-off actionable ID creation with explicit manual promotion, and exact asynchronous `nodes-org-sync --quiet --file FILE` argv. The installed-wrapper gate covers reload, physical saves, metacharacters, source-block decoys, symlink escapes, and failure-buffer behavior (`scripts/org-nodes-sync-test.sh`). The live projector/PostgreSQL acceptance on `nova` remains external, and Lem adds a five-minute/1-MiB subprocess bound. |
 
+The agenda row includes the effective Evil-Org `a` and GNU-state `z`/`C-c C-z`
+note session in `src/apps/agenda-note.lisp`. It preserves Org's configured
+timestamp/list shape, newest-first placement after metadata, finalize/abort
+lifecycle, stale-source refusal, and exact popup return. The resulting source
+edit deliberately remains unsaved, belongs to ordinary source undo, and is not
+registered with agenda remote undo, matching the installed Emacs command.
+
 ## Behavioral divergences worth knowing
 
 - **Display palette and delimiters**: Lem retains the configured Modus hex
