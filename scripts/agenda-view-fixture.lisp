@@ -24,7 +24,7 @@
       (loop
         (when (text-property-at point :agenda-section-key)
           (setf section-date (text-property-at point :agenda-view-date)))
-        (when (and section-date (text-property-at point :agenda-file))
+        (when (and section-date (agenda-source-row-p point))
           (push (format nil "~a|~a" section-date (line-string point)) rows))
         (unless (line-offset point 1) (return))))
     (nreverse rows)))
@@ -41,7 +41,7 @@
   (let ((count 0))
     (with-point ((point (buffer-start-point (current-buffer))))
       (loop
-        (when (text-property-at point :agenda-file) (incf count))
+        (when (agenda-source-row-p point) (incf count))
         (unless (line-offset point 1) (return))))
     count))
 
@@ -92,11 +92,25 @@
   (let ((dates '()))
     (with-point ((point (buffer-start-point (current-buffer))))
       (loop
-        (when (and (text-property-at point :agenda-file)
+        (when (and (agenda-source-row-p point)
                    (search needle (line-string point)))
           (push (text-property-at point :agenda-display-date) dates))
         (unless (line-offset point 1) (return))))
     (nreverse dates)))
+
+(defun agenda-view-test-log-anniversary (label)
+  (with-point ((point (buffer-start-point (current-buffer))))
+    (loop
+      (when (text-property-at point :agenda-diary-file)
+        (agenda-view-test-log
+         "ANNIVERSARY ~a date=~a category=~a file=yes text=~s"
+         label
+         (text-property-at point :agenda-display-date)
+         (text-property-at point :agenda-category)
+         (line-string point))
+        (return-from agenda-view-test-log-anniversary))
+      (unless (line-offset point 1) (return)))
+    (agenda-view-test-log "ANNIVERSARY ~a missing" label)))
 
 (defun agenda-view-test-log-state (label)
   (let* ((state (agenda-view-state))
@@ -120,7 +134,8 @@
      "TIMELINE ~a ~{~a~^,~}" label (agenda-view-test-timeline))
     (agenda-view-test-log
      "HOURLY ~a dates=~{~a~^,~}"
-     label (agenda-view-test-matching-dates "Hourly repeat sentinel"))))
+     label (agenda-view-test-matching-dates "Hourly repeat sentinel"))
+    (agenda-view-test-log-anniversary label)))
 
 (defmacro define-agenda-view-test-log-command (name label)
   `(define-command ,name () () (agenda-view-test-log-state ,label)))
@@ -184,6 +199,23 @@
 (define-command lem-yath-test-view-point-third () ()
   (agenda-view-test-log-point "third"))
 
+(define-command lem-yath-test-view-goto-anniversary () ()
+  (with-point ((point (buffer-start-point (current-buffer))))
+    (loop
+      (when (text-property-at point :agenda-diary-file)
+        (move-point (current-point) point)
+        (return-from lem-yath-test-view-goto-anniversary))
+      (unless (line-offset point 1)
+        (error "Anniversary row is missing")))))
+
+(define-command lem-yath-test-view-anniversary-source () ()
+  (agenda-view-test-log
+   "ANNIVERSARY-SOURCE file=~a line=~d text=~s"
+   (buffer-filename (current-buffer))
+   (line-number-at-point (current-point))
+   (line-string (current-point)))
+  (switch-to-buffer (get-buffer *agenda-buffer-name*)))
+
 (let ((keymap *lem-yath-agenda-mode-keymap*))
   (define-key keymap "C-c z 0" 'lem-yath-test-view-initial)
   (define-key keymap "C-c z 1" 'lem-yath-test-view-week)
@@ -204,3 +236,8 @@
   (define-key keymap "C-c z p" 'lem-yath-test-view-point-first)
   (define-key keymap "C-c z P" 'lem-yath-test-view-point-second)
   (define-key keymap "C-c z q" 'lem-yath-test-view-point-third))
+
+(define-key *lem-yath-agenda-mode-keymap* "C-c z a"
+  'lem-yath-test-view-goto-anniversary)
+(define-key *global-keymap* "C-c z v"
+  'lem-yath-test-view-anniversary-source)

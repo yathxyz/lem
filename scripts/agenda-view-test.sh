@@ -93,6 +93,12 @@ printf '%s\n' \
   'CLOCK: [2026-07-17 Fri 10:00]--[2026-07-17 Fri 11:00] =>  1:00' \
   'CLOCK: [2026-08-05 Wed 10:00]--[2026-08-05 Wed 12:00] =>  2:00' \
   ':END:' \
+  '* Anniversary fixture' \
+  ':PROPERTIES:' \
+  ':CATEGORY: Ann' \
+  ':END:' \
+  '%%(org-anniversary 2004 3 29) Birthday sentinel is %d years old.' \
+  '%%(progn (error "unsafe")) Unsafe diary sentinel' \
   >"$work_file"
 cp "$work_file" "$original_file"
 : >"$LEM_YATH_AGENDA_VIEW_REPORT"
@@ -252,17 +258,29 @@ lem_wait_for "$session" 'entire year' 10 >/dev/null || true
 send_keys y
 for _ in $(seq 1 160); do
   send_keys C-c z 9
-  grep -q '^STATE year span=year start=2026-01-01 end=2026-12-31 header="Agenda  (Year 2026-01-01..2026-12-31)"' "$LEM_YATH_AGENDA_VIEW_REPORT" 2>/dev/null && break
+  grep -q '^ANNIVERSARY year date=2026-03-29 category=Ann file=yes ' "$LEM_YATH_AGENDA_VIEW_REPORT" 2>/dev/null && break
   sleep 0.1
 done
-if grep -q '^STATE year span=year start=2026-01-01 end=2026-12-31 .*point-date=2026-08-09 headers=365 ' "$LEM_YATH_AGENDA_VIEW_REPORT"; then
-  pass year-view 'gD y confirmed and rendered the full leap-aware year span'
+if grep -q '^STATE year span=year start=2026-01-01 end=2026-12-31 .*point-date=2026-08-09 headers=365 .*2026-03-29|.*Ann:.*Birthday sentinel is 22 years old.*\[DIARY 2026-03-29\]' "$LEM_YATH_AGENDA_VIEW_REPORT" &&
+   grep -q '^ANNIVERSARY year date=2026-03-29 category=Ann file=yes .*Ann:.*Birthday sentinel is 22 years old' "$LEM_YATH_AGENDA_VIEW_REPORT" &&
+   ! grep -q 'Unsafe diary sentinel' "$LEM_YATH_AGENDA_VIEW_REPORT"; then
+  pass year-view 'gD y rendered the year and safe configured anniversary sexps'
 else
-  fail year-view 'year confirmation, boundaries, or date sections differed'
+  fail year-view 'year boundaries, anniversary expansion, metadata, or source identity differed'
+fi
+
+send_keys C-c z a
+send_keys Enter
+send_keys C-c z v
+wait_report '^ANNIVERSARY-SOURCE ' || true
+if grep -q "^ANNIVERSARY-SOURCE file=$work_file line=[0-9][0-9]* text=\"%%(org-anniversary 2004 3 29) Birthday sentinel is %d years old.\"$" "$LEM_YATH_AGENDA_VIEW_REPORT"; then
+  pass anniversary-visit 'Return opened the exact read-only diary source line'
+else
+  fail anniversary-visit 'the anniversary source identity or Return visit differed'
 fi
 
 send_keys g D Space
-lem_wait_for "$session" 'Agenda  \(2026-08-09\)' 30 >/dev/null || true
+lem_wait_for "$session" 'Agenda  \(2026-03-29\)' 30 >/dev/null || true
 send_keys .
 lem_wait_for "$session" 'Agenda  \(2026-07-17\)' 30 >/dev/null || true
 send_keys c r

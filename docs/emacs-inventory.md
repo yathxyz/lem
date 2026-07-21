@@ -915,7 +915,11 @@ the trailing text-ready space. The profile binds no other org-journal command
 - The active stock terminal time grid appears when today or a one-day span has
   a timed item. Lem interleaves the exact `08:00` through `20:00` grid, terminal
   rule strings, and current-time marker without making those rows navigable
-  entries; same-day event ranges retain and display both endpoints.
+  entries; same-day event ranges retain both endpoints and cross-date ranges
+  use the applicable endpoint time on their first and last days.
+- The live top-level `notes.org` contains two `org-anniversary` diary sexps
+  under category `Ann`. Lem expands that configured form yearly, including
+  `%d` ages and inherited metadata, without evaluating arbitrary Lisp sexps.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
 - Evil-Org `Tab`, Shift-Return, and `g TAB` run `org-agenda-goto`, opening the

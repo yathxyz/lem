@@ -3348,11 +3348,14 @@ DEADLINE rows, and groups entries into overdue, today, seven-day upcoming, and
 unscheduled TODO sections. Ordinary active timestamps on headings or body text
 join the today/upcoming sections; inactive timestamps do not. Timed events
 retain their start and optional same-day end time, date ranges expand
-inclusively with occurrence indices, and `+`, `++`, and `.+`
-day/week/month/year repeaters generate the same
-agenda occurrences across the visible horizon. COMMENT and ARCHIVE subtrees,
-drawers, source blocks, and comment lines are excluded, while completed
-headings can still contribute timestamp events as in GNU Org.
+inclusively with occurrence indices and per-day endpoint times, and `+`, `++`,
+and `.+` hour/day/week/month/year repeaters generate the same agenda
+occurrences across the visible horizon. The configured `org-anniversary` diary
+form expands yearly with `%d` ages, inherited category/tag metadata, and an
+exact source-line visit; arbitrary Lisp diary sexps are never evaluated.
+COMMENT and ARCHIVE subtrees, drawers, source blocks, and comment lines are
+excluded, while completed headings can still contribute timestamp events as
+in GNU Org.
 
 `src/apps/agenda-reminder.lisp` separately projects the pinned stock Org
 planning reminders over that immutable parse result. Open deadlines appear
@@ -3650,8 +3653,8 @@ bracketed-link exclusion, elapsed-hour repeater dates, decoration-skipping
 `gj`, retained source time properties, and byte-identical grid rendering.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
-dispatcher. Diary sexps, configurable time-grid, AM/PM display, and
-default-duration presentation,
+dispatcher. Diary sexps beyond the configured safe `org-anniversary` form,
+configurable time-grid, AM/PM display, and default-duration presentation,
 and configurable reminder-policy, leader, and sorting variables,
 configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive

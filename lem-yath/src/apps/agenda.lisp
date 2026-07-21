@@ -78,7 +78,8 @@ items remain immutable so projections can add reminder rows safely.")
   end-time range-end-time occurrence-index occurrence-count
   timestamp-line timestamp-source-line timestamp-start timestamp-raw
   timestamp-first-raw timestamp-second-raw timestamp-heading-line-p
-  category tags effort top-headline planning-suffix
+  category tags effort top-headline planning-suffix metadata-line
+  anniversary-year anniversary-month anniversary-day
   display-date reminder-kind reminder-days)
 
 (defstruct (agenda-item-metadata (:constructor make-agenda-item-metadata))
@@ -136,6 +137,11 @@ items remain immutable so projections can add reminder rows safely.")
   (ppcre:create-scanner
    "(?i)^([012]?[0-9])(?::([0-5][0-9]))?(am|pm)?$")
   "Parses one component of an ordinary Org headline time.")
+
+(defvar *agenda-org-anniversary-scanner*
+  (ppcre:create-scanner
+   "^\\s*%%\\(org-anniversary\\s+([0-9]{1,4})\\s+([0-9]{1,2})\\s+([0-9]{1,2})\\)\\s*(.*)$")
+  "Matches the safe diary sexp form used by the configured Org sources.")
 
 (defun agenda-existing-directory (directory)
   (ignore-errors
@@ -201,6 +207,42 @@ items remain immutable so projections can add reminder rows safely.")
        :time (or timestamp-time heading-time)
        :end-time (or timestamp-end-time heading-end-time)
        :planning-suffix suffix))))
+
+(defun agenda-item-with-anniversary (item line-number source-line)
+  "Return a safe `org-anniversary' diary item parsed from SOURCE-LINE."
+  (multiple-value-bind (start end registers register-ends)
+      (ppcre:scan *agenda-org-anniversary-scanner* source-line)
+    (declare (ignore end))
+    (when start
+      (let* ((year
+               (parse-integer source-line
+                              :start (aref registers 0)
+                              :end (aref register-ends 0)))
+             (month
+               (parse-integer source-line
+                              :start (aref registers 1)
+                              :end (aref register-ends 1)))
+             (day
+               (parse-integer source-line
+                              :start (aref registers 2)
+                              :end (aref register-ends 2)))
+             (date (format nil "~4,'0d-~2,'0d-~2,'0d" year month day)))
+        (when (valid-iso-date-p date)
+          (make-agenda-item
+           :text (string-trim
+                  '(#\Space #\Tab)
+                  (subseq source-line
+                          (aref registers 3) (aref register-ends 3)))
+           :file (agenda-item-file item)
+           :line line-number
+           :heading source-line
+           :date date
+           :kind "DIARY"
+           :event-p t
+           :metadata-line (agenda-item-line item)
+           :anniversary-year year
+           :anniversary-month month
+           :anniversary-day day))))))
 
 (defun agenda-timestamp-field (scanner contents)
   (multiple-value-bind (start end registers register-ends)
@@ -511,7 +553,13 @@ Ordinary active timestamps belong to their containing visible heading."
                                       (setf drawer-p nil))
                                      ((or planning-p drawer-p
                                           (ppcre:scan "^\\s*#" line)))
-                                     (t (emit-events line lineno))))))))))
+                                     (t
+                                      (alexandria:if-let
+                                          ((anniversary
+                                             (agenda-item-with-anniversary
+                                              current lineno line)))
+                                        (push anniversary items)
+                                        (emit-events line lineno)))))))))))
              (finish-current))
            (values (nreverse items) (nreverse warnings))))
 
@@ -696,7 +744,11 @@ Ordinary active timestamps belong to their containing visible heading."
                     (agenda-read-source-lines source)))
          (table (agenda-build-filter-metadata lines source)))
     (dolist (item items items)
-      (alexandria:when-let ((metadata (gethash (agenda-item-line item) table)))
+      (alexandria:when-let
+          ((metadata
+             (gethash (or (agenda-item-metadata-line item)
+                          (agenda-item-line item))
+                      table)))
         (setf (agenda-item-category item)
               (agenda-item-metadata-category metadata)
               (agenda-item-tags item)
@@ -780,6 +832,37 @@ Ordinary active timestamps belong to their containing visible heading."
           (agenda-item-occurrence-count occurrence) count)
     occurrence))
 
+(defun agenda-anniversary-text (item year)
+  "Expand ITEM's safe anniversary age placeholder for YEAR."
+  (ppcre:regex-replace-all
+   "%d" (agenda-item-text item)
+   (princ-to-string (- year (agenda-item-anniversary-year item)))))
+
+(defun agenda-anniversary-occurrences (item today horizon)
+  "Expand ITEM's configured `org-anniversary' through the displayed span."
+  (multiple-value-bind (today-year today-month today-day)
+      (agenda-date-components today)
+    (declare (ignore today-month today-day))
+    (multiple-value-bind (horizon-year horizon-month horizon-day)
+        (agenda-date-components horizon)
+      (declare (ignore horizon-month horizon-day))
+      (loop :for year :from (max today-year
+                                  (agenda-item-anniversary-year item))
+              :to horizon-year
+            :for date :=
+              (format nil "~4,'0d-~2,'0d-~2,'0d"
+                      year
+                      (agenda-item-anniversary-month item)
+                      (agenda-item-anniversary-day item))
+            :when (and (valid-iso-date-p date)
+                       (not (string< date today))
+                       (string<= date horizon))
+              :collect
+              (let ((occurrence (agenda-item-occurrence item date)))
+                (setf (agenda-item-text occurrence)
+                      (agenda-anniversary-text item year))
+                occurrence)))))
+
 (defun agenda-remove-event-token-from-text (text token)
   (if token
       (string-trim
@@ -858,6 +941,8 @@ Ordinary active timestamps belong to their containing visible heading."
         (end (agenda-item-end-date item))
         (repeater (agenda-item-repeater item)))
     (cond
+      ((agenda-item-anniversary-year item)
+       (agenda-anniversary-occurrences item today horizon))
       (end
        (let* ((base-ordinal (agenda-date-ordinal base))
               (count (1+ (- (agenda-date-ordinal end) base-ordinal)))
@@ -1038,6 +1123,7 @@ completed unscheduled tasks stay out of the TODO section."
           (if (agenda-item-date item)
               (format nil "  [~a ~a~@[ ~a~]~@[ ~a~]]"
                       (cond
+                        ((string= (agenda-item-kind item) "DIARY") "DIARY")
                         ((agenda-item-event-p item) "EVENT")
                         ((eq (agenda-item-reminder-kind item)
                              :scheduled-past)
@@ -1060,7 +1146,9 @@ completed unscheduled tasks stay out of the TODO section."
                                    (agenda-item-occurrence-count item))))
               "")))
     (format nil "~9a ~a~a   (~a:~a)"
-            (or (agenda-item-keyword item) "")
+            (if (string= (agenda-item-kind item) "DIARY")
+                (format nil "~a:" (or (agenda-item-category item) ""))
+                (or (agenda-item-keyword item) ""))
             (agenda-item-text item)
             planning
             (file-namestring (agenda-item-file item))
@@ -1118,7 +1206,12 @@ completed unscheduled tasks stay out of the TODO section."
                      (format nil "~a ~a~%"
                              (if marked-p ">" " ")
                              (agenda-display-line item)))
-      (put-text-property start point :agenda-file (agenda-item-file item))
+      (put-text-property
+       start point
+       (if (string= (agenda-item-kind item) "DIARY")
+           :agenda-diary-file
+           :agenda-file)
+       (agenda-item-file item))
       (put-text-property start point :agenda-line (agenda-item-line item))
       (put-text-property start point :agenda-heading
                          (agenda-item-heading item))
@@ -1452,6 +1545,7 @@ completed unscheduled tasks stay out of the TODO section."
 (define-command lem-yath-agenda-visit () ()
   "Open the org file for the entry on the current line at its heading."
   (let ((file (or (text-property-at (current-point) :agenda-file)
+                  (text-property-at (current-point) :agenda-diary-file)
                   (text-property-at
                    (current-point) :agenda-clock-report-file)))
         (line (or (text-property-at (current-point) :agenda-line)
@@ -1467,6 +1561,7 @@ completed unscheduled tasks stay out of the TODO section."
 (define-command lem-yath-agenda-goto () ()
   "Open the current agenda entry in another window, like Evil-Org Tab."
   (let ((file (or (text-property-at (current-point) :agenda-file)
+                  (text-property-at (current-point) :agenda-diary-file)
                   (text-property-at
                    (current-point) :agenda-clock-report-file)))
         (line (or (text-property-at (current-point) :agenda-line)
@@ -1485,6 +1580,7 @@ completed unscheduled tasks stay out of the TODO section."
 (defun agenda-source-row-p (point)
   "Return true when POINT names a source-backed agenda or clock-report row."
   (or (text-property-at point :agenda-file)
+      (text-property-at point :agenda-diary-file)
       (text-property-at point :agenda-clock-report-file)))
 
 (defun agenda-find-item-point (origin direction)
