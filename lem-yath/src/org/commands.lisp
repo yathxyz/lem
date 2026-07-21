@@ -1095,10 +1095,21 @@ still use TARGET as their cursor destination."
 (defun org-shift-todo-keyword-set ()
   "Apply GNU Org's next/previous TODO-set command for this profile.
 
-The effective configuration has one keyword set, so either direction leaves
-the heading text unchanged."
-  (unless (org-heading-line-p (current-point))
-    (editor-error "Not at an Org heading"))
+The effective configuration has one keyword set, so either direction selects
+that set's head, TODO.  GNU Org maps the command over an active region and the
+user configuration saves file-backed TODO changes immediately."
+  (when (buffer-read-only-p (current-buffer))
+    (editor-error "Org buffer is read-only"))
+  (let ((headings (org-planning-target-headings)))
+    (unless headings
+      (editor-error (if (org-planning-region-active-p)
+                        "No Org headings in selection"
+                        "Not at an Org heading")))
+    (org-clear-folds (current-buffer))
+    (dolist (heading headings)
+      (org-set-heading-todo-state heading (first *org-todo-keywords*)))
+    (when (buffer-filename (current-buffer))
+      (save-buffer (current-buffer))))
   (message "Keyword-Set 1/1: ~{~a~^ ~}" *org-todo-keywords*)
   t)
 
@@ -3672,6 +3683,8 @@ matching the active Emacs terminal profile.")
 ;; and would reduce the operation to the headline under the moving endpoint.
 (define-key *org-vi-visual-keymap* "C-c C-s" 'lem-yath-org-schedule)
 (define-key *org-vi-visual-keymap* "C-c C-d" 'lem-yath-org-deadline)
+(define-key *org-vi-visual-keymap* "C-c H" 'lem-yath-org-shiftcontrolleft)
+(define-key *org-vi-visual-keymap* "C-c L" 'lem-yath-org-shiftcontrolright)
 
 (define-key *org-vi-visual-keymap* "M-h" 'lem-yath-org-visual-metaleft)
 (define-key *org-vi-visual-keymap* "M-l" 'lem-yath-org-visual-metaright)

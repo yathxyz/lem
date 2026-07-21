@@ -251,6 +251,7 @@ else
   grep -qF "FILE serial=1 index=3 path=$public_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=4 path=$mcp_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^OPEN-MOTION serial=1 tab=LEM-YATH-AGENDA-GOTO shift-return=LEM-YATH-AGENDA-GOTO gtab=LEM-YATH-AGENDA-GOTO gj=LEM-YATH-AGENDA-NEXT-ITEM gk=LEM-YATH-AGENDA-PREVIOUS-ITEM Cj=LEM-YATH-AGENDA-NEXT-ITEM Ck=LEM-YATH-AGENDA-PREVIOUS-ITEM Mj=LEM-YATH-AGENDA-DRAG-LINE-FORWARD Mk=LEM-YATH-AGENDA-DRAG-LINE-BACKWARD space=LEM-YATH-AGENDA-SHOW-AND-SCROLL-UP backspace=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN delete=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN mret=LEM-YATH-AGENDA-RECENTER-SOURCE P=LEM-YATH-AGENDA-SHOW-FLAGGING-NOTE$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -q '^TODO-SET-BINDINGS serial=1 previous=LEM-YATH-AGENDA-TODO-PREVIOUSSET next=LEM-YATH-AGENDA-TODO-NEXTSET fallback-previous=LEM-YATH-AGENDA-TODO-PREVIOUSSET fallback-next=LEM-YATH-AGENDA-TODO-NEXTSET$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,movetag,parenttag,shared,targettag items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 39 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -352,6 +353,56 @@ if lem_wait_for "$session" 'Cannot move line forward' 10 >/dev/null; then
   pass agenda-drag-boundary 'M-k refused to cross the TODO section header'
 else
   fail agenda-drag-boundary 'M-k crossed or misreported the TODO section boundary'
+fi
+
+# Evil-Org's Ctrl-Shift TODO-set commands select the head of the next or
+# previous sequence.  This profile has one sequence, so WAITING becomes TODO;
+# terminal aliases keep the otherwise-indistinguishable chord usable in Lem.
+tmux_cmd send-keys -t "$session" C-c 0 C-c L
+if wait_file_pattern '^\* TODO Upcoming work sentinel$' "$work_file"; then
+  for _ in $(seq 1 120); do
+    tmux_cmd send-keys -t "$session" C-c 9
+    grep -q '^TODO-SET serial=1 ' "$LEM_YATH_AGENDA_REPORT" 2>/dev/null && break
+    sleep 0.1
+  done
+  if grep -q '^TODO-SET serial=1 heading="\* TODO Upcoming work sentinel" current=yes modified=no$' \
+       "$LEM_YATH_AGENDA_REPORT"; then
+    pass agenda-todo-set 'next-set selected, saved, and restored the sole sequence head'
+  else
+    fail agenda-todo-set 'the refreshed agenda lost the changed row or its source state'
+  fi
+else
+  fail agenda-todo-set 'the terminal next-set alias did not persist TODO'
+fi
+# Explicit refresh clears the remote transaction so later undo-boundary tests
+# remain independent of this focused mutation.
+tmux_cmd send-keys -t "$session" g r
+sleep 0.2
+
+# Diary-derived agenda rows carry source metadata for visits, but Org forbids
+# TODO mutation through them.  The guard must run before any remote transaction.
+printf '%s\n' \
+  '* TODO Diary guard parent' \
+  '%%(org-anniversary 2020 7 12) Diary guard sentinel' \
+  >>"$work_file"
+tmux_cmd send-keys -t "$session" g r
+if lem_wait_for "$session" 'Diary guard sentinel' 20 >/dev/null; then
+  diary_guard_before="$(sha256sum "$work_file" | cut -d' ' -f1)"
+  tmux_cmd send-keys -t "$session" C-c D
+  sleep 0.2
+  tmux_cmd send-keys -t "$session" C-c L
+  if wait_report '^TODO-SET-DIARY-COMMAND command=LEM-YATH-AGENDA-TODO-NEXTSET kind=DIARY$'; then
+    diary_guard_after="$(sha256sum "$work_file" | cut -d' ' -f1)"
+    if [ "$diary_guard_before" = "$diary_guard_after" ]; then
+      pass agenda-todo-set-diary 'TODO-set selection refused a diary-derived row byte-identically'
+    else
+      fail agenda-todo-set-diary 'diary-row refusal changed its Org source'
+    fi
+  else
+    fail agenda-todo-set-diary 'the TODO-set command did not refuse the diary row'
+  fi
+else
+  fail agenda-todo-set-diary 'the safe anniversary guard fixture did not render'
 fi
 
 # Add mutation-only targets after the baseline source/grouping assertions so

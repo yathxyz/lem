@@ -3183,9 +3183,11 @@ Missing siblings, table edges, unsupported fields, and read-only mutations
 fail before changing the buffer.
 
 The active Evil-Org additional map is also reproduced: `C-Shift-h/l` select
-the previous/next TODO keyword set (a stable no-op with this profile's single
-set), while `C-Shift-k/j` adjust the date or time field under point on a CLOCK
-line. Closed clocks move both endpoints by the same actual delta and repair the
+the previous/next TODO keyword set. With this profile's single set, either
+direction selects its `TODO` head from any current state, maps over every
+headline in an active region, and immediately saves a file-backed Org buffer.
+`C-Shift-k/j` adjust the date or time field under point on a CLOCK line. Closed
+clocks move both endpoints by the same actual delta and repair the
 duration; open clocks move their lone timestamp. Cursor-selected year, month,
 day/weekday, hour, and minute fields follow the pinned Org oracle, including
 five-minute unprefixed rounding, exact numeric prefixes, calendar overflow,
@@ -3202,7 +3204,9 @@ timestamp field adjustment, priority cycling, direct list-sibling navigation,
 inherited/file-wide property cycling, checkbox fallback, cancellation,
 read-only and non-CLOCK refusal, undo, persistence boundaries,
 successive active/mixed ranges, existing-timestamp ranges, interruption, and
-TODO dispatch through packaged ncurses Lem.
+TODO dispatch through packaged ncurses Lem. It additionally proves the pinned
+single-set `WAITING` to `TODO` transition, unchanged `TODO` head, selected-only
+Visual-region mapping, and immediate persistence.
 
 `src/org/source-editing.lisp` supplies GNU Org's source-edit workflow on
 `C-c '`. A bounded source body opens without block delimiters in a dedicated
@@ -3401,7 +3405,12 @@ existing window and splitting only when the agenda is alone. `gj`/`gk` and
 skipping headers, empty sections, status text, and clocktable decoration while
 preserving the current column. Evil-Org's `t` opens the configured one-key
 TODO/NEXT/WAITING/HOLD/SOMEDAY/DONE/CANCELLED selector. A selected state updates
-and immediately saves the source before refreshing. Evil-Org's `K` and `J`
+and immediately saves the source before refreshing. Evil-Org `C-Shift-h/l`
+select the previous/next configured sequence; because the profile has one
+sequence, either route selects its `TODO` head. Terminal `C-c H/L` aliases make
+the chords usable under ncurses. The mutation refuses diary-derived rows,
+saves through the same remote-undo transaction as `t`, and follows the logical
+row through the asynchronous refresh. Evil-Org's `K` and `J`
 raise and lower GNU Org's default A/B/C priority cookies: an unprioritized
 heading starts at B, while repeated movement wraps through no priority to the
 opposite bound. GNU Org's `C-c C-s` and `C-c C-d` chords set SCHEDULED and

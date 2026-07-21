@@ -2272,23 +2272,65 @@ suffix."
         (entry-key (agenda-entry-key-at-point (current-point)))
         (file (text-property-at (current-point) :agenda-file))
         (line (text-property-at (current-point) :agenda-line))
-        (heading (text-property-at (current-point) :agenda-heading)))
-    (if (null file)
-        (message "No agenda entry on this line.")
-        (multiple-value-bind (state selected-p) (agenda-prompt-todo-state)
-          (when selected-p
-            (handler-case
-                (progn
-                  (with-agenda-undo-transaction
-                      (agenda-buffer "org-agenda-todo" entry-key)
-                    (agenda-set-source-todo file line heading state))
-                  (setf (buffer-value agenda-buffer
-                                      'lem-yath-agenda-restore-entry)
-                        entry-key)
-                  (agenda-start-scan agenda-buffer)
-                  (message "TODO state: ~a" (or state "none")))
-              (error (condition)
-                (message "Agenda TODO failed: ~a" condition))))))))
+        (heading (text-property-at (current-point) :agenda-heading))
+        (kind (text-property-at (current-point) :agenda-kind)))
+    (cond
+      ((null file)
+       (message "No agenda entry on this line."))
+      ((equal kind "DIARY")
+       (message "Command not allowed in this line"))
+      (t
+       (multiple-value-bind (state selected-p) (agenda-prompt-todo-state)
+         (when selected-p
+           (handler-case
+               (progn
+                 (with-agenda-undo-transaction
+                     (agenda-buffer "org-agenda-todo" entry-key)
+                   (agenda-set-source-todo file line heading state))
+                 (setf (buffer-value agenda-buffer
+                                     'lem-yath-agenda-restore-entry)
+                       entry-key)
+                 (agenda-start-scan agenda-buffer)
+                 (message "TODO state: ~a" (or state "none")))
+             (error (condition)
+               (message "Agenda TODO failed: ~a" condition)))))))))
+
+(defun agenda-select-configured-todo-set ()
+  "Select the sole configured TODO sequence for the agenda row at point."
+  (let ((agenda-buffer (current-buffer))
+        (entry-key (agenda-entry-key-at-point (current-point)))
+        (file (text-property-at (current-point) :agenda-file))
+        (line (text-property-at (current-point) :agenda-line))
+        (heading (text-property-at (current-point) :agenda-heading))
+        (kind (text-property-at (current-point) :agenda-kind)))
+    (cond
+      ((null file)
+       (message "No agenda entry on this line."))
+      ((equal kind "DIARY")
+       (message "Command not allowed in this line"))
+      (t
+       (handler-case
+           (progn
+             (with-agenda-undo-transaction
+                 (agenda-buffer "org-agenda-todo" entry-key)
+               (agenda-set-source-todo
+                file line heading (first *org-todo-keywords*)))
+             (setf (buffer-value agenda-buffer
+                                 'lem-yath-agenda-restore-entry)
+                   entry-key)
+             (agenda-start-scan agenda-buffer)
+             (message "Keyword-Set 1/1: ~{~a~^ ~}"
+                      *org-todo-keywords*))
+         (error (condition)
+           (message "Agenda TODO failed: ~a" condition)))))))
+
+(define-command lem-yath-agenda-todo-previousset () ()
+  "Select the previous configured TODO sequence for the current row."
+  (agenda-select-configured-todo-set))
+
+(define-command lem-yath-agenda-todo-nextset () ()
+  "Select the next configured TODO sequence for the current row."
+  (agenda-select-configured-todo-set))
 
 (defvar *agenda-command-initializer-function* nil
   "Optional function initializing BUFFER for an agenda dispatcher command.")
@@ -2333,6 +2375,15 @@ suffix."
 (define-key *lem-yath-agenda-vi-keymap* "g r" 'lem-yath-agenda-refresh)
 (define-key *lem-yath-agenda-vi-keymap* "g R" 'lem-yath-agenda-refresh)
 (define-key *lem-yath-agenda-vi-keymap* "t" 'lem-yath-agenda-todo)
+(define-key *lem-yath-agenda-vi-keymap* "C-Shift-h"
+  'lem-yath-agenda-todo-previousset)
+(define-key *lem-yath-agenda-vi-keymap* "C-Shift-l"
+  'lem-yath-agenda-todo-nextset)
+;; Traditional terminal input cannot reliably distinguish Ctrl-Shift letters.
+(define-key *lem-yath-agenda-vi-keymap* "C-c H"
+  'lem-yath-agenda-todo-previousset)
+(define-key *lem-yath-agenda-vi-keymap* "C-c L"
+  'lem-yath-agenda-todo-nextset)
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-s" 'lem-yath-agenda-schedule)
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-d" 'lem-yath-agenda-deadline)
 (define-key *lem-yath-agenda-vi-keymap* "K" 'lem-yath-agenda-priority-up)

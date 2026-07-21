@@ -65,6 +65,11 @@
   "Range cancelled:")
 (define-org-timestamp-test-goto
   lem-yath-test-timestamp-goto-clock-heading "Clock shifts")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-keyword-set "Keyword set edge")
+(define-org-timestamp-test-goto
+  lem-yath-test-timestamp-goto-keyword-set-region
+  "Keyword set region parent")
 (define-org-timestamp-test-goto-field
   lem-yath-test-timestamp-goto-clock-minute "10:01" 1)
 (define-org-timestamp-test-goto-field

@@ -12,6 +12,7 @@
 (defvar *agenda-test-note-report-serial* 0)
 (defvar *agenda-test-capture-report-serial* 0)
 (defvar *agenda-test-drag-report-serial* 0)
+(defvar *agenda-test-todo-set-report-serial* 0)
 (defvar *agenda-test-original-top-level-org-files* nil)
 (defvar *agenda-test-stale-source* nil)
 
@@ -27,6 +28,18 @@
     (apply #'format stream format-control arguments)
     (terpri stream)
     (finish-output stream)))
+
+(defun agenda-test-todo-set-diary-command-watch ()
+  (let ((command (and (this-command) (command-name (this-command))))
+        (kind (text-property-at (current-point) :agenda-kind)))
+    (when (and (member command '(lem-yath-agenda-todo-previousset
+                                 lem-yath-agenda-todo-nextset))
+               (equal kind "DIARY"))
+      (agenda-test-log "TODO-SET-DIARY-COMMAND command=~a kind=~a"
+                       command kind))))
+
+(remove-hook *post-command-hook* 'agenda-test-todo-set-diary-command-watch)
+(add-hook *post-command-hook* 'agenda-test-todo-set-diary-command-watch)
 
 (defun agenda-test-path (pathname)
   (uiop:native-namestring pathname))
@@ -143,6 +156,13 @@
      (agenda-test-command-name "Delete")
      (agenda-test-command-name "M-Return")
      (agenda-test-command-name "P"))
+    (agenda-test-log
+     "TODO-SET-BINDINGS serial=~d previous=~a next=~a fallback-previous=~a fallback-next=~a"
+     serial
+     (agenda-test-command-name "C-Shift-h")
+     (agenda-test-command-name "C-Shift-l")
+     (agenda-test-command-name "C-c H")
+     (agenda-test-command-name "C-c L"))
     (loop :for directory :in directories
           :for index :from 1
           :do (agenda-test-log "ROOT serial=~d index=~d path=~a"
@@ -173,6 +193,25 @@
 (define-command lem-yath-test-agenda-goto-work-todo () ()
   (move-point (current-point)
               (agenda-test-find-line "Work unscheduled sentinel")))
+
+(define-command lem-yath-test-agenda-goto-todo-set () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Upcoming work sentinel")))
+
+(define-command lem-yath-test-agenda-goto-diary-guard () ()
+  (move-point (current-point)
+              (agenda-test-find-line "Diary guard sentinel")))
+
+(define-command lem-yath-test-agenda-todo-set-report () ()
+  (let* ((original (copy-point (current-point) :temporary))
+         (point (agenda-test-find-line "Upcoming work sentinel"))
+         (serial (incf *agenda-test-todo-set-report-serial*)))
+    (agenda-test-log
+     "TODO-SET serial=~d heading=~s current=~a modified=~a"
+     serial
+     (text-property-at point :agenda-heading)
+     (if (point= original point) "yes" "no")
+     (if (buffer-modified-p (current-buffer)) "yes" "no"))))
 
 (define-command lem-yath-test-agenda-goto-effort () ()
   (move-point (current-point)
@@ -651,6 +690,12 @@
 (define-key *lem-yath-agenda-vi-keymap* "F6" 'lem-yath-test-agenda-point-report)
 (define-key *lem-yath-agenda-vi-keymap* "F12"
   'lem-yath-test-agenda-goto-work-todo)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 0"
+  'lem-yath-test-agenda-goto-todo-set)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 9"
+  'lem-yath-test-agenda-todo-set-report)
+(define-key *lem-yath-agenda-vi-keymap* "C-c D"
+  'lem-yath-test-agenda-goto-diary-guard)
 (define-key *lem-yath-agenda-vi-keymap* "C-c e"
   'lem-yath-test-agenda-goto-effort)
 (define-key *lem-yath-agenda-vi-keymap* "C-c 1"

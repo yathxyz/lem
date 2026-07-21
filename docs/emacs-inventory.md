@@ -940,6 +940,12 @@ the trailing text-ready space. The profile binds no other org-journal command
   header or decoration, and are reset by agenda redo. Lem reproduces those
   boundaries and retains the selected logical row across its asynchronous
   `gr` rebuild.
+- Evil-Org `C-Shift-h/l` call `org-agenda-todo-previousset` and
+  `org-agenda-todo-nextset`. The profile has one TODO sequence, so either
+  direction selects that sequence's `TODO` head from any other state and the
+  configured agenda advice saves the source immediately. Lem preserves those
+  semantics in Org and agenda buffers; terminal `C-c H/L` aliases retain
+  access where ncurses cannot distinguish Ctrl-Shift letters.
 - Evil-Org `SPC` displays the current source without leaving the agenda and a
   directly repeated `SPC` pages that source forward; Backspace/Delete page the
   remembered source backward. `M-Return` displays and recenters the exact row

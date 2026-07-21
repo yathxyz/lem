@@ -83,6 +83,10 @@ Vertical readonly: <2026-07-18 Sat>
 :READONLY_ALL: one two
 :READONLY: one
 :END:
+* WAITING Keyword set edge
+* WAITING Keyword set region parent
+** HOLD Keyword set region child
+* NEXT Keyword set region outside
 EOF
 cp "$fixture" "$root/original.org"
 
@@ -434,9 +438,9 @@ tmux_cmd send-keys -t "$session" C-c H
 sleep 0.3
 if snapshot 17 &&
    grep -q '^\* TODO Clock shifts$' "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-17"; then
-  pass todo-set 'next/previous set leave the sole TODO keyword set unchanged'
+  pass todo-set-head 'next/previous set retain an existing sequence head'
 else
-  fail todo-set 'Shift-Control TODO-set behavior changed the sole keyword set'
+  fail todo-set-head 'Shift-Control changed the existing sequence head'
 fi
 
 goto_marker clock-minute
@@ -935,6 +939,55 @@ else
   fail property-read-only 'read-only property cycling changed the buffer'
 fi
 mx lem-yath-test-org-timestamp-writable
+
+goto_marker keyword-set
+tmux_cmd send-keys -t "$session" C-c L
+if lem_wait_for "$session" \
+     'Keyword-Set 1/1: TODO NEXT WAITING HOLD SOMEDAY DONE CANCELLED' \
+     10 >/dev/null &&
+   snapshot 56 &&
+   grep -q '^\* TODO Keyword set edge$' \
+     "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-56" &&
+   grep -q '^\* TODO Keyword set edge$' "$fixture"; then
+  pass todo-next-set 'next-set selects and saves the sole sequence head'
+else
+  fail todo-next-set 'next-set did not select or persist TODO from WAITING'
+fi
+
+goto_marker keyword-set
+tmux_cmd send-keys -t "$session" C-c H
+if lem_wait_for "$session" \
+     'Keyword-Set 1/1: TODO NEXT WAITING HOLD SOMEDAY DONE CANCELLED' \
+     10 >/dev/null &&
+   snapshot 57 &&
+   cmp -s "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-57" \
+          "$LEM_YATH_ORG_TIMESTAMP_SNAPSHOTS/state-56"; then
+  pass todo-previous-set 'previous-set retains the sole sequence head'
+else
+  fail todo-previous-set 'previous-set changed the sole sequence head'
+fi
+
+goto_marker keyword-set-region
+tmux_cmd send-keys -t "$session" C-z
+if lem_wait_for "$session" 'NORMAL' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" V j
+  sleep 0.2
+  tmux_cmd send-keys -t "$session" C-c L
+else
+  fail todo-set-region-state 'could not enter Normal state for the Visual-region oracle'
+fi
+if lem_wait_for "$session" \
+     'Keyword-Set 1/1: TODO NEXT WAITING HOLD SOMEDAY DONE CANCELLED' \
+     10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" Escape
+fi
+if grep -q '^\* TODO Keyword set region parent$' "$fixture" &&
+   grep -q '^\*\* TODO Keyword set region child$' "$fixture" &&
+   grep -q '^\* NEXT Keyword set region outside$' "$fixture"; then
+  pass todo-set-region 'active-region set selection changed and saved only selected headings'
+else
+  fail todo-set-region 'active-region set selection changed the wrong headings'
+fi
 
 if [ "$failed" -ne 0 ]; then
   exit 1
