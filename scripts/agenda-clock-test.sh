@@ -121,7 +121,7 @@ send_chord C-z
 send_chord C-c z k
 wait_report_count '^KEYS state=emacs ' 1 || true
 keys_ok=1
-grep -q '^KEYS state=normal I=LEM-YATH-AGENDA-CLOCK-IN O=LEM-YATH-AGENDA-CLOCK-OUT cg=LEM-YATH-AGENDA-CLOCK-GOTO cc=LEM-YATH-AGENDA-CLOCK-CANCEL J=LEM-YATH-AGENDA-PRIORITY-DOWN X=LEM-YATH-STRUCTURAL-DELETE-PREVIOUS-CHAR plus=VI-NEXT-LINE minus=VI-PREVIOUS-LINE control-goto=LEM-YATH-AGENDA-CLOCK-GOTO control-cancel=LEM-YATH-AGENDA-CLOCK-CANCEL cr=LEM-YATH-AGENDA-CLOCKREPORT-MODE R=VI-REPLACE ' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
+grep -q '^KEYS state=normal I=LEM-YATH-AGENDA-CLOCK-IN O=LEM-YATH-AGENDA-CLOCK-OUT cg=LEM-YATH-AGENDA-CLOCK-GOTO cc=LEM-YATH-AGENDA-CLOCK-CANCEL J=LEM-YATH-AGENDA-PRIORITY-DOWN X=LEM-YATH-STRUCTURAL-DELETE-PREVIOUS-CHAR plus=LEM-YATH-AGENDA-INCLUDE-INACTIVE-TIMESTAMPS minus=LEM-YATH-AGENDA-INCLUDE-INACTIVE-TIMESTAMPS control-goto=LEM-YATH-AGENDA-CLOCK-GOTO control-cancel=LEM-YATH-AGENDA-CLOCK-CANCEL cr=LEM-YATH-AGENDA-CLOCKREPORT-MODE R=VI-REPLACE ' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
 grep -q '^KEYS state=emacs I=LEM-YATH-AGENDA-CLOCK-IN-ADDITIONAL O=LEM-YATH-AGENDA-CLOCK-OUT-OPEN-CLOCKS cg=SELF-INSERT cc=SELF-INSERT J=LEM-YATH-AGENDA-CLOCK-GOTO X=LEM-YATH-AGENDA-CLOCK-CANCEL plus=LEM-YATH-AGENDA-PRIORITY-UP minus=LEM-YATH-AGENDA-PRIORITY-DOWN control-goto=LEM-YATH-AGENDA-CLOCK-GOTO control-cancel=LEM-YATH-AGENDA-CLOCK-CANCEL cr=SELF-INSERT R=LEM-YATH-AGENDA-CLOCKREPORT-MODE m=LEM-YATH-AGENDA-BULK-MARK .*u=LEM-YATH-AGENDA-BULK-UNMARK U=LEM-YATH-AGENDA-BULK-UNMARK-ALL M-m=LEM-YATH-AGENDA-BULK-TOGGLE M-star=LEM-YATH-AGENDA-BULK-TOGGLE-ALL$' "$LEM_YATH_AGENDA_CLOCK_REPORT" || keys_ok=0
 if [ "$keys_ok" = 1 ]; then
   pass state-maps 'clock, priority, and mark keys follow pinned Evil/base shadowing'
@@ -246,9 +246,12 @@ wait_report_count '^CLOCK-SOURCE modified=yes open=1 logbook=1 active=no$' 1 || 
 
 send_chord C-c z o
 wait_report_count '^SOURCE-CONTEXT file=clock\.org ' 1 || stock_shape=0
+# Staged project-grep installs a contextual Normal-state u wrapper globally;
+# in this ordinary Org source it must delegate to Vi undo, as the state checks
+# immediately below prove through the exact clock edit.
 if grep -q '^SOURCE-CONTEXT file=clock\.org state=emacs ' "$LEM_YATH_AGENDA_CLOCK_REPORT"; then
   send_chord C-z
-elif ! grep -q '^SOURCE-CONTEXT file=clock\.org state=normal u=VI-UNDO$' "$LEM_YATH_AGENDA_CLOCK_REPORT"; then
+elif ! grep -q '^SOURCE-CONTEXT file=clock\.org state=normal u=LEM-YATH-PROJECT-GREP-NORMAL-UNDO$' "$LEM_YATH_AGENDA_CLOCK_REPORT"; then
   stock_shape=0
 fi
 send_chord u
