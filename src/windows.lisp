@@ -1,5 +1,10 @@
 (in-package :lem-core)
 
+;; Deployed binaries resolve bundled resources (e.g. the SDL2 fonts) next
+;; to the executable via lem-relative-pathname, which is gated on *deployed*.
+(deploy:define-hook (:boot set-lem-deployed) ()
+  (setf *deployed* t))
+
 ;; The Windows executable is built as a GUI-subsystem application
 ;; (deploy's default on Windows), so a process launched from Explorer has
 ;; no console and the initial stdio handles are invalid; the first write

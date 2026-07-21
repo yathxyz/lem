@@ -3,12 +3,15 @@
 (defparameter *deployed* nil)
 
 (defun lem-relative-pathname (pathname)
+  "Resolve PATHNAME relative to the deployed executable's directory, or NIL
+when not deployed or the file does not exist (callers fall back to the
+source tree via `asdf:system-relative-pathname')."
   (when *deployed*
-    (truename (merge-pathnames pathname
-			       #+sbcl
-                               (uiop:pathname-directory-pathname (first sb-ext:*posix-argv*))
-			       #-sbcl
-                               (uiop:pathname-directory-pathname (uiop/os:getcwd))))))
+    (probe-file (merge-pathnames pathname
+			         #+sbcl
+                                 (uiop:pathname-directory-pathname (first sb-ext:*posix-argv*))
+			         #-sbcl
+                                 (uiop:pathname-directory-pathname (uiop/os:getcwd))))))
 
 (defun get-pid ()
   #+sbcl

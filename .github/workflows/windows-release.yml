@@ -1,7 +1,8 @@
 name: Windows Release
 
-# Fork-owned Windows build of lem (webview frontend) for the yathxyz/scoop-yath
-# private Scoop bucket. Adapted from upstream's Windows CD (removed upstream at
+# Fork-owned Windows builds of lem (webview + sdl2 frontends) for the
+# yathxyz/scoop-yath private Scoop bucket.
+# Adapted from upstream's Windows CD (removed upstream at
 # 7f7a21a5 as "doesn't work properly") with two fixes: git deps are cloned at
 # the SHAs pinned in qlfile.lock (upstream cloned default-branch HEADs), and
 # the SBCL MSI picker matches x86-64 explicitly (upstream's regex now matches
@@ -17,7 +18,7 @@ concurrency: windows-release
 
 jobs:
   build:
-    name: Build lem.exe (webview frontend)
+    name: Build lem.exe (webview) + lem-sdl2.exe
     runs-on: windows-latest
     steps:
       - name: Force LF line endings for all clones
@@ -114,15 +115,7 @@ jobs:
           if (-not (Test-Path "bin\lem.exe")) { throw "bin/lem.exe not produced" }
           Get-ChildItem bin | Format-Table Name, Length
 
-      - name: Compute release tag
-        id: ver
-        shell: pwsh
-        run: |
-          $tag = "windows-v" + (Get-Date -Format "yyyyMMdd") + "." + $env:GITHUB_RUN_NUMBER
-          echo "tag=$tag" >> $env:GITHUB_OUTPUT
-          Write-Host "Release tag: $tag"
-
-      - name: Package
+      - name: Package webview build
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -130,6 +123,62 @@ jobs:
           $hash = (Get-FileHash dist\lem-windows.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  lem-windows.zip" | Out-File -Encoding ascii -NoNewline dist\lem-windows.zip.sha256
           Write-Host "sha256: $hash"
+          Remove-Item bin -Recurse -Force
+
+      - name: Install SDL2 runtime DLLs (pinned)
+        shell: pwsh
+        run: |
+          $dlls = Join-Path $env:RUNNER_TEMP "sdl2-dlls"
+          New-Item -ItemType Directory -Force -Path $dlls | Out-Null
+          $pins = @(
+            @{ url = "https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10-win32-x64.zip";
+               sha256 = "6cf9706eefd0a4a06dc764007934d428afaf029fabdd408a9e646048c91e18fb" },
+            @{ url = "https://github.com/libsdl-org/SDL_ttf/releases/download/release-2.24.0/SDL2_ttf-2.24.0-win32-x64.zip";
+               sha256 = "8d72240aafc783d37d6cf960b1a2138e6ca4eb0c1b5b9a9e71ea299d1ef27ef9" },
+            @{ url = "https://github.com/libsdl-org/SDL_image/releases/download/release-2.8.12/SDL2_image-2.8.12-win32-x64.zip";
+               sha256 = "a85aa359f0d7cf0c7e0586deee464982e4433e63fba407911dd802459f967f5f" }
+          )
+          foreach ($p in $pins) {
+            $zip = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileName($p.url))
+            Invoke-WebRequest $p.url -OutFile $zip
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+            if ($hash -ne $p.sha256) { throw "sha256 mismatch for $($p.url): $hash" }
+            Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP "sdl2-x") -Force
+          }
+          Copy-Item (Join-Path $env:RUNNER_TEMP "sdl2-x\*.dll") $dlls
+          Get-ChildItem $dlls
+          echo $dlls | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build lem-sdl2 (deploy-op)
+        shell: pwsh
+        run: |
+          & sbcl --dynamic-space-size 4096 --non-interactive `
+                 --eval "(require :asdf)" `
+                 --eval "(asdf:load-system :uiop)" `
+                 --eval "(assert (find-package :uiop/cl) () `"pinned uiop 3.3.7 not in effect`")" `
+                 --eval "(ql:quickload :lem/sdl2)" `
+                 --eval "(asdf:make :lem/sdl2)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "bin\lem-sdl2.exe")) { throw "bin/lem-sdl2.exe not produced" }
+          if (-not (Test-Path "bin\SDL2.dll")) { throw "deploy did not bundle SDL2.dll" }
+          Copy-Item -Recurse frontends\sdl2\resources bin\resources
+          Get-ChildItem bin | Format-Table Name, Length
+
+      - name: Package sdl2 build
+        shell: pwsh
+        run: |
+          Compress-Archive -Path bin\* -DestinationPath dist\lem-sdl2-windows.zip
+          $hash = (Get-FileHash dist\lem-sdl2-windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  lem-sdl2-windows.zip" | Out-File -Encoding ascii -NoNewline dist\lem-sdl2-windows.zip.sha256
+          Write-Host "sha256: $hash"
+
+      - name: Compute release tag
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "windows-v" + (Get-Date -Format "yyyyMMdd") + "." + $env:GITHUB_RUN_NUMBER
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Release tag: $tag"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -141,3 +190,5 @@ jobs:
           files: |
             dist/lem-windows.zip
             dist/lem-windows.zip.sha256
+            dist/lem-sdl2-windows.zip
+            dist/lem-sdl2-windows.zip.sha256

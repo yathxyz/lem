@@ -328,3 +328,18 @@
   :pathname "src"
   :components ((:file "macosx" :if-feature :os-macosx)
                (:file "windows" :if-feature :os-windows)))
+
+;; Standalone SDL2 desktop build (Windows release artifact). The zip must
+;; also carry frontends/sdl2/resources/ next to the executable: the deploy
+;; boot hook in src/windows.lisp sets *deployed* so get-resource-pathname
+;; resolves fonts/icons there instead of the build tree.
+(defsystem "lem/sdl2"
+  :version "2.3.0"
+  :defsystem-depends-on ("deploy")
+  :build-operation "deploy-op"
+  :build-pathname "lem-sdl2"
+  :entry-point "lem:main"
+  :depends-on ("lem-sdl2")
+  :pathname "src"
+  :components ((:file "macosx" :if-feature :os-macosx)
+               (:file "windows" :if-feature :os-windows)))
