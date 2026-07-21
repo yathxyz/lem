@@ -291,11 +291,22 @@ cannot fall through to a paragraph or section after an inner end marker."
       (push (cons start end) ranges))
     (nreverse ranges)))
 
+(defun %org-whitespace-entity-end (line start)
+  "Return the exclusive end of a valid `\\_ '-family entity at START."
+  (when (and (< (1+ start) (length line))
+             (eql (char line start) #\Backslash)
+             (eql (char line (1+ start)) #\_))
+    (let ((end (+ start 2)))
+      (loop :while (and (< end (length line))
+                        (eql (char line end) #\Space))
+            :do (incf end))
+      (and (<= 1 (- end (+ start 2)) 20) end))))
+
 (defun %org-backslash-token-ranges (line)
   "Return ranges for unsupported backslash syntax on LINE.
 
 Alphabetic TeX macros and matched LaTeX delimiters are modeled inline below.
-Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
+Keep unmatched delimiters and punctuation escapes fail-closed."
   (let ((ranges '())
         (search-from 0))
     (loop
@@ -308,6 +319,7 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
                  (or (and next
                           (or (and (char>= next #\A) (char<= next #\Z))
                               (and (char>= next #\a) (char<= next #\z))))
+                     (%org-whitespace-entity-end line start)
                      (and (eql next #\()
                           (search "\\)" line :start2 (+ start 2)))
                      (and (eql next #\[)
@@ -325,8 +337,7 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
   "Return conservative ranges for Org objects not modeled by this module."
   (append
    (mapcan (lambda (pattern) (%org-regexp-ranges pattern line))
-           '("\\[fn:[^]\\n]+\\]"
-             "\\[(?:[0-9]+/[0-9]+|[0-9]+%)\\]"
+           '("\\[(?:[0-9]+/[0-9]+|[0-9]+%)\\]"
              "@@[A-Za-z0-9_-]+:[^\\n]*?@@"
              "\\{\\{\\{[^\\n]*\\}\\}\\}"
              "<<[^>\\n]+>>"
@@ -347,6 +358,131 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
         :while (eql (char line position) #\Backslash)
         :count t :into count
         :finally (return (oddp count))))
+
+(defun %org-footnote-label-character-p (character)
+  (or (alphanumericp character) (member character '(#\- #\_))))
+
+(defun %org-footnote-closing-index (line start)
+  "Return the exclusive balanced square-bracket end beginning at START."
+  (loop :with depth := 0
+        :for index :from start :below (length line)
+        :for character := (char line index)
+        :unless (%org-escaped-character-p line index)
+          :do (cond
+                ((eql character #\[) (incf depth))
+                ((eql character #\])
+                 (decf depth)
+                 (when (zerop depth) (return (1+ index)))
+                 (when (minusp depth) (return nil))))))
+
+(defun %org-footnote-candidates (line)
+  "Return bounded same-line GNU Org footnote-reference objects."
+  (let ((result '())
+        (search-from 0))
+    (loop
+      (let ((start (search "[fn:" line :start2 search-from)))
+        (unless start (return (nreverse result)))
+        (unless (%org-escaped-character-p line start)
+          (let* ((payload-start (+ start 4))
+                 (cursor payload-start))
+            (loop :while (and (< cursor (length line))
+                              (%org-footnote-label-character-p
+                               (char line cursor)))
+                  :do (incf cursor))
+            (let* ((anonymous-p
+                     (and (= cursor payload-start)
+                          (< cursor (length line))
+                          (eql (char line cursor) #\:)))
+                   (labeled-p (> cursor payload-start))
+                   (inline-p
+                     (and (or anonymous-p labeled-p)
+                          (< cursor (length line))
+                          (eql (char line cursor) #\:)))
+                   (standard-p
+                     (and labeled-p
+                          (< cursor (length line))
+                          (eql (char line cursor) #\])))
+                   (closing
+                     (cond
+                       (inline-p (%org-footnote-closing-index line start))
+                       (standard-p (1+ cursor)))))
+              (when closing
+                (let ((outer-end (%org-inline-postblank-end line closing)))
+                  (push (%make-org-inline-candidate
+                         start closing outer-end
+                         (if inline-p (1+ cursor) start)
+                         (if inline-p (1- closing) closing)
+                         :footnote-reference)
+                        result))))))
+        (setf search-from (1+ start))))))
+
+(defun %org-malformed-footnote-at-point-p (point)
+  "Whether POINT is in footnote-looking syntax without a valid reference."
+  (let* ((line (line-string point))
+         (column (point-charpos point))
+         (valid-starts
+           (mapcar #'%org-inline-candidate-start
+                   (%org-footnote-candidates line)))
+         (search-from 0))
+    (loop
+      (let ((start (search "[fn:" line :start2 search-from)))
+        (unless start (return nil))
+        (when (and (not (%org-escaped-character-p line start))
+                   (<= start column)
+                   (not (member start valid-starts)))
+          (return t))
+        (setf search-from (1+ start))))))
+
+(defun %org-whitespace-entity-candidates (line)
+  "Return GNU Org's bounded `\\_ '-family whitespace entities."
+  (let ((result '())
+        (search-from 0))
+    (loop
+      (let ((start (search "\\_" line :start2 search-from)))
+        (unless start (return (nreverse result)))
+        (let ((end (%org-whitespace-entity-end line start)))
+          (when (and end (not (%org-escaped-character-p line start)))
+            (push (%make-org-inline-candidate
+                   start end end start end :entity)
+                  result)))
+        (setf search-from (+ start 2))))))
+
+(defun %org-line-break-start-column (line)
+  "Return the first backslash of a valid explicit Org line break."
+  (let ((end (length line)))
+    (loop :while (and (plusp end)
+                      (member (char line (1- end)) '(#\Space #\Tab)))
+          :do (decf end))
+    (let ((start (- end 2)))
+      (and (not (minusp start))
+           (eql (char line start) #\Backslash)
+           (eql (char line (1+ start)) #\Backslash)
+           (or (zerop start)
+               (not (eql (char line (1- start)) #\Backslash)))
+           start))))
+
+(defun %org-line-break-boundary-on-line (line-point)
+  (alexandria:when-let
+      ((start-column (%org-line-break-start-column (line-string line-point))))
+    (let ((start (%org-line-point line-point start-column))
+          (end (%org-line-after line-point)))
+      (when (point< start end)
+        (%make-org-boundary
+         start end (copy-point start :temporary) (copy-point end :temporary)
+         :character :line-break)))))
+
+(defun %org-line-break-boundary-at (origin)
+  "Return the explicit line break owning ORIGIN, including GNU's next-BOL edge."
+  (let ((column (point-charpos origin)))
+    (or (alexandria:when-let
+            ((boundary (%org-line-break-boundary-on-line origin)))
+          (when (>= column
+                    (point-charpos (%org-boundary-start boundary)))
+            boundary))
+        (when (zerop column)
+          (with-point ((previous origin))
+            (when (line-offset previous -1)
+              (%org-line-break-boundary-on-line previous)))))))
 
 (defparameter +org-citation-prefix-pattern+
   "\\[cite(?:/[A-Za-z0-9_/-]+)?:[ \\t]*")
@@ -853,10 +989,12 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
                              citation-outers)))
                       (%org-plain-link-candidates line))))
               (append
+               (%org-footnote-candidates line)
                citations
                links
                plain-links
                (%org-timestamp-candidates line)
+               (%org-whitespace-entity-candidates line)
                (%org-latex-dollar-candidates line)
                (%org-latex-delimited-candidates line "\\(" "\\)")
                (%org-latex-delimited-candidates line "\\[" "\\]")
@@ -1034,6 +1172,7 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
 
 (defun %org-object-at-point (origin)
   (or
+   (%org-line-break-boundary-at origin)
    (%org-multiline-latex-boundary-at origin)
    (let* ((column (point-charpos origin))
          (all-covering
@@ -1079,6 +1218,7 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
       ;; so ae cannot over-delete that container or its paragraph.
       ((or (%org-unsupported-table-object-at-point-p origin)
            (%org-unsupported-inline-at-point-p origin)
+           (%org-malformed-footnote-at-point-p origin)
            (%org-malformed-citation-at-point-p origin))
        nil)
       (candidate (%org-inline-to-boundary origin candidate))
@@ -1104,6 +1244,7 @@ Keep unmatched delimiters, line breaks, and punctuation entities fail-closed."
         (return at-point))
       (when (or (%org-boundary-scan-barrier-p point)
                 (%org-unsupported-inline-at-point-p point)
+                (%org-malformed-footnote-at-point-p point)
                 (%org-malformed-citation-at-point-p point))
         (return nil))
       (let ((eligible

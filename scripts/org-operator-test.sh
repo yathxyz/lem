@@ -514,7 +514,7 @@ write_fixtures() {
   printf '%s\n' 'P1' '' 'P2' '' 'AFTER' \
     >"$WORKDIR/count-element.org"
   printf '%s\n' '~one~ [fn:note] ~two~' \
-    >"$WORKDIR/count-object-barrier.org"
+    >"$WORKDIR/count-object-footnote.org"
   printf '%s\n' 'P1' '' ':ID: orphan' '' 'P2' \
     >"$WORKDIR/count-element-barrier.org"
   printf '%s\n' '- parent' '  - child' '- sibling' \
@@ -522,8 +522,20 @@ write_fixtures() {
   printf '%s\n' '- ' '- KEEP' >"$WORKDIR/empty-list-leaf.org"
   printf '%s\n' '- ' '  - child' '- KEEP' \
     >"$WORKDIR/empty-list-parent.org"
-  printf '%s\n' 'prefix [fn:note] suffix' \
-    >"$WORKDIR/unsupported-inline.org"
+  printf '%s\n' 'prefix [fn:note]  suffix' \
+    >"$WORKDIR/footnote-standard.org"
+  printf '%s\n' 'prefix [fn:note]  suffix' \
+    >"$WORKDIR/footnote-standard-inner.org"
+  printf '%s\n' 'prefix [fn:note:def *bold* tail]  suffix' \
+    >"$WORKDIR/footnote-inline.org"
+  printf '%s\n' 'prefix [fn::definition [nested] tail] suffix' \
+    >"$WORKDIR/footnote-anonymous.org"
+  printf '%s\n' 'prefix [fn::] suffix' \
+    >"$WORKDIR/footnote-empty-inner.org"
+  printf '%s\n' 'prefix [fn:note:def suffix' \
+    >"$WORKDIR/footnote-malformed.org"
+  printf '%s\n' '[fn:note] Definition text' \
+    >"$WORKDIR/footnote-definition.org"
   printf '%s\n' 'prefix [cite:@key] suffix' \
     >"$WORKDIR/citation-simple.org"
   printf '%s\n' 'prefix [cite:@key] suffix' \
@@ -543,7 +555,9 @@ write_fixtures() {
   printf '%s\n' '~[cite:@key]~ tail' \
     >"$WORKDIR/citation-code-opaque.org"
   printf '%s\n' 'prefix \_ suffix' \
-    >"$WORKDIR/unsupported-entity.org"
+    >"$WORKDIR/whitespace-entity.org"
+  printf '%s\n' 'alpha\\   ' 'beta' \
+    >"$WORKDIR/line-break.org"
   printf '%s\n' '*prefix [cite:@key] suffix*' \
     >"$WORKDIR/citation-in-bold.org"
   printf '%s\n' '* H' ':ID: *orphan*' 'KEEP' '* S' \
@@ -2004,13 +2018,13 @@ if start_case count-heading "$WORKDIR/count-heading.org" 'P1'; then
   stop_case "$CASE_SESSION"
 fi
 
-if start_case count-object-barrier "$WORKDIR/count-object-barrier.org" \
+if start_case count-object-footnote "$WORKDIR/count-object-footnote.org" \
      'fn:note'; then
   send_keys "$CASE_SESSION" l
-  if operate_and_record count-object-barrier "$CASE_SESSION" 2 y a e; then
-    assert_state count-object-barrier-abort count-object-barrier \
+  if operate_and_record count-object-footnote "$CASE_SESSION" 2 y a e; then
+    assert_state count-object-footnote-range count-object-footnote \
       "$CASE_SESSION" 'text=~one~ [fn:note] ~two~\n bytes=' \
-      'register= register-type=none' 'small= small-type=none' 'modified=no'
+      'register=one~ [fn:note]  register-type=char' 'modified=no'
   fi
   stop_case "$CASE_SESSION"
 fi
@@ -2871,14 +2885,79 @@ fi
 
 # Unsafe list ownership and malformed blocks must not fall through to a
 # paragraph or section for either aE or ar.
-if start_case unsupported-inline "$WORKDIR/unsupported-inline.org" \
+if start_case footnote-standard "$WORKDIR/footnote-standard.org" 'fn:note'; then
+  send_keys "$CASE_SESSION" 8 l
+  if operate_and_record footnote-standard "$CASE_SESSION" d a e; then
+    assert_state footnote-standard-ae footnote-standard "$CASE_SESSION" \
+      'text=prefix suffix\n bytes=' \
+      'register=[fn:note]   register-type=char' \
+      'state=normal selection=none' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case footnote-standard-inner \
+     "$WORKDIR/footnote-standard-inner.org" 'fn:note'; then
+  send_keys "$CASE_SESSION" 8 l
+  if operate_and_record footnote-standard-inner "$CASE_SESSION" y i e; then
+    assert_state footnote-standard-ie footnote-standard-inner \
+      "$CASE_SESSION" 'register=[fn:note] register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case footnote-inline "$WORKDIR/footnote-inline.org" 'bold.*tail'; then
+  send_keys "$CASE_SESSION" 8 l
+  if operate_and_record footnote-inline "$CASE_SESSION" y i e; then
+    assert_state footnote-inline-ie footnote-inline "$CASE_SESSION" \
+      'register=def *bold* tail register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 22 l
+  if operate_and_record footnote-inline "$CASE_SESSION" y a e; then
+    assert_state footnote-inline-nested-ae footnote-inline "$CASE_SESSION" \
+      'register=*bold*  register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case footnote-anonymous "$WORKDIR/footnote-anonymous.org" \
+     'definition.*nested'; then
+  send_keys "$CASE_SESSION" 8 l
+  if operate_and_record footnote-anonymous "$CASE_SESSION" y i e; then
+    assert_state footnote-anonymous-ie footnote-anonymous "$CASE_SESSION" \
+      'register=definition [nested] tail register-type=char' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case footnote-empty-inner "$WORKDIR/footnote-empty-inner.org" \
+     'fn::'; then
+  send_keys "$CASE_SESSION" 8 l
+  if operate_and_record footnote-empty-inner "$CASE_SESSION" y i e; then
+    assert_state footnote-empty-inner-abort footnote-empty-inner \
+      "$CASE_SESSION" 'text=prefix [fn::] suffix\n bytes=' \
+      'register= register-type=none' 'small= small-type=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case footnote-malformed "$WORKDIR/footnote-malformed.org" \
      'fn:note'; then
   send_keys "$CASE_SESSION" 8 l
-  if operate_and_record unsupported-inline "$CASE_SESSION" d a e; then
-    assert_state unsupported-inline-ae unsupported-inline "$CASE_SESSION" \
-      'text=prefix [fn:note] suffix\n bytes=' \
-      'register= register-type=none' 'small= small-type=none' \
-      'state=normal selection=none' 'modified=no'
+  if operate_and_record footnote-malformed "$CASE_SESSION" d a e; then
+    assert_state footnote-malformed-abort footnote-malformed \
+      "$CASE_SESSION" 'text=prefix [fn:note:def suffix\n bytes=' \
+      'register= register-type=none' 'small= small-type=none' 'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case footnote-definition "$WORKDIR/footnote-definition.org" \
+     'Definition'; then
+  if operate_and_record footnote-definition "$CASE_SESSION" d a e; then
+    assert_state footnote-definition-object-abort footnote-definition \
+      "$CASE_SESSION" 'text=[fn:note] Definition text\n bytes=' \
+      'register= register-type=none' 'small= small-type=none' 'modified=no'
   fi
   stop_case "$CASE_SESSION"
 fi
@@ -2980,14 +3059,28 @@ if start_case citation-code-opaque "$WORKDIR/citation-code-opaque.org" \
   stop_case "$CASE_SESSION"
 fi
 
-if start_case unsupported-entity "$WORKDIR/unsupported-entity.org" \
+if start_case whitespace-entity "$WORKDIR/whitespace-entity.org" \
      'prefix.*suffix'; then
   send_keys "$CASE_SESSION" 8 l
-  if operate_and_record unsupported-entity "$CASE_SESSION" d a e; then
-    assert_state unsupported-entity-ae unsupported-entity "$CASE_SESSION" \
-      'text=prefix \\_ suffix\n bytes=' \
-      'register= register-type=none' 'small= small-type=none' \
-      'state=normal selection=none' 'modified=no'
+  if operate_and_record whitespace-entity "$CASE_SESSION" d a e; then
+    assert_state whitespace-entity-ae whitespace-entity "$CASE_SESSION" \
+      'text=prefix suffix\n bytes=' \
+      'register=\\_  register-type=char' \
+      'state=normal selection=none' 'modified=yes'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case line-break "$WORKDIR/line-break.org" 'alpha'; then
+  send_keys "$CASE_SESSION" 5 l
+  if operate_and_record line-break "$CASE_SESSION" y a e; then
+    assert_state line-break-ae line-break "$CASE_SESSION" \
+      'register=\\\\   \n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g j 0
+  if operate_and_record line-break "$CASE_SESSION" y i e; then
+    assert_state line-break-next-bol-ie line-break "$CASE_SESSION" \
+      'register=\\\\   \n register-type=char' 'modified=no'
   fi
   stop_case "$CASE_SESSION"
 fi
