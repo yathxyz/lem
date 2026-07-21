@@ -934,6 +934,12 @@ the trailing text-ready space. The profile binds no other org-journal command
   exact source marker in another window; Return instead runs
   `org-agenda-switch-to` in the agenda window. `gj`/`gk` and `C-j`/`C-k` move
   between source-backed items rather than stopping on agenda decoration.
+- Evil-Org `M-j`/`M-k` run pinned `org-agenda-drag-line-forward` and
+  `org-agenda-drag-line-backward`. They reorder only the displayed agenda,
+  honor counts, carry the row's complete text properties, refuse to cross a
+  header or decoration, and are reset by agenda redo. Lem reproduces those
+  boundaries and retains the selected logical row across its asynchronous
+  `gr` rebuild.
 - Evil-Org `SPC` displays the current source without leaving the agenda and a
   directly repeated `SPC` pages that source forward; Backspace/Delete page the
   remembered source backward. `M-Return` displays and recenters the exact row

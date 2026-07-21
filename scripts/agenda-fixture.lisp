@@ -11,6 +11,7 @@
 (defvar *agenda-test-preview-report-serial* 0)
 (defvar *agenda-test-note-report-serial* 0)
 (defvar *agenda-test-capture-report-serial* 0)
+(defvar *agenda-test-drag-report-serial* 0)
 (defvar *agenda-test-original-top-level-org-files* nil)
 (defvar *agenda-test-stale-source* nil)
 
@@ -125,7 +126,7 @@
      (concatenate
       'string
       "OPEN-MOTION serial=~d tab=~a shift-return=~a gtab=~a "
-      "gj=~a gk=~a Cj=~a Ck=~a space=~a backspace=~a delete=~a "
+      "gj=~a gk=~a Cj=~a Ck=~a Mj=~a Mk=~a space=~a backspace=~a delete=~a "
       "mret=~a P=~a")
      serial
      (agenda-test-command-name "Tab")
@@ -135,6 +136,8 @@
      (agenda-test-command-name "g k")
      (agenda-test-command-name "C-j")
      (agenda-test-command-name "C-k")
+     (agenda-test-command-name "M-j")
+     (agenda-test-command-name "M-k")
      (agenda-test-command-name "Space")
      (agenda-test-command-name "Backspace")
      (agenda-test-command-name "Delete")
@@ -182,6 +185,58 @@
 (define-command lem-yath-test-agenda-goto-capture () ()
   (move-point (current-point)
               (agenda-test-find-line "Body event sentinel")))
+
+(define-command lem-yath-test-agenda-goto-drag () ()
+  (move-point (current-point)
+              (agenda-test-find-line "After archive sentinel"))
+  (unless (agenda-bulk-find-mark
+           (current-buffer)
+           (agenda-row-mark-key-at-point (current-point)))
+    (agenda-bulk-add-current)))
+
+(define-command lem-yath-test-agenda-drag-report () ()
+  (with-point ((original (current-point)))
+    (let* ((rows
+             (mapcar
+              (lambda (entry)
+                (cons (car entry)
+                      (line-number-at-point
+                       (agenda-test-find-line (cdr entry)))))
+              '(("after" . "After archive sentinel")
+                ("refile" . "Refile action sentinel")
+                ("child" . "Refile child sentinel"))))
+           (order (mapcar #'car (sort rows #'< :key #'cdr)))
+           (key (agenda-row-mark-key-at-point original))
+           (serial (incf *agenda-test-drag-report-serial*)))
+      (agenda-test-log
+       (concatenate
+        'string
+        "DRAG serial=~d order=~{~a~^,~} current=~a identity=~a "
+        "marked=~a marks=~d modified=~a")
+       serial order
+       (if (search "After archive sentinel" (line-string original))
+           "after" "other")
+       (if (and (text-property-at original :agenda-file)
+                (integerp (text-property-at original :agenda-line))
+                (string= (text-property-at original :agenda-heading)
+                         "* TODO After archive sentinel"))
+           "yes" "no")
+       (if (and key
+                (char= (or (character-at original) #\Space) #\>)
+                (agenda-bulk-row-marked-p (current-buffer) key))
+           "yes" "no")
+       (length (agenda-bulk-marks))
+       (if (buffer-modified-p (current-buffer)) "yes" "no")))
+    (move-point (current-point) original)))
+
+(define-command lem-yath-test-agenda-drag-ready () ()
+  (unless (agenda-scan-running-p (current-buffer))
+    (with-point ((original (current-point)))
+      (when (handler-case
+                (progn (agenda-test-find-line "After archive sentinel") t)
+              (error () nil))
+        (move-point (current-point) original)
+        (agenda-test-log "DRAG-READY")))))
 
 (defun agenda-test-time-string (time)
   (multiple-value-bind (second minute hour day month year)
@@ -604,6 +659,12 @@
   'lem-yath-test-agenda-goto-capture)
 (define-key *lem-yath-agenda-vi-keymap* "C-c 5"
   'lem-yath-test-agenda-capture-target-report)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 6"
+  'lem-yath-test-agenda-goto-drag)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 7"
+  'lem-yath-test-agenda-drag-report)
+(define-key *lem-yath-agenda-vi-keymap* "C-c 8"
+  'lem-yath-test-agenda-drag-ready)
 (define-key *lem-yath-agenda-vi-keymap* "C-c 2"
   'lem-yath-test-agenda-note-report)
 (define-key *lem-yath-agenda-vi-keymap* "C-c 3"

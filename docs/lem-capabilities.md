@@ -3391,7 +3391,9 @@ edits without touching mutable editor state off-thread. Refresh requests
 coalesce behind one worker per buffer, generations reject stale results, source
 failures are shown instead of becoming a false empty agenda, and killed buffers
 reject late delivery. Entry lines retain exact source pathname, line, and
-scanned-heading properties. In Vi state, `Return` visits that source, `gr`/`gR`
+scanned-heading properties. Manual `gr`/`gR` records the selected entry key
+before rendering the temporary scanning buffer and restores that logical row
+after the asynchronous rebuild. In Vi state, `Return` visits that source, `gr`/`gR`
 refresh, and `q` closes the explicit popup split. Evil-Org `Tab`, `g Tab`, and
 Shift-Return open the exact source row in the next ordinary window, reusing an
 existing window and splitting only when the agenda is alone. `gj`/`gk` and
@@ -3419,6 +3421,14 @@ agenda sources, removes duplicates, offers an explicit clear row for empty
 input, accepts the current valid expression on Return even while add-tag
 candidates remain visible, and realigns the result to the active terminal tag
 column.
+
+`src/apps/agenda-drag.lisp` implements pinned Evil-Org `M-j`/`M-k` as a
+display-only rotation of complete agenda line objects. A Vi count crosses that
+many adjacent source-backed rows; headers, blank separators, time-grid rows,
+and other decoration refuse the whole move. Text, the complete line-property
+map, and bulk-mark styling move together, point follows the dragged row,
+the agenda remains read-only and unmodified, and no source buffer or file is
+touched. The next refresh reconstructs canonical order from source.
 
 `src/apps/agenda-view.lisp` owns the GNU span policy separately from scanning
 and source mutation. `SPC m a` opens a stock-shaped command dispatcher for the

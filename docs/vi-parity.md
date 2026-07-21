@@ -76,6 +76,12 @@ annotation, and finalize/abort restore the exact agenda point, window, and Vi
 state. The physical agenda gate covers both state-specific bindings, the date,
 timed-prefix and undated boundaries, target persistence, and cleanup.
 
+Evil-Org agenda `M-j`/`M-k` drag the current display row forward/backward by
+the Vi count. Complete line properties and bulk-mark state follow the row;
+headers and decorations refuse the entire move, the source stays byte-identical,
+and `gr` restores canonical order while retaining the logical selection. These
+paths are physically covered by `agenda-test.sh`.
+
 ## Remaining capability gaps
 
 These bindings are intentionally not mapped to unrelated commands:

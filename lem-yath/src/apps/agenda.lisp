@@ -1364,7 +1364,9 @@ completed unscheduled tasks stay out of the TODO section."
                  (agenda-error-text (cdr failure))))))))
 
 (defun agenda-entry-key-at-point (point)
-  (alexandria:when-let ((file (text-property-at point :agenda-file)))
+  (alexandria:when-let
+      ((file (or (text-property-at point :agenda-file)
+                 (text-property-at point :agenda-diary-file))))
     (list file
           (text-property-at point :agenda-line)
           (text-property-at point :agenda-kind)
@@ -1713,6 +1715,8 @@ completed unscheduled tasks stay out of the TODO section."
         (progn
           (when (fboundp 'agenda-undo-clear)
             (agenda-undo-clear buffer))
+          (setf (buffer-value buffer 'lem-yath-agenda-restore-entry)
+                (agenda-entry-key-at-point (buffer-point buffer)))
           (agenda-start-scan buffer))
         (message "No agenda buffer to refresh."))))
 

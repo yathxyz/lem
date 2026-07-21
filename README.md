@@ -747,7 +747,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   visits in another window, focus-retaining source preview on `SPC`, repeated
   `SPC`/Backspace paging, `M-Return` source recentering, decoration-skipping
   `gj`/`gk` and `C-j`/`C-k` item motion, and Evil-Org-style `t` fast TODO
-  selection plus
+  selection. Evil-Org `M-j`/`M-k` drag a source-backed row through adjacent
+  source rows by the Vi count without touching its Org file; the complete row
+  property map and bulk mark follow the display row, headers/decorations are
+  hard boundaries, and `gr` restores canonical order while retaining the
+  logical row. It also provides
   `J`/`K` GNU Org priority cycling. Evil-Org `dd` and GNU `C-k` durably delete
   complete source subtrees, while `ce`, GNU `e`, and `C-c C-x e` set validated
   Effort properties. Agenda `H`/`L` and the GNU shifted-arrow routes move

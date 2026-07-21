@@ -250,7 +250,7 @@ else
   grep -qF "FILE serial=1 index=2 path=$source_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=3 path=$public_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "FILE serial=1 index=4 path=$mcp_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  grep -q '^OPEN-MOTION serial=1 tab=LEM-YATH-AGENDA-GOTO shift-return=LEM-YATH-AGENDA-GOTO gtab=LEM-YATH-AGENDA-GOTO gj=LEM-YATH-AGENDA-NEXT-ITEM gk=LEM-YATH-AGENDA-PREVIOUS-ITEM Cj=LEM-YATH-AGENDA-NEXT-ITEM Ck=LEM-YATH-AGENDA-PREVIOUS-ITEM space=LEM-YATH-AGENDA-SHOW-AND-SCROLL-UP backspace=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN delete=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN mret=LEM-YATH-AGENDA-RECENTER-SOURCE P=LEM-YATH-AGENDA-SHOW-FLAGGING-NOTE$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -q '^OPEN-MOTION serial=1 tab=LEM-YATH-AGENDA-GOTO shift-return=LEM-YATH-AGENDA-GOTO gtab=LEM-YATH-AGENDA-GOTO gj=LEM-YATH-AGENDA-NEXT-ITEM gk=LEM-YATH-AGENDA-PREVIOUS-ITEM Cj=LEM-YATH-AGENDA-NEXT-ITEM Ck=LEM-YATH-AGENDA-PREVIOUS-ITEM Mj=LEM-YATH-AGENDA-DRAG-LINE-FORWARD Mk=LEM-YATH-AGENDA-DRAG-LINE-BACKWARD space=LEM-YATH-AGENDA-SHOW-AND-SCROLL-UP backspace=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN delete=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN mret=LEM-YATH-AGENDA-RECENTER-SOURCE P=LEM-YATH-AGENDA-SHOW-FLAGGING-NOTE$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,movetag,parenttag,shared,targettag items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 39 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -292,6 +292,66 @@ else
   else
     fail sources "source set, grouping, or effective keymap differed"
   fi
+fi
+
+# Evil-Org M-j/M-k reorder only complete, adjacent source rows in the agenda
+# display.  Counts are honored, all row properties follow the moved row, the
+# source file remains byte-identical, and a refresh restores canonical order.
+drag_source_before="$(sha256sum "$work_file" | cut -d' ' -f1)"
+tmux_cmd send-keys -t "$session" C-c 6
+sleep 0.2
+tmux_cmd send-keys -t "$session" 2 M-j
+sleep 0.2
+tmux_cmd send-keys -t "$session" C-c 7
+if wait_report '^DRAG serial=1 order=refile,child,after current=after identity=yes marked=yes marks=1 modified=no$'; then
+  tmux_cmd send-keys -t "$session" 2 M-k C-c 7
+  if wait_report '^DRAG serial=2 order=after,refile,child current=after identity=yes marked=yes marks=1 modified=no$'; then
+    pass agenda-drag 'M-j/M-k moved complete property-preserving rows with counts'
+  else
+    fail agenda-drag-backward '2 M-k did not restore the marked row and its identity'
+  fi
+else
+  fail agenda-drag-forward '2 M-j did not move the marked row and its identity'
+fi
+drag_source_after="$(sha256sum "$work_file" | cut -d' ' -f1)"
+if [ "$drag_source_before" = "$drag_source_after" ]; then
+  pass agenda-drag-source 'display reordering left the Org source byte-identical'
+else
+  fail agenda-drag-source 'display reordering changed the Org source'
+fi
+
+tmux_cmd send-keys -t "$session" C-c 6
+sleep 0.2
+tmux_cmd send-keys -t "$session" 2 M-j
+sleep 0.2
+tmux_cmd send-keys -t "$session" g r
+for _ in $(seq 1 120); do
+  tmux_cmd send-keys -t "$session" C-c 8
+  grep -q '^DRAG-READY$' "$LEM_YATH_AGENDA_REPORT" 2>/dev/null && break
+  sleep 0.1
+done
+if grep -q '^DRAG-READY$' "$LEM_YATH_AGENDA_REPORT"; then
+  tmux_cmd send-keys -t "$session" C-c 7
+  if wait_report '^DRAG serial=3 order=after,refile,child current=after identity=yes marked=yes marks=1 modified=no$'; then
+    pass agenda-drag-refresh 'g r restored canonical order and retained the logical row'
+  else
+    fail agenda-drag-refresh 'refresh settled without canonical order and row identity'
+  fi
+else
+  fail agenda-drag-refresh 'refresh did not settle on the rebuilt agenda'
+fi
+
+tmux_cmd send-keys -t "$session" C-c 6
+sleep 0.2
+tmux_cmd send-keys -t "$session" m
+sleep 0.2
+tmux_cmd send-keys -t "$session" F12
+sleep 0.2
+tmux_cmd send-keys -t "$session" M-k
+if lem_wait_for "$session" 'Cannot move line forward' 10 >/dev/null; then
+  pass agenda-drag-boundary 'M-k refused to cross the TODO section header'
+else
+  fail agenda-drag-boundary 'M-k crossed or misreported the TODO section boundary'
 fi
 
 # Add mutation-only targets after the baseline source/grouping assertions so
