@@ -90,6 +90,11 @@ headers and decorations refuse the entire move, the source stays byte-identical,
 and `gr` restores canonical order while retaining the logical selection. These
 paths are physically covered by `agenda-test.sh`.
 
+Agenda `q` and Evil-Org `ZZ` kill the configured non-sticky result buffer and
+restore its parent window. `ZQ` additionally has Org's release-and-exit intent;
+because Lem's immutable scan creates no source buffers, it converges with the
+same tested teardown rather than killing user-visited Org buffers.
+
 ## Remaining capability gaps
 
 These bindings are intentionally not mapped to unrelated commands:

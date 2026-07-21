@@ -3368,6 +3368,11 @@ field and inherited/local tags in canonical Org syntax at the end; the exact
 file and line are retained as navigation properties rather than printed debug
 text.
 
+The non-sticky lifecycle is also exact: `q` and Evil-Org `ZZ` kill the agenda
+buffer and restore its parent window. Evil-Org `ZQ` uses the same visible
+teardown because the asynchronous scanner reads immutable contents and never
+creates source buffers for an exit command to release.
+
 `src/apps/agenda-reminder.lisp` separately projects the pinned stock Org
 planning reminders over that immutable parse result. Open deadlines appear
 under today from fourteen days before their due date and while overdue;

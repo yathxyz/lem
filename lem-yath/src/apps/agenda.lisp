@@ -1775,6 +1775,17 @@ completed unscheduled tasks stay out of the TODO section."
   "Move to the previous source-backed agenda row."
   (agenda-move-item -1 count))
 
+(define-command lem-yath-agenda-quit () ()
+  "Kill the non-sticky agenda and restore its parent window."
+  (quit-window (current-window) :kill-buffer t))
+
+(define-command lem-yath-agenda-exit () ()
+  "Exit the agenda and release scanner-owned buffers.
+
+The Lem scanner opens no source buffers, so releasing them reduces to the
+same agenda-buffer teardown as `lem-yath-agenda-quit'."
+  (lem-yath-agenda-quit))
+
 (define-command lem-yath-agenda-refresh () ()
   "Re-scan the org files and rebuild the agenda buffer."
   (let ((buffer (get-buffer *agenda-buffer-name*)))
@@ -2468,7 +2479,9 @@ suffix."
 (define-key *lem-yath-agenda-vi-keymap* "-"
   'lem-yath-agenda-include-inactive-timestamps)
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-q" 'lem-yath-agenda-set-tags)
-(define-key *lem-yath-agenda-vi-keymap* "q" 'quit-active-window)
+(define-key *lem-yath-agenda-vi-keymap* "q" 'lem-yath-agenda-quit)
+(define-key *lem-yath-agenda-vi-keymap* "Z Z" 'lem-yath-agenda-quit)
+(define-key *lem-yath-agenda-vi-keymap* "Z Q" 'lem-yath-agenda-exit)
 
 (defmethod lem-vi-mode/core:mode-specific-keymaps ((mode lem-yath-agenda-mode))
   (declare (ignore mode))
@@ -2486,7 +2499,7 @@ suffix."
 (define-key *lem-yath-agenda-mode-keymap* "-" 'lem-yath-agenda-priority-down)
 (define-key *lem-yath-agenda-mode-keymap* "c t" 'lem-yath-agenda-set-tags)
 (define-key *lem-yath-agenda-mode-keymap* "C-c C-q" 'lem-yath-agenda-set-tags)
-(define-key *lem-yath-agenda-mode-keymap* "q" 'quit-active-window)
+(define-key *lem-yath-agenda-mode-keymap* "q" 'lem-yath-agenda-quit)
 
 (remove-hook *post-command-hook* 'agenda-priority-post-command)
 (add-hook *post-command-hook* 'agenda-priority-post-command)

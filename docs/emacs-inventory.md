@@ -939,6 +939,12 @@ the trailing text-ready space. The profile binds no other org-journal command
   `org-agenda-include-inactive-timestamps` default. Lem preserves that
   generation-local behavior and point while Emacs-state `+`/`-` retain GNU
   Org's priority commands.
+- Evil-Org `ZZ` runs `org-agenda-quit`; with the configured non-sticky default,
+  both it and base-map `q` kill the agenda buffer and restore the prior window.
+  `ZQ` runs `org-agenda-exit`, which additionally releases source buffers
+  created solely by Emacs's agenda scan. Lem's immutable scanner creates no
+  source buffers, so `ZQ` intentionally converges with `q`/`ZZ` after that
+  vacuous release step.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
 - Evil-Org `Tab`, Shift-Return, and `g TAB` run `org-agenda-goto`, opening the

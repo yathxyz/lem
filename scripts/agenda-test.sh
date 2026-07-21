@@ -242,7 +242,7 @@ else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
   static_ok=1
-  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT gr=LEM-YATH-AGENDA-REFRESH gR=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO p=LEM-YATH-AGENDA-DATE-PROMPT a=LEM-YATH-AGENDA-ADD-NOTE C=LEM-YATH-AGENDA-CAPTURE schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=QUIT-ACTIVE-WINDOW J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^STATIC serial=1 mode=LEM-YATH-AGENDA-MODE date=2026-07-12 roots=3 files=4 generation=[1-9][0-9]* return=LEM-YATH-AGENDA-VISIT gr=LEM-YATH-AGENDA-REFRESH gR=LEM-YATH-AGENDA-REFRESH t=LEM-YATH-AGENDA-TODO p=LEM-YATH-AGENDA-DATE-PROMPT a=LEM-YATH-AGENDA-ADD-NOTE C=LEM-YATH-AGENDA-CAPTURE schedule=LEM-YATH-AGENDA-SCHEDULE deadline=LEM-YATH-AGENDA-DEADLINE ct=LEM-YATH-AGENDA-SET-TAGS tags=LEM-YATH-AGENDA-SET-TAGS q=LEM-YATH-AGENDA-QUIT J=LEM-YATH-AGENDA-PRIORITY-DOWN K=LEM-YATH-AGENDA-PRIORITY-UP H=LEM-YATH-AGENDA-DATE-EARLIER L=LEM-YATH-AGENDA-DATE-LATER dd=LEM-YATH-AGENDA-KILL-ENTRY ce=LEM-YATH-AGENDA-SET-EFFORT shift-left=LEM-YATH-AGENDA-DATE-EARLIER shift-right=LEM-YATH-AGENDA-DATE-LATER dA=LEM-YATH-AGENDA-ARCHIVE da=LEM-YATH-AGENDA-ARCHIVE-WITH-CONFIRMATION dollar=LEM-YATH-AGENDA-ARCHIVE archive=LEM-YATH-AGENDA-ARCHIVE refile=LEM-YATH-AGENDA-REFILE kill-hooks=1 modified=no undo=no running=no pending=no$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=1 path=$WORKDIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=2 path=$PUBLIC_ORG_DIR/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qF "ROOT serial=1 index=3 path=$PUBLIC_ORG_DIR/mcp/" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -254,6 +254,7 @@ else
   grep -q '^TODO-SET-BINDINGS serial=1 previous=LEM-YATH-AGENDA-TODO-PREVIOUSSET next=LEM-YATH-AGENDA-TODO-NEXTSET fallback-previous=LEM-YATH-AGENDA-TODO-PREVIOUSSET fallback-next=LEM-YATH-AGENDA-TODO-NEXTSET$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^INSPECT-BINDINGS serial=1 tags=LEM-YATH-AGENDA-SHOW-TAGS$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^QUERY-BINDINGS serial=1 add=LEM-YATH-AGENDA-INCLUDE-INACTIVE-TIMESTAMPS subtract=LEM-YATH-AGENDA-INCLUDE-INACTIVE-TIMESTAMPS$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -q '^LIFECYCLE-BINDINGS serial=1 q=LEM-YATH-AGENDA-QUIT ZZ=LEM-YATH-AGENDA-QUIT ZQ=LEM-YATH-AGENDA-EXIT$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,movetag,parenttag,shared,targettag items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 39 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -1448,11 +1449,46 @@ sleep 0.2
 # q must close the popped agenda and restore the source view.
 tmux_cmd send-keys -t "$session" q
 sleep 0.5
+tmux_cmd send-keys -t "$session" F6
 if lem_capture "$session" | grep -q 'Agenda source buffer sentinel' &&
-   ! lem_capture "$session" | grep -q 'Overdue work sentinel'; then
-  pass quit "q returns from the agenda popup"
+   ! lem_capture "$session" | grep -q 'Overdue work sentinel' &&
+   wait_report '^AGENDA-LIFECYCLE serial=1 exists=no$'; then
+  pass quit "q kills the non-sticky agenda and restores its parent window"
 else
-  fail quit "q did not restore the source view"
+  fail quit "q buried the agenda or did not restore the source view"
+fi
+
+# Evil-Org ZZ is the same non-sticky quit.  ZQ additionally releases buffers
+# created solely by Org's agenda scan; Lem scans immutable contents without
+# opening sources, so the two routes intentionally converge at teardown.
+tmux_cmd send-keys -t "$session" Escape
+sleep 0.2
+tmux_cmd send-keys -t "$session" Space m a
+lem_wait_for "$session" 'Agenda for current week or day' 20 >/dev/null || true
+tmux_cmd send-keys -t "$session" n
+lem_wait_for "$session" 'Overdue work sentinel' 40 >/dev/null || true
+tmux_cmd send-keys -t "$session" Z Z
+sleep 0.5
+tmux_cmd send-keys -t "$session" F6
+if wait_report '^AGENDA-LIFECYCLE serial=2 exists=no$'; then
+  pass agenda-quit-ZZ 'ZZ killed the agenda buffer'
+else
+  fail agenda-quit-ZZ 'ZZ left the agenda buffer alive'
+fi
+
+tmux_cmd send-keys -t "$session" Escape
+sleep 0.2
+tmux_cmd send-keys -t "$session" Space m a
+lem_wait_for "$session" 'Agenda for current week or day' 20 >/dev/null || true
+tmux_cmd send-keys -t "$session" n
+lem_wait_for "$session" 'Overdue work sentinel' 40 >/dev/null || true
+tmux_cmd send-keys -t "$session" Z Q
+sleep 0.5
+tmux_cmd send-keys -t "$session" F6
+if wait_report '^AGENDA-LIFECYCLE serial=3 exists=no$'; then
+  pass agenda-exit-ZQ 'ZQ killed the agenda with no scanner-owned buffers to release'
+else
+  fail agenda-exit-ZQ 'ZQ left the agenda buffer alive'
 fi
 
 # Reopen, select an entry, and use the real Return key to visit its exact file/line.

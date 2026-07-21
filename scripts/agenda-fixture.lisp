@@ -15,6 +15,7 @@
 (defvar *agenda-test-todo-set-report-serial* 0)
 (defvar *agenda-test-inactive-report-serial* 0)
 (defvar *agenda-test-inactive-last-generation* nil)
+(defvar *agenda-test-lifecycle-report-serial* 0)
 (defvar *agenda-test-original-top-level-org-files* nil)
 (defvar *agenda-test-stale-source* nil)
 
@@ -172,6 +173,12 @@
      serial
      (agenda-test-command-name "+")
      (agenda-test-command-name "-"))
+    (agenda-test-log
+     "LIFECYCLE-BINDINGS serial=~d q=~a ZZ=~a ZQ=~a"
+     serial
+     (agenda-test-command-name "q")
+     (agenda-test-command-name "Z Z")
+     (agenda-test-command-name "Z Q"))
     (loop :for directory :in directories
           :for index :from 1
           :do (agenda-test-log "ROOT serial=~d index=~d path=~a"
@@ -239,6 +246,12 @@
       (agenda-test-log
        "INACTIVE serial=~d count=~d current=~s generation=~d"
        serial count current generation)))))
+
+(define-command lem-yath-test-agenda-lifecycle-report () ()
+  (agenda-test-log
+   "AGENDA-LIFECYCLE serial=~d exists=~a"
+   (incf *agenda-test-lifecycle-report-serial*)
+   (if (get-buffer *agenda-buffer-name*) "yes" "no")))
 
 (define-command lem-yath-test-agenda-goto-effort () ()
   (move-point (current-point)
@@ -783,6 +796,8 @@
   'lem-yath-test-agenda-root-failure)
 (define-key *org-vi-normal-keymap* "F7" 'lem-yath-test-agenda-source-report)
 (define-key *org-vi-normal-keymap* "F8" 'lem-yath-test-agenda-return)
+(define-key *org-vi-normal-keymap* "F6"
+  'lem-yath-test-agenda-lifecycle-report)
 (define-key *org-vi-insert-keymap* "F7" 'lem-yath-test-agenda-source-report)
 (define-key *org-vi-insert-keymap* "F8" 'lem-yath-test-agenda-return)
 (define-key *agenda-note-mode-keymap* "F5"
