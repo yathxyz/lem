@@ -69,17 +69,20 @@
 (add-hook *exit-editor-hook* 'buffer-list-exit-query 100000)
 
 (defparameter *buffer-list-filter-groups*
-  '(("org" . buffer-list-org-buffer-p)
-    ("tramp" . buffer-list-tramp-buffer-p)
-    ("emacs" . buffer-list-emacs-buffer-p)
-    ("ediff" . buffer-list-ediff-buffer-p)
-    ("dired" . buffer-list-dired-buffer-p)
-    ("terminal" . buffer-list-terminal-buffer-p)
-    ("help" . buffer-list-help-buffer-p))
+  '(("org" (:predicate buffer-list-org-buffer-p))
+    ("tramp" (:predicate buffer-list-tramp-buffer-p))
+    ("emacs" (:predicate buffer-list-emacs-buffer-p))
+    ("ediff" (:predicate buffer-list-ediff-buffer-p))
+    ("dired" (:predicate buffer-list-dired-buffer-p))
+    ("terminal" (:predicate buffer-list-terminal-buffer-p))
+    ("help" (:predicate buffer-list-help-buffer-p)))
   "The effective Emacs Ibuffer groups, in their configured first-match order.")
 
 (defvar *buffer-list-saved-filters* nil
   "Session-local Ibuffer filter stacks saved by name.")
+
+(defvar *buffer-list-saved-filter-groups* nil
+  "Session-local Ibuffer filter-group sets saved by name.")
 
 (defun buffer-list-name-prefix-p (prefix buffer)
   (let ((name (buffer-name buffer)))
@@ -128,11 +131,16 @@
 (defun buffer-list-help-buffer-p (buffer)
   (member (buffer-name buffer) '("*Help*" "*info*") :test #'string=))
 
-(defun buffer-list-group-name (buffer)
+(defun buffer-list-group-matches-p (group buffer)
+  (every (lambda (filter) (buffer-list-filter-match-p filter buffer))
+         (rest group)))
+
+(defun buffer-list-group-name (buffer &optional
+                                        (groups *buffer-list-filter-groups*))
   "Return BUFFER's first configured group, or \"Default\"."
-  (or (loop :for (name . predicate) :in *buffer-list-filter-groups*
-            :when (funcall predicate buffer)
-              :return name)
+  (or (loop :for group :in groups
+            :when (buffer-list-group-matches-p group buffer)
+              :return (first group))
       "Default"))
 
 (defun make-buffer-list-entry (group buffer)
@@ -159,15 +167,18 @@
           (push buffer remaining)))
     (values (nreverse matching) (nreverse remaining))))
 
-(defun buffer-list-grouped-entries (&optional (buffers (buffer-list)))
+(defun buffer-list-grouped-entries
+    (&optional (buffers (buffer-list)) (groups *buffer-list-filter-groups*))
   "Group BUFFERS like the configured Ibuffer view, omitting empty groups.
 
 Each nonempty group begins with a distinct heading entry."
   (let ((remaining (copy-list buffers))
         entries)
-    (dolist (group *buffer-list-filter-groups*)
+    (dolist (group groups)
       (multiple-value-bind (matching rest)
-          (buffer-list-partition remaining (cdr group))
+          (buffer-list-partition
+           remaining
+           (lambda (buffer) (buffer-list-group-matches-p group buffer)))
         (setf remaining rest)
         (when matching
           (push (make-buffer-list-heading (car group)) entries)
@@ -189,6 +200,9 @@ Each nonempty group begins with a distinct heading entry."
    (hidden-groups
     :initform nil
     :accessor buffer-list-component-hidden-groups)
+   (filter-groups
+    :initform (copy-tree *buffer-list-filter-groups*)
+    :accessor buffer-list-component-filter-groups)
    (sort-mode
     :initform :recency
     :accessor buffer-list-component-sort-mode)
@@ -479,6 +493,7 @@ Each nonempty group begins with a distinct heading entry."
 
 (defun buffer-list-filter-match-p (filter buffer)
   (ecase (first filter)
+    (:predicate (funcall (second filter) buffer))
     (:or
      (some (lambda (operand)
              (buffer-list-filter-match-p operand buffer))
@@ -1167,6 +1182,8 @@ With a prefix, include buffers GNU Ibuffer normally excludes."
 
 (defun buffer-list-filter-description (filter)
   (ecase (first filter)
+    (:predicate
+     (string-downcase (symbol-name (second filter))))
     (:or
      (format nil "or(~{~a~^,~})"
              (mapcar #'buffer-list-filter-description (rest filter))))
@@ -1463,7 +1480,13 @@ With a prefix, include buffers GNU Ibuffer normally excludes."
     (let ((active-reference-p
             (some (lambda (filter)
                     (buffer-list-filter-references-saved-p filter name))
-                  (buffer-list-component-filters component))))
+                  (buffer-list-component-filters component)))
+          (group-reference-p
+            (some (lambda (group)
+                    (some (lambda (filter)
+                            (buffer-list-filter-references-saved-p filter name))
+                          (rest group)))
+                  (buffer-list-component-filter-groups component))))
       (setf *buffer-list-saved-filters*
             (remove name *buffer-list-saved-filters*
                     :key #'car :test #'string=))
@@ -1471,8 +1494,13 @@ With a prefix, include buffers GNU Ibuffer normally excludes."
       ;; invalid.  Clear before refreshing so rendering never observes a
       ;; dangling definition.
       (when active-reference-p
-        (setf (buffer-list-component-filters component) nil)))
-    (buffer-list-refresh-filters component)))
+        (setf (buffer-list-component-filters component) nil))
+      (when group-reference-p
+        (setf (buffer-list-component-filter-groups component) nil
+              (buffer-list-component-hidden-groups component) nil))
+      (if group-reference-p
+          (buffer-list-regroup component)
+          (buffer-list-refresh-filters component)))))
 
 (define-command lem-yath-buffer-list-decompose-filter () ()
   (let* ((component (lem/multi-column-list::current-multi-column-list))
@@ -1498,6 +1526,112 @@ With a prefix, include buffers GNU Ibuffer normally excludes."
       (setf (buffer-list-component-filters component)
             (append replacement tail))
       (buffer-list-refresh-filters component))))
+
+(defun buffer-list-filter-group-names (component)
+  (mapcar #'first (buffer-list-component-filter-groups component)))
+
+(defun buffer-list-read-filter-group-name (component prompt)
+  (let ((names (buffer-list-filter-group-names component)))
+    (unless names
+      (editor-error "No Ibuffer filter groups are active"))
+    (prompt-for-string
+     prompt
+     :completion-function (lambda (input) (prescient-filter input names))
+     :test-function (lambda (input) (member input names :test #'string=)))))
+
+(defun buffer-list-remove-first-named-group (name groups)
+  (let ((removed-p nil))
+    (remove-if (lambda (group)
+                 (and (not removed-p)
+                      (string= name (first group))
+                      (setf removed-p t)))
+               groups)))
+
+(define-command lem-yath-buffer-list-filters-to-filter-group () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (filters (buffer-list-component-filters component)))
+    (unless filters
+      (editor-error "No Ibuffer filters in effect"))
+    (let ((name (prompt-for-string "Name for filtering group: ")))
+      (push (cons name (copy-tree filters))
+            (buffer-list-component-filter-groups component))
+      (setf (buffer-list-component-filters component) nil)
+      (buffer-list-regroup component)
+      (message "Made Ibuffer filter group ~a" name))))
+
+(define-command lem-yath-buffer-list-pop-filter-group () ()
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (unless (buffer-list-component-filter-groups component)
+      (editor-error "No Ibuffer filter groups are active"))
+    (pop (buffer-list-component-filter-groups component))
+    (buffer-list-regroup component)))
+
+(define-command lem-yath-buffer-list-decompose-filter-group () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (name (buffer-list-read-filter-group-name
+                component "Decompose filter group: "))
+         (group (find name (buffer-list-component-filter-groups component)
+                      :key #'first :test #'string=)))
+    (setf (buffer-list-component-filter-groups component)
+          (buffer-list-remove-first-named-group
+           name (buffer-list-component-filter-groups component))
+          (buffer-list-component-filters component) (copy-tree (rest group)))
+    (buffer-list-regroup component)
+    (buffer-list-refresh-filters component)))
+
+(define-command lem-yath-buffer-list-clear-filter-groups () ()
+  (let ((component (lem/multi-column-list::current-multi-column-list)))
+    (setf (buffer-list-component-filter-groups component) nil
+          (buffer-list-component-hidden-groups component) nil)
+    (buffer-list-regroup component)
+    (message "Ibuffer filter groups cleared")))
+
+(defun buffer-list-saved-filter-group-set (name)
+  (assoc name *buffer-list-saved-filter-groups* :test #'string=))
+
+(defun buffer-list-read-saved-filter-group-name (prompt)
+  (unless *buffer-list-saved-filter-groups*
+    (editor-error "No saved Ibuffer filter groups"))
+  (let ((names (mapcar #'car *buffer-list-saved-filter-groups*)))
+    (if (and (string= prompt "Switch to saved filter groups: ")
+             (null (rest names)))
+        (first names)
+        (prompt-for-string
+         prompt
+         :completion-function (lambda (input) (prescient-filter input names))
+         :test-function
+         (lambda (input) (member input names :test #'string=))))))
+
+(define-command lem-yath-buffer-list-save-filter-groups () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (groups (buffer-list-component-filter-groups component)))
+    (unless groups
+      (editor-error "No Ibuffer filter groups are active"))
+    (let* ((name (prompt-for-string "Save current filter groups as: "))
+           (saved (buffer-list-saved-filter-group-set name))
+           (snapshot (copy-tree groups)))
+      (if saved
+          (setf (cdr saved) snapshot)
+          (push (cons name snapshot) *buffer-list-saved-filter-groups*))
+      (message "Saved Ibuffer filter groups as ~a" name))))
+
+(define-command lem-yath-buffer-list-switch-to-saved-filter-groups () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (name (buffer-list-read-saved-filter-group-name
+                "Switch to saved filter groups: "))
+         (saved (buffer-list-saved-filter-group-set name)))
+    (setf (buffer-list-component-filter-groups component) (copy-tree (rest saved))
+          (buffer-list-component-hidden-groups component) nil)
+    (buffer-list-regroup component)
+    (message "Switched to Ibuffer filter groups ~a" name)))
+
+(define-command lem-yath-buffer-list-delete-saved-filter-groups () ()
+  (let ((name (buffer-list-read-saved-filter-group-name
+               "Delete saved filter groups: ")))
+    (setf *buffer-list-saved-filter-groups*
+          (remove name *buffer-list-saved-filter-groups*
+                  :key #'car :test #'string=))
+    (message "Deleted saved Ibuffer filter groups ~a" name)))
 
 (defun buffer-list-action-items (component)
   (let ((marked
@@ -1777,6 +1911,31 @@ mark inside a collapsed group still participates.  Deletion marks never do."
         (lem/multi-column-list::multi-column-list/down))
       t)))
 
+(defun buffer-list-regroup (component)
+  "Rebuild COMPONENT under its current filter groups, preserving row state."
+  (let ((focused-buffer (buffer-list-current-buffer component))
+        (marks (buffer-list-record-marks component))
+        (buffers (buffer-list-snapshot-buffers component)))
+    (clrhash (buffer-list-component-deletion-items component))
+    (setf (buffer-list-component-hidden-groups component)
+          (intersection
+           (buffer-list-component-hidden-groups component)
+           (mapcar #'first (buffer-list-component-filter-groups component))
+           :test #'string=)
+          (buffer-list-component-all-items component)
+          (mapcar #'lem/multi-column-list::wrap
+                  (buffer-list-grouped-entries
+                   buffers (buffer-list-component-filter-groups component))))
+    (dolist (item (buffer-list-component-all-items component))
+      (let ((entry (buffer-list-item-entry item)))
+        (unless (buffer-list-entry-heading-p entry)
+          (alexandria:when-let
+              ((mark (gethash (buffer-list-entry-buffer entry) marks)))
+            (buffer-list-set-item-mark component item mark)))))
+    (buffer-list-sort-all-items component)
+    (buffer-list-refresh component :recompute-columns t)
+    (buffer-list-focus-buffer component focused-buffer)))
+
 (defun buffer-list-activate-pending-temp-visibility (component)
   "Activate the session visibility regexps staged since the previous `gr'."
   (setf (buffer-list-component-tmp-hide-regexps component)
@@ -1797,7 +1956,9 @@ mark inside a collapsed group still participates.  Deletion marks never do."
         (marks (buffer-list-record-marks component))
         (items
           (mapcar #'lem/multi-column-list::wrap
-                  (buffer-list-grouped-entries))))
+                  (buffer-list-grouped-entries
+                   (buffer-list)
+                   (buffer-list-component-filter-groups component)))))
     (clrhash (buffer-list-component-recency-ranks component))
     (clrhash (buffer-list-component-deletion-items component))
     (setf (buffer-list-component-all-items component) items)
@@ -3739,6 +3900,22 @@ through later selected buffers without wrapping."
   'lem-yath-buffer-list-and-filter)
 (define-key *buffer-list-picker-mode-keymap* "s d"
   'lem-yath-buffer-list-decompose-filter)
+(define-key *buffer-list-picker-mode-keymap* "s g"
+  'lem-yath-buffer-list-filters-to-filter-group)
+(define-key *buffer-list-picker-mode-keymap* "s P"
+  'lem-yath-buffer-list-pop-filter-group)
+(define-key *buffer-list-picker-mode-keymap* "s Shift-Up"
+  'lem-yath-buffer-list-pop-filter-group)
+(define-key *buffer-list-picker-mode-keymap* "s D"
+  'lem-yath-buffer-list-decompose-filter-group)
+(define-key *buffer-list-picker-mode-keymap* "s S"
+  'lem-yath-buffer-list-save-filter-groups)
+(define-key *buffer-list-picker-mode-keymap* "s R"
+  'lem-yath-buffer-list-switch-to-saved-filter-groups)
+(define-key *buffer-list-picker-mode-keymap* "s X"
+  'lem-yath-buffer-list-delete-saved-filter-groups)
+(define-key *buffer-list-picker-mode-keymap* "s \\"
+  'lem-yath-buffer-list-clear-filter-groups)
 (define-key *buffer-list-picker-mode-keymap* "s s"
   'lem-yath-buffer-list-save-filters)
 (define-key *buffer-list-picker-mode-keymap* "s a"

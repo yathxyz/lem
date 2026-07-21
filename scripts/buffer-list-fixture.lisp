@@ -212,8 +212,11 @@
                    (completion-path-display-string
                     (buffer-name (buffer-list-entry-buffer entry))))))
     (buffer-list-test-log
-     "FILTER stack=~{~a~^,+~} visible=~{~a~^,~} saved=~{~a~^,~}"
-     filters visible (mapcar #'car *buffer-list-saved-filters*))))
+     "FILTER stack=~{~a~^,+~} visible=~{~a~^,~} saved=~{~a~^,~} groups=~{~a~^,~} saved-groups=~{~a~^,~}"
+     filters visible
+     (mapcar #'car *buffer-list-saved-filters*)
+     (buffer-list-filter-group-names component)
+     (mapcar #'car *buffer-list-saved-filter-groups*))))
 
 (define-command lem-yath-test-buffer-list-old-state () ()
   (let* ((probe (make-buffer "buffer-list-old-boundary-probe"))
@@ -666,6 +669,7 @@
 
 (setf *buffer-list-test-buffers* nil)
 (setf *buffer-list-saved-filters* nil)
+(setf *buffer-list-saved-filter-groups* nil)
 (buffer-list-test-make-buffer 'org "*Org Src buffer-list*")
 (buffer-list-test-make-buffer 'tramp "*tramp-buffer-list*")
 (buffer-list-test-make-buffer 'emacs "*Warnings*")

@@ -905,7 +905,7 @@ if lem_wait_for "$session" 'Save current filters as:' 10 >/dev/null; then
   tmux_cmd send-keys -t "$session" -l 'compound'
   lem_keys "$session" Enter
   filter=$(report_filter || true)
-  if [[ "$filter" == *' saved=compound' ]]; then
+  if [[ "$filter" == *' saved=compound groups='* ]]; then
     pass filter-save "s s saved the current compound stack by name"
   else
     fail filter-save "saved filter name was not retained: $filter"
@@ -968,7 +968,7 @@ if lem_wait_for "$session" 'Delete saved filters:' 10 >/dev/null; then
   lem_keys "$session" Enter
   filter=$(report_filter || true)
   if [[ "$filter" == FILTER\ stack=\ visible=* ]] &&
-     [[ "$filter" == *' saved=' ]]; then
+     [[ "$filter" == *' saved= groups='* ]]; then
     pass filter-delete-saved "s x removed the definition and its active reference"
   else
     fail filter-delete-saved "deleted saved filter left stale state: $filter"
@@ -1004,7 +1004,7 @@ if lem_wait_for "$session" 'Save current filters as:' 10 >/dev/null; then
           lem_keys "$session" Enter
           filter=$(report_filter || true)
           if [[ "$filter" == FILTER\ stack=\ visible=* ]] &&
-             [[ "$filter" == *' saved=outer' ]]; then
+             [[ "$filter" == *' saved=outer groups='* ]]; then
             pass filter-delete-transitive "deleting an inner definition cleared its active outer reference"
           else
             fail filter-delete-transitive "transitive deletion left stale state: $filter"
@@ -1049,7 +1049,7 @@ if lem_wait_for "$session" 'Save current filters as:' 10 >/dev/null; then
       filter=$(report_filter || true)
       if [[ "$filter" == FILTER\ stack=saved=cycle* ]] &&
          [[ "$filter" == *'buffer-list-name-that-is-long'* ]] &&
-         [[ "$filter" == *' saved=cycle' ]]; then
+         [[ "$filter" == *' saved=cycle groups='* ]]; then
         pass filter-save-cycle "cyclic overwrite was rejected without changing the active or saved stack"
       else
         fail filter-save-cycle "cyclic overwrite corrupted filter state: $filter"
@@ -1068,6 +1068,121 @@ if lem_wait_for "$session" 'Delete saved filters:' 10 >/dev/null; then
   tmux_cmd send-keys -t "$session" -l 'cycle'
   lem_keys "$session" Enter
 fi
+
+# Convert an ordinary filter into the first exclusive group, then exercise
+# GNU Ibuffer's group stack and its separately saved group-set namespace.
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'sort-'
+lem_keys "$session" Enter
+lem_keys "$session" s g
+if lem_wait_for "$session" 'Name for filtering group:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'sorted'
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=\ visible=* ]] &&
+     [[ "$filter" == *' groups=sorted,org,tramp,emacs,ediff,dired,terminal,help '* ]] &&
+     grep -q 'sorted' <<<"$(lem_capture "$session")"; then
+    pass filter-group-create "s g made the active filter the first exclusive group"
+  else
+    fail filter-group-create "unexpected created filter-group state: $filter"
+  fi
+else
+  fail filter-group-create "s g did not prompt for a group name"
+fi
+
+lem_keys "$session" s P
+filter=$(report_filter || true)
+if [[ "$filter" == *' groups=org,tramp,emacs,ediff,dired,terminal,help '* ]]; then
+  pass filter-group-pop "s P removed exactly the first filter group"
+else
+  fail filter-group-pop "unexpected popped filter-group state: $filter"
+fi
+
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'sort-'
+lem_keys "$session" Enter
+lem_keys "$session" s g
+if lem_wait_for "$session" 'Name for filtering group:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'sorted'
+  lem_keys "$session" Enter
+fi
+lem_keys "$session" s S
+if lem_wait_for "$session" 'Save current filter groups as:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'working-groups'
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == *' saved-groups=working-groups' ]]; then
+    pass filter-group-save "s S saved the complete ordered group set"
+  else
+    fail filter-group-save "saved group set was not retained: $filter"
+  fi
+else
+  fail filter-group-save "s S did not prompt for a group-set name"
+fi
+
+lem_keys "$session" s "\\"
+filter=$(report_filter || true)
+if [[ "$filter" == *' groups= saved-groups=working-groups' ]] &&
+   grep -q 'Default' <<<"$(lem_capture "$session")"; then
+  pass filter-group-clear "s backslash collapsed an ungrouped snapshot under Default"
+else
+  fail filter-group-clear "unexpected cleared group state: $filter"
+fi
+
+# GNU skips completion when exactly one saved group set exists.
+lem_keys "$session" s R
+filter=$(report_filter || true)
+if [[ "$filter" == *' groups=sorted,org,tramp,emacs,ediff,dired,terminal,help saved-groups=working-groups' ]]; then
+  pass filter-group-switch "s R restored the sole saved group set without prompting"
+else
+  fail filter-group-switch "unexpected restored group-set state: $filter"
+fi
+
+lem_keys "$session" s D
+if lem_wait_for "$session" 'Decompose filter group:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'sorted'
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=name=sort-* ]] &&
+     [[ "$filter" == *' groups=org,tramp,emacs,ediff,dired,terminal,help '* ]]; then
+    pass filter-group-decompose "s D restored a dynamic group's filters to the active stack"
+  else
+    fail filter-group-decompose "unexpected decomposed group state: $filter"
+  fi
+else
+  fail filter-group-decompose "s D did not offer active group completion"
+fi
+lem_keys "$session" s /
+
+lem_keys "$session" s X
+if lem_wait_for "$session" 'Delete saved filter groups:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'working-groups'
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == *' saved-groups=' ]]; then
+    pass filter-group-delete "s X deleted only the named saved group set"
+  else
+    fail filter-group-delete "deleted group set remained: $filter"
+  fi
+else
+  fail filter-group-delete "s X did not offer saved group-set completion"
+fi
+
+lem_keys "$session" s D
+if lem_wait_for "$session" 'Decompose filter group:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'org'
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=buffer-list-org-buffer-p* ]] &&
+     [[ "$filter" == *' groups=tramp,emacs,ediff,dired,terminal,help '* ]]; then
+    pass filter-group-predicate "configured safe predicate groups decompose without Emacs Lisp evaluation"
+  else
+    fail filter-group-predicate "unexpected configured-group decomposition: $filter"
+  fi
+else
+  fail filter-group-predicate "configured org group was not offered for decomposition"
+fi
+lem_keys "$session" s /
 
 # Invalid stack shapes must leave the existing stack intact.
 lem_keys "$session" s t

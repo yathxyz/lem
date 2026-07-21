@@ -182,7 +182,11 @@ negates the top filter, `s p` removes it, and `s /` disables the stack.
 OR/AND compounds, and `s d` decomposes OR, AND, NOT, or a saved reference in
 GNU operand order. `s s/a/r/x` save, add, switch, or delete named filter
 stacks for the current Lem process; active saved references remain live and
-deleting one clears a now-invalid active stack
+deleting one clears a now-invalid active stack. `s g` converts the stack into
+the first exclusive group, `s P` removes the first group, `s D` returns a
+group's filters to the active stack, and `s \\` clears grouping to `Default`.
+`s S/R/X` save, restore, or delete complete ordered group sets for the Lem
+process; restoring the sole saved set follows GNU's no-prompt shortcut
 (`src/buffer-list.lisp`, `scripts/buffer-list-test.sh`).
 `O` and `M-s a C-o` reproduce `ibuffer-do-occur` over ordinary marks, in GNU's
 reverse display order, excluding `D`; with no ordinary marks the current row is

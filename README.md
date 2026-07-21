@@ -388,7 +388,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   into flattened OR/AND filters, and `s d` decomposes the top compound.
   `s s` saves the current stack by name for the Lem session; `s a` adds a
   live saved reference, `s r` switches to one, and `s x` deletes it without
-  leaving a dangling active filter.
+  leaving a dangling active filter. `s g` turns the stack into the first
+  exclusive group, `s P/D` pop or decompose groups, `s \\` clears grouping,
+  and `s S/R/X` save, restore, or delete complete ordered group sets.
   `O` and the effective Evil-Collection chord `M-s a C-o` run a persistent,
   smart-case Occur over ordinary marks in GNU's reverse display order, exclude
   `D`, and visibly mark the current row when no ordinary marks exist. The
