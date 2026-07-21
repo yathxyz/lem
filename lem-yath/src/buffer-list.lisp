@@ -78,6 +78,9 @@
     ("help" . buffer-list-help-buffer-p))
   "The effective Emacs Ibuffer groups, in their configured first-match order.")
 
+(defvar *buffer-list-saved-filters* nil
+  "Session-local Ibuffer filter stacks saved by name.")
+
 (defun buffer-list-name-prefix-p (prefix buffer)
   (let ((name (buffer-name buffer)))
     (and (<= (length prefix) (length name))
@@ -476,6 +479,22 @@ Each nonempty group begins with a distinct heading entry."
 
 (defun buffer-list-filter-match-p (filter buffer)
   (ecase (first filter)
+    (:or
+     (some (lambda (operand)
+             (buffer-list-filter-match-p operand buffer))
+           (rest filter)))
+    (:and
+     (every (lambda (operand)
+              (buffer-list-filter-match-p operand buffer))
+            (rest filter)))
+    (:saved
+     (let ((saved (assoc (second filter) *buffer-list-saved-filters*
+                         :test #'string=)))
+       (unless saved
+         (editor-error "Unknown saved Ibuffer filter ~a" (second filter)))
+       (every (lambda (operand)
+                (buffer-list-filter-match-p operand buffer))
+              (rest saved))))
     (:process (buffer-list-process-buffer-p buffer))
     (:modified (buffer-modified-p buffer))
     (:visiting-file (buffer-filename buffer))
@@ -1148,6 +1167,13 @@ With a prefix, include buffers GNU Ibuffer normally excludes."
 
 (defun buffer-list-filter-description (filter)
   (ecase (first filter)
+    (:or
+     (format nil "or(~{~a~^,~})"
+             (mapcar #'buffer-list-filter-description (rest filter))))
+    (:and
+     (format nil "and(~{~a~^,~})"
+             (mapcar #'buffer-list-filter-description (rest filter))))
+    (:saved (format nil "saved=~a" (second filter)))
     (:process "process")
     (:modified "modified")
     (:visiting-file "visiting-file")
@@ -1328,6 +1354,150 @@ With a prefix, include buffers GNU Ibuffer normally excludes."
   (let ((component (lem/multi-column-list::current-multi-column-list)))
     (setf (buffer-list-component-filters component) nil)
     (buffer-list-refresh-filters component)))
+
+(defun buffer-list-compound-operands (operator filter)
+  "Return FILTER's operands, flattening it when it already uses OPERATOR."
+  (if (eq operator (first filter))
+      (rest filter)
+      (list filter)))
+
+(defun buffer-list-compose-filters (component operator)
+  "Replace COMPONENT's top two filters with a flattened OPERATOR filter."
+  (let ((filters (buffer-list-component-filters component)))
+    (when (< (length filters) 2)
+      (editor-error "Need two Ibuffer filters to ~(~a~)"
+                    (symbol-name operator)))
+    (let ((first (first filters))
+          (second (second filters)))
+      (setf (buffer-list-component-filters component)
+            (cons (cons operator
+                        (append (buffer-list-compound-operands operator first)
+                                (buffer-list-compound-operands operator second)))
+                  (cddr filters))))
+    (buffer-list-refresh-filters component)))
+
+(define-command lem-yath-buffer-list-or-filter () ()
+  (buffer-list-compose-filters
+   (lem/multi-column-list::current-multi-column-list) :or))
+
+(define-command lem-yath-buffer-list-and-filter () ()
+  (buffer-list-compose-filters
+   (lem/multi-column-list::current-multi-column-list) :and))
+
+(define-command lem-yath-buffer-list-exchange-filters () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (filters (buffer-list-component-filters component)))
+    (when (< (length filters) 2)
+      (editor-error "Need two Ibuffer filters to exchange"))
+    (setf (buffer-list-component-filters component)
+          (list* (second filters) (first filters) (cddr filters)))
+    (buffer-list-refresh-filters component)))
+
+(defun buffer-list-saved-filter (name)
+  (assoc name *buffer-list-saved-filters* :test #'string=))
+
+(defun buffer-list-read-saved-filter-name (prompt)
+  (unless *buffer-list-saved-filters*
+    (editor-error "No saved Ibuffer filters"))
+  (let ((names (mapcar #'car *buffer-list-saved-filters*)))
+    (prompt-for-string
+     prompt
+     :completion-function
+     (lambda (input) (prescient-filter input names))
+     :test-function
+     (lambda (input) (member input names :test #'string=)))))
+
+(define-command lem-yath-buffer-list-save-filters () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (filters (buffer-list-component-filters component)))
+    (unless filters
+      (editor-error "No Ibuffer filters currently in effect"))
+    (let* ((name (prompt-for-string "Save current filters as: "))
+           (saved (buffer-list-saved-filter name))
+           (snapshot (copy-tree filters)))
+      (when (some (lambda (filter)
+                    (buffer-list-filter-references-saved-p filter name))
+                  snapshot)
+        (editor-error "Saving Ibuffer filters as ~a would create a cycle"
+                      name))
+      (if saved
+          (setf (cdr saved) snapshot)
+          (push (cons name snapshot) *buffer-list-saved-filters*))
+      (message "Saved Ibuffer filters as ~a" name))))
+
+(define-command lem-yath-buffer-list-add-saved-filters () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (name (buffer-list-read-saved-filter-name "Add saved filters: ")))
+    (push (list :saved name) (buffer-list-component-filters component))
+    (buffer-list-refresh-filters component)))
+
+(define-command lem-yath-buffer-list-switch-to-saved-filters () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (name (buffer-list-read-saved-filter-name "Switch to saved filters: ")))
+    (setf (buffer-list-component-filters component) (list (list :saved name)))
+    (buffer-list-refresh-filters component)))
+
+(defun buffer-list-filter-references-saved-p (filter name &optional visited)
+  "Return true when FILTER directly or transitively references saved NAME."
+  (case (first filter)
+    (:saved
+     (let ((reference (second filter)))
+       (or (string= name reference)
+           (unless (member reference visited :test #'string=)
+             (alexandria:when-let ((saved (buffer-list-saved-filter reference)))
+               (some (lambda (operand)
+                       (buffer-list-filter-references-saved-p
+                        operand name (cons reference visited)))
+                     (rest saved)))))))
+    ((:or :and)
+     (some (lambda (operand)
+             (buffer-list-filter-references-saved-p operand name visited))
+           (rest filter)))
+    (:not (buffer-list-filter-references-saved-p
+           (second filter) name visited))
+    (otherwise nil)))
+
+(define-command lem-yath-buffer-list-delete-saved-filters () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (name (buffer-list-read-saved-filter-name "Delete saved filters: ")))
+    (let ((active-reference-p
+            (some (lambda (filter)
+                    (buffer-list-filter-references-saved-p filter name))
+                  (buffer-list-component-filters component))))
+      (setf *buffer-list-saved-filters*
+            (remove name *buffer-list-saved-filters*
+                    :key #'car :test #'string=))
+      ;; GNU Ibuffer disables an active stack when its saved reference becomes
+      ;; invalid.  Clear before refreshing so rendering never observes a
+      ;; dangling definition.
+      (when active-reference-p
+        (setf (buffer-list-component-filters component) nil)))
+    (buffer-list-refresh-filters component)))
+
+(define-command lem-yath-buffer-list-decompose-filter () ()
+  (let* ((component (lem/multi-column-list::current-multi-column-list))
+         (filters (buffer-list-component-filters component)))
+    (unless filters
+      (editor-error "No Ibuffer filters in effect"))
+    (let* ((filter (first filters))
+           (tail (rest filters))
+           (replacement
+             (case (first filter)
+               ((:or :and) (rest filter))
+               (:not (list (second filter)))
+               (:saved
+                (let ((saved (buffer-list-saved-filter (second filter))))
+                  (unless saved
+                    (setf (buffer-list-component-filters component) nil)
+                    (editor-error "Unknown saved Ibuffer filter ~a"
+                                  (second filter)))
+                  (copy-tree (rest saved))))
+               (otherwise
+                (editor-error "Ibuffer filter type ~(~a~) is not compound"
+                              (symbol-name (first filter)))))))
+      (setf (buffer-list-component-filters component)
+            (append replacement tail))
+      (buffer-list-refresh-filters component))))
 
 (defun buffer-list-action-items (component)
   (let ((marked
@@ -3557,6 +3727,26 @@ through later selected buffers without wrapping."
   'lem-yath-buffer-list-filter-content)
 (define-key *buffer-list-picker-mode-keymap* "s p"
   'lem-yath-buffer-list-pop-filter)
+(define-key *buffer-list-picker-mode-keymap* "s t"
+  'lem-yath-buffer-list-exchange-filters)
+(define-key *buffer-list-picker-mode-keymap* "s Tab"
+  'lem-yath-buffer-list-exchange-filters)
+(define-key *buffer-list-picker-mode-keymap* "s o"
+  'lem-yath-buffer-list-or-filter)
+(define-key *buffer-list-picker-mode-keymap* "s |"
+  'lem-yath-buffer-list-or-filter)
+(define-key *buffer-list-picker-mode-keymap* "s &"
+  'lem-yath-buffer-list-and-filter)
+(define-key *buffer-list-picker-mode-keymap* "s d"
+  'lem-yath-buffer-list-decompose-filter)
+(define-key *buffer-list-picker-mode-keymap* "s s"
+  'lem-yath-buffer-list-save-filters)
+(define-key *buffer-list-picker-mode-keymap* "s a"
+  'lem-yath-buffer-list-add-saved-filters)
+(define-key *buffer-list-picker-mode-keymap* "s r"
+  'lem-yath-buffer-list-switch-to-saved-filters)
+(define-key *buffer-list-picker-mode-keymap* "s x"
+  'lem-yath-buffer-list-delete-saved-filters)
 (define-key *buffer-list-picker-mode-keymap* "s !"
   'lem-yath-buffer-list-negate-filter)
 (define-key *buffer-list-picker-mode-keymap* "s /"

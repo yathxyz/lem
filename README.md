@@ -384,6 +384,11 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   without replacing the prior diff when an associated file is missing. The
   filter stack also supports modified and visiting-file filters on `s i/v`,
   top-filter negation and removal on `s !/p`, and complete disable on `s /`.
+  `s t` exchanges the top two filters, `s o`/`s |` and `s &` combine them
+  into flattened OR/AND filters, and `s d` decomposes the top compound.
+  `s s` saves the current stack by name for the Lem session; `s a` adds a
+  live saved reference, `s r` switches to one, and `s x` deletes it without
+  leaving a dangling active filter.
   `O` and the effective Evil-Collection chord `M-s a C-o` run a persistent,
   smart-case Occur over ordinary marks in GNU's reverse display order, exclude
   `D`, and visibly mark the current row when no ordinary marks exist. The

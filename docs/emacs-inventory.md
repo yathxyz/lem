@@ -177,7 +177,12 @@ owners, `s F` matches a file's containing directory or a non-file buffer's
 working directory, `s <`/`s >` compare character sizes strictly, and `s c`
 applies a case-insensitive content regexp. `s i` and `s v` push GNU Ibuffer's
 modified and visiting-file filters, multiple filters compose by AND, `s !`
-negates the top filter, `s p` removes it, and `s /` disables the stack
+negates the top filter, `s p` removes it, and `s /` disables the stack.
+`s t` exchanges the top two entries; `s o`/`s |` and `s &` form flattened
+OR/AND compounds, and `s d` decomposes OR, AND, NOT, or a saved reference in
+GNU operand order. `s s/a/r/x` save, add, switch, or delete named filter
+stacks for the current Lem process; active saved references remain live and
+deleting one clears a now-invalid active stack
 (`src/buffer-list.lisp`, `scripts/buffer-list-test.sh`).
 `O` and `M-s a C-o` reproduce `ibuffer-do-occur` over ordinary marks, in GNU's
 reverse display order, excluding `D`; with no ordinary marks the current row is

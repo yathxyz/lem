@@ -860,6 +860,233 @@ else
   fail filter-disable "unexpected disabled filter state: $filter"
 fi
 
+# GNU Ibuffer treats the filter list as a stack: exchange is order-only,
+# OR/AND replace the top two entries, and decompose restores their operands.
+lem_keys "$session" s i
+lem_keys "$session" s v
+lem_keys "$session" s t
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=modified,+visiting-file* ]]; then
+  pass filter-exchange "s t exchanged exactly the top two filters"
+else
+  fail filter-exchange "unexpected exchanged filter stack: $filter"
+fi
+
+lem_keys "$session" s o
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=or\(modified,visiting-file\)* ]] &&
+   [[ "$filter" == *'buffer-list-name-that-is-long'* ]] &&
+   [[ "$filter" == *'buffer-list-zz-target.txt'* ]]; then
+  pass filter-or "s o composed the top filters with inclusive OR"
+else
+  fail filter-or "unexpected OR filter state: $filter"
+fi
+
+lem_keys "$session" s d
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=modified,+visiting-file* ]]; then
+  pass filter-decompose-or "s d restored an OR filter's ordered operands"
+else
+  fail filter-decompose-or "unexpected decomposed OR state: $filter"
+fi
+
+lem_keys "$session" s '&'
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=and\(modified,visiting-file\)* ]] &&
+   [[ "$filter" == *'buffer-list-sort-zeta'* ]] &&
+   [[ "$filter" != *'buffer-list-name-that-is-long'* ]]; then
+  pass filter-and "s & composed the top filters with logical AND"
+else
+  fail filter-and "unexpected AND filter state: $filter"
+fi
+
+lem_keys "$session" s s
+if lem_wait_for "$session" 'Save current filters as:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'compound'
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == *' saved=compound' ]]; then
+    pass filter-save "s s saved the current compound stack by name"
+  else
+    fail filter-save "saved filter name was not retained: $filter"
+  fi
+else
+  fail filter-save "s s did not prompt for a saved-filter name"
+fi
+
+lem_keys "$session" s /
+lem_keys "$session" s a
+if lem_wait_for "$session" 'Add saved filters:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'compound'
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=saved=compound* ]] &&
+     [[ "$filter" == *'buffer-list-sort-zeta'* ]] &&
+     [[ "$filter" != *'buffer-list-name-that-is-long'* ]]; then
+    pass filter-add-saved "s a added a live saved-filter reference"
+  else
+    fail filter-add-saved "unexpected added saved-filter state: $filter"
+  fi
+else
+  fail filter-add-saved "s a did not offer saved-filter completion"
+fi
+
+lem_keys "$session" s d
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=and\(modified,visiting-file\)* ]]; then
+  pass filter-decompose-saved "s d expanded one saved-filter reference"
+else
+  fail filter-decompose-saved "unexpected decomposed saved-filter state: $filter"
+fi
+
+lem_keys "$session" s d
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=modified,+visiting-file* ]]; then
+  pass filter-decompose-and "s d restored an AND filter's ordered operands"
+else
+  fail filter-decompose-and "unexpected decomposed AND state: $filter"
+fi
+
+lem_keys "$session" s /
+lem_keys "$session" s r
+if lem_wait_for "$session" 'Switch to saved filters:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'compound'
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=saved=compound* ]]; then
+    pass filter-switch-saved "s r replaced the stack with a saved reference"
+  else
+    fail filter-switch-saved "unexpected switched saved-filter state: $filter"
+  fi
+else
+  fail filter-switch-saved "s r did not offer saved-filter completion"
+fi
+
+lem_keys "$session" s x
+if lem_wait_for "$session" 'Delete saved filters:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'compound'
+  lem_keys "$session" Enter
+  filter=$(report_filter || true)
+  if [[ "$filter" == FILTER\ stack=\ visible=* ]] &&
+     [[ "$filter" == *' saved=' ]]; then
+    pass filter-delete-saved "s x removed the definition and its active reference"
+  else
+    fail filter-delete-saved "deleted saved filter left stale state: $filter"
+  fi
+else
+  fail filter-delete-saved "s x did not offer saved-filter completion"
+fi
+
+# Saved filters can refer to other saved filters.  Deleting the inner
+# definition must clear an active outer reference before the chooser redraws.
+lem_keys "$session" s i
+lem_keys "$session" s s
+if lem_wait_for "$session" 'Save current filters as:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'inner'
+  lem_keys "$session" Enter
+  lem_keys "$session" s /
+  lem_keys "$session" s a
+  if lem_wait_for "$session" 'Add saved filters:' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l 'inner'
+    lem_keys "$session" Enter
+    lem_keys "$session" s s
+    if lem_wait_for "$session" 'Save current filters as:' 10 >/dev/null; then
+      tmux_cmd send-keys -t "$session" -l 'outer'
+      lem_keys "$session" Enter
+      lem_keys "$session" s /
+      lem_keys "$session" s r
+      if lem_wait_for "$session" 'Switch to saved filters:' 10 >/dev/null; then
+        tmux_cmd send-keys -t "$session" -l 'outer'
+        lem_keys "$session" Enter
+        lem_keys "$session" s x
+        if lem_wait_for "$session" 'Delete saved filters:' 10 >/dev/null; then
+          tmux_cmd send-keys -t "$session" -l 'inner'
+          lem_keys "$session" Enter
+          filter=$(report_filter || true)
+          if [[ "$filter" == FILTER\ stack=\ visible=* ]] &&
+             [[ "$filter" == *' saved=outer' ]]; then
+            pass filter-delete-transitive "deleting an inner definition cleared its active outer reference"
+          else
+            fail filter-delete-transitive "transitive deletion left stale state: $filter"
+          fi
+        else
+          fail filter-delete-transitive "nested inner filter was not offered for deletion"
+        fi
+      else
+        fail filter-delete-transitive "nested outer filter was not offered for switching"
+      fi
+    else
+      fail filter-delete-transitive "nested outer filter did not accept a name"
+    fi
+  else
+    fail filter-delete-transitive "nested inner filter was not offered for addition"
+  fi
+else
+  fail filter-delete-transitive "nested inner filter did not accept a name"
+fi
+lem_keys "$session" s x
+if lem_wait_for "$session" 'Delete saved filters:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'outer'
+  lem_keys "$session" Enter
+fi
+
+# Re-saving an active symbolic reference under its own name would recurse
+# forever during matching.  Refuse it atomically and retain the old definition.
+lem_keys "$session" s i
+lem_keys "$session" s s
+if lem_wait_for "$session" 'Save current filters as:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'cycle'
+  lem_keys "$session" Enter
+  lem_keys "$session" s /
+  lem_keys "$session" s r
+  if lem_wait_for "$session" 'Switch to saved filters:' 10 >/dev/null; then
+    tmux_cmd send-keys -t "$session" -l 'cycle'
+    lem_keys "$session" Enter
+    lem_keys "$session" s s
+    if lem_wait_for "$session" 'Save current filters as:' 10 >/dev/null; then
+      tmux_cmd send-keys -t "$session" -l 'cycle'
+      lem_keys "$session" Enter
+      filter=$(report_filter || true)
+      if [[ "$filter" == FILTER\ stack=saved=cycle* ]] &&
+         [[ "$filter" == *'buffer-list-name-that-is-long'* ]] &&
+         [[ "$filter" == *' saved=cycle' ]]; then
+        pass filter-save-cycle "cyclic overwrite was rejected without changing the active or saved stack"
+      else
+        fail filter-save-cycle "cyclic overwrite corrupted filter state: $filter"
+      fi
+    else
+      fail filter-save-cycle "cyclic overwrite did not reach its naming prompt"
+    fi
+  else
+    fail filter-save-cycle "cycle fixture was not offered for switching"
+  fi
+else
+  fail filter-save-cycle "cycle fixture did not accept its initial name"
+fi
+lem_keys "$session" s x
+if lem_wait_for "$session" 'Delete saved filters:' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'cycle'
+  lem_keys "$session" Enter
+fi
+
+# Invalid stack shapes must leave the existing stack intact.
+lem_keys "$session" s t
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=\ visible=* ]]; then
+  pass filter-exchange-underflow "s t rejected an empty filter stack without mutation"
+else
+  fail filter-exchange-underflow "empty exchange changed state: $filter"
+fi
+lem_keys "$session" s i
+lem_keys "$session" s d
+filter=$(report_filter || true)
+if [[ "$filter" == FILTER\ stack=modified* ]]; then
+  pass filter-decompose-primitive "s d rejected a primitive filter without mutation"
+else
+  fail filter-decompose-primitive "primitive decomposition changed state: $filter"
+fi
+lem_keys "$session" s /
+
 lem_keys "$session" s Enter
 if lem_wait_for "$session" 'Filter by major mode' 10 >/dev/null; then
   sleep 0.3
