@@ -3363,8 +3363,11 @@ boundary is inclusive, completed planning rows remain visible only at their
 exact dates, and completed tasks never acquire reminder copies. A projected
 row keeps its source date and gains a separate display date, so visits,
 refresh identity, `H`/`L`, and other mutations still validate and edit the real
-planning token. Terminal labels state `in Nd` or `Nd ago`; exact GNU text
-leaders and urgency styling are presentation differences.
+planning token. Reminder labels use the exact stock `Sched.%2dx:`,
+`In %3d d.:`, and `%2d d. ago:` leaders. Rows within each date use the
+configured stock `time-up`, `urgency-down`, stable source order, including
+numeric one- or two-digit times and A/B/C priority offsets. Terminal urgency
+faces remain a presentation difference.
 
 Scanning runs away from the editor thread. Before launching a worker, refresh
 captures immutable text snapshots of modified live agenda-file buffers on the
@@ -3510,9 +3513,10 @@ decoration-skipping item motion, and cleanup.
 `scripts/agenda-reminder-test.sh` fixes today at a known date and checks the
 default fourteen-day boundary, its excluded fifteenth day, explicit warning
 cookies, active and hidden schedule delays, zero/base suppression behavior,
-dual planning, and completed rows through real ncurses Lem. It compares the
-source byte-for-byte after rendering, then physically presses Evil-Org `H` on
-a projected reminder and proves both source mutation and refreshed reminder
+dual planning, completed rows, exact stock leaders, numeric time ordering, and
+urgency ordering across A/B/C priorities through real ncurses Lem. It compares
+the source byte-for-byte after rendering, then physically presses Evil-Org `H`
+on a projected reminder and proves both source mutation and refreshed reminder
 point restoration.
 `scripts/agenda-undo-test.sh` separately drives the effective `u` binding and
 proves empty-history reporting, newest-first saved TODO/priority undo without a
@@ -3633,8 +3637,7 @@ sources.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
-presentation, configurable reminder-policy variables and exact GNU reminder
-leaders/urgency ordering,
+presentation, and configurable reminder-policy, leader, and sorting variables,
 configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive
 sibling/tag commands, bulk archive-sibling/scatter/arbitrary-function/persistent-

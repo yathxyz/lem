@@ -64,6 +64,9 @@ items remain immutable so projections can add reminder rows safely.")
 (defvar *agenda-planning-restore-key-function* nil
   "Optional function refining a planning edit's post-refresh row key.")
 
+(defvar *agenda-day-sort-function* nil
+  "Optional function returning ITEMS in configured single-day agenda order.")
+
 ;;; --- parsing -------------------------------------------------------------
 
 (defstruct (agenda-item (:constructor make-agenda-item))
@@ -678,6 +681,33 @@ Ordinary active timestamps belong to their containing visible heading."
   (member (agenda-item-kind item) '("SCHEDULED" "DEADLINE")
           :test #'string=))
 
+(defun agenda-sort-day-items (items)
+  "Return ITEMS in the active single-day agenda order."
+  (if *agenda-day-sort-function*
+      (funcall *agenda-day-sort-function* items)
+      items))
+
+(defun agenda-sort-dated-items (items)
+  "Sort ITEMS by display date, then by the active single-day strategy."
+  (let ((remaining
+          (stable-sort
+           items
+           (lambda (a b)
+             (string< (or (agenda-item-effective-date a) "")
+                      (or (agenda-item-effective-date b) "")))))
+        (result '()))
+    (loop :while remaining
+          :do (let* ((date (agenda-item-effective-date (first remaining)))
+                     (group
+                       (loop :while (and remaining
+                                         (equal date
+                                                (agenda-item-effective-date
+                                                 (first remaining))))
+                             :collect (pop remaining))))
+                (setf result
+                      (nconc result (agenda-sort-day-items group)))))
+    result))
+
 (defun group-items (items &optional (now (funcall *agenda-now-function*))
                                    start-date horizon-date)
   "Bucket ITEMS into (overdue today upcoming todos), each a list of items.
@@ -718,8 +748,8 @@ completed unscheduled tasks stay out of the TODO section."
                         (string< (or (agenda-item-time a) "")
                                  (or (agenda-item-time b) "")))))))
       (values (stable-sort (nreverse overdue) #'by-date)
-              (nreverse today-items)
-              (stable-sort (nreverse upcoming) #'by-date)
+              (agenda-sort-day-items (nreverse today-items))
+              (agenda-sort-dated-items (nreverse upcoming))
               (nreverse todos)))))
 
 (defun agenda-default-sections
@@ -775,15 +805,15 @@ completed unscheduled tasks stay out of the TODO section."
                         ((agenda-item-event-p item) "EVENT")
                         ((eq (agenda-item-reminder-kind item)
                              :scheduled-past)
-                         (format nil "SCHEDULED ~dd ago"
+                         (format nil "Sched.~2dx:"
                                  (agenda-item-reminder-days item)))
                         ((eq (agenda-item-reminder-kind item)
                              :deadline-upcoming)
-                         (format nil "DEADLINE in ~dd"
+                         (format nil "In ~3d d.:"
                                  (agenda-item-reminder-days item)))
                         ((eq (agenda-item-reminder-kind item)
                              :deadline-overdue)
-                         (format nil "DEADLINE ~dd ago"
+                         (format nil "~2d d. ago:"
                                  (agenda-item-reminder-days item)))
                         (t (agenda-item-kind item)))
                       (agenda-item-date item)

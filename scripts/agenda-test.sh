@@ -240,9 +240,9 @@ else
   grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,movetag,parenttag,shared,targettag items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 39 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  grep -qE '^ENTRY serial=1 section=TODAY .*Overdue work sentinel.*\[DEADLINE 1d ago 2026-07-11\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=TODAY .*Overdue work sentinel.*\[ 1 d\. ago: 2026-07-11\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Today work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  grep -qE '^ENTRY serial=1 section=TODAY .*Upcoming work sentinel.*\[DEADLINE in 3d 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=TODAY .*Upcoming work sentinel.*\[In   3 d\.: 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Done dated sentinel.*\[SCHEDULED 2026-07-12\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Cancelled dated sentinel.*\[DEADLINE 2026-07-12\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Plain today sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -266,9 +266,9 @@ else
   grep -qE '^ENTRY serial=1 section=TODOS .*Invalid planning sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 .*Dual planning sentinel' "$LEM_YATH_AGENDA_REPORT")" = 3 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=TODAY .*Dual planning sentinel.*\[SCHEDULED 2026-07-12\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  grep -qE '^ENTRY serial=1 section=TODAY .*Dual planning sentinel.*\[DEADLINE in 3d 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=TODAY .*Dual planning sentinel.*\[In   3 d\.: 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^ENTRY serial=1 section=UPCOMING .*Dual planning sentinel.*\[DEADLINE 2026-07-15\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
-  grep -qE '^ENTRY serial=1 section=TODAY .*Archive action sentinel.*\[DEADLINE in 2d 2026-07-14\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -qE '^ENTRY serial=1 section=TODAY .*Archive action sentinel.*\[In   2 d\.: 2026-07-14\]' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -qE '^WARNING serial=1 .*Invalid Org planning date.*2026-02-30' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   if grep -qE '^ENTRY serial=1 .*Nested (work|public)|^ENTRY serial=1 .*Hidden file|^ENTRY serial=1 .*Uppercase extension|^ENTRY serial=1 .*Far future|^ENTRY serial=1 .*Inactive event exclusion|^ENTRY serial=1 .*Comment (subtree|child|line) exclusion|^ENTRY serial=1 .*Archive(d| child) .*exclusion|^ENTRY serial=1 .*Source block exclusion' "$LEM_YATH_AGENDA_REPORT"; then
     static_ok=0

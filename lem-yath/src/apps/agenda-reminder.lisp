@@ -14,6 +14,9 @@
   '((#\h . 0.041667d0) (#\d . 1d0) (#\w . 7d0)
     (#\m . 30.4d0) (#\y . 365.25d0)))
 
+(defparameter *agenda-priority-scanner*
+  (ppcre:create-scanner "(?:^|[ \\t])\\[#([A-C])\\](?:[ \\t]|$)"))
+
 (defun agenda-planning-cookie-days (suffix)
   "Return the Org warning/delay cookie in planning SUFFIX, if present."
   (multiple-value-bind (start end registers register-ends)
@@ -41,6 +44,53 @@
           (agenda-item-reminder-kind reminder) kind
           (agenda-item-reminder-days reminder) days)
     reminder))
+
+(defun agenda-item-priority-value (item)
+  "Return ITEM's configured GNU Org A/B/C priority value."
+  (multiple-value-bind (start end registers register-ends)
+      (ppcre:scan *agenda-priority-scanner* (agenda-item-text item))
+    (declare (ignore start end))
+    (* 1000
+       (- (char-code #\C)
+          (if (and registers (aref registers 0))
+              (char-code
+               (char (agenda-item-text item) (aref registers 0)))
+              (char-code #\B))))))
+
+(defun agenda-item-display-day-offset (item)
+  (- (agenda-date-ordinal (agenda-item-effective-date item))
+     (agenda-date-ordinal (agenda-item-date item))))
+
+(defun agenda-item-urgency (item)
+  "Return ITEM's stock Org urgency on its projected display day."
+  (let ((priority (agenda-item-priority-value item)))
+    (cond
+      ((string= (or (agenda-item-kind item) "") "SCHEDULED")
+       (+ priority 99 (agenda-item-display-day-offset item)))
+      ((string= (or (agenda-item-kind item) "") "DEADLINE")
+       (+ priority (agenda-item-display-day-offset item)))
+      (t priority))))
+
+(defun agenda-item-time-value (item)
+  "Return ITEM's HH:MM value as an integer, or NIL when untimed."
+  (alexandria:when-let ((time (agenda-item-time item)))
+    (let ((colon (position #\: time)))
+      (+ (* 100 (parse-integer time :end colon))
+         (parse-integer time :start (1+ colon))))))
+
+(defun agenda-item-stock-before-p (a b)
+  "Compare A and B with the configured stock agenda day strategies."
+  (let ((a-time (agenda-item-time-value a))
+        (b-time (agenda-item-time-value b)))
+    (cond
+      ((and a-time b-time) (< a-time b-time))
+      (a-time t)
+      (b-time nil)
+      (t (> (agenda-item-urgency a) (agenda-item-urgency b))))))
+
+(defun agenda-sort-stock-day-items (items)
+  "Return ITEMS in stock time-up, urgency-down, stable source order."
+  (stable-sort items #'agenda-item-stock-before-p))
 
 (defun agenda-planning-reminder (item today offset-days)
   "Return ITEM's GNU Org reminder projection for TODAY, if visible."
@@ -110,3 +160,4 @@
 (setf *agenda-item-projection-function* 'agenda-project-planning-reminders)
 (setf *agenda-planning-restore-key-function*
       'agenda-reminder-planning-restore-key)
+(setf *agenda-day-sort-function* 'agenda-sort-stock-day-items)

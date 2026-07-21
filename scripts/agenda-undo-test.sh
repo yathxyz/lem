@@ -78,7 +78,7 @@ type_slow() {
 printf '%s\n' '* TODO Undo saved sentinel' >"$saved_file"
 printf '%s\n' \
   '* TODO Undo timestamp sentinel' \
-  'SCHEDULED: <2026-07-14 Tue +1w -2d>' \
+  'DEADLINE: <2026-07-13 Mon +1w -2d>' \
   >"$timestamp_file"
 printf '%s\n' \
   '* TODO Undo bulk alpha sentinel' \
@@ -158,25 +158,25 @@ fi
 
 # p is intentionally unsaved; undo returns the source to its saved node.
 tmux_cmd send-keys -t "$session" F4 p
-if lem_wait_for "$session" 'Date \[2026-07-14\]' 10 >/dev/null; then
-  type_slow '2026-07-16 09:15-10:30'
+if lem_wait_for "$session" 'Date \[2026-07-13\]' 10 >/dev/null; then
+  type_slow '2026-07-14 09:15-10:30'
   tmux_cmd send-keys -t "$session" Enter
 else
   fail timestamp-prompt 'p did not offer the represented timestamp'
 fi
-lem_wait_for "$session" 'Undo timestamp sentinel.*SCHEDULED 2026-07-16' 30 >/dev/null || true
+lem_wait_for "$session" 'Undo timestamp sentinel.*2026-07-14' 30 >/dev/null || true
 report || true
-if grep -Fqx 'SCHEDULED: <2026-07-14 Tue +1w -2d>' "$timestamp_file" &&
-   grep -Fqx 'TIMESTAMP serial=5 modified=yes planning="SCHEDULED: <2026-07-16 Thu 09:15-10:30 +1w -2d>"' "$LEM_YATH_AGENDA_UNDO_REPORT" &&
+if grep -Fqx 'DEADLINE: <2026-07-13 Mon +1w -2d>' "$timestamp_file" &&
+   grep -Fqx 'TIMESTAMP serial=5 modified=yes planning="DEADLINE: <2026-07-14 Tue 09:15-10:30 +1w -2d>"' "$LEM_YATH_AGENDA_UNDO_REPORT" &&
    grep -q '^REPORT serial=5 records=1 labels=org-agenda-date-prompt ' "$LEM_YATH_AGENDA_UNDO_REPORT"; then
   pass timestamp-edit 'p recorded one unsaved remote transaction with suffixes intact'
 else
   fail timestamp-edit 'p saved, split, or lost the represented timestamp'
 fi
 tmux_cmd send-keys -t "$session" u
-lem_wait_for "$session" 'Undo timestamp sentinel.*SCHEDULED 2026-07-14' 30 >/dev/null || true
+lem_wait_for "$session" 'Undo timestamp sentinel.*2026-07-13' 30 >/dev/null || true
 report || true
-if grep -Fqx 'TIMESTAMP serial=6 modified=no planning="SCHEDULED: <2026-07-14 Tue +1w -2d>"' "$LEM_YATH_AGENDA_UNDO_REPORT" &&
+if grep -Fqx 'TIMESTAMP serial=6 modified=no planning="DEADLINE: <2026-07-13 Mon +1w -2d>"' "$LEM_YATH_AGENDA_UNDO_REPORT" &&
    grep -q '^REPORT serial=6 records=0 labels= ' "$LEM_YATH_AGENDA_UNDO_REPORT"; then
   pass timestamp-undo 'u restored the exact saved timestamp and modified state'
 else

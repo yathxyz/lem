@@ -909,7 +909,9 @@ the trailing text-ready space. The profile binds no other org-journal command
   only on their exact dates. Timestamp-local `-Nd` cookies override the
   deadline warning or scheduled delay. Lem reproduces those boundaries in its
   summary and span views; reminder rows retain the real planning timestamp for
-  visits and edits while being displayed under today.
+  visits and edits while being displayed under today. Daily rows use the stock
+  `time-up`, `urgency-down`, stable source ordering, including configured A/B/C
+  priorities, and reminder rows use the stock scheduled/deadline leader text.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
 - Evil-Org `Tab`, Shift-Return, and `g TAB` run `org-agenda-goto`, opening the

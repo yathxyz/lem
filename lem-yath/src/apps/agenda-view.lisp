@@ -75,16 +75,7 @@
         (:year (format nil "Year ~a..~a" start end))))))
 
 (defun agenda-view-sort-items (items)
-  (stable-sort
-   items
-   (lambda (a b)
-     (let ((a-date (or (agenda-item-effective-date a) ""))
-           (b-date (or (agenda-item-effective-date b) ""))
-           (a-time (or (agenda-item-time a) ""))
-           (b-time (or (agenda-item-time b) "")))
-       (or (string< a-date b-date)
-           (and (string= a-date b-date)
-                (string< a-time b-time)))))))
+  (agenda-sort-dated-items items))
 
 (defun agenda-view-date-title (date)
   (format nil "~a  ~a"

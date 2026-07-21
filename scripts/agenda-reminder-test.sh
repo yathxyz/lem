@@ -76,6 +76,12 @@ printf '%s\n' \
   'SCHEDULED: <2026-07-10 Fri>' \
   '* DONE Done today schedule sentinel' \
   'SCHEDULED: <2026-07-12 Sun>' \
+  '* Late timed event sentinel <2026-07-12 Sun 10:00>' \
+  '* Early timed event sentinel <2026-07-12 Sun 9:00>' \
+  '* TODO [#A] Priority upcoming deadline sentinel' \
+  'DEADLINE: <2026-07-26 Sun>' \
+  '* TODO [#C] Low priority past schedule sentinel' \
+  'SCHEDULED: <2026-07-10 Fri>' \
   >"$work_file"
 cp "$work_file" "$original_file"
 : >"$LEM_YATH_AGENDA_REMINDER_REPORT"
@@ -89,15 +95,15 @@ if ! lem_wait_for "$session" 'Past deadline sentinel' 30 >/dev/null; then
 fi
 
 tmux_cmd send-keys -t "$session" F4
-wait_report '^DONE rows=17$' || true
+wait_report '^DONE rows=22$' || true
 static_ok=1
-[ "$(grep -c '^ROW ' "$LEM_YATH_AGENDA_REMINDER_REPORT")" = 17 ] || static_ok=0
+[ "$(grep -c '^ROW ' "$LEM_YATH_AGENDA_REMINDER_REPORT")" = 22 ] || static_ok=0
 grep -qE '^ROW section=OVERDUE source=2026-07-11 display=2026-07-11 .*Past deadline sentinel.*\[DEADLINE 2026-07-11\]' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
-grep -qE '^ROW section=TODAY source=2026-07-11 display=2026-07-12 .*reminder=DEADLINE-OVERDUE days=1 .*Past deadline sentinel.*\[DEADLINE 1d ago 2026-07-11\]' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
-grep -qE '^ROW section=TODAY source=2026-07-13 display=2026-07-12 .*reminder=DEADLINE-UPCOMING days=1 .*Tomorrow deadline sentinel.*\[DEADLINE in 1d 2026-07-13\]' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
-grep -qE '^ROW section=TODAY source=2026-07-26 display=2026-07-12 .*reminder=DEADLINE-UPCOMING days=14 .*Boundary deadline sentinel.*\[DEADLINE in 14d 2026-07-26\]' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
+grep -qE '^ROW section=TODAY source=2026-07-11 display=2026-07-12 .*reminder=DEADLINE-OVERDUE days=1 .*Past deadline sentinel.*\[ 1 d\. ago: 2026-07-11\]' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
+grep -qE '^ROW section=TODAY source=2026-07-13 display=2026-07-12 .*reminder=DEADLINE-UPCOMING days=1 .*Tomorrow deadline sentinel.*\[In   1 d\.: 2026-07-13\]' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
+grep -qE '^ROW section=TODAY source=2026-07-26 display=2026-07-12 .*reminder=DEADLINE-UPCOMING days=14 .*Boundary deadline sentinel.*\[In  14 d\.: 2026-07-26\]' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
 grep -qE '^ROW section=TODAY source=2026-07-14 display=2026-07-12 .*reminder=DEADLINE-UPCOMING days=2 .*Explicit warning sentinel' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
-grep -qE '^ROW section=TODAY source=2026-07-10 display=2026-07-12 .*reminder=SCHEDULED-PAST days=2 .*Scheduled past sentinel.*\[SCHEDULED 2d ago 2026-07-10\]' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
+grep -qE '^ROW section=TODAY source=2026-07-10 display=2026-07-12 .*reminder=SCHEDULED-PAST days=2 .*Scheduled past sentinel.*\[Sched\. 2x: 2026-07-10\]' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
 grep -qE '^ROW section=TODAY source=2026-07-10 display=2026-07-12 .*reminder=SCHEDULED-PAST days=2 .*Scheduled delay active sentinel' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
 [ "$(grep -c '^ROW .*Dual planning sentinel' "$LEM_YATH_AGENDA_REMINDER_REPORT")" = 3 ] || static_ok=0
 grep -qE '^ROW section=UPCOMING source=2026-07-13 display=2026-07-13 .*Done future deadline sentinel' "$LEM_YATH_AGENDA_REMINDER_REPORT" || static_ok=0
@@ -105,8 +111,32 @@ grep -qE '^ROW section=TODAY source=2026-07-12 display=2026-07-12 .*Done today s
 if grep -qE '^ROW .*Beyond boundary|^ROW .*Scheduled delay hidden|^ROW .*Scheduled today delayed|^ROW .*Cancelled past|^ROW section=TODAY .*Before explicit warning|^ROW .*reminder=(DEADLINE|SCHEDULED)-.*Done future' "$LEM_YATH_AGENDA_REMINDER_REPORT"; then
   static_ok=0
 fi
+row_number() {
+  grep -n "^ROW section=TODAY .*${1}" "$LEM_YATH_AGENDA_REMINDER_REPORT" |
+    head -n 1 | cut -d: -f1
+}
+early_row="$(row_number 'Early timed event sentinel')"
+late_row="$(row_number 'Late timed event sentinel')"
+high_row="$(row_number 'Priority upcoming deadline sentinel')"
+scheduled_row="$(row_number 'Scheduled past sentinel')"
+today_deadline_row="$(row_number 'Today deadline sentinel')"
+tomorrow_row="$(row_number 'Tomorrow deadline sentinel')"
+boundary_row="$(row_number 'Boundary deadline sentinel')"
+low_row="$(row_number 'Low priority past schedule sentinel')"
+if [ -z "$early_row" ] || [ -z "$late_row" ] || [ -z "$high_row" ] ||
+   [ -z "$scheduled_row" ] || [ -z "$today_deadline_row" ] ||
+   [ -z "$tomorrow_row" ] || [ -z "$boundary_row" ] || [ -z "$low_row" ] ||
+   ! [ "$early_row" -lt "$late_row" ] ||
+   ! [ "$late_row" -lt "$high_row" ] ||
+   ! [ "$high_row" -lt "$scheduled_row" ] ||
+   ! [ "$scheduled_row" -lt "$today_deadline_row" ] ||
+   ! [ "$today_deadline_row" -lt "$tomorrow_row" ] ||
+   ! [ "$tomorrow_row" -lt "$boundary_row" ] ||
+   ! [ "$boundary_row" -lt "$low_row" ]; then
+  static_ok=0
+fi
 if [ "$static_ok" = 1 ] && cmp -s "$work_file" "$original_file"; then
-  pass boundaries 'default, explicit, delayed, completed, and dual boundaries match Org'
+  pass boundaries 'leaders, time/urgency order, priorities, delays, and dual rows match Org'
 else
   fail boundaries 'reminder rows, exclusions, or immutable source differed'
 fi
@@ -114,7 +144,7 @@ fi
 # A physical Evil-Org H on a projected reminder must edit its real planning
 # timestamp and restore point to the corresponding refreshed reminder row.
 tmux_cmd send-keys -t "$session" F5 H
-if lem_wait_for "$session" 'Scheduled past sentinel.*SCHEDULED 3d ago 2026-07-09' 30 >/dev/null &&
+if lem_wait_for "$session" 'Scheduled past sentinel.*Sched. 3x: 2026-07-09' 30 >/dev/null &&
    grep -q '^SCHEDULED: <2026-07-09 Thu>$' "$work_file"; then
   tmux_cmd send-keys -t "$session" F6
   wait_report '^POINT source=2026-07-09 display=2026-07-12 reminder=SCHEDULED-PAST days=3 ' || true
