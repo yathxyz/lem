@@ -952,7 +952,7 @@
          (text (and buffer (buffer-text buffer)))
          (todo-point (and buffer (buffer-start-point buffer))))
     (when todo-point
-      (unless (search-forward todo-point "nested/deeper/todos.txt:1:")
+      (unless (search-forward todo-point "nested/deeper/todos.org:1:")
         (setf todo-point nil))
       (when todo-point (line-start todo-point)))
     (vcs-test-log
@@ -967,11 +967,21 @@
                            (not (deleted-buffer-p *vcs-test-source-buffer*))))
      (vcs-test-yes-no (vcs-test-source-raw-exact-p))
      (vcs-test-yes-no (vcs-test-source-raw-sentinel-p))
-     (vcs-test-yes-no (and text (search "TODO/FIXME (2):" text)))
+     (vcs-test-yes-no (and text (search "Todos (16):" text)))
      (vcs-test-yes-no
       (and text
-           (search "nested/deeper/todos.txt:1:" text)
-           (search "nested/docs/fixmes.txt:1:" text)))
+           (let ((hold (search "HOLD: held" text))
+                 (todo (search "* TODO tracked implementation task" text))
+                 (next (search "NEXT: next" text))
+                 (fixme (search "FIXME(owner): tracked documentation task"
+                                text)))
+             (and hold todo next fixme (< hold todo next fixme)))
+           (search "nested/deeper/todos.org:1:" text)
+           (search "nested/docs/fixmes.txt:1:" text)
+           (search "nested/docs/keywords.txt:14: XXXX*: literal" text)
+           (not (search "NOTE: ignored" text))
+           (not (search "DONE: ignored" text))
+           (not (search "TODO missing required colon" text))))
      (vcs-test-yes-no
       (and todo-point
            (lem/legit::get-move-function todo-point)
@@ -986,7 +996,7 @@
                       (window-buffer lem/legit::*peek-window*)))
          (row (and buffer (buffer-start-point buffer))))
     (when row
-      (unless (search-forward row "nested/deeper/todos.txt:1:")
+      (unless (search-forward row "nested/deeper/todos.org:1:")
         (setf row nil))
       (when row (line-start row)))
     (let* ((move (and row (lem/legit::get-move-function row)))
@@ -999,7 +1009,7 @@
        (vcs-test-yes-no source)
        (vcs-test-yes-no
         (and visit
-             (string= (funcall visit) "nested/deeper/todos.txt")))
+             (string= (funcall visit) "nested/deeper/todos.org")))
        (if (and source-buffer (buffer-filename source-buffer))
            (file-namestring (buffer-filename source-buffer))
            "none")

@@ -2672,11 +2672,15 @@ conflict handling, operation log, workspaces, sparse checkout, and Majutsu's
 wider arbitrary-revision/fileset/tool split options remain outside this focused
 approximation.
 
-Git status also appends navigable TODO/FIXME rows from tracked, nonbinary
+Git status also appends navigable Magit-Todos rows from tracked, nonbinary
 files. Moving onto a row previews the exact source line and visiting it opens
-that file. This is a bounded magit-todos approximation: the synchronous
-`git grep` scan stops at 200 rendered results, 1 MiB of output, or five seconds,
-and does not implement configurable keywords or magit-todos grouping. A small
+that file. The scanner uses the installed package's 16 effective default
+keywords in package order, including literal `XXXX*`, its Org-heading form,
+and its required colon with optional parenthesized/bracketed suffix elsewhere;
+configured ignored `NOTE` and `DONE` plus bare prose are excluded. The
+synchronous `git grep` scan stops at 200 rendered results, 1 MiB of output, or
+five seconds. Automatic grouping/collapse and branch-diff sections remain
+outside this bounded magit-todos approximation. A small
 pinned-upstream patch exposes the status-section hook used by this integration.
 
 ### GitHub Forge workflow — `lem-yath/src/forge.lisp`

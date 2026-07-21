@@ -399,11 +399,45 @@
 (defparameter *legit-todo-result-limit* 200)
 (defparameter *legit-todo-output-limit* (* 1024 1024))
 (defparameter *legit-todo-timeout* 5)
+(defparameter *legit-todo-keywords*
+  '("HOLD" "TODO" "NEXT" "THEM" "PROG" "OKAY" "DONT" "FAIL"
+    "MAYBE" "KLUDGE" "HACK" "TEMP" "WIP" "FIXME" "DEBUG" "XXXX*"))
 
 (defstruct legit-todo
   path
   line
+  keyword
   text)
+
+(defun detect-legit-todo-keyword (text)
+  (loop :for keyword :in *legit-todo-keywords*
+        :for quoted := (cl-ppcre:quote-meta-chars keyword)
+        :when (or (cl-ppcre:scan
+                   (format nil "^\\*+[\\t ]+~a[\\t ]+" quoted) text)
+                  (cl-ppcre:scan
+                   (format nil
+                           "(?:^|[\\t ]+)~a(?:\\([^)]+\\)|\\[[^]]+\\])?:"
+                           quoted)
+                   text))
+          :return keyword))
+
+(defun legit-todo-keyword-index (todo)
+  (position (legit-todo-keyword todo) *legit-todo-keywords*
+            :test #'string=))
+
+(defun sort-legit-todos (todos)
+  (stable-sort todos
+               (lambda (left right)
+                 (let ((left-keyword (legit-todo-keyword-index left))
+                       (right-keyword (legit-todo-keyword-index right)))
+                   (or (< left-keyword right-keyword)
+                       (and (= left-keyword right-keyword)
+                            (or (string< (legit-todo-path left)
+                                         (legit-todo-path right))
+                                (and (string= (legit-todo-path left)
+                                              (legit-todo-path right))
+                                     (< (legit-todo-line left)
+                                        (legit-todo-line right))))))))))
 
 (defun parse-legit-todos (output)
   "Parse Git grep's NUL-delimited path, line, and text records."
@@ -427,21 +461,35 @@
                                       :end line-end
                                       :junk-allowed t)
           :for text := (subseq output (1+ line-end) text-end)
-          :when (and line (plusp line) (plusp (length path)))
-            :do (push (make-legit-todo :path path :line line :text text)
+          :for keyword := (detect-legit-todo-keyword text)
+          :when (and line keyword (plusp line) (plusp (length path)))
+            :do (push (make-legit-todo :path path :line line
+                                       :keyword keyword :text text)
                       results)
           :do (setf start (min length (1+ text-end))))
-    (nreverse results)))
+    (sort-legit-todos (nreverse results))))
+
+(defun legit-todo-grep-regexp ()
+  (let ((keywords
+          (format nil "~{~a~^|~}"
+                  (mapcar (lambda (keyword)
+                            (if (string= keyword "XXXX*")
+                                "XXXX\\*"
+                                keyword))
+                          *legit-todo-keywords*))))
+    (format nil
+            "(^[*]+[[:blank:]]+(~a)[[:blank:]]+)|((^|[[:blank:]]+)(~a)(\\([^)]{1,}\\)|\\[[^]]{1,}\\])?:)"
+            keywords keywords)))
 
 (defun collect-legit-todos (root)
-  "Return bounded TODO/FIXME matches from tracked Git files below ROOT."
+  "Return bounded configured Magit-Todos matches from tracked files."
   (let ((git (or (executable-find "git")
                  (error "Git is unavailable"))))
     (let ((*project-process-timeout* *legit-todo-timeout*))
       (multiple-value-bind (output error-output status)
           (run-project-program
            (list (uiop:native-namestring git)
-                 "grep" "-n" "-I" "-z" "-E" "(TODO|FIXME)" "--")
+                 "grep" "-n" "-I" "-z" "-E" (legit-todo-grep-regexp) "--")
            :directory root
            :output-limit *legit-todo-output-limit*)
         (cond
@@ -463,7 +511,7 @@
         point))))
 
 (defun insert-legit-todo-section (vcs collector)
-  "Append a navigable tracked-file TODO/FIXME section to Legit status."
+  "Append configured Magit-Todos matches to Legit status."
   (declare (ignore collector))
   (unless (string-equal "git" (lem/porcelain::vcs-name vcs))
     (return-from insert-legit-todo-section))
@@ -472,7 +520,7 @@
         (let ((todos (collect-legit-todos root)))
           (lem/legit::collector-insert "")
           (lem/legit::collector-insert
-           (format nil "TODO/FIXME (~d):" (length todos)) :header t)
+           (format nil "Todos (~d):" (length todos)) :header t)
           (if todos
               (dolist (todo todos)
                 (lem/legit::with-appending-source
@@ -494,7 +542,7 @@
               (lem/legit::collector-insert "<none>")))
       (error (condition)
         (lem/legit::collector-insert "")
-        (lem/legit::collector-insert "TODO/FIXME (unavailable):" :header t)
+        (lem/legit::collector-insert "Todos (unavailable):" :header t)
         (lem/legit::collector-insert
          (completion-bounded-annotation (princ-to-string condition)))))))
 

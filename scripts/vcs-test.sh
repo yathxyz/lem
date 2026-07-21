@@ -141,13 +141,20 @@ printf '(defparameter vcs-retired :historical)\n' \
   >"$LEM_YATH_VCS_GIT_MAIN/nested/deeper/retired.lisp"
 printf '# VCS notes\n\nold prose\n' \
   >"$LEM_YATH_VCS_GIT_MAIN/nested/docs/notes.md"
-printf 'TODO tracked implementation task\nordinary line\n' \
-  >"$LEM_YATH_VCS_GIT_MAIN/nested/deeper/todos.txt"
-printf 'FIXME tracked documentation task\n' \
+printf '* TODO tracked implementation task\nordinary line\n' \
+  >"$LEM_YATH_VCS_GIT_MAIN/nested/deeper/todos.org"
+printf 'FIXME(owner): tracked documentation task\n' \
   >"$LEM_YATH_VCS_GIT_MAIN/nested/docs/fixmes.txt"
+printf '%s\n' \
+  'HOLD: held' 'NEXT: next' 'THEM: them' 'PROG: progress' 'OKAY: okay' \
+  'DONT: avoid' 'FAIL: failed' 'MAYBE: maybe' 'KLUDGE: kludge' \
+  'HACK: hack' 'TEMP: temporary' 'WIP: work' 'DEBUG: debug' 'XXXX*: literal' \
+  'NOTE: ignored' 'DONE: ignored' 'TODO missing required colon' \
+  >"$LEM_YATH_VCS_GIT_MAIN/nested/docs/keywords.txt"
 "$git_bin" -C "$LEM_YATH_VCS_GIT_MAIN" add -- \
   nested/deeper/history-old.lisp nested/deeper/retired.lisp \
-  nested/deeper/todos.txt nested/docs/fixmes.txt nested/docs/notes.md
+  nested/deeper/todos.org nested/docs/fixmes.txt nested/docs/keywords.txt \
+  nested/docs/notes.md
 if ! git_commit "$LEM_YATH_VCS_GIT_MAIN" vcs-old \
   '2001-01-02T00:00:00+0000'; then
   echo "Could not create the older history fixture" >&2
@@ -2884,7 +2891,7 @@ else
 fi
 legit_state=$(latest_report '^LEGIT phase=git ')
 if [[ "$legit_state" == *'todos=yes todo-count=yes todo-properties=yes todo-hook=1 '* ]]; then
-  pass legit-todo-section 'Legit rendered two tracked TODO/FIXME rows with actions'
+  pass legit-todo-section 'Legit rendered the configured Magit-Todos keywords with actions'
 else
   fail legit-todo-section "unexpected Legit TODO state: $legit_state" \
     "$git_session"
@@ -2894,7 +2901,7 @@ todo_preview_before=$(report_count '^TODO-PREVIEW ')
 send_keys "$git_session" C-c t
 if wait_report_count '^TODO-PREVIEW ' "$((todo_preview_before + 1))" &&
    [[ $(latest_report '^TODO-PREVIEW ') == \
-      'TODO-PREVIEW row=yes move=yes visit=yes file=todos.txt line=1 text=yes' ]]; then
+      'TODO-PREVIEW row=yes move=yes visit=yes file=todos.org line=1 text=yes' ]]; then
   pass legit-todo-preview 'a TODO row resolves to its exact tracked source line'
 else
   fail legit-todo-preview 'TODO row preview metadata did not resolve exactly' \
