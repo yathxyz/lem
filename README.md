@@ -751,6 +751,7 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   with the configured single sequence either command selects its `TODO` head,
   saves immediately, and follows the refreshed row. Terminal `C-c H/L`
   aliases preserve access to those otherwise indistinguishable chords.
+  Evil-Org `g t` reports the row's effective inherited/local tags.
   Evil-Org `M-j`/`M-k` drag a source-backed row through adjacent
   source rows by the Vi count without touching its Org file; the complete row
   property map and bulk mark follow the display row, headers/decorations are

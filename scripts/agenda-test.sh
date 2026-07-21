@@ -252,6 +252,7 @@ else
   grep -qF "FILE serial=1 index=4 path=$mcp_file" "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^OPEN-MOTION serial=1 tab=LEM-YATH-AGENDA-GOTO shift-return=LEM-YATH-AGENDA-GOTO gtab=LEM-YATH-AGENDA-GOTO gj=LEM-YATH-AGENDA-NEXT-ITEM gk=LEM-YATH-AGENDA-PREVIOUS-ITEM Cj=LEM-YATH-AGENDA-NEXT-ITEM Ck=LEM-YATH-AGENDA-PREVIOUS-ITEM Mj=LEM-YATH-AGENDA-DRAG-LINE-FORWARD Mk=LEM-YATH-AGENDA-DRAG-LINE-BACKWARD space=LEM-YATH-AGENDA-SHOW-AND-SCROLL-UP backspace=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN delete=LEM-YATH-AGENDA-SHOW-SCROLL-DOWN mret=LEM-YATH-AGENDA-RECENTER-SOURCE P=LEM-YATH-AGENDA-SHOW-FLAGGING-NOTE$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TODO-SET-BINDINGS serial=1 previous=LEM-YATH-AGENDA-TODO-PREVIOUSSET next=LEM-YATH-AGENDA-TODO-NEXTSET fallback-previous=LEM-YATH-AGENDA-TODO-PREVIOUSSET fallback-next=LEM-YATH-AGENDA-TODO-NEXTSET$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
+  grep -q '^INSPECT-BINDINGS serial=1 tags=LEM-YATH-AGENDA-SHOW-TAGS$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   grep -q '^TAG-COMPLETION serial=1 known=alpha,ARCHIVE,localtag,movetag,parenttag,shared,targettag items=:alpha:,:localtag:$' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
   [ "$(grep -c '^ENTRY serial=1 ' "$LEM_YATH_AGENDA_REPORT")" = 39 ] || static_ok=0
   grep -qE '^ENTRY serial=1 section=OVERDUE .*Overdue work sentinel' "$LEM_YATH_AGENDA_REPORT" || static_ok=0
@@ -293,6 +294,31 @@ else
   else
     fail sources "source set, grouping, or effective keymap differed"
   fi
+fi
+
+# Evil-Org g t reports the effective inherited/local tags at point and handles
+# an untagged row without changing either agenda or source state.
+tag_inspect_before="$(sha256sum "$work_file" | cut -d' ' -f1)"
+tmux_cmd send-keys -t "$session" F1
+sleep 0.2
+tmux_cmd send-keys -t "$session" g t
+if lem_wait_for "$session" 'Tags are :parenttag:shared:localtag:' 10 >/dev/null; then
+  pass agenda-show-tags 'g t reported effective inherited and local tags in order'
+else
+  fail agenda-show-tags 'g t did not report the row tag property exactly'
+fi
+tmux_cmd send-keys -t "$session" F12
+sleep 0.2
+tmux_cmd send-keys -t "$session" g t
+if lem_wait_for "$session" 'No tags associated with this line' 10 >/dev/null; then
+  tag_inspect_after="$(sha256sum "$work_file" | cut -d' ' -f1)"
+  if [ "$tag_inspect_before" = "$tag_inspect_after" ]; then
+    pass agenda-show-tags-empty 'g t handled an untagged row byte-identically'
+  else
+    fail agenda-show-tags-empty 'tag inspection changed its Org source'
+  fi
+else
+  fail agenda-show-tags-empty 'g t did not report an untagged row'
 fi
 
 # Evil-Org M-j/M-k reorder only complete, adjacent source rows in the agenda

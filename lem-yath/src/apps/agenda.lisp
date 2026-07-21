@@ -2258,6 +2258,12 @@ suffix."
             (error (condition)
               (message "Agenda tags failed: ~a" condition)))))))
 
+(define-command lem-yath-agenda-show-tags () ()
+  "Show the tags applicable to the current agenda row."
+  (alexandria:if-let ((tags (text-property-at (current-point) :agenda-tags)))
+    (message "Tags are ~a" (agenda-tag-string tags))
+    (message "No tags associated with this line")))
+
 (defun agenda-priority-post-command ()
   "Forget priority repetition after any other command."
   (unless (member (and (this-command) (command-name (this-command)))
@@ -2389,6 +2395,7 @@ suffix."
 (define-key *lem-yath-agenda-vi-keymap* "K" 'lem-yath-agenda-priority-up)
 (define-key *lem-yath-agenda-vi-keymap* "J" 'lem-yath-agenda-priority-down)
 (define-key *lem-yath-agenda-vi-keymap* "c t" 'lem-yath-agenda-set-tags)
+(define-key *lem-yath-agenda-vi-keymap* "g t" 'lem-yath-agenda-show-tags)
 (define-key *lem-yath-agenda-vi-keymap* "C-c C-q" 'lem-yath-agenda-set-tags)
 (define-key *lem-yath-agenda-vi-keymap* "q" 'quit-active-window)
 

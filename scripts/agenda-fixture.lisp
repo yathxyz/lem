@@ -163,6 +163,8 @@
      (agenda-test-command-name "C-Shift-l")
      (agenda-test-command-name "C-c H")
      (agenda-test-command-name "C-c L"))
+    (agenda-test-log "INSPECT-BINDINGS serial=~d tags=~a"
+                     serial (agenda-test-command-name "g t"))
     (loop :for directory :in directories
           :for index :from 1
           :do (agenda-test-log "ROOT serial=~d index=~d path=~a"

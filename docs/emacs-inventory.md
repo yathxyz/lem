@@ -928,6 +928,10 @@ the trailing text-ready space. The profile binds no other org-journal command
 - Agenda rows expose GNU-style effective category prefixes and inherited/local
   tag suffixes; their exact file and line remain navigation properties instead
   of visible debug text.
+- Evil-Org `g t` runs pinned `org-agenda-show-tags`, reporting the complete
+  applicable tag list in inherited-to-local order or the stock no-tags message
+  without changing agenda or source state. Lem reproduces both messages from
+  the row metadata already used for rendering and filtering.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
 - Evil-Org `Tab`, Shift-Return, and `g TAB` run `org-agenda-goto`, opening the

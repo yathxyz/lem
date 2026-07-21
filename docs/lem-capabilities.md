@@ -3429,7 +3429,9 @@ canonical colon-delimited expressions from tags found across the configured
 agenda sources, removes duplicates, offers an explicit clear row for empty
 input, accepts the current valid expression on Return even while add-tag
 candidates remain visible, and realigns the result to the active terminal tag
-column.
+column. Evil-Org `g t` reads that same effective row metadata and reports the
+pinned `Tags are :...:` or `No tags associated with this line` message without
+touching the agenda or any Org source.
 
 `src/apps/agenda-drag.lisp` implements pinned Evil-Org `M-j`/`M-k` as a
 display-only rotation of complete agenda line objects. A Vi count crosses that

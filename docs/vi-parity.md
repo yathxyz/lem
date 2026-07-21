@@ -79,6 +79,7 @@ timed-prefix and undated boundaries, target persistence, and cleanup.
 Evil-Org agenda `C-Shift-h/l`, with terminal `C-c H/L` aliases, select the
 configured sequence head (`TODO`) from any source-backed non-diary row, save
 immediately, and retain the logical row through refresh. Evil-Org agenda
+`g t` reports effective inherited/local tags without mutation. Evil-Org agenda
 `M-j`/`M-k` drag the current display row forward/backward by
 the Vi count. Complete line properties and bulk-mark state follow the row;
 headers and decorations refuse the entire move, the source stays byte-identical,
