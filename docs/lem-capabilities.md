@@ -1396,8 +1396,10 @@ API, so their intermediate transactions remain in history.
   `patches/lem-grep-writeback.patch` still supplies the
   point-preserving replacement primitive, and
   `patches/lem-peek-source-timer.patch` owns and invalidates preview timers.
-  Editable headers/newlines, multiline replacement, auto-save, and per-row error
-  echo remain outside this bounded port.
+  Re-entering a rejected row echoes its retained failure reason. Editable
+  headers/newlines and multiline replacement remain outside this bounded port;
+  automatic save is intentionally absent because configured wgrep leaves
+  `wgrep-auto-save-buffer` at its nil default.
 
 ### Project-aware finding — `src/commands/project.lisp`
 `project-find-file` (`C-x p f`), `project-switch` (`C-x p p`), `project-root-directory`
@@ -4131,7 +4133,8 @@ does not enable `hl-line-mode` or `global-hl-line-mode`.
   persistent marked-buffer Occur described in §4; configured project grep now
   covers read-only results plus wgrep-style staged editing, source-buffer apply,
   whole-row deletion, regional/all unmarking, bounded staged undo, rollback,
-  ordinary save, and stale-row refusal. Lem-yath also adds marked-buffer
+  ordinary save, stale-row refusal, and rejected-row error echo. Lem-yath also
+  adds marked-buffer
   literal and regexp incremental isearch through the effective Evil Collection
   chords described in §4, plus the marked-buffer literal/regexp query-replace
   coordinator described there. GNU's Lisp-evaluated replacement form remains a

@@ -42,6 +42,8 @@
 (defconstant +project-grep-records-key+ 'lem-yath-project-grep-records)
 (defconstant +project-grep-edit-session-key+
   'lem-yath-project-grep-edit-session)
+(defconstant +project-grep-last-error-row-key+
+  'lem-yath-project-grep-last-error-row)
 
 (define-attribute project-grep-changed-attribute
   (t :foreground :base0A :background :base02))
@@ -1009,6 +1011,20 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
     (line-start line)
     (text-property-at line :lem-yath-project-grep-record)))
 
+(defun project-grep-error-post-command ()
+  "Echo a rejected grep row's reason when point enters that row."
+  (let ((buffer (current-buffer)))
+    (when (project-grep-edit-records buffer)
+      (let* ((record (project-grep-record-at-point (current-point)))
+             (previous
+               (buffer-value buffer +project-grep-last-error-row-key+)))
+        (setf (buffer-value buffer +project-grep-last-error-row-key+) record)
+        (when (and record
+                   (not (eq record previous))
+                   (project-grep-edit-record-error record))
+          (message-without-log
+           "~a" (project-grep-edit-record-error record)))))))
+
 (defun project-grep-stage-before-change (point change)
   "Refuse structural row changes that the staged grep model cannot apply."
   (when (project-grep-edit-active-p (point-buffer point))
@@ -1710,6 +1726,8 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
 (register-project-grep-ex-write)
 
 ;; Hot reloads must not multiply registration work.
+(remove-hook *post-command-hook* 'project-grep-error-post-command)
+(add-hook *post-command-hook* 'project-grep-error-post-command)
 (remove-hook *find-file-hook* 'register-buffer-project)
 (add-hook *find-file-hook* 'register-buffer-project)
 (remove-hook *pre-command-hook* 'cancel-pending-project-requests)

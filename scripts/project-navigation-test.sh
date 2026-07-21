@@ -931,6 +931,17 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
         "$verify_session"
     fi
 
+    send_chord "$verify_session" j k
+    if lem_wait_for "$verify_session" 'Source changed after grep' \
+         "$WAIT_TIMEOUT" >/dev/null; then
+      pass spc-p-g-stage-stale-echo \
+        'revisiting a rejected row echoed its exact failure reason'
+    else
+      fail spc-p-g-stage-stale-echo \
+        'the rejected row did not explain itself when revisited' \
+        "$verify_session"
+    fi
+
   else
     fail spc-p-g-results 'SPC p g produced no Alpha match' "$verify_session"
   fi
