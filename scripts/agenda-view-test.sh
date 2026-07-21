@@ -11,7 +11,7 @@ export HOME="$root/home"
 export WORKDIR="$root/work"
 export PUBLIC_ORG_DIR="$root/public"
 export LEM_YATH_AGENDA_VIEW_REPORT="$root/report"
-export TZ=UTC
+export TZ=Europe/Dublin
 mkdir -p "$HOME" "$WORKDIR" "$PUBLIC_ORG_DIR/mcp"
 
 work_file="$WORKDIR/view.org"
@@ -65,6 +65,8 @@ printf '%s\n' \
   'SCHEDULED: <2026-07-13 Mon>' \
   '* TODO Today view sentinel' \
   'SCHEDULED: <2026-07-17 Fri>' \
+  '* Late grid sentinel <2026-07-17 Fri 10:00>' \
+  '* Early grid range sentinel <2026-07-17 Fri 9:00-10:30>' \
   '* TODO Sunday view sentinel' \
   'DEADLINE: <2026-07-19 Sun>' \
   '* TODO Next Monday view sentinel' \
@@ -73,6 +75,7 @@ printf '%s\n' \
   'SCHEDULED: <2026-07-31 Fri>' \
   '* TODO August view sentinel' \
   'SCHEDULED: <2026-08-05 Wed>' \
+  '* August grid range sentinel <2026-08-05 Wed 15:30-16:00>' \
   '* Ranged view sentinel <2026-07-15 Wed>--<2026-07-18 Sat>' \
   '* TODO Unscheduled view sentinel' \
   '* TODO Clock span view sentinel' \
@@ -104,14 +107,31 @@ else
   fail keymap 'the effective view keymap or default summary differed'
 fi
 
+send_keys C-c z g
+send_keys g j
+send_keys C-c z p
+wait_report '^POINT first ' || true
+send_keys g j
+send_keys C-c z P
+wait_report '^POINT second ' || true
+if grep -q '^POINT first grid=NIL file=yes time=9:00 end=10:30 .*Early grid range sentinel' "$LEM_YATH_AGENDA_VIEW_REPORT" &&
+   grep -q '^POINT second grid=NIL file=yes time=10:00 end=NIL .*Late grid sentinel' "$LEM_YATH_AGENDA_VIEW_REPORT"; then
+  pass grid-motion 'gj skipped grid decorations and retained range metadata'
+else
+  fail grid-motion 'grid rows captured motion or lost source-backed time metadata'
+fi
+
 send_keys g D w
 lem_wait_for "$session" 'Week 2026-07-13..2026-07-19' 30 >/dev/null || true
 send_keys C-c z 1
 wait_report '^STATE week ' || true
+wait_report '^TIMELINE week ' || true
 week_ok=1
 grep -q '^STATE week span=week start=2026-07-13 end=2026-07-19 .*point-date=2026-07-17 headers=7 ' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
 grep -q '2026-07-13|.*Monday view sentinel' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
 grep -q '2026-07-19|.*Sunday view sentinel' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
+grep -q 'Early grid range sentinel.*\[EVENT 2026-07-17 9:00-10:30\]' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
+grep -q '^TIMELINE week grid-0800,item-0900-1030,grid-1000,item-1000,grid-1200,now-1300,grid-1400,grid-1600,grid-1800,grid-2000$' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
 if [ "$week_ok" = 1 ]; then
   pass week-view 'gD w aligned to Monday and rendered all seven date sections'
 else
@@ -167,7 +187,9 @@ send_keys Enter
 lem_wait_for "$session" 'Week 2026-08-05..2026-08-11' 30 >/dev/null || true
 send_keys C-c z 5
 wait_report '^STATE goto ' || true
-if grep -q '^STATE goto span=week start=2026-08-05 end=2026-08-11 .*point-date=2026-08-05 headers=7 .*2026-08-05|.*August view sentinel' "$LEM_YATH_AGENDA_VIEW_REPORT"; then
+wait_report '^TIMELINE goto ' || true
+if grep -q '^STATE goto span=week start=2026-08-05 end=2026-08-11 .*point-date=2026-08-05 headers=7 .*2026-08-05|.*August view sentinel' "$LEM_YATH_AGENDA_VIEW_REPORT" &&
+   grep -q '^TIMELINE goto item-1530-1600$' "$LEM_YATH_AGENDA_VIEW_REPORT"; then
   pass goto-date 'gd used Org date input and retained the current seven-day span'
 else
   fail goto-date 'gd did not rebuild from or select the requested date'
@@ -187,8 +209,10 @@ send_keys g D d
 lem_wait_for "$session" 'Day 2026-08-05' 30 >/dev/null || true
 send_keys C-c z 7
 wait_report '^STATE day ' || true
+wait_report '^TIMELINE day ' || true
 day_ok=1
 grep -q '^STATE day span=day start=2026-08-05 end=2026-08-05 .*point-date=2026-08-05 headers=1 ' "$LEM_YATH_AGENDA_VIEW_REPORT" || day_ok=0
+grep -q '^TIMELINE day grid-0800,grid-1000,grid-1200,grid-1400,item-1530-1600,grid-1600,grid-1800,grid-2000$' "$LEM_YATH_AGENDA_VIEW_REPORT" || day_ok=0
 send_keys C-u ']' ']'
 lem_wait_for "$session" 'Day 2026-08-09' 30 >/dev/null || true
 send_keys C-c z 8

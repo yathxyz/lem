@@ -3347,8 +3347,9 @@ sequence plus immediate Org planning lines, preserves separate SCHEDULED and
 DEADLINE rows, and groups entries into overdue, today, seven-day upcoming, and
 unscheduled TODO sections. Ordinary active timestamps on headings or body text
 join the today/upcoming sections; inactive timestamps do not. Timed events
-retain their start time, date ranges expand inclusively with occurrence
-indices, and `+`, `++`, and `.+` day/week/month/year repeaters generate the same
+retain their start and optional same-day end time, date ranges expand
+inclusively with occurrence indices, and `+`, `++`, and `.+`
+day/week/month/year repeaters generate the same
 agenda occurrences across the visible horizon. COMMENT and ARCHIVE subtrees,
 drawers, source blocks, and comment lines are excluded, while completed
 headings can still contribute timestamp events as in GNU Org.
@@ -3368,6 +3369,14 @@ planning token. Reminder labels use the exact stock `Sched.%2dx:`,
 configured stock `time-up`, `urgency-down`, stable source order, including
 numeric one- or two-digit times and A/B/C priority offsets. Terminal urgency
 faces remain a presentation difference.
+
+`src/apps/agenda-time-grid.lisp` interleaves the pinned stock terminal grid at
+`08:00`, `10:00`, `12:00`, `14:00`, `16:00`, `18:00`, and `20:00` whenever
+today or a one-day view contains a timed item. It uses the exact `......`,
+`----------------`, and terminal current-time strings, orders numeric one- and
+two-digit starts correctly, displays same-day `start-end` ranges, and keeps
+every grid/current-time row decoration-only so visits, item motion, marks, and
+mutations continue to target source-backed rows.
 
 Scanning runs away from the editor thread. Before launching a worker, refresh
 captures immutable text snapshots of modified live agenda-file buffers on the
@@ -3633,11 +3642,16 @@ presets, and auto-exclusion callbacks are not claimed.
 weeks, exact seven- and fourteen-day spans, calendar month/year boundaries,
 year confirmation, universal counts, selected-date restoration, Org date
 input, state-specific `g` ownership, range-aware clock totals, and byte-identical
-sources.
+sources. It also proves required-timed grid suppression, today and non-today
+daily grids, exact fixed/current-time ordering, complete same-day range display,
+decoration-skipping `gj`, retained source time properties, and byte-identical
+grid rendering.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
-dispatcher. Diary sexps, hour repeaters, full time-grid and time-range
-presentation, and configurable reminder-policy, leader, and sorting variables,
+dispatcher. Diary sexps, hour repeaters, configurable time-grid, AM/PM, and
+default-duration presentation, cross-day endpoint and plain-headline time
+extraction,
+and configurable reminder-policy, leader, and sorting variables,
 configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive
 sibling/tag commands, bulk archive-sibling/scatter/arbitrary-function/persistent-

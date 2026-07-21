@@ -129,6 +129,7 @@
                              (:file "agenda-undo-command")
                              (:file "agenda-filter")
                              (:file "agenda-view")
+                             (:file "agenda-time-grid")
                              (:file "citar")
                              (:file "devdocs")
                              (:file "elfeed")

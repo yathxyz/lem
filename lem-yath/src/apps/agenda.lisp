@@ -67,12 +67,15 @@ items remain immutable so projections can add reminder rows safely.")
 (defvar *agenda-day-sort-function* nil
   "Optional function returning ITEMS in configured single-day agenda order.")
 
+(defvar *agenda-section-layout-function* nil
+  "Optional function interleaving source items and display decorations.")
+
 ;;; --- parsing -------------------------------------------------------------
 
 (defstruct (agenda-item (:constructor make-agenda-item))
   "One parsed heading: its TODO keyword, text, source file/line and date."
   keyword text file line heading date kind event-p end-date repeater time
-  occurrence-index occurrence-count
+  end-time occurrence-index occurrence-count
   timestamp-line timestamp-source-line timestamp-start timestamp-raw
   category tags effort top-headline planning-suffix
   display-date reminder-kind reminder-days)
@@ -85,6 +88,11 @@ items remain immutable so projections can add reminder rows safely.")
 
 (defstruct (agenda-section (:constructor make-agenda-section))
   key title items date)
+
+(defstruct (agenda-section-decoration
+            (:constructor make-agenda-section-decoration))
+  "One display-only agenda row with no source identity."
+  text properties)
 
 (defparameter *heading-scanner*
   (ppcre:create-scanner
@@ -109,10 +117,10 @@ items remain immutable so projections can add reminder rows safely.")
   (ppcre:create-scanner "^(\\d{4}-\\d{2}-\\d{2})(?:\\s|$)")
   "Extracts the date at the start of active timestamp contents.")
 
-(defvar *timestamp-time-scanner*
+(defvar *timestamp-time-range-scanner*
   (ppcre:create-scanner
-   "(?:^|\\s)([0-9]{1,2}:[0-9]{2})(?:-[0-9]{1,2}:[0-9]{2})?(?:\\s|$)")
-  "Extracts an optional start time from active timestamp contents.")
+   "(?:^|\\s)([0-9]{1,2}:[0-9]{2})(?:-([0-9]{1,2}:[0-9]{2}))?(?:\\s|$)")
+  "Extracts optional start and end times from active timestamp contents.")
 
 (defvar *timestamp-repeater-scanner*
   (ppcre:create-scanner "(?:^|\\s)([.+]*\\+[0-9]+[dDwWmMyY])(?:\\s|$)")
@@ -180,13 +188,26 @@ items remain immutable so projections can add reminder rows safely.")
     (when (and registers (aref registers 0))
       (subseq contents (aref registers 0) (aref register-ends 0)))))
 
+(defun agenda-timestamp-times (contents)
+  "Return optional start and end times parsed from timestamp CONTENTS."
+  (multiple-value-bind (start end registers register-ends)
+      (ppcre:scan *timestamp-time-range-scanner* contents)
+    (declare (ignore start end))
+    (when (and registers (aref registers 0))
+      (values
+       (subseq contents (aref registers 0) (aref register-ends 0))
+       (and (aref registers 1)
+            (subseq contents
+                    (aref registers 1) (aref register-ends 1)))))))
+
 (defun agenda-parse-active-timestamp (contents)
-  "Return DATE, TIME, and REPEATER parsed from timestamp CONTENTS."
+  "Return DATE, START-TIME, END-TIME, and REPEATER from CONTENTS."
   (let ((date (agenda-timestamp-field *timestamp-date-scanner* contents)))
     (when (and date (valid-iso-date-p date))
-      (values date
-              (agenda-timestamp-field *timestamp-time-scanner* contents)
-              (agenda-timestamp-field *timestamp-repeater-scanner* contents)))))
+      (multiple-value-bind (time end-time) (agenda-timestamp-times contents)
+        (values date time end-time
+                (agenda-timestamp-field
+                 *timestamp-repeater-scanner* contents))))))
 
 (defun agenda-active-timestamp-specs (line)
   "Return valid active timestamp specifications found in LINE."
@@ -203,14 +224,15 @@ items remain immutable so projections can add reminder rows safely.")
                       (and (aref registers 1)
                            (subseq line (aref registers 1)
                                    (aref register-ends 1)))))
-                (multiple-value-bind (date time repeater)
+                (multiple-value-bind (date time end-time repeater)
                     (agenda-parse-active-timestamp first)
                   (when date
                     (let ((end-date
                             (and second
                                  (nth-value
                                   0 (agenda-parse-active-timestamp second)))))
-                      (push (list :date date :time time :repeater repeater
+                      (push (list :date date :time time :end-time end-time
+                                  :repeater repeater
                                   :end-date end-date
                                   :start start
                                   :raw (subseq line start end))
@@ -238,6 +260,7 @@ items remain immutable so projections can add reminder rows safely.")
    :end-date (getf spec :end-date)
    :repeater (getf spec :repeater)
    :time (getf spec :time)
+   :end-time (getf spec :end-time)
    :timestamp-line source-line-number
    :timestamp-source-line source-line
    :timestamp-start (getf spec :start)
@@ -687,6 +710,13 @@ Ordinary active timestamps belong to their containing visible heading."
       (funcall *agenda-day-sort-function* items)
       items))
 
+(defun agenda-item-time-value (item)
+  "Return ITEM's start time as an HHMM integer, or NIL when untimed."
+  (alexandria:when-let ((time (agenda-item-time item)))
+    (let ((colon (position #\: time)))
+      (+ (* 100 (parse-integer time :end colon))
+         (parse-integer time :start (1+ colon))))))
+
 (defun agenda-sort-dated-items (items)
   "Sort ITEMS by display date, then by the active single-day strategy."
   (let ((remaining
@@ -796,6 +826,13 @@ completed unscheduled tasks stay out of the TODO section."
 
 ;;; --- rendering -----------------------------------------------------------
 
+(defun agenda-item-display-time (item)
+  "Return ITEM's start time or complete same-day time range."
+  (let ((start (agenda-item-time item))
+        (end (agenda-item-end-time item)))
+    (and start
+         (if end (format nil "~a-~a" start end) start))))
+
 (defun agenda-display-line (item)
   "One display line for ITEM, including planning kind/date when present."
   (let ((planning
@@ -817,7 +854,7 @@ completed unscheduled tasks stay out of the TODO section."
                                  (agenda-item-reminder-days item)))
                         (t (agenda-item-kind item)))
                       (agenda-item-date item)
-                      (agenda-item-time item)
+                      (agenda-item-display-time item)
                       (and (agenda-item-occurrence-index item)
                            (format nil "~d/~d"
                                    (agenda-item-occurrence-index item)
@@ -858,69 +895,86 @@ completed unscheduled tasks stay out of the TODO section."
           (text-property-at point :agenda-reminder-kind)
           (text-property-at point :agenda-duplicate-index))))
 
+(defun insert-agenda-decoration-row (point decoration)
+  "Insert display-only DECORATION at POINT."
+  (with-point ((start point))
+    (insert-string point
+                   (format nil "  ~a~%"
+                           (agenda-section-decoration-text decoration)))
+    (loop :for tail
+            :on (agenda-section-decoration-properties decoration) :by #'cddr
+          :do (put-text-property start point (first tail) (second tail)))))
+
+(defun insert-agenda-item-row (buffer point item duplicate-counts)
+  "Insert source-backed ITEM at POINT with its exact identity properties."
+  (let* ((base-key (agenda-item-mark-base-key item))
+         (duplicate-index (1+ (gethash base-key duplicate-counts 0)))
+         (mark-key (agenda-item-mark-key item duplicate-index))
+         (marked-p
+           (and *agenda-row-marked-p-function*
+                (funcall *agenda-row-marked-p-function* buffer mark-key))))
+    (setf (gethash base-key duplicate-counts) duplicate-index)
+    (with-point ((start point))
+      (insert-string point
+                     (format nil "~a ~a~%"
+                             (if marked-p ">" " ")
+                             (agenda-display-line item)))
+      (put-text-property start point :agenda-file (agenda-item-file item))
+      (put-text-property start point :agenda-line (agenda-item-line item))
+      (put-text-property start point :agenda-heading
+                         (agenda-item-heading item))
+      (put-text-property start point :agenda-kind (agenda-item-kind item))
+      (put-text-property start point :agenda-date (agenda-item-date item))
+      (put-text-property start point :agenda-display-date
+                         (agenda-item-effective-date item))
+      (put-text-property start point :agenda-reminder-kind
+                         (agenda-item-reminder-kind item))
+      (put-text-property start point :agenda-reminder-days
+                         (agenda-item-reminder-days item))
+      (put-text-property start point :agenda-time (agenda-item-time item))
+      (put-text-property start point :agenda-end-time
+                         (agenda-item-end-time item))
+      (put-text-property start point :agenda-occurrence-index
+                         (agenda-item-occurrence-index item))
+      (put-text-property start point :agenda-category
+                         (agenda-item-category item))
+      (put-text-property start point :agenda-tags (agenda-item-tags item))
+      (put-text-property start point :agenda-effort (agenda-item-effort item))
+      (put-text-property start point :agenda-top-headline
+                         (agenda-item-top-headline item))
+      (put-text-property start point :agenda-timestamp-line
+                         (agenda-item-timestamp-line item))
+      (put-text-property start point :agenda-timestamp-source-line
+                         (agenda-item-timestamp-source-line item))
+      (put-text-property start point :agenda-timestamp-start
+                         (agenda-item-timestamp-start item))
+      (put-text-property start point :agenda-timestamp-raw
+                         (agenda-item-timestamp-raw item))
+      (put-text-property start point :agenda-duplicate-index
+                         duplicate-index))))
+
 (defun insert-agenda-section (buffer title items duplicate-counts
-                              &optional date key)
-  "Insert TITLE and ITEMS with exact source file/line text properties."
-  (let ((point (buffer-end-point buffer)))
+                              &optional date key now)
+  "Insert TITLE and ITEMS with source rows distinct from decorations."
+  (let* ((point (buffer-end-point buffer))
+         (entries
+           (if *agenda-section-layout-function*
+               (funcall *agenda-section-layout-function*
+                        buffer key date items now)
+               items)))
     (with-point ((start point))
       (insert-string point (format nil "~a~%" title))
       (put-text-property start point :agenda-section-key key)
       (when date
         (put-text-property start point :agenda-view-date date)))
-    (if (null items)
+    (if (null entries)
         (insert-string point (format nil "  (none)~%"))
-        (dolist (item items)
-          (let* ((base-key (agenda-item-mark-base-key item))
-                 (duplicate-index (1+ (gethash base-key duplicate-counts 0)))
-                 (mark-key (agenda-item-mark-key item duplicate-index))
-                 (marked-p
-                   (and *agenda-row-marked-p-function*
-                        (funcall *agenda-row-marked-p-function*
-                                 buffer mark-key))))
-            (setf (gethash base-key duplicate-counts) duplicate-index)
-            (with-point ((start point))
-              (insert-string point
-                             (format nil "~a ~a~%"
-                                     (if marked-p ">" " ")
-                                     (agenda-display-line item)))
-              (put-text-property start point :agenda-file
-                                 (agenda-item-file item))
-              (put-text-property start point :agenda-line
-                                 (agenda-item-line item))
-              (put-text-property start point :agenda-heading
-                                 (agenda-item-heading item))
-              (put-text-property start point :agenda-kind
-                                 (agenda-item-kind item))
-              (put-text-property start point :agenda-date
-                                 (agenda-item-date item))
-              (put-text-property start point :agenda-display-date
-                                 (agenda-item-effective-date item))
-              (put-text-property start point :agenda-reminder-kind
-                                 (agenda-item-reminder-kind item))
-              (put-text-property start point :agenda-reminder-days
-                                 (agenda-item-reminder-days item))
-              (put-text-property start point :agenda-time
-                                 (agenda-item-time item))
-              (put-text-property start point :agenda-occurrence-index
-                                 (agenda-item-occurrence-index item))
-              (put-text-property start point :agenda-category
-                                 (agenda-item-category item))
-              (put-text-property start point :agenda-tags
-                                 (agenda-item-tags item))
-              (put-text-property start point :agenda-effort
-                                 (agenda-item-effort item))
-              (put-text-property start point :agenda-top-headline
-                                 (agenda-item-top-headline item))
-              (put-text-property start point :agenda-timestamp-line
-                                 (agenda-item-timestamp-line item))
-              (put-text-property start point :agenda-timestamp-source-line
-                                 (agenda-item-timestamp-source-line item))
-              (put-text-property start point :agenda-timestamp-start
-                                 (agenda-item-timestamp-start item))
-              (put-text-property start point :agenda-timestamp-raw
-                                 (agenda-item-timestamp-raw item))
-              (put-text-property start point :agenda-duplicate-index
-                                 duplicate-index)))))
+        (dolist (entry entries)
+          (etypecase entry
+            (agenda-section-decoration
+             (insert-agenda-decoration-row point entry))
+            (agenda-item
+             (insert-agenda-item-row buffer point entry duplicate-counts)))))
     (insert-string point (format nil "~%"))))
 
 (defun agenda-error-text (condition)
@@ -1006,7 +1060,8 @@ completed unscheduled tasks stay out of the TODO section."
            (agenda-section-items section)
            duplicate-counts
            (agenda-section-date section)
-           (agenda-section-key section)))
+           (agenda-section-key section)
+           now))
         (insert-agenda-failures buffer failures)
         (when (and clock-report
                    (buffer-value buffer 'lem-yath-agenda-clockreport-mode)

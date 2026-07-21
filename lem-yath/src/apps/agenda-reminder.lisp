@@ -71,13 +71,6 @@
        (+ priority (agenda-item-display-day-offset item)))
       (t priority))))
 
-(defun agenda-item-time-value (item)
-  "Return ITEM's HH:MM value as an integer, or NIL when untimed."
-  (alexandria:when-let ((time (agenda-item-time item)))
-    (let ((colon (position #\: time)))
-      (+ (* 100 (parse-integer time :end colon))
-         (parse-integer time :start (1+ colon))))))
-
 (defun agenda-item-stock-before-p (a b)
   "Compare A and B with the configured stock agenda day strategies."
   (let ((a-time (agenda-item-time-value a))

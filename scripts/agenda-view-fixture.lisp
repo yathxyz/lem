@@ -45,6 +45,35 @@
         (unless (line-offset point 1) (return))))
     count))
 
+(defun agenda-view-test-time-token (time)
+  (let ((colon (position #\: time)))
+    (format nil "~2,'0d~2,'0d"
+            (parse-integer time :end colon)
+            (parse-integer time :start (1+ colon)))))
+
+(defun agenda-view-test-timeline ()
+  (let ((tokens '()))
+    (with-point ((point (buffer-start-point (current-buffer))))
+      (loop
+        (let ((grid-kind (text-property-at point :agenda-grid-kind))
+              (grid-time (text-property-at point :agenda-grid-time))
+              (time (text-property-at point :agenda-time))
+              (end-time (text-property-at point :agenda-end-time)))
+          (cond
+            (grid-kind
+             (push (format nil "~a-~4,'0d"
+                           (if (eq grid-kind :line) "grid" "now")
+                           grid-time)
+                   tokens))
+            (time
+             (push (format nil "item-~a~@[-~a~]"
+                           (agenda-view-test-time-token time)
+                           (and end-time
+                                (agenda-view-test-time-token end-time)))
+                   tokens))))
+        (unless (line-offset point 1) (return))))
+    (nreverse tokens)))
+
 (defun agenda-view-test-log-state (label)
   (let* ((state (agenda-view-state))
          (clock (buffer-value (current-buffer)
@@ -62,7 +91,9 @@
        (agenda-view-test-date-rows)
        (and clock (agenda-clock-report-start-date clock))
        (and clock (agenda-clock-report-end-date clock))
-       (and clock (agenda-clock-report-minutes clock))))))
+       (and clock (agenda-clock-report-minutes clock))))
+    (agenda-view-test-log
+     "TIMELINE ~a ~{~a~^,~}" label (agenda-view-test-timeline))))
 
 (defmacro define-agenda-view-test-log-command (name label)
   `(define-command ,name () () (agenda-view-test-log-state ,label)))
@@ -98,6 +129,31 @@
    (agenda-view-test-command-name "g")
    (agenda-view-test-command-name "g D")))
 
+(define-command lem-yath-test-view-goto-grid () ()
+  (with-point ((point (buffer-start-point (current-buffer))))
+    (loop
+      (when (text-property-at point :agenda-grid-kind)
+        (move-point (current-point) point)
+        (return-from lem-yath-test-view-goto-grid))
+      (unless (line-offset point 1)
+        (error "Agenda grid row is missing")))))
+
+(defun agenda-view-test-log-point (label)
+  (agenda-view-test-log
+   "POINT ~a grid=~a file=~a time=~a end=~a text=~s"
+   label
+   (text-property-at (current-point) :agenda-grid-kind)
+   (and (text-property-at (current-point) :agenda-file) "yes")
+   (text-property-at (current-point) :agenda-time)
+   (text-property-at (current-point) :agenda-end-time)
+   (line-string (current-point))))
+
+(define-command lem-yath-test-view-point-first () ()
+  (agenda-view-test-log-point "first"))
+
+(define-command lem-yath-test-view-point-second () ()
+  (agenda-view-test-log-point "second"))
+
 (let ((keymap *lem-yath-agenda-mode-keymap*))
   (define-key keymap "C-c z 0" 'lem-yath-test-view-initial)
   (define-key keymap "C-c z 1" 'lem-yath-test-view-week)
@@ -113,4 +169,7 @@
   (define-key keymap "C-c z s" 'lem-yath-test-view-summary)
   (define-key keymap "C-c z c" 'lem-yath-test-view-clock)
   (define-key keymap "C-c z n" 'lem-yath-test-view-normal-keys)
-  (define-key keymap "C-c z e" 'lem-yath-test-view-emacs-keys))
+  (define-key keymap "C-c z e" 'lem-yath-test-view-emacs-keys)
+  (define-key keymap "C-c z g" 'lem-yath-test-view-goto-grid)
+  (define-key keymap "C-c z p" 'lem-yath-test-view-point-first)
+  (define-key keymap "C-c z P" 'lem-yath-test-view-point-second))

@@ -912,6 +912,10 @@ the trailing text-ready space. The profile binds no other org-journal command
   visits and edits while being displayed under today. Daily rows use the stock
   `time-up`, `urgency-down`, stable source ordering, including configured A/B/C
   priorities, and reminder rows use the stock scheduled/deadline leader text.
+- The active stock terminal time grid appears when today or a one-day span has
+  a timed item. Lem interleaves the exact `08:00` through `20:00` grid, terminal
+  rule strings, and current-time marker without making those rows navigable
+  entries; same-day event ranges retain and display both endpoints.
 - **org-super-agenda** (`org-super-agenda-mode 1`) — grouped agenda views (no custom groups defined in elisp; defaults).
 - **evil-org-agenda** keys set.
 - Evil-Org `Tab`, Shift-Return, and `g TAB` run `org-agenda-goto`, opening the
