@@ -424,10 +424,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   in-loop undo. Lowercase
   searches transfer lower, all-caps, or initial-cap case patterns; uppercase
   searches are case-sensitive and keep exact replacement case. Regexp
-  replacement expands `\&`, `\1`–`\9`, `\\`, and a per-buffer `\#` count,
-  and zero-width matches make GNU-style forward progress. Read-only sets and
-  invalid regexps or replacement directives fail before mutation. GNU
-  Lisp-evaluated `\,`, per-match `\?` directives, and recursive edit remain
+  replacement expands `\&`, `\1`–`\9`, `\\`, and a per-buffer `\#` count.
+  An unescaped `\?` removes its marker and opens a per-match replacement edit
+  prompt at that position before expansion and case transfer; escaped `\\?`
+  remains literal. Zero-width matches make GNU-style forward progress.
+  Read-only sets and invalid regexps or replacement directives fail before
+  mutation. GNU Lisp-evaluated `\,` replacements and recursive edit remain
   gaps.
 - project-scoped LSP lifecycle: canonical-root isolation, in-flight startup
   deduplication and timeout, explicit buffer ownership with save-as migration,

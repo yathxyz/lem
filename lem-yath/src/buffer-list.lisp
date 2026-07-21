@@ -3277,8 +3277,9 @@ through later selected buffers without wrapping."
                      (push (cons :group (digit-char-p directive)) pieces))
                     ((char= directive #\#)
                      (push :replacement-count pieces))
-                    ((or (char= directive #\,)
-                         (char= directive #\?))
+                    ((char= directive #\?)
+                     (push :edit-replacement pieces))
+                    ((char= directive #\,)
                      (editor-error
                       "Unsupported Ibuffer regexp replacement directive: ~c~c"
                       #\\ directive))
@@ -3302,10 +3303,49 @@ through later selected buffers without wrapping."
          (write-string matched-text output))
         ((eq piece :replacement-count)
          (princ replacement-count output))
+        ((eq piece :edit-replacement))
         ((and (consp piece) (eq (car piece) :group))
          (let ((capture (nth (1- (cdr piece)) captures)))
            (when capture
              (write-string capture output))))))))
+
+(defun buffer-list-query-replace-first-edit-directive (replacement)
+  (loop :with length := (length replacement)
+        :for index :from 0 :below length
+        :when (char= (aref replacement index) #\\)
+          :do (incf index)
+              (when (= index length)
+                (return nil))
+              (when (char= (aref replacement index) #\?)
+                (return (1- index)))))
+
+(defun buffer-list-query-replace-prompt-at
+    (prompt initial-value input-position)
+  (let ((lem-core::*prompt-after-activate-hook*
+          (cons
+           (cons
+            (lambda ()
+              (with-point ((point (buffer-start-point (current-buffer))
+                                  :temporary))
+                (character-offset point
+                                  (+ (length prompt) input-position))
+                (move-point (current-point) point)))
+            0)
+           lem-core::*prompt-after-activate-hook*)))
+    (prompt-for-string prompt :initial-value initial-value)))
+
+(defun buffer-list-query-replace-resolve-edit-directives (replacement)
+  (loop :for position :=
+          (buffer-list-query-replace-first-edit-directive replacement)
+        :while position
+        :do (setf replacement
+                  (concatenate 'string
+                               (subseq replacement 0 position)
+                               (subseq replacement (+ position 2)))
+                  replacement
+                  (buffer-list-query-replace-prompt-at
+                   "Edit replacement string: " replacement position))
+        :finally (return replacement)))
 
 (defun buffer-list-query-replace-case-action (matched-text)
   (let ((previous-word-p nil)
@@ -3506,6 +3546,22 @@ same CL-PPCRE scan."
         (buffer-list-query-replace-transfer-case
          expanded matched-text case-fold-p))))
 
+(defun buffer-list-query-replace-final-replacement
+    (entry raw-replacement replacement-program replacement-count
+     case-fold-p regexp-p exact-case-p)
+  (let* ((resolved-raw
+           (if (and regexp-p
+                    (member :edit-replacement replacement-program :test #'eq))
+               (buffer-list-query-replace-resolve-edit-directives
+                raw-replacement)
+               raw-replacement))
+         (resolved-program
+           (and regexp-p
+                (buffer-list-query-replace-compile-replacement resolved-raw))))
+    (buffer-list-query-replace-effective-replacement
+     entry resolved-raw resolved-program replacement-count
+     case-fold-p exact-case-p)))
+
 (defun buffer-list-query-replace-response
     (before displayed-replacement raw-replacement)
   (loop
@@ -3637,17 +3693,17 @@ same CL-PPCRE scan."
                                (edited-program
                                 (and regexp-p
                                      (buffer-list-query-replace-compile-replacement
-                                      edited)))
-                               (edited-replacement
-                                (buffer-list-query-replace-effective-replacement
-                                 current-entry edited edited-program
-                                 replacement-count case-fold-p exact-case-p)))
+                                      edited))))
                           (setf raw-replacement edited
                                 current-program edited-program)
                           (unless (buffer-list-query-replace-entry-replaced-p
                                    current-entry)
                             (buffer-list-query-replace-entry-replace
-                             current-entry edited-replacement)
+                             current-entry
+                             (buffer-list-query-replace-final-replacement
+                              current-entry edited edited-program
+                              replacement-count case-fold-p regexp-p
+                              exact-case-p))
                             (incf replacement-count))
                           (move-point
                            cursor
@@ -3743,7 +3799,10 @@ same CL-PPCRE scan."
                         (unless (buffer-list-query-replace-entry-replaced-p
                                  current-entry)
                           (buffer-list-query-replace-entry-replace
-                      current-entry replacement)
+                           current-entry
+                           (buffer-list-query-replace-final-replacement
+                            current-entry raw-replacement current-program
+                            replacement-count case-fold-p regexp-p nil))
                      (incf replacement-count))
                    (move-point
                     cursor (buffer-list-query-replace-entry-end current-entry))
@@ -3755,23 +3814,28 @@ same CL-PPCRE scan."
                           (setf replace-rest-p t))
                         (unless (buffer-list-query-replace-entry-replaced-p
                                  current-entry)
-                          (when output-character-limit
-                            (let ((projected-length
-                                    (+ (- (position-at-point
-                                           (buffer-end-point buffer))
-                                          (position-at-point
-                                           (buffer-start-point buffer)))
-                                       (- (length replacement)
-                                          (length
-                                           (buffer-list-query-replace-entry-original
-                                            current-entry))))))
-                              (when (> projected-length output-character-limit)
-                                (editor-error
-                                 "Ibuffer query-replace preview exceeds ~d characters"
-                                 output-character-limit))))
-                          (buffer-list-query-replace-entry-replace
-                           current-entry replacement)
-                          (incf replacement-count))
+                          (let ((final-replacement
+                                  (buffer-list-query-replace-final-replacement
+                                   current-entry raw-replacement current-program
+                                   replacement-count case-fold-p regexp-p nil)))
+                            (when output-character-limit
+                              (let ((projected-length
+                                      (+ (- (position-at-point
+                                             (buffer-end-point buffer))
+                                            (position-at-point
+                                             (buffer-start-point buffer)))
+                                         (- (length final-replacement)
+                                            (length
+                                             (buffer-list-query-replace-entry-original
+                                              current-entry))))))
+                                (when (> projected-length
+                                         output-character-limit)
+                                  (editor-error
+                                   "Ibuffer query-replace preview exceeds ~d characters"
+                                   output-character-limit))))
+                            (buffer-list-query-replace-entry-replace
+                             current-entry final-replacement)
+                            (incf replacement-count)))
                         (when (eq response :replace-and-exit)
                           (return replacement-count))
                         (move-point

@@ -227,10 +227,12 @@ uses the configured GNU smart-case rule: lowercase searches fold case and
 transfer lower, all-caps, or initial-cap patterns to replacements, while an
 unescaped uppercase search is case-sensitive and keeps exact replacement case.
 Regexp replacement expands `\&`, `\1`–`\9`, `\\`, and the per-buffer `\#`
-count, while zero-width matches make GNU-style forward progress, including a
-final empty line. Invalid regexps and invalid or unsupported replacement
-directives are refused before mutation. GNU Lisp-evaluated `\,`, per-match
-`\?` directives, and recursive edit remain gaps.
+count. An unescaped `\?` removes its marker and prompts for a per-match edit at
+that position before expansion and case transfer, while escaped `\\?` remains
+literal. Zero-width matches make GNU-style forward progress, including a final
+empty line. Invalid regexps and invalid or unsupported replacement directives
+are refused before mutation. GNU Lisp-evaluated `\,` replacements and
+recursive edit remain gaps.
 Like GNU Ibuffer, ordinary bulk operations implicitly mark the current row when
 there are no ordinary marks and exclude `D` deletion marks. Revert failures are
 isolated per buffer so a missing file does not prevent later buffers from being

@@ -2643,8 +2643,8 @@ else
 fi
 
 # GNU regexp replacement expands the whole match, groups, the per-command
-# replacement count, and a quoted backslash.  Lisp evaluation and per-match
-# replacement editing are deliberately rejected before the picker is hidden.
+# replacement count, and a quoted backslash.  Lisp evaluation remains
+# deliberately rejected before the picker is hidden.
 lem_keys "$session" C-x C-b U o a
 lem_keys "$session" s n
 tmux_cmd send-keys -t "$session" -l 'buffer-list-query-expand'
@@ -2693,6 +2693,88 @@ if [[ "$expand_undo" == *'text=foo-one\nFOO-TWO\nFoo-Three\n'* ]]; then
   pass query-regexp-expansion-undo "one undo restored the expanded regexp replacements"
 else
   fail query-regexp-expansion-undo "expanded regexp replacements escaped their undo unit: $expand_undo"
+fi
+
+# An unescaped \? edits the raw replacement at every accepted match.  Text is
+# inserted at the removed marker, the original template is reused per match,
+# and ! remains automatic only for the y/n decision—not these edit prompts.
+lem_keys "$session" C-x C-b U o a
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-expand'
+lem_keys "$session" Enter I
+if lem_wait_for "$session" 'Query replace regexp' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '([a-z]+)-([a-z]+)'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'left-\?-\2'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Replace' 10 >/dev/null; then
+  lem_keys "$session" y
+fi
+if lem_wait_for "$session" 'Edit replacement string' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'one'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'left-one-one' 10 >/dev/null &&
+   lem_wait_for "$session" 'FOO-TWO' 10 >/dev/null; then
+  lem_keys "$session" '!'
+fi
+if lem_wait_for "$session" 'Edit replacement string' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'two'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'LEFT-TWO-TWO' 10 >/dev/null &&
+   lem_wait_for "$session" 'Edit replacement string' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l 'three'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Query replace finished; 3 replacements in 1 buffer' 10 >/dev/null; then
+  edited_directives=$(report_query_state || true)
+  if [[ "$edited_directives" == *'expand=modified:writable:left-one-one\nLEFT-TWO-TWO\nLeft-Three-Three\n'* ]]; then
+    pass query-regexp-edit-directive "\\? prompted per match at its marker through y and ! with expansion and case transfer"
+  else
+    fail query-regexp-edit-directive "per-match replacement editing diverged: $edited_directives"
+  fi
+else
+  fail query-regexp-edit-directive "\\? did not complete three independently edited replacements"
+fi
+lem_keys "$session" Enter u
+edit_directive_undo=$(report_current || true)
+if [[ "$edit_directive_undo" == *'text=foo-one\nFOO-TWO\nFoo-Three\n'* ]]; then
+  pass query-regexp-edit-directive-undo "one undo restored every per-match edited replacement"
+else
+  fail query-regexp-edit-directive-undo "per-match edited replacements escaped their undo unit: $edit_directive_undo"
+fi
+
+lem_keys "$session" C-x C-b U o a
+lem_keys "$session" s n
+tmux_cmd send-keys -t "$session" -l 'buffer-list-query-expand'
+lem_keys "$session" Enter I
+if lem_wait_for "$session" 'Query replace regexp' 10 >/dev/null; then
+  tmux_cmd send-keys -t "$session" -l '([a-z]+)-([a-z]+)'
+  lem_keys "$session" Enter
+  tmux_cmd send-keys -t "$session" -l 'literal-\\?-\2'
+  lem_keys "$session" Enter
+fi
+if lem_wait_for "$session" 'Replace' 10 >/dev/null; then
+  lem_keys "$session" '!'
+fi
+if lem_wait_for "$session" 'Query replace finished; 3 replacements in 1 buffer' 10 >/dev/null; then
+  escaped_edit_directive=$(report_query_state || true)
+  if [[ "$escaped_edit_directive" == *'expand=modified:writable:literal-\\?-one\nLITERAL-\\?-TWO\nLiteral-\\?-Three\n'* ]]; then
+    pass query-regexp-edit-directive-escape "escaped \\? stayed literal without opening an edit prompt"
+  else
+    fail query-regexp-edit-directive-escape "escaped \\? replacement diverged: $escaped_edit_directive"
+  fi
+else
+  fail query-regexp-edit-directive-escape "escaped \\? was not treated as an ordinary replacement"
+fi
+lem_keys "$session" Enter u
+escaped_edit_directive_undo=$(report_current || true)
+if [[ "$escaped_edit_directive_undo" == *'text=foo-one\nFOO-TWO\nFoo-Three\n'* ]]; then
+  pass query-regexp-edit-directive-escape-undo "one undo restored escaped-directive replacements"
+else
+  fail query-regexp-edit-directive-escape-undo "escaped-directive replacements escaped their undo unit: $escaped_edit_directive_undo"
 fi
 
 # An uppercase search disables case folding and replacement case transfer,
