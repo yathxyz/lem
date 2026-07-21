@@ -21,11 +21,13 @@
              :command :summary
              :start-date (today-iso (funcall *agenda-now-function*))))))
 
-(defun agenda-view-initialize-command (buffer command command-argument)
+(defun agenda-view-initialize-command
+    (buffer command command-argument restriction)
   "Initialize BUFFER for one dispatcher COMMAND."
   (let* ((today (today-iso (funcall *agenda-now-function*)))
          (span (if (eq command :agenda) :week :summary)))
-    (setf (buffer-value buffer 'lem-yath-agenda-view-state)
+    (setf (buffer-value buffer 'lem-yath-agenda-restriction) restriction
+          (buffer-value buffer 'lem-yath-agenda-view-state)
           (make-agenda-view-state
            :command command
            :span span
@@ -298,9 +300,13 @@
          (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
         description))
 
-(defun agenda-dispatch-popup-keymap ()
+(defun agenda-dispatch-popup-keymap (&optional restriction)
   "Return the truthful configured subset of Org's agenda dispatcher."
-  (let ((keymap (make-keymap :description "Agenda Commands")))
+  (let ((keymap
+          (make-keymap
+           :description
+           (format nil "Agenda Commands (~a; < restrict, > clear)"
+                   (agenda-restriction-label restriction)))))
     (setf (lem/transient::keymap-show-p keymap) t
           (lem/transient::keymap-display-style keymap) :row)
     ;; Transient renders newest bindings first.  Keep the nonessential abort
@@ -340,36 +346,71 @@
 
 (define-command lem-yath-agenda-dispatch () ()
   "Display and execute one configured Org agenda command."
-  (unwind-protect
-       (progn
-         (let ((lem/transient:*transient-popup-delay* 0))
-           (keymap-activate (agenda-dispatch-popup-keymap)))
-         (redraw-display)
-         (let ((key (agenda-dispatch-read-key)))
-           (lem/transient::hide-transient)
-           (cond
-             ((string= key "a") (agenda-open-command :agenda))
-             ((string= key "t") (agenda-open-command :todo))
-             ((string= key "T")
-              (alexandria:when-let ((keyword (agenda-dispatch-read-todo-keyword)))
-                (agenda-open-command :todo keyword)))
-             ((member key '("m" "M") :test #'string=)
-              (let* ((raw (agenda-read-tags-query))
-                     (query (agenda-compile-tags-query raw)))
-                (agenda-open-command
-                 (if (string= key "M") :tags-todo :tags) query)))
-             ((member key '("s" "S") :test #'string=)
-              (let* ((raw (agenda-read-search-query))
-                     (query
-                       (agenda-compile-search-query
-                        raw :todo-only-p (string= key "S"))))
-                (agenda-open-command :search query)))
-             ((string= key "/") (agenda-query-multi-occur))
-             ((string= key "n") (agenda-open-command :summary))
-             ((member key '("q" "Escape" "C-g") :test #'string=)
-              (message "Abort"))
-             (t (message "Invalid agenda command key: ~a" key)))))
-    (lem/transient::hide-transient)))
+  (let ((context (agenda-restriction-origin-context))
+        (restriction nil))
+    (labels ((select-restriction (kind)
+               (multiple-value-bind (selected valid-p)
+                   (agenda-restriction-from-kind context kind)
+                 (if valid-p
+                     (setf restriction selected)
+                     (message
+                      (if context
+                          "No Org subtree or active region at point"
+                          "Restriction is only possible in Org buffers"))))))
+      (unwind-protect
+           (loop
+             (let ((lem/transient:*transient-popup-delay* 0))
+               (keymap-activate
+                (agenda-dispatch-popup-keymap restriction)))
+             (redraw-display)
+             (let ((key (agenda-dispatch-read-key)))
+               (lem/transient::hide-transient)
+               (cond
+                 ((string= key "<")
+                  (let ((kind
+                          (agenda-restriction-next-kind restriction context)))
+                    (if kind
+                        (select-restriction kind)
+                        (setf restriction nil))))
+                 ((string= key ">") (setf restriction nil))
+                 ((string= key "1") (select-restriction :buffer))
+                 ((string= key "0")
+                  (select-restriction
+                   (if (agenda-restriction-context-region-p context)
+                       :region
+                       :subtree)))
+                 ((string= key "a")
+                  (return (agenda-open-command :agenda nil restriction)))
+                 ((string= key "t")
+                  (return (agenda-open-command :todo nil restriction)))
+                 ((string= key "T")
+                  (let ((keyword (agenda-dispatch-read-todo-keyword)))
+                    (when keyword
+                      (agenda-open-command :todo keyword restriction))
+                    (return nil)))
+                 ((member key '("m" "M") :test #'string=)
+                  (let* ((raw (agenda-read-tags-query))
+                         (query (agenda-compile-tags-query raw)))
+                    (return
+                     (agenda-open-command
+                      (if (string= key "M") :tags-todo :tags)
+                      query restriction))))
+                 ((member key '("s" "S") :test #'string=)
+                  (let* ((raw (agenda-read-search-query))
+                         (query
+                           (agenda-compile-search-query
+                            raw :todo-only-p (string= key "S"))))
+                    (return
+                     (agenda-open-command :search query restriction))))
+                 ((string= key "/")
+                  (return (agenda-query-multi-occur restriction)))
+                 ((string= key "n")
+                  (return (agenda-open-command :summary nil restriction)))
+                 ((member key '("q" "Escape" "C-g") :test #'string=)
+                  (message "Abort")
+                  (return nil))
+                 (t (message "Invalid agenda command key: ~a" key)))))
+        (lem/transient::hide-transient)))))
 
 (defun agenda-view-prefix-count (argument)
   (typecase argument

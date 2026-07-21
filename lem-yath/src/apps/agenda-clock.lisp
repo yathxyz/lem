@@ -114,7 +114,8 @@
   (let ((seconds (- (min end range-end) (max start range-start))))
     (if (plusp seconds) (floor seconds 60) 0)))
 
-(defun agenda-clock-report-file-data (file range-start range-end)
+(defun agenda-clock-report-file-data
+    (file range-start range-end &optional scope-predicate)
   "Collect GNU maxlevel-2 rollups for FILE within RANGE-START/RANGE-END."
   (with-open-file (stream file :direction :input :external-format :utf-8)
     (let ((stack '())
@@ -147,7 +148,15 @@
                  (stack
                   (multiple-value-bind (start end)
                       (agenda-clock-report-closed-interval line)
-                    (when (and start end)
+                    (when (and start end
+                               (or (null scope-predicate)
+                                   (and
+                                    (funcall
+                                     scope-predicate file lineno)
+                                    (funcall
+                                     scope-predicate file
+                                     (agenda-clock-report-heading-line
+                                      (cdr (first stack)))))))
                       (let ((minutes
                               (agenda-clock-report-overlap-minutes
                                start end range-start range-end)))
@@ -163,11 +172,16 @@
        :headings
        (remove-if
         (lambda (heading)
-          (or (> (agenda-clock-report-heading-level heading) 2)
+          (or (and scope-predicate
+                   (not (funcall
+                         scope-predicate file
+                         (agenda-clock-report-heading-line heading))))
+              (> (agenda-clock-report-heading-level heading) 2)
               (zerop (agenda-clock-report-heading-minutes heading))))
         (nreverse headings))))))
 
-(defun agenda-clock-collect-report (files &optional start-date end-date)
+(defun agenda-clock-collect-report
+    (files &optional start-date end-date scope-predicate)
   "Collect a clock report for the inclusive displayed agenda span."
   (let* ((now (funcall *agenda-now-function*))
          (start-date (or start-date (today-iso now)))
@@ -183,7 +197,7 @@
       (handler-case
           (let ((data
                   (agenda-clock-report-file-data
-                   file range-start range-end)))
+                   file range-start range-end scope-predicate)))
             (incf total (agenda-clock-report-file-minutes data))
             (push data report-files))
         (error (condition)

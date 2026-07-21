@@ -729,7 +729,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   and the stock-shaped `SPC m a` dispatcher. Its `m`/`M` branches match
   inherited tags, local properties, and TODO clauses; `s`/`S` provide Org's
   phrase, Boolean, regexp, headline-only, and open-TODO searches; `/` runs a
-  source-backed multi-occur across every agenda file,
+  source-backed multi-occur across every agenda file. While the dispatcher is
+  open, repeated `<` cycles current-buffer and subtree/active-region
+  restrictions, `>` removes the pending restriction, and Org's direct `1`/`0`
+  aliases select buffer or subtree/region scope. The selected boundary applies
+  to agenda rows, query text/properties, multi-occur, refreshes, and clock
+  totals without leaking another file or out-of-region body line. It also has
   modal Return/`gr`/q navigation, Evil-Org `Tab`/`g Tab`/Shift-Return source
   visits in another window, decoration-skipping `gj`/`gk` and `C-j`/`C-k`
   item motion, and Evil-Org-style `t` fast TODO selection plus
@@ -1071,6 +1076,7 @@ nix run .#agenda-clock-test
 nix run .#agenda-bulk-test
 nix run .#agenda-filter-test
 nix run .#agenda-dispatch-test
+nix run .#agenda-query-test
 nix run .#agenda-view-test
 nix run .#interactive-test
 nix run .#structural-test

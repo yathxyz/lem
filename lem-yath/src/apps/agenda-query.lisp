@@ -471,7 +471,8 @@
    "Phrase or [+-]Word/{Regexp} ...: "
    :history-symbol 'lem-yath-agenda-search-query-history))
 
-(defun agenda-query-multi-occur-run (buffers pattern source-window)
+(defun agenda-query-multi-occur-run
+    (buffers pattern source-window &optional restriction)
   "Run the existing source-backed Occur engine over agenda BUFFERS."
   (let ((scanner (buffer-list-occur-scanner pattern))
         (total-characters
@@ -483,7 +484,10 @@
                     *buffer-list-occur-total-character-limit*))
     (dolist (buffer buffers)
       (let ((source
-              (buffer-list-occur-source-data buffer scanner remaining-matches)))
+              (agenda-restriction-filter-occur-source
+               (buffer-list-occur-source-data
+                buffer scanner remaining-matches)
+               restriction)))
         (decf remaining-matches (buffer-list-occur-source-match-count source))
         (push source sources)))
     (setf sources (nreverse sources))
@@ -508,12 +512,20 @@
                        total-matches pattern)
               buffer))))))
 
-(defun agenda-query-multi-occur ()
+(defun agenda-query-multi-occur (&optional restriction)
   (let ((source-window (current-window))
         (pattern (prompt-for-string "Org-files matching: ")))
     (multiple-value-bind (files failures) (agenda-org-files)
       (declare (ignore failures))
+      (when restriction
+        (setf files
+              (remove-if-not
+               (lambda (file)
+                 (agenda-restriction-file-equal-p
+                  (agenda-restriction-file restriction) file))
+               files)))
       (if (null files)
           (message "No configured Org agenda files exist")
           (agenda-query-multi-occur-run
-           (mapcar #'find-file-buffer files) pattern source-window)))))
+           (mapcar #'find-file-buffer files) pattern source-window
+           restriction)))))

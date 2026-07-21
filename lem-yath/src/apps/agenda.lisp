@@ -70,6 +70,13 @@ items remain immutable so projections can add reminder rows safely.")
 (defvar *agenda-section-layout-function* nil
   "Optional function interleaving source items and display decorations.")
 
+(defvar *agenda-scan-scope-function* nil
+  "Optional function restricting one agenda scan.
+
+The function receives BUFFER, FILES, and discovery FAILURES, and returns three
+values: the files to scan, the failures to retain, and an optional predicate
+called with a source file and source line.")
+
 ;;; --- parsing -------------------------------------------------------------
 
 (defstruct (agenda-item (:constructor make-agenda-item))
@@ -762,32 +769,47 @@ Ordinary active timestamps belong to their containing visible heading."
           (read-lines stream)))))
 
 (defun agenda-enrich-filter-metadata
-    (source items &optional (contents nil contents-p))
+    (source items &key (contents nil contents-p) line-predicate)
   "Attach source-derived agenda filter metadata to ITEMS."
   (let* ((lines (if contents-p
                     (agenda-read-source-lines source contents)
                     (agenda-read-source-lines source)))
-         (table (agenda-build-filter-metadata lines source)))
+         (table (agenda-build-filter-metadata lines source))
+         (scoped-table
+           (and line-predicate
+                (agenda-build-filter-metadata
+                 (loop :for line :in lines
+                       :for line-number :from 1
+                       :collect (if (funcall line-predicate line-number)
+                                    line
+                                    ""))
+                 source))))
     (dolist (item items items)
-      (alexandria:when-let
-          ((metadata
-             (gethash (or (agenda-item-metadata-line item)
-                          (agenda-item-line item))
-                      table)))
-        (setf (agenda-item-category item)
-              (agenda-item-metadata-category metadata)
-              (agenda-item-tags item)
-              (copy-list (agenda-item-metadata-tags metadata))
-              (agenda-item-effort item)
-              (agenda-item-metadata-effort metadata)
-              (agenda-item-top-headline item)
-              (agenda-item-metadata-top-headline metadata)
-              (agenda-item-level item)
-              (agenda-item-metadata-level metadata)
-              (agenda-item-properties item)
-              (copy-tree (agenda-item-metadata-properties metadata))
-              (agenda-item-search-text item)
-              (agenda-item-metadata-search-text metadata))))))
+      (let* ((line (or (agenda-item-metadata-line item)
+                       (agenda-item-line item)))
+             (metadata (gethash line table))
+             (scoped-metadata (and scoped-table
+                                   (gethash line scoped-table))))
+        (when metadata
+          (setf (agenda-item-category item)
+                (agenda-item-metadata-category metadata)
+                (agenda-item-tags item)
+                (copy-list (agenda-item-metadata-tags metadata))
+                (agenda-item-effort item)
+                (agenda-item-metadata-effort metadata)
+                (agenda-item-top-headline item)
+                (agenda-item-metadata-top-headline metadata)
+                (agenda-item-level item)
+                (agenda-item-metadata-level metadata)
+                (agenda-item-properties item)
+                (copy-tree
+                 (agenda-item-metadata-properties
+                  (or scoped-metadata metadata)))
+                (agenda-item-search-text item)
+                (if scoped-table
+                    (and scoped-metadata
+                         (agenda-item-metadata-search-text scoped-metadata))
+                    (agenda-item-metadata-search-text metadata))))))))
 
 ;;; --- date helpers --------------------------------------------------------
 
@@ -1431,7 +1453,8 @@ completed unscheduled tasks stay out of the TODO section."
                 (points-to-string (buffer-start-point buffer)
                                   (buffer-end-point buffer)))))
 
-(defun agenda-collect-items (files discovery-failures snapshots)
+(defun agenda-collect-items
+    (files discovery-failures snapshots &optional scope-predicate)
   "Return parsed items and failures from immutable scan inputs."
   (handler-case
       (let ((items '())
@@ -1443,11 +1466,26 @@ completed unscheduled tasks stay out of the TODO section."
                     (parse-org-file file (cdr snapshot))
                     (parse-org-file file))
               (handler-case
-                  (if snapshot
-                      (agenda-enrich-filter-metadata file parsed (cdr snapshot))
-                      (agenda-enrich-filter-metadata file parsed))
+                  (let ((line-predicate
+                          (and scope-predicate
+                               (lambda (line)
+                                 (funcall scope-predicate file line)))))
+                    (if snapshot
+                        (agenda-enrich-filter-metadata
+                         file parsed :contents (cdr snapshot)
+                         :line-predicate line-predicate)
+                        (agenda-enrich-filter-metadata
+                         file parsed :line-predicate line-predicate)))
                 (error (condition)
                   (push condition errors)))
+              (when scope-predicate
+                (setf parsed
+                      (remove-if-not
+                       (lambda (item)
+                         (funcall scope-predicate
+                                  (agenda-item-file item)
+                                  (agenda-item-line item)))
+                       parsed)))
               (setf items (nconc items parsed))
               (dolist (error errors)
                 (push (cons file error) failures)))))
@@ -1482,11 +1520,12 @@ completed unscheduled tasks stay out of the TODO section."
 
 (defun agenda-scan-worker
     (buffer generation clock-report-p range-start range-end
-     files discovery-failures snapshots)
+     files discovery-failures snapshots scope-predicate)
   "Collect agenda items off-thread and marshal one completion event."
   (multiple-value-bind (items failures collected-files)
       (handler-case
-          (agenda-collect-items files discovery-failures snapshots)
+          (agenda-collect-items
+           files discovery-failures snapshots scope-predicate)
         (error (condition)
           (values nil (list (cons nil condition)) nil)))
     (let ((clock-report nil))
@@ -1495,7 +1534,7 @@ completed unscheduled tasks stay out of the TODO section."
         (multiple-value-bind (report report-failures)
             (handler-case
                 (agenda-clock-collect-report
-                 collected-files range-start range-end)
+                 collected-files range-start range-end scope-predicate)
               (error (condition)
                 (values nil (list (cons nil condition)))))
           (setf clock-report report
@@ -1521,22 +1560,27 @@ completed unscheduled tasks stay out of the TODO section."
               (agenda-org-files)
             (error (condition)
               (values nil (list (cons nil condition)))))
-        (let ((snapshots (agenda-live-source-snapshots files)))
-          (setf (buffer-value buffer 'lem-yath-agenda-scan-running) t)
-          (handler-case
-              (bt2:make-thread
-               (lambda ()
-                 (agenda-scan-worker
-                  buffer generation clock-report-p range-start range-end
-                  files discovery-failures snapshots))
-               :name (format nil "lem-yath/agenda-scan-~d" generation))
-            (error (condition)
-              (setf (buffer-value buffer 'lem-yath-agenda-scan-running) nil
-                    (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)
-              (agenda-render-if-current
-               buffer generation nil (list (cons nil condition)))
-              (message "Agenda scan could not start: ~a" condition)
-              nil)))))))
+        (let ((scope-predicate nil))
+          (when *agenda-scan-scope-function*
+            (multiple-value-setq (files discovery-failures scope-predicate)
+              (funcall *agenda-scan-scope-function*
+                       buffer files discovery-failures)))
+          (let ((snapshots (agenda-live-source-snapshots files)))
+            (setf (buffer-value buffer 'lem-yath-agenda-scan-running) t)
+            (handler-case
+                (bt2:make-thread
+                 (lambda ()
+                   (agenda-scan-worker
+                    buffer generation clock-report-p range-start range-end
+                    files discovery-failures snapshots scope-predicate))
+                 :name (format nil "lem-yath/agenda-scan-~d" generation))
+              (error (condition)
+                (setf (buffer-value buffer 'lem-yath-agenda-scan-running) nil
+                      (buffer-value buffer 'lem-yath-agenda-refresh-pending) nil)
+                (agenda-render-if-current
+                 buffer generation nil (list (cons nil condition)))
+                (message "Agenda scan could not start: ~a" condition)
+                nil))))))))
 
 (defun agenda-finish-scan
     (buffer generation items failures &optional clock-report)
@@ -2237,8 +2281,8 @@ suffix."
 (defvar *agenda-command-initializer-function* nil
   "Optional function initializing BUFFER for an agenda dispatcher command.")
 
-(defun agenda-open-command (command &optional todo-keyword)
-  "Open the agenda BUFFER for COMMAND and optional TODO-KEYWORD."
+(defun agenda-open-command (command &optional command-argument restriction)
+  "Open the agenda BUFFER for COMMAND, argument, and temporary RESTRICTION."
   (let ((directories (agenda-directories)))
     (unless directories
       (message "No configured Org agenda directory exists.")
@@ -2248,7 +2292,7 @@ suffix."
       (change-buffer-mode buffer 'lem-yath-agenda-mode)
       (when *agenda-command-initializer-function*
         (funcall *agenda-command-initializer-function*
-                 buffer command todo-keyword))
+                 buffer command command-argument restriction))
       (switch-to-window (pop-to-buffer buffer :split-action :sensibly))
       (agenda-start-scan buffer)
       buffer)))

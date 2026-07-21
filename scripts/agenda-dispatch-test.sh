@@ -183,6 +183,109 @@ else
   fail combined 'n did not open the established combined summary'
 fi
 
+# Repeated < follows Org's buffer -> subtree/region -> unrestricted cycle.
+# The restriction is captured from the source before the dispatcher opens and
+# remains attached to refreshes of the resulting agenda buffer.
+send_keys q
+lem_wait_for "$session" 'Past dispatch sentinel' 10 >/dev/null || true
+send_keys C-c z c
+send_keys g g
+send_keys Space m a
+lem_wait_for "$session" 'unrestricted; < restrict' 10 >/dev/null || true
+send_keys '<'
+lem_wait_for "$session" 'buffer; < restrict' 10 >/dev/null || true
+send_keys '<'
+lem_wait_for "$session" 'subtree; < restrict' 10 >/dev/null || true
+send_keys t
+lem_wait_for "$session" 'Global list of TODO items of type: ALL' 30 >/dev/null || true
+send_keys C-c z d
+wait_report 'restriction=SUBTREE range=1\.\.2$' || true
+if grep -q '^STATE command=TODO .*rows=1 .*Past dispatch sentinel.*restriction=SUBTREE range=1\.\.2$' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
+   ! grep -q '^STATE command=TODO .*rows=1 .*Monday dispatch sentinel.*restriction=SUBTREE' "$LEM_YATH_AGENDA_DISPATCH_REPORT"; then
+  pass subtree-restrict '< < t retained only the source subtree and its exact line range'
+else
+  fail subtree-restrict 'subtree restriction leaked another heading or lost its boundary'
+fi
+
+send_keys q
+lem_wait_for "$session" 'Past dispatch sentinel' 10 >/dev/null || true
+send_keys C-c z r
+lem_wait_for "$session" 'unrestricted; < restrict' 10 >/dev/null || true
+send_keys '<'
+lem_wait_for "$session" 'buffer; < restrict' 10 >/dev/null || true
+send_keys '<'
+lem_wait_for "$session" 'region; < restrict' 10 >/dev/null || true
+send_keys t
+lem_wait_for "$session" 'Global list of TODO items of type: ALL' 30 >/dev/null || true
+send_keys C-c z d
+wait_report 'restriction=REGION range=3\.\.6$' || true
+if grep -q '^STATE command=TODO .*rows=2 .*Monday dispatch sentinel.*Today dispatch sentinel.*restriction=REGION range=3\.\.6$' "$LEM_YATH_AGENDA_DISPATCH_REPORT" &&
+   ! grep -q '^STATE command=TODO .*rows=2 .*Past dispatch sentinel.*restriction=REGION' "$LEM_YATH_AGENDA_DISPATCH_REPORT"; then
+  pass region-restrict 'active-region < < t included both and only selected headings'
+else
+  fail region-restrict 'region restriction used the wrong inclusive/exclusive lines'
+fi
+
+send_keys q
+lem_wait_for "$session" 'Past dispatch sentinel' 10 >/dev/null || true
+send_keys C-c z p
+lem_wait_for "$session" 'unrestricted; < restrict' 10 >/dev/null || true
+send_keys '<'
+lem_wait_for "$session" 'buffer; < restrict' 10 >/dev/null || true
+send_keys '<'
+lem_wait_for "$session" 'region; < restrict' 10 >/dev/null || true
+send_keys s
+sleep 0.15
+tmux_cmd send-keys -t "$session" -l '2026-07-10'
+send_keys Enter
+lem_wait_for "$session" 'Search words: 2026-07-10' 30 >/dev/null || true
+send_keys C-c z d
+wait_report '^STATE command=SEARCH .*rows=0 .*restriction=REGION range=1\.\.1$' || true
+if grep -q '^STATE command=SEARCH .*rows=0 .*restriction=REGION range=1\.\.1$' "$LEM_YATH_AGENDA_DISPATCH_REPORT"; then
+  pass partial-region 's ignored matching body text beyond the exact region end'
+else
+  fail partial-region 'out-of-region body text leaked into restricted search'
+fi
+
+send_keys q
+lem_wait_for "$session" 'Past dispatch sentinel' 10 >/dev/null || true
+send_keys g g
+send_keys Space m a
+lem_wait_for "$session" 'unrestricted; < restrict' 10 >/dev/null || true
+send_keys '<'
+lem_wait_for "$session" 'buffer; < restrict' 10 >/dev/null || true
+send_keys '>'
+lem_wait_for "$session" 'unrestricted; < restrict' 10 >/dev/null || true
+send_keys t
+lem_wait_for "$session" 'Global list of TODO items of type: ALL' 30 >/dev/null || true
+send_keys C-c z d
+wait_report 'restriction=NIL range=NIL\.\.NIL$' || true
+if grep -q '^STATE command=TODO .*rows=5 .*restriction=NIL range=NIL\.\.NIL$' "$LEM_YATH_AGENDA_DISPATCH_REPORT"; then
+  pass restriction-clear '> removed a pending buffer restriction before dispatch'
+else
+  fail restriction-clear '> left the agenda restricted or changed its TODO rows'
+fi
+
+send_keys q
+lem_wait_for "$session" 'Past dispatch sentinel' 10 >/dev/null || true
+send_keys C-c z c
+send_keys g g
+send_keys Space m a
+lem_wait_for "$session" 'unrestricted; < restrict' 10 >/dev/null || true
+send_keys '<'
+lem_wait_for "$session" 'buffer; < restrict' 10 >/dev/null || true
+send_keys '<'
+lem_wait_for "$session" 'subtree; < restrict' 10 >/dev/null || true
+send_keys /
+sleep 0.15
+tmux_cmd send-keys -t "$session" -l 'dispatch sentinel'
+send_keys Enter
+if lem_wait_for "$session" '1 match for "dispatch sentinel"' 30 >/dev/null; then
+  pass restricted-occur 'restricted / narrowed source-backed Occur to one subtree'
+else
+  fail restricted-occur 'restricted / searched outside the selected subtree'
+fi
+
 cmp -s "$work_file" "$original_file" ||
   fail safety 'dispatcher views changed their Org source'
 

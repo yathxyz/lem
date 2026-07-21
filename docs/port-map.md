@@ -192,7 +192,12 @@ Status legend:
   source-block sessions, richer list/table transforms, and exact graphical
   org-modern/agenda presentation remain absent. The active terminal-safe
   org-modern projection, configured org-download commands, and empty initial
-  Org scratch are ported and tested.
+  Org scratch are ported and tested. The stock-shaped agenda dispatcher also
+  supports Org's temporary `<` buffer/subtree/active-region restriction cycle,
+  `>` removal, and direct `1`/`0` aliases. Its file/line boundary is shared by
+  parsed rows, partial-entry query text and properties, source-backed
+  multi-occur, refreshes, and clock rollups; the physical dispatcher and clock
+  gates cover subtree, region, removal, and exclusive-end edge cases.
 - **Completion previews**: the grouped project picker and directory-local
   Elisp outline provide reversible Consult-style preview. Generic command,
   file, buffer, and LSP-symbol prompts still do not preview their targets.

@@ -278,6 +278,36 @@
      (line-string (current-point)))
     (agenda-clock-test-log "STATE-ENTRIES count=~d" entry-rows)))
 
+(define-command lem-yath-test-agenda-restricted-clock-report () ()
+  (let* ((buffer (current-buffer))
+         (file (merge-pathnames "clock.org" (workdir)))
+         (restriction
+           (make-agenda-restriction
+            :kind :subtree :file file :start-line 9 :end-line 17))
+         (old (buffer-value buffer 'lem-yath-agenda-restriction)))
+    (unwind-protect
+         (progn
+           (setf (buffer-value buffer 'lem-yath-agenda-restriction)
+                 restriction)
+           (multiple-value-bind (files failures) (agenda-org-files)
+             (multiple-value-bind (scoped scoped-failures predicate)
+                 (agenda-restriction-scan-scope buffer files failures)
+               (declare (ignore scoped-failures))
+               (multiple-value-bind (report report-failures)
+                   (agenda-clock-collect-report
+                    scoped "2026-07-12" "2026-07-19" predicate)
+                 (agenda-clock-test-log
+                  "RESTRICTED-CLOCK files=~d failures=~d minutes=~d headings=~s"
+                  (length (agenda-clock-report-files report))
+                  (length report-failures)
+                  (agenda-clock-report-minutes report)
+                  (mapcan
+                   (lambda (report-file)
+                     (mapcar #'agenda-clock-report-heading-title
+                             (agenda-clock-report-file-headings report-file)))
+                   (agenda-clock-report-files report)))))))
+      (setf (buffer-value buffer 'lem-yath-agenda-restriction) old))))
+
 (dolist (keymap (list *lem-yath-agenda-vi-keymap*
                       *lem-yath-agenda-mode-keymap*))
   (define-key keymap "C-c z 1" 'lem-yath-test-agenda-clock-one)
@@ -301,6 +331,7 @@
   (define-key keymap "C-c z j" 'lem-yath-test-agenda-clock-report-child)
   (define-key keymap "C-c z k" 'lem-yath-test-agenda-clock-keys)
   (define-key keymap "C-c z r" 'lem-yath-test-agenda-clock-report)
+  (define-key keymap "C-c z R" 'lem-yath-test-agenda-restricted-clock-report)
   (define-key keymap "C-c z x" 'lem-yath-test-agenda-clock-source-report))
 
 (define-key *global-keymap* "C-c z l"

@@ -105,6 +105,14 @@ if ! wait_agenda; then
   exit 1
 fi
 
+send_chord C-c z R
+wait_report_count '^RESTRICTED-CLOCK ' 1 || true
+if grep -q '^RESTRICTED-CLOCK files=1 failures=0 minutes=60 headings=.*Clock three sentinel.*Nested clock report sentinel' "$LEM_YATH_AGENDA_CLOCK_REPORT"; then
+  pass restricted-report 'subtree scope constrained clock files, totals, and heading rows'
+else
+  fail restricted-report 'clock aggregation escaped its temporary subtree scope'
+fi
+
 # The effective maps intentionally differ: Evil motion uses the stock global
 # clock, while C-z Emacs state exposes the user's delegated clock functions.
 send_chord C-c z k

@@ -43,6 +43,13 @@ Run the complete gate away from the laptop with:
 ./scripts/test-on-ex44.sh
 ```
 
+The agenda dispatcher now includes Org's temporary `<` restriction cycle
+(buffer, then subtree or active region, then unrestricted), `>` removal, and
+the direct `1`/`0` aliases. Agenda rows, `m`/`M`/`s`/`S`, source-backed `/`,
+refreshes, and clock reports use the same exact file/line boundary; the TUI
+gate includes partial-entry region ends so body text beyond the region cannot
+influence a restricted search.
+
 ## Remaining capability gaps
 
 These bindings are intentionally not mapped to unrelated commands:
