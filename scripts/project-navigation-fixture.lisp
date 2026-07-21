@@ -1133,7 +1133,7 @@
      (concatenate
       'string
       "GREP alpha=~a tracked-build=~a sibling=~a ignored=~a matches=~d "
-      "readonly=~a active=~a enter=~a finish=~a abort=~a exit=~a "
+      "readonly=~a active=~a enter=~a finish=~a delete=~a abort=~a exit=~a "
       "ex=~a ex-count=~d")
      (project-navigation-test-yes-no alpha)
      (project-navigation-test-yes-no tracked-build)
@@ -1152,6 +1152,9 @@
      (project-navigation-test-yes-no
       (project-navigation-test-key-bound-p
        lem/grep::*peek-grep-mode-keymap* "C-c C-c"))
+     (project-navigation-test-yes-no
+      (project-navigation-test-key-bound-p
+       lem/grep::*peek-grep-mode-keymap* "C-c C-d"))
      (project-navigation-test-yes-no
       (project-navigation-test-key-bound-p
        lem/grep::*peek-grep-mode-keymap* "C-c C-k"))
@@ -1296,7 +1299,38 @@
                (points-to-string (buffer-start-point buffer)
                                  (buffer-end-point buffer))))
      (project-navigation-test-yes-no
-      (project-grep-edit-active-p buffer)))))
+     (project-grep-edit-active-p buffer)))))
+
+(define-command lem-yath-test-project-navigation-record-grep-delete () ()
+  (let* ((grep-buffer (project-navigation-test-grep-buffer))
+         (records (and grep-buffer (project-grep-edit-records grep-buffer)))
+         (path (project-navigation-test-path
+                *project-navigation-test-alpha* "src/delete-target.txt"))
+         (source (find-file-buffer path))
+         (source-text
+           (points-to-string (buffer-start-point source)
+                             (buffer-end-point source)))
+         (disk-text (uiop:read-file-string path))
+         (original
+           (format nil
+                   "DELETE_GREP FIRST~%KEEP ONE~%DELETE_GREP MIDDLE~%KEEP TWO~%DELETE_GREP FINAL"))
+         (remaining (format nil "KEEP ONE~%KEEP TWO~%")))
+    (project-navigation-test-log
+     "GREP-DELETE records=~d marked=~d blank=~d active=~a readonly=~a source=~a disk=~a modified=~a"
+     (length records)
+     (count-if #'project-grep-edit-record-deletion-p records)
+     (count-if (lambda (record)
+                 (zerop (length (project-grep-record-current-text record))))
+               records)
+     (project-navigation-test-yes-no
+      (and grep-buffer (project-grep-edit-active-p grep-buffer)))
+     (project-navigation-test-yes-no
+      (and grep-buffer (buffer-read-only-p grep-buffer)))
+     (cond ((string= source-text original) "original")
+           ((string= source-text remaining) "remaining")
+           (t "other"))
+     (if (string= disk-text original) "original" "other")
+     (project-navigation-test-yes-no (buffer-modified-p source)))))
 
 (define-command lem-yath-test-project-navigation-submit-gamma () ()
   (lem/prompt-window::replace-prompt-input
@@ -1343,6 +1377,8 @@
   "F3" 'lem-yath-test-project-navigation-stale-grep-source)
 (define-key lem/peek-source:*peek-source-keymap*
   "F4" 'lem-yath-test-project-navigation-multiline-guard)
+(define-key lem/peek-source:*peek-source-keymap*
+  "F1" 'lem-yath-test-project-navigation-record-grep-delete)
 (define-key lem/prompt-window::*prompt-mode-keymap*
   "F4" 'lem-yath-test-project-navigation-submit-gamma)
 

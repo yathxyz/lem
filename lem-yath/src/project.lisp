@@ -46,6 +46,9 @@
 (define-attribute project-grep-changed-attribute
   (t :foreground :base0A :background :base02))
 
+(define-attribute project-grep-delete-attribute
+  (t :foreground :base08 :background :base02))
+
 (define-attribute project-grep-done-attribute
   (t :foreground :base0B))
 
@@ -59,6 +62,7 @@
   line-number
   original
   overlay
+  deletion-p
   status
   error)
 
@@ -972,8 +976,9 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
     (points-to-string start end)))
 
 (defun project-grep-record-changed-p (record)
-  (not (string= (project-grep-edit-record-original record)
-                (project-grep-record-current-text record))))
+  (or (project-grep-edit-record-deletion-p record)
+      (not (string= (project-grep-edit-record-original record)
+                    (project-grep-record-current-text record)))))
 
 (defun project-grep-set-record-status (record status &optional error)
   "Set RECORD's staged result STATUS and replace its display overlay."
@@ -987,6 +992,7 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
          (ecase status
            ((nil) nil)
            (:changed 'project-grep-changed-attribute)
+           (:delete 'project-grep-delete-attribute)
            (:done 'project-grep-done-attribute)
            (:reject 'project-grep-reject-attribute))))
     (multiple-value-bind (start end)
@@ -1019,9 +1025,28 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
 (defun project-grep-stage-after-change (start end old-length)
   (declare (ignore end old-length))
   (alexandria:when-let ((record (project-grep-record-at-point start)))
+    (setf (project-grep-edit-record-deletion-p record) nil)
     (project-grep-set-record-status
      record
      (and (project-grep-record-changed-p record) :changed))))
+
+(defun project-grep-mark-record-deletion (record)
+  "Mark RECORD for complete source-line deletion, retaining its result row."
+  (multiple-value-bind (start end)
+      (project-grep-record-content-bounds record)
+    (delete-between-points start end))
+  (setf (project-grep-edit-record-deletion-p record) t)
+  (project-grep-set-record-status record :delete))
+
+(defun project-grep-delete-source-line (point)
+  "Delete POINT's complete line, including its following newline when present."
+  (with-point ((start point)
+               (end point))
+    (line-start start)
+    (line-start end)
+    (unless (line-offset end 1)
+      (move-point end (buffer-end-point (point-buffer point))))
+    (delete-between-points start end)))
 
 (defun project-grep-reset-result-undo (buffer)
   "Make BUFFER clean and give the next staging session fresh undo history."
@@ -1105,11 +1130,14 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
                 (error "Source changed while applying staged grep edits"))
               (with-point ((point (buffer-point buffer)))
                 (move-to-line point line-number)
-                (lem/grep::replace-grep-source-line point replacement))))
+                (if (project-grep-edit-record-deletion-p record)
+                    (project-grep-delete-source-line point)
+                    (lem/grep::replace-grep-source-line point replacement)))))
           (buffer-accept-change-group group)
           (dolist (record records)
             (let ((replacement (project-grep-record-current-text record)))
-              (setf (project-grep-edit-record-original record) replacement)
+              (setf (project-grep-edit-record-original record) replacement
+                    (project-grep-edit-record-deletion-p record) nil)
               (project-grep-set-record-status record :done)))
           (values (length records) nil))
       (error (condition)
@@ -1181,6 +1209,7 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
       (editor-error "Project grep is not in staged edit mode"))
     (project-grep-close-edit-session buffer :cancel)
     (dolist (record (project-grep-edit-records buffer))
+      (setf (project-grep-edit-record-deletion-p record) nil)
       (project-grep-set-record-status
        record
        (and (project-grep-record-changed-p record) :changed)))
@@ -1279,6 +1308,16 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
 (define-command lem-yath-project-grep-finish-edit () ()
   (project-grep-apply-staged-edits))
 
+(define-command lem-yath-project-grep-mark-deletion () ()
+  "Mark the current grep result for complete source-line deletion."
+  (unless (project-grep-edit-active-p)
+    (editor-error "Project grep is not in staged edit mode"))
+  (alexandria:if-let ((record (project-grep-record-at-point (current-point))))
+    (progn
+      (project-grep-mark-record-deletion record)
+      (message "Grep result marked for deletion"))
+    (editor-error "Point is not on a project grep result")))
+
 (define-command lem-yath-project-grep-abort-edit () ()
   (if (project-grep-edit-active-p)
       (project-grep-abort-staged-edits)
@@ -1301,6 +1340,28 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
            (not (project-grep-edit-active-p)))
       (project-grep-begin-edit)
       (lem-vi-mode/commands:vi-insert)))
+
+(defun project-grep-undo-staged-edit ()
+  "Undo one staged edit without crossing the cancellable session baseline."
+  (let* ((buffer (current-buffer))
+         (session (project-grep-edit-session buffer))
+         (group (and session
+                     (project-grep-edit-session-change-group session))))
+    (unless group
+      (editor-error "Project grep is not in staged edit mode"))
+    (when (eq (lem/buffer/internal::buffer-%undo-tree-current buffer)
+              (lem/buffer/internal::buffer-change-group-baseline group))
+      (editor-error "No further staged project grep edits to undo"))
+    (let ((lem/buffer/internal::*undo-tree-history-move-group* group))
+      (unless (buffer-undo (current-point))
+        (editor-error "Could not undo the staged project grep edit")))))
+
+(define-command lem-yath-project-grep-normal-undo (count) (:universal-nil)
+  "Undo within an active grep stage, otherwise retain ordinary Vi undo."
+  (if (project-grep-edit-active-p)
+      (dotimes (_ (or count 1))
+        (project-grep-undo-staged-edit))
+      (lem-vi-mode/commands:vi-undo (or count 1))))
 
 (define-command lem-yath-project-grep-normal-write-quit () ()
   "Apply staged grep edits on ZZ, otherwise retain ordinary Vi behavior."
@@ -1538,6 +1599,8 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
 (define-key lem/grep::*peek-grep-mode-keymap*
   "C-c C-e" 'lem-yath-project-grep-finish-edit)
 (define-key lem/grep::*peek-grep-mode-keymap*
+  "C-c C-d" 'lem-yath-project-grep-mark-deletion)
+(define-key lem/grep::*peek-grep-mode-keymap*
   "C-x C-s" 'lem-yath-project-grep-finish-edit)
 (define-key lem/grep::*peek-grep-mode-keymap*
   "C-c C-k" 'lem-yath-project-grep-abort-edit)
@@ -1549,6 +1612,8 @@ an escaped (), {}, or | becomes special and an unescaped one becomes literal."
   "Z Q" 'lem-yath-project-grep-abort-edit)
 (define-key lem-vi-mode:*normal-keymap*
   "i" 'lem-yath-project-grep-normal-insert)
+(define-key lem-vi-mode:*normal-keymap*
+  "u" 'lem-yath-project-grep-normal-undo)
 (define-key lem-vi-mode:*normal-keymap*
   "Z Z" 'lem-yath-project-grep-normal-write-quit)
 (define-key lem-vi-mode:*normal-keymap*

@@ -55,6 +55,8 @@ printf 'ALPHA MAIN PROJECT\n' \
   >"$LEM_YATH_PROJECT_NAVIGATION_ALPHA/alpha-main.txt"
 printf 'TRACKED PROJECT TARGET\nSHARED_GREP ALPHA\n' \
   >"$LEM_YATH_PROJECT_NAVIGATION_ALPHA/src/tracked-target.txt"
+printf 'DELETE_GREP FIRST\nKEEP ONE\nDELETE_GREP MIDDLE\nKEEP TWO\nDELETE_GREP FINAL' \
+  >"$LEM_YATH_PROJECT_NAVIGATION_ALPHA/src/delete-target.txt"
 printf 'UNTRACKED PROJECT TARGET\n' \
   >"$LEM_YATH_PROJECT_NAVIGATION_ALPHA/src/untracked-target.txt"
 printf 'RECENT PROJECT PREVIEW\n' \
@@ -153,7 +155,8 @@ git -c advice.addEmbeddedRepo=false \
   -C "$LEM_YATH_PROJECT_NAVIGATION_SUBMODULE_CYCLE" add \
   .gitmodules child
 git -C "$LEM_YATH_PROJECT_NAVIGATION_ALPHA" add \
-  .gitignore alpha-main.txt build/kept.txt src/tracked-target.txt
+  .gitignore alpha-main.txt build/kept.txt src/delete-target.txt \
+  src/tracked-target.txt
 git -C "$LEM_YATH_PROJECT_NAVIGATION_ALPHA_SIBLING" add sibling-only.txt
 git -C "$LEM_YATH_PROJECT_NAVIGATION_BETA" add beta-main.txt
 git -C "$LEM_YATH_PROJECT_NAVIGATION_GAMMA" add gamma-target.txt
@@ -722,7 +725,7 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
     before=$(report_count '^GREP ')
     lem_keys "$verify_session" F8
     if wait_report_count '^GREP ' "$((before + 1))" &&
-       grep -q '^GREP alpha=yes tracked-build=yes sibling=no ignored=no matches=2 readonly=yes active=no enter=yes finish=yes abort=yes exit=yes ex=yes ex-count=1$' \
+       grep -q '^GREP alpha=yes tracked-build=yes sibling=no ignored=no matches=2 readonly=yes active=no enter=yes finish=yes delete=yes abort=yes exit=yes ex=yes ex-count=1$' \
          "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
       pass spc-p-g-buffer \
         'project grep opens read-only with the pinned staged-edit bindings'
@@ -934,6 +937,88 @@ if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
 else
   fail spc-p-g-binding 'SPC p g did not open the regexp prompt' \
     "$verify_session"
+fi
+
+lem_keys "$verify_session" Escape
+sleep 0.4
+lem_keys "$verify_session" Escape
+sleep 0.2
+
+send_chord "$verify_session" Space p g
+if lem_wait_for "$verify_session" 'Project regexp:' "$WAIT_TIMEOUT" \
+     >/dev/null; then
+  lem_keys "$verify_session" C-a C-k
+  tmux_cmd send-keys -t "$verify_session" -l 'DELETE_GREP'
+  lem_keys "$verify_session" Enter
+  if lem_wait_for "$verify_session" 'DELETE_GREP FIRST' "$WAIT_TIMEOUT" \
+       >/dev/null; then
+    send_chord "$verify_session" i
+    send_chord "$verify_session" C-c C-d
+    send_chord "$verify_session" u
+    before=$(report_count '^GREP-DELETE ')
+    lem_keys "$verify_session" F1
+    if wait_report_count '^GREP-DELETE ' "$((before + 1))" &&
+       grep -q '^GREP-DELETE records=3 marked=0 blank=0 active=yes readonly=no source=original disk=original modified=no$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-delete-undo \
+        'undo restored a whole-row deletion mark and its separate intent'
+    else
+      fail spc-p-g-delete-undo \
+        'undo left stale deletion intent or result text' "$verify_session"
+    fi
+
+    send_chord "$verify_session" C-c C-d
+    send_chord "$verify_session" C-c C-k
+    before=$(report_count '^GREP-DELETE ')
+    lem_keys "$verify_session" F1
+    if wait_report_count '^GREP-DELETE ' "$((before + 1))" &&
+       grep -q '^GREP-DELETE records=3 marked=0 blank=0 active=no readonly=yes source=original disk=original modified=no$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-delete-abort \
+        'abort restored a marked deletion without touching its source'
+    else
+      fail spc-p-g-delete-abort \
+        'abort retained deletion intent or changed the source' "$verify_session"
+    fi
+
+    send_chord "$verify_session" i
+    send_chord "$verify_session" C-c C-d
+    send_chord "$verify_session" j
+    send_chord "$verify_session" C-c C-d
+    send_chord "$verify_session" j
+    send_chord "$verify_session" C-c C-d
+    before=$(report_count '^GREP-DELETE ')
+    lem_keys "$verify_session" F1
+    if wait_report_count '^GREP-DELETE ' "$((before + 1))" &&
+       grep -q '^GREP-DELETE records=3 marked=3 blank=3 active=yes readonly=no source=original disk=original modified=no$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-delete-stage \
+        'C-c C-d marked first, middle, and unterminated final rows in isolation'
+    else
+      fail spc-p-g-delete-stage \
+        'whole-row deletion did not retain three isolated marks' "$verify_session"
+    fi
+
+    send_chord "$verify_session" C-c C-e
+    before=$(report_count '^GREP-DELETE ')
+    lem_keys "$verify_session" F1
+    if wait_report_count '^GREP-DELETE ' "$((before + 1))" &&
+       grep -q '^GREP-DELETE records=3 marked=0 blank=3 active=no readonly=yes source=remaining disk=original modified=yes$' \
+         "$LEM_YATH_PROJECT_NAVIGATION_REPORT"; then
+      pass spc-p-g-delete-apply \
+        'apply removed complete source lines bottom-up without saving the file'
+    else
+      fail spc-p-g-delete-apply \
+        'whole-row apply lost line boundaries, ordering, or the save boundary' \
+        "$verify_session"
+    fi
+  else
+    fail spc-p-g-delete-results \
+      'the dedicated deletion grep returned no first row' "$verify_session"
+  fi
+else
+  fail spc-p-g-delete-binding \
+    'the deletion scenario could not open project grep' "$verify_session"
 fi
 
 lem_keys "$verify_session" Escape
