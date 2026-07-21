@@ -270,18 +270,22 @@ return NIL so callers retain the existing fail-closed boundary."
           :with open-marker-end := nil
           :with blank-count := 0
           :with open-block-type := nil
+          :with definition-split-p := nil
           :for line := (line-string point)
           :for block-marker := (org-block-marker line)
-          :for marker-end := (and (null open-block-type)
+          :for structural-p := (null open-block-type)
+          :for marker-end := (and structural-p
                                   (%org-footnote-definition-marker-end-column
                                    line))
-          :for heading-p := (and (null open-block-type)
+          :for heading-p := (and structural-p
                                  (org-heading-line-p point))
           :for blank-p := (not (null (cl-ppcre:scan "^\\s*$" line)))
           :do
+             (setf definition-split-p nil)
              (when (and open-start
                         (not blank-p)
                         (or (>= blank-count 2) heading-p marker-end))
+               (setf definition-split-p (not (null marker-end)))
                (let ((boundary
                        (%org-make-footnote-definition-boundary
                         open-start open-marker-end point)))
@@ -290,12 +294,16 @@ return NIL so callers retain the existing fail-closed boundary."
                (setf open-start nil open-marker-end nil blank-count 0))
              (when (and marker-end
                         (null open-start)
-                        (not (%org-inside-drawer-p point)))
+                        (or definition-split-p
+                            (not (%org-inside-drawer-p point))))
                (setf open-start (copy-point point :temporary)
                      open-marker-end marker-end
                      blank-count 0))
              (when open-start
-               (if blank-p (incf blank-count) (setf blank-count 0)))
+               (if (and structural-p blank-p)
+                   (incf blank-count)
+                   (unless open-block-type
+                     (setf blank-count 0))))
              (cond
                (open-block-type
                 (when (and block-marker
@@ -1744,55 +1752,220 @@ item."
          (not (org-inside-block-p point))
          (not (%org-special-line-p point)))))
 
+(defun %org-affiliated-keyword-line-p (point)
+  "Whether POINT is on a GNU Org affiliated keyword handled here."
+  (not
+   (null
+    (cl-ppcre:scan
+     "(?i)^\\s*#\\+(?:(?:CAPTION|DATA|HEADERS?|LABEL|NAME|PLOT|RESNAME|RESULTS?|SOURCE|SRCNAME|TBLNAME)|ATTR_[A-Za-z0-9_-]+):"
+     (line-string point)))))
+
+(defun %org-boundary-with-outer-start (boundary start)
+  "Return BOUNDARY with its outer START replaced."
+  (%make-org-boundary
+   (copy-point start :temporary)
+   (copy-point (%org-boundary-end boundary) :temporary)
+   (and (%org-boundary-inner-start boundary)
+        (copy-point (%org-boundary-inner-start boundary) :temporary))
+   (and (%org-boundary-inner-end boundary)
+        (copy-point (%org-boundary-inner-end boundary) :temporary))
+   (%org-boundary-kind boundary)
+   (%org-boundary-node-type boundary)))
+
+(defun %org-boundary-affiliated-prefix (boundary lower-bound)
+  "Include consecutive affiliated lines before BOUNDARY, above LOWER-BOUND."
+  (when boundary
+    (with-point ((start (%org-boundary-start boundary)))
+      (line-start start)
+      (loop
+        (with-point ((previous start))
+          (unless (and (line-offset previous -1)
+                       (not (point< previous lower-bound))
+                       (%org-affiliated-keyword-line-p previous))
+            (return))
+          (move-point start previous)))
+      (if (point= start (%org-boundary-start boundary))
+          boundary
+          (%org-boundary-with-outer-start boundary start)))))
+
+(defun %org-clamp-child-boundary (boundary container &optional origin)
+  "Clamp BOUNDARY to CONTAINER and optionally require it to own ORIGIN."
+  (when (and boundary
+             (%org-boundary-inner-start container)
+             (%org-boundary-inner-end container))
+    (let ((lower (%org-boundary-inner-start container))
+          (upper (%org-boundary-inner-end container))
+          (start (%org-boundary-start boundary)))
+      (when (and (not (point< start lower))
+                 (point< start upper)
+                 (or (null (%org-boundary-inner-end boundary))
+                     (not (point< upper
+                                  (%org-boundary-inner-end boundary)))))
+        (let* ((raw-end (%org-boundary-end boundary))
+               (end (if (point< upper raw-end) upper raw-end))
+               (raw-inner-start (%org-boundary-inner-start boundary))
+               (raw-inner-end (%org-boundary-inner-end boundary))
+               (inner-start
+                 (and raw-inner-start (point< raw-inner-start end)
+                      raw-inner-start))
+               (inner-end
+                 (and raw-inner-end inner-start
+                      (if (point< upper raw-inner-end) upper raw-inner-end))))
+          (let ((result
+                  (%make-org-boundary
+                   (copy-point start :temporary) (copy-point end :temporary)
+                   (and inner-start (copy-point inner-start :temporary))
+                   (and inner-end (point< inner-start inner-end)
+                        (copy-point inner-end :temporary))
+                   (%org-boundary-kind boundary)
+                   (%org-boundary-node-type boundary))))
+            (when (or (null origin)
+                      (%org-boundary-contains-point-p result origin))
+              result)))))))
+
+(defun %org-contained-paragraph-line-p
+    (point &optional allowed-definition-marker)
+  "Whether POINT is ordinary prose inside a modeled recursive container."
+  (let ((line (line-string point)))
+    (and (plusp (length line))
+         (not (cl-ppcre:scan "^\\s*$" line))
+         (or (and allowed-definition-marker
+                  (same-line-p point allowed-definition-marker))
+             (and (not (org-heading-line-p point))
+                  (not (org-table-line-p point))
+                  (not (org-list-item-line-p point))
+                  (not (%org-list-continuation-context-p point))
+                  (null (org-block-marker line))
+                  (null (%org-drawer-marker line))
+                  (not (%org-affiliated-keyword-line-p point))
+                  (not (cl-ppcre:scan "^\\s*#" line))
+                  (not (cl-ppcre:scan
+                        "(?i)^\\s*(?:SCHEDULED|DEADLINE|CLOSED|CLOCK):"
+                        line))
+                  (not (%org-property-looking-line-p line))
+                  (not (cl-ppcre:scan "^\\s*:\\s" line))
+                  (not (cl-ppcre:scan "^\\s*\\\\(?:begin|end)\\{" line))
+                  (not (cl-ppcre:scan "^\\s*-{5,}\\s*$" line))
+                  (null (%org-footnote-definition-marker-end-column line)))))))
+
+(defun %org-contained-paragraph-boundary
+    (origin content-start content-end &optional allowed-definition-marker)
+  "Return the paragraph at ORIGIN inside the half-open content bounds."
+  (when (%org-point-in-half-open-range-p origin content-start content-end)
+    (with-point ((owner origin))
+      (line-start owner)
+      (when (cl-ppcre:scan "^\\s*$" (line-string owner))
+        (loop
+          (unless (line-offset owner -1)
+            (return-from %org-contained-paragraph-boundary nil))
+          (when (point< owner content-start)
+            (return-from %org-contained-paragraph-boundary nil))
+          (unless (cl-ppcre:scan "^\\s*$" (line-string owner))
+            (return))))
+      (unless (%org-contained-paragraph-line-p
+               owner allowed-definition-marker)
+        (return-from %org-contained-paragraph-boundary nil))
+      (with-point ((start owner)
+                   (last owner))
+        (loop
+          (with-point ((previous start))
+            (unless (and (line-offset previous -1)
+                         (not (point< previous content-start))
+                         (%org-contained-paragraph-line-p
+                          previous allowed-definition-marker))
+              (return))
+            (move-point start previous)))
+        (when (same-line-p start content-start)
+          (move-point start content-start))
+        (loop
+          (with-point ((next last))
+            (unless (and (line-offset next 1)
+                         (point< next content-end)
+                         (%org-contained-paragraph-line-p
+                          next allowed-definition-marker))
+              (return))
+            (move-point last next)))
+        (let* ((core-end (%org-line-after last))
+               (outer-end (%org-expand-blank-lines core-end)))
+          (when (point< content-end core-end)
+            (move-point core-end content-end))
+          (when (point< content-end outer-end)
+            (move-point outer-end content-end))
+          (%make-org-boundary
+           (copy-point start :temporary) outer-end
+           (copy-point start :temporary) core-end
+           :character :paragraph))))))
+
+(defun %org-footnote-affiliated-child-boundary (origin definition)
+  "Return a supported table or block affiliated at ORIGIN in DEFINITION."
+  (when (%org-affiliated-keyword-line-p origin)
+    (let ((lower (%org-boundary-inner-start definition))
+          (upper (%org-boundary-inner-end definition)))
+      (with-point ((first origin)
+                   (target origin))
+        (line-start first)
+        (line-start target)
+        (loop
+          (with-point ((previous first))
+            (unless (and (line-offset previous -1)
+                         (not (point< previous lower))
+                         (%org-affiliated-keyword-line-p previous))
+              (return))
+            (move-point first previous)))
+        (loop :while (%org-affiliated-keyword-line-p target)
+              :do (unless (line-offset target 1) (return)))
+        (when (point< target upper)
+          (let ((boundary
+                  (or (%org-table-boundary target :kind :character)
+                      (%org-block-boundary-at target))))
+            (when boundary
+              (%org-clamp-child-boundary
+               (%org-boundary-with-outer-start boundary first)
+               definition origin))))))))
+
 (defun %org-footnote-definition-paragraph-boundary (origin definition)
   "Return the paragraph child of DEFINITION owning ORIGIN."
   (when (%org-footnote-definition-content-at-point-p origin definition)
-    (let ((content-start (%org-boundary-inner-start definition))
-          (content-end (%org-boundary-inner-end definition)))
-      (with-point ((owner origin))
-        (line-start owner)
-        (when (cl-ppcre:scan "^\\s*$" (line-string owner))
-          (loop
-            (unless (line-offset owner -1)
-              (return-from %org-footnote-definition-paragraph-boundary nil))
-            (when (point< owner content-start)
-              (return-from %org-footnote-definition-paragraph-boundary nil))
-            (unless (cl-ppcre:scan "^\\s*$" (line-string owner))
-              (return))))
-        (with-point ((start owner)
-                     (last owner))
-          (loop
-            (with-point ((previous start))
-              (unless (and (line-offset previous -1)
-                           (not (point< previous content-start))
-                           (not (cl-ppcre:scan
-                                 "^\\s*$" (line-string previous))))
-                (return))
-              (move-point start previous)))
-          (when (same-line-p start content-start)
-            (move-point start content-start))
-          (loop
-            (with-point ((next last))
-              (unless (and (line-offset next 1)
-                           (point< next content-end)
-                           (not (cl-ppcre:scan
-                                 "^\\s*$" (line-string next))))
-                (return))
-              (move-point last next)))
-          (let* ((core-end (%org-line-after last))
-                 (outer-end (%org-expand-blank-lines core-end)))
-            (when (point< content-end core-end)
-              (move-point core-end content-end))
-            (when (point< content-end outer-end)
-              (move-point outer-end content-end))
-            (%make-org-boundary
-             (copy-point start :temporary) outer-end
-             (copy-point start :temporary) core-end
-             :character :paragraph)))))))
+    (%org-contained-paragraph-boundary
+     origin
+     (%org-boundary-inner-start definition)
+     (%org-boundary-inner-end definition)
+     (%org-boundary-start definition))))
+
+(defun %org-footnote-definition-block-element (origin block definition)
+  "Return BLOCK or its supported recursive paragraph child."
+  (let ((block (%org-boundary-affiliated-prefix
+                block (%org-boundary-inner-start definition))))
+    (if (and (%org-greater-block-boundary-p block)
+             (%org-boundary-inner-start block)
+             (%org-boundary-inner-end block)
+             (%org-point-in-half-open-range-p
+              origin (%org-boundary-inner-start block)
+              (%org-boundary-inner-end block)))
+        (or (%org-contained-paragraph-boundary
+             origin (%org-boundary-inner-start block)
+             (%org-boundary-inner-end block))
+            (%org-clamp-child-boundary block definition origin))
+        (%org-clamp-child-boundary block definition origin))))
 
 (defun %org-footnote-definition-element-at-point (origin definition)
   "Return DEFINITION or its supported child element at ORIGIN."
-  (or (%org-footnote-definition-paragraph-boundary origin definition)
+  (or (%org-footnote-affiliated-child-boundary origin definition)
+      (alexandria:when-let ((block (%org-block-boundary-at origin)))
+        (%org-footnote-definition-block-element origin block definition))
+      (alexandria:when-let ((drawer (%org-drawer-boundary-at origin)))
+        (%org-clamp-child-boundary
+         (%org-drawer-element-at-point origin drawer) definition origin))
+      (alexandria:when-let ((table (%org-table-element-boundary origin)))
+        (when (eq (%org-boundary-node-type table) :table)
+          (setf table (%org-boundary-affiliated-prefix
+                       table (%org-boundary-inner-start definition))))
+        (%org-clamp-child-boundary table definition origin))
+      (%org-clamp-child-boundary
+       (%org-list-element-boundary origin) definition origin)
+      (%org-clamp-child-boundary
+       (%org-postblank-element-boundary origin) definition origin)
+      (%org-footnote-definition-paragraph-boundary origin definition)
       definition))
 
 (defun %org-paragraph-boundary (origin)
@@ -1939,11 +2112,11 @@ item."
        (%org-drawer-paragraph-boundary origin drawer)))))
 
 (defun %org-element-at-point (origin)
-  (or (%org-block-boundary-at origin)
-      (and (not (%org-unclosed-block-at-p origin))
-           (alexandria:if-let
-               ((definition (%org-footnote-definition-boundary-at origin)))
-             (%org-footnote-definition-element-at-point origin definition)
+  (and (not (%org-unclosed-block-at-p origin))
+       (alexandria:if-let
+           ((definition (%org-footnote-definition-boundary-at origin)))
+         (%org-footnote-definition-element-at-point origin definition)
+         (or (%org-block-boundary-at origin)
              (alexandria:if-let ((drawer (%org-drawer-boundary-at origin)))
                (%org-drawer-element-at-point origin drawer)
                (or (and (org-heading-line-p origin)
@@ -2049,12 +2222,44 @@ item."
         (definition (%org-footnote-definition-boundary-at origin)))
     (when definition
       (setf (%org-boundary-kind definition) :line)
-      (return-from %org-greater-chain
-        (append
-         (list definition)
-         (alexandria:when-let ((section (%org-section-boundary origin)))
-           (list section))
-         (%org-heading-ancestors origin))))
+      (multiple-value-bind (list-context item text-column)
+          (%org-list-point-context origin)
+        (declare (ignore text-column))
+        (let* ((affiliated
+                 (%org-footnote-affiliated-child-boundary origin definition))
+               (table (%org-table-boundary origin))
+               (local
+                 (cond
+                   (drawer
+                    (setf (%org-boundary-kind drawer) :line)
+                    (list (%org-clamp-child-boundary drawer definition)))
+                   (list-context
+                    (mapcar
+                     (lambda (boundary)
+                       (%org-clamp-child-boundary boundary definition))
+                     (%org-list-greater-chain item)))
+                   ((and affiliated
+                         (or (eq (%org-boundary-node-type affiliated) :table)
+                             (%org-greater-block-boundary-p affiliated)))
+                    (setf (%org-boundary-kind affiliated) :line)
+                    (list affiliated))
+                   ((%org-greater-block-boundary-p block)
+                    (setf block (%org-boundary-affiliated-prefix
+                                block (%org-boundary-inner-start definition))
+                          (%org-boundary-kind block) :line)
+                    (list (%org-clamp-child-boundary block definition)))
+                   (table
+                    (setf table (%org-boundary-affiliated-prefix
+                                 table (%org-boundary-inner-start definition))
+                          (%org-boundary-kind table) :line)
+                    (list (%org-clamp-child-boundary table definition))))))
+          (return-from %org-greater-chain
+            (append
+             (remove nil local)
+             (list definition)
+             (alexandria:when-let ((section (%org-section-boundary origin)))
+               (list section))
+             (%org-heading-ancestors origin))))))
     (when drawer
       (setf (%org-boundary-kind drawer) :line)
       (return-from %org-greater-chain

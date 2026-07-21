@@ -3018,9 +3018,14 @@ unsupported or ambiguous inline/cell syntax fail object requests closed;
 empty leaf-item or inner-subtree ranges abort. These aborts occur before mutation and
 preserve text, registers, and an existing Visual selection. Type-mismatched
 inner end markers remain literal inside an otherwise matched flat block.
-Affiliated footnote definitions and non-paragraph nested definition children
-are not yet modeled. Footnote-looking syntax that crosses an Org paragraph
-separator fails closed instead of falling through to a paragraph object.
+Footnote definitions retain their own marker and trailing-blank ownership while
+delegating to bounded paragraph, affiliated table, nested list, recursive block,
+matched drawer, CLOCK, and inline-object children. Child ranges are clamped to
+the definition contents, and counted greater-element ancestry climbs from a
+nested list child through its list parents to the definition. Definition child
+types outside this bounded set remain unsupported. Footnote-looking syntax that
+crosses an Org paragraph separator fails closed instead of falling through to a
+paragraph object.
 
 The exact
 `TODO → NEXT → WAITING → HOLD → SOMEDAY | DONE → CANCELLED`
@@ -3068,12 +3073,14 @@ bindings with delete/yank operators over
 opaque/nested markup, bracket/plain links, timestamps, table cells/rules and
 formula ownership, scripts, same-line and bounded multiline LaTeX
 fragments/macros, same-line and multiline footnote references, definition
-marker/body/post-blank ownership and ancestry, whitespace entities, explicit
-line breaks, malformed-dollar fallback, paragraphs, headlines, flat leaf
+marker/body/post-blank ownership, affiliated tables, nested lists, recursive
+blocks, matched drawers/CLOCK children, and counted ancestry, whitespace
+entities, explicit line breaks, malformed-dollar fallback, paragraphs, headlines, flat leaf
 and recursive blocks,
 point-sensitive and empty lists, owned post-blank, and subtrees. It verifies
-object/element count anchors, footnote count traversal, adjacent and empty
-definitions, nested markup, paragraph splitting, malformed footnote refusal,
+object/element count anchors, footnote count traversal, adjacent, empty, and
+structurally rich definitions, would-be drawer splitting, nested markup,
+paragraph splitting, malformed footnote refusal,
 source-block opacity, unsupported-syntax barriers, subtree
 ancestry count, character/line registers, representative one-step undo,
 normal-state aborts (including nested and opaque unsupported syntax), and exact

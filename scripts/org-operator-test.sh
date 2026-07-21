@@ -543,6 +543,29 @@ write_fixtures() {
     '' \
     '' \
     'AFTER' >"$WORKDIR/footnote-definition.org"
+  printf '%s\n' \
+    '[fn:rich] Intro' \
+    '#+name: tbl' \
+    '| a | b |' \
+    '- one' \
+    '  - child' \
+    '#+begin_quote' \
+    'quoted' \
+    '#+end_quote' \
+    ':LOGBOOK:' \
+    'CLOCK: [2026-07-21 Tue 09:00]' \
+    ':END:' \
+    '' \
+    '' \
+    'AFTER' >"$WORKDIR/footnote-definition-children.org"
+  printf '%s\n' \
+    '[fn:one] Intro' \
+    ':LOGBOOK:' \
+    '[fn:two] Second' \
+    ':END:' \
+    '' \
+    '' \
+    'AFTER' >"$WORKDIR/footnote-definition-split-drawer.org"
   printf '%s\n' '[fn:one] First' '[fn:two] Second' '' '' 'AFTER' \
     >"$WORKDIR/footnote-next-definition.org"
   printf '%s\n' '[fn:empty]' '' '' 'AFTER' \
@@ -3056,6 +3079,147 @@ if start_case footnote-definition "$WORKDIR/footnote-definition.org" \
       "$CASE_SESSION" \
       'register=[fn:note] First *bold*\ncontinuation\n\n  second paragraph\nsecond continuation\n\n\n register-type=char' \
       'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case footnote-definition-children \
+     "$WORKDIR/footnote-definition-children.org" 'fn:rich.*Intro'; then
+  send_keys "$CASE_SESSION" Escape g g 0 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a e; then
+    assert_state footnote-definition-affiliated-ae \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=#+name: tbl\n| a | b |\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y i e; then
+    assert_state footnote-definition-affiliated-ie \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=| a | b |\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a r; then
+    assert_state footnote-definition-table-ar \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=#+name: tbl\n| a | b |\n register-type=line' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y i r; then
+    assert_state footnote-definition-table-ir \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=| a | b |\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 3 j 2 l
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a e; then
+    assert_state footnote-definition-list-ae \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=one\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 3 j 2 l
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a r; then
+    assert_state footnote-definition-list-ar \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=- one\n  - child\n register-type=line' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 3 j 2 l
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y i r; then
+    assert_state footnote-definition-list-ir \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=one\n  - child\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 4 j 4 l
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a r; then
+    assert_state footnote-definition-child-ar \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=  - child\n register-type=line' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 4 j 4 l
+  if operate_and_record footnote-definition-children "$CASE_SESSION" \
+       5 y a r; then
+    assert_state footnote-definition-child-parent-count \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=[fn:rich] Intro\n#+name: tbl\n| a | b |\n- one\n  - child\n#+begin_quote\nquoted\n#+end_quote\n:LOGBOOK:\nCLOCK: [2026-07-21 Tue 09:00]\n:END:\n\n\n register-type=line' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 6 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a e; then
+    assert_state footnote-definition-quote-body-ae \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=quoted\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 6 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a r; then
+    assert_state footnote-definition-quote-ar \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=#+begin_quote\nquoted\n#+end_quote\n register-type=line' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 6 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y i r; then
+    assert_state footnote-definition-quote-ir \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=quoted\n register-type=char' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 8 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a e; then
+    assert_state footnote-definition-drawer-ae \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=:LOGBOOK:\nCLOCK: [2026-07-21 Tue 09:00]\n:END:\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 8 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y i e; then
+    assert_state footnote-definition-drawer-ie \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=CLOCK: [2026-07-21 Tue 09:00]\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 9 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a e; then
+    assert_state footnote-definition-clock-ae \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=CLOCK: [2026-07-21 Tue 09:00]\n register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 9 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y i e; then
+    assert_state footnote-definition-clock-ie \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=CLOCK: [2026-07-21 Tue 09:00] register-type=char' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 9 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y a r; then
+    assert_state footnote-definition-drawer-ar \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=:LOGBOOK:\nCLOCK: [2026-07-21 Tue 09:00]\n:END:\n register-type=line' \
+      'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 9 j
+  if operate_and_record footnote-definition-children "$CASE_SESSION" y i r; then
+    assert_state footnote-definition-drawer-ir \
+      footnote-definition-children "$CASE_SESSION" \
+      'register=CLOCK: [2026-07-21 Tue 09:00]\n register-type=char' \
+      'modified=no'
+  fi
+  stop_case "$CASE_SESSION"
+fi
+
+if start_case footnote-definition-split-drawer \
+     "$WORKDIR/footnote-definition-split-drawer.org" 'fn:one.*Intro'; then
+  send_keys "$CASE_SESSION" Escape g g 0 j
+  if operate_and_record footnote-definition-split-drawer \
+       "$CASE_SESSION" y a r; then
+    assert_state footnote-definition-split-drawer-ar \
+      footnote-definition-split-drawer "$CASE_SESSION" \
+      'register=[fn:one] Intro\n:LOGBOOK:\n register-type=line' 'modified=no'
+  fi
+  send_keys "$CASE_SESSION" Escape g g 0 2 j
+  if operate_and_record footnote-definition-split-drawer \
+       "$CASE_SESSION" y a e; then
+    assert_state footnote-definition-split-drawer-ae \
+      footnote-definition-split-drawer "$CASE_SESSION" \
+      'register=[fn:two] Second\n:END:\n\n\n register-type=char' 'modified=no'
   fi
   stop_case "$CASE_SESSION"
 fi
