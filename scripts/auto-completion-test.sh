@@ -77,6 +77,7 @@ run_fixture_command() {
     lem-yath-test-auto-corfu-middle-setup) key=r ;;
     lem-yath-test-auto-async-setup) key=a ;;
     lem-yath-test-auto-dabbrev-setup) key=d ;;
+    lem-yath-test-auto-manual-tab-setup) key=t ;;
     lem-yath-test-auto-corfu-lisp-setup) key=l ;;
     lem-yath-test-auto-middle-setup) key=m ;;
     lem-yath-test-auto-primary-setup) key=p ;;
@@ -152,6 +153,49 @@ if run_fixture_command lem-yath-test-auto-completion-static-checks &&
   pass static-contracts "threshold, rows, Corfu bindings, change groups, and empty LSP passed"
 else
   fail static-contracts "static automatic-completion contracts failed"
+fi
+
+# `tab-always-indent' is `complete': generic language-mode Tab first indents,
+# then manually opens the configured mode/Cape chain only when indentation
+# changed neither the buffer nor point.
+if run_fixture_command lem-yath-test-auto-manual-tab-setup &&
+   wait_report '^SETUP manual-tab$' 10 && enter_insert; then
+  tmux_cmd send-keys -t "$session" -l al
+  lem_keys "$session" Tab
+  if lem_wait_for "$session" 'alphaCandidate[0-9][0-9]' 10 >/dev/null; then
+    lem_keys "$session" F5
+    manual_tab_state=$(grep '^STATE context ' "$LEM_YATH_AUTO_COMPLETION_REPORT" | tail -n 1)
+    if grep -q 'automatic=NIL max=10 cycle=NIL items=12 .*buffer=al' \
+         <<<"$manual_tab_state"; then
+      pass manual-tab-cape \
+        'Tab opened the ordered Cape fallback below the automatic threshold'
+    else
+      fail manual-tab-cape "manual completion state diverged: $manual_tab_state"
+    fi
+    lem_keys "$session" C-g
+  else
+    fail manual-tab-cape 'Tab did not open the Cape dabbrev candidates'
+  fi
+else
+  fail manual-tab-cape-setup 'could not prepare manual Tab completion'
+fi
+
+if run_fixture_command lem-yath-test-auto-manual-tab-setup &&
+   wait_report '^SETUP manual-tab$' 10 && enter_insert; then
+  tmux_cmd send-keys -t "$session" -l '  al'
+  lem_keys "$session" Tab
+  sleep 0.4
+  lem_keys "$session" F7
+  if wait_report '^STATE none buffer=al timer=NIL$' 5 &&
+     ! lem_capture "$session" | grep -q 'alphaCandidate'; then
+    pass manual-tab-indent-first \
+      'Tab corrected indentation without also opening completion'
+  else
+    fail manual-tab-indent-first \
+      'an indentation-changing Tab also opened or retained completion'
+  fi
+else
+  fail manual-tab-indent-setup 'could not prepare indentation-first Tab'
 fi
 
 # M-Tab is Corfu expansion, not ordinary Tab acceptance: the implicit

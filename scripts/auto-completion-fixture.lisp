@@ -6,6 +6,17 @@
 (define-major-mode lem-yath-auto-other-mode ()
     (:name "AutoOther"))
 
+(defun auto-test-zero-indent (point)
+  (declare (ignore point))
+  0)
+
+(define-major-mode lem-yath-auto-language-test-mode
+    lem/language-mode:language-mode
+    (:name "AutoLanguage"
+     :keymap *lem-yath-auto-language-test-mode-keymap*)
+  (setf (variable-value 'calc-indent-function)
+        'auto-test-zero-indent))
+
 (defvar *auto-test-callbacks* (make-hash-table :test 'equal))
 (defvar *auto-test-primary-label* "primaryOnlyCandidate")
 (defvar *auto-test-origin-buffer* nil)
@@ -84,6 +95,17 @@
                          'lem-yath-auto-other-mode
                          "")
   (auto-test-report "SETUP dabbrev"))
+
+(define-command lem-yath-test-auto-manual-tab-setup () ()
+  (auto-test-reset-current-buffer)
+  (change-buffer-mode (current-buffer) 'lem-yath-auto-language-test-mode)
+  (setf (variable-value 'lem/language-mode:completion-spec
+                        :buffer (current-buffer))
+        nil)
+  (auto-test-fill-buffer "*auto-completion-source*"
+                         'lem-yath-auto-language-test-mode
+                         (auto-test-dabbrev-source-text))
+  (auto-test-report "SETUP manual-tab"))
 
 (define-command lem-yath-test-auto-middle-setup () ()
   (auto-test-reset-current-buffer)
@@ -1292,6 +1314,8 @@
   "C-c z a" 'lem-yath-test-auto-async-setup)
 (define-key lem-vi-mode:*normal-keymap*
   "C-c z d" 'lem-yath-test-auto-dabbrev-setup)
+(define-key lem-vi-mode:*normal-keymap*
+  "C-c z t" 'lem-yath-test-auto-manual-tab-setup)
 (define-key lem-vi-mode:*normal-keymap*
   "C-c z l" 'lem-yath-test-auto-corfu-lisp-setup)
 (define-key lem-vi-mode:*normal-keymap*

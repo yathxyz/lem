@@ -228,10 +228,11 @@ directory already exists."
             (string-upcase word)))
       word))
 
-(defun auto-completion-dabbrev-items (point)
+(defun auto-completion-dabbrev-items
+    (point &optional (minimum-length *auto-completion-prefix-length*))
   (multiple-value-bind (start end prefix)
       (auto-completion-dabbrev-bounds point)
-    (when (>= (length prefix) *auto-completion-prefix-length*)
+    (when (>= (length prefix) minimum-length)
       (stable-sort
        (mapcar
         (lambda (word)
@@ -324,9 +325,12 @@ directory already exists."
 (defun auto-completion-primary-spec (&optional (buffer (current-buffer)))
   (variable-value 'lem/language-mode:completion-spec :buffer buffer))
 
-(defun auto-completion-provider (&optional (point (current-point)))
+(defun auto-completion-provider
+    (&optional (point (current-point)) manual-p)
   (or (auto-completion-primary-spec (point-buffer point))
-      (let ((dabbrev-items (auto-completion-dabbrev-items point)))
+      (let ((dabbrev-items
+              (auto-completion-dabbrev-items
+               point (if manual-p 1 *auto-completion-prefix-length*))))
         (if dabbrev-items
             (lem/completion-mode:make-completion-spec
              (lambda (ignored-point)
@@ -336,6 +340,41 @@ directory already exists."
             (lem/completion-mode:make-completion-spec
              #'auto-completion-file-items
              :test-function #'auto-completion-file-input-valid-p)))))
+
+(defun auto-completion-run-manual ()
+  "Start configured mode/Cape completion without the automatic threshold."
+  (lem/completion-mode:run-completion
+   (auto-completion-provider (current-point) t)
+   :max-display-items *auto-completion-max-display-items*
+   :cycle nil))
+
+(define-command lem-yath-indent-line-and-complete () ()
+  "Indent first, then complete when indentation changed neither text nor point.
+
+This is the effective `tab-always-indent' `complete' path.  Lem's stock
+language command only checks point and only invokes the mode-local provider;
+the configured Emacs command also observes buffer mutation and reaches the
+ordered Cape fallback when the mode provider is absent."
+  (let* ((point (current-point))
+         (old-position (position-at-point point))
+         (old-tick (buffer-modified-tick (current-buffer))))
+    (if (variable-value 'calc-indent-function :buffer (current-buffer))
+        (let ((charpos (point-charpos point)))
+          (handler-case (indent-line point)
+            (editor-condition ()
+              (line-offset point 0 charpos)))
+          (when (and (= old-position (position-at-point point))
+                     (= old-tick
+                        (buffer-modified-tick (current-buffer))))
+            (auto-completion-run-manual)))
+        (auto-completion-run-manual))))
+
+;; Preserve every more-specific mode and minor-mode Tab binding.  This only
+;; replaces Lem's generic language-mode dispatcher, so Fundamental mode keeps
+;; its literal tab behavior and Org, snippets, completion, and NASM retain
+;; their own maps.
+(define-key lem/language-mode:*language-mode-keymap* "Tab"
+  'lem-yath-indent-line-and-complete)
 
 (defun auto-completion-prefix-ready-p (point)
   (if (auto-completion-primary-spec (point-buffer point))

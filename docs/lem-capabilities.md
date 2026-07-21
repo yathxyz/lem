@@ -804,6 +804,17 @@ matches the pinned Cape case policy: an initial-cap prefix capitalizes the
 candidate, an all-caps prefix uppercases it, and a single uppercase character
 does not accidentally uppercase the whole expansion.
 
+Generic language-mode `Tab` follows the configured
+`tab-always-indent=complete` decision boundary: it first runs the mode's
+indentation function, and starts manual completion only when neither point nor
+the buffer modification tick changed. Manual completion keeps a mode-local
+provider authoritative; without one it reaches the same ordered Cape fallback
+without the automatic three-character threshold. A nonempty prefix is still
+required to keep an explicit blank-buffer Tab from scanning every word in every
+same-mode buffer. More-specific Org, snippet, active-completion, and NASM maps
+retain their own Tab behavior. The real ncurses gate proves both the short-prefix
+manual Dabbrev path and indentation-without-popup path.
+
 `lem-yath/src/orderless.lisp` filters ordinary in-buffer candidates with the
 configured portable Orderless behavior: escaped-space components, whole-query
 smart case, any-order AND matching, overlapping and repeated components,
