@@ -1705,6 +1705,7 @@
         (dotimes (index 2)
           (declare (ignore index))
           (load (merge-pathnames "src/git.lisp" source))
+          (load (merge-pathnames "src/git-log-selection.lisp" source))
           (load (merge-pathnames "src/git-bisect.lisp" source))
           (load (merge-pathnames "src/git-fetch.lisp" source))
           (load (merge-pathnames "src/git-reset.lisp" source))

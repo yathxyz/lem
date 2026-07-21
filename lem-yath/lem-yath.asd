@@ -42,6 +42,7 @@
                (:file "formatting")
                (:file "git")
                (:file "git-rebase")
+               (:file "git-log-selection")
                (:file "git-cherry-pick")
                (:file "git-bisect")
                (:file "git-fetch")

@@ -305,8 +305,10 @@
 
 (defun legit-branch-spin (checkout-p)
   "Implement Magit's ordinary spin-off or spin-out branch lifecycle."
-  (let ((current (or (legit-branch-current)
-                     (editor-error "Spin-off requires a current branch."))))
+  (let* ((current (or (legit-branch-current)
+                      (editor-error "Spin-off requires a current branch.")))
+         (selected (legit-log-selected-commits 64))
+         (from (car (last selected))))
     (alexandria:when-let
         ((name
            (legit-branch-read-new-name
@@ -316,9 +318,24 @@
              (checkout-p (or checkout-p dirty-p))
              (upstream (legit-reset-upstream current))
              (base
-               (and upstream
-                    (legit-branch-optional-output
-                     (list "merge-base" current upstream)))))
+               (cond
+                 (from
+                  (unless (legit-branch-ancestor-p from current)
+                    (editor-error
+                     "Selected spin boundary is not reachable from ~a."
+                     current))
+                  (when (and upstream
+                             (legit-branch-ancestor-p from upstream))
+                    (editor-error
+                     "Selected spin boundary is already in upstream ~a."
+                     upstream))
+                  (or (legit-branch-optional-output
+                       (list "rev-parse" (format nil "~a^" from)))
+                      (editor-error
+                       "The oldest selected commit has no parent.")))
+                 (upstream
+                  (legit-branch-optional-output
+                   (list "merge-base" current upstream))))))
         (when (and dirty-p (not requested-checkout-p))
           (message "Staying on the new branch due to uncommitted changes."))
         (legit-branch-checked-output

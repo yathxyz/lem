@@ -514,9 +514,13 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   branch/all-ref, reflog, and shortlog views while preserving Legit's two-pane
   commit preview and bounded pagination. Log buffers now retain the implemented
   Evil Collection action surface on `A/B/f/F/b/c/m/-/_/O/p/Z/z/M/'/"`; the
-  commit-aware actions default to the commit at point. Bounded page loading
-  lives on `g f`/`g b`/`g F`/`g B`, so it no longer shadows fetch, pull,
-  branch, or bisect. Evil Collection's lowercase `p`
+  commit-aware actions default to the commit at point. A forward or backward
+  Visual region whose endpoints are commit headings supplies the selected
+  commits to cherry-pick/revert and the oldest selected boundary to branch
+  spin-off/spin-out; detail rows are ignored and malformed or Block regions
+  retain the ordinary prompt. Bounded page loading lives on
+  `g f`/`g b`/`g F`/`g B`, so it no longer shadows fetch, pull, branch, or
+  bisect. Evil Collection's lowercase `p`
   opens the matching Magit push dispatch in both panes. Its
   force-with-lease/force, no-verify, dry-run, set-upstream, all-tags, and
   follow-tags arguments apply to current-branch push-remote or upstream
@@ -541,9 +545,9 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   status. Move/delete never offer the primary worktree; dirty removal requires
   explicit confirmation, locked worktrees fail closed, missing registrations
   are pruned, and moving or deleting the active linked worktree follows the
-  resulting status root. Visual commit-region spin boundaries remain an
-  explicit gap, and Git mutations remain synchronous instead of using Magit's
-  process buffers.
+  resulting status root. Log Visual regions now provide Magit's selected
+  oldest-commit spin boundary; Git mutations remain synchronous instead of
+  using Magit's process buffers.
   Stock Magit's lowercase `z` stash dispatch is available in status and
   diff panes. `- u`/`- a`
   select untracked or ignored files; `z`/`i`/`w`/`x` stash both layers, only
@@ -581,7 +585,8 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   strategy, GPG-sign, and signoff arguments; clean edited reverts use Legit's
   native prefilled commit buffer, while conflicts switch `_` to
   continue/skip/confirmed-abort actions. One prompt accepts up to 64
-  comma-separated commits; visual commit-region selection remains a gap.
+  comma-separated commits, while a valid log Visual region reverts its commit
+  headings newest-first without prompting.
   Evil Collection's double-quote (`"`) subtree route is also present in both
   panes. Its `i` import menu covers prefix/message/squash plus repository add,
   fetched-commit add, merge, and pull; `e` covers prefix/annotation/branch/onto,

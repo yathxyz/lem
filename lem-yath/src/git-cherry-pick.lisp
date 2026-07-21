@@ -156,8 +156,17 @@
                             subject)
                     hash)))))
 
-(defun legit-cherry-read-commits (prompt)
-  "Read one or comma-separated verified commits, defaulting to point."
+(defun legit-cherry-read-commits (prompt &key (allow-region-p t))
+  "Read verified commits, preferring a valid Magit-style commit region."
+  (alexandria:when-let
+      ((selected
+         (and allow-region-p
+              (legit-log-selected-commits
+               *legit-cherry-pick-commit-limit*))))
+    ;; Git applies commits in argv order.  Logs display newest first, while
+    ;; Magit reverses the selected section values for cherry operations.
+    (return-from legit-cherry-read-commits
+      (mapcar #'legit-cherry-normalize-commit (reverse selected))))
   (let* ((default (text-property-at (current-point) :commit-hash))
          (candidates (legit-cherry-pick-candidates))
          (labels (mapcar #'car candidates))
@@ -651,7 +660,10 @@
 
 (defun legit-cherry-squash ()
   (legit-cherry-assert-clean-worktree)
-  (alexandria:when-let ((commit (car (legit-cherry-read-commits "Squash: "))))
+  (alexandria:when-let
+      ((commit
+         (car (legit-cherry-read-commits
+               "Squash: " :allow-region-p nil))))
     (multiple-value-bind (output error-output status)
         (legit-cherry-run-program (list "merge" "--squash" commit)
                                   :editor "true")

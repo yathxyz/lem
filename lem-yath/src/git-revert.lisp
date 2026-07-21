@@ -194,7 +194,14 @@
        nil))))
 
 (defun legit-revert-read-commits (prompt)
-  "Read one or comma-separated verified commits, defaulting to point."
+  "Read verified commits, preferring a valid Magit-style commit region."
+  (alexandria:when-let
+      ((selected
+         (legit-log-selected-commits *legit-revert-commit-limit*)))
+    ;; Revert intentionally retains newest-to-oldest display order, matching
+    ;; Magit's direct use of the selected section values.
+    (return-from legit-revert-read-commits
+      (mapcar #'legit-reset-normalize-revision selected)))
   (let* ((default (text-property-at (current-point) :commit-hash))
          (candidates (legit-cherry-pick-candidates))
          (labels (mapcar #'car candidates))

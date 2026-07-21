@@ -588,8 +588,13 @@ The bounded Legit log keeps Magit's implemented inherited action dispatches:
 `A/B/f/F/b/c/m/-/_/O/p/Z/z/M/'/"` continue to open cherry-pick, bisect,
 fetch, pull, branch, commit, merge, revert, reset, push, worktree, stash,
 remote, submodule, and subtree workflows. Commit-aware readers use the hash at
-point as their default. Extra bounded pagination is namespaced under
-`g f`/`g b`/`g F`/`g B` instead of displacing those effective bindings.
+point as their default. In a log, a forward or backward Visual region whose
+endpoints are commit headings supplies sibling commits in display order;
+detail rows are ignored, while malformed and Visual Block regions fall back to
+the ordinary prompt. Cherry actions reverse that newest-first display order,
+revert retains it, and branch spin uses the oldest selected commit as its reset
+boundary. Extra bounded pagination is namespaced under `g f`/`g b`/`g F`/`g B`
+instead of displacing those effective bindings.
 
 Status and diff panes expose the complete normally visible Magit `A`
 cherry-pick dispatch. `- m`, `= s`, `- F`, `- x`, `- e`, `- S`, and `+ s`
@@ -601,8 +606,9 @@ An active sequence changes the same map to continue, abort, and skip. Moving
 commits copies the destination first, verifies that the source tip has not
 moved, then resets tip commits or rebases away interior commits; spinoff and
 harvest restore the requested destination checkout only after source cleanup.
-Lem accepts up to 64 comma-separated commits instead of Magit's visual commit
-region, requires a completely clean repository before cross-branch moves,
+Lem accepts up to 64 comma-separated prompted commits and the equivalent
+bounded Visual commit region in log views, requires a completely clean
+repository before cross-branch moves,
 refuses topology-unsafe source removal of merge commits, and runs synchronously
 without Magit's process buffer. If source cleanup itself conflicts, its real
 Git rebase is retained for manual completion rather than hidden or rolled back.
@@ -698,8 +704,9 @@ configures both upstream and push remote, remote rename preserves a divergent
 remote tip, unmerged deletion requires confirmation, deleting the checked-out
 branch first switches or detaches, and a dirty spin-out becomes a checked-out
 spin-off without losing edits. The recurse-submodules checkout argument is
-retained. Magit's visual commit-region spin boundary remains outside this port;
-execution is bounded and synchronous rather than process-buffer based.
+retained. A valid log Visual region supplies Magit's oldest selected spin
+boundary; execution is bounded and synchronous rather than process-buffer
+based.
 
 The configuration leaves Evil Collection's optional `z`-for-folds remap
 disabled, so stock Magit lowercase `z` remains the stash dispatch and uppercase

@@ -830,6 +830,33 @@ porcelain_cherry_success() {
     porcelain_cherry_clean
 }
 
+porcelain_cherry_region_picked() {
+  [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-region.txt")" = \
+    $'region one\nregion two' ] &&
+    [ 'cherry-region-one' = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        log -1 --format=%s HEAD~1)" ] &&
+    [ 'cherry-region-two' = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        log -1 --format=%s HEAD)" ] &&
+    [ "$cherry_main_head" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD~2)" ] &&
+    porcelain_cherry_clean
+}
+
+porcelain_cherry_region_reverted() {
+  [ ! -e "$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-region.txt" ] &&
+    [ 4 -eq "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+      rev-list --count "$cherry_main_head..HEAD")" ] &&
+    [ 'Revert "cherry-region-two"' = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        log -1 --format=%s HEAD~1)" ] &&
+    [ 'Revert "cherry-region-one"' = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        log -1 --format=%s HEAD)" ] &&
+    porcelain_cherry_clean
+}
+
 porcelain_cherry_applied() {
   [ "$cherry_success_head" = \
     "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
@@ -1049,6 +1076,27 @@ prepare_porcelain_cherry_fixture() {
   git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-apply-source \
     '2001-01-12T00:00:00+0000' || return 1
   cherry_apply_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
+    "$target_branch" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -qc \
+    test-cherry-region "$cherry_main_head" || return 1
+  printf 'region one\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-region.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-region.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-region-one \
+    '2001-01-12T01:00:00+0000' || return 1
+  cherry_region_one_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+    rev-parse HEAD) || return 1
+  printf 'region two\n' \
+    >>"$LEM_YATH_VCS_PORCELAIN_ROOT/cherry-region.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    cherry-region.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" cherry-region-two \
+    '2001-01-12T02:00:00+0000' || return 1
+  cherry_region_two_hash=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
     rev-parse HEAD) || return 1
 
   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" switch -q \
@@ -1800,6 +1848,21 @@ porcelain_branch_spinoff_complete() {
     "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
 }
 
+porcelain_branch_spinoff_region_complete() {
+  porcelain_branch_current_is branch-spun-off-region &&
+    [ "$branch_spinoff_region_tip" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD)" ] &&
+    [ "$branch_spinoff_region_keep" = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        rev-parse refs/heads/branch-spinoff-region-source)" ] &&
+    [ 'origin/spin-base' = \
+      "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
+        for-each-ref --format='%(upstream:short)' \
+        refs/heads/branch-spun-off-region)" ] &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --quiet &&
+    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" diff --cached --quiet
+}
+
 porcelain_branch_spinout_complete() {
   porcelain_branch_current_is branch-spinout-source &&
     [ "$merge_main_hash" = \
@@ -1915,6 +1978,34 @@ prepare_porcelain_branch_fixture() {
     '2001-06-04T00:00:00+0000' || return 1
   branch_spinoff_tip=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
     rev-parse HEAD) || return 1
+
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
+    branch-spinoff-region-source "$merge_main_hash" || return 1
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" branch \
+    --set-upstream-to=origin/spin-base \
+    branch-spinoff-region-source >/dev/null || return 1
+  printf 'region keep\n' \
+    >"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-spinoff-region.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    branch-spinoff-region.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" branch-spinoff-region-keep \
+    '2001-06-03T01:00:00+0000' || return 1
+  branch_spinoff_region_keep=$("$git_bin" \
+    -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD) || return 1
+  printf 'region move one\n' \
+    >>"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-spinoff-region.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    branch-spinoff-region.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" branch-spinoff-region-one \
+    '2001-06-03T02:00:00+0000' || return 1
+  printf 'region move two\n' \
+    >>"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-spinoff-region.txt"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- \
+    branch-spinoff-region.txt || return 1
+  git_commit "$LEM_YATH_VCS_PORCELAIN_ROOT" branch-spinoff-region-two \
+    '2001-06-03T03:00:00+0000' || return 1
+  branch_spinoff_region_tip=$("$git_bin" \
+    -C "$LEM_YATH_VCS_PORCELAIN_ROOT" rev-parse HEAD) || return 1
 
   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
     branch-spinout-source "$merge_main_hash" || return 1
@@ -4439,6 +4530,66 @@ else
     "$porcelain_session"
 fi
 
+cherry_region_prompted=0
+send_keys "$porcelain_session" l o
+if lem_wait_for "$porcelain_session" 'Log revision\(s\):' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" test-cherry-region \
+    'Log revision\(s\):'
+fi
+if lem_wait_for "$porcelain_session" 'cherry-region-two' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  # Select from the older row back toward the newer row.  This proves that
+  # commit collection is independent of Visual selection direction.
+  send_keys "$porcelain_session" j V k A A
+fi
+if lem_wait_for "$porcelain_session" 'Cherry-pick:' 2 >/dev/null 2>&1; then
+  cherry_region_prompted=1
+  enter_cherry_revision "$porcelain_session" \
+    "$cherry_region_one_hash,$cherry_region_two_hash"
+fi
+if ((cherry_region_prompted == 0)) &&
+   wait_until "$WAIT_TIMEOUT" porcelain_cherry_region_picked; then
+  pass legit-cherry-visual-region \
+    'reversed Visual A A picked dependent commits oldest-first without prompting'
+else
+  fail legit-cherry-visual-region \
+    'Visual A A prompted, lost selection direction, or replayed commits out of order' \
+    "$porcelain_session"
+fi
+
+cherry_region_prompted=0
+send_keys "$porcelain_session" l l
+if lem_wait_for "$porcelain_session" 'cherry-region-two' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" j V k _
+fi
+if lem_wait_for "$porcelain_session" '\[Revert\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" - E _
+fi
+if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' 2 \
+     >/dev/null 2>&1; then
+  cherry_region_prompted=1
+  enter_completion_prompt_value "$porcelain_session" \
+    "$cherry_region_two_hash,$cherry_region_one_hash" 'Revert commit\(s\):'
+fi
+if ((cherry_region_prompted == 0)) &&
+   wait_until "$WAIT_TIMEOUT" porcelain_cherry_region_reverted; then
+  pass legit-revert-visual-region \
+    'reversed Visual _ reverted dependent commits newest-first without prompting'
+else
+  fail legit-revert-visual-region \
+    'Visual _ prompted, lost selection direction, or reverted commits out of order' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+  "$cherry_main_head"
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" clean -fq -- \
+  cherry-region.txt
+send_keys "$porcelain_session" g
+
 send_keys "$porcelain_session" A A
 if lem_wait_for "$porcelain_session" 'Cherry-pick:' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6159,6 +6310,33 @@ if wait_until "$WAIT_TIMEOUT" porcelain_branch_current_is branch-created &&
 else
   fail legit-branch-delete-current \
     'current-branch deletion lost its selected safe checkout boundary' \
+    "$porcelain_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
+  branch-spinoff-region-source
+branch_region_prompted=0
+send_keys "$porcelain_session" g l l
+if lem_wait_for "$porcelain_session" 'branch-spinoff-region-two' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" j V k b
+fi
+if lem_wait_for "$porcelain_session" '\[Branch\]' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  send_keys "$porcelain_session" s
+fi
+if lem_wait_for "$porcelain_session" 'Spin off branch:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  branch_region_prompted=1
+  enter_prompt_value "$porcelain_session" branch-spun-off-region
+fi
+if ((branch_region_prompted == 1)) &&
+   wait_until "$WAIT_TIMEOUT" porcelain_branch_spinoff_region_complete; then
+  pass legit-branch-spinoff-visual-region \
+    'reversed Visual b s moved only the two selected commits and retained their parent'
+else
+  fail legit-branch-spinoff-visual-region \
+    'Visual b s lost its oldest selected boundary or reset the entire unpushed range' \
     "$porcelain_session"
 fi
 
