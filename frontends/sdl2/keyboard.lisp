@@ -136,7 +136,11 @@
 (defun send-key-event (key)
   (if (lem:match-key key :ctrl t :sym "]")
       (lem:send-abort-event (lem:find-editor-thread) nil)
-      (lem:send-event key)))
+      ;; t0: the SDL key event is now in hand -- this frontend's closest
+      ;; analogue of ncurses' "tty bytes read".
+      (lem:send-input-event key
+                            (when (lem:pipeline-recording-p)
+                              (lem:pipeline-now)))))
 
 ;; linux
 (defun modifier-is-accept-text-input-p (modifier)

@@ -111,7 +111,7 @@ decomposes into attributable stages:
 
 | Stage | Point in code |
 |-------|---------------|
-| t₀ input arrives | frontend input thread: tty byte(s) read (ncurses) or key RPC received (lem-server/webview) |
+| t₀ input arrives | frontend input thread: tty byte(s) read (ncurses), key RPC received (lem-server/webview), or SDL key event dequeued (sdl2) |
 | t₁ event enqueued | `send-event` into the editor queue |
 | t₂ event dequeued | main loop picks it up |
 | t₃ command done | command dispatch returns |
