@@ -120,6 +120,30 @@ else
   fail inherited-tags 'm did not preserve Org inherited-tag semantics'
 fi
 
+send_keys C-c z e
+wait_report '^EDGE kind=TAGS query="parent|blue-parent"' || true
+edge_ok=1
+grep -q '^EDGE kind=TAGS query="parent|blue-parent" rows=5 names=("Parent query sentinel" "Child query sentinel" "Done query sentinel" "Next query sentinel" "Plain tagged query sentinel")' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=TAGS query="{\^bl}" rows=4 ' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=TAGS query="OWNER={Ada\.\*}" rows=1 names=("Parent query sentinel")' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=TAGS query="MISSING=0" rows=6 ' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=TAGS query="MISSING=\*0" rows=0 names=NIL' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=TAGS query="LEVEL>=2" rows=2 names=("Child query sentinel" "Done query sentinel")' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=TAGS query="TODO=\\"DONE\\"" rows=1 names=("Done query sentinel")' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=TAGS query="blue/-DONE" rows=3 names=("Child query sentinel" "Next query sentinel" "Plain tagged query sentinel")' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=TAGS query="blue/TODO|DONE" rows=2 names=("Child query sentinel" "Done query sentinel")' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=SEARCH query=":+uni" rows=0 names=NIL' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=SEARCH query=":+unique" rows=2 names=("Next query sentinel" "Plain body query sentinel")' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=SEARCH query="+{uni\.\.e} -ordinary" rows=1 names=("Next query sentinel")' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=SEARCH query="+\\"unique beta\\"" rows=2 ' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=SEARCH query="!completed body" rows=0 names=NIL' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+grep -q '^EDGE kind=SEARCH query="UNIQUE BETA" rows=2 ' "$LEM_YATH_AGENDA_QUERY_REPORT" || edge_ok=0
+if [ "$edge_ok" = 1 ]; then
+  pass matcher-edges 'Org 9.8.5 OR/negative/regexp/starred/property and search modifiers agree'
+else
+  fail matcher-edges 'one differential Org 9.8.5 matcher/search edge diverged'
+fi
+
 send_keys q
 lem_wait_for "$session" 'Parent query sentinel' 10 >/dev/null || true
 if run_query m 'SCORE>=20' 'Headlines with TAGS match' ; then
@@ -240,15 +264,31 @@ sleep 0.15
 send_text 'occur needle'
 send_keys Enter
 if lem_wait_for "$session" 'beta occur needle' 30 >/dev/null; then
+  send_keys g j
+  sleep 0.15
   send_keys Enter
-  if lem_wait_for "$session" 'Child query sentinel' 15 >/dev/null &&
-     lem_capture "$session" | grep -q 'beta occur needle'; then
+  if lem_wait_for "$session" 'beta occur needle' 15 >/dev/null &&
+     lem_capture "$session" | grep -qE 'query\.org.*12:5'; then
     pass multi-occur '/ reused source-backed Occur and Return visited the match'
   else
     fail multi-occur 'Return did not visit the physical Org match'
   fi
 else
   fail multi-occur '/ did not search all agenda file buffers'
+fi
+
+send_keys A
+send_text ' unsaved-live-sentinel'
+send_keys C-[
+lem_wait_for "$session" 'unsaved-live-sentinel' 10 >/dev/null || true
+if run_query s 'unsaved-live-sentinel' 'Search words' ; then
+  send_keys C-c z q
+  wait_report '^STATE command=SEARCH query="unsaved-live-sentinel" rows=1 ' || true
+fi
+if grep -q '^STATE command=SEARCH query="unsaved-live-sentinel" rows=1 .*Child query sentinel' "$LEM_YATH_AGENDA_QUERY_REPORT"; then
+  pass live-unsaved 's searched the immutable snapshot of a modified live Org buffer'
+else
+  fail live-unsaved 'query scan ignored or mishandled the unsaved live source'
 fi
 
 cmp -s "$work_file" "$original_file" ||

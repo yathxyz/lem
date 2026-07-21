@@ -498,9 +498,12 @@
               (buffer-list-occur-target-map sources)
             (let ((buffer
                     (buffer-list-occur-install-output
-                     sources state text pattern 0 target-map targets)))
-              (with-current-window source-window
-                (pop-to-buffer buffer :split-action :sensibly))
+                     sources state text pattern 0 target-map targets))
+                  (occur-window nil))
+              (setf occur-window
+                    (with-current-window source-window
+                      (pop-to-buffer buffer :split-action :sensibly)))
+              (switch-to-window occur-window)
               (message "Org files: ~d matches for \"~a\""
                        total-matches pattern)
               buffer))))))

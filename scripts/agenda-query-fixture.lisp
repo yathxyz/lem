@@ -34,3 +34,44 @@
 
 (define-key *lem-yath-agenda-mode-keymap* "C-c z q"
   'lem-yath-test-agenda-query-state)
+
+(defun agenda-query-test-names (items)
+  (mapcar
+   (lambda (item)
+     (multiple-value-bind (level title tags)
+         (roam-org-heading-fields (agenda-item-heading item))
+       (declare (ignore level tags))
+       title))
+   items))
+
+(define-command lem-yath-test-agenda-query-edges () ()
+  (let ((items (buffer-value (current-buffer) 'lem-yath-agenda-cached-items)))
+    (dolist (spec '(;; Expected names were pinned with Org 9.8.5.
+                    (:tags "parent|blue-parent")
+                    (:tags "{^bl}")
+                    (:tags "OWNER={Ada.*}")
+                    (:tags "MISSING=0")
+                    (:tags "MISSING=*0")
+                    (:tags "LEVEL>=2")
+                    (:tags "TODO=\"DONE\"")
+                    (:tags "blue/-DONE")
+                    (:tags "blue/TODO|DONE")
+                    (:search ":+uni")
+                    (:search ":+unique")
+                    (:search "+{uni..e} -ordinary")
+                    (:search "+\"unique beta\"")
+                    (:search "!completed body")
+                    (:search "UNIQUE BETA")))
+      (let* ((kind (first spec))
+             (raw (second spec))
+             (query
+               (if (eq kind :tags)
+                   (agenda-compile-tags-query raw)
+                   (agenda-compile-search-query raw)))
+             (matches (agenda-query-matching-items items query)))
+        (agenda-query-test-log
+         "EDGE kind=~a query=~s rows=~d names=~s"
+         kind raw (length matches) (agenda-query-test-names matches))))))
+
+(define-key *lem-yath-agenda-mode-keymap* "C-c z e"
+  'lem-yath-test-agenda-query-edges)

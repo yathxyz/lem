@@ -3668,13 +3668,15 @@ drives `SPC m a`, cancellation, `a`, `t`, `T`, and configured custom `n`.
 `M` additionally requires any configured TODO state, including done states;
 `s` compiles phrase or Boolean text searches, while `S` restricts them to open
 TODO headings; and `/` adapts the existing live-buffer, source-linked Occur
-engine to all agenda files. Search entries stop at the next heading, matching
+engine to all agenda files and selects that result like Emacs multi-occur.
+Search entries stop at the next heading, matching
 the installed zero max-outline-level setting, and COMMENT/ARCHIVE trees remain
 excluded. `scripts/agenda-query-test.sh` physically proves inherited/local tag
-AND, numeric and quoted properties, exact and open TODO clauses, the crucial
-`M` versus `S` done-state distinction, multiline phrases, Boolean exclusion,
-headline-only search, exact Occur navigation, cancellation safety, and
-byte-identical sources. Tag-group expansion is intentionally absent because
+AND/OR/negative and regexp tags, numeric/quoted/regexp/starred properties,
+exact and open TODO clauses, the crucial `M` versus `S` done-state distinction,
+multiline phrases, Boolean/regexp/full-word/headline-only search, exact Occur
+focus/navigation, live unsaved snapshots, cancellation safety, and byte-identical
+sources. Tag-group expansion is intentionally absent because
 the actual profile defines no groups; timestamp property operands currently
 compare at date granularity rather than preserving Org's time-of-day ordering.
 It proves the visible supported boundary, Monday-aligned week ownership,
