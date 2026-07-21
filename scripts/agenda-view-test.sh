@@ -68,6 +68,7 @@ printf '%s\n' \
   '* Late grid sentinel <2026-07-17 Fri 10:00>' \
   '* Early grid range sentinel <2026-07-17 Fri 9:00-10:30>' \
   '* Hourly repeat sentinel <2026-07-17 Fri 08:30 +36h>' \
+  '* Cross timed range sentinel <2026-07-17 Fri 15:30>--<2026-07-18 Sat 16:45>' \
   '* TODO Headline morning sentinel 9:30-10:15' \
   'SCHEDULED: <2026-07-17 Fri>' \
   '* TODO Headline lunch sentinel 12pm--1:05pm' \
@@ -148,7 +149,9 @@ grep -q 'Headline morning sentinel  \[SCHEDULED 2026-07-17 9:30-10:15\]' "$LEM_Y
 grep -q 'Headline lunch sentinel  \[DEADLINE 2026-07-17 12:00-13:05\]' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
 grep -q 'Planning stamp sentinel 7am  \[SCHEDULED 2026-07-17 11:20-11:50\]' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
 grep -q 'Link time sentinel .*9:45.*\[SCHEDULED 2026-07-17\]' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
-grep -q '^TIMELINE week grid-0800,item-0830,item-0900-1030,item-0930-1015,grid-1000,item-1000,item-1120-1150,grid-1200,item-1200-1305,now-1300,grid-1400,grid-1600,grid-1800,grid-2000$' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
+grep -q '2026-07-17|.*Cross timed range sentinel --<2026-07-18 Sat 16:45>.*\[EVENT 2026-07-17 15:30 1/2\]' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
+grep -q '2026-07-18|.*Cross timed range sentinel <2026-07-17 Fri 15:30>--.*\[EVENT 2026-07-18 16:45 2/2\]' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
+grep -q '^TIMELINE week grid-0800,item-0830,item-0900-1030,item-0930-1015,grid-1000,item-1000,item-1120-1150,grid-1200,item-1200-1305,now-1300,grid-1400,item-1530,grid-1600,grid-1800,grid-2000$' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
 grep -q '^HOURLY week dates=2026-07-17,2026-07-18$' "$LEM_YATH_AGENDA_VIEW_REPORT" || week_ok=0
 if [ "$week_ok" = 1 ]; then
   pass week-view 'gD w aligned to Monday and rendered all seven date sections'

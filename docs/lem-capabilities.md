@@ -3643,14 +3643,15 @@ weeks, exact seven- and fourteen-day spans, calendar month/year boundaries,
 year confirmation, universal counts, selected-date restoration, Org date
 input, state-specific `g` ownership, range-aware clock totals, and byte-identical
 sources. It also proves required-timed grid suppression, today and non-today
-daily grids, exact fixed/current-time ordering, complete same-day range display,
-ordinary headline AM/PM and 24-hour time ranges, timestamp-time precedence,
+daily grids, exact fixed/current-time ordering, complete same-day ranges,
+per-day cross-date endpoints, ordinary headline AM/PM and 24-hour time ranges,
+timestamp-time precedence,
 bracketed-link exclusion, elapsed-hour repeater dates, decoration-skipping
 `gj`, retained source time properties, and byte-identical grid rendering.
 
 This is a task summary, not a replacement for GNU Org's arbitrary agenda
 dispatcher. Diary sexps, configurable time-grid, AM/PM display, and
-default-duration presentation, cross-day endpoint time extraction,
+default-duration presentation,
 and configurable reminder-policy, leader, and sorting variables,
 configurable or cross-file refile targets, target creation/copy/reverse and
 prefix/cache variants, custom archive destinations and local archive

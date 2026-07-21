@@ -75,8 +75,9 @@ items remain immutable so projections can add reminder rows safely.")
 (defstruct (agenda-item (:constructor make-agenda-item))
   "One parsed heading: its TODO keyword, text, source file/line and date."
   keyword text file line heading date kind event-p end-date repeater time
-  end-time occurrence-index occurrence-count
+  end-time range-end-time occurrence-index occurrence-count
   timestamp-line timestamp-source-line timestamp-start timestamp-raw
+  timestamp-first-raw timestamp-second-raw timestamp-heading-line-p
   category tags effort top-headline planning-suffix
   display-date reminder-kind reminder-days)
 
@@ -338,13 +339,17 @@ items remain immutable so projections can add reminder rows safely.")
                 (multiple-value-bind (date time end-time repeater)
                     (agenda-parse-active-timestamp first)
                   (when date
-                    (let ((end-date
-                            (and second
-                                 (nth-value
-                                  0 (agenda-parse-active-timestamp second)))))
+                    (multiple-value-bind (end-date range-end-time)
+                        (if second
+                            (agenda-parse-active-timestamp second)
+                            (values nil nil))
                       (push (list :date date :time time :end-time end-time
+                                  :range-end-time range-end-time
                                   :repeater repeater
                                   :end-date end-date
+                                  :first-raw (format nil "<~a>" first)
+                                  :second-raw
+                                  (and second (format nil "<~a>" second))
                                   :start start
                                   :raw (subseq line start end))
                             specs)))))
@@ -376,10 +381,14 @@ items remain immutable so projections can add reminder rows safely.")
        :repeater (getf spec :repeater)
        :time (or (getf spec :time) heading-time)
        :end-time (or (getf spec :end-time) heading-end-time)
+       :range-end-time (getf spec :range-end-time)
        :timestamp-line source-line-number
        :timestamp-source-line source-line
        :timestamp-start (getf spec :start)
-       :timestamp-raw (getf spec :raw)))))
+       :timestamp-raw (getf spec :raw)
+       :timestamp-first-raw (getf spec :first-raw)
+       :timestamp-second-raw (getf spec :second-raw)
+       :timestamp-heading-line-p heading-line-p))))
 
 (defun parse-org-stream (in path)
   "Return parsed agenda items and, as a second value, parser warnings.
@@ -771,6 +780,48 @@ Ordinary active timestamps belong to their containing visible heading."
           (agenda-item-occurrence-count occurrence) count)
     occurrence))
 
+(defun agenda-remove-event-token-from-text (text token)
+  (if token
+      (string-trim
+       '(#\Space #\Tab)
+       (ppcre:regex-replace
+        (ppcre:quote-meta-chars token) text ""))
+      text))
+
+(defun agenda-item-range-occurrence (item date offset count)
+  "Return ITEM as one GNU-style day of a multi-date active range."
+  (let ((occurrence
+          (agenda-item-occurrence item date (1+ offset) count)))
+    (setf (agenda-item-range-end-time occurrence) nil)
+    (cond
+      ((= count 1)
+       (unless (agenda-item-end-time occurrence)
+         (setf (agenda-item-end-time occurrence)
+               (agenda-item-range-end-time item)))
+       (when (agenda-item-timestamp-heading-line-p item)
+         (setf (agenda-item-text occurrence)
+               (agenda-remove-event-token-from-text
+                (agenda-item-text item) (agenda-item-timestamp-raw item)))))
+      ((zerop offset)
+       (when (agenda-item-timestamp-heading-line-p item)
+         (setf (agenda-item-text occurrence)
+               (agenda-remove-event-token-from-text
+                (agenda-item-text item)
+                (agenda-item-timestamp-first-raw item)))))
+      ((= offset (1- count))
+       (setf (agenda-item-time occurrence)
+             (agenda-item-range-end-time item)
+             (agenda-item-end-time occurrence) nil)
+       (when (agenda-item-timestamp-heading-line-p item)
+         (setf (agenda-item-text occurrence)
+               (agenda-remove-event-token-from-text
+                (agenda-item-text item)
+                (agenda-item-timestamp-second-raw item)))))
+      (t
+       (setf (agenda-item-time occurrence) nil
+             (agenda-item-end-time occurrence) nil)))
+    occurrence))
+
 (defun agenda-hour-repeater-occurrences (item today horizon amount)
   "Expand ITEM's AMOUNT-hour repeater into one stock agenda row per date."
   (alexandria:when-let ((time-value (agenda-item-time-value item)))
@@ -818,8 +869,8 @@ Ordinary active timestamps belong to their containing visible heading."
          (when (plusp count)
            (loop :for offset :from first-offset :to last-offset
                  :for date := (agenda-add-calendar base offset #\d)
-                 :collect (agenda-item-occurrence
-                           item date (1+ offset) count)))))
+                 :collect (agenda-item-range-occurrence
+                           item date offset count)))))
       (repeater
        (multiple-value-bind (amount unit) (agenda-repeater-parts repeater)
          (when (and amount (plusp amount))
