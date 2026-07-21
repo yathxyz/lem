@@ -726,6 +726,10 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   explicit opt-in path, and failures stay in `*nodes-org-sync*`
 - a grouped Org agenda over the exact existing work/public/public-MCP roots,
   with top-level file scope, ordinary and repeating active-timestamp events,
+  and the stock-shaped `SPC m a` dispatcher. Its `m`/`M` branches match
+  inherited tags, local properties, and TODO clauses; `s`/`S` provide Org's
+  phrase, Boolean, regexp, headline-only, and open-TODO searches; `/` runs a
+  source-backed multi-occur across every agenda file,
   modal Return/`gr`/q navigation, Evil-Org `Tab`/`g Tab`/Shift-Return source
   visits in another window, decoration-skipping `gj`/`gk` and `C-j`/`C-k`
   item motion, and Evil-Org-style `t` fast TODO selection plus

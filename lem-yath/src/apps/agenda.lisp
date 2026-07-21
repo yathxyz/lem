@@ -78,12 +78,13 @@ items remain immutable so projections can add reminder rows safely.")
   end-time range-end-time occurrence-index occurrence-count
   timestamp-line timestamp-source-line timestamp-start timestamp-raw
   timestamp-first-raw timestamp-second-raw timestamp-heading-line-p
-  category tags effort top-headline planning-suffix metadata-line
+  category tags effort top-headline level properties search-text
+  planning-suffix metadata-line
   anniversary-year anniversary-month anniversary-day
   display-date reminder-kind reminder-days)
 
 (defstruct (agenda-item-metadata (:constructor make-agenda-item-metadata))
-  category tags effort top-headline)
+  category tags effort top-headline level properties search-text)
 
 (defstruct (agenda-heading-context (:constructor make-agenda-heading-context))
   level title tags category metadata)
@@ -460,7 +461,7 @@ Ordinary active timestamps belong to their containing visible heading."
                           (alexandria:starts-with-subseq "COMMENT " text)))
                     (archive-heading-p (line)
                       (not (null
-                            (ppcre:scan "(?:^|\\s):ARCHIVE:\\s*$" line)))))
+                            (ppcre:scan "(?:^|:)ARCHIVE(?::|\\s*$)" line)))))
              (loop :for line := (read-line in nil)
                    :for lineno :from 1
                    :while line
@@ -635,93 +636,117 @@ Ordinary active timestamps belong to their containing visible heading."
            local-tags)))
 
 (defun agenda-build-filter-metadata (lines source)
-  "Return a source-line table of category, tags, Effort, and top headline."
+  "Return Org matching metadata and entry text indexed by heading line."
   (multiple-value-bind (file-category file-tags)
       (agenda-file-filter-metadata lines source)
     (let ((table (make-hash-table :test #'eql))
           (contexts '())
           (current nil)
+          (search-lines '())
           (property-eligible-p nil)
           (property-drawer-p nil)
           (block-p nil))
-      (loop :for line :in lines
-            :for line-number :from 1
-            :do
-               (cond
-                 (block-p
-                  (when (ppcre:scan "(?i)^\\s*#\\+end_" line)
-                    (setf block-p nil)))
-                 ((ppcre:scan "(?i)^\\s*#\\+begin_" line)
-                  (setf block-p t
-                        property-eligible-p nil
-                        property-drawer-p nil))
-                 (t
-                  (multiple-value-bind (level title local-tags)
-                      (roam-org-heading-fields line)
-                    (if level
-                        (progn
-                          (loop :while (and contexts
-                                            (>= (agenda-heading-context-level
-                                                 (first contexts))
-                                                level))
-                                :do (pop contexts))
-                          (let* ((top-title
-                                   (agenda-filter-top-title
-                                    (if contexts
-                                        (agenda-heading-context-title
-                                         (car (last contexts)))
-                                        title)))
-                                 (metadata
-                                   (make-agenda-item-metadata
-                                    :category
-                                    (agenda-heading-inherited-category
-                                     contexts file-category)
-                                    :tags
-                                    (agenda-heading-inherited-tags
-                                     contexts file-tags local-tags)
-                                    :top-headline top-title)))
-                            (setf current
-                                  (make-agenda-heading-context
-                                   :level level
-                                   :title title
-                                   :tags local-tags
-                                   :metadata metadata)
-                                  (gethash line-number table) metadata)
-                            (push current contexts))
-                          (setf property-eligible-p t
-                                property-drawer-p nil))
-                        (when current
-                          (let ((trimmed
-                                  (string-trim
-                                   '(#\Space #\Tab #\Return) line)))
-                            (cond
-                              (property-drawer-p
-                               (if (string-equal trimmed ":END:")
-                                   (setf property-drawer-p nil)
-                                   (multiple-value-bind (name value)
-                                       (agenda-filter-property-fields trimmed)
-                                     (cond
-                                       ((and name (string= name "CATEGORY")
-                                             (plusp (length value)))
-                                        (setf
-                                         (agenda-heading-context-category current)
-                                         value
-                                         (agenda-item-metadata-category
-                                          (agenda-heading-context-metadata current))
-                                         value))
-                                       ((and name (string= name "EFFORT"))
-                                        (setf
-                                         (agenda-item-metadata-effort
-                                          (agenda-heading-context-metadata current))
-                                         value))))))
-                              ((and property-eligible-p
-                                    (ppcre:scan *planning-line-scanner* line)))
-                              ((and property-eligible-p
-                                    (string-equal trimmed ":PROPERTIES:"))
-                               (setf property-drawer-p t
-                                     property-eligible-p nil))
-                              (t
-                               (setf property-eligible-p nil))))))))))
+      (labels ((finish-search ()
+                 (when current
+                   (setf (agenda-item-metadata-search-text
+                          (agenda-heading-context-metadata current))
+                         (format nil "~{~a~^~%~}" (nreverse search-lines))))
+                 (setf search-lines nil))
+               (remember-line (line)
+                 (when current (push line search-lines))))
+        (loop :for line :in lines
+              :for line-number :from 1
+              :do
+                 (cond
+                   (block-p
+                    (remember-line line)
+                    (when (ppcre:scan "(?i)^\\s*#\\+end_" line)
+                      (setf block-p nil)))
+                   ((ppcre:scan "(?i)^\\s*#\\+begin_" line)
+                    (remember-line line)
+                    (setf block-p t
+                          property-eligible-p nil
+                          property-drawer-p nil))
+                   (t
+                    (multiple-value-bind (level title local-tags)
+                        (roam-org-heading-fields line)
+                      (if level
+                          (progn
+                            (finish-search)
+                            (loop :while (and contexts
+                                              (>= (agenda-heading-context-level
+                                                   (first contexts))
+                                                  level))
+                                  :do (pop contexts))
+                            (let* ((top-title
+                                     (agenda-filter-top-title
+                                      (if contexts
+                                          (agenda-heading-context-title
+                                           (car (last contexts)))
+                                          title)))
+                                   (metadata
+                                     (make-agenda-item-metadata
+                                      :category
+                                      (agenda-heading-inherited-category
+                                       contexts file-category)
+                                      :tags
+                                      (agenda-heading-inherited-tags
+                                       contexts file-tags local-tags)
+                                      :top-headline top-title
+                                      :level level)))
+                              (setf current
+                                    (make-agenda-heading-context
+                                     :level level
+                                     :title title
+                                     :tags local-tags
+                                     :metadata metadata)
+                                    (gethash line-number table) metadata
+                                    search-lines (list line))
+                              (push current contexts))
+                            (setf property-eligible-p t
+                                  property-drawer-p nil))
+                          (when current
+                            (remember-line line)
+                            (let ((trimmed
+                                    (string-trim
+                                     '(#\Space #\Tab #\Return) line)))
+                              (cond
+                                (property-drawer-p
+                                 (if (string-equal trimmed ":END:")
+                                     (setf property-drawer-p nil)
+                                     (multiple-value-bind (name value)
+                                         (agenda-filter-property-fields trimmed)
+                                       (when name
+                                         (push (cons name value)
+                                               (agenda-item-metadata-properties
+                                                (agenda-heading-context-metadata
+                                                 current)))
+                                         (cond
+                                           ((and (string= name "CATEGORY")
+                                                 (plusp (length value)))
+                                            (setf
+                                             (agenda-heading-context-category
+                                              current)
+                                             value
+                                             (agenda-item-metadata-category
+                                              (agenda-heading-context-metadata
+                                               current))
+                                             value))
+                                           ((string= name "EFFORT")
+                                            (setf
+                                             (agenda-item-metadata-effort
+                                              (agenda-heading-context-metadata
+                                               current))
+                                             value)))))))
+                                ((and property-eligible-p
+                                      (ppcre:scan *planning-line-scanner* line)))
+                                ((and property-eligible-p
+                                      (string-equal trimmed ":PROPERTIES:"))
+                                 (setf property-drawer-p t
+                                       property-eligible-p nil))
+                                (t
+                                 (setf property-eligible-p nil))))))))))
+        (finish-search))
       table)))
 
 (defun agenda-read-source-lines (source &optional (contents nil contents-p))
@@ -756,7 +781,13 @@ Ordinary active timestamps belong to their containing visible heading."
               (agenda-item-effort item)
               (agenda-item-metadata-effort metadata)
               (agenda-item-top-headline item)
-              (agenda-item-metadata-top-headline metadata))))))
+              (agenda-item-metadata-top-headline metadata)
+              (agenda-item-level item)
+              (agenda-item-metadata-level metadata)
+              (agenda-item-properties item)
+              (copy-tree (agenda-item-metadata-properties metadata))
+              (agenda-item-search-text item)
+              (agenda-item-metadata-search-text metadata))))))
 
 ;;; --- date helpers --------------------------------------------------------
 

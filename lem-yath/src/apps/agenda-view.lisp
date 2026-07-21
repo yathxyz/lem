@@ -7,6 +7,7 @@
   (span :summary)
   start-date
   todo-keyword
+  query
   pending-date)
 
 (defparameter *agenda-view-weekdays*
@@ -20,7 +21,7 @@
              :command :summary
              :start-date (today-iso (funcall *agenda-now-function*))))))
 
-(defun agenda-view-initialize-command (buffer command todo-keyword)
+(defun agenda-view-initialize-command (buffer command command-argument)
   "Initialize BUFFER for one dispatcher COMMAND."
   (let* ((today (today-iso (funcall *agenda-now-function*)))
          (span (if (eq command :agenda) :week :summary)))
@@ -29,7 +30,9 @@
            :command command
            :span span
            :start-date (agenda-view-canonical-start span today)
-           :todo-keyword todo-keyword))))
+           :todo-keyword (and (eq command :todo) command-argument)
+           :query (and (member command '(:tags :tags-todo :search))
+                       command-argument)))))
 
 (defun agenda-view-days-in-month (date)
   (multiple-value-bind (year month day) (agenda-date-components date)
@@ -84,16 +87,24 @@
          (command (agenda-view-state-command state))
          (span (agenda-view-state-span state)))
     (multiple-value-bind (start end) (agenda-view-range buffer now)
-      (if (eq command :todo)
-          (format nil "TODO ~a"
-                  (or (agenda-view-state-todo-keyword state) "ALL"))
-          (ecase span
-            (:summary start)
-            (:day (format nil "Day ~a" start))
-            (:week (format nil "Week ~a..~a" start end))
-            (:fortnight (format nil "Fortnight ~a..~a" start end))
-            (:month (format nil "Month ~a..~a" start end))
-            (:year (format nil "Year ~a..~a" start end)))))))
+      (cond
+        ((eq command :todo)
+         (format nil "TODO ~a"
+                 (or (agenda-view-state-todo-keyword state) "ALL")))
+        ((member command '(:tags :tags-todo))
+         (format nil "TAGS ~a"
+                 (agenda-tags-query-raw (agenda-view-state-query state))))
+        ((eq command :search)
+         (format nil "SEARCH ~a"
+                 (agenda-search-query-raw (agenda-view-state-query state))))
+        (t
+         (ecase span
+           (:summary start)
+           (:day (format nil "Day ~a" start))
+           (:week (format nil "Week ~a..~a" start end))
+           (:fortnight (format nil "Fortnight ~a..~a" start end))
+           (:month (format nil "Month ~a..~a" start end))
+           (:year (format nil "Year ~a..~a" start end))))))))
 
 (defun agenda-view-sort-items (items)
   (agenda-sort-dated-items items))
@@ -155,21 +166,7 @@
 
 (defun agenda-view-todo-display-item (item)
   "Return a source-backed all-TODO row derived from ITEM."
-  (let ((copy (copy-agenda-item item)))
-    (setf (agenda-item-date copy) nil
-          (agenda-item-kind copy) nil
-          (agenda-item-event-p copy) nil
-          (agenda-item-end-date copy) nil
-          (agenda-item-repeater copy) nil
-          (agenda-item-time copy) nil
-          (agenda-item-end-time copy) nil
-          (agenda-item-range-end-time copy) nil
-          (agenda-item-occurrence-index copy) nil
-          (agenda-item-occurrence-count copy) nil
-          (agenda-item-display-date copy) nil
-          (agenda-item-reminder-kind copy) nil
-          (agenda-item-reminder-days copy) nil)
-    copy))
+  (agenda-query-display-item item))
 
 (defun agenda-view-todo-items (items keyword)
   "Return one source-ordered row per matching TODO heading in ITEMS."
@@ -200,11 +197,30 @@
                      (or keyword "ALL"))
       :items (agenda-view-todo-items items keyword)))))
 
+(defun agenda-view-query-sections (state items)
+  (let* ((command (agenda-view-state-command state))
+         (query (agenda-view-state-query state))
+         (tags-p (member command '(:tags :tags-todo))))
+    (list
+     (make-agenda-section
+      :key (if tags-p :tags :search)
+      :title
+      (if tags-p
+          (format nil "Headlines with TAGS match: ~a"
+                  (agenda-tags-query-raw query))
+          (format nil "Search words: ~a"
+                  (agenda-search-query-raw query)))
+      :items
+      (agenda-query-matching-items
+       items query :todo-any-p (eq command :tags-todo))))))
+
 (defun agenda-view-sections (buffer items now)
   (let ((state (agenda-view-state buffer)))
     (cond
       ((eq (agenda-view-state-command state) :todo)
        (agenda-view-todo-sections state items))
+      ((member (agenda-view-state-command state) '(:tags :tags-todo :search))
+       (agenda-view-query-sections state items))
       ((eq (agenda-view-state-span state) :summary)
        (multiple-value-bind (start end) (agenda-view-range buffer now)
          (agenda-default-sections items now start end)))
@@ -286,12 +302,19 @@
   "Return the truthful configured subset of Org's agenda dispatcher."
   (let ((keymap (make-keymap :description "Agenda Commands")))
     (setf (lem/transient::keymap-show-p keymap) t
-          (lem/transient::keymap-display-style keymap) :column)
-    (dolist (entry '(("a" "Agenda for current week or day")
+          (lem/transient::keymap-display-style keymap) :row)
+    ;; Transient renders newest bindings first.  Keep the nonessential abort
+    ;; label oldest so every command remains visible in a short terminal.
+    (dolist (entry '(("q" "Abort")
+                     ("a" "Agenda for current week or day")
                      ("t" "List of all TODO entries")
                      ("T" "Entries with special TODO keyword")
-                     ("n" "Agenda and all TODOs")
-                     ("q" "Abort")))
+                     ("m" "Match a TAGS/PROP/TODO query")
+                     ("M" "Match a TAGS query for TODO entries")
+                     ("s" "Search for keywords")
+                     ("S" "Search for keywords in TODO entries")
+                     ("/" "Multi-occur in all agenda files")
+                     ("n" "Agenda and all TODOs")))
       (agenda-dispatch-popup-entry keymap (first entry) (second entry)))
     keymap))
 
@@ -330,6 +353,18 @@
              ((string= key "T")
               (alexandria:when-let ((keyword (agenda-dispatch-read-todo-keyword)))
                 (agenda-open-command :todo keyword)))
+             ((member key '("m" "M") :test #'string=)
+              (let* ((raw (agenda-read-tags-query))
+                     (query (agenda-compile-tags-query raw)))
+                (agenda-open-command
+                 (if (string= key "M") :tags-todo :tags) query)))
+             ((member key '("s" "S") :test #'string=)
+              (let* ((raw (agenda-read-search-query))
+                     (query
+                       (agenda-compile-search-query
+                        raw :todo-only-p (string= key "S"))))
+                (agenda-open-command :search query)))
+             ((string= key "/") (agenda-query-multi-occur))
              ((string= key "n") (agenda-open-command :summary))
              ((member key '("q" "Escape" "C-g") :test #'string=)
               (message "Abort"))

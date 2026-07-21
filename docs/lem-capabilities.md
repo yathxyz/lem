@@ -3663,13 +3663,27 @@ bracketed-link exclusion, elapsed-hour repeater dates, decoration-skipping
 
 `scripts/agenda-dispatch-test.sh` starts from a clean Org source and physically
 drives `SPC m a`, cancellation, `a`, `t`, `T`, and configured custom `n`.
+`src/apps/agenda-query.lisp` supplies the adjacent stock dispatcher branches:
+`m` compiles Org-style inherited-tag, local-property, and slash-TODO matchers;
+`M` additionally requires any configured TODO state, including done states;
+`s` compiles phrase or Boolean text searches, while `S` restricts them to open
+TODO headings; and `/` adapts the existing live-buffer, source-linked Occur
+engine to all agenda files. Search entries stop at the next heading, matching
+the installed zero max-outline-level setting, and COMMENT/ARCHIVE trees remain
+excluded. `scripts/agenda-query-test.sh` physically proves inherited/local tag
+AND, numeric and quoted properties, exact and open TODO clauses, the crucial
+`M` versus `S` done-state distinction, multiline phrases, Boolean exclusion,
+headline-only search, exact Occur navigation, cancellation safety, and
+byte-identical sources. Tag-group expansion is intentionally absent because
+the actual profile defines no groups; timestamp property operands currently
+compare at date granularity rather than preserving Org's time-of-day ordering.
 It proves the visible supported boundary, Monday-aligned week ownership,
 deduplicated all-TODO rows, exact keyword selection, source preservation, and
 return to the originating window.
 
 This is a task summary, not a replacement for GNU Org's complete agenda
-dispatcher. Tag and property queries, searches, multi-occur, arbitrary custom
-commands, and the remaining stock dispatcher branches are not implemented.
+dispatcher. Arbitrary custom commands and the remaining stock dispatcher
+branches are not implemented.
 Diary sexps beyond the configured safe `org-anniversary` form,
 configurable time-grid, AM/PM display, and default-duration presentation,
 and configurable reminder-policy, leader, and sorting variables,

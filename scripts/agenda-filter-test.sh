@@ -324,6 +324,10 @@ grep -q '^STATE general rows=1 header="Agenda  (2026-07-17)  \[Cat:+RootCat Tag:
   "$LEM_YATH_AGENDA_FILTER_REPORT" || general_ok=0
 send_keys C-z
 send_keys g r
+# The enriched query metadata makes this tiny scan observably asynchronous;
+# let the old rendered match transition through the scanning generation before
+# treating the same visible row as refresh completion.
+sleep 0.3
 lem_wait_for "$session" 'Alpha child filter sentinel' 20 >/dev/null || true
 send_keys C-z
 send_keys C-c z r

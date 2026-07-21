@@ -128,6 +128,7 @@
                              (:file "agenda-bulk")
                              (:file "agenda-undo-command")
                              (:file "agenda-filter")
+                             (:file "agenda-query")
                              (:file "agenda-view")
                              (:file "agenda-time-grid")
                              (:file "citar")

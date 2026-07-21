@@ -83,8 +83,10 @@ sleep 0.25
 send_keys Space m a
 if lem_wait_for "$session" 'Agenda for current week or day' 20 >/dev/null &&
    lem_capture "$session" | grep -q 'Agenda and all TODOs' &&
-   ! lem_capture "$session" | grep -q 'Match a TAGS'; then
-  pass menu 'SPC m a exposed only the implemented configured commands'
+   lem_capture "$session" | grep -q 'Match a TAGS/PROP/TODO query' &&
+   lem_capture "$session" | grep -q 'Search for keywords in TODO entries' &&
+   lem_capture "$session" | grep -q 'Multi-occur in all agenda files'; then
+  pass menu 'SPC m a exposed the implemented stock Org dispatcher commands'
 else
   fail menu 'the physical dispatcher labels or supported boundary differed'
 fi
