@@ -234,6 +234,88 @@
                 nil)
             (error () t)))
          "magit-pull-option-vectors"))
+      (dolist (keymap (list lem/legit::*peek-legit-keymap*
+                            lem/legit::*legit-diff-mode-keymap*
+                            lem/legit::*legit-commits-log-keymap*))
+        (check (eq 'lem-yath-legit-log
+                   (vcs-test-key-command keymap "l"))
+               "magit-log-dispatch"))
+      (let ((options (make-legit-log-options)))
+        (check (and (= 256 (legit-log-options-limit options))
+                    (legit-log-options-decorate-p options))
+               "magit-log-status-defaults")
+        (dolist (key '("- n" "- A" "- F" "- G" "- S" "- L" "- D"
+                       "- -" "- f" "- o" "- r" "- g" "- c" "- d"
+                       "= S" "- h" "- p" "- s" "l" "o" "h" "u"
+                       "L" "b" "a" "r" "O" "H" "s" "q"))
+          (check (eq 'nop-command
+                     (vcs-test-key-command
+                      (legit-log-popup-keymap options) key))
+                 (format nil "magit-log-~a" key))))
+      (let ((options (make-legit-shortlog-options)))
+        (dolist (key '("- n" "- s" "- e" "- g" "s" "r" "q"))
+          (check (eq 'nop-command
+                     (vcs-test-key-command
+                      (legit-shortlog-popup-keymap options) key))
+                 (format nil "magit-shortlog-~a" key))))
+      (dolist (binding '(("f" lem-yath-legit-log-next-page)
+                         ("b" lem-yath-legit-log-previous-page)
+                         ("F" lem-yath-legit-log-last-page)
+                         ("B" lem-yath-legit-log-first-page)
+                         ("g r" lem-yath-legit-log-refresh)
+                         ("=" lem-yath-legit-log-toggle-limit)
+                         ("q" lem-yath-legit-log-back-to-status)))
+        (check (eq (second binding)
+                   (vcs-test-key-command
+                    lem/legit::*legit-commits-log-keymap* (first binding)))
+               (format nil "magit-log-view-~a" (first binding))))
+      (check
+       (and
+        (equal '("--author=A U Thor" "--grep=message;safe"
+                 "-Gchange.*safe" "-Sneedle;safe" "-L1,2:file name;safe"
+                 "--simplify-by-decoration" "--follow" "--topo-order"
+                 "--graph" "--patch" "--stat")
+               (legit-log-option-arguments
+                (make-legit-log-options
+                 :author "A U Thor" :grep "message;safe"
+                 :pickaxe-regexp "change.*safe"
+                 :pickaxe-string "needle;safe"
+                 :trace "1,2:file name;safe" :simplify-decoration-p t
+                 :follow-p t :order :topo :graph-p t :patch-p t :stat-p t)))
+        (equal '("--reverse")
+               (legit-log-option-arguments
+                (make-legit-log-options :reverse-p t :graph-p t)))
+        (search "%x00LEM-YATH-LOG%x00" (legit-log-format-argument))
+        (not (find (code-char 0) (legit-log-format-argument)))
+        (handler-case
+            (progn
+              (legit-log-validate-options
+               (make-legit-log-options :follow-p t) '("HEAD"))
+              nil)
+          (error () t))
+        (handler-case
+            (progn
+              (legit-log-validate-options
+               (make-legit-log-options :trace "1,2:file")
+               '("HEAD" "HEAD~1"))
+              nil)
+          (error () t))
+        (handler-case
+            (progn
+              (legit-log-validate-options
+               (make-legit-log-options :trace "1,2:file"
+                                       :files '("file"))
+               '("HEAD"))
+              nil)
+          (error () t)))
+       "magit-log-option-vectors")
+      (check
+       (and (legit-log-safe-relative-path-p "path with space;safe")
+            (not (legit-log-safe-relative-path-p "../escape"))
+            (not (legit-log-safe-relative-path-p "/absolute"))
+            (not (legit-log-safe-relative-path-p
+                  (concatenate 'string "unsafe" (string (code-char 0))))))
+       "magit-log-path-boundaries")
       (check (eq 'lem-yath-legit-reset
                  (vcs-test-key-command lem/legit::*peek-legit-keymap* "O"))
              "magit-reset-status-dispatch")
@@ -1576,6 +1658,7 @@
    :bisect (vcs-test-key-command lem/legit::*peek-legit-keymap* "B")
    :fetch (vcs-test-key-command lem/legit::*peek-legit-keymap* "f")
    :pull (vcs-test-key-command lem/legit::*peek-legit-keymap* "F")
+   :log (vcs-test-key-command lem/legit::*peek-legit-keymap* "l")
    :reset (vcs-test-key-command lem/legit::*peek-legit-keymap* "O")
    :merge (vcs-test-key-command lem/legit::*peek-legit-keymap* "m")
    :revert (vcs-test-key-command lem/legit::*peek-legit-keymap* "_")
@@ -1622,6 +1705,7 @@
           (load (merge-pathnames "src/git-worktree.lisp" source))
           (load (merge-pathnames "src/git-push.lisp" source))
           (load (merge-pathnames "src/git-pull.lisp" source))
+          (load (merge-pathnames "src/git-log.lisp" source))
           (load (merge-pathnames "src/git-stash.lisp" source))
           (load (merge-pathnames "src/git-remote.lisp" source))
           (load (merge-pathnames "src/git-submodule.lisp" source))
@@ -1634,7 +1718,7 @@
             'string
             "RELOAD same=~a find=~d post=~d save=~d change=~d kill=~d "
             "global=~d source=~d directory=~d root-marker=~d todo-hook=~d "
-            "bisect-hook=~d bisect=~a fetch=~a pull=~a reset=~a merge=~a revert=~a branch=~a worktree=~a push=~a stash=~a remote=~a submodule=~a subtree=~a smart=~a git=~a jj=~a time=~a "
+            "bisect-hook=~d bisect=~a fetch=~a pull=~a log=~a reset=~a merge=~a revert=~a branch=~a worktree=~a push=~a stash=~a remote=~a submodule=~a subtree=~a smart=~a git=~a jj=~a time=~a "
             "jj-refresh=~a jj-quit=~a "
             "older=~a newer=~a nth=~a fuzzy=~a short=~a full=~a blame=~a "
             "blame-quit=~a p=~a n=~a t=~a quit=~a")
@@ -1656,6 +1740,8 @@
             (eq (getf after :fetch) 'lem-yath-legit-fetch))
            (vcs-test-yes-no
             (eq (getf after :pull) 'lem-yath-legit-pull))
+           (vcs-test-yes-no
+            (eq (getf after :log) 'lem-yath-legit-log))
            (vcs-test-yes-no
             (eq (getf after :reset) 'lem-yath-legit-reset))
            (vcs-test-yes-no

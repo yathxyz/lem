@@ -2760,7 +2760,7 @@ fi
 send_keys "$colocated_session" q F6
 
 if press_report "$colocated_session" F8 '^RELOAD ' 60 &&
-   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes pull=yes reset=yes merge=yes revert=yes branch=yes worktree=yes push=yes stash=yes remote=yes submodule=yes subtree=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
+   grep -q '^RELOAD same=yes find=1 post=1 save=1 change=1 kill=1 global=0 source=1 directory=0 root-marker=1 todo-hook=1 bisect-hook=1 bisect=yes fetch=yes pull=yes log=yes reset=yes merge=yes revert=yes branch=yes worktree=yes push=yes stash=yes remote=yes submodule=yes subtree=yes smart=yes git=yes jj=yes time=yes jj-refresh=yes jj-quit=yes older=yes newer=yes nth=yes fuzzy=yes short=yes full=yes blame=yes blame-quit=yes p=yes n=yes t=yes quit=yes$' \
      "$LEM_YATH_VCS_REPORT"; then
   pass reload-idempotence 'two VCS reloads preserved one mode, hooks, inserter, and keymaps'
 else
@@ -3132,6 +3132,74 @@ if wait_legit "$porcelain_session" porcelain; then
   pass porcelain-status 'Legit opened the real mutating Git fixture'
 else
   fail porcelain-status 'Legit did not open the porcelain fixture' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" l
+if lem_wait_for "$porcelain_session" 'HEAD reflog' "$WAIT_TIMEOUT" \
+     >/dev/null; then
+  pass legit-log-popup 'l opened the complete visible log argument/action popup'
+else
+  fail legit-log-popup 'l did not open the configured log popup' \
+    "$porcelain_session"
+fi
+send_keys "$porcelain_session" - n
+send_keys "$porcelain_session" - n
+if lem_wait_for "$porcelain_session" 'Limit number of commits:' \
+     "$WAIT_TIMEOUT" >/dev/null; then
+  enter_prompt_value "$porcelain_session" 1
+fi
+send_keys "$porcelain_session" - g
+send_keys "$porcelain_session" - c
+send_keys "$porcelain_session" - h
+send_keys "$porcelain_session" - p
+send_keys "$porcelain_session" - s
+send_keys "$porcelain_session" l
+if lem_wait_for "$porcelain_session" 'porcelain-initial' "$WAIT_TIMEOUT" \
+     >/dev/null &&
+   lem_wait_for "$porcelain_session" 'Author: Lem Yath Test' "$WAIT_TIMEOUT" \
+     >/dev/null &&
+   lem_wait_for "$porcelain_session" 'tracked auxiliary file' "$WAIT_TIMEOUT" \
+     >/dev/null; then
+  pass legit-log-current \
+    'l l rendered the bounded decorated graph with headers, patch, stat, and preview'
+else
+  fail legit-log-current 'the configured current log did not render its options' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" q l r
+if lem_wait_for "$porcelain_session" 'Reflog main' "$WAIT_TIMEOUT" \
+     >/dev/null &&
+   lem_wait_for "$porcelain_session" 'porcelain-initial' "$WAIT_TIMEOUT" \
+     >/dev/null; then
+  pass legit-log-reflog 'l r rendered the bounded current-branch reflog'
+else
+  fail legit-log-reflog 'the current reflog action did not render' \
+    "$porcelain_session"
+fi
+
+send_keys "$porcelain_session" q l s
+if lem_wait_for "$porcelain_session" 'Shortlog' "$WAIT_TIMEOUT" \
+     >/dev/null; then
+  send_keys "$porcelain_session" r
+fi
+if lem_wait_for "$porcelain_session" 'Shortlog range:' "$WAIT_TIMEOUT" \
+     >/dev/null; then
+  enter_completion_prompt_value "$porcelain_session" HEAD 'Shortlog range:'
+fi
+if lem_wait_for "$porcelain_session" 'Lem Yath Test' "$WAIT_TIMEOUT" \
+     >/dev/null; then
+  pass legit-shortlog-range 'l s r summarized the validated revision range'
+else
+  fail legit-shortlog-range 'the visible shortlog range action did not render' \
+    "$porcelain_session"
+fi
+send_keys "$porcelain_session" q
+if wait_legit "$porcelain_session" porcelain; then
+  pass legit-log-quit 'q returned from log-family views to live Legit status'
+else
+  fail legit-log-quit 'log-family q did not restore Legit status' \
     "$porcelain_session"
 fi
 

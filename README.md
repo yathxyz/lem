@@ -507,7 +507,12 @@ opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
   persisted. Divergent `--ff-only` pulls fail without moving `HEAD`, while
   rebase or merge conflict state remains available to the corresponding
   lifecycle dispatch; a conflicted pull can be aborted through the ordinary
-  merge map back to its exact pre-pull state. Evil Collection's lowercase `p`
+  merge map back to its exact pre-pull state. Lowercase `l` now opens Magit's
+  normally visible log dispatch instead of Legit's fixed log route. It retains
+  the configured filters, path/follow, ordering, graph, decoration,
+  signature/header, patch, and stat controls across current/selected/related,
+  branch/all-ref, reflog, and shortlog views while preserving Legit's two-pane
+  commit preview and bounded pagination. Evil Collection's lowercase `p`
   opens the matching Magit push dispatch in both panes. Its
   force-with-lease/force, no-verify, dry-run, set-upstream, all-tags, and
   follow-tags arguments apply to current-branch push-remote or upstream

@@ -2176,7 +2176,14 @@ Magit-inspired. `M-x legit-status` bound **`C-x g`** (`legit/legit.lisp:65`).
 - Push/Pull: lowercase `p` opens lem-yath's Evil Collection push dispatch
   (`p p` is the ordinary push-remote action); uppercase `F` opens the matching
   pull dispatch.
-- Log: `l l`, last/first page `l F` / pagination (`legit.lisp:86-87`).
+- **Log dispatch**: `l` opens the normally visible Magit log surface in status,
+  diff, and log panes (`l l` remains current-branch log). It defaults to 256
+  decorated commits and retains limit/author/message/change/occurrence,
+  numeric line-trace, path/follow, ordering, graph/color, signature/header,
+  patch, and stat arguments when reopened. Actions cover current, selected,
+  `HEAD`, related, local/all branches, all refs, three reflogs, and the visible
+  shortlog sub-dispatch. Rows keep Legit's two-pane preview; `f`/`b`, `F`/`B`,
+  `g r`, `=`, and `q` provide page, refresh, limit, and status restoration.
 - **Stash dispatch**: the configured Evil Collection default keeps Magit's
   lowercase `z` for the complete normally visible stash map in status and
   diff. `- u`/`- a` select untracked/all files;
@@ -2378,13 +2385,15 @@ its in-memory post-success source-cleanup intent.
 
 ### Porcelain coverage vs magit — `legit/README.md`
 Covered: status, stage/unstage (file + hunk), discard, commit, branches (checkout/
-create), push, pull/fetch, commits log with pagination, the configured
-**stash dispatch**, interactive
+create), push, pull/fetch, the configured visible log/reflog/shortlog dispatch,
+the configured **stash dispatch**, interactive
 rebase (pick/reword/edit/fixup/squash/drop/exec/break/label/reset/merge).
 Also basic Fossil + Mercurial. **Gaps vs magit:** no multi-file staging,
 limited switches/transient submenus, no graphical remaining-revisions or process view,
-no complete argument surfaces outside the explicitly ported dispatches, and
-no log graph filtering.
+no complete argument surfaces outside the explicitly ported dispatches. The log
+port intentionally omits hidden high-level history filters, matching/merged
+selectors, conditional WIP logs, and function/regexp `-L` forms; its graph,
+signature, and header presentation is compact rather than face-identical.
 Selected-line staging is verified for ordinary tracked textual
 diffs; untracked, binary, and combined-conflict diffs still require whole-file
 handling. Customize via `lem/porcelain:*git-base-arglist*`,

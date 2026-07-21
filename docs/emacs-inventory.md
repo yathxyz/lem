@@ -637,6 +637,29 @@ restores the exact pre-pull state after a merge conflict. Synchronous execution
 accepts Git's generated merge message instead of opening Magit's process/editor
 buffer. The normally hidden level-7 autostash argument remains outside this port.
 
+The matching lowercase `l` log dispatch replaces Legit's fixed two-key log in
+status, diff, and log panes while retaining `l l` muscle memory. It defaults to
+the configured status view's 256-commit decorated scope and preserves active
+arguments when reopened. The normally visible limit, author, message, change,
+occurrence, numeric line-trace, decoration simplification, path, follow, order,
+reverse, graph/color, refname, signature-status, compact-header, patch, and stat
+controls feed current, other, `HEAD`, related, local-branch, all-branch, and
+all-reference logs. `r`/`O`/`H` show current, selected, and `HEAD` reflogs; `s`
+opens numbered/summary/email/grouped shortlog since/range actions. Log rows keep
+Legit's two-pane commit preview, with `f`/`b` and `F`/`B` pagination, `g r`
+refresh, `=` limit toggling, and `q` status restoration.
+
+Git runs as bounded direct argv (120 seconds, 16 MiB, 4096-character values,
+5000 candidates, and 64 revisions or paths). Follow accepts exactly one current
+tracked path, and line tracing deliberately accepts numeric `START,END` ranges
+on one current tracked path and one revision rather than Magit's additional
+function/regexp forms. Historical deleted-only paths are absent from current
+worktree completion. Lem renders graph color, signature state, and headers
+compactly in its collector rather than reproducing Magit's faces and revision
+header sections. Hidden high-level history filters, matching/merged selectors,
+conditional WIP logs, and asynchronous process buffers remain outside this
+visible configured surface.
+
 Evil Collection's lowercase `p` opens the matching push dispatch in status
 and diff panes. `- f`/`- F` select mutually exclusive force-with-lease/force,
 while `- h`, `- n`, `- u`, `- T`, and `- t` retain no-verify, dry-run,

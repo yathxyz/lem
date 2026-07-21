@@ -52,6 +52,7 @@
                (:file "git-worktree")
                (:file "git-push")
                (:file "git-pull")
+               (:file "git-log")
                (:file "git-stash")
                (:file "git-remote")
                (:file "git-submodule")
