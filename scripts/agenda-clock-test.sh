@@ -99,7 +99,7 @@ printf '%s\n' \
 
 lem_start \
   "$session" \
-  --eval "(progn (unless (find-package \"LEM-YATH\") (load #P$init)) (load #P$fixture) (funcall (intern \"LEM-YATH-AGENDA\" \"LEM-YATH\")))"
+  --eval "(progn (unless (find-package \"LEM-YATH\") (load #P$init)) (load #P$fixture) (funcall (intern \"LEM-YATH-AGENDA-SUMMARY\" \"LEM-YATH\")))"
 if ! wait_agenda; then
   fail startup 'the fixture agenda command did not render'
   exit 1

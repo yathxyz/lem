@@ -105,7 +105,7 @@ cp "$work_file" "$original_file"
 
 lem_start \
   "$session" \
-  --eval "(progn (unless (find-package \"LEM-YATH\") (load #P$init)) (load #P$fixture) (funcall (intern \"LEM-YATH-AGENDA\" \"LEM-YATH\")))"
+  --eval "(progn (unless (find-package \"LEM-YATH\") (load #P$init)) (load #P$fixture) (funcall (intern \"LEM-YATH-AGENDA-SUMMARY\" \"LEM-YATH\")))"
 if ! wait_agenda; then
   fail startup 'the agenda view fixture did not render'
   exit 1

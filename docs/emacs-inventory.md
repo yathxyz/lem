@@ -901,7 +901,12 @@ the trailing text-ready space. The profile binds no other org-journal command
 (`src/notes.lisp`, `scripts/notes-test.sh`).
 
 ### Agenda
-- `org-agenda` on `SPC m a`.
+- `org-agenda` on `SPC m a` opens Org's command dispatcher. The stock
+  `a` current-week/day, `t` all-TODO, and `T` selected-keyword commands are
+  active. The configured `n` custom command combines `(agenda "")` and
+  `(alltodo "")` under the label “Agenda and all TODOs”. Lem reproduces those
+  four effective routes and cancellation; it does not claim the unconfigured
+  remainder of Org's dispatcher.
 - Agenda sources are the top-level `.org` files in the three existing roots above; roam, journal, and other nested trees are not included by those directory entries.
 - The configuration leaves Org's reminder policy at its stock values:
   deadlines warn for 14 days and remain overdue, schedules have no default

@@ -95,7 +95,7 @@ printf '%s\n' '* TODO Undo intervening sentinel' >"$intervening_file"
 
 lem_start \
   "$session" \
-  --eval "(progn (unless (find-package \"LEM-YATH\") (load #P$init)) (load #P$fixture) (funcall (intern \"LEM-YATH-AGENDA\" \"LEM-YATH\")))"
+  --eval "(progn (unless (find-package \"LEM-YATH\") (load #P$init)) (load #P$fixture) (funcall (intern \"LEM-YATH-AGENDA-SUMMARY\" \"LEM-YATH\")))"
 if ! lem_wait_for "$session" 'Undo refresh sentinel' 30 >/dev/null; then
   fail startup 'the undo fixture agenda did not render'
   exit 1

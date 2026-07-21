@@ -88,7 +88,7 @@ cp "$work_file" "$original_file"
 
 lem_start \
   "$session" \
-  --eval "(progn (unless (find-package \"LEM-YATH\") (load #P$init)) (load #P$fixture) (funcall (intern \"LEM-YATH-AGENDA\" \"LEM-YATH\")))"
+  --eval "(progn (unless (find-package \"LEM-YATH\") (load #P$init)) (load #P$fixture) (funcall (intern \"LEM-YATH-AGENDA-SUMMARY\" \"LEM-YATH\")))"
 if ! lem_wait_for "$session" 'Past deadline sentinel' 30 >/dev/null; then
   fail startup 'the reminder agenda did not render'
   exit 1

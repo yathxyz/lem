@@ -3,8 +3,10 @@
 (in-package :lem-yath)
 
 (defstruct (agenda-view-state (:constructor make-agenda-view-state))
+  (command :summary)
   (span :summary)
   start-date
+  todo-keyword
   pending-date)
 
 (defparameter *agenda-view-weekdays*
@@ -15,7 +17,19 @@
   (or (buffer-value buffer 'lem-yath-agenda-view-state)
       (setf (buffer-value buffer 'lem-yath-agenda-view-state)
             (make-agenda-view-state
+             :command :summary
              :start-date (today-iso (funcall *agenda-now-function*))))))
+
+(defun agenda-view-initialize-command (buffer command todo-keyword)
+  "Initialize BUFFER for one dispatcher COMMAND."
+  (let* ((today (today-iso (funcall *agenda-now-function*)))
+         (span (if (eq command :agenda) :week :summary)))
+    (setf (buffer-value buffer 'lem-yath-agenda-view-state)
+          (make-agenda-view-state
+           :command command
+           :span span
+           :start-date (agenda-view-canonical-start span today)
+           :todo-keyword todo-keyword))))
 
 (defun agenda-view-days-in-month (date)
   (multiple-value-bind (year month day) (agenda-date-components date)
@@ -50,29 +64,36 @@
                                    (now (funcall *agenda-now-function*)))
   "Return BUFFER's inclusive GNU-style agenda range."
   (let* ((state (agenda-view-state buffer))
+         (command (agenda-view-state-command state))
          (span (agenda-view-state-span state))
          (start (or (agenda-view-state-start-date state) (today-iso now)))
          (days
-           (ecase span
-             (:summary (1+ *agenda-upcoming-days*))
-             (:day 1)
-             (:week 7)
-             (:fortnight 14)
-             (:month (agenda-view-days-in-month start))
-             (:year (agenda-view-days-in-year start)))))
+           (if (eq command :todo)
+               1
+               (ecase span
+                 (:summary (1+ *agenda-upcoming-days*))
+                 (:day 1)
+                 (:week 7)
+                 (:fortnight 14)
+                 (:month (agenda-view-days-in-month start))
+                 (:year (agenda-view-days-in-year start))))))
     (values start (agenda-add-calendar start (1- days) #\d))))
 
 (defun agenda-view-header-label (buffer now)
   (let* ((state (agenda-view-state buffer))
+         (command (agenda-view-state-command state))
          (span (agenda-view-state-span state)))
     (multiple-value-bind (start end) (agenda-view-range buffer now)
-      (ecase span
-        (:summary start)
-        (:day (format nil "Day ~a" start))
-        (:week (format nil "Week ~a..~a" start end))
-        (:fortnight (format nil "Fortnight ~a..~a" start end))
-        (:month (format nil "Month ~a..~a" start end))
-        (:year (format nil "Year ~a..~a" start end))))))
+      (if (eq command :todo)
+          (format nil "TODO ~a"
+                  (or (agenda-view-state-todo-keyword state) "ALL"))
+          (ecase span
+            (:summary start)
+            (:day (format nil "Day ~a" start))
+            (:week (format nil "Week ~a..~a" start end))
+            (:fortnight (format nil "Fortnight ~a..~a" start end))
+            (:month (format nil "Month ~a..~a" start end))
+            (:year (format nil "Year ~a..~a" start end)))))))
 
 (defun agenda-view-sort-items (items)
   (agenda-sort-dated-items items))
@@ -82,7 +103,8 @@
           (aref *agenda-view-weekdays* (org-date-weekday-index date))
           date))
 
-(defun agenda-view-span-sections (items start end)
+(defun agenda-view-span-sections
+    (items start end &key (include-overdue-p t) (include-todos-p t))
   "Group ITEMS into overdue, one section per displayed date, and TODOs."
   (let ((by-date (make-hash-table :test #'equal))
         (overdue '())
@@ -105,10 +127,12 @@
           ((and (null date) (open-keyword-p keyword))
            (push item todos)))))
     (let ((sections
-            (list
-             (make-agenda-section
-              :key :overdue :title "Overdue"
-              :items (agenda-view-sort-items (nreverse overdue))))))
+            (if include-overdue-p
+                (list
+                 (make-agenda-section
+                  :key :overdue :title "Overdue"
+                  :items (agenda-view-sort-items (nreverse overdue))))
+                nil)))
       (loop :for date := start :then (agenda-add-calendar date 1 #\d)
             :do (setf sections
                       (nconc
@@ -122,17 +146,75 @@
                          (agenda-view-sort-items
                           (nreverse (gethash date by-date)))))))
             :until (string= date end))
-      (nconc sections
-             (list
-              (make-agenda-section
-               :key :todos :title "TODOs" :items (nreverse todos)))))))
+      (if include-todos-p
+          (nconc sections
+                 (list
+                  (make-agenda-section
+                   :key :todos :title "TODOs" :items (nreverse todos))))
+          sections))))
+
+(defun agenda-view-todo-display-item (item)
+  "Return a source-backed all-TODO row derived from ITEM."
+  (let ((copy (copy-agenda-item item)))
+    (setf (agenda-item-date copy) nil
+          (agenda-item-kind copy) nil
+          (agenda-item-event-p copy) nil
+          (agenda-item-end-date copy) nil
+          (agenda-item-repeater copy) nil
+          (agenda-item-time copy) nil
+          (agenda-item-end-time copy) nil
+          (agenda-item-range-end-time copy) nil
+          (agenda-item-occurrence-index copy) nil
+          (agenda-item-occurrence-count copy) nil
+          (agenda-item-display-date copy) nil
+          (agenda-item-reminder-kind copy) nil
+          (agenda-item-reminder-days copy) nil)
+    copy))
+
+(defun agenda-view-todo-items (items keyword)
+  "Return one source-ordered row per matching TODO heading in ITEMS."
+  (let ((table (make-hash-table :test #'equal))
+        (keys '()))
+    (dolist (item items)
+      (let ((item-keyword (agenda-item-keyword item)))
+        (when (and item-keyword
+                   (if keyword
+                       (string= keyword item-keyword)
+                       (open-keyword-p item-keyword)))
+          (let ((key (list (agenda-item-file item) (agenda-item-line item))))
+            (multiple-value-bind (previous present-p) (gethash key table)
+              (unless present-p (push key keys))
+              (when (or (not present-p)
+                        (and (agenda-item-event-p previous)
+                             (not (agenda-item-event-p item))))
+                (setf (gethash key table) item)))))))
+    (loop :for key :in (nreverse keys)
+          :collect (agenda-view-todo-display-item (gethash key table)))))
+
+(defun agenda-view-todo-sections (state items)
+  (let ((keyword (agenda-view-state-todo-keyword state)))
+    (list
+     (make-agenda-section
+      :key :todos
+      :title (format nil "Global list of TODO items of type: ~a"
+                     (or keyword "ALL"))
+      :items (agenda-view-todo-items items keyword)))))
 
 (defun agenda-view-sections (buffer items now)
-  (if (eq (agenda-view-state-span (agenda-view-state buffer)) :summary)
-      (multiple-value-bind (start end) (agenda-view-range buffer now)
-        (agenda-default-sections items now start end))
-      (multiple-value-bind (start end) (agenda-view-range buffer now)
-        (agenda-view-span-sections items start end))))
+  (let ((state (agenda-view-state buffer)))
+    (cond
+      ((eq (agenda-view-state-command state) :todo)
+       (agenda-view-todo-sections state items))
+      ((eq (agenda-view-state-span state) :summary)
+       (multiple-value-bind (start end) (agenda-view-range buffer now)
+         (agenda-default-sections items now start end)))
+      ((eq (agenda-view-state-command state) :agenda)
+       (multiple-value-bind (start end) (agenda-view-range buffer now)
+         (agenda-view-span-sections
+          items start end :include-overdue-p nil :include-todos-p nil)))
+      (t
+       (multiple-value-bind (start end) (agenda-view-range buffer now)
+         (agenda-view-span-sections items start end))))))
 
 (defun agenda-view-date-at-point (&optional (point (current-point)))
   (or (text-property-at point :agenda-view-date)
@@ -168,7 +250,10 @@
   (let* ((state (agenda-view-state))
          (date (agenda-view-current-date state))
          (start (agenda-view-canonical-start span date)))
-    (setf (agenda-view-state-span state) span
+    (setf (agenda-view-state-command state)
+          (if (eq span :summary) :summary :span)
+          (agenda-view-state-todo-keyword state) nil
+          (agenda-view-state-span state) span
           (agenda-view-state-start-date state) start)
     (agenda-view-start-refresh state date)
     (message "Switched to ~(~a~) view" span)))
@@ -190,6 +275,66 @@
       (#\Space (agenda-view-change-span :summary))
       ((#\q #\Q #\Escape) (message "Abort"))
       (otherwise (message "Invalid agenda view key: ~a" character)))))
+
+(defun agenda-dispatch-popup-entry (keymap key description)
+  (define-key keymap key 'nop-command)
+  (setf (lem-core::prefix-description
+         (lem-core::keymap-find keymap (lem-core::parse-keyspec key)))
+        description))
+
+(defun agenda-dispatch-popup-keymap ()
+  "Return the truthful configured subset of Org's agenda dispatcher."
+  (let ((keymap (make-keymap :description "Agenda Commands")))
+    (setf (lem/transient::keymap-show-p keymap) t
+          (lem/transient::keymap-display-style keymap) :column)
+    (dolist (entry '(("a" "Agenda for current week or day")
+                     ("t" "List of all TODO entries")
+                     ("T" "Entries with special TODO keyword")
+                     ("n" "Agenda and all TODOs")
+                     ("q" "Abort")))
+      (agenda-dispatch-popup-entry keymap (first entry) (second entry)))
+    keymap))
+
+(defun agenda-dispatch-read-key ()
+  (lem-core::keyseq-to-string (list (read-key))))
+
+(defun agenda-dispatch-read-todo-keyword ()
+  (loop
+    :for character :=
+      (prompt-for-character
+       "TODO keyword [t]odo [n]ext [w]ait [h]old [s]omeday [d]one [c]ancelled [q]uit: ")
+    :do
+       (cond
+         ((or (null character)
+              (member character '(#\q #\Q #\Escape) :test #'char=))
+          (return nil))
+         (t
+          (alexandria:if-let
+              ((entry (assoc (char-downcase character)
+                             *agenda-todo-fast-keys*)))
+            (return (cdr entry))
+            (message "Unknown TODO key: ~a" character))))))
+
+(define-command lem-yath-agenda-dispatch () ()
+  "Display and execute one configured Org agenda command."
+  (unwind-protect
+       (progn
+         (let ((lem/transient:*transient-popup-delay* 0))
+           (keymap-activate (agenda-dispatch-popup-keymap)))
+         (redraw-display)
+         (let ((key (agenda-dispatch-read-key)))
+           (lem/transient::hide-transient)
+           (cond
+             ((string= key "a") (agenda-open-command :agenda))
+             ((string= key "t") (agenda-open-command :todo))
+             ((string= key "T")
+              (alexandria:when-let ((keyword (agenda-dispatch-read-todo-keyword)))
+                (agenda-open-command :todo keyword)))
+             ((string= key "n") (agenda-open-command :summary))
+             ((member key '("q" "Escape" "C-g") :test #'string=)
+              (message "Abort"))
+             (t (message "Invalid agenda command key: ~a" key)))))
+    (lem/transient::hide-transient)))
 
 (defun agenda-view-prefix-count (argument)
   (typecase argument
@@ -247,7 +392,8 @@
 
 (setf *agenda-sections-function* #'agenda-view-sections
       *agenda-header-label-function* #'agenda-view-header-label
-      *agenda-date-range-function* #'agenda-view-range)
+      *agenda-date-range-function* #'agenda-view-range
+      *agenda-command-initializer-function* #'agenda-view-initialize-command)
 
 (setf *agenda-post-render-functions*
       (cons 'agenda-view-post-render

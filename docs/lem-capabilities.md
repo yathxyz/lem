@@ -3339,7 +3339,7 @@ rather than services of this major mode.
 
 ### Native agenda summary — `lem-yath/src/apps/agenda.lisp`
 
-`SPC m a` opens and focuses a read-only grouped agenda over the current Emacs
+`SPC m a n` opens and focuses a read-only grouped agenda over the current Emacs
 configuration's existing canonical roots: `$WORKDIR`, `$PUBLIC_ORG_DIR`, and
 `$PUBLIC_ORG_DIR/mcp`. Each directory contributes only its top-level,
 non-hidden lowercase `.org` files. The parser recognizes the configured TODO
@@ -3421,7 +3421,13 @@ candidates remain visible, and realigns the result to the active terminal tag
 column.
 
 `src/apps/agenda-view.lisp` owns the GNU span policy separately from scanning
-and source mutation. Evil-Org `gD` dispatches day, week, fortnight, month,
+and source mutation. `SPC m a` opens a stock-shaped command dispatcher for the
+configured surface: `a` renders the Monday-aligned current week without the
+combined summary's separate unscheduled-TODO section, `t` renders each open
+TODO heading once regardless of planning date, `T` selects one configured TODO
+keyword, and custom `n` opens the established agenda-and-all-TODO summary.
+Cancellation retains the originating window. Evil-Org `gD` dispatches day,
+week, fortnight, month,
 year, and reset views; year retains GNU Org's confirmation. Week and fortnight
 selection align to Monday, month and year selection align to their first day,
 and every non-summary span renders a source-linked section for every date,
@@ -3655,8 +3661,16 @@ timestamp-time precedence,
 bracketed-link exclusion, elapsed-hour repeater dates, decoration-skipping
 `gj`, retained source time properties, and byte-identical grid rendering.
 
-This is a task summary, not a replacement for GNU Org's arbitrary agenda
-dispatcher. Diary sexps beyond the configured safe `org-anniversary` form,
+`scripts/agenda-dispatch-test.sh` starts from a clean Org source and physically
+drives `SPC m a`, cancellation, `a`, `t`, `T`, and configured custom `n`.
+It proves the visible supported boundary, Monday-aligned week ownership,
+deduplicated all-TODO rows, exact keyword selection, source preservation, and
+return to the originating window.
+
+This is a task summary, not a replacement for GNU Org's complete agenda
+dispatcher. Tag and property queries, searches, multi-occur, arbitrary custom
+commands, and the remaining stock dispatcher branches are not implemented.
+Diary sexps beyond the configured safe `org-anniversary` form,
 configurable time-grid, AM/PM display, and default-duration presentation,
 and configurable reminder-policy, leader, and sorting variables,
 configurable or cross-file refile targets, target creation/copy/reverse and
@@ -3665,7 +3679,7 @@ sibling/tag commands, bulk archive-sibling/scatter/arbitrary-function/persistent
 mark variants, clock recent-task/prefix variants, custom numeric report spans,
 tag-group/preset/configured-auto-exclusion filtering,
 the other `gD` display toggles (time grid, diary, inactive timestamps, follow,
-log, archive, and entry text), `p` timestamp editing, custom commands, and the
+log, archive, and entry text), `p` timestamp editing, and the
 wider org-super-agenda presentation remain explicit gaps.
 
 ---

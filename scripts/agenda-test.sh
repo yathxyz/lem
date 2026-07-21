@@ -220,10 +220,17 @@ fi
 tmux_cmd send-keys -t "$session" Escape
 sleep 0.25
 
-# Open through the real leader key, then report the effective mode and entries.
+# Open the real dispatcher through the leader, choose the configured combined
+# agenda/TODO command, then report the effective mode and entries.
 tmux_cmd send-keys -t "$session" Space m a
+if lem_wait_for "$session" 'Agenda for current week or day' 20 >/dev/null; then
+  pass dispatcher 'SPC m a opened the configured Org agenda command menu'
+else
+  fail dispatcher 'SPC m a did not expose the agenda command menu'
+fi
+tmux_cmd send-keys -t "$session" n
 if ! lem_wait_for "$session" 'Overdue work sentinel' 40 >/dev/null; then
-  fail leader "SPC m a did not render the agenda"
+  fail leader "SPC m a n did not render the combined agenda and TODO view"
 else
   tmux_cmd send-keys -t "$session" F4
   wait_report '^REPORT-DONE serial=1$' || true
@@ -1058,6 +1065,7 @@ visit_ok=0
 tmux_cmd send-keys -t "$session" Escape
 sleep 0.2
 tmux_cmd send-keys -t "$session" Space m a
+tmux_cmd send-keys -t "$session" n
 if lem_wait_for "$session" 'Overdue work sentinel' 40 >/dev/null; then
   : >"$LEM_YATH_AGENDA_REPORT"
   tmux_cmd send-keys -t "$session" F5 g k F6

@@ -786,6 +786,8 @@
               mkTestAppWithLem lemYath "lem-yath-agenda-filter-test" "agenda-filter-test.sh";
             agenda-reminder-test =
               mkTestAppWithLem lemYath "lem-yath-agenda-reminder-test" "agenda-reminder-test.sh";
+            agenda-dispatch-test =
+              mkTestAppWithLem lemYath "lem-yath-agenda-dispatch-test" "agenda-dispatch-test.sh";
             agenda-view-test =
               mkTestAppWithLem lemYath "lem-yath-agenda-view-test" "agenda-view-test.sh";
             editing-test = mkTestApp "lem-yath-editing-test" "editing-test.sh";
@@ -913,6 +915,7 @@
             agenda-bulk = mkCheckWithLem lemYath "agenda-bulk" "agenda-bulk-test.sh";
             agenda-filter = mkCheckWithLem lemYath "agenda-filter" "agenda-filter-test.sh";
             agenda-reminder = mkCheckWithLem lemYath "agenda-reminder" "agenda-reminder-test.sh";
+            agenda-dispatch = mkCheckWithLem lemYath "agenda-dispatch" "agenda-dispatch-test.sh";
             agenda-view = mkCheckWithLem lemYath "agenda-view" "agenda-view-test.sh";
             editing = mkCheck "editing" "editing-test.sh";
             formatting = mkCheck "formatting" "formatting-test.sh";

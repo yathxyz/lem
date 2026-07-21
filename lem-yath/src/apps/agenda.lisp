@@ -1228,6 +1228,8 @@ completed unscheduled tasks stay out of the TODO section."
       (put-text-property start point :agenda-line (agenda-item-line item))
       (put-text-property start point :agenda-heading
                          (agenda-item-heading item))
+      (put-text-property start point :agenda-keyword
+                         (agenda-item-keyword item))
       (put-text-property start point :agenda-kind (agenda-item-kind item))
       (put-text-property start point :agenda-date (agenda-item-date item))
       (put-text-property start point :agenda-display-date
@@ -2201,17 +2203,34 @@ suffix."
               (error (condition)
                 (message "Agenda TODO failed: ~a" condition))))))))
 
-(define-command lem-yath-agenda () ()
-  "Show grouped actions from the configured top-level Org agenda files."
+(defvar *agenda-command-initializer-function* nil
+  "Optional function initializing BUFFER for an agenda dispatcher command.")
+
+(defun agenda-open-command (command &optional todo-keyword)
+  "Open the agenda BUFFER for COMMAND and optional TODO-KEYWORD."
   (let ((directories (agenda-directories)))
     (unless directories
       (message "No configured Org agenda directory exists.")
-      (return-from lem-yath-agenda))
+      (return-from agenda-open-command))
     (let ((buffer (make-buffer *agenda-buffer-name* :enable-undo-p nil)))
       (setf (buffer-directory buffer) (first directories))
       (change-buffer-mode buffer 'lem-yath-agenda-mode)
+      (when *agenda-command-initializer-function*
+        (funcall *agenda-command-initializer-function*
+                 buffer command todo-keyword))
       (switch-to-window (pop-to-buffer buffer :split-action :sensibly))
-      (agenda-start-scan buffer))))
+      (agenda-start-scan buffer)
+      buffer)))
+
+(define-command lem-yath-agenda-summary () ()
+  "Open the configured combined agenda and all-TODO summary."
+  (agenda-open-command :summary))
+
+(define-command lem-yath-agenda () ()
+  "Prompt for a configured Org agenda command."
+  (if (fboundp 'lem-yath-agenda-dispatch)
+      (lem-yath-agenda-dispatch)
+      (lem-yath-agenda-summary)))
 
 (defvar *lem-yath-agenda-vi-keymap*
   (make-keymap :description '*lem-yath-agenda-vi-keymap*))

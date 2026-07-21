@@ -985,7 +985,8 @@ interaction, and authenticated MCP diff review,
 cursor/state parity, evil-snipe and Avy parity, screen-line/Evil parity, notes,
 roam, roam backlinks, native Org, Org-modern projection, Org image
 capture/download, planning/timestamps, agenda, agenda-undo, agenda-clock, and
-agenda-bulk, agenda-filter, agenda-view, and parity-ledger checks. The ledger can also be
+agenda-bulk, agenda-filter, agenda-dispatch, agenda-view, and parity-ledger
+checks. The ledger can also be
 validated directly, and the
 interactive TUI checks are exposed as flake apps:
 
@@ -1065,6 +1066,7 @@ nix run .#agenda-undo-test
 nix run .#agenda-clock-test
 nix run .#agenda-bulk-test
 nix run .#agenda-filter-test
+nix run .#agenda-dispatch-test
 nix run .#agenda-view-test
 nix run .#interactive-test
 nix run .#structural-test
