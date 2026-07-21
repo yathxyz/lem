@@ -149,6 +149,17 @@ jobs:
           Get-ChildItem $dlls
           echo $dlls | Out-File -FilePath $env:GITHUB_PATH -Append
 
+      - name: Install libffi toolchain for cffi-libffi grovel (MSYS2)
+        shell: pwsh
+        run: |
+          # sdl2-ttf depends on cffi-libffi, whose grovel step compiles C
+          # against ffi.h and links libffi; use the runner's MSYS2 mingw64
+          # toolchain so gcc, headers and libffi-8.dll are all consistent.
+          C:\msys64\usr\bin\bash -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-libffi mingw-w64-x86_64-pkg-config"
+          if ($LASTEXITCODE -ne 0) { throw "pacman install failed" }
+          if (-not (Test-Path "C:\msys64\mingw64\include\ffi.h")) { throw "ffi.h not installed" }
+          echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
       - name: Build lem-sdl2 (deploy-op)
         shell: pwsh
         run: |
