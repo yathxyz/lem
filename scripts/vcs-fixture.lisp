@@ -178,6 +178,34 @@
       (check (eq 'lem-yath-legit-bisect
                  (vcs-test-key-command lem/legit::*peek-legit-keymap* "B"))
              "magit-bisect-status-dispatch")
+      (dolist (binding '(("Tab" lem-yath-legit-toggle-todo-section)
+                         ("n" lem-yath-legit-next-visible-item)
+                         ("C-p" lem-yath-legit-previous-visible-item)
+                         ("M-n" lem-yath-legit-next-visible-header)
+                         ("M-p" lem-yath-legit-previous-visible-header)))
+        (check (eq (second binding)
+                   (vcs-test-key-command lem/legit::*peek-legit-keymap*
+                                         (first binding)))
+               (format nil "magit-todos-~a" (first binding))))
+      (check (and (= 10 (legit-todo-section-threshold 0))
+                  (= 5 (legit-todo-section-threshold 1))
+                  (= 1 (legit-todo-section-threshold 3)))
+             "magit-todos-collapse-thresholds")
+      (let* ((patch (format nil
+                            (concatenate
+                             'string
+                             "diff --git a/path.lisp b/path.lisp~%"
+                             "--- a/path.lisp~%+++ b/path.lisp~%"
+                             "@@ -7,2 +7,3 @@~%"
+                             "-TODO: deleted~%+ordinary~%"
+                             "+TODO(owner): added~%"
+                             "+TODO missing colon~%")))
+             (items (parse-legit-todo-diff patch)))
+        (check (and (= 1 (length items))
+                    (string= "path.lisp" (legit-todo-path (first items)))
+                    (= 8 (legit-todo-line (first items)))
+                    (string= "TODO" (legit-todo-keyword (first items))))
+               "magit-todos-added-line-parser"))
       (check (eq 'lem-yath-legit-bisect
                  (vcs-test-key-command
                   lem/legit::*legit-diff-mode-keymap* "B"))
@@ -1019,6 +1047,81 @@
         (and source-buffer
              (search "TODO tracked implementation task"
                      (buffer-text source-buffer))))))))
+
+(defun vcs-test-todo-section-kind-p (section kind)
+  (let ((key (legit-todo-section-key section)))
+    (case kind
+      (:worktree (and (= 2 (length key)) (eq :worktree (second key))))
+      (:branch (and (= 3 (length key)) (eq :branch (second key))))
+      (:keyword (and (member :keyword key) (not (member :path key))))
+      (:path (not (null (member :path key)))))))
+
+(defun vcs-test-todo-section (buffer kind)
+  (find-if (lambda (section)
+             (vcs-test-todo-section-kind-p section kind))
+           (legit-todo-buffer-sections buffer)))
+
+(defun vcs-test-todo-keyword-section (buffer path-p)
+  (find-if
+   (lambda (section)
+     (let* ((key (legit-todo-section-key section))
+            (keyword-tail (member :keyword key)))
+       (and keyword-tail
+            (string= "TODO" (second keyword-tail))
+            (eq path-p (not (null (member :path key)))))))
+   (legit-todo-buffer-sections buffer)))
+
+(defun vcs-test-todo-row-point (buffer text)
+  (let ((point (buffer-start-point buffer)))
+    (if (search-forward point text)
+        (progn (line-start point) point)
+        nil)))
+
+(define-command lem-yath-test-vcs-todo-sections () ()
+  (let* ((buffer (and (lem/legit::legit-status-active-p)
+                      (window-buffer lem/legit::*peek-window*)))
+         (sections (and buffer (legit-todo-buffer-sections buffer)))
+         (top (and buffer (vcs-test-todo-section buffer :worktree)))
+         (branch (and buffer (vcs-test-todo-section buffer :branch)))
+         (keyword (and buffer (vcs-test-todo-keyword-section buffer nil)))
+         (path (and buffer (vcs-test-todo-keyword-section buffer t)))
+         (ordinary-row
+           (and buffer
+                (vcs-test-todo-row-point
+                 buffer "TODO tracked implementation task")))
+         (branch-row
+           (and buffer
+                (vcs-test-todo-row-point buffer "TODO: branch-only"))))
+    (vcs-test-log
+     (concatenate
+      'string
+      "TODO-SECTIONS total=~d top=~a top-hidden=~a grouped=~a "
+      "keyword-hidden=~a path-hidden=~a row-hidden=~a branch=~a "
+      "branch-hidden=~a branch-row=~a branch-row-hidden=~a")
+     (length sections)
+     (vcs-test-yes-no top)
+     (vcs-test-yes-no (and top (legit-todo-section-hidden-p top)))
+     (vcs-test-yes-no (and keyword path))
+     (vcs-test-yes-no
+      (and keyword (legit-todo-section-hidden-p keyword)))
+     (vcs-test-yes-no (and path (legit-todo-section-hidden-p path)))
+     (vcs-test-yes-no
+      (and ordinary-row (legit-todo-line-hidden-p ordinary-row)))
+     (vcs-test-yes-no branch)
+     (vcs-test-yes-no
+      (and branch (legit-todo-section-hidden-p branch)))
+     (vcs-test-yes-no branch-row)
+     (vcs-test-yes-no
+      (and branch-row (legit-todo-line-hidden-p branch-row))))))
+
+(define-command lem-yath-test-vcs-position-todo-heading () ()
+  (let* ((buffer (and (lem/legit::legit-status-active-p)
+                      (window-buffer lem/legit::*peek-window*)))
+         (section (and buffer (vcs-test-todo-section buffer :worktree))))
+    (when section
+      (setf (current-window) lem/legit::*peek-window*)
+      (move-point (buffer-point buffer)
+                  (legit-todo-section-heading section)))))
 
 (defun vcs-test-position-legit-file (filename &key focus-diff section)
   "Position Legit's status row for FILENAME, optionally focusing its diff."
@@ -1892,6 +1995,8 @@
 (define-key *global-keymap* "C-c h"
   'lem-yath-test-vcs-timemachine-extra-state)
 (define-key *global-keymap* "C-c t" 'lem-yath-test-vcs-todo-preview)
+(define-key *global-keymap* "C-c T" 'lem-yath-test-vcs-todo-sections)
+(define-key *global-keymap* "C-c P" 'lem-yath-test-vcs-position-todo-heading)
 (define-key *global-keymap* "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key *global-keymap* "C-c e" 'lem-yath-test-vcs-porcelain-staged-diff)
 (define-key *global-keymap* "C-c f" 'lem-yath-test-vcs-focus-legit)
@@ -1906,6 +2011,10 @@
 (define-key *global-keymap* "C-c L" 'lem-yath-test-vcs-log-action-state)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c t" 'lem-yath-test-vcs-todo-preview)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c T" 'lem-yath-test-vcs-todo-sections)
+(define-key lem/legit::*peek-legit-keymap*
+  "C-c P" 'lem-yath-test-vcs-position-todo-heading)
 (define-key lem/legit::*peek-legit-keymap*
   "C-c d" 'lem-yath-test-vcs-porcelain-diff)
 (define-key lem/legit::*peek-legit-keymap*

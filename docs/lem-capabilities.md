@@ -2679,9 +2679,18 @@ keywords in package order, including literal `XXXX*`, its Org-heading form,
 and its required colon with optional parenthesized/bracketed suffix elsewhere;
 configured ignored `NOTE` and `DONE` plus bare prose are excluded. The
 synchronous `git grep` scan stops at 200 rendered results, 1 MiB of output, or
-five seconds. Automatic grouping/collapse and branch-diff sections remain
-outside this bounded magit-todos approximation. A small
-pinned-upstream patch exposes the status-section hook used by this integration.
+five seconds. Lists stay flat through 20 items and then group by keyword and
+filename. The top-level section initially folds above 10 items, nested limits
+shrink with depth, `Tab` toggles a TODO heading without replacing Legit's
+ordinary pane switch elsewhere, hidden rows are skipped by item/header
+navigation, and explicit visibility survives refresh. On a non-main local
+branch, a second section shows TODOs only from added diff lines since the merge
+base; main-branch inference follows the installed Magit order
+(`init.defaultBranch`, then `main`, `master`, `trunk`, `development`). Empty
+automatic sections are omitted. Custom scanners, grouping variables, manual
+update mode, alternate branch baselines, submodule scanning, and asynchronous
+process presentation remain outside this bounded approximation. A small
+pinned-upstream patch exposes the status-section hook used by the integration.
 
 ### GitHub Forge workflow — `lem-yath/src/forge.lisp`
 

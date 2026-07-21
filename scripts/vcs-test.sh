@@ -2907,6 +2907,74 @@ else
   fail legit-todo-preview 'TODO row preview metadata did not resolve exactly' \
     "$git_session"
 fi
+
+todo_sections_before=$(report_count '^TODO-SECTIONS ')
+send_keys "$git_session" C-c T
+if wait_report_count '^TODO-SECTIONS ' "$((todo_sections_before + 1))" &&
+   [[ $(latest_report '^TODO-SECTIONS ') == *\
+'top=yes top-hidden=yes grouped=no keyword-hidden=no path-hidden=no row-hidden=yes branch=no '* ]]; then
+  pass legit-todo-auto-collapse 'the 16-item TODO section initially collapsed above the exact limit of 10'
+else
+  fail legit-todo-auto-collapse 'the initial TODO section visibility was wrong' \
+    "$git_session"
+fi
+
+send_keys "$git_session" C-c P Tab C-c T
+if wait_report_count '^TODO-SECTIONS ' "$((todo_sections_before + 2))" &&
+   [[ $(latest_report '^TODO-SECTIONS ') == *\
+'top=yes top-hidden=no grouped=no keyword-hidden=no path-hidden=no row-hidden=no branch=no '* ]]; then
+  pass legit-todo-tab-expand 'Tab expanded the TODO heading and exposed its actionable rows'
+else
+  fail legit-todo-tab-expand 'Tab did not expand the TODO heading physically' \
+    "$git_session"
+fi
+
+send_keys "$git_session" g
+wait_legit "$git_session" git || true
+send_keys "$git_session" C-c T
+if wait_report_count '^TODO-SECTIONS ' "$((todo_sections_before + 3))" &&
+   [[ $(latest_report '^TODO-SECTIONS ') == *\
+'top=yes top-hidden=no grouped=no keyword-hidden=no path-hidden=no row-hidden=no branch=no '* ]]; then
+  pass legit-todo-refresh-visibility 'refresh preserved the explicitly expanded section'
+else
+  fail legit-todo-refresh-visibility 'refresh lost the TODO section visibility cache' \
+    "$git_session"
+fi
+
+printf '%s\n' \
+  'TODO: grouped extra one' 'TODO: grouped extra two' \
+  'TODO: grouped extra three' 'TODO: grouped extra four' \
+  'TODO: grouped extra five' \
+  >>"$LEM_YATH_VCS_GIT_ROOT/nested/docs/keywords.txt"
+send_keys "$git_session" g
+wait_legit "$git_session" git || true
+send_keys "$git_session" C-c T
+if wait_report_count '^TODO-SECTIONS ' "$((todo_sections_before + 4))" &&
+   [[ $(latest_report '^TODO-SECTIONS ') == *\
+'top=yes top-hidden=no grouped=yes keyword-hidden=yes path-hidden=yes row-hidden=yes branch=yes '* ]]; then
+  pass legit-todo-auto-group '21 items grouped by keyword then filename with depth-sensitive collapse'
+else
+  fail legit-todo-auto-group 'the 21-item grouping hierarchy or visibility was wrong' \
+    "$git_session"
+fi
+
+"$git_bin" -C "$LEM_YATH_VCS_GIT_ROOT" restore -- nested/docs/keywords.txt
+printf 'TODO: branch-only\n' \
+  >>"$LEM_YATH_VCS_GIT_ROOT/nested/docs/keywords.txt"
+send_keys "$git_session" g
+wait_legit "$git_session" git || true
+send_keys "$git_session" C-c T
+if wait_report_count '^TODO-SECTIONS ' "$((todo_sections_before + 5))" &&
+   [[ $(latest_report '^TODO-SECTIONS ') == *\
+'branch=yes branch-hidden=no branch-row=yes branch-row-hidden=no' ]]; then
+  pass legit-todo-branch-diff 'the non-main branch list showed only added-line TODOs against main'
+else
+  fail legit-todo-branch-diff 'the branch-diff TODO section was absent or folded incorrectly' \
+    "$git_session"
+fi
+"$git_bin" -C "$LEM_YATH_VCS_GIT_ROOT" restore -- nested/docs/keywords.txt
+send_keys "$git_session" g
+wait_legit "$git_session" git || true
 send_keys "$git_session" q F6
 
 if [[ ${LEM_YATH_VCS_SMOKE_ONLY:-0} == 1 ]]; then
