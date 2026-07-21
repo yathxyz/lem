@@ -989,7 +989,7 @@
       'string
       "LEGIT phase=~a active=~a source-live=~a raw-exact=~a "
       "raw-sentinel=~a todos=~a todo-count=~a todo-properties=~a "
-      "todo-hook=~d current=~a")
+      "todo-hook=~d todo-bottom=~a current=~a")
      *vcs-test-phase*
      (vcs-test-yes-no active)
      (vcs-test-yes-no (and *vcs-test-source-buffer*
@@ -1020,8 +1020,13 @@
            (lem/legit::get-move-function todo-point)
            (lem/legit::get-visit-file-function todo-point)))
      (count 'insert-legit-todo-section
-            lem/legit::*status-section-functions*
+            lem/legit::*status-bottom-section-functions*
             :key #'car :test #'eq)
+     (vcs-test-yes-no
+      (and text
+           (let ((latest (search "Latest commits:" text))
+                 (todos (search "Todos (17):" text)))
+             (and latest todos (< latest todos)))))
      (vcs-test-encode (buffer-name (current-buffer))))))
 
 (define-command lem-yath-test-vcs-todo-preview () ()
@@ -1838,7 +1843,7 @@
    :root-marker (count ".git" lem-core/commands/project:*root-files*
                        :test #'string=)
    :todo-hook (count 'insert-legit-todo-section
-                     lem/legit::*status-section-functions*
+                     lem/legit::*status-bottom-section-functions*
                      :key #'car :test #'eq)
    :bisect-hook (count 'insert-legit-bisect-section
                        lem/legit::*status-section-functions*

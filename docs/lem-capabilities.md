@@ -2688,9 +2688,10 @@ flat through 20 items and then group by keyword and
 filename. The top-level section initially folds above 10 items, nested limits
 shrink with depth, `Tab` toggles a TODO heading without replacing Legit's
 ordinary pane switch elsewhere, hidden rows are skipped by item/header
-navigation, and explicit visibility survives refresh. On a non-main local
-branch, a second section shows TODOs only from added diff lines since the merge
-base; main-branch inference follows the installed Magit order
+navigation, explicit visibility survives refresh, and the section follows the
+installed default by rendering after Legit's final built-in section. On a
+non-main local branch, a second section shows TODOs only from added diff lines
+since the merge base; main-branch inference follows the installed Magit order
 (`init.defaultBranch`, then `main`, `master`, `trunk`, `development`). Empty
 automatic sections are omitted. Within either TODO section, `b` follows
 Magit-Todos' buffer-local `branch` -> disabled -> forced-on cycle and `B`

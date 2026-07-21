@@ -1040,9 +1040,9 @@
 (define-key lem/legit::*peek-legit-keymap*
   "M-p" 'lem-yath-legit-previous-visible-header)
 
-(remove-hook lem/legit::*status-section-functions*
+(remove-hook lem/legit::*status-bottom-section-functions*
              'insert-legit-todo-section)
-(add-hook lem/legit::*status-section-functions*
+(add-hook lem/legit::*status-bottom-section-functions*
           'insert-legit-todo-section)
 
 (defun vcs-directory (&optional (buffer (current-buffer)))

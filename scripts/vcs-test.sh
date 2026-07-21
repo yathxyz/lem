@@ -2905,7 +2905,7 @@ else
     "$git_session"
 fi
 legit_state=$(latest_report '^LEGIT phase=git ')
-if [[ "$legit_state" == *'todos=yes todo-count=yes todo-properties=yes todo-hook=1 '* ]]; then
+if [[ "$legit_state" == *'todos=yes todo-count=yes todo-properties=yes todo-hook=1 todo-bottom=yes '* ]]; then
   pass legit-todo-section 'Legit rendered the configured Magit-Todos keywords with actions'
 else
   fail legit-todo-section "unexpected Legit TODO state: $legit_state" \
