@@ -2112,7 +2112,7 @@ porcelain_push_refspecs_complete() {
 }
 
 porcelain_push_matching_complete() {
-  porcelain_origin_branch_is push-match "$push_match_tip"
+  porcelain_push_target_ref_is refs/heads/push-match "$push_match_tip"
 }
 
 porcelain_push_one_tag_complete() {
@@ -2134,7 +2134,8 @@ porcelain_push_force_with_lease_complete() {
 
 porcelain_push_settled() {
   local predicate=$1
-  wait_legit "$porcelain_session" porcelain && "$predicate"
+  wait_legit "$porcelain_session" porcelain &&
+    wait_until "$WAIT_TIMEOUT" "$predicate"
 }
 
 pull_upstream_tip=
@@ -2456,7 +2457,9 @@ prepare_porcelain_push_fixture() {
     '2001-06-13T00:00:00+0000' || return 1
   push_match_tip=$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" \
     rev-parse HEAD) || return 1
-  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" push -q origin \
+  # Origin deliberately contains divergent branches for rejection coverage.
+  # Seed the clean auxiliary remote so matching tests only matching semantics.
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" push -q push-target \
     "$merge_main_hash":refs/heads/push-match || return 1
 
   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -b \
@@ -2657,6 +2660,16 @@ enter_atomic_prompt_value() {
   send_keys "$session" C-a C-k F12 C-y
   sleep 0.5
   send_keys "$session" Enter
+  sleep 0.25
+}
+
+submit_atomic_prompt_value() {
+  local session=$1 value=$2
+  # A completion popup consumes the first Return and leaves the prompt active.
+  # Submit through one fixture command so a later Return cannot escape into the
+  # synchronous VCS action after the prompt has already closed.
+  printf '%s' "$value" >"$LEM_YATH_VCS_PROMPT_INPUT"
+  send_keys "$session" F4
   sleep 0.25
 }
 
@@ -5280,10 +5293,10 @@ fi
 send_keys "$porcelain_session" A m
 if lem_wait_for "$porcelain_session" 'Squash:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    "$cherry_squash_hash" 'Squash:'
+  submit_atomic_prompt_value "$porcelain_session" "$cherry_squash_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_cherry_squash_complete; then
+if wait_until "$WAIT_TIMEOUT" porcelain_cherry_squash_complete &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-cherry-squash \
     'A m applied a selected ref through git merge --squash without moving HEAD'
 else
@@ -5292,7 +5305,7 @@ else
     "$porcelain_session"
 fi
 "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard HEAD
-send_keys "$porcelain_session" g
+send_keys "$porcelain_session" C-c f g
 
 send_keys "$porcelain_session" A
 if lem_wait_for "$porcelain_session" '\[Apply\]' \
@@ -5909,10 +5922,10 @@ if lem_wait_for "$porcelain_session" '\[Merge\]' \
   send_keys "$porcelain_session" s
 fi
 if lem_wait_for "$porcelain_session" 'Squash:' "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    merge-squash 'Squash:'
+  submit_atomic_prompt_value "$porcelain_session" merge-squash
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_merge_squashed; then
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_squashed &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-merge-squash \
     'm s staged the selected tree without moving HEAD or creating MERGE_HEAD'
 else
@@ -5922,7 +5935,7 @@ else
 fi
 "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
   "$merge_main_hash"
-send_keys "$porcelain_session" g
+send_keys "$porcelain_session" C-c f g
 
 send_keys "$porcelain_session" m
 if lem_wait_for "$porcelain_session" '\[Merge\]' \
@@ -5931,10 +5944,10 @@ if lem_wait_for "$porcelain_session" '\[Merge\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Merge without committing:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    merge-nocommit 'Merge without committing:'
+  submit_atomic_prompt_value "$porcelain_session" merge-nocommit
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_merge_no_commit; then
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_no_commit &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-merge-nocommit \
     'm n retained HEAD and prepared an explicit in-progress merge'
 else
@@ -5967,8 +5980,7 @@ if lem_wait_for "$porcelain_session" '\[Merge\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Merge without committing:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    merge-edit 'Merge without committing:'
+  submit_atomic_prompt_value "$porcelain_session" merge-edit
 fi
 if lem_wait_for "$porcelain_session" 'Please enter the commit message' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6009,10 +6021,10 @@ if lem_wait_for "$porcelain_session" '\[Merge\]' \
   send_keys "$porcelain_session" m
 fi
 if lem_wait_for "$porcelain_session" 'Merge:' "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    merge-conflict 'Merge:'
+  submit_atomic_prompt_value "$porcelain_session" merge-conflict
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_merge_conflicted; then
+if wait_until "$WAIT_TIMEOUT" porcelain_merge_conflicted &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-merge-conflict \
     'm m retained a real unmerged index and MERGE_HEAD on conflict'
 else
@@ -6115,10 +6127,10 @@ fi
 send_keys "$porcelain_session" g -
 if lem_wait_for "$porcelain_session" 'Revert changes from:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    "$revert_nocommit_hash" 'Revert changes from:'
+  submit_atomic_prompt_value "$porcelain_session" "$revert_nocommit_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_revert_no_commit_complete; then
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_no_commit_complete &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-revert-no-commit \
     'direct - staged the inverse tree without moving HEAD and retained abort state'
 else
@@ -6141,10 +6153,11 @@ if lem_wait_for "$porcelain_session" '\[Revert\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    "$revert_multi_b_hash,$revert_multi_a_hash" 'Revert commit\(s\):'
+  submit_atomic_prompt_value "$porcelain_session" \
+    "$revert_multi_b_hash,$revert_multi_a_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_revert_multi_complete; then
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_multi_complete &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-revert-multiple \
     'comma-separated _ _ reverted two commits in the requested order'
 else
@@ -6173,10 +6186,10 @@ if lem_wait_for "$porcelain_session" '\[Revert\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    "$revert_merge_hash" 'Revert commit\(s\):'
+  submit_atomic_prompt_value "$porcelain_session" "$revert_merge_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_revert_merge_complete; then
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_merge_complete &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-revert-mainline \
     '_ -m reverted a merge relative to parent one and retained mainline content'
 else
@@ -6199,10 +6212,10 @@ if lem_wait_for "$porcelain_session" '\[Revert\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    "$revert_conflict_hash" 'Revert commit\(s\):'
+  submit_atomic_prompt_value "$porcelain_session" "$revert_conflict_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_revert_conflicted; then
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_conflicted &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-revert-conflict \
     'a conflicting _ _ retained REVERT_HEAD and the unmerged index'
 else
@@ -6235,10 +6248,10 @@ if lem_wait_for "$porcelain_session" '\[Revert\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    "$revert_conflict_hash" 'Revert commit\(s\):'
+  submit_atomic_prompt_value "$porcelain_session" "$revert_conflict_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_revert_conflicted; then
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_conflicted &&
+   wait_legit "$porcelain_session" porcelain; then
   printf 'merge main value\n' \
     >"$LEM_YATH_VCS_PORCELAIN_ROOT/merge-conflict.txt"
   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- merge-conflict.txt
@@ -6269,11 +6282,11 @@ if lem_wait_for "$porcelain_session" '\[Revert\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Revert commit\(s\):' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" \
-    "$revert_skip_conflict_hash,$revert_skip_clean_hash" \
-    'Revert commit\(s\):'
+  submit_atomic_prompt_value "$porcelain_session" \
+    "$revert_skip_conflict_hash,$revert_skip_clean_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_revert_conflicted; then
+if wait_until "$WAIT_TIMEOUT" porcelain_revert_conflicted &&
+   wait_legit "$porcelain_session" porcelain; then
   send_keys "$porcelain_session" g _
 fi
 if lem_wait_for "$porcelain_session" 'skip commit' \
@@ -6552,8 +6565,7 @@ if lem_wait_for "$porcelain_session" '\[Branch\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Configure branch:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" branch-renamed \
-    'Configure branch:'
+  submit_atomic_prompt_value "$porcelain_session" branch-renamed
 fi
 if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6569,8 +6581,7 @@ if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Upstream for branch-renamed:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" origin/remote-topic \
-    'Upstream for branch-renamed:'
+  submit_atomic_prompt_value "$porcelain_session" origin/remote-topic
 fi
 if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6578,8 +6589,7 @@ if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Rebase when pulling branch-renamed:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" true \
-    'Rebase when pulling branch-renamed:'
+  submit_atomic_prompt_value "$porcelain_session" true
 fi
 if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6587,8 +6597,7 @@ if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Push remote for branch-renamed:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" origin \
-    'Push remote for branch-renamed:'
+  submit_atomic_prompt_value "$porcelain_session" origin
 fi
 if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6596,8 +6605,7 @@ if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Repository pull.rebase:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" true \
-    'Repository pull.rebase:'
+  submit_atomic_prompt_value "$porcelain_session" true
 fi
 if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6605,8 +6613,7 @@ if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Repository push default:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" origin \
-    'Repository push default:'
+  submit_atomic_prompt_value "$porcelain_session" origin
 fi
 if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6614,8 +6621,7 @@ if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Automatic upstream setup:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" always \
-    'Automatic upstream setup:'
+  submit_atomic_prompt_value "$porcelain_session" always
 fi
 if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6623,8 +6629,7 @@ if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Automatic rebase setup:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" remote \
-    'Automatic rebase setup:'
+  submit_atomic_prompt_value "$porcelain_session" remote
 fi
 if lem_wait_for "$porcelain_session" '\[Configure branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6634,7 +6639,8 @@ if lem_wait_for "$porcelain_session" '\[Branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
   send_keys "$porcelain_session" q
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_branch_config_complete; then
+if wait_until "$WAIT_TIMEOUT" porcelain_branch_config_complete &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-branch-configure \
     'b C persisted branch and repository configuration through the live popup'
 else
@@ -6739,16 +6745,15 @@ if lem_wait_for "$porcelain_session" '\[Branch\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Delete branch:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" branch-current-delete \
-    'Delete branch:'
+  submit_atomic_prompt_value "$porcelain_session" branch-current-delete
 fi
 if lem_wait_for "$porcelain_session" 'switch before deleting:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" branch-created \
-    'switch before deleting:'
+  submit_atomic_prompt_value "$porcelain_session" branch-created
 fi
 if wait_until "$WAIT_TIMEOUT" porcelain_branch_current_is branch-created &&
-   porcelain_branch_absent branch-current-delete; then
+   porcelain_branch_absent branch-current-delete &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-branch-delete-current \
     'b x switched away before deleting the current branch'
 else
@@ -7257,8 +7262,7 @@ if lem_wait_for "$porcelain_session" '\[Push\]' \
 fi
 if lem_wait_for "$porcelain_session" 'Push matching branches to:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_completion_prompt_value "$porcelain_session" origin \
-    'Push matching branches to:'
+  submit_atomic_prompt_value "$porcelain_session" push-target
 fi
 if porcelain_push_settled porcelain_push_matching_complete; then
   pass legit-push-matching 'p m updated branches present on both sides'

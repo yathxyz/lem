@@ -2054,7 +2054,20 @@
   (unless (vcs-test-load-prompt-input)
     (lem-yath-test-vcs-debounce-state)))
 
+(define-command lem-yath-test-vcs-submit-prompt-input () ()
+  "Submit the acceptance driver's exact value through the active prompt."
+  (let ((path (uiop:getenv "LEM_YATH_VCS_PROMPT_INPUT")))
+    (unless (and path (probe-file path))
+      (editor-error "VCS test prompt input is missing"))
+    (lem/prompt-window::replace-prompt-input
+     (uiop:read-file-string path))
+    (lem-yath-prompt-execute)))
+
 (define-key *global-keymap* "F12" 'lem-yath-test-vcs-f12)
+(define-key lem/prompt-window::*prompt-mode-keymap*
+  "F4" 'lem-yath-test-vcs-submit-prompt-input)
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "F4" 'lem-yath-test-vcs-submit-prompt-input)
 (define-key *global-keymap* "C-c u" 'lem-yath-test-vcs-untracked-state)
 (define-key *global-keymap* "C-c h"
   'lem-yath-test-vcs-timemachine-extra-state)
