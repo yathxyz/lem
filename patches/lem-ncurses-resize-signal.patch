@@ -1,0 +1,162 @@
+diff --git a/frontends/ncurses/input.lisp b/frontends/ncurses/input.lisp
+--- a/frontends/ncurses/input.lisp
++++ b/frontends/ncurses/input.lisp
+@@ -10,19 +10,23 @@
+ ;;  (we don't use stdscr for input because it calls wrefresh implicitly
+ ;;   and causes the display confliction by two threads)
+ (defvar *padwin* nil)
++(defconstant +input-poll-timeout+ 50)
+ 
+ (defun getch ()
+-  (unless *padwin*
+-    (setf *padwin* (charms/ll:newpad 1 1))
+-    (charms/ll:keypad *padwin* 1)
+-    (charms/ll:wtimeout *padwin* -1))
+-  (charms/ll:wgetch *padwin*))
++  (lem-ncurses/term:with-input-resize-lock
++    (unless *padwin*
++      (setf *padwin* (charms/ll:newpad 1 1))
++      (charms/ll:keypad *padwin* 1)
++      (charms/ll:wtimeout *padwin* +input-poll-timeout+))
++    (charms/ll:wgetch *padwin*)))
+ 
+ (defmacro with-getch-input-timeout ((time) &body body)
+   `(progn
+-     (charms/ll:wtimeout *padwin* ,time)
++     (lem-ncurses/term:with-input-resize-lock
++       (charms/ll:wtimeout *padwin* ,time))
+      (unwind-protect (progn ,@body)
+-       (charms/ll:wtimeout *padwin* -1))))
++       (lem-ncurses/term:with-input-resize-lock
++         (charms/ll:wtimeout *padwin* +input-poll-timeout+)))))
+ 
+ (defun utf8-bytes (c)
+   (cond
+@@ -164,7 +168,9 @@
+     (tagbody :start
+       (return-from get-event
+         (let ((code (getch)))
+-          (cond ((= code -1) (go :start))
++          (cond ((= code -1)
++                 (sleep 0.001)
++                 (go :start))
+                 ((= code resize-code) :resize)
+                 ((= code abort-code) :abort)
+                 ((= code escape-code)
+diff --git a/frontends/ncurses/ncurses.lisp b/frontends/ncurses/ncurses.lisp
+--- a/frontends/ncurses/ncurses.lisp
++++ b/frontends/ncurses/ncurses.lisp
+@@ -73,6 +73,10 @@
+ (defmethod lem-if:update-display ((implementation ncurses))
+   (lem-ncurses/view:update-display (lem:window-view (lem:current-window))))
+ 
++(defmethod lem-if:resize-display-before ((implementation ncurses))
++  (declare (ignore implementation))
++  (lem-ncurses/term:resize-term))
++
+ (defmethod lem-if:clipboard-paste ((implementation ncurses))
+   (lem-ncurses/clipboard:paste))
+ 
+diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
+--- a/frontends/ncurses/term.lisp
++++ b/frontends/ncurses/term.lisp
+@@ -15,7 +15,9 @@
+            :disable-mouse
+            :update-cursor-shape
+            :get-display-width
+-           :get-display-height))
++           :get-display-height
++           :resize-term
++           :with-input-resize-lock))
+ (in-package :lem-ncurses/term)
+ 
+ (cffi:defcvar ("COLOR_PAIRS" *COLOR-PAIRS* :library charms/ll::libcurses) :int)
+@@ -545,13 +547,61 @@
+ 
+ (defvar *tty-name* nil)
+ (defvar *term-io* nil)
++(defvar *input-resize-lock* (bt2:make-lock :name "ncurses input/resize lock"))
++
++(defmacro with-input-resize-lock (&body body)
++  `(bt2:with-lock-held (*input-resize-lock*)
++     ,@body))
++
++#+sbcl
++(defvar *resize-monitor-thread* nil)
++
++#+sbcl
++(defvar *resize-monitor-running-p* nil)
++
++(defun terminal-size ()
++  (let ((term-io (or *term-io* (c-file "stdin"))))
++    (when term-io
++      (cffi:with-foreign-object (ws '(:struct winsize))
++        (when (= 0 (ioctl (fileno term-io) 21523 :pointer ws))
++          (cffi:with-foreign-slots ((ws-row ws-col) ws (:struct winsize))
++            (when (and (plusp ws-row) (plusp ws-col))
++              (values ws-row ws-col))))))))
++
++#+sbcl
++(defun resize-monitor-loop ()
++  (multiple-value-bind (last-rows last-cols) (terminal-size)
++    (loop
++      (sleep 0.05)
++      (unless *resize-monitor-running-p* (return))
++      (multiple-value-bind (rows cols) (terminal-size)
++        (when (and rows cols
++                   (or (null last-rows)
++                       (/= rows last-rows)
++                       (/= cols last-cols)))
++          (setf last-rows rows
++                last-cols cols)
++          (lem:send-event :resize))))))
++
++#+sbcl
++(defun start-resize-monitor ()
++  (setf *resize-monitor-running-p* t
++        *resize-monitor-thread*
++        (bt2:make-thread #'resize-monitor-loop
++                         :name "Lem ncurses resize monitor")))
++
++#+sbcl
++(defun stop-resize-monitor ()
++  (setf *resize-monitor-running-p* nil)
++  (when *resize-monitor-thread*
++    (ignore-errors (bt2:join-thread *resize-monitor-thread*))
++    (setf *resize-monitor-thread* nil)))
+ 
+ (defun resize-term ()
+-  (when *term-io*
+-    (cffi:with-foreign-object (ws '(:struct winsize))
+-      (when (= 0 (ioctl (fileno *term-io*) 21523 :pointer ws))
+-        (cffi:with-foreign-slots ((ws-row ws-col) ws (:struct winsize))
+-          (charms/ll:resizeterm ws-row ws-col))))))
++  (multiple-value-bind (rows cols) (terminal-size)
++    (when (and rows cols)
++      (with-input-resize-lock
++        (charms/ll:resizeterm rows cols)))))
+ 
+ (defun try-newterm (term-name out-fp in-fp)
+   "Create a curses screen for terminfo entry TERM-NAME. Return true when the
+@@ -655,6 +705,10 @@
+   (when (= *mouse-mode* 1)
+     (enable-mouse))
+   (enable-bracketed-paste)
++  #+sbcl
++  (progn
++    (ignore-errors (sb-sys:enable-interrupt sb-unix:sigwinch :ignore))
++    (start-resize-monitor))
+   t)
+ 
+ (defun term-set-tty (tty-name)
+@@ -669,6 +723,10 @@
+   (write-terminal-string (format nil "~C[?1006l~C[?1002l~C[?1000l" #\Esc #\Esc #\Esc)))
+ 
+ (defun term-finalize ()
++  #+sbcl
++  (stop-resize-monitor)
++  #+sbcl
++  (ignore-errors (sb-sys:enable-interrupt sb-unix:sigwinch :default))
+   (disable-bracketed-paste)
+   (emit-mouse-reporting-off)
+   (when *term-io*

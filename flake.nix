@@ -70,6 +70,7 @@
               ./patches/lem-before-find-file.patch
               ./patches/lem-kill-buffer-query.patch
               ./patches/lem-completion-repaint.patch
+              ./patches/lem-ncurses-resize-signal.patch
             ];
           };
           terminalSo = pkgs.stdenv.mkDerivation {
