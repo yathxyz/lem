@@ -154,6 +154,10 @@ line.  Blank lines are skipped like Evil's insert-state C-y and C-e."
 
 (defvar *lem-yath-evil-last-insertion* nil)
 
+(lem-vi-mode/registers:set-last-insertion-register-function
+ (lambda ()
+   (values *lem-yath-evil-last-insertion* :char)))
+
 (defun lem-yath-evil-track-last-insertion (start end old-length)
   "Track Evil's contiguous last-inserted range in the changed buffer."
   (let* ((buffer (point-buffer start))

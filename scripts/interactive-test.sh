@@ -29,7 +29,16 @@ KEY_DELAY="${KEY_DELAY:-0.25}"
 # Session bookkeeping + cleanup trap
 # ---------------------------------------------------------------------------
 SESSIONS=()
-register_session() { SESSIONS+=("$1"); }
+MAX_LIVE_SESSIONS="${MAX_LIVE_SESSIONS:-12}"
+register_session() {
+  local oldest
+  while (( ${#SESSIONS[@]} >= MAX_LIVE_SESSIONS )); do
+    oldest="${SESSIONS[0]}"
+    tmux_cmd kill-session -t "$oldest" 2>/dev/null || true
+    SESSIONS=("${SESSIONS[@]:1}")
+  done
+  SESSIONS+=("$1")
+}
 cleanup() {
   for s in "${SESSIONS[@]:-}"; do
     [ -n "$s" ] && tmux_cmd kill-session -t "$s" 2>/dev/null
@@ -137,6 +146,7 @@ LINENAMEDREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-line-named-register.txt"
 REPEATREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-repeat-register.txt"
 READONLYREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-readonly-register.txt"
 DELETEREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-delete-register.txt"
+DOTREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-dot-register.txt"
 
 printf 'first known line\nsecond known line\nthird known line\n' > "$SCRATCH"
 printf '(defun alpha ())\n(defun beta ())\n(defun gamma ())\n' > "$LISPFIX"
@@ -166,6 +176,7 @@ printf 'LINE\nsink\n' > "$LINENAMEDREGISTERFIX"
 printf 'cat\njunk\nsink\n' > "$REPEATREGISTERFIX"
 printf 'keep text\n' > "$READONLYREGISTERFIX"
 printf 'one two\nsink\n' > "$DELETEREGISTERFIX"
+printf 'base\nsink\n' > "$DOTREGISTERFIX"
 
 # ===========================================================================
 # Check 1: Boot with a scratch file; vi NORMAL state shows in the modeline.
@@ -1039,6 +1050,29 @@ else
 fi
 
 # ===========================================================================
+# Check 27: The read-only dot register exposes the previous contiguous Insert
+# session to Normal-state paste, including a count and dot-repeat.
+# ===========================================================================
+S27="lem-yath-it27-$id"
+dot_register_ok=0
+
+if boot_with_file "$S27" "$DOTREGISTERFIX" '^base$' "27-dot-register"; then
+  tmux_cmd send-keys -t "$S27" "A"
+  send_text "$S27" "foo"
+  send_chord "$S27" Escape "j" '$' '"' "." "2" "p" "." "C-x" "C-s"
+  sleep 0.5
+  cmp -s "$DOTREGISTERFIX" <(printf 'basefoo\nsinkfoofoofoofoo\n') && dot_register_ok=1
+fi
+
+if [ "$dot_register_ok" = 1 ]; then
+  pass "27-dot-register" \
+    'normal ".2p and dot-repeat use the previous contiguous insertion'
+else
+  fail "27-dot-register" \
+    "normal dot-register mismatch (paste=$dot_register_ok)" "$S27"
+fi
+
+# ===========================================================================
 # Summary
 # ===========================================================================
 echo
@@ -1050,7 +1084,7 @@ order=(01-boot-normal 02-insert-roundtrip 03-leader-compile 04-gc-operator \
        15-snipe-parity 16-insert-C-u 17-fill-paragraph 18-org-id \
        19-auto-fill-toggle 20-control-line-motion 21-expand-region \
        22-Y-linewise 23-control-key-parity 24-insert-control-parity \
-       25-insert-registers 26-normal-registers)
+       25-insert-registers 26-normal-registers 27-dot-register)
 for k in "${order[@]}"; do
   printf '  %-26s %s\n' "$k" "${RESULT[$k]:-MISSING}"
 done

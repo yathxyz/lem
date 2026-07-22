@@ -2,21 +2,28 @@ diff --git a/extensions/vi-mode/registers.lisp b/extensions/vi-mode/registers.li
 index 3c312e5..f03a6f2 100644
 --- a/extensions/vi-mode/registers.lisp
 +++ b/extensions/vi-mode/registers.lisp
-@@ -24,6 +24,9 @@
+@@ -24,6 +24,10 @@
             :downcase-char
             :yank-region
             :delete-region
 +           :valid-register-p
 +           :take-selected-register
 +           :with-selected-register
++           :set-last-insertion-register-function
             :paste-yank))
  (in-package :lem-vi-mode/registers)
  
-@@ -70,6 +73,27 @@
+@@ -70,6 +74,33 @@
  (defvar *unnamed-register* nil)
  (defvar *small-deletion-register* nil)
  
 +(defvar *selected-register* nil)
++(defvar *last-insertion-register-function* nil)
++
++(defun set-last-insertion-register-function (function)
++  (check-type function (or null function))
++  (setf *last-insertion-register-function* function)
++  (values))
 +
 +(defun valid-register-p (name)
 +  (and (characterp name)
@@ -233,13 +240,21 @@ index 3c312e5..f03a6f2 100644
           (move-point point (cursor-yank-start point))
           (back-to-indentation point))
          (:block
-@@ -316,6 +376,6 @@
-           (setf (cursor-yank-end point) (copy-point point :left-inserting))
-           (move-point point (cursor-yank-start point)))
-         (:char
+@@ -319 +386 @@
 -         (lem:yank)
 +         (lem-core/commands/edit::yank-string point string)
-          (character-offset point -1))))))
+@@ -347,8 +415,11 @@
+          (#\:
+           *last-ex-command*)
+          ;; Last inserted text (read-only)
+-         ;(#\.)
++         (#\.
++          (if *last-insertion-register-function*
++              (funcall *last-insertion-register-function*)
++              (values nil :char)))
+          ;; Current file name (read-only)
+          (#\%
+           (buffer-filename (current-buffer)))
  
 diff --git a/extensions/vi-mode/commands.lisp b/extensions/vi-mode/commands.lisp
 index f21d0cf..7de79b4 100644
