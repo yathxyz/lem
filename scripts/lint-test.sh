@@ -40,6 +40,13 @@ for program in bash cargo clang go gofmt mypy nix-instantiate python3 ruff timeo
   fi
 done
 
+# Nix creates a per-user state database on its first invocation.  Initialize it
+# before Lem can launch overlapping automatic and explicit Nix lint requests.
+if ! nix-instantiate --eval --expr '1' >/dev/null; then
+  printf 'FAIL prerequisites: nix-instantiate could not initialize test state\n' >&2
+  exit 1
+fi
+
 if [ ! -x "$here/scripts/fake-ruff.py" ]; then
   printf 'FAIL prerequisites: scripts/fake-ruff.py is not executable\n' >&2
   exit 1
