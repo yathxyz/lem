@@ -32,7 +32,7 @@ diff --git a/frontends/ncurses/input.lisp b/frontends/ncurses/input.lisp
  
  (defun utf8-bytes (c)
    (cond
-@@ -164,7 +168,9 @@
+@@ -164,8 +168,12 @@
      (tagbody :start
        (return-from get-event
          (let ((code (getch)))
@@ -40,9 +40,13 @@ diff --git a/frontends/ncurses/input.lisp b/frontends/ncurses/input.lisp
 +          (cond ((= code -1)
 +                 (sleep 0.001)
 +                 (go :start))
-                 ((= code resize-code) :resize)
+-                ((= code resize-code) :resize)
++                ((= code resize-code)
++                 #+sbcl (go :start)
++                 #-sbcl :resize)
                  ((= code abort-code) :abort)
                  ((= code escape-code)
+                  (let ((code (with-getch-input-timeout
 diff --git a/frontends/ncurses/ncurses.lisp b/frontends/ncurses/ncurses.lisp
 --- a/frontends/ncurses/ncurses.lisp
 +++ b/frontends/ncurses/ncurses.lisp
@@ -71,7 +75,7 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
  (in-package :lem-ncurses/term)
  
  (cffi:defcvar ("COLOR_PAIRS" *COLOR-PAIRS* :library charms/ll::libcurses) :int)
-@@ -545,13 +547,72 @@
+@@ -545,13 +547,77 @@
  
  (defvar *tty-name* nil)
  (defvar *term-io* nil)
@@ -114,7 +118,12 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
 +            (lem:send-event
 +             (lambda ()
 +               (unwind-protect
-+                    (lem:update-on-display-resized)
++                    (multiple-value-bind (current-rows current-cols)
++                        (terminal-size)
++                      (when (and current-rows current-cols
++                                 (or (/= current-rows charms/ll:*lines*)
++                                     (/= current-cols charms/ll:*cols*)))
++                        (lem:update-on-display-resized)))
 +                 (setf *resize-event-pending-p* nil))))
 +          (error (condition)
 +            (setf *resize-event-pending-p* nil)
@@ -149,7 +158,7 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
  
  (defun try-newterm (term-name out-fp in-fp)
    "Create a curses screen for terminfo entry TERM-NAME. Return true when the
-@@ -655,6 +716,10 @@
+@@ -655,6 +721,10 @@
    (when (= *mouse-mode* 1)
      (enable-mouse))
    (enable-bracketed-paste)
@@ -160,7 +169,7 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
    t)
  
  (defun term-set-tty (tty-name)
-@@ -669,6 +734,10 @@
+@@ -669,6 +739,10 @@
    (write-terminal-string (format nil "~C[?1006l~C[?1002l~C[?1000l" #\Esc #\Esc #\Esc)))
  
  (defun term-finalize ()
