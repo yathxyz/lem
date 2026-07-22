@@ -46,6 +46,25 @@
                (unless condition (incf failures))))
       (handler-case
           (progn
+            (check (= 70 *fill-column*)
+                   "default-fill-column-matches-emacs")
+            (let ((buffer (make-buffer "*editing-fill-column*")))
+              (unwind-protect
+                   (with-current-buffer buffer
+                     (insert-string
+                      (buffer-point buffer)
+                      (format nil
+                              "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega~%"))
+                     (buffer-start (current-point))
+                     (lem-yath-fill-paragraph)
+                     (check
+                      (string=
+                       (buffer-text buffer)
+                       (format nil
+                               "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu~%xi omicron pi rho sigma tau upsilon phi chi psi omega~%"))
+                      "fill-paragraph-wraps-at-emacs-column-70"))
+                (delete-buffer buffer)))
+
             (let* ((path (editing-test-file "program.fixture"))
                    (initial (format nil
                                     "untouched dirty  ~%insert touched~%delete touched X  ~%stable~%"))

@@ -555,12 +555,15 @@ if boot_with_file "$S17" "$FILLFIX" 'alpha beta gamma' "17-fill-paragraph"; then
   send_chord "$S17" "Space" "y" "w"
   sleep 0.6
   fill_screen="$(lem_capture "$S17")"
-  if echo "$fill_screen" | grep -q 'alpha beta gamma' && \
-     echo "$fill_screen" | grep -q 'omega' && \
-     ! echo "$fill_screen" | grep -qE 'alpha.*omega'; then
-    pass "17-fill-paragraph" "SPC y w wrapped the paragraph"
+  if grep -Fqx \
+       'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu' \
+       <<<"$fill_screen" && \
+     grep -Fqx \
+       'xi omicron pi rho sigma tau upsilon phi chi psi omega' \
+       <<<"$fill_screen"; then
+    pass "17-fill-paragraph" "SPC y w matched Emacs fill-column 70 exactly"
   else
-    fail "17-fill-paragraph" "SPC y w did not wrap the paragraph" "$S17"
+    fail "17-fill-paragraph" "SPC y w did not match Emacs fill-column 70" "$S17"
   fi
 fi
 

@@ -1,4 +1,4 @@
-;;;; Editing defaults. Emacs side: indent-tabs-mode nil, tab-width 4,
+;;;; Editing defaults. Emacs side: tab-width 4, fill-column 70,
 ;;;; ws-butler (trim trailing whitespace on save), raised undo limits.
 
 (in-package :lem-yath)
@@ -11,7 +11,7 @@
 
 (defvar *trim-trailing-whitespace* t)
 (defvar *trimming-touched-lines* nil)
-(defparameter *fill-column* 80)
+(defparameter *fill-column* 70)
 
 (defun lem-yath-buffer-fill-column (&optional (buffer (current-buffer)))
   (or (buffer-value buffer 'lem-yath-fill-column)
