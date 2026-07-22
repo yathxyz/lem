@@ -28,6 +28,7 @@
 (defparameter *auto-completion-prefix-length* 3)
 (defparameter *auto-completion-delay-ms* 200)
 (defparameter *auto-completion-max-display-items* 10)
+(defparameter *auto-completion-scroll-margin* 2)
 
 (defvar *auto-completion-timer* nil)
 (defvar *auto-completion-generation* 0)
@@ -769,6 +770,43 @@ ordered Cape fallback when the mode provider is absent."
 (defun auto-completion-call-navigation (function)
   (funcall function))
 
+(defun auto-completion-ensure-scroll-margin (session)
+  "Keep Corfu's configured context rows visible around the focused item."
+  (alexandria:when-let*
+      ((popup (auto-completion-popup session))
+       (window (lem/popup-menu::popup-menu-window popup)))
+    (when (and (lem/popup-menu:popup-menu-focus-active-p popup)
+               (not (deleted-window-p window)))
+      (let* ((buffer (lem/popup-menu::popup-menu-buffer popup))
+             (focus (lem/popup-menu::focus-point popup))
+             (height (window-height window))
+             (margin (min *auto-completion-scroll-margin*
+                          (floor (max 0 (1- height)) 2))))
+        (with-point ((start (buffer-start-point buffer))
+                     (end (buffer-end-point buffer)))
+          (let* ((first-line (line-number-at-point start))
+                 (last-line (line-number-at-point end))
+                 (focus-line (line-number-at-point focus))
+                 (view-line
+                   (line-number-at-point (window-view-point window)))
+                 (last-full-view
+                   (max first-line (1+ (- last-line height))))
+                 (rows-before (max 0 (- focus-line first-line)))
+                 (rows-after (max 0 (- last-line focus-line)))
+                 (desired-before (min margin rows-before))
+                 (desired-after (min margin rows-after))
+                 (minimum-view
+                   (max first-line
+                        (1+ (- (+ focus-line desired-after) height))))
+                 (maximum-view
+                   (min last-full-view (- focus-line desired-before)))
+                 (target-view
+                   (min maximum-view (max minimum-view view-line))))
+            (unless (= target-view view-line)
+              (move-to-line (window-view-point window) target-view)
+              (line-start (window-view-point window))
+              (lem-core::need-to-redraw window))))))))
+
 (defun auto-completion-navigate (direction)
   "Navigate the owned popup with Corfu's logical prompt row and no cycling."
   (alexandria:if-let ((session
@@ -800,7 +838,8 @@ ordered Cape fallback when the mode provider is absent."
               #'lem/completion-mode::completion-beginning-of-buffer)))
         (:last
          (auto-completion-call-navigation
-          #'lem/completion-mode::completion-end-of-buffer))))
+          #'lem/completion-mode::completion-end-of-buffer)))
+      (auto-completion-ensure-scroll-margin session))
     (ecase direction
       (:next (lem/completion-mode::completion-next-line))
       (:previous (lem/completion-mode::completion-previous-line))
@@ -1199,7 +1238,11 @@ already active prompt boundary, LINE-COMMAND retains ordinary line motion."
                (when (lem/completion-mode::popup-focus-at-first-item-p popup)
                  (return))
                (popup-menu-up popup)))))
-      (lem/completion-mode::call-focus-action))))
+      (lem/completion-mode::call-focus-action)
+      (alexandria:when-let
+          ((session (and (auto-completion-session-owned-p)
+                         (auto-completion-live-session))))
+        (auto-completion-ensure-scroll-margin session)))))
 
 (define-command lem-yath-corfu-scroll-forward () ()
   "Move forward by one configured Corfu or Vertico page."

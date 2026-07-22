@@ -890,11 +890,34 @@ if run_fixture_command lem-yath-test-auto-dabbrev-setup &&
     fail same-mode-scope "dabbrev leaked a different-major-mode candidate"
   fi
 
+  for _ in $(seq 1 8); do
+    lem_keys "$session" C-n
+  done
+  sleep 0.2
+  margin_down=$(lem_capture "$session")
+  for _ in $(seq 1 8); do
+    lem_keys "$session" C-p
+  done
+  sleep 0.2
+  margin_up=$(lem_capture "$session")
+  if ! grep -q 'alphaCandidate00' <<<"$margin_down" &&
+     grep -q 'alphaCandidate10' <<<"$margin_down" &&
+     grep -q 'alphaCandidate00' <<<"$margin_up" &&
+     ! grep -q 'alphaCandidate10' <<<"$margin_up"; then
+    pass corfu-scroll-margin \
+      'candidate navigation retained two context rows in both directions'
+  else
+    fail corfu-scroll-margin \
+      'the ten-row popup did not retain Corfu two-row context'
+  fi
+
   lem_keys "$session" C-v
   sleep 0.2
+  control_v_screen=$(lem_capture "$session")
   control_v=$(report_corfu_state || true)
   lem_keys "$session" M-v
   sleep 0.2
+  meta_v_screen=$(lem_capture "$session")
   meta_v=$(report_corfu_state || true)
   lem_keys "$session" PageDown
   sleep 0.2
@@ -903,11 +926,17 @@ if run_fixture_command lem-yath-test-auto-dabbrev-setup &&
   sleep 0.2
   page_up=$(report_corfu_state || true)
   if grep -q 'selected="alphaCandidate10" preview=T' <<<"$control_v" &&
+     ! grep -q 'alphaCandidate01' <<<"$control_v_screen" &&
+     grep -q 'alphaCandidate02' <<<"$control_v_screen" &&
+     grep -q 'alphaCandidate11' <<<"$control_v_screen" &&
      grep -q 'selected="alphaCandidate00" preview=NIL' <<<"$meta_v" &&
+     grep -q 'alphaCandidate00' <<<"$meta_v_screen" &&
+     grep -q 'alphaCandidate09' <<<"$meta_v_screen" &&
+     ! grep -q 'alphaCandidate10' <<<"$meta_v_screen" &&
      grep -q 'selected="alphaCandidate10" preview=T' <<<"$page_down" &&
      grep -q 'selected="alphaCandidate00" preview=NIL' <<<"$page_up"; then
     pass corfu-page-navigation \
-      'C-v/PageDown and M-v/PageUp moved by the configured ten-row page'
+      'page motion moved ten candidates and retained a full margin viewport'
   else
     fail corfu-page-navigation \
       "page motion diverged: $control_v / $meta_v / $page_down / $page_up"

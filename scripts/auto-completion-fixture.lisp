@@ -1160,6 +1160,7 @@
       (check (= 3 *auto-completion-prefix-length*) "prefix-three")
       (check (= 200 *auto-completion-delay-ms*) "delay-200ms")
       (check (= 10 *auto-completion-max-display-items*) "ten-rows")
+      (check (= 2 *auto-completion-scroll-margin*) "scroll-margin-two")
       (dolist (binding '(("M-Tab" lem-yath-corfu-expand)
                          ("C-M-i" lem-yath-corfu-expand)
                          ("M-g" lem-yath-corfu-info-location)
