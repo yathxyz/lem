@@ -2357,7 +2357,8 @@ Tab reports the failure without also invoking its fallback indentation."
 
 (defun snippet-undo-command-p ()
   (member (symbol-name (command-name (this-command)))
-          '("UNDO" "REDO" "VI-UNDO" "VI-REDO")
+          '("UNDO" "REDO" "VI-UNDO" "VI-REDO"
+            "LEM-YATH-PROJECT-GREP-NORMAL-UNDO")
           :test #'string=))
 
 (defun snippet-revival-offset-valid-p (start end root-length)

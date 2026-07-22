@@ -127,7 +127,8 @@
 (defun llm-response-history-move-command-p ()
   (and (this-command)
        (member (symbol-name (command-name (this-command)))
-               '("UNDO" "REDO" "VI-UNDO" "VI-REDO")
+               '("UNDO" "REDO" "VI-UNDO" "VI-REDO"
+                 "LEM-YATH-PROJECT-GREP-NORMAL-UNDO")
                :test #'string=)))
 
 (defun llm-response-history-post-command ()
