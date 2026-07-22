@@ -132,7 +132,6 @@ else
   fail boot 'Org download fixture did not become ready'
   exit 1
 fi
-lem_keys "$session" Escape
 mx lem-yath-test-org-download-commands || true
 sleep 0.5
 if grep -q '^COMMANDS yank=yes clipboard=yes$' "$LEM_YATH_ORG_DOWNLOAD_REPORT"; then
