@@ -149,6 +149,8 @@ DELETEREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-delete-register.txt"
 DOTREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-dot-register.txt"
 DIGRAPHFIX="$FIXTURE_DIR/lem-yath-itest-digraph.txt"
 REPLACEDIGRAPHFIX="$FIXTURE_DIR/lem-yath-itest-replace-digraph.txt"
+SPECIALREGISTERAFIX="$FIXTURE_DIR/lem-yath-itest-special-register-a.txt"
+SPECIALREGISTERBFIX="$FIXTURE_DIR/lem-yath-itest-special-register-b.txt"
 
 printf 'first known line\nsecond known line\nthird known line\n' > "$SCRATCH"
 printf '(defun alpha ())\n(defun beta ())\n(defun gamma ())\n' > "$LISPFIX"
@@ -181,6 +183,9 @@ printf 'one two\nsink\n' > "$DELETEREGISTERFIX"
 printf 'base\nsink\n' > "$DOTREGISTERFIX"
 printf 'base\n' > "$DIGRAPHFIX"
 printf 'ABCDE\n' > "$REPLACEDIGRAPHFIX"
+printf 'alternate source\n' > "$SPECIALREGISTERAFIX"
+printf 'current=\nalternate=\ncommand=\nword other word other word\nslash=\n' \
+  > "$SPECIALREGISTERBFIX"
 
 # ===========================================================================
 # Check 1: Boot with a scratch file; vi NORMAL state shows in the modeline.
@@ -1114,6 +1119,42 @@ else
 fi
 
 # ===========================================================================
+# Check 29: Evil's special file, command, and search registers expose text.
+# The alternate file follows the most recent suitable other buffer, while
+# word searches update / and establish the direction used by n.
+# ===========================================================================
+S29="lem-yath-it29-$id"
+special_register_ok=0
+
+if boot_with_file "$S29" "$SPECIALREGISTERAFIX" '^alternate source$' \
+    "29-special-registers"; then
+  tmux_cmd send-keys -t "$S29" ":"
+  sleep "$KEY_DELAY"
+  send_text "$S29" "e $SPECIALREGISTERBFIX"
+  tmux_cmd send-keys -t "$S29" Enter
+  if lem_wait_for "$S29" '^current=$' "$WAIT_TIMEOUT"; then
+    send_chord "$S29" '$' '"' '%' 'p' 'j' '$' '"' '#' 'p' \
+      'j' '$' '"' ':' 'p' 'j' '0' '*' 'n' 'r' 'X' \
+      '0' 'w' 'w' '#' 'n' 'r' 'Y' 'G' '$' '"' '/' 'p' \
+      'C-x' 'C-s'
+    sleep 0.5
+    cmp -s "$SPECIALREGISTERBFIX" <(
+      printf 'current=%s\nalternate=%s\ncommand=e %s\nword other Yord other Xord\nslash=word\n' \
+        "$SPECIALREGISTERBFIX" "$SPECIALREGISTERAFIX" \
+        "$SPECIALREGISTERBFIX"
+    ) && special_register_ok=1
+  fi
+fi
+
+if [ "$special_register_ok" = 1 ]; then
+  pass "29-special-registers" \
+    '%, #, :, /, *, #, and n match Evil file/command/search behavior'
+else
+  fail "29-special-registers" \
+    "special register mismatch (paste/search=$special_register_ok)" "$S29"
+fi
+
+# ===========================================================================
 # Summary
 # ===========================================================================
 echo
@@ -1126,7 +1167,7 @@ order=(01-boot-normal 02-insert-roundtrip 03-leader-compile 04-gc-operator \
        19-auto-fill-toggle 20-control-line-motion 21-expand-region \
        22-Y-linewise 23-control-key-parity 24-insert-control-parity \
        25-insert-registers 26-normal-registers 27-dot-register \
-       28-insert-digraphs)
+       28-insert-digraphs 29-special-registers)
 for k in "${order[@]}"; do
   printf '  %-26s %s\n' "$k" "${RESULT[$k]:-MISSING}"
 done

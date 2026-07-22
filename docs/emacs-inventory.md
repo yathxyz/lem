@@ -38,6 +38,12 @@ Key environment:
   column from the nearest nonblank line above/below; insert `C-k` reads an Evil
   digraph; and insert `C-v`/`C-q` quote the next key. Org's insert-state
   `C-d`/`C-t` remain its higher-priority Meta-left/right.
+- Evil's special text registers expose `%` as the current file name, `#` as
+  the most recent suitable other file name, `/` as the last search pattern,
+  `:` as the last Ex command, and `.` as the previous contiguous insertion.
+  Word searches with `*`/`#` replace `/`, establish the direction used by
+  `n`/`N`, and repeat across buffer boundaries because `evil-search-wrap` keeps
+  its default non-nil value.
 - `evil-want-minibuffer nil` (Evil is not active in the minibuffer).
 - After `evil-maps` loads: `C-n` and `C-p` are **unbound** in
   `evil-motion-state-map`, `evil-insert-state-map`, and

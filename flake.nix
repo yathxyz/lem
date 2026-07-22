@@ -54,6 +54,7 @@
               ./patches/lem-completion-marginalia-layout.patch
               ./patches/lem-vi-screen-line.patch
               ./patches/lem-vi-register-selection.patch
+              ./patches/lem-vi-search-repeat-wrap.patch
               ./patches/lem-vi-replace-insert.patch
               ./patches/lem-centered-content-width.patch
               ./patches/lem-word-boundary-wrap.patch

@@ -2,6 +2,15 @@ diff --git a/extensions/vi-mode/registers.lisp b/extensions/vi-mode/registers.li
 index 3c312e5..f03a6f2 100644
 --- a/extensions/vi-mode/registers.lisp
 +++ b/extensions/vi-mode/registers.lisp
+@@ -2,8 +2,6 @@
+   (:use :cl
+         :lem)
+   (:shadow :yank)
+-  (:import-from :lem-vi-mode/core
+-                :vi-current-window)
+   (:import-from :lem/common/killring
+                 :make-item
+                 :peek-killring-item)
 @@ -24,6 +24,10 @@
             :downcase-char
             :yank-region
@@ -243,9 +252,27 @@ index 3c312e5..f03a6f2 100644
 @@ -319 +386 @@
 -         (lem:yank)
 +         (lem-core/commands/edit::yank-string point string)
-@@ -347,8 +415,11 @@
+@@ -325,3 +392,14 @@
++(defun special-register-string (value empty-message)
++  (if value
++      (values value :char)
++      (editor-error "~A" empty-message)))
++
++(defun file-register-string (buffer)
++  (special-register-string
++   (alexandria:when-let ((filename (and buffer (buffer-filename buffer))))
++     (namestring filename))
++   "No file name"))
++
+ (defun register (name)
+   (let ((name (ensure-char name)))
+     (declare (type register name))
+@@ -347,21 +426,26 @@
+          ;; Most recent Ex command (read-only)
           (#\:
-           *last-ex-command*)
+-          *last-ex-command*)
++          (special-register-string *last-ex-command*
++                                   "No previous command line"))
           ;; Last inserted text (read-only)
 -         ;(#\.)
 +         (#\.
@@ -254,8 +281,24 @@ index 3c312e5..f03a6f2 100644
 +              (values nil :char)))
           ;; Current file name (read-only)
           (#\%
-           (buffer-filename (current-buffer)))
- 
+-          (buffer-filename (current-buffer)))
++          (file-register-string (current-buffer)))
+          ;; Alternate file name register
+          (#\#
+-          (buffer-filename (window-buffer (vi-current-window))))
++          (file-register-string (other-buffer)))
+          ;; Expression register
+          ;(#\=)
+          ;; Selection register
+          ;((#\* #\+))
+          ;; Blackhole register
+          (#\_
+           nil)
+          ;; Last search register
+          (#\/
+-          *last-search-query*))))))
++          (special-register-string *last-search-query*
++                                   "No previous regular expression")))))))
 diff --git a/extensions/vi-mode/commands.lisp b/extensions/vi-mode/commands.lisp
 index f21d0cf..7de79b4 100644
 --- a/extensions/vi-mode/commands.lisp
@@ -362,6 +405,20 @@ index f21d0cf..7de79b4 100644
  (define-command vi-record-macro (register) ((if (key-recording-p)
                                                  *kbdmacro-recording-register*
                                                  (read-register)))
+@@ -888,4 +918,6 @@
+ (define-command vi-search-forward-symbol-at-point (&optional (n 1)) (:universal)
++  (setf *last-search-direction* :forward)
++  (add-hook *isearch-finish-hooks* 'vi-isearch-finish-hook)
+   (with-jumplist
+     (lem/isearch:isearch-forward-symbol-at-point)
+     (lem/isearch:isearch-finish)
+@@ -902,4 +934,6 @@
+ (define-command vi-search-backward-symbol-at-point (&optional (n 1)) (:universal)
++  (setf *last-search-direction* :backward)
++  (add-hook *isearch-finish-hooks* 'vi-isearch-finish-hook)
+   (with-jumplist
+     (lem/isearch:isearch-forward-symbol-at-point)
+     (lem/isearch:isearch-finish)
 diff --git a/extensions/vi-mode/binds.lisp b/extensions/vi-mode/binds.lisp
 index a4b010a..c31d7f0 100644
 --- a/extensions/vi-mode/binds.lisp
