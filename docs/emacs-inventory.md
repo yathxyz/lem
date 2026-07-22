@@ -293,7 +293,7 @@ over hiding and ordinary filters. `K` hides visible ordinary-marked lines until
 
 ## 2. Editing behavior
 
-- **Indentation**: `tab-width 4`; `tab-always-indent 'complete` (TAB indents then completes). The configured `:init (indent-tabs-mode -1)` changes only the startup buffer, not the default value: the audited live Emacs 31 process retains `indent-tabs-mode t` in new Fundamental, text, generic programming, Emacs Lisp, and Common Lisp buffers. Clojure and Python select spaces themselves, and `editorconfig-mode` on `prog-mode` can override the project-local policy. `org-src-preserve-indentation t`. A safe-local var sets `smie-indent-basic 2`.
+- **Indentation**: spaces by default with `tab-width 4`; `tab-always-indent 'complete` (TAB indents then completes). The authored `:init (indent-tabs-mode -1)` only changes Emacs's startup buffer, so the audited live Emacs 31 process accidentally retains `indent-tabs-mode t` in several new buffers. On 2026-07-22 the user selected the apparent spaces-by-default intent as canonical for Lem rather than reproducing that quirk. Clojure, Python, and `editorconfig-mode` retain their mode/project-specific overrides. `org-src-preserve-indentation t`. A safe-local var sets `smie-indent-basic 2`.
 - **Paragraph filling**: the effective GNU Emacs default `fill-column` is 70; the configuration does not override it outside the separate business-document profile.
 - **ws-butler**: `ws-butler-mode` on `prog-mode` (trims trailing whitespace only on touched lines).
 - **Electric pairs**: `electric-pair-mode t` (global auto-pairing).
@@ -1175,7 +1175,7 @@ Core: **gptel** (deferred), heavily customized in `init-ai.el` (~1400 lines).
 - **Completion**: Vertico/Marginalia/Prescient minibuffers plus automatic
   Corfu/Orderless/Cape in-buffer completion and separate Yasnippet expansion.
 - **consult/project navigation** (`SPC p f/g/p/s`, `SPC SPC`, `project-find-file/regexp/switch`).
-- **Editing defaults**: tab width 4 with the effective mode/project-specific tab policy above, fill column 70, electric-pair, ws-butler, delete-selection, vundo, and relative line numbers on code.
+- **Editing defaults**: spaces by default at tab width 4 with mode/project-specific overrides, fill column 70, electric-pair, ws-butler, delete-selection, vundo, and relative line numbers on code.
 - **Lisp structural editing** (lispy/lispyville) — relevant since Lem is Common Lisp; map to Lem's paredit-like features.
 - **Fonts/UI basics**: JetBrainsMono, relative line numbers, rainbow-delimiters, which-key-equivalent.
 
