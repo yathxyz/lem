@@ -118,6 +118,7 @@ lem_start "$session" --eval "(load #P$fixture)"
 if lem_wait_for "$session" 'NORMAL' 60 >/dev/null &&
    wait_report '^READY$' 60; then
   tmux_cmd resize-window -t "$session" -x 100 -y 24
+  sleep 0.5
   pass boot 'configured Lem opened a real directory-mode buffer'
 else
   fail boot 'directory fixture did not become ready'
@@ -175,6 +176,7 @@ else
 fi
 
 tmux_cmd resize-window -t "$session" -x 120 -y 30
+sleep 0.5
 lem_keys "$session" F5
 if wait_report '^FULL windows=3 widths=13,41,64 modes=DIRECTORY-MODE,DIRECTORY-MODE,FUNDAMENTAL-MODE focus=root command=yes preview-parent=yes readonly=yes$'; then
   pass fullframe 'M-x command built the pinned one-parent/current/preview layout'

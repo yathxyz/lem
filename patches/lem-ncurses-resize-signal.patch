@@ -71,7 +71,7 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
  (in-package :lem-ncurses/term)
  
  (cffi:defcvar ("COLOR_PAIRS" *COLOR-PAIRS* :library charms/ll::libcurses) :int)
-@@ -545,13 +547,61 @@
+@@ -545,13 +547,72 @@
  
  (defvar *tty-name* nil)
  (defvar *term-io* nil)
@@ -87,6 +87,9 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
 +#+sbcl
 +(defvar *resize-monitor-running-p* nil)
 +
++#+sbcl
++(defvar *resize-event-pending-p* nil)
++
 +(defun terminal-size ()
 +  (let ((term-io (or *term-io* (c-file "stdin"))))
 +    (when term-io
@@ -98,22 +101,29 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
 +
 +#+sbcl
 +(defun resize-monitor-loop ()
-+  (multiple-value-bind (last-rows last-cols) (terminal-size)
-+    (loop
-+      (sleep 0.05)
-+      (unless *resize-monitor-running-p* (return))
-+      (multiple-value-bind (rows cols) (terminal-size)
-+        (when (and rows cols
-+                   (or (null last-rows)
-+                       (/= rows last-rows)
-+                       (/= cols last-cols)))
-+          (setf last-rows rows
-+                last-cols cols)
-+          (lem:send-event :resize))))))
++  (loop
++    (sleep 0.05)
++    (unless *resize-monitor-running-p* (return))
++    (multiple-value-bind (rows cols) (terminal-size)
++      (when (and rows cols
++                 (not *resize-event-pending-p*)
++                 (or (/= rows charms/ll:*lines*)
++                     (/= cols charms/ll:*cols*)))
++        (setf *resize-event-pending-p* t)
++        (handler-case
++            (lem:send-event
++             (lambda ()
++               (unwind-protect
++                    (lem:update-on-display-resized)
++                 (setf *resize-event-pending-p* nil))))
++          (error (condition)
++            (setf *resize-event-pending-p* nil)
++            (error condition)))))))
 +
 +#+sbcl
 +(defun start-resize-monitor ()
-+  (setf *resize-monitor-running-p* t
++  (setf *resize-event-pending-p* nil
++        *resize-monitor-running-p* t
 +        *resize-monitor-thread*
 +        (bt2:make-thread #'resize-monitor-loop
 +                         :name "Lem ncurses resize monitor")))
@@ -123,7 +133,8 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
 +  (setf *resize-monitor-running-p* nil)
 +  (when *resize-monitor-thread*
 +    (ignore-errors (bt2:join-thread *resize-monitor-thread*))
-+    (setf *resize-monitor-thread* nil)))
++    (setf *resize-monitor-thread* nil))
++  (setf *resize-event-pending-p* nil))
  
  (defun resize-term ()
 -  (when *term-io*
@@ -138,7 +149,7 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
  
  (defun try-newterm (term-name out-fp in-fp)
    "Create a curses screen for terminfo entry TERM-NAME. Return true when the
-@@ -655,6 +705,10 @@
+@@ -655,6 +716,10 @@
    (when (= *mouse-mode* 1)
      (enable-mouse))
    (enable-bracketed-paste)
@@ -149,7 +160,7 @@ diff --git a/frontends/ncurses/term.lisp b/frontends/ncurses/term.lisp
    t)
  
  (defun term-set-tty (tty-name)
-@@ -669,6 +723,10 @@
+@@ -669,6 +734,10 @@
    (write-terminal-string (format nil "~C[?1006l~C[?1002l~C[?1000l" #\Esc #\Esc #\Esc)))
  
  (defun term-finalize ()
