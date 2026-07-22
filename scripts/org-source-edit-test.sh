@@ -109,7 +109,7 @@ goto_marker() {
 
 open_source_edit() {
   tmux_cmd send-keys -t "$session" C-c "'"
-  lem_wait_for "$session" "Edit, then C-c ' to finish" 10 >/dev/null
+  lem_wait_for "$session" '\*Org Src ' 10 >/dev/null
 }
 
 leave_insert_state() {
