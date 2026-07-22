@@ -41,6 +41,9 @@ Key environment:
 - Evil's special text registers expose `%` as the current file name, `#` as
   the most recent suitable other file name, `/` as the last search pattern,
   `:` as the last Ex command, and `.` as the previous contiguous insertion.
+  The `=` register prompts with its previous expression; input beginning with
+  whitespace followed by a digit, sign, or decimal point is evaluated through
+  GNU Calc. Other input is read and evaluated as Emacs Lisp.
   Word searches with `*`/`#` replace `/`, establish the direction used by
   `n`/`N`, and repeat across buffer boundaries because `evil-search-wrap` keeps
   its default non-nil value.

@@ -151,6 +151,7 @@ DIGRAPHFIX="$FIXTURE_DIR/lem-yath-itest-digraph.txt"
 REPLACEDIGRAPHFIX="$FIXTURE_DIR/lem-yath-itest-replace-digraph.txt"
 SPECIALREGISTERAFIX="$FIXTURE_DIR/lem-yath-itest-special-register-a.txt"
 SPECIALREGISTERBFIX="$FIXTURE_DIR/lem-yath-itest-special-register-b.txt"
+EXPRESSIONREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-expression-register.txt"
 
 printf 'first known line\nsecond known line\nthird known line\n' > "$SCRATCH"
 printf '(defun alpha ())\n(defun beta ())\n(defun gamma ())\n' > "$LISPFIX"
@@ -186,6 +187,7 @@ printf 'ABCDE\n' > "$REPLACEDIGRAPHFIX"
 printf 'alternate source\n' > "$SPECIALREGISTERAFIX"
 printf 'current=\nalternate=\ncommand=\nword other word other word\nslash=\n' \
   > "$SPECIALREGISTERBFIX"
+printf 'base\n' > "$EXPRESSIONREGISTERFIX"
 
 # ===========================================================================
 # Check 1: Boot with a scratch file; vi NORMAL state shows in the modeline.
@@ -1155,6 +1157,36 @@ else
 fi
 
 # ===========================================================================
+# Check 30: Evil's expression register evaluates numeric Calc expressions.
+# A second empty submission accepts the previous expression, matching Evil's
+# retained expression prompt and register-paste workflow.
+# ===========================================================================
+S30="lem-yath-it30-$id"
+expression_register_ok=0
+
+if boot_with_file "$S30" "$EXPRESSIONREGISTERFIX" '^base$' \
+    "30-expression-register"; then
+  send_chord "$S30" '$' '"' '='
+  send_text "$S30" '1+2*3'
+  tmux_cmd send-keys -t "$S30" Enter
+  send_chord "$S30" 'p' '"' '='
+  tmux_cmd send-keys -t "$S30" Enter
+  send_chord "$S30" 'p' 'C-x' 'C-s'
+  sleep 0.5
+  cmp -s "$EXPRESSIONREGISTERFIX" <(printf 'base77\n') && \
+    expression_register_ok=1
+fi
+
+if [ "$expression_register_ok" = 1 ]; then
+  pass "30-expression-register" \
+    'numeric = evaluation and retained prompt input match Evil'
+else
+  fail "30-expression-register" \
+    "expression register mismatch (numeric/history=$expression_register_ok)" \
+    "$S30"
+fi
+
+# ===========================================================================
 # Summary
 # ===========================================================================
 echo
@@ -1167,7 +1199,7 @@ order=(01-boot-normal 02-insert-roundtrip 03-leader-compile 04-gc-operator \
        19-auto-fill-toggle 20-control-line-motion 21-expand-region \
        22-Y-linewise 23-control-key-parity 24-insert-control-parity \
        25-insert-registers 26-normal-registers 27-dot-register \
-       28-insert-digraphs 29-special-registers)
+       28-insert-digraphs 29-special-registers 30-expression-register)
 for k in "${order[@]}"; do
   printf '  %-26s %s\n' "$k" "${RESULT[$k]:-MISSING}"
 done

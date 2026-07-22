@@ -66,6 +66,7 @@
                (:file "project")
                (:file "lsp-file-watches")
                (:file "calc")
+               (:file "expression-register")
                (:file "lint")
                (:file "dap")
                (:file "jump-feedback")

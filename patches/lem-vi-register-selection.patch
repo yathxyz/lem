@@ -11,7 +11,7 @@ index 3c312e5..f03a6f2 100644
    (:import-from :lem/common/killring
                  :make-item
                  :peek-killring-item)
-@@ -24,6 +24,10 @@
+@@ -24,6 +24,11 @@
             :downcase-char
             :yank-region
             :delete-region
@@ -19,33 +19,45 @@ index 3c312e5..f03a6f2 100644
 +           :take-selected-register
 +           :with-selected-register
 +           :set-last-insertion-register-function
++           :set-expression-register-function
             :paste-yank))
  (in-package :lem-vi-mode/registers)
  
-@@ -70,6 +74,33 @@
+@@ -70,6 +74,44 @@
  (defvar *unnamed-register* nil)
  (defvar *small-deletion-register* nil)
  
 +(defvar *selected-register* nil)
++(defvar *selected-register-value* nil)
 +(defvar *last-insertion-register-function* nil)
++(defvar *expression-register-function* nil)
 +
 +(defun set-last-insertion-register-function (function)
 +  (check-type function (or null function))
 +  (setf *last-insertion-register-function* function)
 +  (values))
 +
++(defun set-expression-register-function (function)
++  (check-type function (or null function))
++  (setf *expression-register-function* function)
++  (values))
++
 +(defun valid-register-p (name)
 +  (and (characterp name)
 +       (or (named-register-p name)
 +           (numbered-register-p name)
-+           (find name "\"-_:%.#/" :test #'char=))))
++           (find name "\"-_:%.#/=" :test #'char=))))
 +
 +(defun take-selected-register ()
 +  (prog1 *selected-register*
 +    (setf *selected-register* nil)))
 +
 +(defmacro with-selected-register ((name) &body body)
-+  `(let ((*selected-register* ,name))
++  `(let ((*selected-register* ,name)
++         (*selected-register-value* nil))
++     (when (char= *selected-register* #\=)
++       (setf *selected-register-value*
++             (multiple-value-list (register *selected-register*))))
 +     ,@body))
 +
 +(defun writable-register-p (name)
@@ -267,7 +279,7 @@ index 3c312e5..f03a6f2 100644
  (defun register (name)
    (let ((name (ensure-char name)))
      (declare (type register name))
-@@ -347,21 +426,26 @@
+@@ -347,21 +426,31 @@
           ;; Most recent Ex command (read-only)
           (#\:
 -          *last-ex-command*)
@@ -288,7 +300,13 @@ index 3c312e5..f03a6f2 100644
 -          (buffer-filename (window-buffer (vi-current-window))))
 +          (file-register-string (other-buffer)))
           ;; Expression register
-          ;(#\=)
+-         ;(#\=)
++         (#\=
++          (if *selected-register-value*
++              (values-list *selected-register-value*)
++              (if *expression-register-function*
++                  (funcall *expression-register-function*)
++                  (values nil :char))))
           ;; Selection register
           ;((#\* #\+))
           ;; Blackhole register
@@ -389,16 +407,16 @@ index f21d0cf..7de79b4 100644
 +  (let ((register (read-register)))
 +    (unless (valid-register-p register)
 +      (editor-error "Invalid register: ~A" register))
-+    (let* ((inner-count (read-universal-argument))
-+           (count (cond
-+                    ((and outer-count inner-count)
-+                     (* outer-count inner-count))
-+                    (outer-count outer-count)
-+                    (inner-count inner-count)))
-+           (command-name (read-command)))
-+      (unless command-name
-+        (editor-error "Expected a command after register ~A" register))
-+      (with-selected-register (register)
++    (with-selected-register (register)
++      (let* ((inner-count (read-universal-argument))
++             (count (cond
++                      ((and outer-count inner-count)
++                       (* outer-count inner-count))
++                      (outer-count outer-count)
++                      (inner-count inner-count)))
++             (command-name (read-command)))
++        (unless command-name
++          (editor-error "Expected a command after register ~A" register))
 +        (let ((lem-core::*universal-argument* count))
 +          (call-command command-name count))))))
 +
