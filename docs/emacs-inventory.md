@@ -35,9 +35,9 @@ Key environment:
   current line left/right by `evil-shift-width` 4; insert `C-a` pastes the last
   contiguous insertion; insert `C-r` pastes a selected register; insert `C-o`
   executes one complete Normal command; insert `C-y`/`C-e` copy at the current
-  column from the nearest nonblank line above/below; and insert `C-v`/`C-q`
-  quote the next key. Org's insert-state `C-d`/`C-t` remain its higher-priority
-  Meta-left/right.
+  column from the nearest nonblank line above/below; insert `C-k` reads an Evil
+  digraph; and insert `C-v`/`C-q` quote the next key. Org's insert-state
+  `C-d`/`C-t` remain its higher-priority Meta-left/right.
 - `evil-want-minibuffer nil` (Evil is not active in the minibuffer).
 - After `evil-maps` loads: `C-n` and `C-p` are **unbound** in
   `evil-motion-state-map`, `evil-insert-state-map`, and

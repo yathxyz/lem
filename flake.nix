@@ -54,6 +54,7 @@
               ./patches/lem-completion-marginalia-layout.patch
               ./patches/lem-vi-screen-line.patch
               ./patches/lem-vi-register-selection.patch
+              ./patches/lem-vi-replace-insert.patch
               ./patches/lem-centered-content-width.patch
               ./patches/lem-word-boundary-wrap.patch
               ./patches/lem-git-worktree.patch
@@ -279,6 +280,31 @@
             ]) treeSitterSpecs
           );
 
+          evilPackage = pkgs.emacsPackages.evil;
+          evilDigraphs =
+            pkgs.runCommand "lem-yath-evil-digraphs.tsv"
+              {
+                nativeBuildInputs = [ pkgs.emacs ];
+                meta.license = lib.licenses.gpl3Plus;
+              }
+              ''
+                evil_file=$(find ${evilPackage} -name evil-digraphs.el -print -quit)
+                test -n "$evil_file"
+                evil_dir=$(dirname "$evil_file")
+                HOME="$TMPDIR" ${lib.getExe pkgs.emacs} --batch -Q \
+                  -L "$evil_dir" -l evil-digraphs \
+                  --eval '(let ((seen (make-hash-table :test (quote equal))))
+                             (with-temp-file (getenv "out")
+                               (dolist (entry evil-digraphs-table)
+                                 (unless (gethash (car entry) seen)
+                                   (puthash (car entry) t seen)
+                                   (insert (format "%d\t%d\t%d\n"
+                                                   (caar entry)
+                                                   (cadar entry)
+                                                   (cdr entry)))))))'
+                test "$(wc -l < "$out")" -eq 1401
+              '';
+
           devPython = pkgs.python3.withPackages (pythonPackages: [
             pythonPackages.debugpy
           ]);
@@ -468,6 +494,7 @@
                 export LEM_YATH_MCP_FETCH_PROGRAM=${lib.getExe' pkgs.uv "uvx"}
                 export LEM_YATH_MCP_DOCKER_PROGRAM=${lib.getExe pkgs.docker-client}
                 export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
+                export LEM_YATH_EVIL_DIGRAPHS=${evilDigraphs}
                 export LEM_YATH_SNIPPET_DIRS="${self}/lem-yath/snippets:${yasnippet-snippets}/snippets"
                 export ASDF_OUTPUT_TRANSLATIONS="${self}/lem-yath:$out:/nix/store:/nix/store"
 
@@ -517,6 +544,7 @@
               export LEM_YATH_SMTP_SUBMIT_PROGRAM="''${LEM_YATH_SMTP_SUBMIT_PROGRAM:-${smtpSubmit}/bin/lem-yath-smtp-submit}"
               export LEM_YATH_NOTMUCH_DRAFT_PROGRAM="''${LEM_YATH_NOTMUCH_DRAFT_PROGRAM:-${smtpSubmit}/bin/lem-yath-smtp-submit}"
               export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
+              export LEM_YATH_EVIL_DIGRAPHS=${evilDigraphs}
               export LEM_YATH_AOT_FASL_ROOT=${lemYathAot}
 
               cache_home="''${XDG_CACHE_HOME:-''${HOME:-/tmp}/.cache}"

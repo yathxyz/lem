@@ -147,6 +147,8 @@ REPEATREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-repeat-register.txt"
 READONLYREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-readonly-register.txt"
 DELETEREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-delete-register.txt"
 DOTREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-dot-register.txt"
+DIGRAPHFIX="$FIXTURE_DIR/lem-yath-itest-digraph.txt"
+REPLACEDIGRAPHFIX="$FIXTURE_DIR/lem-yath-itest-replace-digraph.txt"
 
 printf 'first known line\nsecond known line\nthird known line\n' > "$SCRATCH"
 printf '(defun alpha ())\n(defun beta ())\n(defun gamma ())\n' > "$LISPFIX"
@@ -177,6 +179,8 @@ printf 'cat\njunk\nsink\n' > "$REPEATREGISTERFIX"
 printf 'keep text\n' > "$READONLYREGISTERFIX"
 printf 'one two\nsink\n' > "$DELETEREGISTERFIX"
 printf 'base\nsink\n' > "$DOTREGISTERFIX"
+printf 'base\n' > "$DIGRAPHFIX"
+printf 'ABCDE\n' > "$REPLACEDIGRAPHFIX"
 
 # ===========================================================================
 # Check 1: Boot with a scratch file; vi NORMAL state shows in the modeline.
@@ -1073,6 +1077,43 @@ else
 fi
 
 # ===========================================================================
+# Check 28: Insert C-k uses Evil's effective digraph table, reverse-pair
+# fallback, invalid-pair fallback, cancellation, and Replace-state restoration.
+# ===========================================================================
+S28I="lem-yath-it28i-$id"
+S28R="lem-yath-it28r-$id"
+digraph_insert_ok=0
+digraph_replace_ok=0
+
+if boot_with_file "$S28I" "$DIGRAPHFIX" '^base$' "28-insert-digraphs"; then
+  send_chord "$S28I" "A" "C-k" "a" "*" "C-k" "*" "a" \
+    "C-k" "<" "/" "C-k" "/" ">" "C-k" "q" "z" "C-k" "C-g"
+  send_text "$S28I" "x"
+  send_chord "$S28I" Escape "C-x" "C-s"
+  sleep 0.5
+  cmp -s "$DIGRAPHFIX" <(printf 'baseαα〈〉zx\n') && digraph_insert_ok=1
+fi
+
+if boot_with_file "$S28R" "$REPLACEDIGRAPHFIX" '^ABCDE$' "28-insert-digraphs"; then
+  send_chord "$S28R" "0" "R" "C-k" "a" "*" BSpace \
+    "C-k" "<" "/" Escape "C-x" "C-s"
+  sleep 0.5
+  cmp -s "$REPLACEDIGRAPHFIX" <(printf '〈BCDE\n') && digraph_replace_ok=1
+fi
+
+if [ "$digraph_insert_ok" = 1 ] && [ "$digraph_replace_ok" = 1 ]; then
+  pass "28-insert-digraphs" \
+    "C-k matches Evil direct, reverse, invalid, abort, and Replace behavior"
+else
+  fail "28-insert-digraphs" \
+    "digraph mismatch (insert=$digraph_insert_ok replace=$digraph_replace_ok)" \
+    "$S28I"
+  echo "----- screen ($S28R) -----"
+  lem_capture "$S28R" 2>/dev/null || echo "(no screen)"
+  echo "--------------------------------"
+fi
+
+# ===========================================================================
 # Summary
 # ===========================================================================
 echo
@@ -1084,7 +1125,8 @@ order=(01-boot-normal 02-insert-roundtrip 03-leader-compile 04-gc-operator \
        15-snipe-parity 16-insert-C-u 17-fill-paragraph 18-org-id \
        19-auto-fill-toggle 20-control-line-motion 21-expand-region \
        22-Y-linewise 23-control-key-parity 24-insert-control-parity \
-       25-insert-registers 26-normal-registers 27-dot-register)
+       25-insert-registers 26-normal-registers 27-dot-register \
+       28-insert-digraphs)
 for k in "${order[@]}"; do
   printf '  %-26s %s\n' "$k" "${RESULT[$k]:-MISSING}"
 done

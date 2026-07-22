@@ -19,6 +19,7 @@
                (:file "so-long")
                (:file "cursor-state")
                (:file "vi")
+               (:file "digraphs")
                (:file "terminal")
                (:file "avy")
                (:file "structural")
