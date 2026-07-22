@@ -152,6 +152,89 @@ line.  Blank lines are skipped like Evil's insert-state C-y and C-e."
   "Insert characters at the current column from the nearest line below."
   (lem-yath-evil-copy-from-line 1 count))
 
+(defvar *lem-yath-evil-last-insertion* nil)
+
+(defun lem-yath-evil-track-last-insertion (start end old-length)
+  "Track Evil's contiguous last-inserted range in the changed buffer."
+  (let* ((buffer (point-buffer start))
+         (begin-position (position-at-point start))
+         (end-position (position-at-point end))
+         (range (buffer-value buffer 'lem-yath-evil-current-insertion)))
+    (if (and range
+             (<= (car range) begin-position)
+             (or (= (+ begin-position old-length) (cdr range))
+                 (and (typep (lem-vi-mode/core:buffer-state buffer)
+                             'lem-vi-mode/states:replace-state)
+                      (= begin-position (cdr range)))))
+        (setf (cdr range) end-position)
+        (setf (buffer-value buffer 'lem-yath-evil-current-insertion)
+              (cons begin-position end-position)))))
+
+(defun lem-yath-evil-start-track-last-insertion (buffer)
+  (setf (buffer-value buffer 'lem-yath-evil-current-insertion) nil)
+  (remove-hook (variable-value 'after-change-functions :buffer buffer)
+               'lem-yath-evil-track-last-insertion)
+  (add-hook (variable-value 'after-change-functions :buffer buffer)
+            'lem-yath-evil-track-last-insertion))
+
+(defun lem-yath-evil-stop-track-last-insertion (buffer)
+  (let ((range (buffer-value buffer 'lem-yath-evil-current-insertion)))
+    (setf *lem-yath-evil-last-insertion*
+          (when range
+            (let ((limit (position-at-point (buffer-end-point buffer))))
+              (when (<= 1 (car range) (cdr range) limit)
+                (with-point ((start (buffer-start-point buffer))
+                             (end (buffer-start-point buffer)))
+                  (move-to-position start (car range))
+                  (move-to-position end (cdr range))
+                  (points-to-string start end)))))))
+  (remove-hook (variable-value 'after-change-functions :buffer buffer)
+               'lem-yath-evil-track-last-insertion)
+  (setf (buffer-value buffer 'lem-yath-evil-current-insertion) nil))
+
+(defmethod lem-vi-mode/core:buffer-state-enabled-hook :after
+    ((state lem-vi-mode/states:insert) buffer)
+  ;; replace-state delegates once to the concrete Insert state; ignore the
+  ;; outer subclass dispatch so that it does not reset the new tracker twice.
+  (unless (typep state 'lem-vi-mode/states:replace-state)
+    (lem-yath-evil-start-track-last-insertion buffer)))
+
+(defmethod lem-vi-mode/core:buffer-state-disabled-hook :before
+    ((state lem-vi-mode/states:insert) buffer)
+  (unless (typep state 'lem-vi-mode/states:replace-state)
+    (lem-yath-evil-stop-track-last-insertion buffer)))
+
+(defun lem-yath-evil-read-register ()
+  (message-without-log "Register: ")
+  (lem-vi-mode/commands::read-register))
+
+(defun lem-yath-evil-register-text (register)
+  (multiple-value-bind (value type)
+      (if (eql register #\.)
+          (values *lem-yath-evil-last-insertion* :char)
+          (lem-vi-mode/registers:register register))
+    (declare (ignore type))
+    (etypecase value
+      (null nil)
+      (string value)
+      (pathname (namestring value))
+      (list
+       (editor-error "Register ~A contains keys, not text" register)))))
+
+(define-command (lem-yath-evil-paste-from-register
+                 (:advice-classes editable-advice))
+    (register) ((lem-yath-evil-read-register))
+  "Insert the exact text held by a Vi register."
+  (alexandria:when-let ((text (lem-yath-evil-register-text register)))
+    (insert-string (current-point) text)))
+
+(define-command (lem-yath-evil-paste-last-insertion
+                 (:advice-classes editable-advice))
+    () ()
+  "Insert the text from the previous Insert session."
+  (when *lem-yath-evil-last-insertion*
+    (insert-string (current-point) *lem-yath-evil-last-insertion*)))
+
 (defvar *lem-yath-evil-normal-once-buffer* nil)
 
 (defun lem-yath-evil-seal-insert-undo-command (buffer)
@@ -164,6 +247,7 @@ line.  Blank lines are skipped like Evil's insert-state C-y and C-e."
 (define-command lem-yath-evil-execute-one-normal-command () ()
   "Execute the next complete Normal-state command, then resume Insert state."
   (let ((buffer (current-buffer)))
+    (lem-yath-evil-stop-track-last-insertion buffer)
     ;; Evil closes the insertion before C-o's Normal command.  Lem normally
     ;; suppresses boundaries for the whole Insert state, so seal it explicitly.
     (lem-yath-evil-seal-insert-undo-command buffer)
@@ -179,8 +263,9 @@ line.  Blank lines are skipped like Evil's insert-state C-y and C-e."
               (command-name command))))
       (unless (eq command-name 'lem-yath-evil-execute-one-normal-command)
         (let* ((buffer *lem-yath-evil-normal-once-buffer*)
-               (current-p (and (bufferp buffer)
-                               (not (deleted-buffer-p buffer))
+               (live-p (and (bufferp buffer)
+                            (not (deleted-buffer-p buffer))))
+               (current-p (and live-p
                                (eq buffer (current-buffer))))
                (state (and current-p lem-vi-mode/core::*current-state*)))
           (unless (and current-p
@@ -193,7 +278,11 @@ line.  Blank lines are skipped like Evil's insert-state C-y and C-e."
               ;; Evil's undo order after `C-o d w` followed by inserted text.
               (lem-yath-evil-seal-insert-undo-command buffer)
               (setf (lem-vi-mode/core::current-state)
-                    'lem-vi-mode/states:insert))))))))
+                    'lem-vi-mode/states:insert))
+            (when (and live-p
+                       (typep (lem-vi-mode/core:buffer-state buffer)
+                              'lem-vi-mode/states:insert))
+              (lem-yath-evil-start-track-last-insertion buffer))))))))
 
 (remove-hook *post-command-hook*
              'lem-yath-evil-return-to-insert-after-normal-command)

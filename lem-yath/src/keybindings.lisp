@@ -179,6 +179,10 @@
 (define-key lem-vi-mode:*insert-keymap* "C-d" 'lem-yath-evil-shift-left-line)
 (define-key lem-vi-mode:*insert-keymap* "C-t" 'lem-yath-evil-shift-right-line)
 (define-key lem-vi-mode:*insert-keymap* "C-v" 'quoted-insert)
+(define-key lem-vi-mode:*insert-keymap* "C-a"
+  'lem-yath-evil-paste-last-insertion)
+(define-key lem-vi-mode:*insert-keymap* "C-r"
+  'lem-yath-evil-paste-from-register)
 (define-key lem-vi-mode:*insert-keymap* "C-o"
   'lem-yath-evil-execute-one-normal-command)
 (define-key lem-vi-mode:*insert-keymap* "C-y" 'lem-yath-evil-copy-from-above)

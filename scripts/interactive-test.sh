@@ -126,6 +126,9 @@ COPYCONTROLFIX="$FIXTURE_DIR/lem-yath-itest-copy-control.txt"
 ONENORMALFIX="$FIXTURE_DIR/lem-yath-itest-one-normal.txt"
 ONENORMALPROMPTFIX="$FIXTURE_DIR/lem-yath-itest-one-normal-prompt.txt"
 ORGRIGHTFIX="$FIXTURE_DIR/lem-yath-itest-right-control.org"
+LASTINSERTFIX="$FIXTURE_DIR/lem-yath-itest-last-insert.txt"
+CHARREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-char-register.txt"
+LINEREGISTERFIX="$FIXTURE_DIR/lem-yath-itest-line-register.txt"
 
 printf 'first known line\nsecond known line\nthird known line\n' > "$SCRATCH"
 printf '(defun alpha ())\n(defun beta ())\n(defun gamma ())\n' > "$LISPFIX"
@@ -144,6 +147,9 @@ printf 'ABOVE\n\nxx\n\nBELOW\n' > "$COPYCONTROLFIX"
 printf 'abc def\n' > "$ONENORMALFIX"
 printf 'abc def\n' > "$ONENORMALPROMPTFIX"
 printf '* Child\n' > "$ORGRIGHTFIX"
+printf 'base\n\n' > "$LASTINSERTFIX"
+printf 'TOKEN\nhere\n' > "$CHARREGISTERFIX"
+printf 'TOKEN\nhere\n' > "$LINEREGISTERFIX"
 
 # ===========================================================================
 # Check 1: Boot with a scratch file; vi NORMAL state shows in the modeline.
@@ -868,6 +874,59 @@ else
 fi
 
 # ===========================================================================
+# Check 25: Match Evil's insert-state register controls.  C-a inserts the last
+# contiguous insertion; C-r inserts either characterwise or linewise register
+# text verbatim.  The new insertion remains a separate undo unit.
+# ===========================================================================
+S25A="lem-yath-it25a-$id"
+S25R="lem-yath-it25r-$id"
+S25L="lem-yath-it25l-$id"
+last_insert_ok=0
+last_insert_undo_ok=0
+char_register_ok=0
+line_register_ok=0
+
+if boot_with_file "$S25A" "$LASTINSERTFIX" '^base$' "25-insert-registers"; then
+  tmux_cmd send-keys -t "$S25A" A
+  send_text "$S25A" "foo"
+  send_chord "$S25A" Escape "j" "i" "C-a" Escape "C-x" "C-s"
+  sleep 0.5
+  if cmp -s "$LASTINSERTFIX" <(printf 'basefoo\nfoo\n'); then
+    last_insert_ok=1
+    send_chord "$S25A" "u" "C-x" "C-s"
+    sleep 0.5
+    cmp -s "$LASTINSERTFIX" <(printf 'basefoo\n\n') && last_insert_undo_ok=1
+  fi
+fi
+
+if boot_with_file "$S25R" "$CHARREGISTERFIX" '^TOKEN$' "25-insert-registers"; then
+  send_chord "$S25R" "0" "y" "e" "j" "A" "C-r" "0" Escape "C-x" "C-s"
+  sleep 0.5
+  cmp -s "$CHARREGISTERFIX" <(printf 'TOKEN\nhereTOKEN\n') && char_register_ok=1
+fi
+
+if boot_with_file "$S25L" "$LINEREGISTERFIX" '^TOKEN$' "25-insert-registers"; then
+  send_chord "$S25L" "y" "y" "j" "A" "C-r" "0" Escape "C-x" "C-s"
+  sleep 0.5
+  cmp -s "$LINEREGISTERFIX" <(printf 'TOKEN\nhereTOKEN\n\n') && line_register_ok=1
+fi
+
+if [ "$last_insert_ok" = 1 ] && [ "$last_insert_undo_ok" = 1 ] &&
+   [ "$char_register_ok" = 1 ] && [ "$line_register_ok" = 1 ]; then
+  pass "25-insert-registers" \
+    "insert C-a/C-r preserve Evil text, register, and undo semantics"
+else
+  fail "25-insert-registers" \
+    "insert-register mismatch (last=$last_insert_ok undo=$last_insert_undo_ok char=$char_register_ok line=$line_register_ok)" \
+    "$S25A"
+  echo "----- screen (character register $S25R) -----"
+  lem_capture "$S25R" 2>/dev/null || echo "(no screen)"
+  echo "----- screen (line register $S25L) -----"
+  lem_capture "$S25L" 2>/dev/null || echo "(no screen)"
+  echo "-----------------------------------------"
+fi
+
+# ===========================================================================
 # Summary
 # ===========================================================================
 echo
@@ -878,7 +937,8 @@ order=(01-boot-normal 02-insert-roundtrip 03-leader-compile 04-gc-operator \
        12-visual-operators 13-doubled-operators 14-count-repeat \
        15-snipe-parity 16-insert-C-u 17-fill-paragraph 18-org-id \
        19-auto-fill-toggle 20-control-line-motion 21-expand-region \
-       22-Y-linewise 23-control-key-parity 24-insert-control-parity)
+       22-Y-linewise 23-control-key-parity 24-insert-control-parity \
+       25-insert-registers)
 for k in "${order[@]}"; do
   printf '  %-26s %s\n' "$k" "${RESULT[$k]:-MISSING}"
 done
