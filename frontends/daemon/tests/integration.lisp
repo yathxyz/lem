@@ -1,7 +1,8 @@
 (defpackage :lem-daemon/tests/integration
   (:use :cl :rove)
   (:local-nicknames (:client :lem-daemon/client)
-                    (:protocol :lem-daemon/protocol)))
+                    (:protocol :lem-daemon/protocol)
+                    (:transport :lem-daemon/transport)))
 (in-package :lem-daemon/tests/integration)
 
 (defun wait-until (predicate &optional (seconds 10))
@@ -92,8 +93,10 @@
            (ensure-directories-exist (merge-pathnames "marker" root))
            (setf (uiop:getenv "XDG_RUNTIME_DIR")
                  (uiop:native-namestring root)
-                 endpoint (protocol:endpoint-pathname server-name)
-                 metadata (protocol:metadata-pathname server-name)
+                 endpoint (transport:local-endpoint
+                           (transport:require-local-backend) server-name)
+                 metadata (transport:local-metadata
+                           (transport:require-local-backend) server-name)
                  daemon-thread
                  (bt2:make-thread
                   (lambda ()

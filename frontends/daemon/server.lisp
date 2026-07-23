@@ -1,7 +1,3 @@
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  #+sbcl (require :sb-bsd-sockets)
-  #+sbcl (require :sb-posix))
-
 (in-package :lem-daemon)
 
 (defparameter +connection-limit+ 64)
@@ -10,11 +6,8 @@
     "shutdown" "cancel"))
 
 (defvar *daemon-name* "server")
-(defvar *daemon-socket* nil)
+(defvar *daemon-listener* nil)
 (defvar *daemon-endpoint* nil)
-(defvar *daemon-metadata* nil)
-(defvar *daemon-endpoint-identity* nil)
-(defvar *daemon-metadata-identity* nil)
 (defvar *daemon-accept-thread* nil)
 (defvar *daemon-running-p* nil)
 (defvar *daemon-root-implementation* nil)
@@ -25,7 +18,7 @@
 (define-condition stop-accept-loop (condition) ())
 
 (defclass daemon-connection ()
-  ((socket :initarg :socket :reader connection-socket)
+  ((transport :initarg :transport :reader connection-transport)
    (stream :initarg :stream :reader connection-stream)
    (write-lock :initform (bt2:make-lock :name "lem-daemon/write")
                :reader connection-write-lock)
@@ -477,8 +470,7 @@
 (defun close-connection (connection)
   (unless (connection-closed-p connection)
     (setf (connection-closed-p connection) t))
-  (ignore-errors (close (connection-stream connection) :abort t))
-  (ignore-errors (sb-bsd-sockets:socket-close (connection-socket connection)))
+  (transport:close-local-connection (connection-transport connection))
   (bt2:with-lock-held (*daemon-lock*)
     (setf *daemon-connections*
           (delete connection *daemon-connections* :test #'eq)))
@@ -488,192 +480,60 @@
                   (detach-connection-frame-on-editor connection)
                   (lem-core::cancel-routed-input-session connection)))))
 
-#+sbcl
-(progn
-  (sb-alien:define-alien-type linux-ucred
-      (sb-alien:struct linux-ucred (pid sb-alien:int)
-                                   (uid sb-alien:unsigned-int)
-                                   (gid sb-alien:unsigned-int)))
-  (sb-alien:define-alien-routine ("getsockopt" %getsockopt-ucred) sb-alien:int
-    (fd sb-alien:int)
-    (level sb-alien:int)
-    (option sb-alien:int)
-    (value (* linux-ucred))
-    (length (* sb-alien:unsigned-int))))
-
-(defun peer-user-id (socket)
-  #+(and sbcl linux)
-  (sb-alien:with-alien ((credential linux-ucred)
-                        (length sb-alien:unsigned-int
-                                (sb-alien:alien-size linux-ucred :bytes)))
-    (when (zerop (%getsockopt-ucred
-                  (sb-bsd-sockets:socket-file-descriptor socket)
-                  1 17 (sb-alien:addr credential) (sb-alien:addr length)))
-      (sb-alien:slot credential 'uid)))
-  #-(and sbcl linux)
-  (declare (ignore socket))
-  #-(and sbcl linux) nil)
-
-(defun validate-peer (socket)
-  #+(and sbcl linux)
-  (let ((uid (peer-user-id socket)))
-    (unless (and uid (= uid (sb-posix:getuid)))
-      (error "Refusing local client whose user identity could not be verified")))
-  #-(and sbcl linux)
-  (declare (ignore socket)))
-
-(defun serve-connection (socket)
+(defun serve-connection (local-connection)
   (let ((connection nil))
     (unwind-protect
          (handler-case
-             (progn
-               (validate-peer socket)
-               (let ((stream (sb-bsd-sockets:socket-make-stream
-                              socket :input t :output t
-                              :element-type '(unsigned-byte 8)
-                              :buffering :none)))
-                 (setf connection (make-instance 'daemon-connection
-                                                 :socket socket :stream stream))
-                 (bt2:with-lock-held (*daemon-lock*)
-                   (push connection *daemon-connections*))
-                 (loop :for message := (protocol:read-message stream)
-                       :while message
-                       :do (handler-case (handle-message connection message)
-                             (error (condition)
-                               (response-error connection
-                                               (protocol:field message "id")
-                                               "invalid-request"
-                                               (princ-to-string condition)))))))
+             (let ((stream
+                     (transport:local-connection-stream local-connection)))
+               (setf connection (make-instance 'daemon-connection
+                                               :transport local-connection
+                                               :stream stream))
+               (bt2:with-lock-held (*daemon-lock*)
+                 (push connection *daemon-connections*))
+               (loop :for message := (protocol:read-message stream)
+                     :while message
+                     :do (handler-case (handle-message connection message)
+                           (error (condition)
+                             (response-error connection
+                                             (protocol:field message "id")
+                                             "invalid-request"
+                                             (princ-to-string condition))))))
            (error () nil))
       (if connection
           (close-connection connection)
-          (ignore-errors (sb-bsd-sockets:socket-close socket))))))
+          (transport:close-local-connection local-connection)))))
 
-(defun accept-loop (socket)
+(defun accept-loop (listener)
   (loop :while *daemon-running-p*
         :do (handler-case
-                (let ((client (sb-bsd-sockets:socket-accept socket)))
+                (let ((client (transport:accept-local-connection listener)))
                   (if (bt2:with-lock-held (*daemon-lock*)
                         (< (length *daemon-connections*) +connection-limit+))
                       (bt2:make-thread (lambda () (serve-connection client))
                                        :name "Lem daemon client")
-                      (sb-bsd-sockets:socket-close client)))
-              (sb-bsd-sockets:socket-error ()
-                (unless *daemon-running-p* (return)))
+                      (transport:close-local-connection client)))
               (error ()
                 (unless *daemon-running-p* (return))))))
 
-(defun stat-path (pathname)
-  (handler-case (sb-posix:lstat (uiop:native-namestring pathname))
-    (sb-posix:syscall-error () nil)))
-
-(defun stat-kind-p (stat kind)
-  (and stat (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt) kind)))
-
-(defun ensure-private-runtime-directory (endpoint)
-  (let ((directory (uiop:pathname-directory-pathname endpoint)))
-    (ensure-directories-exist endpoint)
-    (let ((stat (stat-path directory)))
-      (unless (and (stat-kind-p stat sb-posix:s-ifdir)
-                   (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
-        (error "Daemon runtime directory is not a user-owned directory: ~a"
-               directory))
-      (sb-posix:chmod (uiop:native-namestring directory) #o700)
-      (unless (zerop (logand (sb-posix:stat-mode (stat-path directory)) #o077))
-        (error "Daemon runtime directory is not private: ~a" directory)))))
-
-(defun socket-live-p (pathname)
-  (let ((socket (make-instance 'sb-bsd-sockets:local-socket :type :stream)))
-    (unwind-protect
-         (handler-case
-             (progn
-               (sb-bsd-sockets:socket-connect
-                socket (uiop:native-namestring pathname))
-               t)
-           (sb-bsd-sockets:socket-error () nil))
-      (ignore-errors (sb-bsd-sockets:socket-close socket)))))
-
-(defun prepare-endpoint (endpoint)
-  (ensure-private-runtime-directory endpoint)
-  (let* ((stat (stat-path endpoint))
-         (identity (and stat (cons (sb-posix:stat-dev stat)
-                                   (sb-posix:stat-ino stat)))))
-    (when stat
-      (unless (and (stat-kind-p stat sb-posix:s-ifsock)
-                   (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
-        (error "Refusing unsafe existing daemon endpoint: ~a" endpoint))
-      (when (socket-live-p endpoint)
-        (error "A daemon is already running at ~a" endpoint))
-      (delete-owned-path endpoint identity sb-posix:s-ifsock))))
-
-(defun path-identity (pathname)
-  (alexandria:when-let ((stat (stat-path pathname)))
-    (cons (sb-posix:stat-dev stat) (sb-posix:stat-ino stat))))
-
-(defun delete-owned-path (pathname identity expected-kind)
-  (when (and pathname identity)
-    (let ((stat (stat-path pathname)))
-      (when (and (stat-kind-p stat expected-kind)
-                 (= (sb-posix:stat-uid stat) (sb-posix:getuid))
-                 (equal identity (cons (sb-posix:stat-dev stat)
-                                       (sb-posix:stat-ino stat))))
-        (sb-posix:unlink (uiop:native-namestring pathname))))))
-
-(defun write-metadata (pathname endpoint)
-  (with-open-file (stream pathname :direction :output :if-exists :error
-                                   :if-does-not-exist :create)
-    (yason:encode
-     (protocol:make-object "version" protocol:+protocol-version+
-                           "pid" (sb-posix:getpid)
-                           "name" *daemon-name*
-                           "endpoint" (uiop:native-namestring endpoint))
-     stream))
-  (sb-posix:chmod (uiop:native-namestring pathname) #o600)
-  (path-identity pathname))
-
 (defun start-daemon-transport ()
-  (let* ((endpoint (protocol:endpoint-pathname *daemon-name*))
-         (metadata (protocol:metadata-pathname *daemon-name*))
-         (native (uiop:native-namestring endpoint)))
-    (when (> (length (sb-ext:string-to-octets native :external-format :utf-8)) 100)
-      (error "Daemon endpoint path is too long: ~a" endpoint))
-    (prepare-endpoint endpoint)
-    (when (stat-path metadata)
-      (let* ((stat (stat-path metadata))
-             (identity (and stat (cons (sb-posix:stat-dev stat)
-                                       (sb-posix:stat-ino stat)))))
-        (unless (and (stat-kind-p stat sb-posix:s-ifreg)
-                     (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
-          (error "Refusing unsafe daemon metadata: ~a" metadata))
-        (delete-owned-path metadata identity sb-posix:s-ifreg)))
-    (let ((socket (make-instance 'sb-bsd-sockets:local-socket :type :stream)))
-      (handler-case
-          (progn
-            (sb-bsd-sockets:socket-bind socket native)
-            (sb-posix:chmod native #o600)
-            (sb-bsd-sockets:socket-listen socket 64)
-            (setf *daemon-socket* socket
-                  *daemon-endpoint* endpoint
-                  *daemon-metadata* metadata
-                  *daemon-endpoint-identity* (path-identity endpoint)
-                  *daemon-running-p* t)
-            (setf *daemon-metadata-identity*
-                  (write-metadata metadata endpoint))
-            (setf *daemon-accept-thread*
-                  (bt2:make-thread
-                   (lambda ()
-                     (handler-case (accept-loop socket)
-                       (stop-accept-loop () nil)))
-                                   :name "Lem daemon accept")))
-        (error (condition)
-          (ignore-errors (sb-bsd-sockets:socket-close socket))
-          (delete-owned-path endpoint (path-identity endpoint) sb-posix:s-ifsock)
-          (error condition))))))
+  (let* ((backend (transport:require-local-backend))
+         (listener (transport:open-local-listener
+                    backend *daemon-name* +connection-limit+)))
+    (setf *daemon-listener* listener
+          *daemon-endpoint* (transport:local-listener-endpoint listener)
+          *daemon-running-p* t
+          *daemon-accept-thread*
+          (bt2:make-thread
+           (lambda ()
+             (handler-case (accept-loop listener)
+               (stop-accept-loop () nil)))
+           :name "Lem daemon accept"))))
 
 (defun stop-daemon-transport ()
   (setf *daemon-running-p* nil)
-  (when *daemon-socket*
-    (ignore-errors (sb-bsd-sockets:socket-close *daemon-socket*)))
+  (when *daemon-listener*
+    (transport:close-local-listener *daemon-listener*))
   (dolist (connection (bt2:with-lock-held (*daemon-lock*)
                         (copy-list *daemon-connections*)))
     (close-connection connection))
@@ -685,13 +545,7 @@
          *daemon-accept-thread*
          (lambda () (error 'stop-accept-loop)))))
     (ignore-errors (bt2:join-thread *daemon-accept-thread*)))
-  (delete-owned-path *daemon-endpoint* *daemon-endpoint-identity*
-                     sb-posix:s-ifsock)
-  (delete-owned-path *daemon-metadata* *daemon-metadata-identity*
-                     sb-posix:s-ifreg)
-  (setf *daemon-socket* nil *daemon-endpoint* nil *daemon-metadata* nil
-        *daemon-endpoint-identity* nil *daemon-metadata-identity* nil
-        *daemon-accept-thread* nil
+  (setf *daemon-listener* nil *daemon-endpoint* nil *daemon-accept-thread* nil
         *daemon-connections* '() *daemon-requests* '()))
 
 (defun stop-daemon (&key force)

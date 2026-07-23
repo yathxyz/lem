@@ -1,7 +1,3 @@
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  #+sbcl (require :sb-bsd-sockets)
-  #+sbcl (require :sb-posix))
-
 (in-package :lem-daemon/client)
 
 (defparameter +client-capabilities+
@@ -12,13 +8,14 @@
 (defvar *request-counter-lock* (bt2:make-lock :name "lemclient/request-id"))
 
 (defclass client-connection ()
-  ((socket :initarg :socket :reader client-socket)
+  ((transport :initarg :transport :reader client-transport)
    (stream :initarg :stream :reader client-stream)
    (write-lock :initform (bt2:make-lock :name "lemclient/write")
                :reader client-write-lock)))
 
 (defun next-id ()
-  (format nil "~d-~d" #+sbcl (sb-posix:getpid) #-sbcl 0
+  (format nil "~d-~d"
+          (transport:backend-process-id (transport:require-local-backend))
           (bt2:with-lock-held (*request-counter-lock*)
             (incf *request-counter*))))
 
@@ -27,67 +24,33 @@
     (protocol:write-message message (client-stream connection))))
 
 (defun close-client (connection)
-  (ignore-errors (close (client-stream connection) :abort t))
-  #+sbcl
-  (ignore-errors (sb-bsd-sockets:socket-close (client-socket connection))))
-
-(defun validate-endpoint (pathname)
-  #+sbcl
-  (let* ((directory (uiop:pathname-directory-pathname pathname))
-         (directory-stat (handler-case
-                             (sb-posix:lstat (uiop:native-namestring directory))
-                           (sb-posix:syscall-error () nil)))
-         (socket-stat (handler-case
-                          (sb-posix:lstat (uiop:native-namestring pathname))
-                        (sb-posix:syscall-error () nil))))
-    (unless (and directory-stat socket-stat
-                 (= (sb-posix:stat-uid directory-stat) (sb-posix:getuid))
-                 (= (logand (sb-posix:stat-mode directory-stat) sb-posix:s-ifmt)
-                    sb-posix:s-ifdir)
-                 (zerop (logand (sb-posix:stat-mode directory-stat) #o077))
-                 (= (sb-posix:stat-uid socket-stat) (sb-posix:getuid))
-                 (= (logand (sb-posix:stat-mode socket-stat) sb-posix:s-ifmt)
-                    sb-posix:s-ifsock))
-      (error "Daemon endpoint is absent or not owner-private: ~a" pathname)))
-  #-sbcl
-  (declare (ignore pathname)))
+  (transport:close-local-connection (client-transport connection)))
 
 (defun connect-client (server-name)
-  #+sbcl
-  (let* ((pathname (protocol:endpoint-pathname server-name))
-         (socket (make-instance 'sb-bsd-sockets:local-socket :type :stream)))
-    (validate-endpoint pathname)
+  (let ((local-connection
+          (transport:connect-local (transport:require-local-backend)
+                                   server-name)))
     (handler-case
-        (progn
-          (sb-bsd-sockets:socket-connect socket (uiop:native-namestring pathname))
-          (let ((uid (lem-daemon::peer-user-id socket)))
-            (unless (and uid (= uid (sb-posix:getuid)))
-              (error "Daemon peer identity could not be verified")))
-          (let* ((stream (sb-bsd-sockets:socket-make-stream
-                          socket :input t :output t
-                          :element-type '(unsigned-byte 8) :buffering :none))
-                 (connection (make-instance 'client-connection
-                                            :socket socket :stream stream)))
-            (client-send
-             connection
-             (protocol:make-object
-              "version" protocol:+protocol-version+
-              "type" "hello"
-              "capabilities" +client-capabilities+))
-            (let ((hello (protocol:read-message stream)))
-              (unless (and hello
-                           (= protocol:+protocol-version+
-                              (or (protocol:field hello "version") -1))
-                           (string= "hello" (protocol:field hello "type" "")))
-                (error "Daemon did not complete protocol negotiation")))
-            connection))
+        (let* ((stream (transport:local-connection-stream local-connection))
+               (connection (make-instance 'client-connection
+                                          :transport local-connection
+                                          :stream stream)))
+          (client-send
+           connection
+           (protocol:make-object
+            "version" protocol:+protocol-version+
+            "type" "hello"
+            "capabilities" +client-capabilities+))
+          (let ((hello (protocol:read-message stream)))
+            (unless (and hello
+                         (= protocol:+protocol-version+
+                            (or (protocol:field hello "version") -1))
+                         (string= "hello" (protocol:field hello "type" "")))
+              (error "Daemon did not complete protocol negotiation")))
+          connection)
       (error (condition)
-        (ignore-errors (sb-bsd-sockets:socket-close socket))
-        (error condition))))
-  #-sbcl
-  (declare (ignore server-name))
-  #-sbcl
-  (error "lemclient local transport is currently supported on SBCL"))
+        (transport:close-local-connection local-connection)
+        (error condition)))))
 
 (defun response-error-message (message)
   (let ((error (protocol:field message "error")))

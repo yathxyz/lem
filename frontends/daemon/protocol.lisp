@@ -98,24 +98,3 @@
                 (or (alphanumericp character)
                     (find character "_.-")))
               name)))
-
-(defun runtime-directory ()
-  (if (uiop:getenvp "XDG_RUNTIME_DIR")
-      (merge-pathnames "lem/"
-                       (uiop:ensure-directory-pathname
-                        (uiop:getenv "XDG_RUNTIME_DIR")))
-      (merge-pathnames
-       "lem/runtime/"
-       (uiop:ensure-directory-pathname
-        (or (uiop:getenv "XDG_CACHE_HOME")
-            (merge-pathnames ".cache/" (user-homedir-pathname)))))))
-
-(defun endpoint-pathname (&optional (name "server"))
-  (unless (valid-server-name-p name)
-    (fail "Unsafe server name: ~s" name))
-  (merge-pathnames (format nil "~a.sock" name) (runtime-directory)))
-
-(defun metadata-pathname (&optional (name "server"))
-  (unless (valid-server-name-p name)
-    (fail "Unsafe server name: ~s" name))
-  (merge-pathnames (format nil "~a.json" name) (runtime-directory)))

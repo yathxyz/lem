@@ -4,6 +4,8 @@
   :serial t
   :components ((:file "package")
                (:file "protocol")
+               (:file "transport")
+               (:file "transport-unix")
                (:file "implementation")
                (:file "server")
                (:file "client")))
