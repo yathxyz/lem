@@ -1248,12 +1248,12 @@ makes the buffer read-only and switches it to `notmuch-search-mode'."
   (setf (buffer-read-only-p buffer) t)
   buffer)
 
-(defun notmuch-search (query &optional selected-id)
+(defun notmuch-search-query (query &optional selected-id)
   "Run a newest-first `notmuch search' for QUERY and render the result list.
 Degrades to a message when notmuch is missing or the query fails."
   (unless (notmuch-available-p)
     (message "notmuch not found on PATH")
-    (return-from notmuch-search))
+    (return-from notmuch-search-query))
   (multiple-value-bind (result success-p)
       (notmuch-run-json
        (list "search" "--format=json"
@@ -1270,17 +1270,28 @@ Degrades to a message when notmuch is missing or the query fails."
          (switch-to-window (pop-to-buffer buffer))
          (message "~d thread~:p" (length result)))))))
 
-(define-command lem-yath-notmuch () ()
-  "Prompt for a notmuch query and show matching threads (M-x notmuch).
-Defaults to \"tag:inbox\"; results are newest-first, one thread per line."
+(defun notmuch-prompt-search ()
+  "Prompt for a Notmuch query and show matching threads."
   (unless (notmuch-available-p)
     (message "notmuch not found on PATH")
-    (return-from lem-yath-notmuch))
+    (return-from notmuch-prompt-search))
   (let ((query (prompt-for-string "notmuch query: "
                                   :initial-value *notmuch-default-query*
-                                  :history-symbol 'lem-yath-notmuch)))
+                                  :history-symbol 'notmuch-search)))
     (when (plusp (length query))
-      (notmuch-search query))))
+      (notmuch-search-query query))))
+
+(define-command notmuch-search () ()
+  "Prompt for a Notmuch query and show newest-first matching threads."
+  (notmuch-prompt-search))
+
+(define-command notmuch () ()
+  "Open the Notmuch inbox search, like the configured Emacs entry point."
+  (notmuch-prompt-search))
+
+(define-command lem-yath-notmuch () ()
+  "Compatibility name for the configured Notmuch search command."
+  (notmuch-prompt-search))
 
 (define-command lem-yath-notmuch-refresh () ()
   "Re-run the current query in the *lem-yath-mail* list buffer (g)."
@@ -1288,7 +1299,7 @@ Defaults to \"tag:inbox\"; results are newest-first, one thread per line."
     (let ((query (buffer-value buffer 'notmuch-query))
           (selected-id (notmuch-thread-id-at-point)))
       (if query
-          (notmuch-search query selected-id)
+          (notmuch-search-query query selected-id)
           (message "No notmuch query to refresh")))))
 
 (defun notmuch-search-tag-current (tag-changes &optional advance-p)

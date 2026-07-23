@@ -536,10 +536,12 @@ lem_start "$session" "$source_file" --eval "(load #P$fixture)"
 
 if wait_report READY 0 && lem_wait_for "$session" NORMAL 60 >/dev/null &&
    grep -Fqx -- "EXEC notmuch=$fakebin/notmuch xdg-open=$fakebin/xdg-open" \
+     "$LEM_YATH_NOTMUCH_REPORT" &&
+   grep -Fqx -- 'COMMANDS notmuch=yes search=yes legacy=yes' \
      "$LEM_YATH_NOTMUCH_REPORT"; then
-  pass boot 'configured Lem loaded the fixture and resolved the fake notmuch'
+  pass boot 'configured Lem loaded Notmuch with familiar interactive command names'
 else
-  fail boot 'configured Lem did not load the fixture with the fake notmuch'
+  fail boot 'configured Lem did not expose the Notmuch executable and commands'
 fi
 
 lem_keys "$session" F3

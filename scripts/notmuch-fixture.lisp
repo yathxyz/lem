@@ -569,13 +569,13 @@
              (notmuch-test-yes-no (notmuch-test-source-exact-p)))))))))
 
 (define-command lem-yath-notmuch-test-open () ()
-  (notmuch-search *notmuch-test-query*))
+  (notmuch-search-query *notmuch-test-query*))
 
 (define-command lem-yath-notmuch-test-empty () ()
-  (notmuch-search "tag:empty"))
+  (notmuch-search-query "tag:empty"))
 
 (define-command lem-yath-notmuch-test-drafts () ()
-  (notmuch-search "tag:draft"))
+  (notmuch-search-query "tag:draft"))
 
 (define-command lem-yath-notmuch-test-open-protected () ()
   (notmuch-show "protected"))
@@ -595,4 +595,8 @@
 (notmuch-test-log "EXEC notmuch=~a xdg-open=~a"
                   (executable-find "notmuch")
                   (executable-find "xdg-open"))
+(notmuch-test-log "COMMANDS notmuch=~a search=~a legacy=~a"
+                  (notmuch-test-yes-no (find-command "notmuch"))
+                  (notmuch-test-yes-no (find-command "notmuch-search"))
+                  (notmuch-test-yes-no (find-command "lem-yath-notmuch")))
 (notmuch-test-log "READY")
