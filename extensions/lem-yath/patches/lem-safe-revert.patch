@@ -1,0 +1,270 @@
+diff --git a/src/commands/file.lisp b/src/commands/file.lisp
+index f7bc8bc..51ef69b 100644
+--- a/src/commands/file.lisp
++++ b/src/commands/file.lisp
+@@ -3,0 +4 @@
++           :*after-sync-buffer-hook*
+@@ -11,0 +13 @@
++           :confirm-kill-buffer
+@@ -43,0 +46,92 @@
++(defvar *after-sync-buffer-hook* '())
++(defparameter *safe-reload-byte-limit* (* 64 1024 1024))
++
++(defun confirm-kill-buffer (buffer)
++  (lem-core::confirm-buffer-kill buffer))
++
++(defclass byte-snapshot-input-stream
++    (trivial-gray-streams:fundamental-binary-input-stream)
++  ((octets :initarg :octets :reader snapshot-stream-octets)
++   (position :initform 0 :accessor snapshot-stream-position)))
++
++(defmethod stream-element-type ((stream byte-snapshot-input-stream))
++  (declare (ignore stream))
++  '(unsigned-byte 8))
++
++(defmethod trivial-gray-streams:stream-read-byte
++    ((stream byte-snapshot-input-stream))
++  (let ((position (snapshot-stream-position stream))
++        (octets (snapshot-stream-octets stream)))
++    (if (< position (length octets))
++        (prog1 (aref octets position)
++          (incf (snapshot-stream-position stream)))
++        :eof)))
++
++(defmethod trivial-gray-streams:stream-read-sequence
++    ((stream byte-snapshot-input-stream) sequence start end &key)
++  (let* ((position (snapshot-stream-position stream))
++         (octets (snapshot-stream-octets stream))
++         (count (min (- end start) (- (length octets) position))))
++    (replace sequence octets
++             :start1 start :end1 (+ start count)
++             :start2 position :end2 (+ position count))
++    (incf (snapshot-stream-position stream) count)
++    (+ start count)))
++
++(defun read-file-byte-snapshot (filename)
++  "Read exactly one finite regular-file snapshot or fail before buffer mutation."
++  (with-open-file (stream filename :element-type '(unsigned-byte 8))
++    (let ((size (file-length stream)))
++      (unless (and (integerp size)
++                   (<= 0 size *safe-reload-byte-limit*
++                       (1- array-total-size-limit)))
++        (error "File exceeds the safe reload size limit: ~A" filename))
++      (let ((octets (make-array size :element-type '(unsigned-byte 8))))
++        (unless (and (= (read-sequence octets stream) size)
++                     (eq (read-byte stream nil :eof) :eof))
++          (error "File changed while being read: ~A" filename))
++        octets))))
++
++(defun insert-byte-snapshot
++    (point octets filename
++     &key (external-format lem/buffer/file::*default-external-format*)
++          (end-of-line :auto))
++  "Decode finite OCTETS into POINT using the original filename's policy."
++  (when (eql external-format :detect-encoding)
++    (if lem/buffer/file::*external-format-function*
++        (multiple-value-setq (external-format end-of-line)
++          (funcall lem/buffer/file::*external-format-function* filename))
++        (setf external-format :utf-8)))
++  (let* ((encoding
++           (lem/buffer/encodings:encoding external-format end-of-line))
++         (internal-p
++           (typep encoding 'lem/buffer/encodings:internal-encoding)))
++    (handler-case
++        (with-point ((point point :left-inserting))
++          (if internal-p
++              (let ((string
++                      #+sbcl
++                      (sb-ext:octets-to-string
++                       octets :external-format external-format)
++                      #-sbcl
++                      (error "Finite file snapshots require SBCL")))
++                (with-input-from-string (stream string)
++                  (lem/buffer/file::%encoding-read
++                   encoding point stream filename)))
++              (with-open-stream
++                  (stream (make-instance 'byte-snapshot-input-stream
++                                         :octets octets))
++                (lem/buffer/encodings:encoding-read
++                 encoding stream
++                 (lem/buffer/encodings:encoding-read-detect-eol
++                  (lambda (code)
++                    (when code
++                      (insert-character point (code-char code)))))))))
++      (lem/buffer/file:encoding-read-error (condition)
++        (error condition))
++      (error (condition)
++        (error 'lem/buffer/file:encoding-read-error
++               :condition condition
++               :filename filename)))
++    encoding))
++
+@@ -290,7 +384,10 @@
+-         (expand-file-name (expand-file-name filename)))
+-    (unless (and (find expand-file-name (mapcar #'buffer-filename
+-                                                (buffer-list))
+-                       :test #'equal)
+-                 (not (prompt-for-y-or-n-p (format nil
+-                                                   "~a is opened, overwrite it?"
+-                                                   expand-file-name))))
++         (buffer (current-buffer))
++         (old-filename (lem/buffer/internal::buffer-%filename buffer))
++         (old-directory (lem/buffer/internal::buffer-%directory buffer))
++         (expand-file-name (expand-file-name filename))
++         (existing-other-p
++           (and (probe-file expand-file-name)
++                (not (equal expand-file-name (buffer-filename))))))
++    (when (or (not existing-other-p)
++              (prompt-for-y-or-n-p
++               (format nil "~a exists; overwrite it" expand-file-name)))
+@@ -297,9 +394,21 @@
+-      (directory-for-file-or-lose filename)
+-      (unless (string= old new)
+-        (buffer-rename (current-buffer)
+-                       (if (get-buffer new)
+-                           (unique-buffer-name new)
+-                           new)))
+-      (setf (buffer-filename) expand-file-name)
+-      (add-newline-at-eof (current-buffer))
+-      (save-current-buffer t))))
++      (directory-for-file-or-lose filename)
++      (let ((save-succeeded-p nil))
++        (unwind-protect
++             (progn
++               (unless (string= old new)
++                 (buffer-rename buffer
++                                (if (get-buffer new)
++                                    (unique-buffer-name new)
++                                    new)))
++               (setf (buffer-filename buffer) expand-file-name)
++               (add-newline-at-eof buffer)
++               (setf (buffer-value
++                      buffer 'write-file-overwrite-confirmed)
++                     existing-other-p)
++               (save-current-buffer t)
++               (setf save-succeeded-p t))
++          (setf (buffer-value buffer 'write-file-overwrite-confirmed) nil)
++          (unless save-succeeded-p
++            (setf (lem/buffer/internal::buffer-%filename buffer) old-filename
++                  (lem/buffer/internal::buffer-%directory buffer) old-directory
++                  (lem/buffer/internal::buffer-%name buffer) old)))))))
+@@ -353,11 +462,39 @@
+-  (with-buffer-read-only buffer nil
+-    (let* ((point (buffer-point buffer))
+-           (line-number (line-number-at-point point))
+-           (column (point-column point)))
+-      (erase-buffer buffer)
+-      (insert-file-contents point (buffer-filename buffer))
+-      (buffer-unmark buffer)
+-      (update-changed-disk-date buffer)
+-      (move-to-line point line-number)
+-      (move-to-column point column)
+-      t)))
++  ;; Read and decode first.  A disappearing, unreadable, or malformed file
++  ;; must not leave the visited buffer empty or partially replaced.
++  (let ((staging
++          (make-buffer (format nil " *revert staging ~A*" (gensym))
++                       :enable-undo-p nil
++                       :temporary t)))
++    (unwind-protect
++         (let* ((staging-point (buffer-start-point staging))
++                (octets
++                  (read-file-byte-snapshot (buffer-filename buffer)))
++                (encoding
++                  (let ((*inhibit-modification-hooks* t))
++                    (insert-byte-snapshot
++                     staging-point octets (buffer-filename buffer)
++                     :external-format
++                     (if (variable-value 'find-file-literally :default buffer)
++                         :latin-1
++                         lem/buffer/file::*default-external-format*)
++                     :end-of-line
++                     (if (variable-value 'find-file-literally :default buffer)
++                         :lf
++                         :auto))))
++                (contents
++                  (points-to-string (buffer-start-point staging)
++                                    (buffer-end-point staging))))
++           (with-buffer-read-only buffer nil
++             (let* ((point (buffer-point buffer))
++                    (line-number (line-number-at-point point))
++                    (column (point-column point)))
++               (erase-buffer buffer)
++               (insert-string point contents)
++               (setf (buffer-encoding buffer) encoding)
++               (buffer-unmark buffer)
++               (update-changed-disk-date buffer)
++               (move-to-line point line-number)
++               (move-to-column point column)
++               (run-hooks *after-sync-buffer-hook* buffer)
++               t)))
++      (delete-buffer staging))))
+@@ -369,8 +506,11 @@
+-    (alexandria:if-let (fn (revert-buffer-function buffer))
+-      (funcall fn buffer)
+-      (when (and (or (buffer-modified-p buffer)
+-                     (changed-disk-p buffer))
+-                 (if ask
+-                     (prompt-for-y-or-n-p (format nil "Revert buffer from file ~A" (buffer-filename)))
+-                     t))
+-        (sync-buffer-with-file-content buffer)))))
++    (when (or (revert-buffer-function buffer)
++              (buffer-modified-p buffer)
++              (changed-disk-p buffer))
++      (when (or (not ask)
++                (not (buffer-modified-p buffer))
++                (prompt-for-y-or-n-p
++                 (format nil "Discard unsaved changes in ~A?"
++                         (or (buffer-filename buffer) (buffer-name buffer)))))
++        (alexandria:if-let (fn (revert-buffer-function buffer))
++          (funcall fn buffer)
++          (sync-buffer-with-file-content buffer))))))
+diff --git a/src/commands/window.lisp b/src/commands/window.lisp
+index f12b83d..1d6a50e 100644
+--- a/src/commands/window.lisp
++++ b/src/commands/window.lisp
+@@ -100,0 +101 @@
++    (lem-core/commands/file:confirm-kill-buffer buffer)
+diff --git a/src/commands/project.lisp b/src/commands/project.lisp
+index adf6bb9..50ff461 100644
+--- a/src/commands/project.lisp
++++ b/src/commands/project.lisp
+@@ -184,0 +185 @@
++        (confirm-kill-buffer buffer)
+@@ -191,0 +193 @@
++        (confirm-kill-buffer buffer)
+@@ -219,0 +222 @@
++                   (confirm-kill-buffer buffer)
+diff --git a/src/window/window.lisp b/src/window/window.lisp
+index 9080fca..0146d64 100644
+--- a/src/window/window.lisp
++++ b/src/window/window.lisp
+@@ -966,0 +967,9 @@ You can pass in the optional argument WINDOW-LIST to replace the default
++(defun confirm-buffer-kill (buffer)
++  "Abort unless BUFFER is unmodified or the user confirms discarding it."
++  (when (and (buffer-modified-p buffer)
++             (not (prompt-for-y-or-n-p
++                   (format nil "Buffer ~A is modified; kill anyway"
++                           (buffer-name buffer)))))
++    (error 'editor-abort))
++  t)
++
+@@ -977 +986,3 @@ You can pass in the optional argument WINDOW-LIST to replace the default
+-           (delete-buffer (window-buffer window))
++           (progn
++             (confirm-buffer-kill (window-buffer window))
++             (delete-buffer (window-buffer window)))
+@@ -984 +995,3 @@ You can pass in the optional argument WINDOW-LIST to replace the default
+-           (delete-buffer (window-buffer window))
++           (progn
++             (confirm-buffer-kill (window-buffer window))
++             (delete-buffer (window-buffer window)))
+diff --git a/extensions/mcp-server/handlers/buffer.lisp b/extensions/mcp-server/handlers/buffer.lisp
+index 4eecc0a..480a68c 100644
+--- a/extensions/mcp-server/handlers/buffer.lisp
++++ b/extensions/mcp-server/handlers/buffer.lisp
+@@ -83,0 +84,4 @@
++    (when (buffer-modified-p buffer)
++      (mcp-error +invalid-params+
++                 (format nil "Buffer is modified; refusing deletion: ~A"
++                         buffer-name)))

@@ -1,0 +1,2248 @@
+diff --git a/extensions/language-client/request.lisp b/extensions/language-client/request.lisp
+index 649c76f..a01e992 100644
+--- a/extensions/language-client/request.lisp
++++ b/extensions/language-client/request.lisp
+@@ -86,9 +86,19 @@
+                       (lambda (response)
+-                        (handler-bind ((error (lambda (e)
+-                                                (log:error "~A"
+-                                                          (with-output-to-string (stream)
+-                                                            (uiop:println e stream)
+-                                                            (uiop:print-backtrace :stream stream
+-                                                                                  :condition e))))))
+-                          (let ((value (coerce-response message response)))
++                        (multiple-value-bind (value converted-p)
++                            (handler-case
++                                (values (coerce-response message response) t)
++                              (error (condition)
++                                (log:error "~A"
++                                           (with-output-to-string (stream)
++                                             (uiop:println condition stream)
++                                             (uiop:print-backtrace
++                                              :stream stream
++                                              :condition condition)))
++                                (if error-callback
++                                    (funcall error-callback
++                                             (princ-to-string condition)
++                                             nil)
++                                    (error condition))
++                                (values nil nil)))
++                          (when converted-p
+                             (funcall callback value))))
+diff --git a/extensions/lsp-mode/client-capabilities.json b/extensions/lsp-mode/client-capabilities.json
+index e6cb53f..60f028c 100644
+--- a/extensions/lsp-mode/client-capabilities.json
++++ b/extensions/lsp-mode/client-capabilities.json
+@@ -1,5 +1,10 @@
+ {
+   "workspace": {},
++  "general": {
++    "positionEncodings": [
++      "utf-16"
++    ]
++  },
+   "textDocument": {
+     "synchronization": {
+       "didSave": true
+diff --git a/extensions/lsp-mode/lsp-mode.lisp b/extensions/lsp-mode/lsp-mode.lisp
+index b50d1d4..a0997c1 100644
+--- a/extensions/lsp-mode/lsp-mode.lisp
++++ b/extensions/lsp-mode/lsp-mode.lisp
+@@ -101,14 +101,18 @@ Use this when lsp-mode has side effects that you want to avoid."
+ (defun jsonrpc-editor-error (message code)
+   (editor-error "JSONRPC-CALLBACK-ERROR: ~A (Code=~A)" message code))
+
+-(defun async-request (client request params &key then)
++(defun async-request (client request params &key then error)
+   (request:request-async client
+                          request
+                          params
+                          (lambda (response)
+                            (send-event (lambda () (funcall then response))))
+                          (lambda (message code)
+-                           (send-event (lambda () (jsonrpc-editor-error message code))))))
++                           (send-event
++                            (lambda ()
++                              (if error
++                                  (funcall error message code)
++                                  (jsonrpc-editor-error message code)))))))
+
+ (defun display-message (text &key style source-window)
+   (when text
+@@ -262,7 +266,10 @@ Use this when lsp-mode has side effects that you want to avoid."
+      :keymap *lsp-mode-keymap*
+      :enable-hook 'enable-hook)
+   (setf (variable-value 'language-mode:completion-spec)
+-        (lem/completion-mode:make-completion-spec 'text-document/completion :async t))
++        (lem/completion-mode:make-completion-spec
++         'text-document/completion
++         :async t
++         :filter-function #'filter-completion-items))
+   (setf (variable-value 'language-mode:find-definitions-function)
+         #'lsp-find-definitions)
+   (setf (variable-value 'language-mode:find-references-function)
+@@ -326,9 +333,9 @@ Use this when lsp-mode has side effects that you want to avoid."
+               (command (gethash c (workspace-trigger-characters workspace))))
+     (funcall command c)))
+
+-(defun buffer-change-event-to-content-change-event (point arg)
++(defun buffer-change-event-to-content-change-event (point arg workspace)
+   (labels ((inserting-content-change-event (string)
+-             (let ((position (point-to-lsp-position point)))
++             (let ((position (point-to-workspace-position point workspace)))
+                (make-lsp-map :range (make-instance 'lsp:range
+                                                    :start position
+                                                    :end position)
+@@ -337,11 +344,18 @@ Use this when lsp-mode has side effects that you want to avoid."
+            (deleting-content-change-event (count)
+              (with-point ((end point))
+                (character-offset end count)
+-               (make-lsp-map :range (points-to-lsp-range
+-                                     point
+-                                     end)
+-                             :range-length (count-characters point end)
+-                             :text ""))))
++               (let ((deleted-text (points-to-string point end)))
++                 (make-lsp-map :range
++                               (make-instance
++                                'lsp:range
++                                :start (point-to-workspace-position point workspace)
++                                :end (point-to-workspace-position end workspace))
++                             :range-length
++                             (string-index-to-position-character
++                              deleted-text
++                              (length deleted-text)
++                             (workspace-position-encoding workspace))
++                             :text "")))))
+     (etypecase arg
+       (character
+        (inserting-content-change-event (string arg)))
+@@ -351,8 +365,11 @@ Use this when lsp-mode has side effects that you want to avoid."
+        (deleting-content-change-event arg)))))
+
+ (defun handle-change-buffer (point arg)
+-  (let ((buffer (point-buffer point))
+-        (change-event (buffer-change-event-to-content-change-event point arg)))
++  (let* ((buffer (point-buffer point))
++         (workspace (buffer-workspace buffer))
++         (change-event
++           (buffer-change-event-to-content-change-event
++            point arg workspace)))
+     (text-document/did-change buffer (make-lsp-array change-event))))
+
+ (defun add-buffer-hooks (buffer)
+@@ -369,7 +386,8 @@ Use this when lsp-mode has side effects that you want to avoid."
+ (defun initialize-workspace (workspace continuation)
+   (register-lsp-method workspace
+                        "textDocument/publishDiagnostics"
+-                       'text-document/publish-diagnostics)
++                       (lambda (params)
++                         (text-document/publish-diagnostics workspace params)))
+   (register-lsp-method workspace
+                        "window/showMessage"
+                        'window/show-message)
+@@ -452,14 +470,83 @@ Use this when lsp-mode has side effects that you want to avoid."
+   (make-instance 'lsp:text-document-identifier
+                  :uri (buffer-uri buffer)))
+
+-(defun make-text-document-position-arguments (point)
++(defun workspace-position-encoding (workspace)
++  (let ((encoding
++          (and workspace
++               (handler-case
++                   (lsp:server-capabilities-position-encoding
++                    (workspace-server-capabilities workspace))
++                 (unbound-slot () nil)))))
++    (if (and (stringp encoding)
++             (member encoding
++                     (list lsp:position-encoding-kind-utf8
++                           lsp:position-encoding-kind-utf16
++                           lsp:position-encoding-kind-utf32)
++                     :test #'string=))
++        encoding
++        lsp:position-encoding-kind-utf16)))
++
++(defun character-position-width (character encoding)
++  (cond
++    ((string= encoding lsp:position-encoding-kind-utf8)
++     (babel:string-size-in-octets (string character) :encoding :utf-8))
++    ((string= encoding lsp:position-encoding-kind-utf16)
++     (if (> (char-code character) #xffff) 2 1))
++    (t
++     1)))
++
++(defun string-index-to-position-character (string index encoding)
++  (loop :for offset :below index
++        :sum (character-position-width (char string offset) encoding)))
++
++(defun position-character-to-string-index (string character encoding)
++  "Convert protocol code units to a character index, rejecting split units."
++  (when (and (integerp character) (not (minusp character)))
++    (loop :with units := 0
++          :for index :from 0
++          :when (= units character)
++            :return index
++          :when (= index (length string))
++            :return nil
++          :do (incf units
++                    (character-position-width (char string index) encoding))
++          :when (> units character)
++            :return nil)))
++
++(defun point-to-workspace-position (point workspace)
++  (let ((encoding (workspace-position-encoding workspace)))
++    (make-instance
++     'lsp:position
++     :line (point-lsp-line-number point)
++     :character
++     (string-index-to-position-character
++      (line-string point) (point-charpos point) encoding))))
++
++(defun points-to-workspace-range (start end workspace)
++  (make-instance 'lsp:range
++                 :start (point-to-workspace-position start workspace)
++                 :end (point-to-workspace-position end workspace)))
++
++(defun move-to-workspace-position (point position workspace)
++  "Move POINT to POSITION using the workspace-negotiated code-unit encoding."
++  (let ((line (lsp:position-line position))
++        (character (lsp:position-character position)))
++    (when (and (integerp line)
++               (not (minusp line))
++               (move-to-line point (1+ line)))
++      (alexandria:when-let
++          ((index
++             (position-character-to-string-index
++              (line-string point)
++              character
++              (workspace-position-encoding workspace))))
++        (line-start point)
++        (character-offset point index)
++        point))))
++
++(defun make-text-document-position-arguments (point workspace)
+   (list :text-document (make-text-document-identifier (point-buffer point))
+-        :position (point-to-lsp-position point)))
+-
+-(defun make-text-document-position-params (point)
+-  (apply #'make-instance
+-         'lsp:text-document-position-params
+-         (make-text-document-position-arguments point)))
++        :position (point-to-workspace-position point workspace)))
+
+ (defun find-buffer-from-uri (uri)
+   (find uri (buffer-list) :key #'buffer-uri :test #'equal))
+@@ -468,57 +555,115 @@ Use this when lsp-mode has side effects that you want to avoid."
+   (let ((uri (lsp:text-document-identifier-uri text-document-identifier)))
+     (find-buffer-from-uri uri)))
+
+-(defun apply-text-edits (buffer text-edits)
+-  (flet ((replace-points ()
+-           (let ((points '()))
+-             (with-point ((start (buffer-point buffer) :left-inserting)
+-                          (end (buffer-point buffer) :left-inserting))
+-               (do-sequence (text-edit text-edits)
+-                 (let ((range (lsp:text-edit-range text-edit))
+-                       (new-text (lsp:text-edit-new-text text-edit)))
+-                   (move-to-lsp-position start (lsp:range-start range))
+-                   (move-to-lsp-position end (lsp:range-end range))
+-                   (push (list (copy-point start)
+-                               (copy-point end)
+-                               new-text)
+-                         points))))
+-             (nreverse points))))
+-    (let ((points (replace-points)))
++(defun edit-ranges-overlap-p (start1 end1 start2 end2)
++  "Return true when two half-open edit ranges cannot be applied independently."
++  (let ((empty1 (point= start1 end1))
++        (empty2 (point= start2 end2)))
++    (cond
++      ((and empty1 empty2)
++       (point= start1 start2))
++      (empty1
++       (and (point<= start2 start1) (point< start1 end2)))
++      (empty2
++       (and (point<= start1 start2) (point< start2 end1)))
++      (t
++       (and (point< start1 end2) (point< start2 end1))))))
++
++(defun ensure-edit-range-writable (start end)
++  (let ((buffer (point-buffer start)))
++    (lem/buffer/internal::check-read-only-buffer buffer)
++    (lem/buffer/internal::check-read-only-at-point start 0)
++    (when (point< start end)
++      (lem/buffer/internal::check-read-only-at-point
++       start (count-characters start end)))))
++
++(defun apply-text-edits (buffer text-edits workspace)
++  (when (or (null text-edits) (lsp-null-p text-edits))
++    (return-from apply-text-edits nil))
++  (labels ((delete-edit-points (edits)
++             (dolist (edit edits)
++               (delete-point (first edit))
++               (delete-point (second edit))))
++           (ranges-valid-p (edits)
++             (loop :for rest :on edits
++                   :for edit := (first rest)
++                   :never
++                   (some (lambda (other)
++                           (edit-ranges-overlap-p
++                            (first edit) (second edit)
++                            (first other) (second other)))
++                         (rest rest))))
++           (prepare-edits ()
++             (let ((edits '()))
++               (handler-case
++                   (progn
++                     (do-sequence (text-edit text-edits)
++                       (let ((range (lsp:text-edit-range text-edit))
++                             (new-text (lsp:text-edit-new-text text-edit)))
++                         (with-point ((start (buffer-point buffer))
++                                      (end (buffer-point buffer)))
++                           (unless (and
++                                    (stringp new-text)
++                                    (move-to-workspace-position
++                                     start (lsp:range-start range) workspace)
++                                    (move-to-workspace-position
++                                     end (lsp:range-end range) workspace)
++                                    (point<= start end))
++                             (error "Invalid LSP text edit"))
++                           (push (list (copy-point start :left-inserting)
++                                       (copy-point end :right-inserting)
++                                       new-text)
++                                 edits))))
++                     (setf edits (nreverse edits))
++                     (unless (ranges-valid-p edits)
++                       (error "Overlapping LSP text edits"))
++                     edits)
++                 (error (condition)
++                   (delete-edit-points edits)
++                   (error condition))))))
++    (let ((edits (prepare-edits)))
+       (unwind-protect
+-           (loop :for (start end text) :in points
+-                 :do (delete-between-points start end)
+-                     (insert-string start text))
+-        (loop :for (start end) :in points
+-              :do (delete-point start)
+-                  (delete-point end))))))
++           (progn
++             (dolist (edit edits)
++               (ensure-edit-range-writable (first edit) (second edit)))
++             (dolist (edit (sort (copy-list edits) #'point> :key #'first))
++               (delete-between-points (first edit) (second edit))
++               (insert-string (first edit) (third edit))))
++        (delete-edit-points edits)))))
+
+-(defgeneric apply-document-change (document-change))
++(defgeneric apply-document-change (workspace document-change))
+
+-(defmethod apply-document-change ((document-change lsp:text-document-edit))
++(defmethod apply-document-change (workspace (document-change lsp:text-document-edit))
+   (let* ((buffer
+            (get-buffer-from-text-document-identifier
+             (lsp:text-document-edit-text-document document-change))))
+-    (apply-text-edits buffer (lsp:text-document-edit-edits document-change))))
++    (apply-text-edits
++     buffer (lsp:text-document-edit-edits document-change) workspace)))
+
+-(defmethod apply-document-change ((document-change lsp:create-file))
++(defmethod apply-document-change (workspace (document-change lsp:create-file))
++  (declare (ignore workspace))
+   (error "createFile is not yet supported"))
+
+-(defmethod apply-document-change ((document-change lsp:rename-file))
++(defmethod apply-document-change (workspace (document-change lsp:rename-file))
++  (declare (ignore workspace))
+   (error "renameFile is not yet supported"))
+
+-(defmethod apply-document-change ((document-change lsp:delete-file))
++(defmethod apply-document-change (workspace (document-change lsp:delete-file))
++  (declare (ignore workspace))
+   (error "deleteFile is not yet supported"))
+
+-(defun apply-change (uri text-edits)
++(defun apply-change (workspace uri text-edits)
+   (let ((buffer (find-buffer-from-uri uri)))
+-    (apply-text-edits buffer text-edits)))
++    (apply-text-edits buffer text-edits workspace)))
+
+-(defun apply-workspace-edit (workspace-edit)
++(defun apply-workspace-edit (workspace workspace-edit)
+   (labels ((apply-document-changes (document-changes)
+              (do-sequence (document-change document-changes)
+-               (apply-document-change document-change)))
++               (apply-document-change workspace document-change)))
+            (apply-changes (changes)
+-             (maphash #'apply-change changes)))
++             (maphash (lambda (uri text-edits)
++                        (apply-change workspace uri text-edits))
++                      changes)))
+     (if-let ((document-changes (handler-case
+                                    (lsp:workspace-edit-document-changes workspace-edit)
+                                  (unbound-slot () nil))))
+@@ -538,10 +683,29 @@ Use this when lsp-mode has side effects that you want to avoid."
+     (asdf:system-relative-pathname :lem-lsp-mode
+                                    "client-capabilities.json"))))
+
++(defun completion-snippet-preparation-function ()
++  (variable-value
++   'completion:completion-snippet-preparation-function
++   :global))
++
+ (defun client-capabilities ()
+-  (convert-from-json
+-   (parse-json *client-capabilities-text*)
+-   'lsp:client-capabilities))
++  (let* ((capabilities
++           (convert-from-json
++            (parse-json *client-capabilities-text*)
++            'lsp:client-capabilities))
++         (text-document
++           (lsp:client-capabilities-text-document capabilities))
++         (completion
++           (lsp:text-document-client-capabilities-completion text-document))
++         (completion-item
++           (lsp:completion-client-capabilities-completion-item completion)))
++    (setf (gethash "snippetSupport" completion-item)
++          (not (null (completion-snippet-preparation-function)))
++          (gethash "insertReplaceSupport" completion-item)
++          t
++          (gethash "resolveSupport" completion-item)
++          (make-lsp-map :properties (vector "additionalTextEdits")))
++    capabilities))
+
+ (defun initialize (workspace continuation)
+   (async-request
+@@ -734,12 +898,17 @@ Use this when lsp-mode has side effects that you want to avoid."
+   (language-mode::make-xref-position :line-number (line-number-at-point point)
+                                      :charpos (point-charpos point)))
+
+-(defun highlight-diagnostic (buffer diagnostic)
++(defun highlight-diagnostic (workspace buffer diagnostic)
+   (with-point ((start (buffer-point buffer))
+                (end (buffer-point buffer)))
+     (let ((range (lsp:diagnostic-range diagnostic)))
+-      (move-to-lsp-position start (lsp:range-start range))
+-      (move-to-lsp-position end (lsp:range-end range))
++      (unless (and
++               (move-to-workspace-position
++                start (lsp:range-start range) workspace)
++               (move-to-workspace-position
++                end (lsp:range-end range) workspace)
++               (point<= start end))
++        (return-from highlight-diagnostic nil))
+       (when (point= start end)
+         ;; XXX: for `gopls`
+         ;; ```
+@@ -765,11 +934,11 @@ Use this when lsp-mode has side effects that you want to avoid."
+                                       :message (lsp:diagnostic-message diagnostic)))
+         (push overlay (buffer-diagnostic-overlays buffer))))))
+
+-(defun highlight-diagnostics (params)
++(defun highlight-diagnostics (workspace params)
+   (when-let ((buffer (find-buffer-from-uri (lsp:publish-diagnostics-params-uri params))))
+     (reset-buffer-diagnostic buffer)
+     (do-sequence (diagnostic (lsp:publish-diagnostics-params-diagnostics params))
+-      (highlight-diagnostic buffer diagnostic))
++      (highlight-diagnostic workspace buffer diagnostic))
+     (setf (buffer-diagnostic-idle-timer buffer)
+           (start-timer (make-idle-timer 'popup-diagnostic :name "lsp-diagnostic")
+                        200
+@@ -784,11 +953,11 @@ Use this when lsp-mode has side effects that you want to avoid."
+         (display-message (diagnostic-message (overlay-diagnostic overlay))))
+       (return))))
+
+-(defun text-document/publish-diagnostics (params)
++(defun text-document/publish-diagnostics (workspace params)
+   (request::do-request-log "textDocument/publishDiagnostics" params :from :server)
+   (let ((params (convert-from-json params 'lsp:publish-diagnostics-params)))
+     (send-event (lambda ()
+-                  (highlight-diagnostics params)))))
++                  (highlight-diagnostics workspace params)))))
+
+ (define-command lsp-document-diagnostics () ()
+   (when-let ((diagnostics (buffer-diagnostics (current-buffer))))
+@@ -865,7 +1034,7 @@ Use this when lsp-mode has side effects that you want to avoid."
+                (make-instance 'lsp:text-document/hover)
+                (apply #'make-instance
+                       'lsp:hover-params
+-                      (make-text-document-position-arguments point)))))
++                      (make-text-document-position-arguments point workspace)))))
+         (unless (lsp-null-p result)
+           (contents-to-markdown-buffer (lsp:hover-contents result)))))))
+
+@@ -882,76 +1051,526 @@ Use this when lsp-mode has side effects that you want to avoid."
+ ;; - partialResult
+ ;; - completionParams.context, include information about how completion was triggered.
+ ;; - There are many unused fields in `completionItem`
+-;; - completionResolve
++
++(defparameter *completion-resolve-timeout* 2
++  "Maximum seconds to block while resolving an accepted completion item.")
+
+ (defclass completion-item (completion:completion-item)
+   ((sort-text
+     :initarg :sort-text
+     :reader completion-item-sort-text)))
+
+-(defun convert-to-range (point range)
++(defstruct completion-text-edit
++  start
++  end
++  text)
++
++(defstruct completion-document-snapshot
++  text
++  encoding
++  main-start-offset
++  main-end-offset)
++
++(defun convert-to-range (point range &optional workspace)
+   (let ((range-start (lsp:range-start range))
+         (range-end (lsp:range-end range)))
+     (with-point ((start point)
+                  (end point))
+-      (move-to-lsp-position start range-start)
+-      (move-to-lsp-position end range-end)
++      (unless (and (move-to-workspace-position start range-start workspace)
++                   (move-to-workspace-position end range-end workspace)
++                   (same-line-p start end)
++                   (point<= start point end))
++        (error "Invalid LSP completion range"))
+       (list start end))))
+
+-(defun convert-completion-items (point items)
+-  (labels ((sort-items (items)
++(defun convert-insert-replace-range (point edit workspace)
++  (let ((insert
++          (convert-to-range
++           point (lsp:insert-replace-edit-insert edit) workspace))
++        (replace
++          (convert-to-range
++           point (lsp:insert-replace-edit-replace edit) workspace)))
++    (destructuring-bind (insert-start insert-end) insert
++      (destructuring-bind (replace-start replace-end) replace
++        (unless (and (point= insert-start replace-start)
++                     (point<= insert-end replace-end))
++          (error "Invalid LSP InsertReplaceEdit ranges"))))
++    replace))
++
++(defun optional-completion-item-value (reader item)
++  (handler-case (funcall reader item)
++    (unbound-slot () nil)))
++
++(defun completion-item-nonempty-string (reader item fallback)
++  (let ((value (optional-completion-item-value reader item)))
++    (if (and (stringp value) (plusp (length value)))
++        value
++        fallback)))
++
++(defun completion-item-value (reader item)
++  "Return ITEM's optional value and whether the protocol property was present."
++  (handler-case (values (funcall reader item) t)
++    (unbound-slot () (values nil nil))))
++
++(defun completion-snippet-p (item)
++  (eql (optional-completion-item-value
++        #'lsp:completion-item-insert-text-format item)
++       lsp:insert-text-format-snippet))
++
++(defun completion-resolve-provider-p (workspace)
++  (when workspace
++    (alexandria:when-let ((options (provide-completion-p workspace)))
++      (handler-case
++          (not (null (lsp:completion-options-resolve-provider options)))
++        (unbound-slot () nil)))))
++
++(defun completion-item-needs-final-insertion-p (item workspace)
++  (or (completion-snippet-p item)
++      (nth-value 1
++                 (completion-item-value
++                  #'lsp:completion-item-additional-text-edits item))
++      (completion-resolve-provider-p workspace)))
++
++(defun cancel-completion-resolve-request (client request)
++  "Forget REQUEST's callback and ask the server to cancel its work."
++  (when request
++    (handler-case
++        (let* ((id (jsonrpc:request-id request))
++               (jsonrpc-client
++                 (lem-language-client/client:client-connection client))
++               (connection
++                 (jsonrpc::transport-connection
++                  (jsonrpc::jsonrpc-transport jsonrpc-client))))
++          (jsonrpc/connection:remove-callback-for-id connection id)
++          (request:request
++           client
++           (make-instance 'lsp:/cancel-request)
++           (make-instance 'lsp:cancel-params :id id)))
++      (error (condition)
++        (log:warn "Could not cancel timed-out completion resolve: ~A"
++                  condition)))))
++
++(defun request-completion-item-resolve (workspace item)
++  "Resolve ITEM synchronously with bounded, explicitly cancellable waiting."
++  (let ((channel (make-instance 'chanl:unbounded-channel))
++        (client (workspace-client workspace))
++        (request nil))
++    (setf request
++          (request:request-async
++           client
++           (make-instance 'lsp:completion-item/resolve)
++           item
++           (lambda (response)
++             (chanl:send channel (list :success response)))
++           (lambda (message code)
++             (chanl:send channel (list :error message code)))))
++    (handler-case
++        (bt2:with-timeout (*completion-resolve-timeout*)
++          (destructuring-bind (status value &optional code)
++              (chanl:recv channel)
++            (ecase status
++              (:success value)
++              (:error
++               (error "Completion resolve failed: ~A (code ~A)"
++                      value code)))))
++      (bt2:timeout ()
++        (cancel-completion-resolve-request client request)
++        (error "Completion resolve timed out after ~A seconds"
++               *completion-resolve-timeout*)))))
++
++(defun resolve-completion-additional-text-edits (item workspace)
++  "Resolve ITEM when supported, importing only lazy additional text edits.
++
++Insertion fields are deliberately retained from the original completion item,
++as required by LSP.  A failed or partial resolve falls back to ITEM's original
++additional edits."
++  (flet ((original-edits ()
++           (optional-completion-item-value
++            #'lsp:completion-item-additional-text-edits item)))
++    (if (not (completion-resolve-provider-p workspace))
++        (original-edits)
++        (handler-case
++            (let ((resolved
++                    (request-completion-item-resolve workspace item)))
++              (if (typep resolved 'lsp:completion-item)
++                  (multiple-value-bind (edits present-p)
++                      (completion-item-value
++                       #'lsp:completion-item-additional-text-edits resolved)
++                    (if present-p edits (original-edits)))
++                  (original-edits)))
++          (error (condition)
++            (message "LSP completion resolve failed: ~A" condition)
++            (original-edits))))))
++
++(defun string-line-bounds (string target-line)
++  (when (and (integerp target-line) (not (minusp target-line)))
++    (loop :with start := 0
++          :for line :from 0
++          :for newline := (position #\newline string :start start)
++          :when (= line target-line)
++            :return (values start (or newline (length string)) t)
++          :when (null newline)
++            :return (values nil nil nil)
++          :do (setf start (1+ newline)))))
++
++(defun snapshot-position-offset (snapshot position)
++  (multiple-value-bind (line-start line-end found-p)
++      (string-line-bounds
++       (completion-document-snapshot-text snapshot)
++       (lsp:position-line position))
++    (when found-p
++      (alexandria:when-let
++          ((index
++             (position-character-to-string-index
++              (subseq (completion-document-snapshot-text snapshot)
++                      line-start line-end)
++              (lsp:position-character position)
++              (completion-document-snapshot-encoding snapshot))))
++        (+ line-start index)))))
++
++(defun snapshot-offset-to-current-offset
++    (snapshot main-start main-end offset)
++  "Map an original offset through edits confined to the tracked main range."
++  (let ((original-start
++          (completion-document-snapshot-main-start-offset snapshot))
++        (original-end
++          (completion-document-snapshot-main-end-offset snapshot))
++        (current-start (1- (position-at-point main-start)))
++        (current-end (1- (position-at-point main-end))))
++    (cond
++      ((< offset original-start)
++       (+ offset (- current-start original-start)))
++      ((> offset original-end)
++       (+ offset (- current-end original-end)))
++      ((= offset original-end)
++       current-end)
++      ((= offset original-start)
++       current-start)
++      (t
++       nil))))
++
++(defun strict-lsp-position-point
++    (buffer position kind snapshot main-start main-end)
++  "Track POSITION from the response snapshot through completion input edits."
++  (alexandria:when-let*
++      ((snapshot-offset (snapshot-position-offset snapshot position))
++       (current-offset
++         (snapshot-offset-to-current-offset
++          snapshot main-start main-end snapshot-offset)))
++    (with-point ((point (buffer-start-point buffer)))
++      (when (move-to-position point (1+ current-offset))
++        (copy-point point kind)))))
++
++(defun make-completion-text-edit-from-lsp
++    (buffer text-edit snapshot main-start main-end)
++  (let ((start nil)
++        (end nil))
++    (handler-case
++        (let* ((range (lsp:text-edit-range text-edit))
++               (text (lsp:text-edit-new-text text-edit)))
++          (setf start
++                (strict-lsp-position-point
++                 buffer (lsp:range-start range) :left-inserting
++                 snapshot main-start main-end)
++                end
++                (strict-lsp-position-point
++                 buffer (lsp:range-end range) :right-inserting
++                 snapshot main-start main-end))
++          (if (and start end (stringp text) (point<= start end))
++              (values (make-completion-text-edit
++                       :start start :end end :text text)
++                      t)
++              (progn
++                (when start (delete-point start))
++                (when end (delete-point end))
++                (values nil nil))))
++      (error ()
++        (when start (delete-point start))
++        (when end (delete-point end))
++        (values nil nil)))))
++
++(defun delete-completion-text-edit-points (edits)
++  (dolist (edit edits)
++    (delete-point (completion-text-edit-start edit))
++    (delete-point (completion-text-edit-end edit))))
++
++(defun completion-text-edit-overlaps-points-p (edit start end)
++  (edit-ranges-overlap-p
++   (completion-text-edit-start edit)
++   (completion-text-edit-end edit)
++   start
++   end))
++
++(defun completion-text-edits-valid-p (edits main-start main-end)
++  (and (point<= main-start main-end)
++       (loop :for rest :on edits
++             :for edit := (first rest)
++             :never (or (completion-text-edit-overlaps-points-p
++                         edit main-start main-end)
++                        (some (lambda (other)
++                                (completion-text-edit-overlaps-points-p
++                                 edit
++                                 (completion-text-edit-start other)
++                                 (completion-text-edit-end other)))
++                              (rest rest))))))
++
++(defun prepare-completion-text-edits
++    (buffer text-edits main-start main-end snapshot)
++  "Precompute and validate all additional edits against one buffer snapshot."
++  (if (or (null text-edits) (lsp-null-p text-edits))
++      (values nil t)
++      (let ((edits '())
++            (valid-p t))
++        (handler-case
++            (do-sequence (text-edit text-edits)
++              (when valid-p
++                (multiple-value-bind (edit edit-valid-p)
++                    (make-completion-text-edit-from-lsp
++                     buffer text-edit snapshot main-start main-end)
++                  (if edit-valid-p
++                      (push edit edits)
++                      (setf valid-p nil)))))
++          (error ()
++            (setf valid-p nil)))
++        (setf edits (nreverse edits))
++        (unless (and valid-p
++                     (completion-text-edits-valid-p
++                      edits main-start main-end))
++          (delete-completion-text-edit-points edits)
++          (setf edits nil
++                valid-p nil))
++        (values edits valid-p))))
++
++(defun apply-completion-text-edits (edits)
++  (dolist (edit (sort (copy-list edits)
++                      #'point>
++                      :key #'completion-text-edit-start))
++    (delete-between-points (completion-text-edit-start edit)
++                           (completion-text-edit-end edit))
++    (insert-string (completion-text-edit-start edit)
++                   (completion-text-edit-text edit))))
++
++(defun ensure-completion-edits-writable (edits main-start main-end)
++  "Preflight every disjoint mutation before applying the first one."
++  (ensure-edit-range-writable main-start main-end)
++  (dolist (edit edits)
++    (ensure-edit-range-writable
++     (completion-text-edit-start edit)
++     (completion-text-edit-end edit))))
++
++(defun prepare-completion-snippet (text label buffer)
++  (alexandria:if-let ((function
++                       (completion-snippet-preparation-function)))
++    (handler-case (funcall function text label buffer)
++      (error (condition)
++        (message "Cannot prepare LSP snippet: ~A" condition)
++        nil))
++    (progn
++      (message "Cannot expand LSP snippet: no snippet expander is configured")
++      nil)))
++
++(defun rollback-completion-change-group (group buffer point-position)
++  "Cancel GROUP, failing closed if its retained history cannot be replayed."
++  (when (buffer-change-group-active-p group)
++    (handler-case
++        (progn
++          (buffer-cancel-change-group group)
++          (unless (move-to-position (buffer-point buffer) point-position)
++            (message "Could not restore point after failed LSP completion"))
++          nil)
++      (error (condition)
++        (when (buffer-change-group-active-p group)
++          (ignore-errors (buffer-abort-change-group group)))
++        condition))))
++
++(defun call-with-completion-change-group (buffer function)
++  "Call FUNCTION as one undo-honest completion mutation in BUFFER."
++  (let ((group
++          (handler-case (buffer-prepare-change-group buffer)
++            (error (condition)
++              (message "Cannot apply LSP completion transactionally: ~A"
++                       condition)
++              nil))))
++    (unless group
++      (return-from call-with-completion-change-group nil))
++    (let* ((point-position (position-at-point (buffer-point buffer)))
++           (result
++            (handler-case (funcall function)
++              (error (condition)
++                (alexandria:when-let
++                    ((rollback-error
++                       (rollback-completion-change-group
++                        group buffer point-position)))
++                  (message "Could not roll back failed LSP completion: ~A"
++                           rollback-error))
++                (error condition)))))
++      (if result
++          (handler-case
++              (buffer-accept-change-group group)
++            (error (condition)
++              (alexandria:when-let
++                  ((rollback-error
++                     (rollback-completion-change-group
++                      group buffer point-position)))
++                (message "Could not roll back uncommitted LSP completion: ~A"
++                         rollback-error))
++              (error condition)))
++          (alexandria:when-let
++              ((rollback-error
++                 (rollback-completion-change-group
++                  group buffer point-position)))
++            (error rollback-error)))
++      result)))
++
++(defun completion-final-insert-action (item workspace text label snapshot)
++  (when (completion-item-needs-final-insertion-p item workspace)
++    (let ((snippet-p (completion-snippet-p item)))
++      (lambda (point start end)
++        (let* ((buffer (point-buffer point))
++               (installer
++                 (when snippet-p
++                   (prepare-completion-snippet text label buffer)))
++               (additional-text-edits
++                 (resolve-completion-additional-text-edits item workspace))
++               (main-start (copy-point start :left-inserting))
++               (main-end (copy-point end :right-inserting))
++               (edits nil))
++          (unwind-protect
++               (when (or (not snippet-p) installer)
++                 (multiple-value-bind (prepared-edits valid-p)
++                   (prepare-completion-text-edits
++                      buffer additional-text-edits main-start main-end snapshot)
++                   (setf edits prepared-edits)
++                   (unless valid-p
++                     (message "Ignoring invalid or overlapping LSP additionalTextEdits"))
++                   (call-with-completion-change-group
++                    buffer
++                    (lambda ()
++                      (handler-case
++                          (progn
++                            (ensure-completion-edits-writable
++                             edits main-start main-end)
++                            (apply-completion-text-edits edits)
++                            (if snippet-p
++                                (funcall installer main-start main-end)
++                                (progn
++                                  (delete-between-points main-start main-end)
++                                  (move-point point main-start)
++                                  (insert-string point text)
++                                  t)))
++                        (read-only-error (condition)
++                          (message "Cannot apply read-only LSP completion: ~A"
++                                   condition)
++                          nil))))))
++            (when edits
++              (delete-completion-text-edit-points edits))
++            (delete-point main-start)
++            (delete-point main-end)))))))
++
++(defun convert-completion-items (point items &optional workspace)
++  (let ((snapshot-text (buffer-text (point-buffer point)))
++        (snapshot-encoding (workspace-position-encoding workspace)))
++    (labels ((sort-items (items)
+              (sort items #'string< :key #'completion-item-sort-text))
+-           (label-and-points (item)
+-             (let ((text-edit
+-                     (handler-case (lsp:completion-item-text-edit item)
+-                       (unbound-slot () nil))))
+-               (if text-edit
+-                   (cons (lsp:text-edit-new-text text-edit)
+-                         (convert-to-range point (lsp:text-edit-range text-edit)))
+-                   (list (lsp:completion-item-label item) nil nil))))
++           (original-range-points (start end)
++             (values
++              (or start
++                  (with-point ((range-start point))
++                    (skip-chars-backward range-start #'syntax-symbol-char-p)
++                    range-start))
++              (or end point)))
++           (label-filter-insert-and-points (item)
++             (let* ((label (lsp:completion-item-label item))
++                    (filter-text
++                      (completion-item-nonempty-string
++                       #'lsp:completion-item-filter-text item label))
++                    (insert-text
++                      (completion-item-nonempty-string
++                       #'lsp:completion-item-insert-text item label))
++                    (text-edit
++                      (optional-completion-item-value
++                       #'lsp:completion-item-text-edit item)))
++               (typecase text-edit
++                 (lsp:text-edit
++                  (list* label
++                         filter-text
++                         (lsp:text-edit-new-text text-edit)
++                         (convert-to-range
++                          point (lsp:text-edit-range text-edit) workspace)))
++                 (lsp:insert-replace-edit
++                  (list* label
++                         filter-text
++                         (lsp:insert-replace-edit-new-text text-edit)
++                         (convert-insert-replace-range
++                          point text-edit workspace)))
++                 (otherwise
++                  (list label filter-text insert-text nil nil)))))
++           (make-completion-item-unsafe (item)
++             (destructuring-bind (label filter-text insert-text start end)
++                 (label-filter-insert-and-points item)
++               (multiple-value-bind (range-start range-end)
++                   (original-range-points start end)
++                 (let ((snapshot
++                         (make-completion-document-snapshot
++                          :text snapshot-text
++                          :encoding snapshot-encoding
++                          :main-start-offset
++                          (1- (position-at-point range-start))
++                          :main-end-offset
++                          (1- (position-at-point range-end)))))
++                   (make-instance
++                    'completion-item
++                    :start start
++                    :end end
++                    :label label
++                    :filter-text filter-text
++                    :insert-text insert-text
++                    :final-insert-action
++                    (completion-final-insert-action
++                     item workspace insert-text label snapshot)
++                    :detail (handler-case (lsp:completion-item-detail item)
++                              (unbound-slot () ""))
++                    :sort-text
++                    (completion-item-nonempty-string
++                     #'lsp:completion-item-sort-text item label)
++                    :focus-action
++                    (when-let* ((documentation
++                                  (handler-case
++                                      (lsp:completion-item-documentation item)
++                                    (unbound-slot () nil)))
++                                 (result
++                                   (contents-to-markdown-buffer documentation)))
++                      (lambda (context)
++                        (display-message
++                         result
++                         :style `(:gravity :vertically-adjacent-window
++                                  :offset-y -1
++                                  :offset-x 1)
++                         :source-window
++                         (lem/popup-menu::popup-menu-window
++                          (lem/completion-mode::context-popup-menu
++                           context))))))))))
+            (make-completion-item (item)
+-             (destructuring-bind (label start end)
+-                 (label-and-points item)
+-               (declare (ignore end))
+-               (make-instance
+-                'completion-item
+-                :start start
+-                ;; After showing completion candidates, if you type characters and select a candidate,
+-                ;; the `end` position becomes mis-aligned and can't be used.
+-                ;; :end end
+-                :label label
+-                :detail (handler-case (lsp:completion-item-detail item)
+-                          (unbound-slot () ""))
+-                :sort-text (handler-case (lsp:completion-item-sort-text item)
+-                             (unbound-slot ()
+-                               (lsp:completion-item-label item)))
+-                :focus-action (when-let* ((documentation
+-                                           (handler-case (lsp:completion-item-documentation item)
+-                                             (unbound-slot () nil)))
+-                                          (result
+-                                           (contents-to-markdown-buffer documentation)))
+-                                (lambda (context)
+-                                  (display-message
+-                                   result
+-                                   :style `(:gravity :vertically-adjacent-window
+-                                            :offset-y -1
+-                                            :offset-x 1)
+-                                   :source-window (lem/popup-menu::popup-menu-window
+-                                                   (lem/completion-mode::context-popup-menu
+-                                                    context)))))))))
+-    (sort-items
+-     (map 'list
+-          #'make-completion-item
+-          items))))
+-
+-(defun convert-completion-list (point completion-list)
+-  (convert-completion-items point (lsp:completion-list-items completion-list)))
+-
+-(defun convert-completion-response (point value)
++             (handler-case (make-completion-item-unsafe item)
++               (error (condition)
++                 (log:warn "Ignoring malformed LSP completion item: ~A"
++                           condition)
++                 nil))))
++      (sort-items
++       (remove nil
++               (map 'list
++                    #'make-completion-item
++                    items))))))
++
++(defun convert-completion-list (point completion-list &optional workspace)
++  (convert-completion-items
++   point (lsp:completion-list-items completion-list) workspace))
++
++(defun convert-completion-response (point value &optional workspace)
+   (cond ((typep value 'lsp:completion-list)
+-         (convert-completion-list point value))
++         (convert-completion-list point value workspace))
+         ((lsp-array-p value)
+-         (convert-completion-items point value))
++         (convert-completion-items point value workspace))
+         (t
+          nil)))
+
+@@ -960,22 +1523,36 @@ Use this when lsp-mode has side effects that you want to avoid."
+                  (workspace-server-capabilities workspace))
+     (unbound-slot () nil)))
+
++(defun filter-completion-items (input items)
++  "Retain Lem's native LSP fuzzy filtering when no client overrides it."
++  (completion-strings input
++                      items
++                      :key #'completion:completion-item-filter-text))
++
+ (defun text-document/completion (point then)
+-  (when-let ((workspace (get-workspace-from-point point)))
+-    (when (provide-completion-p workspace)
+-      (async-request
+-       (workspace-client workspace)
+-       (make-instance 'lsp:text-document/completion)
+-       (apply #'make-instance
+-              'lsp:completion-params
+-              (make-text-document-position-arguments point))
+-       :then (lambda (response)
+-               (funcall then
+-                        (if-let ((symbol-at-point (symbol-string-at-point point)))
+-                          (completion-strings symbol-at-point
+-                                              (convert-completion-response point response)
+-                                              :key #'lem/completion-mode::completion-item-label)
+-                          (convert-completion-response point response))))))))
++  (let ((workspace (buffer-workspace (point-buffer point) nil)))
++    (if (and workspace (provide-completion-p workspace))
++        (async-request
++         (workspace-client workspace)
++         (make-instance 'lsp:text-document/completion)
++         (apply #'make-instance
++                'lsp:completion-params
++         (make-text-document-position-arguments point workspace))
++         :then (lambda (response)
++                 (let ((items
++                         (handler-case
++                             (convert-completion-response
++                              point response workspace)
++                           (error (condition)
++                             (message
++                              "Ignoring malformed LSP completion response: ~A"
++                              condition)
++                             nil))))
++                   (funcall then items)))
++         :error (lambda (message code)
++                  (declare (ignore message code))
++                  (funcall then nil)))
++        (funcall then nil))))
+
+ (defun completion-with-trigger-character (c)
+   (declare (ignore c))
+@@ -1079,7 +1656,8 @@ Use this when lsp-mode has side effects that you want to avoid."
+                             'lsp:signature-help-params
+                             (append (when signature-help-context
+                                       `(:context ,signature-help-context))
+-                                    (make-text-document-position-arguments point)))
++                                    (make-text-document-position-arguments
++                                     point workspace)))
+                      :then (lambda (result)
+                              (unless (lsp-null-p result)
+                                (display-signature-help result)
+@@ -1121,20 +1699,23 @@ Use this when lsp-mode has side effects that you want to avoid."
+                  (workspace-server-capabilities workspace))
+     (unbound-slot () nil)))
+
+-(defun definition-location-to-content (file location)
+-  (when-let* ((buffer (find-file-buffer file))
+-              (point (buffer-point buffer))
++(defun definition-location-to-content (buffer location workspace)
++  (when-let* ((point (buffer-point buffer))
+               (range (lsp:location-range location)))
+     (with-point ((start point)
+                  (end point))
+-      (move-to-lsp-position start (lsp:range-start range))
+-      (move-to-lsp-position end (lsp:range-end range))
+-      (line-start start)
+-      (line-end end)
+-      (points-to-string start end))))
+-
+-(defgeneric convert-location (location)
+-  (:method ((location lsp:location))
++      (when (and
++             (move-to-workspace-position
++              start (lsp:range-start range) workspace)
++             (move-to-workspace-position
++              end (lsp:range-end range) workspace)
++             (point<= start end))
++        (line-start start)
++        (line-end end)
++        (points-to-string start end)))))
++
++(defgeneric convert-location (location workspace)
++  (:method ((location lsp:location) workspace)
+     ;; TODO:
+     ;; Also use `end-position`.
+     ;; After moving to definition location, set the highlight to the start/end range.
+@@ -1144,22 +1725,31 @@ Use this when lsp-mode has side effects that you want to avoid."
+            (file (uri-to-pathname uri)))
+       (declare (ignore end-position))
+       (when (uiop:file-exists-p file)
+-        (language-mode:make-xref-location
+-         :filespec file
+-         :position (language-mode::make-position
+-                    (1+ (lsp:position-line start-position))
+-                    (lsp:position-character start-position))
+-         :content (definition-location-to-content file location)))))
+-  (:method ((location lsp:location-link))
++        (when-let* ((buffer (find-file-buffer file))
++                    (content
++                      (definition-location-to-content
++                       buffer location workspace)))
++          (with-point ((point (buffer-point buffer)))
++            (when (move-to-workspace-position
++                   point start-position workspace)
++              (language-mode:make-xref-location
++               :filespec file
++               :position (point-to-xref-position point)
++               :content content)))))))
++  (:method ((location lsp:location-link) workspace)
++    (declare (ignore workspace))
+     (error "locationLink is unsupported")))
+
+-(defun convert-definition-response (value)
++(defun convert-definition-response (value workspace)
+   (remove nil
+           (cond ((typep value 'lsp:location)
+-                 (list (convert-location value)))
++                 (list (convert-location value workspace)))
+                 ((lsp-array-p value)
+                  ;; TODO: location-link
+-                 (map 'list #'convert-location value))
++                 (map 'list
++                      (lambda (location)
++                        (convert-location location workspace))
++                      value))
+                 (t
+                  nil))))
+
+@@ -1171,9 +1761,9 @@ Use this when lsp-mode has side effects that you want to avoid."
+        (make-instance 'lsp:text-document/definition)
+        (apply #'make-instance
+               'lsp:definition-params
+-              (make-text-document-position-arguments point))
++              (make-text-document-position-arguments point workspace))
+        :then (lambda (response)
+-               (funcall then (convert-definition-response response))
++               (funcall then (convert-definition-response response workspace))
+                (redraw-display))))))
+
+ (defun lsp-find-definitions (point)
+@@ -1187,8 +1777,8 @@ Use this when lsp-mode has side effects that you want to avoid."
+                  (workspace-server-capabilities workspace))
+     (unbound-slot () nil)))
+
+-(defun convert-type-definition-response (value)
+-  (convert-definition-response value))
++(defun convert-type-definition-response (value workspace)
++  (convert-definition-response value workspace))
+
+ (defun text-document/type-definition (point then)
+   (when-let ((workspace (get-workspace-from-point point)))
+@@ -1197,9 +1787,11 @@ Use this when lsp-mode has side effects that you want to avoid."
+                      (make-instance 'lsp:text-document/type-definition)
+                      (apply #'make-instance
+                             'lsp:type-definition-params
+-                            (make-text-document-position-arguments point))
++                            (make-text-document-position-arguments point workspace))
+                      :then (lambda (response)
+-                             (funcall then (convert-type-definition-response response)))))))
++                             (funcall then
++                                      (convert-type-definition-response
++                                       response workspace)))))))
+
+ (define-command lsp-type-definition () ()
+   (check-connection)
+@@ -1212,8 +1804,8 @@ Use this when lsp-mode has side effects that you want to avoid."
+                  (workspace-server-capabilities workspace))
+     (unbound-slot () nil)))
+
+-(defun convert-implementation-response (value)
+-  (convert-definition-response value))
++(defun convert-implementation-response (value workspace)
++  (convert-definition-response value workspace))
+
+ (defun text-document/implementation (point then)
+   (when-let ((workspace (get-workspace-from-point point)))
+@@ -1222,9 +1814,11 @@ Use this when lsp-mode has side effects that you want to avoid."
+                      (make-instance 'lsp:text-document/implementation)
+                      (apply #'make-instance
+                             'lsp:type-definition-params
+-                            (make-text-document-position-arguments point))
++                            (make-text-document-position-arguments point workspace))
+                      :then (lambda (response)
+-                             (funcall then (convert-implementation-response response)))))))
++                             (funcall then
++                                      (convert-implementation-response
++                                       response workspace)))))))
+
+ (define-command lsp-implementation () ()
+   (check-connection)
+@@ -1247,7 +1841,7 @@ Use this when lsp-mode has side effects that you want to avoid."
+      (language-mode:xref-location-position location))
+     (string-trim '(#\space #\tab) (line-string point))))
+
+-(defun convert-references-response (value)
++(defun convert-references-response (value workspace)
+   (language-mode:make-xref-references
+    :type nil
+    :locations (mapcar (lambda (location)
+@@ -1255,7 +1849,7 @@ Use this when lsp-mode has side effects that you want to avoid."
+                          :filespec (language-mode:xref-location-filespec location)
+                          :position (language-mode:xref-location-position location)
+                          :content (xref-location-to-content location)))
+-                      (convert-definition-response value))))
++                      (convert-definition-response value workspace))))
+
+ (defun text-document/references (point then &optional include-declaration)
+   (when-let ((workspace (get-workspace-from-point point)))
+@@ -1267,9 +1861,9 @@ Use this when lsp-mode has side effects that you want to avoid."
+               'lsp:reference-params
+               :context (make-instance 'lsp:reference-context
+                                       :include-declaration include-declaration)
+-              (make-text-document-position-arguments point))
++              (make-text-document-position-arguments point workspace))
+        :then (lambda (response)
+-               (funcall then (convert-references-response response))
++               (funcall then (convert-references-response response workspace))
+                (redraw-display))))))
+
+ (defun lsp-find-references (point)
+@@ -1321,15 +1915,19 @@ Use this when lsp-mode has side effects that you want to avoid."
+     (clear-document-highlight-overlays)
+     t))
+
+-(defun display-document-highlights (buffer document-highlights)
++(defun display-document-highlights (workspace buffer document-highlights)
+   (with-point ((start (buffer-point buffer))
+                (end (buffer-point buffer)))
+     (do-sequence (document-highlight document-highlights)
+       (let ((range (lsp:document-highlight-range document-highlight)))
+-        (move-to-lsp-position start (lsp:range-start range))
+-        (move-to-lsp-position end (lsp:range-end range))
+-        (push (make-overlay start end 'document-highlight-text-attribute)
+-              (document-highlight-overlays))))))
++        (when (and
++               (move-to-workspace-position
++                start (lsp:range-start range) workspace)
++               (move-to-workspace-position
++                end (lsp:range-end range) workspace)
++               (point<= start end))
++          (push (make-overlay start end 'document-highlight-text-attribute)
++                (document-highlight-overlays)))))))
+
+ (defun text-document/document-highlight (point)
+   (when-let ((workspace (get-workspace-from-point point)))
+@@ -1341,12 +1939,12 @@ Use this when lsp-mode has side effects that you want to avoid."
+            (make-instance 'lsp:text-document/document-highlight)
+            (apply #'make-instance
+                   'lsp:document-highlight-params
+-                  (make-text-document-position-arguments point))
++                  (make-text-document-position-arguments point workspace))
+            :then (lambda (value)
+                    (unless (lsp-null-p value)
+                      (when (= counter (command-loop-counter))
+-                       (display-document-highlights (point-buffer point)
+-                                                    value)
++                       (display-document-highlights
++                        workspace (point-buffer point) value)
+                        (redraw-display))))))))))
+
+ (defun document-highlight-calls-timer ()
+@@ -1551,34 +2149,46 @@ Use this when lsp-mode has side effects that you want to avoid."
+ (define-attribute document-symbol-detail-attribute
+   (t :foreground :base04))
+
+-(defun append-document-symbol-item (buffer document-symbol nest-level)
++(defun append-document-symbol-item (workspace buffer document-symbol nest-level)
+   (let ((selection-range (lsp:document-symbol-selection-range document-symbol))
+         (range (lsp:document-symbol-range document-symbol)))
+     (declare (ignore range)) ; TODO: use `range` in region highlighting
+-    (lem/peek-source:with-appending-source
+-        (point :move-function (lambda ()
+-                                (let ((point (buffer-point buffer)))
+-                                  (move-to-lsp-position point (lsp:range-start selection-range)))))
+-      (multiple-value-bind (kind-name attribute)
+-          (symbol-kind-to-string-and-attribute (lsp:document-symbol-kind document-symbol))
+-        (insert-string point (make-string (* 2 nest-level) :initial-element #\space))
+-        (insert-string point (format nil "[~A]" kind-name) :attribute attribute)
+-        (insert-character point #\space)
+-        (insert-string point (lsp:document-symbol-name document-symbol))
+-        (insert-string point " ")
+-        (when-let (detail (handler-case (lsp:document-symbol-detail document-symbol)
+-                            (unbound-slot () nil)))
+-          (insert-string point detail :attribute 'document-symbol-detail-attribute)))))
++    (when (with-point ((point (buffer-point buffer)))
++            (move-to-workspace-position
++             point (lsp:range-start selection-range) workspace))
++      (lem/peek-source:with-appending-source
++          (point :move-function (lambda ()
++                                  (let ((point (buffer-point buffer)))
++                                    (move-to-workspace-position
++                                     point
++                                     (lsp:range-start selection-range)
++                                     workspace))))
++        (multiple-value-bind (kind-name attribute)
++            (symbol-kind-to-string-and-attribute
++             (lsp:document-symbol-kind document-symbol))
++          (insert-string
++           point (make-string (* 2 nest-level) :initial-element #\space))
++          (insert-string point (format nil "[~A]" kind-name) :attribute attribute)
++          (insert-character point #\space)
++          (insert-string point (lsp:document-symbol-name document-symbol))
++          (insert-string point " ")
++          (when-let (detail
++                     (handler-case
++                         (lsp:document-symbol-detail document-symbol)
++                       (unbound-slot () nil)))
++            (insert-string
++             point detail :attribute 'document-symbol-detail-attribute))))))
+   (do-sequence
+       (document-symbol
+-       (handler-case (lsp:document-symbol-children document-symbol)
++      (handler-case (lsp:document-symbol-children document-symbol)
+          (unbound-slot () nil)))
+-    (append-document-symbol-item buffer document-symbol (1+ nest-level))))
++    (append-document-symbol-item
++     workspace buffer document-symbol (1+ nest-level))))
+
+-(defun display-document-symbol-response (buffer value)
++(defun display-document-symbol-response (workspace buffer value)
+   (lem/peek-source:with-collecting-sources (collector)
+     (do-sequence (item value)
+-      (append-document-symbol-item buffer item 0))))
++      (append-document-symbol-item workspace buffer item 0))))
+
+ (defun text-document/document-symbol (buffer)
+   (when-let ((workspace (buffer-workspace buffer)))
+@@ -1592,9 +2202,10 @@ Use this when lsp-mode has side effects that you want to avoid."
+
+ (define-command lsp-document-symbol () ()
+   (check-connection)
+-  (display-document-symbol-response
+-   (current-buffer)
+-   (text-document/document-symbol (current-buffer))))
++  (let* ((buffer (current-buffer))
++         (workspace (buffer-workspace buffer)))
++    (display-document-symbol-response
++     workspace buffer (text-document/document-symbol buffer))))
+
+ ;;; code action
+ ;; TODO
+@@ -1621,7 +2232,7 @@ Use this when lsp-mode has side effects that you want to avoid."
+   (handler-case (lsp:code-action-edit code-action)
+     (unbound-slot () nil)
+     (:no-error (workspace-edit)
+-      (apply-workspace-edit workspace-edit)))
++      (apply-workspace-edit workspace workspace-edit)))
+   (handler-case (lsp:code-action-command code-action)
+     (unbound-slot () nil)
+     (:no-error (command)
+@@ -1650,12 +2261,12 @@ Use this when lsp-mode has side effects that you want to avoid."
+     (nreverse items)))
+
+ (defun text-document/code-action (point)
+-  (flet ((point-to-line-range (point)
++  (flet ((point-to-line-range (point workspace)
+            (with-point ((start point)
+                         (end point))
+              (line-start start)
+              (line-end end)
+-             (points-to-lsp-range start end))))
++             (points-to-workspace-range start end workspace))))
+     (when-let ((workspace (get-workspace-from-point point)))
+       (when (provide-code-action-p workspace)
+         (request:request
+@@ -1664,7 +2275,7 @@ Use this when lsp-mode has side effects that you want to avoid."
+          (make-instance
+           'lsp:code-action-params
+           :text-document (make-text-document-identifier (point-buffer point))
+-          :range (point-to-line-range point)
++          :range (point-to-line-range point workspace)
+           :context (make-instance 'lsp:code-action-context
+                                   :diagnostics (make-lsp-array))))))))
+
+@@ -1725,7 +2336,8 @@ Use this when lsp-mode has side effects that you want to avoid."
+         (make-instance
+          'lsp:document-formatting-params
+          :text-document (make-text-document-identifier buffer)
+-         :options (make-formatting-options buffer)))))))
++         :options (make-formatting-options buffer)))
++       workspace))))
+
+ (define-command lsp-document-format () ()
+   (check-connection)
+@@ -1753,8 +2365,9 @@ Use this when lsp-mode has side effects that you want to avoid."
+           (make-instance
+            'lsp:document-range-formatting-params
+            :text-document (make-text-document-identifier buffer)
+-           :range (points-to-lsp-range start end)
+-           :options (make-formatting-options buffer))))))))
++           :range (points-to-workspace-range start end workspace)
++           :options (make-formatting-options buffer)))
++         workspace)))))
+
+ (define-command lsp-document-range-format (start end) (:region)
+   (check-connection)
+@@ -1782,8 +2395,9 @@ Use this when lsp-mode has side effects that you want to avoid."
+                             'lsp:document-on-type-formatting-params
+                             :ch typed-character
+                             :options (make-formatting-options (point-buffer point))
+-                            (make-text-document-position-arguments point))))))
+-        (apply-text-edits (point-buffer point) response)))))
++                            (make-text-document-position-arguments
++                             point workspace))))))
++        (apply-text-edits (point-buffer point) response workspace)))))
+
+ ;;; rename
+
+@@ -1806,8 +2420,9 @@ Use this when lsp-mode has side effects that you want to avoid."
+                      (apply #'make-instance
+                             'lsp:rename-params
+                             :new-name new-name
+-                            (make-text-document-position-arguments point))))))
+-        (apply-workspace-edit response)))))
++                            (make-text-document-position-arguments
++                             point workspace))))))
++        (apply-workspace-edit workspace response)))))
+
+ (define-command lsp-rename (new-name) ((:string "New name: "))
+   (check-connection)
+diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
+index 1e90e52..561ab4a 100644
+--- a/src/ext/completion-mode.lisp
++++ b/src/ext/completion-mode.lisp
+@@ -4,7 +4,15 @@
+            :make-completion-item
+            :completion-item
+            :completion-item-label
++           :completion-item-filter-text
++           :completion-item-insert-text
++           :completion-item-final-insert-action
+            :completion-item-detail
++           :completion-item-accept-action
++           :completion-context-options-function
++           :completion-snippet-preparation-function
++           :completion-local-filtering-p
++           :completion-start-local-filtering
+            :run-completion
+            :completion-end
+            :completion-mode
+@@ -18,11 +26,89 @@
+ (defvar *completion-context* nil)
+ (defvar *completion-reverse* nil)
+
++(define-editor-variable completion-context-options-function nil
++  "Function returning completion context options for the current buffer.
++
++The function receives the completion spec and returns a property list.  The
++supported keys are :FILTER-FUNCTION, :SEPARATOR, and :NARROWING.  A filter
++function receives the current completion input and the provider's raw items,
++and must return the original items it wants displayed.  When :NARROWING is
++false, displaying synchronous candidates neither inserts their common prefix
++nor accepts a singleton automatically.")
++
++(define-editor-variable completion-snippet-preparation-function nil
++  "Function used by completion providers to prepare a snippet session.
++
++The function receives snippet text, its display label, and the target buffer.
++It returns an installer which receives the accepted completion range's start
++and end points, or NIL when preparation fails.  Preparing must not mutate the
++buffer; the installer returns true only when it installs the rendered snippet
++without exposing snippet syntax as ordinary buffer text.")
++
+ (defclass completion-context ()
+   ((spec
+     :initarg :spec
+     :reader context-spec
+     :type completion-spec)
++   (buffer
++    :initarg :buffer
++    :initform (current-buffer)
++    :reader context-buffer)
++   (generation
++    :initform 0
++    :accessor context-generation)
++   (presented-generation
++    :initform 0
++    :accessor context-presented-generation)
++   (automatic
++    :initarg :automatic
++    :initform nil
++    :reader context-automatic-p)
++   (narrowing
++    :initarg :narrowing
++    :initform t
++    :reader context-narrowing-p)
++   (style
++    :initarg :style
++    :initform nil
++    :reader context-style)
++   (filter-function
++    :initarg :filter-function
++    :initform nil
++    :reader context-filter-function)
++   (separator
++    :initarg :separator
++    :initform nil
++    :reader context-separator)
++   (local-filtering
++    :initform nil
++    :accessor context-local-filtering-p)
++   (request-pending
++    :initform nil
++    :accessor context-request-pending-p)
++   (raw-items
++    :initform nil
++    :accessor context-raw-items)
++   (range-start
++    :initform nil
++    :accessor context-range-start)
++   (range-end
++    :initform nil
++    :accessor context-range-end)
++   (range-offsets
++    :initform (make-hash-table :test #'eq)
++    :reader context-range-offsets)
++   (max-display-items
++    :initarg :max-display-items
++    :initform nil
++    :reader context-max-display-items)
++   (cycle
++    :initarg :cycle
++    :initform t
++    :reader context-cycle-p)
++   (spinner
++    :initform nil
++    :accessor context-spinner)
+    (last-items
+     :initform '()
+     :accessor context-last-items)
+@@ -37,10 +123,17 @@
+    (async
+     :initarg :async
+     :initform nil
+-    :reader spec-async-p)))
++    :reader spec-async-p)
++   (filter-function
++    :initarg :filter-function
++    :initform nil
++    :reader spec-filter-function)))
+
+-(defun make-completion-spec (function &key async)
+-  (make-instance 'completion-spec :function function :async async))
++(defun make-completion-spec (function &key async filter-function)
++  (make-instance 'completion-spec
++                 :function function
++                 :async async
++                 :filter-function filter-function))
+
+ (defun ensure-completion-spec (completion-spec)
+   (typecase completion-spec
+@@ -63,6 +156,16 @@
+     :initform ""
+     :reader completion-item-label
+     :type string)
++   (filter-text
++    :initarg :filter-text
++    :initform nil
++    :reader %completion-item-filter-text
++    :type (or null string))
++   (insert-text
++    :initarg :insert-text
++    :initform nil
++    :reader %completion-item-insert-text
++    :type (or null string))
+    (chunks
+     :initarg :chunks
+     :initform nil
+@@ -87,15 +190,38 @@
+     :initarg :focus-action
+     :initform nil
+     :reader completion-item-focus-action
++    :type (or null function))
++   (final-insert-action
++    :initarg :final-insert-action
++    :initform nil
++    :reader completion-item-final-insert-action
++    :type (or null function))
++   (accept-action
++    :initarg :accept-action
++    :initform nil
++    :reader completion-item-accept-action
+     :type (or null function))))
+
++(defun completion-item-filter-text (item)
++  "Return ITEM's filtering text, falling back to its display label."
++  (or (%completion-item-filter-text item)
++      (completion-item-label item)))
++
++(defun completion-item-insert-text (item)
++  "Return ITEM's insertion text, falling back to its display label."
++  (or (%completion-item-insert-text item)
++      (completion-item-label item)))
++
+ (defmethod print-object ((obj completion-item) stream)
+   (print-unreadable-object (obj stream :type t)
+     (format stream "label: ~a" (completion-item-label obj))))
+
+ (defun make-completion-item (&rest initargs
+-                             &key label chunks detail start end focus-action)
+-  (declare (ignore label chunks detail start end focus-action))
++                             &key label filter-text insert-text chunks detail
++                               start end focus-action final-insert-action
++                               accept-action)
++  (declare (ignore label filter-text insert-text chunks detail
++                   start end focus-action final-insert-action accept-action))
+   (apply #'make-instance 'completion-item initargs))
+
+ (defvar *completion-mode-keymap* (make-keymap :description '*completion-mode-keymap*
+@@ -170,16 +296,44 @@
+                                             (lambda (point)
+                                               (move-point point dest-point))))))))
+
++(defun stop-context-spinner (context)
++  (alexandria:when-let ((spinner (context-spinner context)))
++    (lem/loading-spinner:stop-loading-spinner spinner)
++    (setf (context-spinner context) nil)))
++
++(defun close-context-popup (context)
++  (alexandria:when-let ((popup (context-popup-menu context)))
++    (popup-menu-quit popup)
++    (setf (context-popup-menu context) nil)))
++
++(defun delete-context-range (context)
++  (dolist (point (list (context-range-start context)
++                       (context-range-end context)))
++    (when point
++      (ignore-errors (delete-point point))))
++  (setf (context-range-start context) nil
++        (context-range-end context) nil)
++  (clrhash (context-range-offsets context)))
++
+ (defun completion-end ()
+   (when *completion-context*
+-    (completion-mode nil)
+-    (alexandria:when-let (popup-menu (context-popup-menu *completion-context*))
+-      (popup-menu-quit popup-menu))
+-    (setf (context-popup-menu *completion-context*) nil)
++    (let* ((context *completion-context*)
++           (buffer (context-buffer context)))
++      (incf (context-generation context))
++      (setf (context-request-pending-p context) nil)
++      (stop-context-spinner context)
++      (when (or (buffer-temporary-p buffer)
++                (member buffer (buffer-list)))
++        (with-current-buffer buffer
++          (completion-mode nil)))
++      (close-context-popup context)
++      (delete-context-range context))
+     (setf *completion-context* nil)))
+
+ (defun call-focus-action ()
+-  (when *completion-context*
++  (when (and *completion-context*
++             (= (context-presented-generation *completion-context*)
++                (context-generation *completion-context*)))
+     (alexandria:when-let* ((menu (context-popup-menu *completion-context*))
+                            (item (lem/popup-menu:get-focus-item menu))
+                            (fn (completion-item-focus-action item)))
+@@ -188,14 +342,20 @@
+ (define-command completion-self-insert () ()
+   (let ((c (insertion-key-p (last-read-key-sequence))))
+     (cond (c (insert-character (current-point) c)
+-             (continue-completion *completion-context*))
++             (completion-refresh))
+           (t (unread-key-sequence (last-read-key-sequence))
+              (completion-end)))))
+
+ (defun completion-refresh ()
+   "This will refresh the contents of the completion window using any changes made in the interim"
+-  (when *completion-context*
+-    (continue-completion *completion-context*)))
++  (alexandria:when-let ((context *completion-context*))
++    (if (context-local-filtering-p context)
++        (if (completion-context-separator-present-p context)
++            (completion-refilter context)
++            (progn
++              (setf (context-local-filtering-p context) nil)
++              (continue-completion context)))
++        (continue-completion context))))
+
+ (define-command completion-delete-previous-char (n) (:universal)
+   (delete-previous-char n)
+@@ -205,33 +365,55 @@
+   (backward-delete-word n)
+   (completion-refresh))
+
++(defun popup-focus-at-last-item-p (popup)
++  (with-point ((focus (lem/popup-menu::focus-point popup))
++               (end (buffer-end-point
++                     (lem/popup-menu::popup-menu-buffer popup))))
++    (same-line-p focus end)))
++
++(defun popup-focus-at-first-item-p (popup)
++  (= (line-number-at-point (lem/popup-menu::focus-point popup))
++     (lem/popup-menu::buffer-start-line
++      (lem/popup-menu::popup-menu-buffer popup))))
++
+ (define-command completion-next-line () ()
+   "Move selection to next line in completion window"
+   (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
+-    (popup-menu-down popup))
+-  (call-focus-action))
++    (when (or (context-cycle-p *completion-context*)
++              (not (popup-focus-at-last-item-p popup)))
++      (popup-menu-down popup)
++      (call-focus-action))))
+
+ (define-command completion-previous-line () ()
+   "Move selection to previous line in completion window"
+-  (popup-menu-up (context-popup-menu *completion-context*))
+-  (call-focus-action))
++  (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
++    (when (or (context-cycle-p *completion-context*)
++              (not (popup-focus-at-first-item-p popup)))
++      (popup-menu-up popup)
++      (call-focus-action))))
+
+ (define-command completion-end-of-buffer () ()
+-  (popup-menu-last (context-popup-menu *completion-context*))
+-  (call-focus-action))
++  (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
++    (popup-menu-last popup)
++    (call-focus-action)))
+
+ (define-command completion-beginning-of-buffer () ()
+-  (popup-menu-first (context-popup-menu *completion-context*))
+-  (call-focus-action))
++  (alexandria:when-let ((popup (context-popup-menu *completion-context*)))
++    (popup-menu-first popup)
++    (call-focus-action)))
+
+ (define-command completion-select () ()
+-  (popup-menu-select (context-popup-menu *completion-context*)))
++  (alexandria:if-let ((popup (context-popup-menu *completion-context*)))
++    (popup-menu-select popup)
++    (progn
++      (unread-key-sequence (last-read-key-sequence))
++      (completion-end))))
+
+ (define-command completion-insert-space-and-cancel () ()
+   (insert-character (current-point) #\space)
+   (completion-end))
+
+-(defun completion-item-range (point item)
++(defun completion-item-provider-range (point item)
+   (let ((start (or (completion-item-start item)
+                    (with-point ((start point))
+                      (skip-chars-backward start #'syntax-symbol-char-p)
+@@ -240,11 +422,54 @@
+                  point)))
+     (values start end)))
+
++(defun completion-item-range (point item)
++  (let ((context *completion-context*))
++    (if (and context
++             (context-range-start context)
++             (context-range-end context))
++        (destructuring-bind (start-offset . end-offset)
++            (gethash item (context-range-offsets context) '(0 . 0))
++          (let ((start (copy-point (context-range-start context) :temporary))
++                (end (copy-point (context-range-end context) :temporary)))
++            (character-offset start start-offset)
++            (character-offset end end-offset)
++            (values start (if (point> point end) point end))))
++        (completion-item-provider-range point item))))
++
+ (defun completion-insert (point item &optional begin)
+   (when item
+     (multiple-value-bind (start end) (completion-item-range point item)
+       (delete-between-points start end)
+-      (insert-string point (subseq (completion-item-label item) 0 begin)))))
++      (insert-string point (subseq (completion-item-insert-text item) 0 begin)))))
++
++(defun completion-accept (point item)
++  "Insert ITEM finally, then run its post-accept action exactly once."
++  (cond
++    ((null item)
++     nil)
++    ((and *completion-context*
++          (or (not (eq (context-buffer *completion-context*)
++                       (point-buffer point)))
++              (deleted-buffer-p (context-buffer *completion-context*))))
++     (completion-end)
++     nil)
++    (t
++     (let ((final-action (completion-item-final-insert-action item))
++           (accept-action (completion-item-accept-action item)))
++       (if final-action
++           (multiple-value-bind (range-start range-end)
++               (completion-item-range point item)
++             (with-point ((start range-start :right-inserting)
++                          (end range-end :left-inserting))
++               (completion-end)
++               (when (funcall final-action point start end)
++                 (when accept-action
++                   (funcall accept-action)))))
++           (progn
++             (completion-insert point item)
++             (completion-end)
++             (when accept-action
++               (funcall accept-action))))))))
+
+ (defun partial-match (strings)
+   (when strings
+@@ -261,22 +486,31 @@
+
+ (defun narrowing-down (context last-items)
+   (when last-items
+-    (let ((n (partial-match (mapcar #'completion-item-label last-items))))
+-      (multiple-value-bind (start end)
+-          (completion-item-range (current-point) (first last-items))
+-        (cond ((and n (plusp n) (< (count-characters start end) n))
+-               (completion-insert (current-point)
+-                                  (first last-items)
+-                                  n)
+-               (continue-completion context)
+-               t)
+-              ((alexandria:length= last-items 1)
+-               (completion-insert (current-point)
+-                                  (first last-items))
+-               (continue-completion context)
+-               t)
+-              (t
+-               nil))))))
++    (cond
++      ((and (alexandria:length= last-items 1)
++            (completion-item-final-insert-action (first last-items)))
++       (completion-accept (current-point) (first last-items))
++       t)
++      ((some #'completion-item-final-insert-action last-items)
++       nil)
++      (t
++       (let ((n (partial-match
++                 (mapcar #'completion-item-insert-text last-items))))
++         (multiple-value-bind (start end)
++             (completion-item-range (current-point) (first last-items))
++           (cond ((and n (plusp n) (< (count-characters start end) n))
++                  (completion-insert (current-point)
++                                     (first last-items)
++                                     n)
++                  (completion-refresh)
++                  t)
++                 ((alexandria:length= last-items 1)
++                  (completion-insert (current-point)
++                                     (first last-items))
++                  (completion-refresh)
++                  t)
++                 (t
++                  nil))))))))
+
+ (define-command completion-narrowing-down-or-next-line () ()
+   (or (narrowing-down *completion-context* (context-last-items *completion-context*))
+@@ -294,79 +528,275 @@
+         result)))
+
+ (defun compute-completion-items (context then)
+-  (flet ((update-items-and-then (items)
+-           (let ((items (limitation-items items)))
+-             (setf (context-last-items context) items)
+-             (funcall then items))))
+-    (let ((spec (context-spec context)))
+-      (if (spec-async-p spec)
+-          (call-async-function spec
+-                               (current-point)
+-                               #'update-items-and-then)
+-          (update-items-and-then (call-sync-function spec (current-point)))))))
+-
+-(defun start-completion (context items style)
++  (let ((generation (incf (context-generation context))))
++    (setf (context-last-items context) nil)
++    (if (context-local-filtering-p context)
++        (funcall then (context-raw-items context) generation nil)
++        (let ((spec (context-spec context)))
++          (setf (context-request-pending-p context) t)
++          (flet ((return-items (items)
++                   (funcall then items generation t)))
++            (if (spec-async-p spec)
++                (call-async-function spec (current-point) #'return-items)
++                (return-items (call-sync-function spec (current-point)))))))))
++
++(defun update-context-range (context items)
++  (when items
++    (multiple-value-bind (start end)
++        (completion-item-provider-range (current-point) (first items))
++      (delete-context-range context)
++      (setf (context-range-start context)
++            (copy-point start :right-inserting)
++            (context-range-end context)
++            (copy-point end :left-inserting))
++      (let ((base-start-position (position-at-point start))
++            (base-end-position (position-at-point end)))
++        (dolist (item items)
++          (multiple-value-bind (item-start item-end)
++              (completion-item-provider-range (current-point) item)
++            (when (and (eq (point-buffer item-start) (point-buffer start))
++                       (eq (point-buffer item-end) (point-buffer end)))
++              (setf (gethash item (context-range-offsets context))
++                    (cons (- (position-at-point item-start)
++                             base-start-position)
++                          (- (position-at-point item-end)
++                             base-end-position))))))))))
++
++(defun completion-context-input (context)
++  (alexandria:when-let ((start (context-range-start context)))
++    (when (and (eq (point-buffer start) (current-buffer))
++               (point<= start (current-point)))
++      (points-to-string start (current-point)))))
++
++(defun completion-context-separator-present-p (context)
++  (alexandria:when-let* ((separator (context-separator context))
++                         (input (completion-context-input context)))
++    (find separator input :test #'char=)))
++
++(defun filter-context-items (context items)
++  (alexandria:if-let ((filter (context-filter-function context)))
++    (funcall filter (or (completion-context-input context) "") items)
++    items))
++
++(defun prepare-context-items (context raw-items)
++  (limitation-items (filter-context-items context raw-items)))
++
++(defun completion-local-filtering-p ()
++  (and *completion-context*
++       (context-local-filtering-p *completion-context*)))
++
++(defun completion-start-local-filtering (&optional (separator #\Space))
++  "Freeze the current provider batch and filter it locally after SEPARATOR."
++  (let ((context *completion-context*))
++    (when (and context
++               (context-filter-function context)
++               (eql separator (context-separator context))
++               (context-raw-items context)
++               (context-range-start context))
++      (incf (context-generation context))
++      (setf (context-request-pending-p context) nil
++            (context-local-filtering-p context) t)
++      (stop-context-spinner context)
++      t)))
++
++(defun start-completion (context items generation)
+   "Open popup menu for completions in the context provided"
+   (when items
++    (setf (context-presented-generation context) generation)
+     (setf (context-popup-menu context)
+-          (apply #'display-popup-menu
+-                 items
+-                 :action-callback (lambda (item)
+-                                    (completion-insert (current-point) item)
+-                                    (completion-end))
+-                 :print-spec (make-print-spec items)
+-                 (when style `(:style ,style))))
++          (apply
++           #'display-popup-menu
++           items
++           :action-callback (lambda (item)
++                              (cond
++                                ((not (eq context *completion-context*))
++                                 nil)
++                                ((or
++                                  (not (eq (context-buffer context)
++                                           (current-buffer)))
++                                  (deleted-buffer-p (context-buffer context)))
++                                 (completion-end))
++                                ((/= (context-presented-generation context)
++                                     (context-generation context))
++                                 nil)
++                                (t
++                                 (completion-accept (current-point) item))))
++           :print-spec (make-print-spec items)
++           (append (alexandria:when-let ((style (context-style context)))
++                     `(:style ,style))
++                   (alexandria:when-let ((max-display-items
++                                          (context-max-display-items context)))
++                     `(:max-display-items ,max-display-items)))))
+     (completion-mode t)
+-    (unless (spec-async-p (context-spec context))
++    (unless (or (not (context-narrowing-p context))
++                (spec-async-p (context-spec context))
++                (context-automatic-p context)
++                (context-local-filtering-p context))
+       (narrowing-down context items))
+     (when *completion-reverse*
+       (completion-end-of-buffer))
+     (call-focus-action)))
+
++(defun present-context-items (context items generation)
++  (setf (context-last-items context) items)
++  (cond
++    ((null items)
++     (if (context-local-filtering-p context)
++         (progn
++           (setf (context-presented-generation context) generation)
++           (close-context-popup context)
++           (completion-mode t))
++         (completion-end)))
++    ((context-popup-menu context)
++     (setf (context-presented-generation context) generation)
++     (apply
++      #'popup-menu-update
++      (context-popup-menu context)
++      items
++      :print-spec (make-print-spec items)
++      (alexandria:when-let
++          ((max-display-items (context-max-display-items context)))
++        `(:max-display-items ,max-display-items)))
++     (call-focus-action))
++    (t
++     (start-completion context items generation))))
++
++(defun completion-refilter (context)
++  (let ((generation (incf (context-generation context))))
++    (setf (context-request-pending-p context) nil)
++    (stop-context-spinner context)
++    (present-context-items
++     context
++     (prepare-context-items context (context-raw-items context))
++     generation)))
++
+ (defun continue-completion (context)
+-  (compute-completion-items
+-   context
+-   (lambda (items)
+-     (cond ((null items)
+-            (completion-end))
+-           (t
+-            (when *completion-context*
+-              (popup-menu-update (context-popup-menu *completion-context*)
+-                                 items
+-                                 :print-spec (make-print-spec items))
+-              (call-focus-action))))))
++  (let ((origin-buffer (current-buffer))
++        (origin-tick (buffer-modified-tick (current-buffer)))
++        (origin-position (position-at-point (current-point))))
++    (compute-completion-items
++     context
++     (lambda (raw-items generation provider-result-p)
++       (when (and (eq context *completion-context*)
++                  (= generation (context-generation context)))
++         (if (and (eq origin-buffer (current-buffer))
++                  (or (not (spec-async-p (context-spec context)))
++                      (and
++                       (= origin-tick (buffer-modified-tick origin-buffer))
++                       (= origin-position
++                          (position-at-point (current-point))))))
++             (progn
++               (setf (context-request-pending-p context) nil)
++               (when provider-result-p
++                 (setf (context-raw-items context) raw-items)
++                 (update-context-range context raw-items))
++               (present-context-items
++                context
++                (prepare-context-items context raw-items)
++                generation))
++             (completion-end))))))
+   (when *completion-reverse*
+     (ignore-errors (completion-end-of-buffer))))
+
+-(defun run-completion (completion-spec &key style then)
++(defun run-completion
++    (completion-spec
++     &key style then automatic max-display-items (cycle t)
++       (narrowing nil narrowing-supplied-p)
++       (filter-function nil filter-function-supplied-p)
++       (separator nil separator-supplied-p))
+   "Start a new completion using the completion-spec,
+ creates a new completion-context and sets *completion-context*"
+   (when *completion-context*
+     (completion-end))
+   (let* ((spec (ensure-completion-spec completion-spec))
+-         (context (make-instance 'completion-context :spec spec)))
++         (origin-buffer (current-buffer))
++         (options-function
++           (variable-value 'completion-context-options-function
++                           :default origin-buffer))
++         (options
++           (when options-function
++             (funcall (alexandria:ensure-function options-function) spec)))
++         (filter-function
++           (cond
++             (filter-function-supplied-p filter-function)
++             ((getf options :filter-function))
++             (t (spec-filter-function spec))))
++         (separator
++           (if separator-supplied-p
++               separator
++               (getf options :separator)))
++         (narrowing-option (getf options :narrowing :unspecified))
++         (narrowing
++           (cond
++             (narrowing-supplied-p narrowing)
++             ((eq narrowing-option :unspecified) t)
++             (t narrowing-option)))
++         (context (make-instance 'completion-context
++                                 :spec spec
++                                 :buffer origin-buffer
++                                 :automatic automatic
++                                 :narrowing narrowing
++                                 :style style
++                                 :filter-function filter-function
++                                 :separator separator
++                                 :max-display-items max-display-items
++                                 :cycle cycle))
++         (origin-tick (buffer-modified-tick origin-buffer)))
+     (setf *completion-context* context)
+-    (with-point ((before-point (current-point)))
+-      (if (spec-async-p (context-spec context))
+-          (let ((spinner (lem/loading-spinner:start-loading-spinner :line
+-                                                                    :point before-point)))
++    (handler-case
++        (with-point ((before-point (current-point)))
++          (if (spec-async-p (context-spec context))
++              (progn
++                (setf (context-spinner context)
++                      (lem/loading-spinner:start-loading-spinner
++                       :line :point before-point))
+             (compute-completion-items
+              context
+-             (lambda (items)
+-               (lem/loading-spinner:stop-loading-spinner spinner)
++             (lambda (raw-items generation provider-result-p)
++               (declare (ignore provider-result-p))
++               (stop-context-spinner context)
+                (when (and (eq context *completion-context*)
++                          (= generation (context-generation context)))
++                 (if (and (eq origin-buffer (current-buffer))
++                          (= origin-tick (buffer-modified-tick origin-buffer))
+                           (point= before-point (current-point)))
+-                 (start-completion context items style)
+-                 (when then
+-                   (funcall then))))))
+-          (compute-completion-items
+-           context
+-           (lambda (items)
+-             (when items
+-               (cond
+-                 ((alexandria:length= items 1)
+-                  (completion-insert (current-point) (first items)))
+-                 (t
+-                  (start-completion context items style)
+-                  (when then
+-                    (funcall then)))))))))))
++                     (progn
++                       (setf (context-request-pending-p context) nil
++                             (context-raw-items context) raw-items)
++                       (update-context-range context raw-items)
++                       (let ((items (prepare-context-items context raw-items)))
++                         (setf (context-last-items context) items)
++                         (if items
++                           (progn
++                             (start-completion context items generation)
++                             (when then
++                               (funcall then)))
++                             (completion-end))))
++                     (completion-end))))))
++              (compute-completion-items
++               context
++               (lambda (raw-items generation provider-result-p)
++                 (declare (ignore provider-result-p))
++                 (when (and (eq context *completion-context*)
++                            (= generation (context-generation context)))
++                   (setf (context-request-pending-p context) nil
++                         (context-raw-items context) raw-items)
++                   (update-context-range context raw-items)
++                   (let ((items (prepare-context-items context raw-items)))
++                     (setf (context-last-items context) items)
++                     (cond
++                       ((null items)
++                        (completion-end))
++                       ((and (context-narrowing-p context)
++                             (alexandria:length= items 1)
++                             (not automatic))
++                        (completion-accept (current-point) (first items)))
++                       (t
++                        (start-completion context items generation)
++                        (when then
++                          (funcall then))))))))))
++      (error (condition)
++        (when (eq context *completion-context*)
++          (completion-end))
++        (error condition)))
++    context))

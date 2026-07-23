@@ -1,0 +1,54 @@
+diff --git a/extensions/lsp-base/type.lisp b/extensions/lsp-base/type.lisp
+index bf125b2c..b4a8fd7a 100644
+--- a/extensions/lsp-base/type.lisp
++++ b/extensions/lsp-base/type.lisp
+@@ -12,6 +12,7 @@
+            :lsp-integer
+            :lsp-uinteger
+            :lsp-decimal
++           :lsp-number
+            :lsp-regexp
+            :lsp-string
+            :lsp-boolean
+@@ -70,6 +71,7 @@
+ (deftype lsp-integer () 'integer)
+ (deftype lsp-uinteger () '(integer 0 *))
+ (deftype lsp-decimal () 'integer)
++(deftype lsp-number () 'real)
+ (deftype lsp-regexp () 'string)
+ (deftype lsp-string (&optional (string nil stringp))
+   (if stringp
+diff --git a/extensions/lsp-base/converter.lisp b/extensions/lsp-base/converter.lisp
+index 59e7e9d6..7e189c0c 100644
+--- a/extensions/lsp-base/converter.lisp
++++ b/extensions/lsp-base/converter.lisp
+@@ -49,6 +49,7 @@
+          'lsp-integer
+          'lsp-uinteger
+          'lsp-decimal
++         'lsp-number
+          'lsp-regexp
+          'lsp-string
+          'lsp-null)
+diff --git a/extensions/lsp-base/protocol-3-17.lisp b/extensions/lsp-base/protocol-3-17.lisp
+index 05797cc5..5a1bf21d 100644
+--- a/extensions/lsp-base/protocol-3-17.lisp
++++ b/extensions/lsp-base/protocol-3-17.lisp
+@@ -558,6 +558,7 @@
+            :base-symbol-information-tags
+            :base-symbol-information-kind
+            :base-symbol-information-name
++           :base-symbol-information-score
+            :document-highlight-options
+            :reference-options
+            :include-declaration
+@@ -5236,6 +5237,9 @@
+     common-lisp:nil
+   ((name :type lem-lsp-base/type:lsp-string :initarg :name :accessor base-symbol-information-name
+     :documentation "The name of this symbol.")
++   (score :type lem-lsp-base/type:lsp-number :initarg :score :accessor
++    base-symbol-information-score :optional common-lisp:t :documentation
++    "The optional Consult-Eglot workspace-symbol ranking extension.")
+    (kind :type symbol-kind :initarg :kind :accessor base-symbol-information-kind :documentation
+     "The kind of this symbol.")
+    (tags :type (lem-lsp-base/type:lsp-array symbol-tag) :initarg :tags :accessor

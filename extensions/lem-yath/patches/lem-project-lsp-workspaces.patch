@@ -1,0 +1,1188 @@
+--- a/src/ext/language-mode.lisp
++++ b/src/ext/language-mode.lisp
+@@ -543 +543,23 @@
++(defun pathname-entry-name (pathname)
++  (if (uiop:directory-pathname-p pathname)
++      (princ-to-string (car (last (pathname-directory pathname))))
++      (file-namestring pathname)))
++
++(defun glob-match-p (pattern string)
++  (labels ((match (pattern-index string-index)
++             (cond
++               ((= pattern-index (length pattern))
++                (= string-index (length string)))
++               ((char= #\* (char pattern pattern-index))
++                (or (match (1+ pattern-index) string-index)
++                    (and (< string-index (length string))
++                         (match pattern-index (1+ string-index)))))
++               ((= string-index (length string)) nil)
++               ((or (char= #\? (char pattern pattern-index))
++                    (char= (char pattern pattern-index)
++                           (char string string-index)))
++                (match (1+ pattern-index) (1+ string-index)))
++               (t nil))))
++    (match 0 0)))
++
+ (defun match-pattern-p (pattern file)
+@@ -546 +568,5 @@
+-    (string (search pattern file))))
++    (string (if (find-if (lambda (character)
++                           (member character '(#\* #\?)))
++                         pattern)
++                (glob-match-p pattern file)
++                (string= pattern file)))))
+@@ -550 +576 @@
+-             (dolist (pathname (list-directory directory))
++             (dolist (pathname (ignore-errors (list-directory directory)))
+@@ -552 +578 @@
+-                 (when (match-pattern-p pattern (file-namestring pathname))
++                 (when (match-pattern-p pattern (pathname-entry-name pathname))
+@@ -555,4 +581,6 @@
+-             (cond ((matchp directory) directory)
+-                   ((uiop:pathname-equal directory (user-homedir-pathname)) nil)
+-                   (t (recursive (uiop:pathname-parent-directory-pathname directory))))))
+-    (recursive directory)))
++             (let ((parent (uiop:pathname-parent-directory-pathname directory)))
++               (cond ((matchp directory) directory)
++                     ((uiop:pathname-equal directory parent)
++                      nil)
++                     (t (recursive parent))))))
++    (recursive (uiop:ensure-directory-pathname directory))))
+@@ -561,3 +589,3 @@
+-  (or (find-root-directory-1 directory
+-                             (or root-uri-patterns
+-                                 (list (lambda (name) (string= name ".git")))))
++  (or (and root-uri-patterns
++           (find-root-directory-1 directory root-uri-patterns))
++      (find-root-directory-1 directory '(".git"))
+--- a/extensions/lsp-base/utils.lisp
++++ b/extensions/lsp-base/utils.lisp
+@@ -12,0 +13,23 @@
++(defun encode-uri-path (path)
++  (with-output-to-string (stream)
++    (loop :with start := 0
++          :for slash := (position #\/ path :start start)
++          :do (write-string (quri:url-encode
++                             (subseq path start (or slash (length path))))
++                            stream)
++          :when slash
++            :do (write-char #\/ stream)
++                (setf start (1+ slash))
++          :unless slash
++            :return nil)))
++
++(defun decode-uri-path (path)
++  ;; Quri's decoder follows form semantics and maps a raw + to a space.
++  ;; A plus in a URI path is literal, so protect it before percent-decoding.
++  (quri:url-decode
++   (with-output-to-string (stream)
++     (loop :for character :across path
++           :do (if (char= character #\+)
++                   (write-string "%2B" stream)
++                   (write-char character stream))))))
++
+@@ -14 +37 @@
+-  (format nil "file://~A" (namestring pathname)))
++  (format nil "file://~A" (encode-uri-path (namestring pathname))))
+@@ -17 +40,10 @@
+-  (pathname (quri:uri-path (quri:uri uri))))
++  (let* ((parsed (quri:uri uri))
++         (scheme (quri:uri-scheme parsed))
++         (host (quri:uri-host parsed)))
++    (unless (and (stringp scheme)
++                 (string-equal scheme "file")
++                 (or (null host)
++                     (string= host "")
++                     (string-equal host "localhost")))
++      (error "Not a local file URI: ~S" uri))
++    (pathname (decode-uri-path (quri:uri-path parsed)))))
+--- a/extensions/lsp-mode/client.lisp
++++ b/extensions/lsp-mode/client.lisp
+@@ -6,0 +7 @@
++           :alive-p
+@@ -13,0 +15 @@
++(defgeneric alive-p (client))
+@@ -32,0 +35,4 @@
++(defmethod alive-p ((client tcp-client))
++  (or (null (tcp-client-process client))
++      (lem-process:process-alive-p (tcp-client-process client))))
++
+@@ -43,0 +50,3 @@
++
++(defmethod alive-p ((client stdio-client))
++  (async-process:process-alive-p (stdio-client-process client)))
+--- a/extensions/lsp-mode/lsp-mode.lisp
++++ b/extensions/lsp-mode/lsp-mode.lisp
+@@ -22,0 +23 @@
++           :spec-workspace-configuration
+@@ -37,7 +37,7 @@
+ (defmacro without-lsp-mode (() &body body)
+   "This macro prevents enabling lsp-mode within the body.
+ Use this when lsp-mode has side effects that you want to avoid."
+-  `(let ((*disable* T))
++  `(let ((*disable* (current-buffer)))
+      ,@body))
+
+ ;;;
+@@ -73 +73 @@
+-(defmethod run-server-using-mode ((mode (eql :tcp)) spec)
++(defmethod run-server-using-mode ((mode (eql :tcp)) spec &key directory)
+@@ -82 +82,3 @@
+-                      (lem-process:run-process command :output-callback #'output-callback))))
++                      (lem-process:run-process command
++                                               :directory directory
++                                               :output-callback #'output-callback))))
+@@ -85 +87 @@
+-(defmethod run-server-using-mode ((mode (eql :stdio)) spec)
++(defmethod run-server-using-mode ((mode (eql :stdio)) spec &key directory)
+@@ -88 +90,3 @@
+-    (let ((process (async-process:create-process command :nonblock nil)))
++    (let ((process (async-process:create-process command
++                                                 :directory directory
++                                                 :nonblock nil)))
+@@ -91,2 +95,4 @@
+-(defmethod run-server (spec)
+-  (run-server-using-mode (spec-connection-mode spec) spec))
++(defmethod run-server (spec &key directory)
++  (run-server-using-mode (spec-connection-mode spec)
++                         spec
++                         :directory directory))
+@@ -145,0 +152,8 @@
++(defgeneric compute-root-pathname (spec buffer)
++  (:method (spec buffer)
++    (let ((root (language-mode:find-root-directory
++                 (buffer-directory buffer)
++                 (spec-root-uri-patterns spec))))
++      (uiop:ensure-directory-pathname
++       (or (ignore-errors (truename root)) root)))))
++
+@@ -147,3 +160 @@
+-  (pathname-to-uri
+-   (language-mode:find-root-directory (buffer-directory buffer)
+-                                      (spec-root-uri-patterns spec))))
++  (pathname-to-uri (compute-root-pathname spec buffer)))
+@@ -156,0 +168,8 @@
++   (root-pathname
++    :initarg :root-pathname
++    :initform nil
++    :accessor workspace-root-pathname)
++   (key
++    :initarg :key
++    :initform nil
++    :accessor workspace-key)
+@@ -176,0 +196,34 @@
++   (state
++    :initarg :state
++    :initform :starting
++    :accessor workspace-state)
++   (buffers
++    :initarg :buffers
++    :initform nil
++    :accessor workspace-buffers)
++   (pending-continuations
++    :initarg :pending-continuations
++    :initform nil
++    :accessor workspace-pending-continuations)
++   (initialization-timer
++    :initarg :initialization-timer
++    :initform nil
++    :accessor workspace-initialization-timer)
++   (startup-spinner
++    :initarg :startup-spinner
++    :initform nil
++    :accessor workspace-startup-spinner)
++   (initialization-options
++    :initarg :initialization-options
++    :initform nil
++    :accessor workspace-initialization-options)
++   (configuration
++    :initarg :configuration
++    :initform nil
++    :accessor workspace-configuration)
++   (progress-reports
++    :initform (make-hash-table :test 'equal)
++    :accessor workspace-progress-reports)
++   (progress-removal-timers
++    :initform (make-hash-table :test 'equal)
++    :accessor workspace-progress-removal-timers)
+@@ -183,4 +230,13 @@
+-  (make-instance 'workspace
+-                 :spec spec
+-                 :client client
+-                 :root-uri (compute-root-uri spec buffer)))
++  (let ((root (compute-root-pathname spec buffer)))
++    (make-instance 'workspace
++                   :spec spec
++                   :client client
++                   :root-pathname root
++                   :root-uri (pathname-to-uri root)
++                   :key (make-workspace-key spec root)
++                   :initialization-options
++                   (with-current-buffer buffer
++                     (spec-initialization-options spec))
++                   :configuration
++                   (with-current-buffer buffer
++                     (spec-workspace-configuration spec)))))
+@@ -197,0 +247,14 @@
++(defgeneric make-workspace-key (spec root-pathname)
++  (:method (spec root-pathname)
++    (list (class-name (class-of spec))
++          (namestring root-pathname))))
++
++(defun workspace-registry-key (workspace)
++  (workspace-key workspace))
++
++(defvar *workspace-table*)
++
++(defun current-workspace-entry-p (workspace)
++  (eq workspace
++      (gethash (workspace-registry-key workspace) *workspace-table*)))
++
+@@ -201,3 +263,0 @@
+-(defun dispose-workspace (workspace)
+-  (client:dispose (workspace-client workspace)))
+-
+@@ -212,0 +273 @@
++(defvar *workspace-table* (make-hash-table :test 'equal))
+@@ -213,0 +275,12 @@
++(defparameter *workspace-shutdown-timeout* 1)
++(defparameter *workspace-initialize-timeout* 30)
++
++(defgeneric find-workspace-for-buffer (spec buffer)
++  (:method (spec buffer)
++    (gethash (make-workspace-key spec (compute-root-pathname spec buffer))
++             *workspace-table*)))
++
++(defgeneric workspace-matches-buffer-p (workspace spec buffer)
++  (:method (workspace spec buffer)
++    (equal (workspace-key workspace)
++           (make-workspace-key spec (compute-root-pathname spec buffer)))))
+@@ -219,0 +293,2 @@
++  (setf (gethash (workspace-registry-key workspace) *workspace-table*)
++        workspace)
+@@ -223,3 +298,2 @@
+-      (setf (workspace-list-current-workspace workspace-list)
+-            workspace)
+-      (push workspace (workspace-list-workspaces workspace-list)))
++      (setf (workspace-list-current-workspace workspace-list) workspace)
++      (pushnew workspace (workspace-list-workspaces workspace-list)))
+@@ -229 +303,20 @@
+-                               :workspaces (list workspace)))))
++                               :workspaces (list workspace))))
++  workspace)
++
++(defun remove-workspace (workspace)
++  (let ((key (workspace-registry-key workspace)))
++    (when (eq workspace (gethash key *workspace-table*))
++      (remhash key *workspace-table*)))
++  (let* ((language-id (workspace-language-id workspace))
++         (workspace-list (gethash language-id
++                                  *workspace-list-per-language-id*)))
++    (when workspace-list
++      (setf (workspace-list-workspaces workspace-list)
++            (delete workspace (workspace-list-workspaces workspace-list)))
++      (when (eq workspace
++                (workspace-list-current-workspace workspace-list))
++        (setf (workspace-list-current-workspace workspace-list)
++              (first (workspace-list-workspaces workspace-list))))
++      (when (null (workspace-list-workspaces workspace-list))
++        (remhash language-id *workspace-list-per-language-id*))))
++  workspace)
+@@ -235 +328,2 @@
+-    (setf (workspace-list-current-workspace workspace-list) workspace)))
++    (setf (workspace-list-current-workspace workspace-list) workspace)
++    (reassign-language-workspace workspace)))
+@@ -247,0 +342,26 @@
++(defun buffer-opened-uri (buffer)
++  (buffer-value buffer 'lsp-opened-uri))
++
++(defun lsp-buffer-attachment-valid-p (buffer workspace)
++  (let ((spec (buffer-language-spec buffer))
++        (state (buffer-value buffer 'lsp-state)))
++    (and (not (deleted-buffer-p buffer))
++         (mode-active-p buffer 'lsp-mode)
++         (lsp-buffer-eligible-p buffer)
++         spec
++         (workspace-matches-buffer-p workspace spec buffer)
++         (or (eq state :pending)
++             (and (eq state :open)
++                  (equal (buffer-opened-uri buffer)
++                         (buffer-uri buffer)))))))
++
++(defun workspace-response-current-p (workspace buffer)
++  (and (typep workspace 'workspace)
++       (eq :ready (workspace-state workspace))
++       (eq workspace (buffer-value buffer 'lsp-workspace))
++       (lsp-buffer-attachment-valid-p buffer workspace)))
++
++(defun feature-request-error (workspace buffer message code)
++  (when (workspace-response-current-p workspace buffer)
++    (jsonrpc-editor-error message code)))
++
+@@ -249 +369,13 @@
+-  (find-workspace (buffer-language-id buffer) :errorp errorp))
++  (let ((workspace (buffer-value buffer 'lsp-workspace)))
++    (when (and workspace (eq :disposed (workspace-state workspace)))
++      (setf (buffer-value buffer 'lsp-workspace) nil
++            (buffer-value buffer 'lsp-state) nil
++            (buffer-value buffer 'lsp-opened-uri) nil
++            workspace nil))
++    (when (and workspace
++               (not (lsp-buffer-attachment-valid-p buffer workspace)))
++      (setf workspace (rebind-lsp-buffer buffer workspace)))
++    (or workspace
++        (when (and errorp (buffer-language-id buffer))
++          (error "Buffer ~A is not attached to an LSP workspace."
++                 (buffer-name buffer))))))
+@@ -252,2 +390,51 @@
+-  (loop :for workspace-list :being :each :hash-value :in *workspace-list-per-language-id*
+-        :append (workspace-list-workspaces workspace-list)))
++  (loop :for workspace-list :being :each :hash-value
++          :in *workspace-list-per-language-id*
++        :append (copy-list (workspace-list-workspaces workspace-list))))
++
++(defun shutdown-workspace-client (workspace initialized-p)
++  (let ((client (workspace-client workspace)))
++    (when initialized-p
++      (let ((jsonrpc:*default-timeout* *workspace-shutdown-timeout*))
++        (ignore-errors
++          (request:request client (make-instance 'lsp:shutdown) nil))
++        (ignore-errors
++          (request:request client (make-instance 'lsp:exit) nil))
++        ;; Notifications are queued by jsonrpc.  Give its writer a bounded
++        ;; opportunity to flush `exit` before the transport is torn down.
++        (sleep 0.05)))
++    (ignore-errors
++      (jsonrpc:client-disconnect
++       (lem-language-client/client:client-connection client)))
++    (ignore-errors (client:dispose client))))
++
++(defun stop-workspace-initialization-timer (workspace)
++  (when-let (timer (workspace-initialization-timer workspace))
++    (ignore-errors (stop-timer timer))
++    (setf (workspace-initialization-timer workspace) nil)))
++
++(defun stop-workspace-startup (workspace)
++  (stop-workspace-initialization-timer workspace)
++  (when-let (spinner (workspace-startup-spinner workspace))
++    (ignore-errors (spinner:stop-loading-spinner spinner))
++    (setf (workspace-startup-spinner workspace) nil)))
++
++(defun stop-workspace-progress (workspace)
++  (maphash (lambda (token timer)
++             (declare (ignore token))
++             (ignore-errors (stop-timer timer)))
++           (workspace-progress-removal-timers workspace))
++  (clrhash (workspace-progress-removal-timers workspace))
++  (clrhash (workspace-progress-reports workspace)))
++
++(defun dispose-workspace (workspace)
++  (unless (member (workspace-state workspace) '(:stopping :disposed))
++    (let ((initialized-p (eq :ready (workspace-state workspace))))
++      (remove-workspace workspace)
++      (setf (workspace-state workspace) :stopping)
++      (stop-workspace-startup workspace)
++      (stop-workspace-progress workspace)
++      (dolist (buffer (copy-list (workspace-buffers workspace)))
++        (detach-lsp-buffer buffer workspace :notify initialized-p))
++      (setf (workspace-pending-continuations workspace) nil)
++      (shutdown-workspace-client workspace initialized-p)
++      (setf (workspace-state workspace) :disposed))))
+@@ -256,2 +428,4 @@
+-  (dolist (workspace (all-workspaces))
+-    (dispose-workspace workspace)))
++  (dolist (workspace (copy-list (all-workspaces)))
++    (dispose-workspace workspace))
++  (clrhash *workspace-table*)
++  (clrhash *workspace-list-per-language-id*))
+@@ -264,5 +438,42 @@
+-(define-minor-mode lsp-mode
+-    (:name "LSP"
+-     :keymap *lsp-mode-keymap*
+-     :enable-hook 'enable-hook)
+-  (setf (variable-value 'language-mode:completion-spec)
++(defun capture-buffer-binding (buffer variable)
++  (let* ((unbound (gensym "UNBOUND-"))
++         (value (buffer-value buffer variable unbound)))
++    (if (eq value unbound)
++        (cons nil nil)
++        (cons t value))))
++
++(defun restore-buffer-binding (buffer variable binding)
++  (if (car binding)
++      (setf (buffer-value buffer variable) (cdr binding))
++      (buffer-unbound buffer variable)))
++
++(defun editor-variable-buffer-key (symbol)
++  (lem/common/var:editor-variable-local-indicator
++   (get symbol 'lem/common/var:editor-variable)))
++
++(defun capture-editor-variable-binding (buffer symbol)
++  (capture-buffer-binding buffer (editor-variable-buffer-key symbol)))
++
++(defun restore-editor-variable-binding (buffer symbol binding)
++  (restore-buffer-binding buffer (editor-variable-buffer-key symbol) binding))
++
++(defun install-lsp-buffer-functions (buffer)
++  (when-let (functions (buffer-value buffer 'lsp-mode-previous-functions))
++    (unless (eq (first functions) (buffer-major-mode buffer))
++      (when (eq (buffer-value buffer 'revert-buffer-function)
++                #'lsp-revert-buffer)
++        (restore-buffer-binding
++         buffer 'revert-buffer-function (fifth functions)))
++      (setf (buffer-value buffer 'lsp-mode-previous-functions) nil)))
++  (unless (buffer-value buffer 'lsp-mode-previous-functions)
++    (setf (buffer-value buffer 'lsp-mode-previous-functions)
++          (list
++           (buffer-major-mode buffer)
++           (capture-editor-variable-binding
++            buffer 'language-mode:completion-spec)
++           (capture-editor-variable-binding
++            buffer 'language-mode:find-definitions-function)
++           (capture-editor-variable-binding
++            buffer 'language-mode:find-references-function)
++           (capture-buffer-binding buffer 'revert-buffer-function))))
++  (setf (variable-value 'language-mode:completion-spec :buffer buffer)
+@@ -272,6 +483,6 @@
+-         :filter-function #'filter-completion-items))
+-  (setf (variable-value 'language-mode:find-definitions-function)
+-        #'lsp-find-definitions)
+-  (setf (variable-value 'language-mode:find-references-function)
+-        #'lsp-find-references)
+-  (setf (buffer-value (current-buffer) 'revert-buffer-function)
++         :filter-function #'filter-completion-items)
++        (variable-value 'language-mode:find-definitions-function :buffer buffer)
++        #'lsp-find-definitions
++        (variable-value 'language-mode:find-references-function :buffer buffer)
++        #'lsp-find-references
++        (buffer-value buffer 'revert-buffer-function)
+@@ -279,0 +491,37 @@
++(defun restore-lsp-buffer-functions (buffer)
++  (when-let (functions (buffer-value buffer 'lsp-mode-previous-functions))
++    (when (eq (first functions) (buffer-major-mode buffer))
++      (restore-editor-variable-binding
++       buffer 'language-mode:completion-spec (second functions))
++      (restore-editor-variable-binding
++       buffer 'language-mode:find-definitions-function (third functions))
++      (restore-editor-variable-binding
++       buffer 'language-mode:find-references-function (fourth functions)))
++    (when (eq (buffer-value buffer 'revert-buffer-function)
++              #'lsp-revert-buffer)
++      (restore-buffer-binding
++       buffer 'revert-buffer-function (fifth functions)))
++    (setf (buffer-value buffer 'lsp-mode-previous-functions) nil)))
++
++(defun disable-lsp-mode-for-buffer (buffer)
++  (when (and (not (deleted-buffer-p buffer))
++             (mode-active-p buffer 'lsp-mode))
++    (with-current-buffer buffer
++      (lsp-mode nil))))
++
++(define-minor-mode lsp-mode
++    (:name "LSP"
++     :keymap *lsp-mode-keymap*
++     :enable-hook 'enable-hook
++     :disable-hook 'disable-hook)
++  (let ((buffer (current-buffer)))
++    (if (mode-active-p buffer 'lsp-mode)
++        (install-lsp-buffer-functions buffer)
++        (restore-lsp-buffer-functions buffer))))
++
++(defun lsp-buffer-eligible-p (buffer)
++  "Whether BUFFER is a local, file-backed buffer with a registered LSP spec."
++  (and (not (buffer-temporary-p buffer))
++       (buffer-filename buffer)
++       (buffer-language-spec buffer)))
++
+@@ -282,10 +530,14 @@
+-    (unless (buffer-temporary-p buffer)
+-      (handler-case
+-          (progn
+-            (add-hook *exit-editor-hook* 'dispose-all-workspaces)
+-            (ensure-lsp-buffer buffer
+-                               :then (lambda ()
+-                                       (text-document/did-open buffer)
+-                                       (enable-document-highlight-idle-timer))))
+-        (editor-error (c)
+-          (show-message (princ-to-string c)))))))
++    (if (not (lsp-buffer-eligible-p buffer))
++        (disable-minor-mode 'lsp-mode)
++        (handler-case
++            (progn
++              (add-hook *exit-editor-hook* 'dispose-all-workspaces)
++              (ensure-lsp-buffer buffer
++                                 :then (lambda ()
++                                         (enable-document-highlight-idle-timer))))
++          (error (condition)
++            (disable-minor-mode 'lsp-mode)
++            (show-message (princ-to-string condition)))))))
++
++(defun disable-hook ()
++  (close-lsp-buffer (current-buffer)))
+@@ -332,3 +584,5 @@
+-  (when-let* ((workspace (buffer-workspace (current-buffer)))
+-              (command (gethash c (workspace-trigger-characters workspace))))
+-    (funcall command c)))
++  (when-let ((workspace (buffer-workspace (current-buffer) nil)))
++    (when (workspace-response-current-p workspace (current-buffer))
++      (when-let ((command
++                   (gethash c (workspace-trigger-characters workspace))))
++        (funcall command c)))))
+@@ -369,5 +623,6 @@
+-         (workspace (buffer-workspace buffer))
+-         (change-event
+-           (buffer-change-event-to-content-change-event
+-            point arg workspace)))
+-    (text-document/did-change buffer (make-lsp-array change-event))))
++         (workspace (buffer-workspace buffer nil)))
++    (when (and workspace (workspace-response-current-p workspace buffer))
++      (let ((change-event
++              (buffer-change-event-to-content-change-event
++               point arg workspace)))
++        (text-document/did-change buffer (make-lsp-array change-event))))))
+@@ -376,2 +631 @@
+-  (add-hook (variable-value 'kill-buffer-hook :buffer buffer) 'text-document/did-close)
+-  (add-hook (variable-value 'after-save-hook :buffer buffer) 'text-document/did-save)
++  (add-hook (variable-value 'after-save-hook :buffer buffer) 'handle-save-buffer)
+@@ -380,0 +635,107 @@
++(defun remove-buffer-hooks (buffer)
++  (remove-hook (variable-value 'after-save-hook :buffer buffer) 'handle-save-buffer)
++  (remove-hook (variable-value 'before-change-functions :buffer buffer) 'handle-change-buffer)
++  (remove-hook (variable-value 'self-insert-after-hook :buffer buffer) 'self-insert-hook))
++
++(defun queue-workspace-continuation (workspace buffer continuation)
++  (when continuation
++    (push (cons buffer continuation)
++          (workspace-pending-continuations workspace))))
++
++(defun run-workspace-continuations (workspace buffer)
++  (let ((entries
++          (remove-if-not (lambda (entry) (eq buffer (car entry)))
++                         (workspace-pending-continuations workspace))))
++    (setf (workspace-pending-continuations workspace)
++          (delete buffer
++                  (workspace-pending-continuations workspace)
++                  :key #'car))
++    (dolist (entry (nreverse entries))
++      (handler-case (funcall (cdr entry))
++        (error (condition)
++          (show-message (format nil "LSP continuation failed: ~A" condition)))))))
++
++(defun attach-lsp-buffer (buffer workspace)
++  (let ((old-workspace (buffer-value buffer 'lsp-workspace)))
++    (unless (eq old-workspace workspace)
++      (when old-workspace
++        (detach-lsp-buffer buffer old-workspace))
++      (setf (buffer-value buffer 'lsp-workspace) workspace
++            (buffer-value buffer 'lsp-state) :pending)
++      (pushnew buffer (workspace-buffers workspace))
++      (add-hook (variable-value 'kill-buffer-hook :buffer buffer)
++                'close-lsp-buffer)))
++  workspace)
++
++(defun activate-lsp-buffer (buffer workspace)
++  (when (and (eq :ready (workspace-state workspace))
++             (eq workspace (buffer-value buffer 'lsp-workspace))
++             (not (deleted-buffer-p buffer))
++             (not (eq :open (buffer-value buffer 'lsp-state))))
++    (setf (buffer-value buffer 'lsp-state) :open
++          (buffer-value buffer 'lsp-opened-uri) (buffer-uri buffer))
++    (add-buffer-hooks buffer)
++    (text-document/did-open buffer))
++  workspace)
++
++(defun detach-lsp-buffer (buffer workspace &key (notify t))
++  (when (eq workspace (buffer-value buffer 'lsp-workspace))
++    (when (and notify
++               (eq :open (buffer-value buffer 'lsp-state)))
++      (ignore-errors
++        (text-document/did-close
++         buffer
++         :workspace workspace
++         :uri (buffer-opened-uri buffer))))
++    (remove-buffer-hooks buffer)
++    (reset-buffer-diagnostic buffer)
++    (unless (deleted-buffer-p buffer)
++      (with-current-buffer buffer
++        (clear-document-highlight-overlays)))
++    (remove-hook (variable-value 'kill-buffer-hook :buffer buffer)
++                 'close-lsp-buffer)
++    (setf (buffer-value buffer 'lsp-workspace) nil
++          (buffer-value buffer 'lsp-state) nil
++          (buffer-value buffer 'lsp-opened-uri) nil))
++  (setf (workspace-buffers workspace)
++        (delete buffer (workspace-buffers workspace))
++        (workspace-pending-continuations workspace)
++        (delete buffer
++                (workspace-pending-continuations workspace)
++                :key #'car))
++  (when (and (eq :starting (workspace-state workspace))
++             (null (workspace-buffers workspace)))
++    (dispose-workspace workspace))
++  buffer)
++
++(defun rebind-lsp-buffer (buffer old-workspace &key continuation)
++  (detach-lsp-buffer buffer old-workspace)
++  (cond
++    ((and (mode-active-p buffer 'lsp-mode)
++          (lsp-buffer-eligible-p buffer))
++     (handler-case
++         (ensure-lsp-buffer buffer :then continuation)
++       (error (condition)
++         (disable-lsp-mode-for-buffer buffer)
++         (show-message (princ-to-string condition))
++         nil)))
++    (t
++     (disable-lsp-mode-for-buffer buffer)
++     nil)))
++
++(defun close-lsp-buffer (buffer)
++  (when-let (workspace (buffer-value buffer 'lsp-workspace))
++    (detach-lsp-buffer buffer workspace)))
++
++(defun reassign-language-workspace (workspace)
++  (dolist (buffer (copy-list (buffer-list)))
++    (when (and (equal (workspace-language-id workspace)
++                      (buffer-language-id buffer))
++               (buffer-value buffer 'lsp-workspace))
++      (let ((old-workspace (buffer-value buffer 'lsp-workspace)))
++        (unless (eq old-workspace workspace)
++          (detach-lsp-buffer buffer old-workspace)
++          (attach-lsp-buffer buffer workspace)
++          (activate-lsp-buffer buffer workspace)))))
++  workspace)
++
+@@ -386 +747 @@
+-(defun initialize-workspace (workspace continuation)
++(defun initialize-workspace (workspace continuation &key error)
+@@ -399,2 +760,2 @@
+-                (initialized workspace)
+-                (funcall continuation workspace))))
++                (funcall continuation workspace))
++              :error error))
+@@ -402 +763 @@
+-(defun connect (client continuation)
++(defun connect (client continuation &key error continue-p)
+@@ -406,0 +768,2 @@
++           :when (and continue-p (not (funcall continue-p)))
++             :do (return)
+@@ -416,5 +779,11 @@
+-           :finally (send-event
+-                     (lambda ()
+-                       (editor-error
+-                        "Could not establish a connection with the Language Server (condition: ~A)"
+-                        condition)))))))
++           :finally
++             (when (or (null continue-p) (funcall continue-p))
++               (send-event
++                (lambda ()
++                  (let ((message
++                          (format nil
++                                  "Could not establish a connection with the Language Server (condition: ~A)"
++                                  condition)))
++                    (if error
++                        (funcall error message nil)
++                        (editor-error "~A" message))))))))))
+@@ -424,0 +794,37 @@
++(defun fail-workspace-initialization (workspace spinner message code)
++  (declare (ignore spinner code))
++  (stop-workspace-startup workspace)
++  (unless (member (workspace-state workspace) '(:stopping :disposed))
++    (let ((buffers (copy-list (workspace-buffers workspace))))
++      (dispose-workspace workspace)
++      (dolist (buffer buffers)
++        (disable-lsp-mode-for-buffer buffer)))
++    (show-message (format nil "LSP initialization failed: ~A" message))
++    (redraw-display)))
++
++(defun finish-workspace-initialization (workspace spinner)
++  (stop-workspace-startup workspace)
++  (if (and (eq :starting (workspace-state workspace))
++           (current-workspace-entry-p workspace))
++      (handler-case
++          (progn
++            (initialized workspace)
++            (setf (workspace-state workspace) :ready)
++            (set-trigger-characters workspace)
++            (let ((mode (ensure-mode-object
++                         (spec-mode (workspace-spec workspace)))))
++              (initialized-workspace mode workspace))
++            (dolist (buffer
++                     (reverse (copy-list (workspace-buffers workspace))))
++              (when (and (not (deleted-buffer-p buffer))
++                         (eq workspace (buffer-value buffer 'lsp-workspace)))
++                (activate-lsp-buffer buffer workspace)
++                (run-workspace-continuations workspace buffer)))
++            (redraw-display))
++        (error (condition)
++          (fail-workspace-initialization
++           workspace spinner (princ-to-string condition) nil)))
++      (progn
++        (dispose-workspace workspace)
++        (redraw-display))))
++
+@@ -425,0 +832,3 @@
++  (add-workspace workspace)
++  (attach-lsp-buffer buffer workspace)
++  (queue-workspace-continuation workspace buffer continuation)
+@@ -430,2 +839,16 @@
+-    (connect (workspace-client workspace)
+-             (lambda ()
++    (setf (workspace-startup-spinner workspace) spinner)
++    (labels ((fail (message code)
++               (fail-workspace-initialization workspace spinner message code))
++             (start-initialize ()
++               (setf (workspace-initialization-timer workspace)
++                     (start-timer
++                      (make-timer
++                       (lambda ()
++                         (when (and
++                                (eq :starting (workspace-state workspace))
++                                (current-workspace-entry-p workspace))
++                           (fail
++                            "Language server initialization timed out."
++                            nil)))
++                       :name "lsp-initialize-timeout")
++                      (* 1000 *workspace-initialize-timeout*)))
+@@ -435,10 +858,17 @@
+-                  (add-workspace workspace)
+-                  (set-trigger-characters workspace)
+-                  (add-buffer-hooks buffer)
+-                  (when continuation (funcall continuation))
+-                  (let ((mode (ensure-mode-object
+-                               (spec-mode
+-                                (workspace-spec workspace)))))
+-                    (initialized-workspace mode workspace))
+-                  (spinner:stop-loading-spinner spinner)
+-                  (redraw-display)))))))
++                  (finish-workspace-initialization workspace spinner))
++                :error #'fail)))
++      (connect (workspace-client workspace)
++               (lambda ()
++                 (if (and (eq :starting (workspace-state workspace))
++                          (current-workspace-entry-p workspace))
++                     (handler-case
++                         (start-initialize)
++                       (error (condition)
++                         (fail (princ-to-string condition) nil)))
++                     (progn
++                       (spinner:stop-loading-spinner spinner)
++                       (dispose-workspace workspace))))
++               :error #'fail
++               :continue-p
++               (lambda ()
++                 (eq :starting (workspace-state workspace)))))))
+@@ -447,11 +877,61 @@
+-  (let ((spec (buffer-language-spec buffer)))
+-    (if-let ((workspace (find-workspace (spec-language-id spec) :errorp nil)))
+-      (progn
+-        (add-buffer-hooks buffer)
+-        (when continuation (funcall continuation)))
+-      (let ((client (run-server spec)))
+-        (connect-and-initialize (make-workspace :spec spec
+-                                                :client client
+-                                                :buffer buffer)
+-                                buffer
+-                                continuation)))))
++  (unless (lsp-buffer-eligible-p buffer)
++    (editor-error "LSP requires a local file-backed buffer with a language spec."))
++  (let* ((spec (buffer-language-spec buffer))
++         (workspace (find-workspace-for-buffer spec buffer)))
++    (when (and workspace
++               (eq :ready (workspace-state workspace))
++               (not (ignore-errors
++                      (client:alive-p (workspace-client workspace)))))
++      (let ((old-workspace workspace)
++            (buffers (adjoin buffer
++                             (remove-if #'deleted-buffer-p
++                                        (copy-list
++                                         (workspace-buffers workspace))))))
++        (dispose-workspace old-workspace)
++        (handler-case
++            (setf workspace
++                  (restart-workspace (workspace-spec old-workspace)
++                                     old-workspace
++                                     buffers))
++          (error (condition)
++            (dolist (affected-buffer buffers)
++              (disable-lsp-mode-for-buffer affected-buffer))
++            (error condition)))
++        (queue-workspace-continuation workspace buffer continuation)
++        (return-from ensure-lsp-buffer workspace)))
++    (cond
++      ((and workspace (eq :ready (workspace-state workspace)))
++       (attach-lsp-buffer buffer workspace)
++       (activate-lsp-buffer buffer workspace)
++       (when continuation (funcall continuation))
++       workspace)
++      ((and workspace (eq :starting (workspace-state workspace)))
++       (attach-lsp-buffer buffer workspace)
++       (queue-workspace-continuation workspace buffer continuation)
++       workspace)
++      (t
++       (let* ((workspace (make-workspace :spec spec :buffer buffer))
++              (client (run-server
++                       spec :directory (workspace-root-pathname workspace))))
++         (setf (workspace-client workspace) client)
++         (connect-and-initialize workspace buffer continuation)
++         workspace)))))
++
++(defgeneric prepare-restarted-workspace (spec old-workspace new-workspace)
++  (:method (spec old-workspace new-workspace)
++    (declare (ignore spec old-workspace))
++    new-workspace))
++
++(defgeneric restart-workspace (spec workspace buffers)
++  (:method (spec workspace buffers)
++    (let* ((buffer (first buffers))
++           (new-workspace (make-workspace :spec spec :buffer buffer)))
++      (prepare-restarted-workspace spec workspace new-workspace)
++      (setf (workspace-client new-workspace)
++            (run-server spec
++                        :directory
++                        (workspace-root-pathname new-workspace)))
++      (connect-and-initialize new-workspace buffer nil)
++      (dolist (other-buffer (rest buffers))
++        (attach-lsp-buffer other-buffer new-workspace))
++      new-workspace)))
+@@ -460 +940,4 @@
+-  (assert (buffer-language-spec (current-buffer))))
++  (let ((workspace (buffer-workspace (current-buffer) nil)))
++    (unless (and workspace (eq :ready (workspace-state workspace)))
++      (editor-error "No initialized LSP workspace for this buffer."))
++    workspace))
+@@ -532,6 +1015,9 @@
+ (defgeneric spec-initialization-options (spec)
+   (:method (spec) nil))
+-
++
++(defgeneric spec-workspace-configuration (spec)
++  (:method (spec) nil))
++
+ (defparameter *client-capabilities-text*
+   (load-time-value
+    (uiop:read-file-string
+@@ -710 +1193 @@
+-(defun initialize (workspace continuation)
++(defun initialize (workspace continuation &key error)
+@@ -722 +1205 @@
+-          (when-let ((value (spec-initialization-options (workspace-spec workspace))))
++          (when-let ((value (workspace-initialization-options workspace)))
+@@ -732 +1215,2 @@
+-           (funcall continuation))))
++           (funcall continuation))
++   :error error))
+@@ -801 +1285 @@
+-                                                  :uri (buffer-uri buffer))
++                                                  :uri (buffer-opened-uri buffer))
+@@ -827,2 +1311,12 @@
+-(defun text-document/did-close (buffer)
+-  (when-let (workspace (buffer-workspace buffer nil))
++(defun handle-save-buffer (buffer)
++  (when-let (workspace (buffer-value buffer 'lsp-workspace))
++    (cond
++      ((not (lsp-buffer-attachment-valid-p buffer workspace))
++       (rebind-lsp-buffer
++        buffer workspace
++        :continuation (lambda () (text-document/did-save buffer))))
++      ((eq :open (buffer-value buffer 'lsp-state))
++       (text-document/did-save buffer)))))
++
++(defun text-document/did-close (buffer &key workspace uri)
++  (when-let (workspace (or workspace (buffer-workspace buffer nil)))
+@@ -833 +1327,5 @@
+-                    :text-document (make-text-document-identifier buffer)))))
++                    :text-document
++                    (make-instance 'lsp:text-document-identifier
++                                   :uri (or uri
++                                            (buffer-opened-uri buffer)
++                                            (buffer-uri buffer)))))))
+@@ -939,7 +1437,9 @@
+-    (reset-buffer-diagnostic buffer)
+-    (do-sequence (diagnostic (lsp:publish-diagnostics-params-diagnostics params))
+-      (highlight-diagnostic workspace buffer diagnostic))
+-    (setf (buffer-diagnostic-idle-timer buffer)
+-          (start-timer (make-idle-timer 'popup-diagnostic :name "lsp-diagnostic")
+-                       200
+-                       :repeat t))))
++    (when (workspace-response-current-p workspace buffer)
++      (reset-buffer-diagnostic buffer)
++      (do-sequence (diagnostic (lsp:publish-diagnostics-params-diagnostics params))
++        (highlight-diagnostic workspace buffer diagnostic))
++      (setf (buffer-diagnostic-idle-timer buffer)
++            (start-timer
++             (make-idle-timer 'popup-diagnostic :name "lsp-diagnostic")
++             200
++             :repeat t)))))
+@@ -1533,2 +2033,5 @@
+-  (let ((workspace (buffer-workspace (point-buffer point) nil)))
+-    (if (and workspace (provide-completion-p workspace))
++  (let* ((buffer (point-buffer point))
++         (workspace (buffer-workspace buffer nil)))
++    (if (and workspace
++             (eq :ready (workspace-state workspace))
++             (provide-completion-p workspace))
+@@ -1542,10 +2045,12 @@
+-                 (let ((items
+-                         (handler-case
+-                             (convert-completion-response
+-                              point response workspace)
+-                           (error (condition)
+-                             (message
+-                              "Ignoring malformed LSP completion response: ~A"
+-                              condition)
+-                             nil))))
+-                   (funcall then items)))
++                 (if (workspace-response-current-p workspace buffer)
++                     (let ((items
++                             (handler-case
++                                 (convert-completion-response
++                                  point response workspace)
++                               (error (condition)
++                                 (message
++                                  "Ignoring malformed LSP completion response: ~A"
++                                  condition)
++                                 nil))))
++                       (funcall then items))
++                     (funcall then nil)))
+@@ -1651 +2156,2 @@
+-  (when-let ((workspace (get-workspace-from-point point)))
++  (let ((buffer (point-buffer point)))
++    (when-let ((workspace (get-workspace-from-point point)))
+@@ -1662 +2168,4 @@
+-                             (unless (lsp-null-p result)
++                             (when (and
++                                    (workspace-response-current-p
++                                     workspace buffer)
++                                    (not (lsp-null-p result)))
+@@ -1664 +2173,4 @@
+-                               (redraw-display)))))))
++                               (redraw-display))))
++                     :error (lambda (message code)
++                              (feature-request-error
++                               workspace buffer message code))))))
+@@ -1725 +2237 @@
+-           (file (uri-to-pathname uri)))
++           (file (ignore-errors (uri-to-pathname uri))))
+@@ -1727 +2239 @@
+-      (when (uiop:file-exists-p file)
++      (when (and file (uiop:file-exists-p file))
+@@ -1757 +2269,2 @@
+-  (when-let ((workspace (get-workspace-from-point point)))
++  (let ((buffer (point-buffer point)))
++    (when-let ((workspace (get-workspace-from-point point)))
+@@ -1764 +2277 @@
+-              (make-text-document-position-arguments point workspace))
++       (make-text-document-position-arguments point workspace))
+@@ -1766,2 +2279,7 @@
+-               (funcall then (convert-definition-response response workspace))
+-               (redraw-display))))))
++               (when (workspace-response-current-p workspace buffer)
++                 (funcall then
++                          (convert-definition-response response workspace))
++                 (redraw-display)))
++       :error (lambda (message code)
++                (feature-request-error
++                 workspace buffer message code)))))))
+@@ -1784 +2302,2 @@
+-  (when-let ((workspace (get-workspace-from-point point)))
++  (let ((buffer (point-buffer point)))
++    (when-let ((workspace (get-workspace-from-point point)))
+@@ -1792,3 +2311,8 @@
+-                             (funcall then
+-                                      (convert-type-definition-response
+-                                       response workspace)))))))
++                             (when (workspace-response-current-p
++                                    workspace buffer)
++                               (funcall then
++                                        (convert-type-definition-response
++                                         response workspace))))
++                     :error (lambda (message code)
++                              (feature-request-error
++                               workspace buffer message code)))))))
+@@ -1811 +2335,2 @@
+-  (when-let ((workspace (get-workspace-from-point point)))
++  (let ((buffer (point-buffer point)))
++    (when-let ((workspace (get-workspace-from-point point)))
+@@ -1819,3 +2344,8 @@
+-                             (funcall then
+-                                      (convert-implementation-response
+-                                       response workspace)))))))
++                             (when (workspace-response-current-p
++                                    workspace buffer)
++                               (funcall then
++                                        (convert-implementation-response
++                                         response workspace))))
++                     :error (lambda (message code)
++                              (feature-request-error
++                               workspace buffer message code)))))))
+@@ -1855 +2385,2 @@
+-  (when-let ((workspace (get-workspace-from-point point)))
++  (let ((buffer (point-buffer point)))
++    (when-let ((workspace (get-workspace-from-point point)))
+@@ -1864 +2395 @@
+-              (make-text-document-position-arguments point workspace))
++       (make-text-document-position-arguments point workspace))
+@@ -1866,2 +2397,7 @@
+-               (funcall then (convert-references-response response workspace))
+-               (redraw-display))))))
++               (when (workspace-response-current-p workspace buffer)
++                 (funcall then
++                          (convert-references-response response workspace))
++                 (redraw-display)))
++       :error (lambda (message code)
++                (feature-request-error
++                 workspace buffer message code)))))))
+@@ -1933 +2469,2 @@
+-  (when-let ((workspace (get-workspace-from-point point)))
++  (let ((buffer (point-buffer point)))
++    (when-let ((workspace (get-workspace-from-point point)))
+@@ -1934 +2471,2 @@
+-    (when (provide-document-highlight-p workspace)
++    (when (and (workspace-response-current-p workspace buffer)
++               (provide-document-highlight-p workspace))
+@@ -1944 +2481,2 @@
+-                   (unless (lsp-null-p value)
++                   (when (and (workspace-response-current-p workspace buffer)
++                              (not (lsp-null-p value)))
+@@ -1947,2 +2485,5 @@
+-                        workspace (point-buffer point) value)
+-                       (redraw-display))))))))))
++                        workspace buffer value)
++                       (redraw-display)))))
++           :error (lambda (message code)
++                    (feature-request-error
++                     workspace buffer message code))))))))
+@@ -1970,0 +2512,6 @@
++  (declare (ignore mode command argument))
++  (let* ((buffer (current-buffer))
++         (workspace (buffer-value buffer 'lsp-workspace)))
++    (when (and workspace
++               (not (lsp-buffer-attachment-valid-p buffer workspace)))
++      (rebind-lsp-buffer buffer workspace)))
+@@ -2041 +2588 @@
+-(define-attribute symbol-kind-enum-membe-attribute
++(define-attribute symbol-kind-enum-member-attribute
+@@ -2081 +2628 @@
+-                   'symbol-kind-enum-membe-attribute
++                   'symbol-kind-enum-member-attribute
+@@ -2431,0 +2979,15 @@
++(define-command lsp-shutdown-server () ()
++  (let* ((buffer (current-buffer))
++         (workspace
++           (or (buffer-workspace buffer nil)
++               (when (lsp-buffer-eligible-p buffer)
++                 (find-workspace-for-buffer
++                  (buffer-language-spec buffer) buffer)))))
++    (unless workspace
++      (editor-error "No LSP workspace for this project."))
++    (let ((buffers (copy-list (workspace-buffers workspace))))
++      (dispose-workspace workspace)
++      (dolist (owned-buffer buffers)
++        (disable-lsp-mode-for-buffer owned-buffer)))
++    (show-message "LSP workspace stopped.")))
++
+@@ -2433,6 +2995,23 @@
+-  (when-let (workspace (buffer-workspace (current-buffer) nil))
+-    (dispose-workspace workspace))
+-  ;; TODO:
+-  ;; It's not enough to reopen just the current buffer,
+-  ;; we need to check the entire `buffer-list`.
+-  (ensure-lsp-buffer (current-buffer)))
++  (let* ((current (current-buffer))
++         (workspace (buffer-workspace current nil))
++         (buffers
++           (if workspace
++               (remove-if #'deleted-buffer-p
++                          (copy-list (workspace-buffers workspace)))
++               (list current))))
++    (setf buffers
++          (remove-if-not #'lsp-buffer-eligible-p
++                         (cons current (delete current buffers))))
++    (cond
++      ((and workspace buffers)
++       (let ((spec (workspace-spec workspace)))
++         (dispose-workspace workspace)
++         (handler-case
++             (restart-workspace spec workspace buffers)
++           (error (condition)
++             (dolist (buffer buffers)
++               (disable-lsp-mode-for-buffer buffer))
++             (error condition)))))
++      (buffers
++       (with-current-buffer (first buffers)
++         (lsp-mode t))))))
+@@ -2444 +3023,3 @@
+-  (unless *disable*
++  (unless (or (eq *disable* t)
++              (eq *disable* (current-buffer))
++              (not (lsp-buffer-eligible-p (current-buffer))))
+--- a/extensions/lisp-mode/lisp-mode.lisp
++++ b/extensions/lisp-mode/lisp-mode.lisp
+@@ -41 +41 @@
+-  (setf (variable-value 'root-uri-patterns) '(".asd"))
++  (setf (variable-value 'root-uri-patterns) '("*.asd"))
+--- a/extensions/lisp-mode/v2/lsp-config.lisp
++++ b/extensions/lisp-mode/v2/lsp-config.lisp
+@@ -12 +12 @@
+-  :root-uri-patterns '(".asd")
++  :root-uri-patterns '("*.asd")
+@@ -54 +54 @@
+-(defmethod lem-lsp-mode::run-server ((spec lisp-spec))
++(defmethod lem-lsp-mode::run-server ((spec lisp-spec) &key directory)
+@@ -56 +56 @@
+-      (call-next-method)
++      (call-next-method spec :directory directory)
+@@ -62,0 +63,31 @@
++(defmethod lem-lsp-mode::make-workspace-key ((spec lisp-spec) root-pathname)
++  (declare (ignore root-pathname))
++  (if *self-connection*
++      (list (class-name (class-of spec)) :self-connection)
++      (list (class-name (class-of spec)) :manual (gensym "LISP-WORKSPACE-"))))
++
++(defmethod lem-lsp-mode::find-workspace-for-buffer ((spec lisp-spec) buffer)
++  (declare (ignore buffer))
++  (or (lem-lsp-mode::find-workspace
++       (lem-lsp-mode/spec:spec-language-id spec)
++       :errorp nil)
++      (call-next-method)))
++
++(defmethod lem-lsp-mode::workspace-matches-buffer-p
++    (workspace (spec lisp-spec) buffer)
++  (declare (ignore buffer))
++  (equal (lem-lsp-mode::workspace-language-id workspace)
++         (lem-lsp-mode/spec:spec-language-id spec)))
++
++(defmethod lem-lsp-mode::restart-workspace :around
++    ((spec lisp-spec) workspace buffers)
++  (let ((*self-connection* (self-connection-p workspace)))
++    (call-next-method)))
++
++(defmethod lem-lsp-mode::prepare-restarted-workspace
++    ((spec lisp-spec) old-workspace new-workspace)
++  (declare (ignore spec))
++  (setf (self-connection-p new-workspace)
++        (self-connection-p old-workspace))
++  new-workspace)
++
+@@ -65 +96,3 @@
+-    (lem-lsp-mode::change-workspace workspace)))
++    (when (and workspace
++               (lem-lsp-mode::current-workspace-entry-p workspace))
++      (lem-lsp-mode::change-workspace workspace))))
+@@ -79,4 +112,7 @@
+-           (client (lem-lsp-mode::run-server spec))
+-           (workspace (lem-lsp-mode::make-workspace :spec spec
+-                                                    :client client
+-                                                    :buffer (current-buffer))))
++           (workspace (lem-lsp-mode::make-workspace
++                       :spec spec :buffer (current-buffer)))
++           (client (lem-lsp-mode::run-server
++                    spec
++                    :directory
++                    (lem-lsp-mode::workspace-root-pathname workspace))))
++      (setf (lem-lsp-mode::workspace-client workspace) client)
+@@ -87 +123,2 @@
+-                                              (reinitialize-all-lisp-buffers))))))
++                                              (lem-lsp-mode::change-workspace
++                                               workspace))))))

@@ -1,0 +1,104 @@
+diff --git a/src/window/virtual-line.lisp b/src/window/virtual-line.lisp
+--- a/src/window/virtual-line.lisp
++++ b/src/window/virtual-line.lisp
+@@ -2,0 +3,51 @@
++;; A mode may provide a non-destructive line-visibility predicate.  Keeping
++;; this at the display/movement layer lets parsers and structural commands
++;; continue to address the real buffer while outline-like modes hide rows.
++(define-editor-variable line-hidden-function nil)
++
++(defun line-hidden-p (point)
++  (alexandria:when-let
++      ((function (variable-value 'line-hidden-function :default point)))
++    (not (null (funcall function point)))))
++
++(defun move-to-next-visible-line (point &optional (n 1))
++  "Move POINT forward by N non-hidden logical lines."
++  (check-type n (integer 0 *))
++  (with-point ((candidate point))
++    (dotimes (_ n)
++      (loop
++        (unless (line-offset candidate 1)
++          (return-from move-to-next-visible-line nil))
++        (unless (line-hidden-p candidate)
++          (return))))
++    (move-point point candidate)))
++
++(defun move-to-previous-visible-line (point &optional (n 1))
++  "Move POINT backward by N non-hidden logical lines."
++  (check-type n (integer 0 *))
++  (with-point ((candidate point))
++    (dotimes (_ n)
++      (loop
++        (unless (line-offset candidate -1)
++          (return-from move-to-previous-visible-line nil))
++        (unless (line-hidden-p candidate)
++          (return))))
++    (move-point point candidate)))
++
++(defun count-visible-lines (start-point end-point)
++  "Return the number of visible logical-line steps between two points."
++  (assert (eq (point-buffer start-point) (point-buffer end-point)))
++  (with-point ((start start-point)
++               (end end-point))
++    (when (point< end start)
++      (rotatef start end))
++    (line-start start)
++    (line-start end)
++    (loop :with count := 0
++          :until (same-line-p start end)
++          :do (unless (line-offset start 1)
++                (return count))
++              (unless (line-hidden-p start)
++                (incf count))
++          :finally (return count))))
++
+@@ -89 +140,3 @@
+-      (map-region start-point
++      (with-point ((line start-point))
++        (line-start line)
++        (map-region start-point
+@@ -93,3 +146,3 @@
+-                    (map-wrapping-line window
+-                                       string
+-                                       #'inc)))
++                    (unless (line-hidden-p line)
++                      (map-wrapping-line window string #'inc))
++                    (line-offset line 1))))
+@@ -99,2 +152,2 @@
+-  (count-lines (window-buffer-point window)
+-               (window-view-point window)))
++  (count-visible-lines (window-buffer-point window)
++                       (window-view-point window)))
+@@ -168 +221 @@
+-      (line-offset point 1)))
++      (move-to-next-visible-line point)))
+@@ -175 +228 @@
+-        (and (line-offset point -1)
++        (and (move-to-previous-visible-line point)
+@@ -184 +237,2 @@
+-    (return-from move-to-next-virtual-line-n (line-offset point n)))
++    (return-from move-to-next-virtual-line-n
++      (move-to-next-visible-line point n)))
+@@ -197 +251 @@
+-            (unless (line-offset point 1)
++            (unless (move-to-next-visible-line point)
+@@ -208 +262,2 @@
+-    (return-from move-to-previous-virtual-line-n (line-offset point (- n))))
++    (return-from move-to-previous-virtual-line-n
++      (move-to-previous-visible-line point n)))
+@@ -240 +295 @@
+-                (unless (line-offset point -1)
++                (unless (move-to-previous-visible-line point)
+diff --git a/src/display/logical-line.lisp b/src/display/logical-line.lisp
+--- a/src/display/logical-line.lisp
++++ b/src/display/logical-line.lisp
+@@ -291,0 +292,5 @@
++      ;; A view point can become hidden after a fold is created.  Normalize
++      ;; the rendering copy without changing the window's persistent point.
++      (when (line-hidden-p point)
++        (unless (move-to-next-visible-line point)
++          (move-to-previous-visible-line point)))
+@@ -294 +299 @@
+-                (unless (line-offset point 1)
++                (unless (move-to-next-visible-line point)

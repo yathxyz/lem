@@ -1,0 +1,7 @@
+diff --git a/extensions/lsp-base/type.lisp b/extensions/lsp-base/type.lisp
+index bf125b2c..cfd533f8 100644
+--- a/extensions/lsp-base/type.lisp
++++ b/extensions/lsp-base/type.lisp
+@@ -67 +67 @@
+-(define-condition json-type-error ()
++(define-condition json-type-error (error)

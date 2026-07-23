@@ -1,0 +1,222 @@
+diff --git a/extensions/terminal/ffi.lisp b/extensions/terminal/ffi.lisp
+index 06a7df6973a11a11906eb8ea8a851c969835a3f6..30eb41efe7d5537dc1256667f074f14b58d9e808 100644
+--- a/extensions/terminal/ffi.lisp
++++ b/extensions/terminal/ffi.lisp
+@@ -82,6 +82,7 @@
+   (id :int)
+   (rows :int)
+   (cols :int)
++  (directory :string)
+   (program :string)
+   (argv (string-of-strings))
+   (cb_damage :pointer)
+@@ -95,10 +96,11 @@
+ 
+ (defun terminal-new (directory id rows cols)
+   (let* ((shell (or (uiop:getenv "SHELL") "/bin/bash"))
+-         (argv (list shell "-c" (concatenate 'string "cd " directory "; " shell))))
++         (argv (list shell)))
+     (%terminal-new id
+                    rows
+                    cols
++                   directory
+                    shell
+                    argv
+                    (cffi:callback cb-damage)
+diff --git a/extensions/terminal/terminal-mode.lisp b/extensions/terminal/terminal-mode.lisp
+index 664c295b7a7285d2057c8169a2cb4ba1ec93feec..691c99c 100644
+--- a/extensions/terminal/terminal-mode.lisp
++++ b/extensions/terminal/terminal-mode.lisp
+@@ -65,8 +65,10 @@
+   (let* ((buffer (make-buffer (unique-buffer-name "*Terminal*") :enable-undo-p nil))
+          (terminal (terminal:create :cols 80 :rows 24 :buffer buffer
+                                     :directory buffer-directory)))
+-    (setf (buffer-terminal buffer) terminal)
++    (setf (buffer-directory buffer) buffer-directory
++          (buffer-terminal buffer) terminal)
+     (change-buffer-mode buffer 'terminal-mode)
++    (buffer-unmark buffer)
+     buffer))
+ 
+ (defun on-kill-buffer (buffer)
+diff --git a/extensions/terminal/terminal.lisp b/extensions/terminal/terminal.lisp
+index eea08f5..f021b0f 100644
+--- a/extensions/terminal/terminal.lisp
++++ b/extensions/terminal/terminal.lisp
+@@ -500,7 +500,9 @@ Called when transitioning from scrollback-active to normal view.
+              (setf (terminal-dirty-any-p terminal) nil)))))
+       ;; Position cursor
+       (move-to-line point (1+ (ffi::terminal-cursor-row viscus)))
+-      (move-to-column point (ffi::terminal-cursor-col viscus)))))
++      (move-to-column point (ffi::terminal-cursor-col viscus)))
++    ;; Terminal output is process state, never an unsaved user edit.
++    (buffer-unmark buffer)))
+ 
+ (defmethod adjust-point ((terminal terminal))
+   (let* ((buffer (terminal-buffer terminal))
+diff --git a/extensions/terminal/terminal.c b/extensions/terminal/terminal.c
+index 736e0e5811a6c5e5829b26c74cd25ce91b504ccf..85ce2d5a9af599ddf8fb37b0cd4ec7a04babd2f6 100644
+--- a/extensions/terminal/terminal.c
++++ b/extensions/terminal/terminal.c
+@@ -1,15 +1,24 @@
++#define _GNU_SOURCE
++
+ // linux check Dockerfile or Dockerfile.musl
+ // osx   gcc terminal.c -I/opt/homebrew/include -L/opt/homebrew/lib -lvterm -o terminal.so -shared -fPIC
+ 
+ #include <stdio.h>
+ #include <assert.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include <unistd.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <spawn.h>
+ #include <sys/select.h>
+ #include <sys/time.h>
++#include <sys/wait.h>
+ #include <vterm.h>
+ #include <signal.h>
+ 
++extern char **environ;
++
+ #ifdef __APPLE__
+   #include <util.h>
+   #include <sys/ioctl.h>
+@@ -23,21 +32,103 @@ typedef struct {
+   int fd;
+ } run_shell_result;
+ 
+-static run_shell_result run_shell(int rows, int cols, const char *program, char* const argv[])
++static char **terminal_environment(void)
++{
++  size_t count = 0;
++  size_t output = 0;
++  int term_found = 0;
++  while (environ[count] != NULL) count++;
++
++  char **environment = calloc(count + 2, sizeof(char *));
++  assert(environment != NULL);
++  for (size_t index = 0; index < count; index++) {
++    if (strncmp(environ[index], "TERM=", 5) == 0) {
++      if (!term_found) {
++        environment[output++] = "TERM=xterm-256color";
++        term_found = 1;
++      }
++    } else {
++      environment[output++] = environ[index];
++    }
++  }
++  if (!term_found) environment[output++] = "TERM=xterm-256color";
++  environment[output] = NULL;
++  return environment;
++}
++
++static run_shell_result run_shell(int rows, int cols, const char *directory,
++                                  const char *program, char* const argv[])
+ {
+-  int fd;
++  int fd, slave_fd;
++  int status;
++  char slave_name[1024];
+   struct winsize win = { rows, cols, 0, 0 };
+-  pid_t pid = forkpty(&fd, NULL, NULL, &win);
+-  assert(pid >= 0);
+-  if (pid == 0) {
+-    setenv("TERM", "xterm-256color", 1);
+-    assert(execvp(program, argv) >= 0);
++  pid_t pid;
++  char **environment = terminal_environment();
++  posix_spawn_file_actions_t actions;
++  posix_spawnattr_t attributes;
++  sigset_t default_signals;
++  sigset_t child_mask;
++  short spawn_flags = POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK;
++
++  assert(openpty(&fd, &slave_fd, NULL, NULL, &win) == 0);
++  assert(fd > STDERR_FILENO && slave_fd > STDERR_FILENO);
++  assert(ttyname_r(slave_fd, slave_name, sizeof(slave_name)) == 0);
++
++  assert(posix_spawn_file_actions_init(&actions) == 0);
++  assert(posix_spawn_file_actions_addchdir_np(&actions, directory) == 0);
++  assert(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, slave_name,
++                                          O_RDWR, 0) == 0);
++  assert(posix_spawn_file_actions_adddup2(&actions, STDIN_FILENO,
++                                          STDOUT_FILENO) == 0);
++  assert(posix_spawn_file_actions_adddup2(&actions, STDIN_FILENO,
++                                          STDERR_FILENO) == 0);
++  assert(posix_spawn_file_actions_addclose(&actions, fd) == 0);
++  assert(posix_spawn_file_actions_addclose(&actions, slave_fd) == 0);
++
++  assert(posix_spawnattr_init(&attributes) == 0);
++  assert(sigfillset(&default_signals) == 0);
++  assert(sigdelset(&default_signals, SIGKILL) == 0);
++  assert(sigdelset(&default_signals, SIGSTOP) == 0);
++  assert(sigemptyset(&child_mask) == 0);
++  assert(posix_spawnattr_setsigdefault(&attributes, &default_signals) == 0);
++  assert(posix_spawnattr_setsigmask(&attributes, &child_mask) == 0);
++#ifdef POSIX_SPAWN_SETSID
++  spawn_flags |= POSIX_SPAWN_SETSID;
++#endif
++  assert(posix_spawnattr_setflags(&attributes, spawn_flags) == 0);
++
++  status = posix_spawn(&pid, program, &actions, &attributes, argv, environment);
++  posix_spawnattr_destroy(&attributes);
++  posix_spawn_file_actions_destroy(&actions);
++  free(environment);
++  close(slave_fd);
++  if (status != 0) {
++    close(fd);
++    errno = status;
+   }
++  assert(status == 0);
+ 
+   run_shell_result result = { pid, fd };
+   return result;
+ }
+ 
++static void terminate_shell(pid_t pid)
++{
++  int child_status;
++  pid_t result;
++
++  if (pid <= 0) return;
++  result = waitpid(pid, &child_status, WNOHANG);
++  if (result == pid || (result < 0 && errno == ECHILD)) return;
++
++  kill(-pid, SIGKILL);
++  kill(pid, SIGKILL);
++  do {
++    result = waitpid(pid, &child_status, 0);
++  } while (result < 0 && errno == EINTR);
++}
++
+ ///
+ struct terminal {
+   int id;
+@@ -150,6 +241,7 @@ VTermScreenCallbacks screen_callbacks = {
+ struct terminal *terminal_new(int id,
+                               int rows,
+                               int cols,
++                              const char *directory,
+                               const char *program,
+                               char* const argv[],
+ 			      void *cb_damage,
+@@ -161,7 +253,7 @@ struct terminal *terminal_new(int id,
+ 			      void *cb_sb_pushline,
+                               void *cb_sb_popline)
+ {
+-  run_shell_result result = run_shell(rows, cols, program, argv);
++  run_shell_result result = run_shell(rows, cols, directory, program, argv);
+ 
+   VTerm *vterm = vterm_new(rows, cols);
+   vterm_set_utf8(vterm, 1);
+@@ -198,6 +290,8 @@ struct terminal *terminal_new(int id,
+ 
+ void terminal_delete(struct terminal *terminal)
+ {
++  close(terminal->fd);
++  terminate_shell(terminal->pid);
+   vterm_free(terminal->vterm);
+   free(terminal);
+ }

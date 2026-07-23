@@ -1,0 +1,441 @@
+diff --git a/extensions/vi-mode/commands.lisp b/extensions/vi-mode/commands.lisp
+index f8d8e20..f21d0cf 100644
+--- a/extensions/vi-mode/commands.lisp
++++ b/extensions/vi-mode/commands.lisp
+@@ -218,7 +218,7 @@
+   (line-offset (current-point) (1- n)))
+
+ (define-motion vi-next-display-line (&optional (n 1)) (:universal)
+-    (:type :line)
++    (:type :exclusive)
+   (next-line n))
+
+ (define-motion vi-previous-line (&optional (n 1)) (:universal)
+@@ -226,7 +226,7 @@
+   (previous-logical-line n))
+
+ (define-motion vi-previous-display-line (&optional (n 1)) (:universal)
+-    (:type :line)
++    (:type :exclusive)
+   (previous-line n))
+
+ (define-motion vi-scroll-down (&optional (n nil)) (:universal-nil)
+@@ -414,11 +414,12 @@
+ (define-operator vi-delete (start end type) ("<R>")
+     (:move-point nil)
+   (when (point= start end)
++    (unless (member type '(:line :screen-line))
+     ;; 'dd' on the empty line at the end of a buffer deletes trailing newlines,
+     ;; but only if the buffer is not empty (i.e. cursor is not at the start of buffer)
+     (if (and (eq 'vi-delete (command-name (this-command)))
+              (not (this-motion-command))
+              (not (start-buffer-p end)))
+         (character-offset end -1)
+-        (return-from vi-delete)))
++        (return-from vi-delete))))
+   (let ((pos (point-charpos (current-point)))
+@@ -470,8 +471,13 @@
+ (define-operator vi-change (beg end type) ("<R>")
+     (:move-point nil)
+   (when (point= beg end)
++    (delete-region beg end :type type)
++    (when (eq type :line)
++      (insert-character (current-point) #\Newline)
++      (character-offset (current-point) -1))
++    (setf (buffer-state) 'insert)
+     (return-from vi-change))
+   (let ((end-with-newline (char= (character-at end -1) #\Newline)))
+     (case type
+       (:line
+        (vi-delete beg end type)
+@@ -478,11 +484,13 @@
+        (cond
+          (end-with-newline
+           (insert-character (current-point) #\Newline)
+           (character-offset (current-point) -1))
+          (t
+-          (insert-character (current-point) #\Newline)))
++          (insert-character (current-point) #\Newline)
++          (character-offset (current-point) -1)))
+        (indent-line (current-point)))
+-      (t (unless (eql (character-at (current-point)) #\Space)
++      (t (unless (or end-with-newline
++                     (eql (character-at (current-point)) #\Space))
+            (skip-whitespace-backward end))
+          (vi-delete beg end type))))
+   (setf (buffer-state) 'insert))
+@@ -547,7 +554,7 @@ Move the cursor to the first non-blank character of the line."
+                                         (line-number-at-point end)))
+      (move-to-column (current-point) (min (point-column start)
+                                           (point-column end))))
+-    (:line
++    ((:line :screen-line)
+      (move-to-column start (point-charpos (current-point)))
+      (move-point (current-point) start))
+     (otherwise
+@@ -573,7 +580,8 @@ Move the cursor to the first non-blank character of the line."
+         (vi-yank-from-clipboard-or-killring)
+       (cond
+         ((visual-p)
+-         (let ((visual-line (visual-line-p)))
++         (let ((visual-line (or (visual-line-p)
++                                (visual-screen-line-p))))
+            (lem-core::with-enable-clipboard nil
+              (multiple-value-bind (beg end type)
+                  (visual-region)
+diff --git a/extensions/vi-mode/commands/utils.lisp b/extensions/vi-mode/commands/utils.lisp
+index fa88365..31a2c54 100644
+--- a/extensions/vi-mode/commands/utils.lisp
++++ b/extensions/vi-mode/commands/utils.lisp
+@@ -27,7 +27,10 @@
+   (:import-from :lem-vi-mode/visual
+                 :visual-p
+                 :visual-line-p
++                :visual-screen-line-p
+                 :visual-block-p
++                :respect-visual-line-mode-p
++                :screen-line-range
+                 :visual-range
+                 :vi-visual-end)
+   (:import-from :lem/common/command
+@@ -100,7 +103,7 @@
+     (t (values arg-list '("P") nil))))
+
+ (defmacro define-motion (name arg-list arg-descriptors (&key type jump (repeat :motion) (default-n-arg 1)) &body body)
+-  (check-type type (or null (member :inclusive :exclusive :line :block)))
++  (check-type type (or null (member :inclusive :exclusive :line :screen-line :block)))
+   (check-type jump boolean)
+   `(define-command (,name (:advice-classes vi-motion)
+                           (:initargs
+@@ -160,9 +163,16 @@
+                  (if (eq command-name (command-name (this-command)))
+                      ;; Recursive call of the operator like 'dd', 'cc'
+                      (save-excursion
+-                       (ignore-some-conditions (end-of-buffer)
+-                         (next-logical-line (1- (or uarg 1))))
+-                       (values start (copy-point (current-point) :temporary) :line))
++                       (if (respect-visual-line-mode-p)
++                           (ignore-some-conditions (end-of-buffer)
++                             (next-line (1- (or uarg 1))))
++                           (ignore-some-conditions (end-of-buffer)
++                             (next-logical-line (1- (or uarg 1)))))
++                       (values start
++                               (copy-point (current-point) :temporary)
++                               (if (respect-visual-line-mode-p)
++                                   :screen-line
++                                   :line)))
+                      ;; raise error for invalid commands
+                      (error 'editor-abort :message nil)))
+                 (otherwise
+@@ -175,6 +185,7 @@
+            (list
+             (cond
+               ((visual-line-p) :line)
++              ((visual-screen-line-p) :screen-line)
+               ((visual-block-p) :block)
+               (t :exclusive))))))
+
+@@ -191,9 +202,14 @@
+                    (line-start start)
+                    (or (line-offset end 1 0)
+                        (line-end end))))
++          (:screen-line
++           (unless (visual-p)
++             (destructuring-bind (screen-start screen-end)
++                 (screen-line-range start end)
++               (move-point start screen-start)
++               (move-point end screen-end))))
+           (:block)
+           (:inclusive
+-           (unless (point= start end)
+-             (character-offset end 1)))
++           (character-offset end 1))
+           (:exclusive))
+         (values start end type))
+diff --git a/extensions/vi-mode/registers.lisp b/extensions/vi-mode/registers.lisp
+index 062cc19..3c312e5 100644
+--- a/extensions/vi-mode/registers.lisp
++++ b/extensions/vi-mode/registers.lisp
+@@ -220,16 +220,23 @@
+                (lem:alive-point-p end))
+     (return-from yank-region))
+   (with-killring-context (:options (case type
+-                                     (:line :vi-line)
++                                     ((:line :screen-line) :vi-line)
+                                      (:block :vi-block)))
+     (copy-to-clipboard-with-killring
+      (case type
+        (:block
+         (process-block-region start end))
++       ((:line :screen-line)
++        (let ((text (points-to-string start end)))
++          (if (and (plusp (length text))
++                   (eql (char text (1- (length text))) #\Newline))
++              text
++              (concatenate 'string text (string #\Newline)))))
+        (otherwise
+         (points-to-string start end)))))
+   (let ((item (make-yank (peek-killring-item (current-killring) 0)
+                          (case type
++                           (:screen-line :line)
+                            ((:line :block) type)
+                            (otherwise :char)))))
+     (setf *yank-text*
+@@ -242,27 +249,46 @@
+ (defun small-deletion-p (start end type)
+   (and (= (line-number-at-point start)
+           (line-number-at-point end))
+-       (not (member type '(:line :block)))))
++       (not (member type '(:line :screen-line :block)))))
+
+ (defun delete-region (start end &key type)
+-  (let ((small (small-deletion-p start end type)))
++  (let* ((small (small-deletion-p start end type))
++         (line-text
++           (and (member type '(:line :screen-line))
++                (points-to-string start end)))
++         (line-small
++           (and line-text
++                (not (find #\Newline line-text)))))
+     (with-killring-context (:options (case type
+-                                       (:line :vi-line)
++                                       ((:line :screen-line) :vi-line)
+                                        (:block :vi-block)))
+       (copy-to-clipboard-with-killring
+        (case type
+          (:block
+           (process-block-region start end t))
++         ((:line :screen-line)
++          (delete-between-points start end)
++          (if (and (plusp (length line-text))
++                   (eql (char line-text
++                              (1- (length line-text)))
++                        #\Newline))
++              line-text
++              (concatenate 'string
++                           line-text
++                           (string #\Newline))))
+          (otherwise
+           (delete-between-points start end)))))
+     (let ((yank (make-yank (peek-killring-item (current-killring) 0)
+                            (case type
++                             (:screen-line :line)
+                              ((:line :block) type)
+                              (otherwise :char)))))
++      (when line-small
++        (setf *small-deletion-register*
++              (make-yank line-text :char)))
+-      (unless small
+-        (ring-push *deletion-history* yank))
++      (ring-push *deletion-history* yank)
+       (if small
+           (setf *small-deletion-register* yank
+                 *unnamed-register* #\-)
+           (setf *unnamed-register* #\1))))
+   (values))
+diff --git a/extensions/vi-mode/visual.lisp b/extensions/vi-mode/visual.lisp
+index 4c698df..8b57b8c 100644
+--- a/extensions/vi-mode/visual.lisp
++++ b/extensions/vi-mode/visual.lisp
+@@ -20,12 +20,19 @@
+            :vi-visual-end
+            :vi-visual-char
+            :vi-visual-line
++           :vi-visual-screen-line
+            :vi-visual-block
+            :visual
+            :visual-p
+            :visual-char-p
+            :visual-line-p
++           :visual-screen-line-p
+            :visual-block-p
++           :respect-visual-line-mode
++           :respect-visual-line-mode-p
++           :screen-line-start
++           :screen-line-end
++           :screen-line-range
+            :visual-range
+            :apply-visual-range
+            :vi-visual-insert
+@@ -36,6 +43,37 @@
+
+ (defvar *visual-keymap* (make-keymap :description '*visual-keymap*))
+
++(define-editor-variable respect-visual-line-mode nil
++  "Whether Vi line commands follow displayed rows while line wrapping is on.")
++
++(defun respect-visual-line-mode-p (&optional (buffer (current-buffer)))
++  (and (variable-value 'respect-visual-line-mode :default buffer)
++       (variable-value 'line-wrap :default buffer)))
++
++(defun screen-line-start (point &optional (window (current-window)))
++  "Return a temporary point at the start of POINT's displayed row."
++  (with-point ((start point))
++    (backward-line-wrap start window t)
++    (copy-point start :temporary)))
++
++(defun screen-line-end (point &optional (window (current-window)))
++  "Return a temporary exclusive end for POINT's displayed row."
++  (let ((end (screen-line-start point window)))
++    (or (move-to-next-virtual-line end 1 window)
++        (buffer-end end))
++    end))
++
++(defun screen-line-range (start end &optional (window (current-window)))
++  "Expand START and END to complete displayed rows in WINDOW."
++  (with-point ((start start)
++               (end end))
++    (when (point< end start)
++      (rotatef start end))
++    (move-point start (screen-line-start start window))
++    (move-point end (screen-line-end end window))
++    (list (copy-point start :temporary)
++          (copy-point end :temporary))))
++
+ (defmethod make-region-overlays-using-global-mode ((global-mode vi-mode) cursor)
+   (let ((buffer (point-buffer cursor)))
+     (visual-overlays buffer)))
+@@ -58,6 +96,10 @@
+                              (push (make-line-overlay p 'region :temporary t)
+                                    overlays)))
+        overlays))
++    ;; Displayed-row mode
++    ((visual-screen-line-p buffer)
++     (destructuring-bind (start end) (visual-range buffer)
++       (list (make-overlay start end 'region :temporary t))))
+     ;; Block mode
+     ((visual-block-p buffer)
+      (let ((overlays '()))
+@@ -97,6 +139,10 @@
+   (:default-initargs
+    :name "V-LINE"))
+
++(define-state visual-screen-line (visual) ()
++  (:default-initargs
++   :name "V-SCREEN"))
++
+ (define-state visual-block (visual) ()
+   (:default-initargs
+    :name "V-BLOCK"))
+@@ -128,11 +174,19 @@
+ 
++(defun enable-command-visual (new-state buffer)
++  (unless (visual-p buffer)
++    (buffer-mark-cancel buffer))
++  (enable-visual new-state buffer))
++
+ (define-command vi-visual-char (&optional (buffer (current-buffer))) ()
+-  (enable-visual 'visual-char buffer))
++  (enable-command-visual 'visual-char buffer))
+ 
+ (define-command vi-visual-line (&optional (buffer (current-buffer))) ()
+-  (enable-visual 'visual-line buffer))
++  (enable-command-visual 'visual-line buffer))
+ 
++(define-command vi-visual-screen-line (&optional (buffer (current-buffer))) ()
++  (enable-command-visual 'visual-screen-line buffer))
++
+ (define-command vi-visual-block (&optional (buffer (current-buffer))) ()
+-  (enable-visual 'visual-block buffer))
++  (enable-command-visual 'visual-block buffer))
+ 
+ (defun visual-p (&optional (buffer (current-buffer)))
+@@ -144,6 +198,9 @@
+ (defun visual-line-p (&optional (buffer (current-buffer)))
+   (typep (buffer-state buffer) 'visual-line))
+
++(defun visual-screen-line-p (&optional (buffer (current-buffer)))
++  (typep (buffer-state buffer) 'visual-screen-line))
++
+ (defun visual-block-p (&optional (buffer (current-buffer)))
+   (typep (buffer-state buffer) 'visual-block))
+
+@@ -159,6 +216,8 @@
+        (list start end))
+       ((visual-block-p buffer)
+        (list start end))
++      ((visual-screen-line-p buffer)
++       (screen-line-range start end))
+       (t
+        (when (point< end start)
+          (rotatef start end))
+@@ -180,6 +239,9 @@
+            (visual-block-p buffer))
+        (setf (buffer-mark buffer) start)
+        (move-point (buffer-point buffer) end))
++      ((visual-screen-line-p buffer)
++       (setf (buffer-mark buffer) start)
++       (move-point (buffer-point buffer) end))
+       ((visual-line-p buffer)
+        (unless (same-line-p (buffer-mark buffer) start)
+          (setf (buffer-mark buffer) start))
+diff --git a/src/commands/move.lisp b/src/commands/move.lisp
+index 35011da..f75b11e 100644
+--- a/src/commands/move.lisp
++++ b/src/commands/move.lisp
+@@ -48,8 +48,9 @@
+ (defun next-line-aux (n
+                       point-column-fn
+                       forward-line-fn
+-                      move-to-column-fn)
+-  (if (continue-flag :next-line)
++                      move-to-column-fn
++                      continue-flag)
++  (if (continue-flag continue-flag)
+       (unless (not (null (cursor-saved-column (current-point))))
+         (log:error "asseriton error: (not (null (cursor-saved-column (current-point))))"))
+       (setf (cursor-saved-column (current-point))
+@@ -68,14 +69,16 @@
+   (next-line-aux n
+                  #'point-virtual-line-column
+                  #'move-to-next-virtual-line
+-                 #'move-to-virtual-line-column))
++                 #'move-to-virtual-line-column
++                 :next-display-line))
+
+ (define-command (next-logical-line (:advice-classes movable-advice)) (&optional n) (:universal)
+   "Move the cursor to the next logical line."
+   (next-line-aux n
+                  #'point-column
+                  #'line-offset
+-                 #'move-to-column))
++                 #'move-to-column
++                 :next-logical-line))
+
+ (define-command (previous-line (:advice-classes movable-advice)) (&optional (n 1)) (:universal)
+   "Move the cursor to the previous line."
+diff --git a/src/window/virtual-line.lisp b/src/window/virtual-line.lisp
+index 3d31475..810df35 100644
+--- a/src/window/virtual-line.lisp
++++ b/src/window/virtual-line.lisp
+@@ -284,13 +284,23 @@ next line because it is at the end of width."
+
+ (defun move-to-virtual-line-column (point column &optional (window (current-window)))
+   (backward-line-wrap point window t)
+-  (let ((w 0))
+-    (loop
+-      :while (< w column)
+-      :do (setf w (char-width (character-at point) w))
+-          (when (end-line-p point) (return nil))
+-          (character-offset point 1)
+-      :finally (return t))))
++  (let* ((line (line-string point))
++         (start (point-charpos point))
++         (tab-size
++           (variable-value 'tab-width :default (point-buffer point)))
++         (index (wide-index
++                 line
++                 column
++                 :start start
++                 :tab-size tab-size))
++         (remaining-width
++           (string-width line
++                         :start start
++                         :tab-size tab-size)))
++    (line-offset point 0 (or index (length line)))
++    ;; Preserve the old success contract for mouse hit testing: reaching the
++    ;; exact EOL succeeds, but a column beyond the text returns NIL.
++    (and (<= column remaining-width) point)))
+
+ (defun window-scroll-down (window)
+   (move-to-next-virtual-line (window-view-point window) 1 window))

@@ -1,0 +1,44 @@
+diff --git a/src/display/base.lisp b/src/display/base.lisp
+index d8a04f5d..0518c68d 100644
+--- a/src/display/base.lisp
++++ b/src/display/base.lisp
+@@ -3,2 +3,9 @@
+ (define-editor-variable wrap-line-character #\\)
+ (define-editor-variable wrap-line-attribute nil)
++(define-editor-variable display-line-transform-function nil
++  "Optional function called with BUFFER, the source POINT, a freshly
++constructed LOGICAL-LINE, and the rendering WINDOW before conversion to
++drawing objects.  WINDOW is NIL for callers which construct a logical line
++outside redisplay.  The function may replace display strings and attributes
++but must not modify the buffer or change the number of cells corresponding to
++existing text.")
+diff --git a/src/display/logical-line.lisp b/src/display/logical-line.lisp
+index b2cae3ca..c3f18a70 100644
+--- a/src/display/logical-line.lisp
++++ b/src/display/logical-line.lisp
+@@ -80 +80 @@
+-(defun create-logical-line (point overlays active-modes)
++(defun create-logical-line (point overlays active-modes &optional window)
+@@ -143,6 +143,12 @@
+-        (make-logical-line :string string
+-                           :attributes attributes
+-                           :left-content left-content
+-                           :extend-to-end extend-to-end-attribute
+-                           :end-of-line-cursor-attribute end-of-line-cursor-attribute
+-                           :line-end-overlay line-end-overlay)))))
++        (let ((logical-line
++                (make-logical-line :string string
++                                   :attributes attributes
++                                   :left-content left-content
++                                   :extend-to-end extend-to-end-attribute
++                                   :end-of-line-cursor-attribute end-of-line-cursor-attribute
++                                   :line-end-overlay line-end-overlay)))
++          (alexandria:when-let
++              ((function (variable-value 'display-line-transform-function
++                                         :default (point-buffer point))))
++            (funcall function (point-buffer point) point logical-line window))
++          logical-line)))))
+@@ -297 +303,2 @@
+-      (loop :for logical-line := (create-logical-line point overlays active-modes)
++      (loop :for logical-line := (create-logical-line
++                                  point overlays active-modes window)

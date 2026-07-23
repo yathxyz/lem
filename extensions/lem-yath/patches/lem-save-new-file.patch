@@ -1,0 +1,14 @@
+diff --git a/src/commands/file.lisp b/src/commands/file.lisp
+index 7e19c9d..8d2f367 100644
+--- a/src/commands/file.lisp
++++ b/src/commands/file.lisp
+@@ -390,5 +390,7 @@
+   (cond
+-    ((and (or force-p (buffer-modified-p buffer))
+-          (buffer-filename buffer))
++    ((and (buffer-filename buffer)
++          (or force-p
++              (buffer-modified-p buffer)
++              (not (probe-file (buffer-filename buffer)))))
+      ;; Clobber protection: if the file changed on disk since we loaded or last
+      ;; saved it, writing would silently discard the other process's changes.

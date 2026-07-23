@@ -1,0 +1,27 @@
+diff --git a/extensions/vi-mode/commands.lisp b/extensions/vi-mode/commands.lisp
+index 7de79b4..333e8af 100644
+--- a/extensions/vi-mode/commands.lisp
++++ b/extensions/vi-mode/commands.lisp
+@@ -901,14 +901,16 @@
+         (vi-forward-char (length lem/isearch::*isearch-string*))
+         (loop repeat n
+-              for found = (lem/isearch:isearch-next)
+-              unless found
+-              do (move-point (current-point) p)
+-                 (return)
++              unless (lem/isearch:isearch-next)
++              do (unless (lem/isearch:isearch-next)
++                   (move-point (current-point) p)
++                   (return))
+               finally
+                  (vi-backward-char (length lem/isearch::*isearch-string*)))))))
+-
++
+ (defun vi-search-repeat-backward (n)
+   (when-let ((query (register #\/)))
+     (lem/isearch::change-previous-string query)
+     (with-jumplist
+-      (dotimes (i n) (lem/isearch:isearch-prev)))))
++      (dotimes (i n)
++        (unless (lem/isearch:isearch-prev)
++          (lem/isearch:isearch-prev))))))

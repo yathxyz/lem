@@ -1,0 +1,18 @@
+diff --git a/src/buffer/file.lisp b/src/buffer/file.lisp
+index 32d3863..7602ad5 100644
+--- a/src/buffer/file.lisp
++++ b/src/buffer/file.lisp
+@@ -4,6 +4,7 @@
+
+ (define-editor-variable before-save-hook '())
+ (define-editor-variable after-save-hook '())
++(define-editor-variable write-file-function nil)
+
+ (defvar *external-format-function* nil)
+ (defvar *find-directory-function* nil)
+@@ -143 +144,4 @@
+-   (lambda () (write-to-file-without-write-hook buffer filename))
++   (lambda ()
++     (alexandria:if-let ((writer (buffer-value buffer 'write-file-function)))
++       (funcall writer buffer filename)
++       (write-to-file-without-write-hook buffer filename)))

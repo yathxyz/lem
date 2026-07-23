@@ -1,0 +1,14 @@
+diff --git a/src/ext/directory-mode/internal.lisp b/src/ext/directory-mode/internal.lisp
+index 8db11bf..5d47eb5 100644
+--- a/src/ext/directory-mode/internal.lisp
++++ b/src/ext/directory-mode/internal.lisp
+@@ -246,7 +246,8 @@
+         (insert-directories-and-files p directory
+                                       :sort-method sort-method
+                                       :without-parent-directory nil)
+-        (move-to-line p line-number)))))
++        (move-to-line p line-number)))
++    (buffer-unmark buffer)))
+ 
+ (defun create-directory-buffer (name filename)
+   (let ((buffer (make-buffer name :enable-undo-p nil :read-only-p t)))

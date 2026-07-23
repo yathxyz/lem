@@ -1,0 +1,27 @@
+diff --git a/src/common/timer.lisp b/src/common/timer.lisp
+index f24d7de..b45357d 100644
+--- a/src/common/timer.lisp
++++ b/src/common/timer.lisp
+@@ -206,8 +206,11 @@
+ (defmethod start-timer ((timer idle-timer) ms &key repeat)
+   (setf (timer-ms timer) ms)
+   (setf (timer-repeat-p timer) repeat)
+-  (when *idle-p*
++  ;; A nested event read can ask for the next deadline before the outer idle
++  ;; scope has restarted every timer.  Anchor new timers immediately whenever
++  ;; a manager is available so TIMER-NEXT-TIME never adds MS to NIL.
++  (when (boundp '*timer-manager*)
+     (setf (timer-last-time timer)
+           (get-microsecond-time *timer-manager*)))
+   (push timer *idle-timer-list*)
+   timer)
+@@ -273,5 +276,9 @@
+ (defun get-next-timer-timing-ms ()
+   (when-let (timers *idle-timer-list*)
++    (let ((last-time (get-microsecond-time *timer-manager*)))
++      (dolist (timer timers)
++        (unless (timer-last-time timer)
++          (set-timer-last-time last-time timer))))
+     (- (loop :for timer :in timers
+              :minimize (timer-next-time timer))
+        (get-microsecond-time *timer-manager*))))

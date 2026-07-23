@@ -1,0 +1,51 @@
+diff --git a/src/buffer/package.lisp b/src/buffer/package.lisp
+index 751a350..19b1b90 100644
+--- a/src/buffer/package.lisp
++++ b/src/buffer/package.lisp
+@@ -329,5 +329,8 @@
+   (:export
+    :*find-file-hook*
++   :*before-find-file-hook*
++   :*find-file-read-options*
+    :before-save-hook
+    :after-save-hook
++   :find-file-literally
+    :*external-format-function*
+diff --git a/src/buffer/file.lisp b/src/buffer/file.lisp
+index 32d3863..bdd0709 100644
+--- a/src/buffer/file.lisp
++++ b/src/buffer/file.lisp
+@@ -3 +3,3 @@
+ (defvar *find-file-hook* '())
++(defvar *before-find-file-hook* '())
++(defvar *find-file-read-options* nil)
+@@ -6,0 +9 @@
++(define-editor-variable find-file-literally nil)
+@@ -84,2 +87,6 @@
+         (t
+-         (let* ((name (file-namestring filename))
++         (let ((*find-file-read-options* nil))
++           ;; Run before allocating a buffer or reading any file content.  A
++           ;; callback may abort or select bounded read options for this visit.
++           (run-hooks *before-find-file-hook* filename temporary)
++           (let* ((name (file-namestring filename))
+@@ -93 +100,3 @@
+-           (setf (buffer-filename buffer) filename)
++             (setf (buffer-filename buffer) filename
++                   (variable-value 'find-file-literally :buffer buffer)
++                   (not (null (getf *find-file-read-options* :literal))))
+@@ -145 +154,7 @@
+-                           (insert-file-contents (buffer-start-point buffer) filename)
++                           (insert-file-contents
++                            (buffer-start-point buffer) filename
++                            :external-format
++                            (getf *find-file-read-options* :external-format
++                                  *default-external-format*)
++                            :end-of-line
++                            (getf *find-file-read-options* :end-of-line :auto))
+@@ -108,2 +123,3 @@
+-           (run-hooks *find-file-hook* buffer)
+-           (values buffer t)))))
++             (unless (variable-value 'find-file-literally :default buffer)
++               (run-hooks *find-file-hook* buffer))
++             (values buffer t))))))

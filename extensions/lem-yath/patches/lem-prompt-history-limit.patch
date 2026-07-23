@@ -1,0 +1,19 @@
+diff --git a/src/ext/prompt-window.lisp b/src/ext/prompt-window.lisp
+index a10d1e0..9f87d3b 100644
+--- a/src/ext/prompt-window.lisp
++++ b/src/ext/prompt-window.lisp
+@@ -19,0 +20 @@
++(defvar *prompt-history-limit* nil)
+@@ -297,3 +298,9 @@
+-  (or (gethash history-name *history-table*)
+-      (setf (gethash history-name *history-table*)
+-            (lem/common/history:make-history))))
++  (let ((history
++          (or (gethash history-name *history-table*)
++              (setf (gethash history-name *history-table*)
++                    (lem/common/history:make-history
++                     :limit *prompt-history-limit*)))))
++    (when *prompt-history-limit*
++      (setf (lem/common/history::history-limit history)
++            *prompt-history-limit*))
++    history))

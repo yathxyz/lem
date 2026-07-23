@@ -1,0 +1,216 @@
+diff --git a/src/display/base.lisp b/src/display/base.lisp
+index 6451f12..cdd65cb 100644
+--- a/src/display/base.lisp
++++ b/src/display/base.lisp
+@@ -16,6 +16,13 @@
+ (defgeneric compute-left-display-area-content (mode buffer point)
+   (:method (mode buffer point) nil))
+
++(defgeneric compute-window-content-width (mode buffer window)
++  (:documentation
++   "Return the preferred maximum content width in columns for WINDOW, or NIL.")
++  (:method (mode buffer window)
++    (declare (ignore mode buffer window))
++    nil))
++
+ (defgeneric compute-wrap-left-area-content (mode left-side-width left-side-characters)
+   (:method (mode left-side-width left-side-characters)
+     nil))
+diff --git a/src/display/physical-line.lisp b/src/display/physical-line.lisp
+index add39e7..ba73ff3 100644
+--- a/src/display/physical-line.lisp
++++ b/src/display/physical-line.lisp
+@@ -528,7 +528,7 @@ over the top-level spine and tolerant of improper (dotted) lists.
+             (setf hash (djb2 hash item))))
+       hash)))
+
+-(defun compute-line-fingerprint (logical-line scroll-start left-side-width)
++(defun compute-line-fingerprint (logical-line scroll-start left-side-width right-side-width)
+   "Compute a cheap fingerprint for a logical line's display state."
+   (mix-hashes
+    (logical-line-string logical-line)
+@@ -537,7 +537,8 @@ over the top-level spine and tolerant of improper (dotted) lists.
+    (logical-line-extend-to-end logical-line)
+    (logical-line-line-end-overlay logical-line)
+    scroll-start
+-   left-side-width))
++   left-side-width
++   right-side-width))
+
+ (defun check-line-fingerprint (window y fingerprint)
+   "Check if the fingerprint for line at Y matches. Returns cached height or NIL."
+@@ -644,10 +645,13 @@ over the top-level spine and tolerant of improper (dotted) lists.
+                                                y
+                                                logical-line
+                                                left-side-objects
+-                                               left-side-width)
++                                               left-side-width
++                                               right-side-width)
+   (let* ((left-side-characters (loop :for obj :in left-side-objects
+                                      :when (typep obj 'text-object)
+                                      :sum (length (text-object-string obj))))
+-         (view-width (- (window-view-width window) left-side-width))
++         (view-width (- (window-view-width window)
++                        left-side-width
++                        right-side-width))
+          (buffer (window-buffer window)))
+
+@@ -660,11 +666,13 @@ creating zero temporary letter-objects.
+                                                    y
+                                                    logical-line
+                                                    left-side-objects
+-                                                   left-side-width)
++                                                   left-side-width
++                                                   right-side-width)
+   (let* ((scroll-before (horizontal-scroll-start window))
+          (fingerprint (compute-line-fingerprint logical-line
+                                                 scroll-before
+-                                                left-side-width)))
++                                                left-side-width
++                                                right-side-width)))
+     ;; Early exit if line content unchanged
+     (alexandria:when-let ((cached-height (check-line-fingerprint window y fingerprint)))
+       (return-from redraw-logical-line-when-horizontal-scroll cached-height))
+@@ -675,7 +683,9 @@ creating zero temporary letter-objects.
+       (multiple-value-bind (cursor-object cursor-x)
+           (find-cursor-object objects)
+         (when cursor-object
+-          (let ((width (- (window-view-width window) left-side-width)))
++          (let ((width (- (window-view-width window)
++                          left-side-width
++                          right-side-width)))
+             (cond ((< cursor-x (horizontal-scroll-start window))
+                    (setf (horizontal-scroll-start window) cursor-x))
+                   ((< (+ (horizontal-scroll-start window)
+@@ -690,7 +700,9 @@ creating zero temporary letter-objects.
+                 objects
+                 (horizontal-scroll-start window)
+                 (+ (horizontal-scroll-start window)
+-                   (window-view-width window)))))
++                   (- (window-view-width window)
++                      left-side-width
++                      right-side-width)))))
+         (render-line-with-caching window 0 y (append left-side-objects objects) height))
+       ;; Reuse fingerprint if scroll position didn't change; avoids redundant sxhash
+       (update-line-fingerprint
+@@ -699,16 +711,41 @@ creating zero temporary letter-objects.
+            fingerprint
+            (compute-line-fingerprint logical-line
+                                      (horizontal-scroll-start window)
+-                                     left-side-width))
++                                     left-side-width
++                                     right-side-width))
+        height)
+       height)))
+
++(defun centered-display-margin-width (window content-width)
++  (if content-width
++      (let ((char-width (lem-if:get-char-width (implementation))))
++        (* char-width
++           (floor (max 0
++                       (- (window-view-width window)
++                          (* content-width char-width)))
++                  (* 2 char-width))))
++      0))
++
++(defun left-margin-drawing-objects (width)
++  (when (plusp width)
++    (create-drawing-object
++     (make-string-with-attribute-item
++      :string (make-string
++               (floor width (lem-if:get-char-width (implementation)))
++               :initial-element #\space)))))
++
+ (defun redraw-lines (window)
+   (let* ((*line-wrap* (variable-value 'line-wrap
+                                       :default (window-buffer window)))
+          (redraw-fn (if *line-wrap*
+                         #'redraw-logical-line-when-line-wrapping
+-                        #'redraw-logical-line-when-horizontal-scroll)))
++                        #'redraw-logical-line-when-horizontal-scroll))
++         (content-width
++           (compute-window-content-width (get-active-modes-class-instance (window-buffer window))
++                                         (window-buffer window)
++                                         window))
++         (right-side-width
++           (centered-display-margin-width window content-width)))
+     (let ((y 0)
+           (height (window-view-height window))
+           left-side-width)
+@@ -720,10 +757,16 @@ creating zero temporary letter-objects.
+                              (compute-items-from-string-and-attributes
+                               (lem/buffer/line:content-string content)
+                               (lem/buffer/line:content-attributes content))))))
+-            (setf left-side-width
+-                  (loop :for object :in left-side-objects
+-                        :sum (object-width object)))
+-            (incf y (funcall redraw-fn window y logical-line left-side-objects left-side-width))
++            (let* ((gutter-width
++                     (loop :for object :in left-side-objects
++                           :sum (object-width object)))
++                   (padding-width (max 0 (- right-side-width gutter-width))))
++              (setf left-side-objects
++                    (append (left-margin-drawing-objects padding-width)
++                            left-side-objects)
++                    left-side-width (+ padding-width gutter-width)))
++            (incf y (funcall redraw-fn window y logical-line
++                             left-side-objects left-side-width right-side-width))
+             (unless (< y height)
+               (return-from outer)))))
+       (when (< y height)
+@@ -731,7 +774,9 @@ creating zero temporary letter-objects.
+         (invalidate-drawing-cache-from window y)
+         (lem-if:clear-to-end-of-window (implementation) (window-view window) y))
+       (setf (window-left-width window)
+-            (floor left-side-width (lem-if:get-char-width (implementation)))))))
++            (floor left-side-width (lem-if:get-char-width (implementation)))
++            (window-right-width window)
++            (floor right-side-width (lem-if:get-char-width (implementation)))))))
+
+ (defun call-with-display-error (function)
+   (handler-bind ((error (lambda (e)
+diff --git a/src/internal-packages.lisp b/src/internal-packages.lisp
+index 6dfa60c..5fa27ba 100644
+--- a/src/internal-packages.lisp
++++ b/src/internal-packages.lisp
+@@ -293,6 +293,7 @@
+    :window-y
+    :window-width
+    :window-left-width
++   :window-right-width
+    :window-height
+    :window-buffer
+    :window-screen
+@@ -656,6 +657,7 @@
+    :inactive-window-background-color
+    :redraw-buffer
+    :compute-left-display-area-content
++   :compute-window-content-width
+    :compute-wrap-left-area-content)
+   ;; display/logical-line.lisp
+   (:export
+diff --git a/src/window/window.lisp b/src/window/window.lisp
+index 9080fca..e456803 100644
+--- a/src/window/window.lisp
++++ b/src/window/window.lisp
+@@ -96,6 +96,9 @@
+    (left-width
+     :initform 0
+     :accessor window-left-width)
++   (right-width
++    :initform 0
++    :accessor window-right-width)
+    (modeline-elements-cache
+     :initform '()
+     :accessor window-modeline-elements-cache)
+@@ -193,7 +196,9 @@ uses pixel-aware view creation if the implementation supports it.
+ (defun window-body-width (window)
+   "Return the width of the body of WINDOW.
+ This is the content area in which the buffer is displayed, without any side margins."
+-  (- (window-width window) (window-left-width window)))
++  (- (window-width window)
++     (window-left-width window)
++     (window-right-width window)))
+
+ (defun clear-screens-of-window-list ()
+   (flet ((clear-screen (window)

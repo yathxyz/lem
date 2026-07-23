@@ -1,0 +1,92 @@
+diff --git a/extensions/transient/popup.lisp b/extensions/transient/popup.lisp
+index e0eb69e..35bf7ea 100644
+--- a/extensions/transient/popup.lisp
++++ b/extensions/transient/popup.lisp
+@@ -44,0 +45,42 @@ which call site aborts the transient sequence.")
++(defstruct transient-bottom-state
++  buffer
++  height
++  point-position
++  view-position
++  cursor-invisible-p
++  horizontal-scroll-start)
++
++(defvar *transient-previous-bottom-state* nil
++  "State displaced when the transient popup borrows a bottom-side window.")
++
++(defun snapshot-transient-bottom-state (window)
++  (make-transient-bottom-state
++   :buffer (window-buffer window)
++   :height (window-height window)
++   :point-position (position-at-point (lem-core::%window-point window))
++   :view-position (position-at-point (window-view-point window))
++   :cursor-invisible-p (window-cursor-invisible-p window)
++   :horizontal-scroll-start
++   (window-parameter window 'lem-core::horizontal-scroll-start)))
++
++(defun restore-transient-bottom-state (window state)
++  (let ((buffer (transient-bottom-state-buffer state)))
++    (when (and buffer (not (deleted-buffer-p buffer)))
++      (lem-core::set-window-buffer buffer window)
++      (move-to-position
++       (lem-core::%window-point window)
++       (max 1 (min (transient-bottom-state-point-position state)
++                   (position-at-point (buffer-end-point buffer)))))
++      (move-to-position
++       (window-view-point window)
++       (max 1 (min (transient-bottom-state-view-position state)
++                   (position-at-point (buffer-end-point buffer)))))
++      (resize-bottomside-window
++       window (transient-bottom-state-height state))
++      (setf (window-parameter window 'lem-core::horizontal-scroll-start)
++            (transient-bottom-state-horizontal-scroll-start state))
++      (if (transient-bottom-state-cursor-invisible-p state)
++          (hide-cursor window)
++          (show-cursor window))
++      t)))
++
+@@ -461,2 +503,7 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
+-            (setf *transient-popup-window*
+-                  (make-bottomside-window buffer :height height))))
++            (progn
++              (setf *transient-previous-bottom-state*
++                    (alexandria:when-let
++                        ((bottom (frame-bottomside-window (current-frame))))
++                      (snapshot-transient-bottom-state bottom)))
++              (setf *transient-popup-window*
++                    (make-bottomside-window buffer :height height)))))
+@@ -539 +586 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
+-  "hide (delete) the transient window."
++  "Hide the transient window and restore any bottom pane it borrowed."
+@@ -541,2 +588,7 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
+-  (when (and *transient-popup-window*
+-             (not (deleted-window-p *transient-popup-window*)))
++  (let ((window *transient-popup-window*)
++        (previous *transient-previous-bottom-state*))
++    ;; Clear ownership before window operations so their hooks cannot recurse
++    ;; through stale transient state.
++    (setf *transient-popup-window* nil
++          *transient-previous-bottom-state* nil
++          *transient-shown-keymap* nil)
+@@ -544,3 +595,0 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
+-    (delete-bottomside-window)
+-    (setf *transient-popup-window* nil)
+-    (setf *transient-shown-keymap* nil)
+@@ -547,0 +597,6 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
++    (when (and window
++               (not (deleted-window-p window))
++               (eq window (frame-bottomside-window (current-frame))))
++      (unless (and previous
++                   (restore-transient-bottom-state window previous))
++        (delete-bottomside-window)))
+@@ -569 +624 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
+-  (setf *transient-always-show* (not *transient-always-show*)))
+\ No newline at end of file
++  (setf *transient-always-show* (not *transient-always-show*)))
+diff --git a/src/window/side-window.lisp b/src/window/side-window.lisp
+index 7a5d62e..7943740 100644
+--- a/src/window/side-window.lisp
++++ b/src/window/side-window.lisp
+@@ -110 +110 @@ if a bottom-side window already exists, switch its buffer instead."
+-             (set-window-buffer window buffer)
++             (set-window-buffer buffer window)

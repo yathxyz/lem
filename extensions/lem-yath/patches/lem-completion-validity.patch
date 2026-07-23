@@ -1,0 +1,113 @@
+diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
+index da22672..3f08f8d 100644
+--- a/src/ext/completion-mode.lisp
++++ b/src/ext/completion-mode.lisp
+@@ -10,6 +10,7 @@
+            :completion-item-detail
+            :completion-item-group
+            :completion-item-accept-action
++           :completion-context-input-valid-p
+            :completion-context-options-function
+            :completion-context-observer-function
+            :completion-snippet-preparation-function
+@@ -33,8 +34,10 @@
+   "Function returning completion context options for the current buffer.
+-
++
+ The function receives the completion spec and returns a property list.  The
+-supported keys are :FILTER-FUNCTION, :SEPARATOR, :NARROWING, and
+-:OBSERVER-FUNCTION.  A filter function receives the current completion input
+-and the provider's raw items, and must return the original items it wants
++supported keys are :FILTER-FUNCTION, :TEST-FUNCTION, :SEPARATOR, :NARROWING,
++and :OBSERVER-FUNCTION.  A filter function receives the current completion
++input and the provider's raw items, and must return the original items it wants
++displayed.  A test function receives the complete provider input and raw items,
++and reports whether that input is already a valid completion.
+-displayed.  When :NARROWING is false, displaying synchronous candidates
+-neither inserts their common prefix nor accepts a singleton automatically.")
++When :NARROWING is false, displaying synchronous candidates neither inserts
++their common prefix nor accepts a singleton automatically.")
+@@ -87,6 +90,10 @@
+     :initarg :filter-function
+     :initform nil
+     :reader context-filter-function)
++   (test-function
++    :initarg :test-function
++    :initform nil
++    :reader context-test-function)
+    (separator
+     :initarg :separator
+     :initform nil
+@@ -151,13 +158,18 @@
+    (filter-function
+     :initarg :filter-function
+     :initform nil
+-    :reader spec-filter-function)))
++    :reader spec-filter-function)
++   (test-function
++    :initarg :test-function
++    :initform nil
++    :reader spec-test-function)))
+-
++
+-(defun make-completion-spec (function &key async filter-function)
++(defun make-completion-spec (function &key async filter-function test-function)
+   (make-instance 'completion-spec
+                  :function function
+                  :async async
+-                 :filter-function filter-function))
++                 :filter-function filter-function
++                 :test-function test-function))
+-
++
+ (defun ensure-completion-spec (completion-spec)
+   (typecase completion-spec
+@@ -710,6 +722,19 @@
+                (point<= start (current-point)))
+       (points-to-string start (current-point)))))
+-
++
++(defun completion-context-input-valid-p (context &optional input)
++  "Ask CONTEXT's provider whether INPUT is already a valid completion.
++
++The provider sees its unfiltered items.  Missing predicates and predicate errors
++fail closed so presentation code never mistakes a display-string heuristic for
++provider truth."
++  (alexandria:when-let ((test-function (context-test-function context)))
++    (handler-case
++        (not (null (funcall test-function
++                            (or input (completion-context-input context) "")
++                            (context-raw-items context))))
++      (error () nil))))
++
+ (defun completion-context-separator-present-p (context)
+   (alexandria:when-let* ((separator (context-separator context))
+                          (input (completion-context-input context)))
+@@ -850,6 +875,7 @@
+      &key style then automatic max-display-items (cycle t)
+        (narrowing nil narrowing-supplied-p)
+        (filter-function nil filter-function-supplied-p)
++       (test-function nil test-function-supplied-p)
+        (separator nil separator-supplied-p)
+        (observer-function nil observer-function-supplied-p))
+   "Start a new completion using the completion-spec,
+@@ -871,6 +897,11 @@
+              (filter-function-supplied-p filter-function)
+              ((getf options :filter-function))
+              (t (spec-filter-function spec))))
++         (test-function
++           (cond
++             (test-function-supplied-p test-function)
++             ((getf options :test-function))
++             (t (spec-test-function spec))))
+          (separator
+            (if separator-supplied-p
+                separator
+@@ -895,6 +926,7 @@
+                                  :narrowing narrowing
+                                  :style style
+                                  :filter-function filter-function
++                                 :test-function test-function
+                                  :separator separator
+                                  :observer-function observer-function
+                                  :max-display-items max-display-items

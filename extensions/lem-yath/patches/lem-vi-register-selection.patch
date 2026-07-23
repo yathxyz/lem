@@ -1,0 +1,451 @@
+diff --git a/extensions/vi-mode/registers.lisp b/extensions/vi-mode/registers.lisp
+index 3c312e5..f03a6f2 100644
+--- a/extensions/vi-mode/registers.lisp
++++ b/extensions/vi-mode/registers.lisp
+@@ -2,8 +2,6 @@
+   (:use :cl
+         :lem)
+   (:shadow :yank)
+-  (:import-from :lem-vi-mode/core
+-                :vi-current-window)
+   (:import-from :lem/common/killring
+                 :make-item
+                 :peek-killring-item)
+@@ -24,6 +24,11 @@
+            :downcase-char
+            :yank-region
+            :delete-region
++           :valid-register-p
++           :take-selected-register
++           :with-selected-register
++           :set-last-insertion-register-function
++           :set-expression-register-function
+            :paste-yank))
+ (in-package :lem-vi-mode/registers)
+ 
+@@ -70,6 +74,44 @@
+ (defvar *unnamed-register* nil)
+ (defvar *small-deletion-register* nil)
+ 
++(defvar *selected-register* nil)
++(defvar *selected-register-value* nil)
++(defvar *last-insertion-register-function* nil)
++(defvar *expression-register-function* nil)
++
++(defun set-last-insertion-register-function (function)
++  (check-type function (or null function))
++  (setf *last-insertion-register-function* function)
++  (values))
++
++(defun set-expression-register-function (function)
++  (check-type function (or null function))
++  (setf *expression-register-function* function)
++  (values))
++
++(defun valid-register-p (name)
++  (and (characterp name)
++       (or (named-register-p name)
++           (numbered-register-p name)
++           (find name "\"-_:%.#/=" :test #'char=))))
++
++(defun take-selected-register ()
++  (prog1 *selected-register*
++    (setf *selected-register* nil)))
++
++(defmacro with-selected-register ((name) &body body)
++  `(let ((*selected-register* ,name)
++         (*selected-register-value* nil))
++     (when (char= *selected-register* #\=)
++       (setf *selected-register-value*
++             (multiple-value-list (register *selected-register*))))
++     ,@body))
++
++(defun writable-register-p (name)
++  (or (null name)
++      (named-register-p name)
++      (member name '(#\" #\_) :test #'char=)))
++
+ (defvar *last-ex-command* nil)
+ (defvar *last-search-query* nil)
+ 
+@@ -210,6 +234,22 @@
+                 finally
+                 (return (format nil "~{~A~^~%~}" results))))))))
+ 
++(defun write-explicit-register (name item)
++  (unless (writable-register-p name)
++    (editor-error "Register '\"~A' is read-only." name))
++  (when (named-register-p name)
++    (set-named-register (downcase-char name)
++                        item
++                        :append (upper-case-p name)))
++  ;; Evil's unnamed register contains the text written by the operation, not
++  ;; the accumulated value of an uppercase named register.
++  (setf *unnamed-register* item)
++  (values))
++
++(defun ensure-writable-register (name)
++  (unless (writable-register-p name)
++    (editor-error "Register '\"~A' is read-only." name)))
++
+ (defun yank-region (start end &key type append)
+   ;; A motion that mutates the buffer (e.g. `k` in the REPL, which swaps in a
+   ;; history item and deletes the old input) can leave START or END on a line
+@@ -219,30 +259,37 @@
+                (lem:alive-point-p end))
+     (return-from yank-region))
+-  (with-killring-context (:options (case type
+-                                     ((:line :screen-line) :vi-line)
+-                                     (:block :vi-block)))
+-    (copy-to-clipboard-with-killring
+-     (case type
+-       (:block
+-        (process-block-region start end))
+-       ((:line :screen-line)
+-        (let ((text (points-to-string start end)))
+-          (if (and (plusp (length text))
+-                   (eql (char text (1- (length text))) #\Newline))
+-              text
+-              (concatenate 'string text (string #\Newline)))))
+-       (otherwise
+-        (points-to-string start end)))))
+-  (let ((item (make-yank (peek-killring-item (current-killring) 0)
+-                         (case type
+-                           (:screen-line :line)
+-                           ((:line :block) type)
+-                           (otherwise :char)))))
+-    (setf *yank-text*
+-          (if append
+-              (append-register-item *yank-text* item)
+-              item)))
+-  (setf *unnamed-register* #\0)
++  (let ((register (take-selected-register)))
++    (ensure-writable-register register)
++    (unless (char= (or register #\") #\_)
++      (with-killring-context (:options (case type
++                                         ((:line :screen-line) :vi-line)
++                                         (:block :vi-block)))
++        (copy-to-clipboard-with-killring
++         (case type
++           (:block
++            (process-block-region start end))
++           ((:line :screen-line)
++            (let ((text (points-to-string start end)))
++              (if (and (plusp (length text))
++                       (eql (char text (1- (length text))) #\Newline))
++                  text
++                  (concatenate 'string text (string #\Newline)))))
++           (otherwise
++            (points-to-string start end)))))
++      (let ((item (make-yank (peek-killring-item (current-killring) 0)
++                             (case type
++                               (:screen-line :line)
++                               ((:line :block) type)
++                               (otherwise :char)))))
++        (cond
++          ((or (null register) (char= register #\"))
++           (setf *yank-text*
++                 (if append
++                     (append-register-item *yank-text* item)
++                     item)
++                 *unnamed-register* #\0))
++          (t
++           (write-explicit-register register item))))))
+   (values))
+ 
+ (defun small-deletion-p (start end type)
+@@ -252,45 +299,58 @@
+        (not (member type '(:line :screen-line :block)))))
+ 
+ (defun delete-region (start end &key type)
+-  (let* ((small (small-deletion-p start end type))
+-         (line-text
+-           (and (member type '(:line :screen-line))
+-                (points-to-string start end)))
+-         (line-small
+-           (and line-text
+-                (not (find #\Newline line-text)))))
+-    (with-killring-context (:options (case type
+-                                       ((:line :screen-line) :vi-line)
+-                                       (:block :vi-block)))
+-      (copy-to-clipboard-with-killring
+-       (case type
+-         (:block
+-          (process-block-region start end t))
+-         ((:line :screen-line)
+-          (delete-between-points start end)
+-          (if (and (plusp (length line-text))
+-                   (eql (char line-text
+-                              (1- (length line-text)))
+-                        #\Newline))
+-              line-text
+-              (concatenate 'string
+-                           line-text
+-                           (string #\Newline))))
+-         (otherwise
+-          (delete-between-points start end)))))
+-    (let ((yank (make-yank (peek-killring-item (current-killring) 0)
+-                           (case type
+-                             (:screen-line :line)
+-                             ((:line :block) type)
+-                             (otherwise :char)))))
+-      (when line-small
+-        (setf *small-deletion-register*
+-              (make-yank line-text :char)))
+-      (ring-push *deletion-history* yank)
+-      (if small
+-          (setf *small-deletion-register* yank
+-                *unnamed-register* #\-)
+-          (setf *unnamed-register* #\1))))
++  (let ((register (take-selected-register)))
++    (ensure-writable-register register)
++    (if (and register (char= register #\_))
++        (case type
++          (:block
++           (process-block-region start end t))
++          (otherwise
++           (delete-between-points start end)))
++        (let* ((small (small-deletion-p start end type))
++               (line-text
++                 (and (member type '(:line :screen-line))
++                      (points-to-string start end)))
++               (line-small
++                 (and line-text
++                      (not (find #\Newline line-text)))))
++          (with-killring-context (:options (case type
++                                             ((:line :screen-line) :vi-line)
++                                             (:block :vi-block)))
++            (copy-to-clipboard-with-killring
++             (case type
++               (:block
++                (process-block-region start end t))
++               ((:line :screen-line)
++                (delete-between-points start end)
++                (if (and (plusp (length line-text))
++                         (eql (char line-text
++                                    (1- (length line-text)))
++                              #\Newline))
++                    line-text
++                    (concatenate 'string
++                                 line-text
++                                 (string #\Newline))))
++               (otherwise
++                (delete-between-points start end)))))
++          (let ((yank (make-yank (peek-killring-item (current-killring) 0)
++                                 (case type
++                                   (:screen-line :line)
++                                   ((:line :block) type)
++                                   (otherwise :char)))))
++            (when (and line-small
++                       (or (null register) (char= register #\")))
++              (setf *small-deletion-register*
++                    (make-yank line-text :char)))
++            (ring-push *deletion-history* yank)
++            (cond
++              ((or (null register) (char= register #\"))
++               (if small
++                   (setf *small-deletion-register* yank
++                         *unnamed-register* #\-)
++                   (setf *unnamed-register* #\1)))
++              (t
++               (write-explicit-register register yank)))))))
+   (values))
+ 
+ (defun paste-yank (string type &optional (position :after))
+@@ -299,7 +359,7 @@
+     (let ((point (current-point)))
+       (ecase type
+         (:line
+-         (lem:yank)
++         (lem-core/commands/edit::yank-string point string)
+          (move-point point (cursor-yank-start point))
+          (back-to-indentation point))
+         (:block
+@@ -319 +386 @@
+-         (lem:yank)
++         (lem-core/commands/edit::yank-string point string)
+@@ -325,3 +392,14 @@
++(defun special-register-string (value empty-message)
++  (if value
++      (values value :char)
++      (editor-error "~A" empty-message)))
++
++(defun file-register-string (buffer)
++  (special-register-string
++   (alexandria:when-let ((filename (and buffer (buffer-filename buffer))))
++     (namestring filename))
++   "No file name"))
++
+ (defun register (name)
+   (let ((name (ensure-char name)))
+     (declare (type register name))
+@@ -347,21 +426,31 @@
+          ;; Most recent Ex command (read-only)
+          (#\:
+-          *last-ex-command*)
++          (special-register-string *last-ex-command*
++                                   "No previous command line"))
+          ;; Last inserted text (read-only)
+-         ;(#\.)
++         (#\.
++          (if *last-insertion-register-function*
++              (funcall *last-insertion-register-function*)
++              (values nil :char)))
+          ;; Current file name (read-only)
+          (#\%
+-          (buffer-filename (current-buffer)))
++          (file-register-string (current-buffer)))
+          ;; Alternate file name register
+          (#\#
+-          (buffer-filename (window-buffer (vi-current-window))))
++          (file-register-string (other-buffer)))
+          ;; Expression register
+-         ;(#\=)
++         (#\=
++          (if *selected-register-value*
++              (values-list *selected-register-value*)
++              (if *expression-register-function*
++                  (funcall *expression-register-function*)
++                  (values nil :char))))
+          ;; Selection register
+          ;((#\* #\+))
+          ;; Blackhole register
+          (#\_
+           nil)
+          ;; Last search register
+          (#\/
+-          *last-search-query*))))))
++          (special-register-string *last-search-query*
++                                   "No previous regular expression")))))))
+diff --git a/extensions/vi-mode/commands.lisp b/extensions/vi-mode/commands.lisp
+index f21d0cf..7de79b4 100644
+--- a/extensions/vi-mode/commands.lisp
++++ b/extensions/vi-mode/commands.lisp
+@@ -87,5 +87,6 @@
+            :vi-yank
+            :vi-yank-line
++           :vi-use-register
+            :vi-paste-after
+            :vi-paste-before
+            :vi-replace-char
+@@ -576,51 +577,60 @@
+         (and (enable-clipboard-p) (values (get-clipboard-data) :block)))))
+ 
++(defun vi-selected-yank ()
++  (let ((register (take-selected-register)))
++    (if register
++        (multiple-value-bind (string type) (register register)
++          (values string (or type :char)))
++        (vi-yank-from-clipboard-or-killring))))
++
+ (define-command vi-paste-after (&optional (n 1)) (:universal)
+-  (dotimes (i n)
+-    (multiple-value-bind (string type)
+-        (vi-yank-from-clipboard-or-killring)
++  (multiple-value-bind (string type) (vi-selected-yank)
++    (unless string
++      (return-from vi-paste-after))
++    (dotimes (i n)
+       (cond
+         ((visual-p)
+          (let ((visual-line (or (visual-line-p)
+                                 (visual-screen-line-p))))
+            (lem-core::with-enable-clipboard nil
+              (multiple-value-bind (beg end type)
+                  (visual-region)
+                (vi-delete beg end type))
+              (rotate-killring (current-killring)))
+            (when (and (not visual-line)
+                       (eq type :line))
+              (insert-character (current-point) #\Newline))))
+         (t
+          (if (eq type :line)
+              (progn
+                (or (line-offset (current-point) 1 0)
+                    (progn
+                      (line-end (current-point))
+                      (insert-character (current-point) #\Newline))))
+              (character-offset (current-point) 1))))
+-      (paste-yank string type :after))))
++      (paste-yank string type :after))))
+ 
+ (define-command vi-paste-before (&optional (n 1)) (:universal)
+-  (dotimes (i n)
+-    (multiple-value-bind (string type)
+-        (vi-yank-from-clipboard-or-killring)
++  (multiple-value-bind (string type) (vi-selected-yank)
++    (unless string
++      (return-from vi-paste-before))
++    (dotimes (i n)
+       (cond
+         ((visual-p)
+          (lem-core::with-enable-clipboard nil
+            (multiple-value-bind (beg end type)
+                (visual-region)
+              (vi-delete beg end type))
+            (rotate-killring (current-killring)))
+          (when (eq type :line)
+            (insert-character (current-point) #\Newline)))
+         (t
+          (when (eq type :line)
+            (if (last-line-p (current-point))
+                (progn
+                  (line-start (current-point))
+                  (open-line 1))
+                (line-start (current-point))))))
+-      (paste-yank string type :before))))
++      (paste-yank string type :before))))
+ 
+ (defun read-key-to-replace ()
+@@ -720,5 +730,25 @@
+        (lem-core:key-to-char key)))))
+ 
++(define-command (vi-use-register
++                 (:advice-classes vi-command)
++                 (:initargs :repeat t))
++    (&optional outer-count) (:universal-nil)
++  (let ((register (read-register)))
++    (unless (valid-register-p register)
++      (editor-error "Invalid register: ~A" register))
++    (with-selected-register (register)
++      (let* ((inner-count (read-universal-argument))
++             (count (cond
++                      ((and outer-count inner-count)
++                       (* outer-count inner-count))
++                      (outer-count outer-count)
++                      (inner-count inner-count)))
++             (command-name (read-command)))
++        (unless command-name
++          (editor-error "Expected a command after register ~A" register))
++        (let ((lem-core::*universal-argument* count))
++          (call-command command-name count))))))
++
+ (define-command vi-record-macro (register) ((if (key-recording-p)
+                                                 *kbdmacro-recording-register*
+                                                 (read-register)))
+@@ -888,4 +918,6 @@
+ (define-command vi-search-forward-symbol-at-point (&optional (n 1)) (:universal)
++  (setf *last-search-direction* :forward)
++  (add-hook *isearch-finish-hooks* 'vi-isearch-finish-hook)
+   (with-jumplist
+     (lem/isearch:isearch-forward-symbol-at-point)
+     (lem/isearch:isearch-finish)
+@@ -902,4 +934,6 @@
+ (define-command vi-search-backward-symbol-at-point (&optional (n 1)) (:universal)
++  (setf *last-search-direction* :backward)
++  (add-hook *isearch-finish-hooks* 'vi-isearch-finish-hook)
+   (with-jumplist
+     (lem/isearch:isearch-forward-symbol-at-point)
+     (lem/isearch:isearch-finish)
+diff --git a/extensions/vi-mode/binds.lisp b/extensions/vi-mode/binds.lisp
+index a4b010a..c31d7f0 100644
+--- a/extensions/vi-mode/binds.lisp
++++ b/extensions/vi-mode/binds.lisp
+@@ -112,6 +112,7 @@
+ (define-key *motion-keymap* "C-i" 'vi-jump-next)
+ (define-key *motion-keymap* "'" 'vi-goto-mark)
+ (define-key *motion-keymap* ":" 'vi-ex)
++(define-key *motion-keymap* "\"" 'vi-use-register)
+ 
+ (define-key *motion-keymap* "v" 'vi-visual-char)
+ (define-key *motion-keymap* "V" 'vi-visual-line)

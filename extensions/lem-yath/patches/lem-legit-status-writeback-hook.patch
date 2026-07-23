@@ -1,0 +1,7 @@
+diff --git a/extensions/legit/legit.lisp b/extensions/legit/legit.lisp
+index 8c51f4a..5c18d85 100644
+--- a/extensions/legit/legit.lisp
++++ b/extensions/legit/legit.lisp
+@@ -646 +646 @@ Ongoing:
+-                  'change-grep-buffer)))))
++                  'lem/grep::change-grep-buffer)))))

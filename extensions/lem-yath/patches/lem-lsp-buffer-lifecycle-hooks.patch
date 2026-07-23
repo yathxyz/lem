@@ -1,0 +1,30 @@
+--- a/extensions/lsp-mode/lsp-mode.lisp
++++ b/extensions/lsp-mode/lsp-mode.lisp
+@@ -666,3 +666,9 @@
++(defvar *lsp-buffer-attached-hook* '()
++  "Functions called with BUFFER and WORKSPACE after ownership is attached.")
++
++(defvar *lsp-buffer-detached-hook* '()
++  "Functions called with BUFFER and WORKSPACE after ownership is detached.")
++
+ (defun attach-lsp-buffer (buffer workspace)
+   (let ((old-workspace (buffer-value buffer 'lsp-workspace)))
+     (unless (eq old-workspace workspace)
+@@ -673,5 +679,6 @@
+             (buffer-value buffer 'lsp-state) :pending)
+       (pushnew buffer (workspace-buffers workspace))
+       (add-hook (variable-value 'kill-buffer-hook :buffer buffer)
+-                'close-lsp-buffer)))
++                'close-lsp-buffer)
++      (run-hooks *lsp-buffer-attached-hook* buffer workspace)))
+   workspace)
+@@ -705,7 +713,8 @@
+                  'close-lsp-buffer)
+     (setf (buffer-value buffer 'lsp-workspace) nil
+           (buffer-value buffer 'lsp-state) nil
+-          (buffer-value buffer 'lsp-opened-uri) nil))
++          (buffer-value buffer 'lsp-opened-uri) nil)
++    (run-hooks *lsp-buffer-detached-hook* buffer workspace))
+   (setf (workspace-buffers workspace)
+         (delete buffer (workspace-buffers workspace))
+         (workspace-pending-continuations workspace)

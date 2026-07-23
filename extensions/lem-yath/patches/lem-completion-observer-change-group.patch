@@ -1,0 +1,863 @@
+diff --git a/src/buffer/package.lisp b/src/buffer/package.lisp
+--- a/src/buffer/package.lisp
++++ b/src/buffer/package.lisp
+@@ -98,6 +98,11 @@
+    :buffer-undo-tree-node-children
+    :buffer-undo-tree-node-preferred
+    :buffer-undo-tree-node-saved-sequence
++   :buffer-prepare-change-group
++   :buffer-accept-change-group
++   :buffer-cancel-change-group
++   :buffer-abort-change-group
++   :buffer-change-group-active-p
+    :buffer-value
+    :buffer-unbound
+    :clear-buffer-variables
+diff --git a/src/buffer/file.lisp b/src/buffer/file.lisp
+--- a/src/buffer/file.lisp
++++ b/src/buffer/file.lisp
+@@ -121,7 +121,14 @@
+ 
+ (defun call-with-write-hook (buffer function &optional mark-saved-p)
+   (run-before-save-hooks buffer)
++  ;; A saved identity must name a stable undo node.  Commit an active
++  ;; transaction before external I/O so a splice refusal cannot happen after
++  ;; the file has already changed.
++  (when mark-saved-p
++    (alexandria:when-let
++        ((group (lem/buffer/internal::buffer-%active-change-group buffer)))
++      (buffer-accept-change-group group)))
+   (funcall function)
+   ;; Mark the exact bytes just written before after-save hooks are allowed to
+   ;; create a new dirty descendant.
+   (when mark-saved-p
+diff --git a/src/buffer/internal/buffer.lisp b/src/buffer/internal/buffer.lisp
+--- a/src/buffer/internal/buffer.lisp
++++ b/src/buffer/internal/buffer.lisp
+@@ -131,6 +131,9 @@
+    (%undo-tree-pending-dirty-p
+     :initform nil
+     :accessor buffer-%undo-tree-pending-dirty-p)
++   (%active-change-group
++    :initform nil
++    :accessor buffer-%active-change-group)
+    (encoding
+     :initform nil
+     :accessor buffer-encoding)
+diff --git a/src/buffer/internal/buffer-insert.lisp b/src/buffer/internal/buffer-insert.lisp
+--- a/src/buffer/internal/buffer-insert.lisp
++++ b/src/buffer/internal/buffer-insert.lisp
+@@ -197,7 +197,7 @@
+                                           #'call-next-method)))
+       (when (plusp (length result))
+         (let ((edit (make-edit :insert-string position result)))
+-          (cond (*undo-tree-replaying-p*)
++          (cond ((undo-tree-replaying-buffer-p buffer))
+                 ((inhibit-undo-p)
+                  (recompute-undo-position-offset buffer edit))
+                 ((buffer-%enable-undo-p buffer)
+@@ -213,7 +213,7 @@
+     (let ((string (delete/after-change-function point #'call-next-method)))
+       (when (plusp (length string))
+         (let ((edit (make-edit :delete-string position string)))
+-          (cond (*undo-tree-replaying-p*)
++          (cond ((undo-tree-replaying-buffer-p buffer))
+                 ((inhibit-undo-p)
+                  (recompute-undo-position-offset buffer edit))
+                 ((buffer-%enable-undo-p buffer)
+diff --git a/src/buffer/internal/undo.lisp b/src/buffer/internal/undo.lisp
+--- a/src/buffer/internal/undo.lisp
++++ b/src/buffer/internal/undo.lisp
+@@ -11,6 +11,58 @@
+ (defvar *undo-tree-replaying-p* nil)
+ (defvar *undo-touched-buffers* '())
+ 
++(defun undo-tree-replaying-buffer-p (buffer)
++  "Return true only while undo history is replaying BUFFER."
++  (eq buffer *undo-tree-replaying-p*))
++
++(defvar *undo-tree-history-move-group* nil)
++
++(defstruct (buffer-change-group
++            (:constructor %make-buffer-change-group
++                (buffer baseline baseline-preferred first-node-id
++                 split-open-p split-parent split-parent-preferred)))
++  (buffer nil :read-only t)
++  (baseline nil :read-only t)
++  (baseline-preferred nil :read-only t)
++  (first-node-id 0 :read-only t)
++  (split-open-p nil :read-only t)
++  (split-parent nil :read-only t)
++  (split-parent-preferred nil :read-only t)
++  (state :active))
++
++(defun buffer-change-group-active-p (group)
++  (and (typep group 'buffer-change-group)
++       (eq :active (buffer-change-group-state group))))
++
++(defun retained-change-group-p (group)
++  (and (typep group 'buffer-change-group)
++       (member (buffer-change-group-state group) '(:active :closing))))
++
++(defun retained-buffer-change-group (buffer)
++  (let ((group (buffer-%active-change-group buffer)))
++    (and (retained-change-group-p group) group)))
++
++(defun ensure-undo-history-move-allowed (buffer)
++  "Refuse nested replay and history travel outside a group's close token."
++  (when *undo-tree-replaying-p*
++    (editor-error "Cannot move undo history during undo replay"))
++  (let ((group (retained-buffer-change-group buffer)))
++    (when (and group (not (eq group *undo-tree-history-move-group*)))
++      (editor-error "Cannot move undo history while a change group is active")))
++  t)
++
++(defun active-change-group-protected-node-p (buffer node)
++  (let ((group (buffer-%active-change-group buffer)))
++    (and (retained-change-group-p group)
++         (eq node (buffer-change-group-baseline group)))))
++
++(defun invalidate-buffer-change-group (buffer)
++  (let ((group (buffer-%active-change-group buffer)))
++    (when group
++      (setf (buffer-change-group-state group) :inactive
++            (buffer-%active-change-group buffer) nil)))
++  nil)
++
+ (defstruct (undo-tree-node
+             (:constructor %make-undo-tree-node
+                 (id &key parent edits (payload-bytes 0))))
+@@ -82,6 +134,7 @@
+ 
+ (defun buffer-reset-undo-tree (buffer &key dirty saved-sequence truncated release)
+   "Invalidate BUFFER's undo tree and optionally create a new root at its text."
++  (invalidate-buffer-change-group buffer)
+   (setf *undo-touched-buffers* (delete buffer *undo-touched-buffers* :test #'eq))
+   (incf (buffer-%undo-tree-generation buffer))
+   (setf (buffer-%undo-tree-table buffer) nil
+@@ -127,6 +180,9 @@
+                             :saved-sequence saved-sequence)))
+ 
+ (defun buffer-mark-undo-tree-clean (buffer saved-p)
++  (alexandria:when-let ((group (buffer-%active-change-group buffer)))
++    ;; Clean and saved identities may only point at stable, sealed nodes.
++    (buffer-accept-change-group group))
+   (buffer-undo-tree-finalize buffer)
+   (ensure-buffer-undo-tree buffer)
+   (let ((current (buffer-%undo-tree-current buffer)))
+@@ -174,10 +230,12 @@
+ (defun buffer-modify (buffer)
+   ;; This is a content generation, not a dirty counter.  Saving never resets it.
+   (incf (buffer-%modified-tick buffer))
+-  (cond (*undo-tree-replaying-p*
++  (cond ((undo-tree-replaying-buffer-p buffer)
+          (setf (buffer-%undo-tree-pending-dirty-p buffer) t))
+         ((and (buffer-%enable-undo-p buffer) (not *inhibit-undo*))
+          (setf (buffer-%undo-tree-pending-dirty-p buffer) t))
+         (t
++         ;; No retained route can restore a transaction across this edit.
++         (invalidate-buffer-change-group buffer)
+          (setf (buffer-%undo-tree-untracked-dirty-p buffer) t)))
+  (buffer-mark-cancel buffer))
+@@ -185,7 +243,7 @@
+ (defun push-undo (buffer edit)
+   (when (and (buffer-%enable-undo-p buffer)
+              (not *inhibit-undo*)
+-             (not *undo-tree-replaying-p*)
++             (not (undo-tree-replaying-buffer-p buffer))
+              (plusp (length (edit-string edit))))
+     (ensure-buffer-undo-tree buffer)
+     (cond ((buffer-%undo-tree-discard-open-p buffer)
+@@ -254,6 +312,7 @@
+ (defun prunable-undo-leaf-p (buffer node protected)
+   (and (node-in-buffer-p buffer node)
+        (not (eq node protected))
++       (not (active-change-group-protected-node-p buffer node))
+        (not (eq node (buffer-%undo-tree-current buffer)))
+        (undo-tree-node-parent node)
+        (null (undo-tree-node-children node))))
+@@ -285,6 +344,7 @@
+                (and node
+                     (node-in-buffer-p buffer node)
+                     (not (eq node protected))
++                    (not (active-change-group-protected-node-p buffer node))
+                     (not (eq node (buffer-%undo-tree-current buffer)))
+                     (undo-tree-node-parent node)
+                     (zerop (gethash node child-counts 0))))
+@@ -334,8 +394,11 @@
+ (defun advance-undo-root (buffer protected)
+   (let* ((root (buffer-%undo-tree-root buffer))
+          (children (undo-tree-node-children root)))
+     (when (and (= 1 (length children))
+-               (not (eq (first children) protected)))
++               (not (eq (first children) protected))
++               (not (active-change-group-protected-node-p buffer root))
++               (not (active-change-group-protected-node-p
++                     buffer (first children))))
+       (let ((new-root (first children)))
+         (when (eq root (buffer-%undo-tree-clean buffer))
+           (setf (buffer-%undo-tree-clean buffer) nil))
+@@ -391,7 +454,7 @@
+ (defun pending-edits-list (buffer)
+   (loop :for edit :across (buffer-edit-history buffer) :collect edit))
+ 
+-(defun seal-buffer-undo-command (buffer)
++(defun seal-buffer-undo-command (buffer &optional (prune-p t))
+   (ensure-buffer-undo-tree buffer)
+   (when (buffer-%undo-tree-discard-open-p buffer)
+     (setf (buffer-%undo-tree-discard-open-p buffer) nil
+@@ -418,7 +481,8 @@
+               (buffer-%undo-tree-pending-dirty-p buffer) nil)
+         (incf (buffer-%undo-tree-node-count buffer))
+         (incf (buffer-%undo-tree-generation buffer))
+-        (prune-undo-tree buffer node))))
++        (when prune-p
++          (prune-undo-tree buffer node)))))
+   (make-node-ref buffer (buffer-%undo-tree-current buffer)))
+ 
+ (defun buffer-undo-tree-finalize (&optional (buffer (current-buffer)))
+@@ -637,7 +701,7 @@
+                :finally (return t)))))
+ 
+ (defun apply-undo-route (point up down)
+-  (let ((*undo-tree-replaying-p* t))
++  (let ((*undo-tree-replaying-p* (point-buffer point)))
+     (dolist (node up)
+       (dolist (edit (reverse (undo-tree-node-edits node)))
+         (apply-inverse-edit point edit))
+@@ -648,6 +712,10 @@
+ (defun move-to-undo-node (point destination &optional rollback-destination)
+   (let* ((buffer (point-buffer point))
+-         (current (buffer-%undo-tree-current buffer)))
++         (current (buffer-%undo-tree-current buffer))
++         (tree-generation (buffer-%undo-tree-generation buffer))
++         (tree-table (buffer-%undo-tree-table buffer))
++         (tree-root (buffer-%undo-tree-root buffer)))
++    (ensure-undo-history-move-allowed buffer)
+     (when (eq current destination)
+       (return-from move-to-undo-node (make-node-ref buffer destination)))
+     ;; Structural and route-work refusals happen before the recovery handler:
+@@ -685,1 +753,11 @@
+-                 "Undo replay was changed by a modification hook"))
++                 "Undo replay was changed by a modification hook"))
++              (unless
++                  (and (= tree-generation (buffer-%undo-tree-generation buffer))
++                       (eq tree-table (buffer-%undo-tree-table buffer))
++                       (eq tree-root (buffer-%undo-tree-root buffer))
++                       (eq current (buffer-%undo-tree-current buffer))
++                       (node-in-buffer-p buffer destination)
++                       (every (lambda (node) (node-in-buffer-p buffer node)) up)
++                       (every (lambda (node) (node-in-buffer-p buffer node)) down))
++                (buffer-reset-undo-tree buffer :dirty t :truncated t)
++                (editor-error "Undo history changed during replay"))
+@@ -707,6 +785,7 @@
+   (unless (alive-point-p point)
+     (editor-error "Cannot move undo history through a dead point"))
+   (let ((buffer (point-buffer point)))
++    (ensure-undo-history-move-allowed buffer)
+     (buffer-undo-tree-finalize buffer)
+     (validate-undo-tree buffer)
+     (move-to-undo-node
+@@ -718,6 +797,7 @@
+ 
+ (defun buffer-undo (point)
+   (let ((buffer (point-buffer point)))
++    (ensure-undo-history-move-allowed buffer)
+     (buffer-undo-tree-finalize buffer)
+     (let* ((current (buffer-%undo-tree-current buffer))
+            (parent (undo-tree-node-parent current)))
+@@ -727,6 +807,7 @@
+ 
+ (defun buffer-redo (point)
+   (let ((buffer (point-buffer point)))
++    (ensure-undo-history-move-allowed buffer)
+     (buffer-undo-tree-finalize buffer)
+     (let* ((current (buffer-%undo-tree-current buffer))
+            (children (undo-tree-node-children current))
+@@ -816,3 +897,454 @@
+ 
+ (defun buffer-undo-tree-node-saved-sequence (ref)
+   (undo-tree-node-saved-sequence (resolve-node-ref ref)))
++
++;;; Transactional change groups
++
++(defun ensure-active-change-group (group)
++  (unless (and (typep group 'buffer-change-group)
++               (buffer-change-group-active-p group))
++    (editor-error "Expected an active buffer change group"))
++  (let ((buffer (buffer-change-group-buffer group)))
++    (when (deleted-buffer-p buffer)
++      (editor-error "The change-group buffer has been deleted"))
++    (unless (eq group (buffer-%active-change-group buffer))
++      (editor-error "The buffer is owned by another change group"))
++    (unless (node-in-buffer-p buffer (buffer-change-group-baseline group))
++      (editor-error "The change-group baseline is no longer retained"))
++    buffer))
++
++(defun begin-change-group-close (group)
++  (let ((buffer (ensure-active-change-group group)))
++    (when (undo-tree-replaying-buffer-p buffer)
++      (editor-error "Cannot close a change group during undo replay"))
++    (when (buffer-%undo-tree-pending-dirty-p buffer)
++      (editor-error "Cannot close a change group after an unretained edit"))
++    (setf (buffer-change-group-state group) :closing)
++    buffer))
++
++(defun finish-change-group-close (group buffer)
++  (unless (eq group (buffer-%active-change-group buffer))
++    (editor-error "The closing change group lost ownership of its buffer"))
++  (setf (buffer-change-group-state group) :inactive
++        (buffer-%active-change-group buffer) nil)
++  t)
++
++(defun restore-change-group-after-failure (group buffer)
++  (if (and (not (deleted-buffer-p buffer))
++           (eq group (buffer-%active-change-group buffer))
++           (node-in-buffer-p buffer (buffer-change-group-baseline group)))
++      (setf (buffer-change-group-state group) :active)
++      (progn
++        (when (and (not (deleted-buffer-p buffer))
++                   (eq group (buffer-%active-change-group buffer)))
++          (setf (buffer-%active-change-group buffer) nil))
++        (setf (buffer-change-group-state group) :inactive)))
++  nil)
++
++(defun make-edit-history-from-list (edits)
++  (let ((history (make-empty-edit-history)))
++    (dolist (edit edits history)
++      (vector-push-extend edit history))))
++
++(defstruct (change-group-open-command-state
++            (:constructor make-change-group-open-command-state
++                (parent children preferred history pending-payload
++                 pending-dirty node-count)))
++  parent
++  children
++  preferred
++  history
++  pending-payload
++  pending-dirty
++  node-count
++  sealed-node)
++
++(defun node-edits-match-history-p (node history)
++  (let ((edits (undo-tree-node-edits node)))
++    (and (= (length edits) (fill-pointer history))
++         (loop :for edit :in edits
++               :for index :from 0
++               :always (eq edit (aref history index))))))
++
++(defun seal-change-group-open-command (buffer)
++  "Temporarily seal BUFFER's pending command without retention pruning."
++  (let ((history (buffer-edit-history buffer)))
++    (when (plusp (fill-pointer history))
++      (let* ((parent (buffer-%undo-tree-current buffer))
++             (state
++               (make-change-group-open-command-state
++                parent
++                (undo-tree-node-children parent)
++                (undo-tree-node-preferred parent)
++                history
++                (buffer-%undo-tree-pending-payload-bytes buffer)
++                (buffer-%undo-tree-pending-dirty-p buffer)
++                (buffer-%undo-tree-node-count buffer))))
++        (seal-buffer-undo-command buffer nil)
++        (let ((sealed (buffer-%undo-tree-current buffer)))
++          (unless (and (eq parent (undo-tree-node-parent sealed))
++                       (eq sealed (first (undo-tree-node-children parent)))
++                       (eq (change-group-open-command-state-children state)
++                           (rest (undo-tree-node-children parent)))
++                       (= (1+ (change-group-open-command-state-node-count state))
++                          (buffer-%undo-tree-node-count buffer))
++                       (eq sealed
++                           (gethash (undo-tree-node-id sealed)
++                                    (buffer-%undo-tree-table buffer)))
++                       (node-edits-match-history-p sealed history)
++                       (= (undo-tree-node-payload-bytes sealed)
++                          (change-group-open-command-state-pending-payload state))
++                       (zerop (fill-pointer (buffer-edit-history buffer)))
++                       (zerop (buffer-%undo-tree-pending-payload-bytes buffer))
++                       (not (buffer-%undo-tree-pending-dirty-p buffer)))
++            (buffer-reset-undo-tree buffer :dirty t :truncated t)
++            (editor-error "Could not temporarily seal the change-group command"))
++          (setf (change-group-open-command-state-sealed-node state) sealed)
++          state)))))
++
++(defun restore-change-group-open-command (buffer state)
++  "Detach STATE's temporary node and restore the exact pending command."
++  (when state
++    (let* ((sealed (change-group-open-command-state-sealed-node state))
++           (parent (change-group-open-command-state-parent state)))
++      (unless (and (eq sealed (buffer-%undo-tree-current buffer))
++                   (eq parent (undo-tree-node-parent sealed))
++                   (null (undo-tree-node-children sealed))
++                   (eq sealed (first (undo-tree-node-children parent)))
++                   (eq (change-group-open-command-state-children state)
++                       (rest (undo-tree-node-children parent)))
++                   (= (1+ (change-group-open-command-state-node-count state))
++                      (buffer-%undo-tree-node-count buffer))
++                   (eq sealed
++                       (gethash (undo-tree-node-id sealed)
++                                (buffer-%undo-tree-table buffer)))
++                   (node-edits-match-history-p
++                    sealed (change-group-open-command-state-history state)))
++        (buffer-reset-undo-tree buffer :dirty t :truncated t)
++        (editor-error "Cannot restore the open change-group command"))
++      (remhash (undo-tree-node-id sealed) (buffer-%undo-tree-table buffer))
++      (setf (undo-tree-node-children parent)
++            (change-group-open-command-state-children state)
++            (undo-tree-node-preferred parent)
++            (change-group-open-command-state-preferred state)
++            (buffer-%undo-tree-current buffer) parent
++            (buffer-edit-history buffer)
++            (change-group-open-command-state-history state)
++            (buffer-%undo-tree-pending-payload-bytes buffer)
++            (change-group-open-command-state-pending-payload state)
++            (buffer-%undo-tree-pending-dirty-p buffer)
++            (change-group-open-command-state-pending-dirty state)
++            (buffer-%undo-tree-node-count buffer)
++            (change-group-open-command-state-node-count state))
++      ;; Never recycle a generation or node ID: a refusal hook may have
++      ;; observed the temporary node through a public tree accessor.
++      (incf (buffer-%undo-tree-generation buffer))
++      (touch-undo-buffer buffer)))
++  t)
++
++(defun restored-preferred-child (buffer parent saved-preferred)
++  "Choose a surviving preferred child without pinning a prunable branch."
++  (let ((children (undo-tree-node-children parent))
++        (current (undo-tree-node-preferred parent)))
++    (flet ((survives-p (node)
++             (and node
++                  (node-in-buffer-p buffer node)
++                  (member node children :test #'eq))))
++      (cond ((survives-p saved-preferred) saved-preferred)
++            ((survives-p current) current)
++            (t (first children))))))
++
++(defun change-group-path-to-current (group current)
++  "Return group-owned nodes after the baseline, in chronological order."
++  (let ((baseline (buffer-change-group-baseline group))
++        (first-id (buffer-change-group-first-node-id group))
++        (path '())
++        (seen (make-hash-table :test #'eq)))
++    (loop :for node := current :then (undo-tree-node-parent node)
++          :until (eq node baseline)
++          :do (when (or (null node) (gethash node seen))
++                (editor-error
++                 "The change-group baseline is not an ancestor of current history"))
++              (setf (gethash node seen) t)
++              (when (< (undo-tree-node-id node) first-id)
++                (editor-error
++                 "Current history crossed a pre-existing change-group branch"))
++              (push node path))
++    path))
++
++(defun collect-node-subtree (node)
++  (let ((result '())
++        (stack (list node))
++        (seen (make-hash-table :test #'eq)))
++    (loop :while stack
++          :for current := (pop stack)
++          :do (when (gethash current seen)
++                (editor-error "Undo tree contains a cycle"))
++              (setf (gethash current seen) t)
++              (push current result)
++              (dolist (child (undo-tree-node-children current))
++                (push child stack)))
++    result))
++
++(defun ensure-unmarked-change-group-nodes (buffer nodes)
++  "Refuse to splice nodes which establish clean or saved identity."
++  (dolist (node nodes)
++    (when (or (eq node (buffer-%undo-tree-clean buffer))
++              (eq node (buffer-%undo-tree-last-saved buffer))
++              (undo-tree-node-saved-sequence node))
++      (editor-error "Change group contains clean or saved undo history"))))
++
++(defun ensure-discardable-change-group-nodes (buffer nodes)
++  (dolist (node nodes)
++    (when (or (eq node (buffer-%undo-tree-current buffer))
++              (eq node (buffer-%undo-tree-clean buffer))
++              (eq node (buffer-%undo-tree-last-saved buffer))
++              (undo-tree-node-saved-sequence node))
++      (editor-error "Change group contains protected undo history"))))
++
++(defun remove-discarded-nodes (buffer nodes)
++  "Remove sealed NODES and their accounting after their edits were undone."
++  (ensure-discardable-change-group-nodes buffer nodes)
++  (dolist (node nodes)
++    (decf (buffer-%undo-tree-payload-bytes buffer)
++          (undo-tree-node-payload-bytes node))
++    (decf (buffer-%undo-tree-edit-count buffer)
++          (length (undo-tree-node-edits node)))
++    (decf (buffer-%undo-tree-node-count buffer))
++    (remhash (undo-tree-node-id node) (buffer-%undo-tree-table buffer))))
++
++(defun group-new-root-children (group)
++  (let ((first-id (buffer-change-group-first-node-id group)))
++    (remove-if (lambda (node) (< (undo-tree-node-id node) first-id))
++               (undo-tree-node-children
++                (buffer-change-group-baseline group)))))
++
++(defun change-group-new-descendants (group)
++  (mapcan #'collect-node-subtree (group-new-root-children group)))
++
++(defun preflight-change-group-close (group buffer remove-baseline-p)
++  "Validate close invariants before sealing or replaying any pending edits."
++  (change-group-path-to-current group (buffer-%undo-tree-current buffer))
++  (let ((nodes (change-group-new-descendants group)))
++    (ensure-unmarked-change-group-nodes
++     buffer
++     (if remove-baseline-p
++         (cons (buffer-change-group-baseline group) nodes)
++         nodes)))
++  (when (buffer-change-group-split-open-p group)
++    (unless (eq (buffer-change-group-split-parent group)
++                (undo-tree-node-parent
++                 (buffer-change-group-baseline group)))
++      (editor-error "The split change-group parent is no longer retained")))
++  t)
++
++(defun discard-change-group-descendants (group buffer)
++  (let* ((baseline (buffer-change-group-baseline group))
++         (nodes (change-group-new-descendants group)))
++    (remove-discarded-nodes buffer nodes)
++    (setf (undo-tree-node-children baseline)
++          (remove-if
++           (lambda (node)
++             (>= (undo-tree-node-id node)
++                 (buffer-change-group-first-node-id group)))
++           (undo-tree-node-children baseline)))
++    (setf (undo-tree-node-preferred baseline)
++          (restored-preferred-child
++           buffer baseline (buffer-change-group-baseline-preferred group)))))
++
++(defun unseal-split-baseline (group buffer)
++  "Restore the open insertion command split when GROUP was prepared."
++  (let* ((baseline (buffer-change-group-baseline group))
++         (parent (buffer-change-group-split-parent group))
++         (edits (undo-tree-node-edits baseline)))
++    (unless (and (eq baseline (buffer-%undo-tree-current buffer))
++                 (eq parent (undo-tree-node-parent baseline))
++                 (null (undo-tree-node-children baseline)))
++      (editor-error "Cannot restore the split change-group command"))
++    (setf (undo-tree-node-children parent)
++          (delete baseline (undo-tree-node-children parent) :test #'eq))
++    (setf (undo-tree-node-preferred parent)
++          (restored-preferred-child
++           buffer parent (buffer-change-group-split-parent-preferred group))
++          (buffer-%undo-tree-current buffer) parent
++          (buffer-edit-history buffer) (make-edit-history-from-list edits)
++          (buffer-%undo-tree-pending-payload-bytes buffer)
++          (undo-tree-node-payload-bytes baseline)
++          (buffer-%undo-tree-pending-dirty-p buffer) nil)
++    (remhash (undo-tree-node-id baseline)
++             (buffer-%undo-tree-table buffer))
++    (decf (buffer-%undo-tree-node-count buffer))
++    (incf (buffer-%undo-tree-generation buffer))
++    (touch-undo-buffer buffer)))
++
++(defun buffer-prepare-change-group (&optional (buffer (current-buffer)))
++  "Start an undo-honest transaction at BUFFER's current text.
++
++Canceling restores this exact text and removes only history created by the
++group.  If an Evil insertion command is open, preparation temporarily seals
++it; accepting or canceling reopens it so completion does not split one insert
++session into multiple undo steps."
++  (check-type buffer buffer)
++  (when (deleted-buffer-p buffer)
++    (editor-error "Cannot prepare a change group in a deleted buffer"))
++  (when (undo-tree-replaying-buffer-p buffer)
++    (editor-error "Cannot prepare a change group during undo replay"))
++  (unless (and (buffer-%enable-undo-p buffer) (not *inhibit-undo*))
++    (editor-error "Buffer change groups require enabled undo recording"))
++  (ensure-buffer-undo-tree buffer)
++  (when (buffer-%active-change-group buffer)
++    (editor-error "Nested buffer change groups are not supported"))
++  (when (buffer-%undo-tree-pending-dirty-p buffer)
++    (editor-error "Cannot prepare a change group after an unretained edit"))
++  (when (buffer-%undo-tree-discard-open-p buffer)
++    (editor-error "Cannot prepare a change group after discarded undo data"))
++  (let* ((split-open-p (plusp (fill-pointer (buffer-edit-history buffer))))
++         (parent (buffer-%undo-tree-current buffer))
++         (parent-preferred (undo-tree-node-preferred parent)))
++    (seal-buffer-undo-command buffer)
++    (let ((baseline (buffer-%undo-tree-current buffer)))
++      (when (and split-open-p
++                 (not (and (eq parent (undo-tree-node-parent baseline))
++                           (undo-tree-node-edits baseline))))
++        (editor-error "Could not retain the open command for a change group"))
++      (let ((group
++              (%make-buffer-change-group
++               buffer
++               baseline
++               (undo-tree-node-preferred baseline)
++               (buffer-%undo-tree-next-id buffer)
++               split-open-p
++               (and split-open-p parent)
++               (and split-open-p parent-preferred))))
++        (setf (buffer-%active-change-group buffer) group)
++        group))))
++
++(defun path-next-node (path node)
++  (let ((tail (member node path :test #'eq)))
++    (second tail)))
++
++(defun split-group-path-nodes (group buffer)
++  (seal-buffer-undo-command buffer)
++  (validate-undo-tree buffer)
++  (cons (buffer-change-group-baseline group)
++        (change-group-path-to-current
++         group (buffer-%undo-tree-current buffer))))
++
++(defun split-group-off-path-roots (group path)
++  (let ((first-id (buffer-change-group-first-node-id group)))
++    (loop :for node :in path
++          :for next := (path-next-node path node)
++          :append
++          (remove-if
++           (lambda (child)
++             (or (eq child next)
++                 (< (undo-tree-node-id child) first-id)))
++           (undo-tree-node-children node)))))
++
++(defun amalgamate-split-change-group (group buffer)
++  "Move GROUP's accepted linear history back into its open insert command."
++  (let* ((path (split-group-path-nodes group buffer))
++         (baseline (first path))
++         (parent (buffer-change-group-split-parent group))
++         (off-path-roots (split-group-off-path-roots group path))
++         (off-path (mapcan #'collect-node-subtree off-path-roots))
++         (edits (mapcan (lambda (node)
++                          (copy-list (undo-tree-node-edits node)))
++                        path))
++         (payload (loop :for node :in path
++                        :sum (undo-tree-node-payload-bytes node))))
++    (unless (and (eq (car (last path))
++                     (buffer-%undo-tree-current buffer))
++                 (eq parent (undo-tree-node-parent baseline)))
++      (editor-error "Cannot amalgamate a non-current change-group path"))
++    (ensure-unmarked-change-group-nodes buffer (append path off-path))
++    (remove-discarded-nodes buffer off-path)
++    (dolist (node path)
++      (remhash (undo-tree-node-id node)
++               (buffer-%undo-tree-table buffer))
++      (decf (buffer-%undo-tree-node-count buffer)))
++    (setf (undo-tree-node-children parent)
++          (delete baseline (undo-tree-node-children parent) :test #'eq))
++    (setf (undo-tree-node-preferred parent)
++          (restored-preferred-child
++           buffer parent (buffer-change-group-split-parent-preferred group))
++          (buffer-%undo-tree-current buffer) parent
++          (buffer-edit-history buffer) (make-edit-history-from-list edits)
++          (buffer-%undo-tree-pending-payload-bytes buffer) payload
++          (buffer-%undo-tree-pending-dirty-p buffer) nil)
++    (incf (buffer-%undo-tree-generation buffer))
++    (touch-undo-buffer buffer)))
++
++(defun buffer-accept-change-group (group)
++  "Accept GROUP while preserving normal undo granularity."
++  (let ((buffer (begin-change-group-close group))
++        (splicing-p nil))
++    (handler-case
++        (progn
++          (when (buffer-change-group-split-open-p group)
++            (preflight-change-group-close group buffer t)
++            (setf splicing-p t)
++            (amalgamate-split-change-group group buffer))
++          (finish-change-group-close group buffer))
++      (error (condition)
++        (if (and splicing-p
++                 (eq group (buffer-%active-change-group buffer)))
++            (buffer-reset-undo-tree
++             buffer :dirty (buffer-modified-p buffer) :truncated t)
++            (restore-change-group-after-failure group buffer))
++        (error condition)))))
++
++(defun buffer-cancel-change-group (group)
++  "Restore GROUP's baseline and discard exactly its retained undo history."
++  (let* ((buffer (begin-change-group-close group))
++         (baseline (buffer-change-group-baseline group))
++         (replay-tick nil)
++         (open-state nil))
++    (handler-case
++        (progn
++          (preflight-change-group-close
++           group buffer (buffer-change-group-split-open-p group))
++          (setf open-state (seal-change-group-open-command buffer))
++          (change-group-path-to-current
++           group (buffer-%undo-tree-current buffer))
++          (setf replay-tick (buffer-modified-tick buffer))
++          (let ((*undo-tree-history-move-group* group))
++            (move-to-undo-node (buffer-point buffer) baseline))
++          (discard-change-group-descendants group buffer)
++          (validate-undo-tree buffer)
++          (when (buffer-change-group-split-open-p group)
++            (unseal-split-baseline group buffer))
++          (incf (buffer-%undo-tree-generation buffer))
++          (finish-change-group-close group buffer))
++      (error (condition)
++        (cond
++          ((and replay-tick
++                (/= replay-tick (buffer-modified-tick buffer))
++                (eq group (buffer-%active-change-group buffer)))
++           (buffer-reset-undo-tree buffer :dirty t :truncated t))
++          (t
++           (when open-state
++             (restore-change-group-open-command buffer open-state))
++           (restore-change-group-after-failure group buffer)))
++        (error condition)))))
++
++(defun buffer-abort-change-group (group)
++  "Fail closed after GROUP cannot be accepted or canceled.
++
++The live text is preserved, ownership is released, and retained undo history
++is reset because it can no longer promise transactional rollback."
++  (check-type group buffer-change-group)
++  (let ((buffer (buffer-change-group-buffer group)))
++    (when (undo-tree-replaying-buffer-p buffer)
++      (editor-error "Cannot abort a change group during undo replay"))
++    (cond
++      ((deleted-buffer-p buffer)
++       (setf (buffer-change-group-state group) :inactive)
++       t)
++      ((eq group (buffer-%active-change-group buffer))
++       (buffer-reset-undo-tree
++        buffer :dirty (buffer-modified-p buffer) :truncated t)
++       t)
++      ((eq :inactive (buffer-change-group-state group)) nil)
++      (t
++       (editor-error "The buffer is owned by another change group")))))
+diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
+--- a/src/ext/completion-mode.lisp
++++ b/src/ext/completion-mode.lisp
+@@ -10,6 +10,7 @@
+            :completion-item-detail
+            :completion-item-accept-action
+            :completion-context-options-function
++           :completion-context-observer-function
+            :completion-snippet-preparation-function
+            :completion-local-filtering-p
+            :completion-start-local-filtering
+@@ -30,11 +31,11 @@
+   "Function returning completion context options for the current buffer.
+ 
+ The function receives the completion spec and returns a property list.  The
+-supported keys are :FILTER-FUNCTION, :SEPARATOR, and :NARROWING.  A filter
+-function receives the current completion input and the provider's raw items,
+-and must return the original items it wants displayed.  When :NARROWING is
+-false, displaying synchronous candidates neither inserts their common prefix
+-nor accepts a singleton automatically.")
++supported keys are :FILTER-FUNCTION, :SEPARATOR, :NARROWING, and
++:OBSERVER-FUNCTION.  A filter function receives the current completion input
++and the provider's raw items, and must return the original items it wants
++displayed.  When :NARROWING is false, displaying synchronous candidates
++neither inserts their common prefix nor accepts a singleton automatically.")
+ 
+ (define-editor-variable completion-snippet-preparation-function nil
+   "Function used by completion providers to prepare a snippet session.
+@@ -45,6 +46,14 @@
+ buffer; the installer returns true only when it installs the rendered snippet
+ without exposing snippet syntax as ordinary buffer text.")
+ 
++(define-editor-variable completion-context-observer-function nil
++  "Function notified about completion context presentation and teardown.
++
++The function receives CONTEXT, an event keyword, and an optional completion
++item.  :PRESENT follows each rendered generation; :FOCUS follows its item action
++only while that presentation remains current.  :END is sent before the old popup
++and tracked range are destroyed.  Options may override via :OBSERVER-FUNCTION.")
++
+ (defclass completion-context ()
+   ((spec
+     :initarg :spec
+@@ -80,6 +89,10 @@
+     :initarg :separator
+     :initform nil
+     :reader context-separator)
++   (observer-function
++    :initarg :observer-function
++    :initform nil
++    :reader context-observer-function)
+    (local-filtering
+     :initform nil
+     :accessor context-local-filtering-p)
+@@ -321,23 +334,33 @@
+            (buffer (context-buffer context)))
+       (incf (context-generation context))
+       (setf (context-request-pending-p context) nil)
+-      (stop-context-spinner context)
+-      (when (or (buffer-temporary-p buffer)
+-                (member buffer (buffer-list)))
+-        (with-current-buffer buffer
+-          (completion-mode nil)))
+-      (close-context-popup context)
+-      (delete-context-range context))
+-    (setf *completion-context* nil)))
++      (setf *completion-context* nil)
++      (unwind-protect
++           (alexandria:when-let ((observer
++                                  (context-observer-function context)))
++             (funcall observer context :end nil))
++        (stop-context-spinner context)
++        (when (or (buffer-temporary-p buffer)
++                  (member buffer (buffer-list)))
++          (with-current-buffer buffer
++            (completion-mode nil)))
++        (close-context-popup context)
++        (delete-context-range context)))))
++
++(defun notify-context-focus (context item)
++  (alexandria:when-let ((observer (context-observer-function context)))
++    (funcall observer context :focus item)))
+ 
+ (defun call-focus-action ()
+   (when (and *completion-context*
+              (= (context-presented-generation *completion-context*)
+                 (context-generation *completion-context*)))
+-    (alexandria:when-let* ((menu (context-popup-menu *completion-context*))
+-                           (item (lem/popup-menu:get-focus-item menu))
+-                           (fn (completion-item-focus-action item)))
+-      (funcall fn *completion-context*))))
++    (alexandria:when-let* ((context *completion-context*)
++                           (menu (context-popup-menu context))
++                           (item (lem/popup-menu:get-focus-item menu)))
++      (alexandria:when-let ((fn (completion-item-focus-action item)))
++        (funcall fn context))
++      (notify-context-focus context item))))
+ 
+ (define-command completion-self-insert () ()
+   (let ((c (insertion-key-p (last-read-key-sequence))))
+@@ -703,7 +726,8 @@
+      &key style then automatic max-display-items (cycle t)
+        (narrowing nil narrowing-supplied-p)
+        (filter-function nil filter-function-supplied-p)
+-       (separator nil separator-supplied-p))
++       (separator nil separator-supplied-p)
++       (observer-function nil observer-function-supplied-p))
+   "Start a new completion using the completion-spec,
+ creates a new completion-context and sets *completion-context*"
+   (when *completion-context*
+@@ -725,6 +749,13 @@
+            (if separator-supplied-p
+                separator
+                (getf options :separator)))
++         (observer-function
++           (cond
++             (observer-function-supplied-p observer-function)
++             ((getf options :observer-function))
++             (t
++              (variable-value 'completion-context-observer-function
++                              :default origin-buffer))))
+          (narrowing-option (getf options :narrowing :unspecified))
+          (narrowing
+            (cond
+@@ -739,6 +770,7 @@
+                                  :style style
+                                  :filter-function filter-function
+                                  :separator separator
++                                 :observer-function observer-function
+                                  :max-display-items max-display-items
+                                  :cycle cycle))
+          (origin-tick (buffer-modified-tick origin-buffer)))

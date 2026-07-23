@@ -1,0 +1,13 @@
+diff --git a/src/ext/completion-mode.lisp b/src/ext/completion-mode.lisp
+index b648160..6e9c821 100644
+--- a/src/ext/completion-mode.lisp
++++ b/src/ext/completion-mode.lisp
+@@ -71,7 +71,7 @@
+    (detail
+     :initarg :detail
+     :initform ""
+-    :reader completion-item-detail
++    :accessor completion-item-detail
+     :type string)
+    (start
+     :initarg :start

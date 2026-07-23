@@ -1,0 +1,71 @@
+--- a/extensions/lsp-mode/lsp-mode.lisp
++++ b/extensions/lsp-mode/lsp-mode.lisp
+@@ -443,6 +443,12 @@
+   (clrhash (workspace-progress-removal-timers workspace))
+   (clrhash (workspace-progress-reports workspace)))
+
++(defun call-lem-yath-lsp-function (name &rest arguments)
++  (let* ((package (find-package :lem-yath))
++         (symbol (and package (find-symbol name package))))
++    (when (and symbol (fboundp symbol))
++      (apply symbol arguments))))
++
+ (defun dispose-workspace (workspace)
+   (unless (member (workspace-state workspace) '(:stopping :disposed))
+     (let ((initialized-p (eq :ready (workspace-state workspace))))
+@@ -450,6 +456,7 @@
+       (setf (workspace-state workspace) :stopping)
+       (stop-workspace-startup workspace)
+       (stop-workspace-progress workspace)
++      (call-lem-yath-lsp-function "LSP-STOP-FILE-WATCHES" workspace)
+       (dolist (buffer (copy-list (workspace-buffers workspace)))
+         (detach-lsp-buffer buffer workspace :notify initialized-p))
+       (setf (workspace-pending-continuations workspace) nil)
+@@ -805,11 +812,11 @@
+          (lsp:configuration-params-items params))))
+
+-(defun client/register-capability (params)
+-  (declare (ignore params))
++(defun client/register-capability (workspace params)
++  (call-lem-yath-lsp-function "LSP-REGISTER-CAPABILITIES" workspace params)
+   +null+)
+
+-(defun client/unregister-capability (params)
+-  (declare (ignore params))
++(defun client/unregister-capability (workspace params)
++  (call-lem-yath-lsp-function "LSP-UNREGISTER-CAPABILITIES" workspace params)
+   +null+)
+
+ (defun window/work-done-progress-create (params)
+@@ -933,11 +940,13 @@
+    "workspace/configuration"
+    (lambda (params) (workspace/configuration workspace params)))
+   (register-lsp-method workspace
+-                       "client/registerCapability"
+-                       'client/register-capability)
++                       "client/registerCapability"
++                       (lambda (params)
++                         (client/register-capability workspace params)))
+   (register-lsp-method workspace
+-                       "client/unregisterCapability"
+-                       'client/unregister-capability)
++                       "client/unregisterCapability"
++                       (lambda (params)
++                         (client/unregister-capability workspace params)))
+   (register-lsp-method workspace
+                        "window/workDoneProgress/create"
+                        'window/work-done-progress-create)
+--- a/extensions/lsp-mode/client-capabilities.json
++++ b/extensions/lsp-mode/client-capabilities.json
+@@ -1,6 +1,10 @@
+ {
+   "workspace": {
+-    "configuration": true
++    "configuration": true,
++    "didChangeWatchedFiles": {
++      "dynamicRegistration": true,
++      "relativePatternSupport": true
++    }
+   },
+   "window": {
+     "workDoneProgress": true

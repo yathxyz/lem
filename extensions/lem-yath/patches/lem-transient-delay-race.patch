@@ -1,0 +1,38 @@
+diff --git a/extensions/transient/keymap.lisp b/extensions/transient/keymap.lisp
+--- a/extensions/transient/keymap.lisp
++++ b/extensions/transient/keymap.lisp
+@@ -27,17 +27,24 @@
+         (show-transient keymap)
+         ;; delayed: start a one-shot timer
+-        (let ((target-keymap keymap))
+-          (setf *transient-delay-timer*
+-                (start-timer
+-                 (make-timer (lambda ()
+-                               (let ((resolved (resolve-transient-keymap target-keymap)))
+-                                 (when resolved
+-                                   (show-transient resolved))))
+-                             :name "transient-popup-delay")
+-                 delay))))))
++        (let ((target-keymap keymap)
++              (timer nil))
++          (setf timer
++                (make-timer
++                 (lambda ()
++                   ;; A stopped timer may already have queued this callback on
++                   ;; the editor event loop.  Only the currently registered
++                   ;; timer may display its captured keymap.
++                   (when (eq timer *transient-delay-timer*)
++                     (setf *transient-delay-timer* nil)
++                     (let ((resolved (resolve-transient-keymap target-keymap)))
++                       (when resolved
++                         (show-transient resolved)))))
++                 :name "transient-popup-delay"))
++          (setf *transient-delay-timer*
++                (start-timer timer delay))))))
+-
++
+ (defmethod keymap-activate ((keymap keymap))
+   (let ((resolved (resolve-transient-keymap keymap)))
+     (if resolved
+         (show-transient-with-delay resolved)
+         (hide-transient))))
