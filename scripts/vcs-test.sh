@@ -7003,16 +7003,25 @@ if [ "$pull_fixture_ready" = 1 ]; then
     enter_completion_prompt_value "$porcelain_session" true \
       'Rebase when pulling pull-rebase:'
   fi
-  if lem_wait_for "$porcelain_session" '\[Pull\]' \
-       "$WAIT_TIMEOUT" >/dev/null; then
-    send_keys "$porcelain_session" q
-  fi
   if wait_until "$WAIT_TIMEOUT" porcelain_pull_rebase_configured; then
     pass legit-pull-configure-rebase \
       'F r persisted the current branch pull-rebase variable'
   else
     fail legit-pull-configure-rebase \
       'F r did not preserve the pinned branch configuration action' \
+      "$porcelain_session"
+  fi
+  # The old popup can remain painted while the completion result is still
+  # being consumed.  Wait for the configuration side effect above before
+  # looking for the re-rendered popup, and cancel with Escape so a delayed key
+  # cannot quit the underlying Legit status buffer.
+  if lem_wait_for "$porcelain_session" '\[Pull\]' \
+       "$WAIT_TIMEOUT" >/dev/null; then
+    send_keys "$porcelain_session" Escape
+  fi
+  if ! wait_legit "$porcelain_session" porcelain; then
+    fail legit-pull-configure-rebase-ui \
+      'the pull configuration action did not return to an interactive Legit status' \
       "$porcelain_session"
   fi
 
