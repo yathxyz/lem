@@ -34,6 +34,7 @@
           mkBuildScript =
             {
               entryPoint ? "lem:main",
+              outputName ? "lem",
             }:
             pkgs.writeText "build-lem.lisp" ''
               (defpackage :nix-cl-user (:use :cl))
@@ -48,7 +49,7 @@
 
               ;; Dump Image
               (setf uiop:*image-entry-point* #'${entryPoint})
-              (uiop:dump-image "lem" :executable t :compression t)
+              (uiop:dump-image "${outputName}" :executable t :compression t)
             '';
 
           sources = import ./_sources/generated.nix {
@@ -383,6 +384,37 @@
             '';
           });
 
+          # Native client for the persistent daemon. It includes ncurses for
+          # `lemclient -t`, while file and eval requests remain lightweight.
+          lemclient = lem-base.overrideLispAttrs (o: {
+            pname = "lemclient";
+            meta.mainProgram = "lemclient";
+            systems = [
+              "lem-ncurses/core"
+              "lem-daemon"
+            ];
+            lispLibs =
+              o.lispLibs
+              ++ (with lisp.pkgs; [
+                cl-charms
+                cl-setlocale
+              ]);
+            nativeLibs = [ pkgs.ncurses ];
+            buildScript = mkBuildScript {
+              entryPoint = "lem-daemon/client:main";
+              outputName = "lemclient";
+            };
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/bin
+              install lemclient $out/bin
+              wrapProgram $out/bin/lemclient \
+                --prefix LD_LIBRARY_PATH : "$LD_LIBRARY_PATH" \
+                --prefix DYLD_LIBRARY_PATH : "$DYLD_LIBRARY_PATH"
+              runHook postInstall
+            '';
+          });
+
           # 2. SDL2 Variant
           lem-sdl2 = lem-base.overrideLispAttrs (o: {
             pname = "lem-sdl2";
@@ -505,11 +537,11 @@
         in
         {
           overlayAttrs = {
-            inherit lem-ncurses lem-sdl2 lem-webview;
+            inherit lem-ncurses lemclient lem-sdl2 lem-webview;
           };
 
           packages = {
-            inherit lem-ncurses lem-sdl2 lem-webview;
+            inherit lem-ncurses lemclient lem-sdl2 lem-webview;
             default = lem-ncurses;
           }
           // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
@@ -528,6 +560,10 @@
             lem-webview = {
               type = "app";
               program = lem-webview;
+            };
+            lemclient = {
+              type = "app";
+              program = "${lemclient}/bin/lemclient";
             };
             default = {
               type = "app";

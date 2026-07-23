@@ -756,6 +756,7 @@
    :command-line-arguments-without-init-file
    :command-line-arguments-log-filename
    :command-line-arguments-interface
+   :command-line-arguments-daemon
    :command-line-arguments-filenames))
 #+sbcl
 (sb-ext:lock-package :lem-core)

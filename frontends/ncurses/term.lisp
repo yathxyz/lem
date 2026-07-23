@@ -18,6 +18,7 @@
            :get-display-height
            :resize-term
            :wait-for-input
+           :*resize-handler*
            :with-input-resize-lock))
 (in-package :lem-ncurses/term)
 
@@ -570,6 +571,19 @@ simply mirrors the standard xterm-256 palette values."
 #+sbcl
 (defvar *applied-terminal-cols* nil)
 
+#+sbcl
+(defvar *resize-handler*
+  (lambda (rows cols)
+    (declare (ignore rows cols))
+    (lem:send-event
+     (lambda ()
+       (unwind-protect
+            (lem:update-on-display-resized)
+         (setf *resize-event-pending-p* nil)))))
+  "Called by the SBCL terminal resize monitor with the new row and column
+counts. The native frontend enqueues Lem's normal resize event. Remote terminal
+clients may temporarily install a transport callback.")
+
 (defun terminal-input-fd ()
   (or *terminal-input-fd*
       (let ((term-io (or *term-io* (c-file "stdin"))))
@@ -605,18 +619,7 @@ simply mirrors the standard xterm-256 palette values."
                      (/= cols *applied-terminal-cols*)))
         (setf *resize-event-pending-p* t)
         (handler-case
-            (lem:send-event
-             (lambda ()
-               (unwind-protect
-                    (multiple-value-bind (current-rows current-cols)
-                        (terminal-size)
-                      (when (and current-rows current-cols
-                                 (or (null *applied-terminal-rows*)
-                                     (null *applied-terminal-cols*)
-                                     (/= current-rows *applied-terminal-rows*)
-                                     (/= current-cols *applied-terminal-cols*)))
-                        (lem:update-on-display-resized)))
-                 (setf *resize-event-pending-p* nil))))
+            (funcall *resize-handler* rows cols)
           (error (condition)
             (setf *resize-event-pending-p* nil)
             (error condition)))))))

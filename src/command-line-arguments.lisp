@@ -6,6 +6,7 @@ Options:
         --debug                   enable debugger
         --log-filename FILENAME   file name of the log file
         -i, --interface INTERFACE interface to use, either sdl2 or ncurses
+        --daemon[=NAME]          start a persistent headless daemon
         -v, --version             print the version number and exit
         -h, --help                display this help and exit
         -e, --eval FORM           common lisp form (in quotes) to evaluate on startup"
@@ -24,6 +25,7 @@ Options:
   (without-init-file nil)
   (log-filename nil)
   (interface nil)
+  (daemon nil)
   (filenames '())
   (eval-form-str nil))
 
@@ -42,6 +44,7 @@ Options:
         (without-init-file nil)
         (log-filename nil)
         (interface nil)
+        (daemon nil)
         (filenames '())
         (eval-form-str nil))
     (loop :while args
@@ -65,6 +68,15 @@ Options:
                            (command-line-arguments-error "Please specify an interface to use."))))
                     ((member arg '("-v" "--version") :test #'equal)
                      (setf version t))
+                    ((equal arg "--daemon")
+                     (setf daemon "server"))
+                    ((and (stringp arg)
+                          (alexandria:starts-with-subseq "--daemon=" arg))
+                     (let ((name (subseq arg (length "--daemon="))))
+                       (when (zerop (length name))
+                         (command-line-arguments-error
+                          "--daemon= requires a server name."))
+                       (setf daemon name)))
                     ((member arg '("-e" "--eval") :test #'equal)
                      ;; assumes that FORM follows --eval and is in quotes.
                      (setf eval-form-str (pop args)))
@@ -78,6 +90,7 @@ Options:
                                  :without-init-file without-init-file
                                  :log-filename log-filename
                                  :interface interface
+                                 :daemon daemon
                                  :filenames (nreverse filenames)
                                  :eval-form-str eval-form-str)))
 

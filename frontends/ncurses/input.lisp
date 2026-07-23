@@ -12,6 +12,14 @@
 (defvar *padwin* nil)
 (defvar *wait-for-terminal-input-p* t)
 
+(defvar *bracketed-paste-handler*
+  (lambda (text)
+    (lambda ()
+      (lem:insert-bracketed-paste (lem:current-point) text)))
+  "Function used to turn decoded bracketed-paste text into an input event.
+The native frontend keeps the default closure. Remote terminal clients bind
+this to produce a transport value while reusing the same byte decoder.")
+
 (defun getch ()
   (lem-ncurses/term:with-input-resize-lock
     (unless *padwin*
@@ -100,8 +108,7 @@ afterwards regardless of how the read exits."
                         (collect-bracketed-paste #'getch)))
                  (charms/ll:keypad *padwin* 1))))
     (let ((text (babel:octets-to-string bytes :encoding :utf-8 :errorp nil)))
-      (lambda ()
-        (lem:insert-bracketed-paste (lem:current-point) text)))))
+      (funcall *bracketed-paste-handler* text))))
 
 (defun csi-param (params index)
   "Return the INDEX-th parameter of the vector PARAMS, or NIL if absent."

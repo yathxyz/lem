@@ -30,6 +30,11 @@ client:
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-client.lisp
 
+daemon-client:
+	qlot install
+	$(LISP) --load .qlot/setup.lisp \
+		--load scripts/build-daemon-client.lisp
+
 webview:
 	qlot install
 	-$(MAKE) terminal-lib

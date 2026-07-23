@@ -125,6 +125,14 @@ See scripts/build-ncurses.lisp or scripts/build-sdl2.lisp"
 
   (cond (*in-the-editor*
          (apply-args args))
+        ((command-line-arguments-daemon args)
+         (unless (find-package :lem-daemon)
+           (error "This Lem executable was built without daemon support"))
+         (uiop:symbol-call
+          :lem-daemon :invoke-daemon
+          (lambda (&optional initialize finalize)
+            (run-editor-thread initialize args finalize))
+          (command-line-arguments-daemon args)))
         (t
          (let ((implementation (get-default-implementation
                                 :implementation (command-line-arguments-interface args))))

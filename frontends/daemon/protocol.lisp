@@ -1,0 +1,121 @@
+(in-package :lem-daemon/protocol)
+
+(defconstant +protocol-version+ 1)
+(defconstant +maximum-message-bytes+ (* 1024 1024))
+(defconstant +maximum-files+ 64)
+
+(define-condition protocol-error (error)
+  ((message :initarg :message :reader protocol-error-message))
+  (:report (lambda (condition stream)
+             (write-string (protocol-error-message condition) stream))))
+
+(defun fail (control &rest arguments)
+  (error 'protocol-error :message (apply #'format nil control arguments)))
+
+(defun make-object (&rest fields)
+  (let ((object (make-hash-table :test #'equal)))
+    (loop :for (name value) :on fields :by #'cddr
+          :do (setf (gethash name object) value))
+    object))
+
+(defun field (object name &optional default)
+  (if (hash-table-p object)
+      (gethash name object default)
+      default))
+
+(defun encode-message (object)
+  (let ((json (with-output-to-string (stream)
+                (yason:encode object stream))))
+    #+sbcl
+    (let ((octets (sb-ext:string-to-octets json :external-format :utf-8)))
+      (when (> (length octets) +maximum-message-bytes+)
+        (fail "Message exceeds ~d bytes" +maximum-message-bytes+))
+      octets)
+    #-sbcl
+    (babel:string-to-octets json :encoding :utf-8)))
+
+(defun decode-message (octets)
+  (when (> (length octets) +maximum-message-bytes+)
+    (fail "Message exceeds ~d bytes" +maximum-message-bytes+))
+  (handler-case
+      (let* ((json #+sbcl (sb-ext:octets-to-string octets
+                                                   :external-format :utf-8)
+                   #-sbcl (babel:octets-to-string octets :encoding :utf-8))
+             (object (yason:parse json :object-as :hash-table)))
+        (unless (hash-table-p object)
+          (fail "Protocol message must be a JSON object"))
+        object)
+    (protocol-error (condition) (error condition))
+    (error (condition)
+      (fail "Invalid JSON message: ~a" condition))))
+
+(defun write-u32 (value stream)
+  (unless (<= 0 value #xffffffff)
+    (fail "Invalid message length: ~d" value))
+  (write-byte (ldb (byte 8 24) value) stream)
+  (write-byte (ldb (byte 8 16) value) stream)
+  (write-byte (ldb (byte 8 8) value) stream)
+  (write-byte (ldb (byte 8 0) value) stream))
+
+(defun read-u32 (stream)
+  (let ((first (read-byte stream nil :eof)))
+    (when (eq first :eof)
+      (return-from read-u32 nil))
+    (let ((rest (loop :repeat 3
+                      :for byte := (read-byte stream nil :eof)
+                      :when (eq byte :eof)
+                        :do (fail "Truncated message length")
+                      :collect byte)))
+      (logior (ash first 24)
+              (ash (first rest) 16)
+              (ash (second rest) 8)
+              (third rest)))))
+
+(defun write-message (object stream)
+  (let ((octets (encode-message object)))
+    (write-u32 (length octets) stream)
+    (write-sequence octets stream)
+    (finish-output stream)
+    object))
+
+(defun read-message (stream)
+  (let ((length (read-u32 stream)))
+    (unless length
+      (return-from read-message nil))
+    (when (> length +maximum-message-bytes+)
+      (fail "Message length ~d exceeds limit" length))
+    (let ((octets (make-array length :element-type '(unsigned-byte 8))))
+      (let ((end (read-sequence octets stream)))
+        (unless (= end length)
+          (fail "Truncated message body")))
+      (decode-message octets))))
+
+(defun valid-server-name-p (name)
+  (and (stringp name)
+       (<= 1 (length name) 64)
+       (alphanumericp (char name 0))
+       (every (lambda (character)
+                (or (alphanumericp character)
+                    (find character "_.-")))
+              name)))
+
+(defun runtime-directory ()
+  (if (uiop:getenvp "XDG_RUNTIME_DIR")
+      (merge-pathnames "lem/"
+                       (uiop:ensure-directory-pathname
+                        (uiop:getenv "XDG_RUNTIME_DIR")))
+      (merge-pathnames
+       "lem/runtime/"
+       (uiop:ensure-directory-pathname
+        (or (uiop:getenv "XDG_CACHE_HOME")
+            (merge-pathnames ".cache/" (user-homedir-pathname)))))))
+
+(defun endpoint-pathname (&optional (name "server"))
+  (unless (valid-server-name-p name)
+    (fail "Unsafe server name: ~s" name))
+  (merge-pathnames (format nil "~a.sock" name) (runtime-directory)))
+
+(defun metadata-pathname (&optional (name "server"))
+  (unless (valid-server-name-p name)
+    (fail "Unsafe server name: ~s" name))
+  (merge-pathnames (format nil "~a.json" name) (runtime-directory)))

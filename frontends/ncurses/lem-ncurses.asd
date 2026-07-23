@@ -1,9 +1,8 @@
-(defsystem "lem-ncurses"
+(defsystem "lem-ncurses/core"
   :depends-on ("cffi"
                "cl-charms"
                "cl-setlocale"
                "lem/core"
-               "lem/extensions"
                "lem-verified-kernel")
   :serial t
   :components (#+pdcurses(:file "cl-charms-pdcurseswin32")
@@ -21,6 +20,11 @@
                (:file "emergency-save")
                (:file "mainloop")
                (:file "ncurses")))
+
+(defsystem "lem-ncurses"
+  :depends-on ("lem-ncurses/core"
+               "lem/extensions"
+               "lem-daemon"))
 
 (defsystem "lem-ncurses/tests"
   :depends-on ("lem-ncurses" "rove")
