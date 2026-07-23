@@ -25,8 +25,8 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          lemPatchedSrc = pkgs.applyPatches {
-            name = "lem-yath-lem-source";
+          lemBasePatchedSrc = pkgs.applyPatches {
+            name = "lem-yath-lem-source-base";
             src = lem.outPath;
             patches = [
               ./patches/lem-completion-lifecycle.patch
@@ -35,7 +35,23 @@
               ./patches/lem-idle-timer-initial-time.patch
               ./patches/lem-emergency-checkpoint-mode.patch
               ./patches/lem-transient-bottom-restore.patch
+            ];
+          };
+          lemProjectPatchedSrc = pkgs.applyPatches {
+            name = "lem-yath-lem-source-project-lsp";
+            src = lemBasePatchedSrc;
+            patches = [
               ./patches/lem-project-lsp-workspaces.patch
+            ];
+            patchFlags = [
+              "-p1"
+              "--fuzz=0"
+            ];
+          };
+          lemPatchedSrc = pkgs.applyPatches {
+            name = "lem-yath-lem-source";
+            src = lemProjectPatchedSrc;
+            patches = [
               ./patches/lem-lsp-buffer-lifecycle-hooks.patch
               ./patches/lem-lsp-pipe-stdio.patch
               ./patches/lem-lsp-file-watches.patch
@@ -787,9 +803,7 @@
             orderless-completion-test = mkTestApp "lem-yath-orderless-completion-test" "orderless-completion-test.sh";
             snippet-test = mkTestApp "lem-yath-snippet-test" "snippet-test.sh";
             lsp-snippet-test = mkTestApp "lem-yath-lsp-snippet-test" "lsp-snippet-test.sh";
-            interactive-test =
-              mkTestAppWithLem lemYath "lem-yath-interactive-test"
-                "interactive-test.sh";
+            interactive-test = mkTestAppWithLem lemYath "lem-yath-interactive-test" "interactive-test.sh";
             expreg-test = mkTestApp "lem-yath-expreg-test" "expreg-test.sh";
             surround-test = mkTestApp "lem-yath-surround-test" "surround-test.sh";
             structural-test = mkTestAppWithLem lemYath "lem-yath-structural-test" "structural-test.sh";
@@ -798,12 +812,8 @@
             roam-test = mkTestApp "lem-yath-roam-test" "roam-test.sh";
             roam-backlink-test = mkTestAppWithLem lemYath "lem-yath-roam-backlink-test" "roam-backlink-test.sh";
             org-test = mkTestAppWithLem lemYath "lem-yath-org-test" "org-test.sh";
-            org-modern-test =
-              mkTestAppWithLem lemYath "lem-yath-org-modern-test"
-                "org-modern-test.sh";
-            org-download-test =
-              mkTestAppWithLem lemYath "lem-yath-org-download-test"
-                "org-download-test.sh";
+            org-modern-test = mkTestAppWithLem lemYath "lem-yath-org-modern-test" "org-modern-test.sh";
+            org-download-test = mkTestAppWithLem lemYath "lem-yath-org-download-test" "org-download-test.sh";
             org-planning-test = mkTestAppWithLem lemYath "lem-yath-org-planning-test" "org-planning-test.sh";
             org-timestamp-test = mkTestAppWithLem lemYath "lem-yath-org-timestamp-test" "org-timestamp-test.sh";
             org-source-edit-test =
@@ -823,16 +833,15 @@
             agenda-undo-test = mkTestAppWithLem lemYath "lem-yath-agenda-undo-test" "agenda-undo-test.sh";
             agenda-clock-test = mkTestAppWithLem lemYath "lem-yath-agenda-clock-test" "agenda-clock-test.sh";
             agenda-bulk-test = mkTestAppWithLem lemYath "lem-yath-agenda-bulk-test" "agenda-bulk-test.sh";
-            agenda-filter-test =
-              mkTestAppWithLem lemYath "lem-yath-agenda-filter-test" "agenda-filter-test.sh";
+            agenda-filter-test = mkTestAppWithLem lemYath "lem-yath-agenda-filter-test" "agenda-filter-test.sh";
             agenda-reminder-test =
-              mkTestAppWithLem lemYath "lem-yath-agenda-reminder-test" "agenda-reminder-test.sh";
+              mkTestAppWithLem lemYath "lem-yath-agenda-reminder-test"
+                "agenda-reminder-test.sh";
             agenda-dispatch-test =
-              mkTestAppWithLem lemYath "lem-yath-agenda-dispatch-test" "agenda-dispatch-test.sh";
-            agenda-query-test =
-              mkTestAppWithLem lemYath "lem-yath-agenda-query-test" "agenda-query-test.sh";
-            agenda-view-test =
-              mkTestAppWithLem lemYath "lem-yath-agenda-view-test" "agenda-view-test.sh";
+              mkTestAppWithLem lemYath "lem-yath-agenda-dispatch-test"
+                "agenda-dispatch-test.sh";
+            agenda-query-test = mkTestAppWithLem lemYath "lem-yath-agenda-query-test" "agenda-query-test.sh";
+            agenda-view-test = mkTestAppWithLem lemYath "lem-yath-agenda-view-test" "agenda-view-test.sh";
             editing-test = mkTestApp "lem-yath-editing-test" "editing-test.sh";
             formatting-test = mkTestApp "lem-yath-formatting-test" "formatting-test.sh";
             prompt-completion-test = mkTestApp "lem-yath-prompt-completion-test" "prompt-completion-test.sh";
@@ -890,9 +899,7 @@
             llm-conversation-test =
               mkTestAppWithLem lemYath "lem-yath-llm-conversation-test"
                 "llm-conversation-test.sh";
-            llm-models-test =
-              mkTestAppWithLem lemYath "lem-yath-llm-models-test"
-                "llm-models-test.sh";
+            llm-models-test = mkTestAppWithLem lemYath "lem-yath-llm-models-test" "llm-models-test.sh";
             llm-codex-models-test =
               mkTestAppWithLem lemYath "lem-yath-llm-codex-models-test"
                 "llm-codex-models-test.sh";
@@ -901,9 +908,9 @@
             llm-oauth-test = mkTestAppWithLem lemYath "lem-yath-llm-oauth-test" "llm-oauth-test.sh";
             llm-workflow-test = mkTestAppWithLem lemYath "lem-yath-llm-workflow-test" "llm-workflow-test.sh";
             llm-tools-test = mkTestAppWithLem lemYath "lem-yath-llm-tools-test" "llm-tools-test.sh";
-            llm-mcp-test =
-              mkTestAppWithLemAndInputs lemYath [ pkgs.python3 ]
-                "lem-yath-llm-mcp-test" "llm-mcp-test.sh";
+            llm-mcp-test = mkTestAppWithLemAndInputs lemYath [
+              pkgs.python3
+            ] "lem-yath-llm-mcp-test" "llm-mcp-test.sh";
             claude-code-test = mkTestAppWithLem lemYath "lem-yath-claude-code-test" "claude-code-test.sh";
             claude-bridge-test = mkTestAppWithLem lemYath "lem-yath-claude-bridge-test" "claude-bridge-test.sh";
             lisp-eval-test = mkTestApp "lem-yath-lisp-eval-test" "lisp-eval-test.sh";
@@ -913,7 +920,9 @@
             lsp-project-test = mkTestAppWithLem lemLspTest "lem-yath-lsp-project-test" "lsp-project-test.sh";
             real-lsp-test = mkRealLspTestApp "lem-yath-real-lsp-test" "real-lsp-test.sh";
             gdscript-test = mkTestAppWithLem lemYath "lem-yath-gdscript-test" "gdscript-test.sh";
-            lint-test = mkTestAppWithLemAndInputs lemYath (rustRuntimeInputs ++ [ pkgs.nix ]) "lem-yath-lint-test" "lint-test.sh";
+            lint-test = mkTestAppWithLemAndInputs lemYath (
+              rustRuntimeInputs ++ [ pkgs.nix ]
+            ) "lem-yath-lint-test" "lint-test.sh";
             tree-sitter-test = mkTestAppWithLem lemYath "lem-yath-tree-sitter-test" "tree-sitter-test.sh";
             dap-test = mkTestAppWithLemAndInputs lemYath (
               dapRuntimeInputs ++ rustRuntimeInputs
@@ -934,8 +943,7 @@
             orderless-completion = mkCheck "orderless-completion" "orderless-completion-test.sh";
             snippets = mkCheck "snippets" "snippet-test.sh";
             lsp-snippets = mkCheck "lsp-snippets" "lsp-snippet-test.sh";
-            interactive =
-              mkCheckWithLem lemYath "interactive" "interactive-test.sh";
+            interactive = mkCheckWithLem lemYath "interactive" "interactive-test.sh";
             expreg = mkCheck "expreg" "expreg-test.sh";
             surround = mkCheck "surround" "surround-test.sh";
             structural = mkCheckWithLem lemYath "structural" "structural-test.sh";
@@ -1008,22 +1016,15 @@
             vundo = mkCheck "vundo" "vundo-test.sh";
             actions = mkCheck "actions" "actions-test.sh";
             llm-keybinding = mkCheck "llm-keybinding" "llm-keybinding-test.sh";
-            llm-conversation =
-              mkCheckWithLem lemYath "llm-conversation"
-                "llm-conversation-test.sh";
-            llm-models =
-              mkCheckWithLem lemYath "llm-models" "llm-models-test.sh";
-            llm-codex-models =
-              mkCheckWithLem lemYath "llm-codex-models"
-                "llm-codex-models-test.sh";
+            llm-conversation = mkCheckWithLem lemYath "llm-conversation" "llm-conversation-test.sh";
+            llm-models = mkCheckWithLem lemYath "llm-models" "llm-models-test.sh";
+            llm-codex-models = mkCheckWithLem lemYath "llm-codex-models" "llm-codex-models-test.sh";
             llm-backend = mkCheckWithLem lemYath "llm-backend" "llm-backend-test.sh";
             llm-http = mkCheckWithLem lemYath "llm-http" "llm-http-test.sh";
             llm-oauth = mkCheckWithLem lemYath "llm-oauth" "llm-oauth-test.sh";
             llm-workflow = mkCheckWithLem lemYath "llm-workflow" "llm-workflow-test.sh";
             llm-tools = mkCheckWithLem lemYath "llm-tools" "llm-tools-test.sh";
-            llm-mcp =
-              mkCheckWithLemAndInputs lemYath [ pkgs.python3 ]
-                "llm-mcp" "llm-mcp-test.sh";
+            llm-mcp = mkCheckWithLemAndInputs lemYath [ pkgs.python3 ] "llm-mcp" "llm-mcp-test.sh";
             claude-code = mkCheckWithLem lemYath "claude-code" "claude-code-test.sh";
             claude-bridge = mkCheckWithLem lemYath "claude-bridge" "claude-bridge-test.sh";
             lisp-eval = mkCheck "lisp-eval" "lisp-eval-test.sh";

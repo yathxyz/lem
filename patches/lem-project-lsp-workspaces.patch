@@ -1,6 +1,6 @@
 --- a/src/ext/language-mode.lisp
 +++ b/src/ext/language-mode.lisp
-@@ -534,0 +535,22 @@
+@@ -543 +543,23 @@
 +(defun pathname-entry-name (pathname)
 +  (if (uiop:directory-pathname-p pathname)
 +      (princ-to-string (car (last (pathname-directory pathname))))
@@ -23,20 +23,21 @@
 +               (t nil))))
 +    (match 0 0)))
 +
-@@ -538 +560,5 @@
+ (defun match-pattern-p (pattern file)
+@@ -546 +568,5 @@
 -    (string (search pattern file))))
 +    (string (if (find-if (lambda (character)
 +                           (member character '(#\* #\?)))
 +                         pattern)
 +                (glob-match-p pattern file)
 +                (string= pattern file)))))
-@@ -542 +568 @@
+@@ -550 +576 @@
 -             (dolist (pathname (list-directory directory))
 +             (dolist (pathname (ignore-errors (list-directory directory)))
-@@ -544 +570 @@
+@@ -552 +578 @@
 -                 (when (match-pattern-p pattern (file-namestring pathname))
 +                 (when (match-pattern-p pattern (pathname-entry-name pathname))
-@@ -547,4 +573,6 @@
+@@ -555,4 +581,6 @@
 -             (cond ((matchp directory) directory)
 -                   ((uiop:pathname-equal directory (user-homedir-pathname)) nil)
 -                   (t (recursive (uiop:pathname-parent-directory-pathname directory))))))
@@ -47,7 +48,7 @@
 +                      nil)
 +                     (t (recursive parent))))))
 +    (recursive (uiop:ensure-directory-pathname directory))))
-@@ -553,3 +581,3 @@
+@@ -561,3 +589,3 @@
 -  (or (find-root-directory-1 directory
 -                             (or root-uri-patterns
 -                                 (list (lambda (name) (string= name ".git")))))
