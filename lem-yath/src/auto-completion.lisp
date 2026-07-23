@@ -1449,9 +1449,13 @@ already active prompt boundary, LINE-COMMAND retains ordinary line motion."
 (define-key lem/completion-mode::*completion-mode-keymap*
   'next-line 'lem-yath-corfu-next)
 (define-key lem/completion-mode::*completion-mode-keymap*
+  "C-n" 'lem-yath-corfu-next)
+(define-key lem/completion-mode::*completion-mode-keymap*
   "Down" 'lem-yath-corfu-next)
 (define-key lem/completion-mode::*completion-mode-keymap*
   'previous-line 'lem-yath-corfu-previous)
+(define-key lem/completion-mode::*completion-mode-keymap*
+  "C-p" 'lem-yath-corfu-previous)
 (define-key lem/completion-mode::*completion-mode-keymap*
   "Up" 'lem-yath-corfu-previous)
 (define-key lem/completion-mode::*completion-mode-keymap*

@@ -44,6 +44,19 @@ wait_report() {
   return 1
 }
 
+wait_report_count() {
+  local pattern=$1 expected=$2 timeout=${3:-10} i=0 count
+  while ((i < timeout * 4)); do
+    count=$(grep -cE "$pattern" "$LEM_YATH_COMPLETION_LIFECYCLE_REPORT" 2>/dev/null || true)
+    if [ "$count" -ge "$expected" ]; then
+      return 0
+    fi
+    sleep 0.25
+    i=$((i + 1))
+  done
+  return 1
+}
+
 start_fixture() {
   local session=$1 scratch=$2 fixture
   sessions+=("$session")
@@ -112,6 +125,20 @@ if start_fixture "$s1" "$scratch1"; then
     pass focus-callback "C-n focused beta and ran its focus callback"
   else
     fail focus-callback "focus callback did not follow C-n" "$s1"
+  fi
+
+  lem_keys "$s1" C-p
+  if wait_report_count '^FOCUS alpha$' 2 10; then
+    pass reverse-focus-callback "C-p returned to alpha and ran its focus callback"
+  else
+    fail reverse-focus-callback "focus callback did not follow C-p" "$s1"
+  fi
+
+  lem_keys "$s1" C-n
+  if wait_report_count '^FOCUS beta$' 2 10; then
+    pass refocus-callback "C-n returned to beta after reverse navigation"
+  else
+    fail refocus-callback "focus did not return to beta" "$s1"
   fi
 
   lem_keys "$s1" Enter
