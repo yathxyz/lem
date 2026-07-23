@@ -49,3 +49,22 @@
       (ok (= 6 (lem-core:string-width text))
           "overwriting a wide-character continuation repairs the row")
       (ok (string= " ab   " text)))))
+
+#+(and sbcl linux)
+(deftest alternate-editor-policy
+  (let ((server (format nil "absent-~d-~d"
+                        (sb-posix:getpid) (random 1000000000)))
+        (alternate (format nil "~a --noinform --non-interactive --quit"
+                           (first sb-ext:*posix-argv*))))
+    (ok (= 0 (lem-daemon/client:run-client
+              (list "--server-name" server
+                    "--alternate-editor" alternate
+                    "unavailable.txt")))
+        "an explicit alternate editor is used when no daemon is reachable")
+    (ok (handler-case
+            (progn
+              (lem-daemon/client:run-client
+               (list "--server-name" server "unavailable.txt"))
+              nil)
+          (error () t))
+        "the client does not start or choose an editor implicitly")))

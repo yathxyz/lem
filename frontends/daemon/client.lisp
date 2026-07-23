@@ -242,14 +242,36 @@
 
 (define-condition terminal-server-exit (condition) ())
 
-(defun terminal-reader-loop (connection main-thread render-lock)
-  (let ((screen (make-terminal-screen)))
+(define-condition terminal-server-error (error)
+  ((message :initarg :message :reader terminal-server-error-message))
+  (:report (lambda (condition stream)
+             (write-string (terminal-server-error-message condition) stream))))
+
+(defstruct terminal-control stopping-p)
+
+(defun terminal-reader-loop (connection main-thread render-lock control)
+  (let ((screen (make-terminal-screen))
+        (reported-p nil))
     (unwind-protect
          (loop :for message := (protocol:read-message (client-stream connection))
                :while message
-               :do (when (string= "screen" (protocol:field message "type" ""))
-                     (render-screen message render-lock screen)))
-      (when (bt2:thread-alive-p main-thread)
+               :do (cond
+                     ((string= "screen" (protocol:field message "type" ""))
+                      (render-screen message render-lock screen))
+                     ((and (string= "response"
+                                    (protocol:field message "type" ""))
+                           (string= "error"
+                                    (protocol:field message "status" "")))
+                      (let ((text (response-error-message message)))
+                        (setf reported-p t)
+                        (bt2:interrupt-thread
+                         main-thread
+                         (lambda ()
+                           (error 'terminal-server-error :message text)))
+                        (return)))))
+      (when (and (not reported-p)
+                 (not (terminal-control-stopping-p control))
+                 (bt2:thread-alive-p main-thread))
         (bt2:interrupt-thread main-thread
                               (lambda () (signal 'terminal-server-exit)))))))
 
@@ -295,6 +317,7 @@
          (old-resize-handler (and resize-symbol
                                   (boundp resize-symbol)
                                   (symbol-value resize-symbol)))
+         (control (make-terminal-control))
          (reader nil)
          (render-lock (bt2:make-lock :name "lemclient/render")))
     (when resize-symbol
@@ -318,7 +341,7 @@
                        (bt2:make-thread
                         (lambda ()
                           (terminal-reader-loop connection main-thread
-                                                render-lock))
+                                                render-lock control))
                         :name "lemclient screen reader"))
                  (when files
                    (let ((visit-id (next-id)))
@@ -341,6 +364,7 @@
                                  (ncurses-call :lem-ncurses/input "GET-EVENT"))))
                        (setf (symbol-value handler-symbol) old-handler)))))
              (terminal-server-exit () 0)))
+      (setf (terminal-control-stopping-p control) t)
       (ignore-errors
         (client-send connection
                      (protocol:make-object
@@ -399,10 +423,16 @@
             (nreverse files) wait eval force server alternate)))
 
 (defun run-alternate-editor (command files)
-  (let ((argv (append (uiop:split-string command :separator '(#\Space #\Tab)) files)))
-    (when (null argv) (error "Alternate editor command is empty"))
-    (uiop:run-program argv :input :interactive :output :interactive
-                           :error-output :interactive)
+  (when (every (lambda (character)
+                 (find character '(#\Space #\Tab #\Return #\Newline)))
+               command)
+    (error "Alternate editor command is empty"))
+  (let ((shell-command
+          (format nil "~a~{ ~a~}" command
+                  (mapcar #'uiop:escape-shell-token files))))
+    (uiop:run-program shell-command
+                      :input :interactive :output :interactive
+                      :error-output :interactive)
     0))
 
 (defun run-client (&optional (arguments (uiop:command-line-arguments)))

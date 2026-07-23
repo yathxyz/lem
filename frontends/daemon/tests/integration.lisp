@@ -33,6 +33,16 @@
                     "path" (uiop:native-namestring pathname)
                     "line" line "column" column))))
 
+(defun visit-many-nowait (connection entries)
+  (send-request connection "visit" "wait" "nowait" "files" entries))
+
+(defun send-key (connection symbol &key ctrl meta shift)
+  (send-request connection "input"
+                "ctrl" (and ctrl t)
+                "meta" (and meta t)
+                "shift" (and shift t)
+                "sym" symbol))
+
 (defstruct asynchronous-response
   thread value error)
 
@@ -70,6 +80,7 @@
                 (uiop:temporary-directory)))
          (server-name (format nil "test-~d" (random 1000000000)))
          (endpoint nil)
+         (metadata nil)
          (daemon-thread nil)
          (daemon-error nil)
          (admin nil)
@@ -82,6 +93,7 @@
            (setf (uiop:getenv "XDG_RUNTIME_DIR")
                  (uiop:native-namestring root)
                  endpoint (protocol:endpoint-pathname server-name)
+                 metadata (protocol:metadata-pathname server-name)
                  daemon-thread
                  (bt2:make-thread
                   (lambda ()
@@ -101,7 +113,11 @@
              (ok (zerop (logand (sb-posix:stat-mode directory-stat) #o077))
                  "runtime directory is owner-private")
              (ok (zerop (logand (sb-posix:stat-mode socket-stat) #o077))
-                 "socket is owner-private"))
+                 "socket is owner-private")
+             (let ((metadata-stat
+                     (sb-posix:lstat (uiop:native-namestring metadata))))
+               (ok (zerop (logand (sb-posix:stat-mode metadata-stat) #o077))
+                   "metadata is owner-private")))
 
            (setf admin (client::connect-client server-name))
            (ok (string= "42" (eval-primary admin "(+ 20 22)"))
@@ -132,6 +148,59 @@
            (ok (string= "3" (eval-primary first "(length (lem:all-frames))"))
                "two client frames coexist with the headless frame")
 
+           (let ((transient (client::connect-client server-name)))
+             (unwind-protect
+                  (progn
+                    (send-request transient "attach" "width" 80 "height" 24)
+                    (ok (string= "4"
+                                 (eval-primary admin "(length (lem:all-frames))"))
+                        "a later client can attach an additional frame"))
+               (client::close-client transient)))
+           (ok (wait-until
+                (lambda ()
+                  (string= "3"
+                           (eval-primary admin "(length (lem:all-frames))"))))
+               "a client crash removes only its frame")
+           (let ((reconnected (client::connect-client server-name)))
+             (unwind-protect
+                  (ok (string= "attached"
+                               (send-request reconnected "attach"
+                                             "width" 90 "height" 25))
+                      "a terminal can reconnect after a disconnect")
+               (client::close-client reconnected)))
+           (ok (wait-until
+                (lambda ()
+                  (string= "3"
+                           (eval-primary admin "(length (lem:all-frames))"))))
+               "reconnected frame cleanup leaves existing sessions alive")
+
+           (let ((design (asdf:system-relative-pathname
+                          :lem-daemon #p"../../docs/daemon-client.md"))
+                 (readme (asdf:system-relative-pathname
+                          :lem-daemon #p"../../README.md")))
+             (visit-many-nowait
+              first
+              (vector (protocol:make-object
+                       "path" (uiop:native-namestring design)
+                       "line" 3 "column" 2)
+                      (protocol:make-object
+                       "path" (uiop:native-namestring readme)
+                       "line" 1 "column" 0)))
+             (ok (string= "3"
+                          (eval-primary
+                           first
+                           "(lem:line-number-at-point (lem:current-point))"))
+                 "a multi-file request positions its first file by line")
+             (ok (string= "2"
+                          (eval-primary first
+                                        "(lem:point-charpos (lem:current-point))"))
+                 "a positioned request preserves the requested column")
+             (ok (string= "T"
+                          (eval-primary
+                           first
+                           "(not (null (lem:get-buffer \"README.md\")))"))
+                 "one request opens every named file"))
+
            (visit-nowait first (asdf:system-relative-pathname
                                 :lem-daemon #p"../../docs/daemon-client.md"))
            (visit-nowait second (asdf:system-relative-pathname
@@ -145,6 +214,33 @@
                                      "(lem:buffer-name (lem:current-buffer))"))
                "second session has an independent selected buffer")
 
+           (eval-primary
+            first
+            "(progn (lem:switch-to-buffer (lem:make-buffer \"daemon-input-first\")) :ready)")
+           (eval-primary
+            second
+            "(progn (lem:switch-to-buffer (lem:make-buffer \"daemon-input-second\")) :ready)")
+           (send-key first "x" :ctrl t)
+           (ok (wait-until
+                (lambda ()
+                  (string= "T"
+                           (eval-primary
+                            admin
+                            "(not (null lem-core::*routed-input-session*))"))))
+               "a prefix key retains ownership of its client session")
+           (send-key second "b")
+           (send-key first "u")
+           (ok (string= "\"\""
+                        (eval-primary first
+                                      "(lem:buffer-text (lem:current-buffer))"))
+               "another client's key does not complete the first prefix")
+           (ok (string= "\"b\""
+                        (eval-primary second
+                                      "(lem:buffer-text (lem:current-buffer))"))
+               "deferred input runs in its originating frame")
+
+           (visit-nowait first (asdf:system-relative-pathname
+                                :lem-daemon #p"../../docs/daemon-client.md"))
            (visit-nowait second (asdf:system-relative-pathname
                                  :lem-daemon #p"../../docs/daemon-client.md"))
            (eval-primary first
@@ -220,6 +316,25 @@
                  (ok (and error (search "cancelled" error :test #'char-equal))
                      "cancellation releases the client with a useful error")))
              (client::close-client waiting)
+             (setf waiting (client::connect-client server-name))
+
+             (multiple-value-bind (response id)
+                 (start-waiting-visit waiting edit-file)
+               (declare (ignore id))
+               (ok (wait-until
+                    (lambda ()
+                      (string= "1"
+                               (eval-primary
+                                admin
+                                "(length (lem-daemon::request-buffer-list))"))))
+                   "an abortable blocking visit is pending")
+               (eval-primary admin "(lem-daemon:daemon-edit-abort)")
+               (multiple-value-bind (value error)
+                   (finish-asynchronous-response response)
+                 (declare (ignore value))
+                 (ok (and error (search "aborted" error :test #'char-equal))
+                     "editor-side abort is recoverable by the daemon")))
+             (client::close-client waiting)
              (setf waiting nil))
 
            (handler-case
@@ -232,6 +347,8 @@
            (client::run-shutdown admin t)
            (ok (wait-until (lambda () (not (probe-file endpoint))))
                "forced shutdown removes the endpoint")
+           (ok (not (probe-file metadata))
+               "forced shutdown removes daemon metadata")
            (when daemon-thread (bt2:join-thread daemon-thread))
            (setf daemon-thread nil)
            (ok (null daemon-error) "daemon exits cleanly"))

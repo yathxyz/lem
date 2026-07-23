@@ -301,13 +301,15 @@
         (move-point (buffer-point buffer) (lem-core::%window-point window))))))
 
 (defun redraw-other-sessions (active)
-  (dolist (connection (bt2:with-lock-held (*daemon-lock*)
-                        (copy-list *daemon-connections*)))
-    (let ((implementation (connection-implementation connection)))
-      (when (and implementation (not (eq implementation active))
-                 (get-frame implementation))
-        (activate-implementation implementation)
-        (redraw-display :force t)))))
+  (unwind-protect
+       (dolist (connection (bt2:with-lock-held (*daemon-lock*)
+                             (copy-list *daemon-connections*)))
+         (let ((implementation (connection-implementation connection)))
+           (when (and implementation (not (eq implementation active))
+                      (get-frame implementation))
+             (activate-implementation implementation)
+             (redraw-display :force t))))
+    (activate-implementation active)))
 
 (defun handle-attach-on-editor (connection id width height)
   (when (connection-implementation connection)
@@ -393,11 +395,12 @@
                           :shift (bool-field message "shift")
                           :sym (require-string message "sym" 64))))
                 (send-event
-                 (lambda ()
-                   (activate-implementation implementation)
-                   (send-event key)
-                   (send-event (lambda ()
-                                 (redraw-other-sessions implementation))))))))
+                 (lem-core::make-routed-input-event
+                  connection
+                  (lambda () (activate-implementation implementation))
+                  key))
+                (send-event
+                 (lambda () (redraw-other-sessions implementation))))))
            (response-ok connection id "accepted")))
         ((string= type "resize")
          (let ((implementation (or (connection-implementation connection)
@@ -469,7 +472,8 @@
   (when lem-core::*in-the-editor*
     (send-event (lambda ()
                   (cancel-connection-requests-on-editor connection)
-                  (detach-connection-frame-on-editor connection)))))
+                  (detach-connection-frame-on-editor connection)
+                  (lem-core::cancel-routed-input-session connection)))))
 
 #+sbcl
 (progn

@@ -104,7 +104,9 @@
                        (editor-condition
                          #'editor-condition-handler))
           (let ((*this-command-keys* nil))
-            (read-command-and-call)))
+            (unwind-protect
+                 (read-command-and-call)
+              (finish-routed-input-session))))
       (editor-condition (c)
         (restart-case (error c)
           (lem-restart:message ()

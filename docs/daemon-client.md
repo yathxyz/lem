@@ -1,8 +1,9 @@
 # Persistent Lem daemon and clients
 
-Status: open-ended design specification. This document records requirements and
-design constraints; it does not select a final implementation or authorize an
-incomplete compatibility layer.
+Status: implemented for Linux, SBCL, and ncurses. The Unix transport, native
+client, independent-frame routing, blocking edit lifecycle, and integration
+tests live under `frontends/daemon/`. Windows and graphical attachment remain
+later milestones.
 
 ## Purpose
 
@@ -14,6 +15,65 @@ history, subprocesses, or other daemon-owned state.
 The first supported platform is Linux with SBCL and the ncurses frontend. The
 protocol and ownership model must not make Windows support impractical. Windows
 support is an intended later milestone, not an unspecified afterthought.
+
+## Using the implementation
+
+Build the normal ncurses editor and the native client, then start a named or
+default daemon:
+
+```sh
+make ncurses
+make daemon-client
+./lem --daemon
+
+# In other processes:
+./lemclient README.md                 # wait until the edit is finished
+./lemclient --no-wait README.md       # submit and return immediately
+./lemclient +120:4 README.md          # line 120, column 4
+./lemclient -t README.md              # attach an independent terminal frame
+./lemclient --eval '(length (lem:all-buffers))'
+./lemclient --stop-server
+```
+
+The Nix flake exposes `.#lemclient` as both a package and an app. The ncurses
+runtime is split from the optional language-mode bundle so the short-lived
+client image does not load LSPs and every extension.
+
+A blocking file request enables `daemon-edit-mode` in each requested buffer:
+
+- `C-x #` finishes without saving;
+- `C-c C-c` saves and finishes;
+- `C-c C-k` aborts the request without killing the daemon or buffer.
+
+`Ctrl-C` in a blocking SBCL client sends protocol cancellation and exits with
+status 130. A client connection failure is an error unless
+`--alternate-editor COMMAND` was explicitly supplied.
+
+## Implemented architecture and performance
+
+The daemon uses one serialized Lem editor loop. Each attached connection owns a
+real Lem frame and a session-scoped headless implementation containing its own
+dimensions, selected window, cursor, and redisplay state. Shared buffers remain
+ordinary daemon-owned Lem buffers. Routed input events retain their client
+session across multi-key prefixes, preventing concurrent terminals from
+completing one another's key sequences.
+
+Connection readers and writers run concurrently, but all editor mutations enter
+the editor event queue. This matches the important Emacs daemon semantics: one
+persistent editor state, independent frames, shared buffer contents, and UI
+disconnects that do not stop the process.
+
+Redisplay composes a terminal cell matrix using Lem's width calculation, sends
+one full screen on attachment or width change, and then sends only changed rows
+plus the cursor. The client applies those rows through ncurses. Consequently,
+wire traffic for an ordinary keystroke is proportional to the changed rows,
+while server-side composition remains proportional to the visible cell matrix.
+The protocol bounds every frame at 1 MiB and file collections at 64 entries.
+
+This is suitable for a local Unix socket and avoids the original full-screen
+broadcast design, but it is not a claim of performance parity with GNU Emacs's
+decades-optimized C redisplay engine. Lem still composes a complete logical
+screen before diffing, and version one does not transmit face/color runs.
 
 ## Required user model
 
@@ -189,12 +249,14 @@ one, tmux pane switching, or silently starting a daemon.
 9. Windows transport and terminal prototypes validate that the abstractions do
    not require a Linux-only redesign.
 
-## Open questions
+## Remaining design questions
 
-- Whether routing belongs in the core implementation abstraction or entirely in
-  a persistent server implementation.
-- Whether each attachment maps to one Lem frame or may own several frames.
-- The printed and machine-readable representation returned by `--eval`.
+- Whether session routing should eventually become a public core implementation
+  abstraction rather than the daemon's routed-input extension.
+- Whether a future graphical attachment may own several Lem frames. Version one
+  maps each attachment to exactly one frame.
+- Whether `--eval` should add typed JSON values. Version one returns a JSON
+  object containing bounded readable Common Lisp representations.
 - How interactive prompts requested by noninteractive file clients are surfaced.
 - Whether socket activation starts an uninitialized daemon or only transports
   requests to an already initialized process.
@@ -204,3 +266,15 @@ one, tmux pane switching, or silently starting a daemon.
 
 These questions should be resolved through focused prototypes and lifecycle
 tests before committing to a broad public protocol.
+
+## Current limits
+
+- Linux/SBCL Unix sockets and ncurses are the only implemented transport and
+  interactive client combination. The wire framing is portable, but extracting
+  endpoint and peer-credential operations behind a Windows-capable backend,
+  then validating a named-pipe/console prototype, remains outstanding.
+- Terminal text, cursor position, wide-character layout, resize, keys, and
+  bracketed paste are supported. Face/color runs and mouse events are not yet
+  transported.
+- Socket activation, systemd user units, SDL2/webview attachment, and daemon
+  state restoration after a process restart remain future integrations.

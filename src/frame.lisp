@@ -131,7 +131,7 @@ redraw-display関数でキャッシュを捨てて画面全体を再描画しま
 
 (defun unmap-frame (display)
   (let ((frame (gethash display *display-frame-map*)))
-    (remhash display frame)
+    (remhash display *display-frame-map*)
     frame))
 
 (defun setup-frame (frame buffer)
