@@ -25,89 +25,7 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          lemBasePatchedSrc = pkgs.applyPatches {
-            name = "lem-yath-lem-source-base";
-            src = lem.outPath;
-            patches = [
-              ./patches/lem-completion-lifecycle.patch
-              ./patches/lem-completion-detail-accessor.patch
-              ./patches/lem-transient-delay-race.patch
-              ./patches/lem-idle-timer-initial-time.patch
-              ./patches/lem-emergency-checkpoint-mode.patch
-              ./patches/lem-transient-bottom-restore.patch
-            ];
-          };
-          lemProjectPatchedSrc = pkgs.applyPatches {
-            name = "lem-yath-lem-source-project-lsp";
-            src = lemBasePatchedSrc;
-            patches = [
-              ./patches/lem-project-lsp-workspaces.patch
-            ];
-            patchFlags = [
-              "-p1"
-              "--fuzz=0"
-            ];
-          };
-          lemPatchedSrc = pkgs.applyPatches {
-            name = "lem-yath-lem-source";
-            src = lemProjectPatchedSrc;
-            patches = [
-              ./patches/lem-lsp-buffer-lifecycle-hooks.patch
-              ./patches/lem-lsp-pipe-stdio.patch
-              ./patches/lem-lsp-file-watches.patch
-              ./patches/lem-lsp-json-type-error.patch
-              ./patches/lem-lsp-workspace-symbol-score.patch
-              ./patches/lem-grep-writeback.patch
-              ./patches/lem-peek-source-timer.patch
-              ./patches/lem-safe-revert.patch
-              ./patches/lem-prompt-history-limit.patch
-              ./patches/lem-undo-tree.patch
-              ./patches/lem-completion-observer-change-group.patch
-              ./patches/lem-after-change-undo.patch
-              ./patches/lem-undo-state-point.patch
-              ./patches/lem-completion-presentation-focus.patch
-              ./patches/lem-completion-groups.patch
-              ./patches/lem-completion-marginalia-layout.patch
-              ./patches/lem-vi-screen-line.patch
-              ./patches/lem-vi-register-selection.patch
-              ./patches/lem-vi-search-repeat-wrap.patch
-              ./patches/lem-vi-replace-insert.patch
-              ./patches/lem-centered-content-width.patch
-              ./patches/lem-word-boundary-wrap.patch
-              ./patches/lem-git-worktree.patch
-              ./patches/lem-legit-status-sections.patch
-              ./patches/lem-legit-status-writeback-hook.patch
-              ./patches/lem-legit-unmerged-files.patch
-              ./patches/lem-hidden-lines.patch
-              ./patches/lem-buffer-write-function.patch
-              ./patches/lem-save-new-file.patch
-              ./patches/lem-display-line-transformer.patch
-              ./patches/lem-directory-buffer-clean.patch
-              ./patches/lem-completion-validity.patch
-              ./patches/lem-terminal-safe-cwd.patch
-              ./patches/lem-mcp-server-secure.patch
-              ./patches/lem-before-find-file.patch
-              ./patches/lem-kill-buffer-query.patch
-              ./patches/lem-completion-repaint.patch
-              ./patches/lem-ncurses-resize-signal.patch
-            ];
-          };
-          terminalSo = pkgs.stdenv.mkDerivation {
-            pname = "lem-yath-terminal-so";
-            version = "0.1.0";
-            src = "${lemPatchedSrc}/extensions/terminal";
-            buildInputs = [ pkgs.libvterm-neovim ];
-            buildPhase = ''
-              $CC -shared -fPIC -o terminal.so terminal.c \
-                -I${pkgs.libvterm-neovim}/include \
-                -L${pkgs.libvterm-neovim}/lib -lvterm \
-                -lutil
-            '';
-            installPhase = ''
-              mkdir -p $out/lib
-              cp terminal.so $out/lib/
-            '';
-          };
+          lemPatchedSrc = lem.outPath;
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (
             old:
             let
@@ -123,10 +41,6 @@
               });
             in
             {
-              src = lemPatchedSrc;
-              nativeLibs = map (
-                dependency: if (dependency.pname or null) == "lem-terminal-so" then terminalSo else dependency
-              ) old.nativeLibs;
               lispLibs = map (
                 dependency: if (dependency.pname or null) == "jsonrpc" then patchedJsonrpc else dependency
               ) old.lispLibs;

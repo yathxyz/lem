@@ -1,4 +1,8 @@
-# lem-yath: emacs → lem
+# lem-yath: Emacs to Lem
+
+This configuration is now maintained as an integrated extension of the
+`yathxyz/lem` fork. The former standalone `yathxyz/lem-yath` repository is
+retired; its complete unsquashed history is preserved in this repository.
 
 A faithful port of my Nix-managed Emacs configuration
 (`~/proj/nix/computer/portable/dot_config/emacs`, ~9,100 lines of elisp,
@@ -22,21 +26,19 @@ terminal (ncurses) frontend, multi-threaded SBCL image.
 
 ## Run
 
-The flake pins upstream Lem and exposes this port as a runnable app. The
-wrapper binary is named `lem`, so installing it gives the configured editor
-under the usual name (unconfigured upstream stays reachable as `nix run
-.#lem-upstream`):
+Run these commands from the Lem repository root. The root flake exposes this
+port as `lem-yath`; the unconfigured fork remains the default package:
 
 ```sh
-nix run
+nix run .#lem-yath
 ```
 
-For development, the dev shell puts the flake-pinned upstream `lem` on PATH
-and points `LEM_YATH_SOURCE` at the working tree:
+For a direct development load, use the fork's development shell and load the
+integrated source explicitly:
 
 ```sh
 nix develop
-lem -q --eval '(load #P"lem-yath/init.lisp")'
+lem -q --eval '(load #P"extensions/lem-yath/lem-yath/init.lisp")'
 ```
 
 The wrapper starts Lem without the user's normal init file and loads
@@ -45,9 +47,9 @@ the installed editor loads immutable `.fasl` files without compiling into the
 user cache. A direct development load still redirects ASDF output under
 `XDG_CACHE_HOME` instead of writing beside the sources.
 
-The installed package also provides `lemclient`. A configured Lem running in
-tmux publishes an owner-only local socket and its pane, so shell and Git edit
-requests can reuse that editor:
+The installed package still provides the legacy `lemclient`. A configured Lem
+running in tmux publishes an owner-only local socket and its pane, so shell and
+Git edit requests can reuse that editor:
 
 ```sh
 lemclient file.txt
@@ -65,6 +67,11 @@ a fresh configured Lem instead. The running editor sets `GIT_EDITOR` to the
 client's non-focusing form and fills
 otherwise-unset `VISUAL`/`EDITOR` for its child processes; a parent shell can
 opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
+
+This tmux/socat implementation is retained only until the native persistent
+daemon and Common Lisp client replace it. The agreed requirements are recorded
+in [`../../docs/daemon-client.md`](../../docs/daemon-client.md); no daemon
+implementation is part of this migration.
 
 ## What's in the port
 

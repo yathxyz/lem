@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Mirror this worktree to ex44 and run the requested test there.
+# Mirror the integrated Lem worktree to ex44 and run the requested test there.
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 host="${LEM_YATH_TEST_HOST:-ex44}"
-remote_root="${LEM_YATH_REMOTE_ROOT:-/home/yanni/.cache/codex/lem-yath-parity}"
+remote_root="${LEM_YATH_REMOTE_ROOT:-/home/yanni/.cache/codex/lem-yath-monorepo}"
 test_name="${1:-all}"
 
 case "$host" in

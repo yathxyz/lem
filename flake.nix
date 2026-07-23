@@ -4,6 +4,10 @@
   inputs = {
     flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:nixos/nixpkgs/release-25.11";
+    yasnippet-snippets = {
+      url = "github:AndreaCrotti/yasnippet-snippets/606ee926df6839243098de6d71332a697518cb86";
+      flake = false;
+    };
   };
 
   outputs =
@@ -21,7 +25,7 @@
       ];
 
       perSystem =
-        { pkgs, ... }:
+        { pkgs, system, ... }:
         let
           # --- Setup & Helpers ---
           lisp = pkgs.sbcl;
@@ -348,7 +352,11 @@
           lem-ncurses = lem-base.overrideLispAttrs (o: {
             pname = "lem-ncurses";
             meta.mainProgram = "lem";
-            systems = [ "lem-ncurses" "tree-sitter-cl" "lem-tree-sitter" ];
+            systems = [
+              "lem-ncurses"
+              "tree-sitter-cl"
+              "lem-tree-sitter"
+            ];
             lispLibs =
               o.lispLibs
               ++ (with lisp.pkgs; [
@@ -379,7 +387,11 @@
           lem-sdl2 = lem-base.overrideLispAttrs (o: {
             pname = "lem-sdl2";
             meta.mainProgram = "lem";
-            systems = [ "lem-sdl2" "tree-sitter-cl" "lem-tree-sitter" ];
+            systems = [
+              "lem-sdl2"
+              "tree-sitter-cl"
+              "lem-tree-sitter"
+            ];
             lispLibs =
               o.lispLibs
               ++ (with lisp.pkgs; [
@@ -388,15 +400,16 @@
                 sdl2-image
                 trivial-main-thread
               ]);
-            nativeLibs = (with pkgs; [
-              SDL2
-              SDL2_ttf
-              SDL2_image
-              tree-sitter
-              ts-wrapper
-            ])
-            # libvterm is Linux-only in nixpkgs (see lem-ncurses).
-            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ terminal-so ];
+            nativeLibs =
+              (with pkgs; [
+                SDL2
+                SDL2_ttf
+                SDL2_image
+                tree-sitter
+                ts-wrapper
+              ])
+              # libvterm is Linux-only in nixpkgs (see lem-ncurses).
+              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ terminal-so ];
             installPhase = ''
               runHook preInstall
               mkdir -p $out/bin
@@ -412,7 +425,11 @@
           lem-webview = lem-base.overrideLispAttrs (o: {
             pname = "lem-webview";
             meta.mainProgram = "lem";
-            systems = [ "lem-webview" "tree-sitter-cl" "lem-tree-sitter" ];
+            systems = [
+              "lem-webview"
+              "tree-sitter-cl"
+              "lem-tree-sitter"
+            ];
 
             # Use the specific webview entry point
             buildScript = mkBuildScript { entryPoint = "lem-webview:main"; };
@@ -469,6 +486,22 @@
                     --prefix LD_LIBRARY_PATH : "${tree-sitter-grammars.json}:${tree-sitter-grammars.markdown}:${tree-sitter-grammars.yaml}:${tree-sitter-grammars.nix}:${tree-sitter-grammars.python}:${tree-sitter-grammars.javascript}:${tree-sitter-grammars.typescript}:${tree-sitter-grammars.go}:${tree-sitter-grammars.perl}:${tree-sitter-grammars.clojure}"
                 '';
           });
+
+          lemYathOutputs =
+            if system == "x86_64-linux" then
+              ((import ./extensions/lem-yath/flake.nix).outputs {
+                self = ./extensions/lem-yath;
+                nixpkgs = inputs.nixpkgs;
+                lem = {
+                  outPath = ./.;
+                  packages.${system}.lem-ncurses = lem-ncurses;
+                };
+                yasnippet-snippets = inputs.yasnippet-snippets;
+              })
+            else
+              null;
+
+          lemYath = lemYathOutputs.packages.${system}.lem-yath;
         in
         {
           overlayAttrs = {
@@ -478,6 +511,9 @@
           packages = {
             inherit lem-ncurses lem-sdl2 lem-webview;
             default = lem-ncurses;
+          }
+          // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+            lem-yath = lemYath;
           };
 
           apps = {
@@ -497,86 +533,106 @@
               type = "app";
               program = lem-ncurses;
             };
-          };
+          }
+          // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+            lem-yath = {
+              type = "app";
+              program = "${lemYath}/bin/lem";
+            };
+          }
+          // pkgs.lib.optionalAttrs (system == "x86_64-linux") (
+            builtins.removeAttrs lemYathOutputs.apps.${system} [
+              "default"
+              "lem-yath"
+            ]
+          );
+
+          checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") lemYathOutputs.checks.${system};
 
           devShells.default = pkgs.mkShell {
-            packages = with pkgs; [
-              # Lisp development
-              sbcl
-              sbclPackages.qlot-cli
+            packages =
+              with pkgs;
+              [
+                # Lisp development
+                sbcl
+                sbclPackages.qlot-cli
 
-              # Build tools
-              gnumake
-              pkg-config
+                # Build tools
+                gnumake
+                pkg-config
 
-              # Node.js for frontend development
-              nodejs_22
+                # Node.js for frontend development
+                nodejs_22
 
-              # Native libraries for frontends
-              ncurses
-              SDL2
-              SDL2_ttf
-              SDL2_image
+                # Native libraries for frontends
+                ncurses
+                SDL2
+                SDL2_ttf
+                SDL2_image
 
-              # SSL/TLS support
-              openssl
+                # SSL/TLS support
+                openssl
 
-              # Tree-sitter support
-              tree-sitter
-              pkgs.tree-sitter-grammars.tree-sitter-json
-              pkgs.tree-sitter-grammars.tree-sitter-markdown
-              pkgs.tree-sitter-grammars.tree-sitter-yaml
-              pkgs.tree-sitter-grammars.tree-sitter-nix
-              pkgs.tree-sitter-grammars.tree-sitter-python
-              pkgs.tree-sitter-grammars.tree-sitter-javascript
-              pkgs.tree-sitter-grammars.tree-sitter-typescript
-              pkgs.tree-sitter-grammars.tree-sitter-go
-              pkgs.tree-sitter-grammars.tree-sitter-perl
-              pkgs.tree-sitter-grammars.tree-sitter-clojure
+                # Tree-sitter support
+                tree-sitter
+                pkgs.tree-sitter-grammars.tree-sitter-json
+                pkgs.tree-sitter-grammars.tree-sitter-markdown
+                pkgs.tree-sitter-grammars.tree-sitter-yaml
+                pkgs.tree-sitter-grammars.tree-sitter-nix
+                pkgs.tree-sitter-grammars.tree-sitter-python
+                pkgs.tree-sitter-grammars.tree-sitter-javascript
+                pkgs.tree-sitter-grammars.tree-sitter-typescript
+                pkgs.tree-sitter-grammars.tree-sitter-go
+                pkgs.tree-sitter-grammars.tree-sitter-perl
+                pkgs.tree-sitter-grammars.tree-sitter-clojure
 
-              # Perl Language Server
-              pkgs.perl538Packages.PLS  # provides 'pls' command (used by lem-perl-mode)
+                # Perl Language Server
+                pkgs.perl538Packages.PLS # provides 'pls' command (used by lem-perl-mode)
 
-              # Clojure development
-              clojure
-              clojure-lsp
-              leiningen
-              babashka
+                # Clojure development
+                clojure
+                clojure-lsp
+                leiningen
+                babashka
 
-              # Code formatting
-              nixfmt-rfc-style
+                # Code formatting
+                nixfmt-rfc-style
 
-              # Development tools
-              direnv
-            ] ++ lib.optionals stdenv.isLinux [
-              # Linux-specific dependencies for webview frontend
-              webkitgtk_4_1
-              gtk3
-            ];
+                # Development tools
+                direnv
+              ]
+              ++ lib.optionals stdenv.isLinux [
+                # Linux-specific dependencies for webview frontend
+                webkitgtk_4_1
+                gtk3
+              ];
 
             # Set up library paths for native dependencies
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath ([
-              pkgs.ncurses
-              pkgs.SDL2
-              pkgs.SDL2_ttf
-              pkgs.SDL2_image
-              pkgs.openssl
-              pkgs.tree-sitter
-              ts-wrapper
-              pkgs.tree-sitter-grammars.tree-sitter-json
-              pkgs.tree-sitter-grammars.tree-sitter-markdown
-              pkgs.tree-sitter-grammars.tree-sitter-yaml
-              pkgs.tree-sitter-grammars.tree-sitter-nix
-              pkgs.tree-sitter-grammars.tree-sitter-python
-              pkgs.tree-sitter-grammars.tree-sitter-javascript
-              pkgs.tree-sitter-grammars.tree-sitter-typescript
-              pkgs.tree-sitter-grammars.tree-sitter-go
-              pkgs.tree-sitter-grammars.tree-sitter-perl
-              pkgs.tree-sitter-grammars.tree-sitter-clojure
-            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-              pkgs.webkitgtk_4_1
-              pkgs.gtk3
-            ]);
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+              [
+                pkgs.ncurses
+                pkgs.SDL2
+                pkgs.SDL2_ttf
+                pkgs.SDL2_image
+                pkgs.openssl
+                pkgs.tree-sitter
+                ts-wrapper
+                pkgs.tree-sitter-grammars.tree-sitter-json
+                pkgs.tree-sitter-grammars.tree-sitter-markdown
+                pkgs.tree-sitter-grammars.tree-sitter-yaml
+                pkgs.tree-sitter-grammars.tree-sitter-nix
+                pkgs.tree-sitter-grammars.tree-sitter-python
+                pkgs.tree-sitter-grammars.tree-sitter-javascript
+                pkgs.tree-sitter-grammars.tree-sitter-typescript
+                pkgs.tree-sitter-grammars.tree-sitter-go
+                pkgs.tree-sitter-grammars.tree-sitter-perl
+                pkgs.tree-sitter-grammars.tree-sitter-clojure
+              ]
+              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+                pkgs.webkitgtk_4_1
+                pkgs.gtk3
+              ]
+            );
 
             shellHook = ''
               # Prioritize local tree-sitter-cl c-wrapper for development
