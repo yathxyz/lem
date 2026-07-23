@@ -2,57 +2,52 @@ LISP ?= sbcl --dynamic-space-size 4GiB --noinform --no-sysinit --no-userinit
 PREFIX ?= /usr/local
 VARIANT ?= webview
 
-ncurses:
-	qlot install
+ncurses: prepare-dependencies
 	-$(MAKE) terminal-lib
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-ncurses.lisp
 
-sdl2:
-	qlot install
+sdl2: prepare-dependencies
 	-$(MAKE) terminal-lib
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-sdl2.lisp
 
-sdl2-ncurses:
-	qlot install
+sdl2-ncurses: prepare-dependencies
 	-$(MAKE) terminal-lib
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-sdl2-ncurses.lisp
 
-server:
-	qlot install
+server: prepare-dependencies
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-server.lisp
 
-client:
-	qlot install
+client: prepare-dependencies
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-client.lisp
 
-daemon-client:
-	qlot install
+daemon-client: prepare-dependencies
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-daemon-client.lisp
 
-webview:
-	qlot install
+webview: prepare-dependencies
 	-$(MAKE) terminal-lib
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-webview.lisp
 
-webview-ncurses:
-	qlot install
+webview-ncurses: prepare-dependencies
 	-$(MAKE) terminal-lib
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-webview-ncurses.lisp
 
 lem: webview
 
-.PHONY: legit terminal-lib
+.PHONY: prepare-dependencies legit terminal-lib
 
-legit:
+prepare-dependencies:
 	qlot install
+	./scripts/prepare-dependencies.sh
+
+legit: prepare-dependencies
 	$(LISP) --load .qlot/setup.lisp \
 		--load scripts/build-legit.lisp
 
@@ -99,8 +94,7 @@ install-webview:
 install-webview-ncurses:
 	$(MAKE) install VARIANT=webview-ncurses
 
-test:
-	qlot install
+test: prepare-dependencies
 	$(LISP) --load .qlot/setup.lisp \
 		--eval '(asdf:test-system "lem-tests")' \
 		--eval '(asdf:test-system "lem-vi-mode")' \
@@ -108,13 +102,12 @@ test:
 		--eval '(asdf:test-system "lem-sdl2/tests")' \
 		--quit
 
-doc:
-	qlot install
+doc: prepare-dependencies
 	$(LISP) --load .qlot/setup.lisp --load scripts/generate-documentation-tests.lisp --eval '(progn (lem-documentation-mode/tests::generate-markdown-file "test.md" :test) (quit))'
 
 update:
 	git pull
-	qlot install
+	$(MAKE) prepare-dependencies
 
 lint:
 	.qlot/bin/sblint lem.asd

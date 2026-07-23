@@ -69,7 +69,12 @@
           };
 
           jsonrpc = lisp.buildASDFSystem {
-            inherit (sources.jsonrpc) pname src version;
+            inherit (sources.jsonrpc) pname version;
+            src = pkgs.applyPatches {
+              name = "lem-jsonrpc-source";
+              src = sources.jsonrpc.src;
+              patches = [ ./extensions/lem-yath/patches/jsonrpc-timeout-cleanup.patch ];
+            };
             systems = [
               "jsonrpc"
               "jsonrpc/transport/stdio"
