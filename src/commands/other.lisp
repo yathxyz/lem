@@ -53,16 +53,17 @@ By default, persist M-x commands to disk. See *persist-M-x-commands*.")
 
 (define-command exit-lem (&optional (ask t)) ()
   "Ask for modified buffers before exiting lem."
-  (let ((modified-buffers
-          (mapcar #'buffer-name (modified-buffers))))
-    (and (or
-          (null ask)
-          (not modified-buffers)
-          (prompt-for-y-or-n-p
-           (format nil
-                   "Modified buffers exist:~%~{~a~%~}Leave anyway?"
-                   modified-buffers)))
-         (exit-editor))))
+  (unless (lem-if:close-frontend (implementation))
+    (let ((modified-buffers
+            (mapcar #'buffer-name (modified-buffers))))
+      (and (or
+            (null ask)
+            (not modified-buffers)
+            (prompt-for-y-or-n-p
+             (format nil
+                     "Modified buffers exist:~%~{~a~%~}Leave anyway?"
+                     modified-buffers)))
+           (exit-editor)))))
 
 (define-command quick-exit () ()
   "Exit the lem job and kill it."

@@ -301,15 +301,18 @@
         (move-point (buffer-point buffer) (lem-core::%window-point window))))))
 
 (defun redraw-other-sessions (active)
-  (unwind-protect
-       (dolist (connection (bt2:with-lock-held (*daemon-lock*)
-                             (copy-list *daemon-connections*)))
-         (let ((implementation (connection-implementation connection)))
-           (when (and implementation (not (eq implementation active))
-                      (get-frame implementation))
-             (activate-implementation implementation)
-             (redraw-display :force t))))
-    (activate-implementation active)))
+  (let ((restore (if (get-frame active)
+                     active
+                     *daemon-root-implementation*)))
+    (unwind-protect
+         (dolist (connection (bt2:with-lock-held (*daemon-lock*)
+                               (copy-list *daemon-connections*)))
+           (let ((implementation (connection-implementation connection)))
+             (when (and implementation (not (eq implementation active))
+                        (get-frame implementation))
+               (activate-implementation implementation)
+               (redraw-display :force t))))
+      (activate-implementation restore))))
 
 (defun handle-attach-on-editor (connection id width height)
   (when (connection-implementation connection)
@@ -335,6 +338,16 @@
     (setf (connection-implementation connection) nil)
     (when (eq (implementation) implementation)
       (activate-implementation *daemon-root-implementation*))))
+
+(defmethod lem-if:close-frontend ((implementation daemon-implementation))
+  (alexandria:when-let
+      ((connection (daemon-implementation-connection implementation)))
+    (daemon-send connection
+                 (protocol:make-object
+                  "version" protocol:+protocol-version+
+                  "type" "close" "reason" "client-request"))
+    (detach-connection-frame-on-editor connection)
+    t))
 
 (defun bool-field (message name)
   (eq t (protocol:field message name)))

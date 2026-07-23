@@ -92,6 +92,13 @@ Available interfaces: ~A"
 (defgeneric lem-if:set-display-title (implementation title))
 (defgeneric lem-if:display-fullscreen-p (implementation))
 (defgeneric lem-if:set-display-fullscreen-p (implementation fullscreen-p))
+(defgeneric lem-if:close-frontend (implementation)
+  (:documentation "Close the current frontend session when it is independently
+closable. Return true when the frontend handled the request; the default keeps
+the editor's normal process-exit behavior.")
+  (:method (implementation)
+    (declare (ignore implementation))
+    nil))
 (defgeneric lem-if:maximize-frame (implementation)
   (:method (implementation)))
 (defgeneric lem-if:minimize-frame (implementation)

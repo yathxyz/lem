@@ -258,6 +258,12 @@
                :do (cond
                      ((string= "screen" (protocol:field message "type" ""))
                       (render-screen message render-lock screen))
+                     ((string= "close" (protocol:field message "type" ""))
+                      (setf reported-p t)
+                      (bt2:interrupt-thread
+                       main-thread
+                       (lambda () (signal 'terminal-server-exit)))
+                      (return))
                      ((and (string= "response"
                                     (protocol:field message "type" ""))
                            (string= "error"

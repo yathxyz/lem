@@ -791,6 +791,7 @@
    :set-display-title
    :display-fullscreen-p
    :set-display-fullscreen-p
+   :close-frontend
    :maximize-frame
    :minimize-frame
    :make-view

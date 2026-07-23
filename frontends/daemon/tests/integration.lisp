@@ -137,6 +137,20 @@
            (ok (string= "6" (eval-primary admin "(* 2 3)"))
                "an oversized request does not damage the daemon")
 
+           (let ((only-terminal (client::connect-client server-name)))
+             (unwind-protect
+                  (progn
+                    (send-request only-terminal "attach"
+                                  "width" 80 "height" 24)
+                    (send-key only-terminal "x" :ctrl t)
+                    (send-key only-terminal "c" :ctrl t))
+               (client::close-client only-terminal)))
+           (ok (wait-until
+                (lambda ()
+                  (string= "1"
+                           (eval-primary admin "(length (lem:all-frames))"))))
+               "closing the last terminal leaves the headless daemon alive")
+
            (setf first (client::connect-client server-name)
                  second (client::connect-client server-name))
            (ok (string= "attached"
@@ -163,16 +177,19 @@
                "a client crash removes only its frame")
            (let ((reconnected (client::connect-client server-name)))
              (unwind-protect
-                  (ok (string= "attached"
-                               (send-request reconnected "attach"
-                                             "width" 90 "height" 25))
-                      "a terminal can reconnect after a disconnect")
+                  (progn
+                    (ok (string= "attached"
+                                 (send-request reconnected "attach"
+                                               "width" 90 "height" 25))
+                        "a terminal can reconnect after a disconnect")
+                    (send-key reconnected "x" :ctrl t)
+                    (send-key reconnected "c" :ctrl t))
                (client::close-client reconnected)))
            (ok (wait-until
                 (lambda ()
                   (string= "3"
                            (eval-primary admin "(length (lem:all-frames))"))))
-               "reconnected frame cleanup leaves existing sessions alive")
+               "C-x C-c detaches a client frame without stopping the daemon")
 
            (let ((design (asdf:system-relative-pathname
                           :lem-daemon #p"../../docs/daemon-client.md"))
