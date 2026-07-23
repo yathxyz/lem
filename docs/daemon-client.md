@@ -42,8 +42,12 @@ client image does not load LSPs and every extension.
 A blocking file request enables `daemon-edit-mode` in each requested buffer:
 
 - `C-x #` finishes without saving;
-- `C-c C-c` saves and finishes;
-- `C-c C-k` aborts the request without killing the daemon or buffer.
+- `C-c C-c` or `Z Z` saves and finishes;
+- `C-c C-k` or `Z Q` aborts the request without killing the daemon or buffer.
+
+After a daemon starts successfully, unset `GIT_EDITOR`, `VISUAL`, and `EDITOR`
+variables are set to its named `lemclient` command. Existing values are left
+unchanged.
 
 `Ctrl-C` in a blocking SBCL client sends protocol cancellation and exits with
 status 130. A client connection failure is an error unless
@@ -230,24 +234,29 @@ Useful behavior to preserve includes:
 The compatibility promise does not include graphical frame creation in version
 one, tmux pane switching, or silently starting a daemon.
 
-## Initial acceptance milestones
+## Acceptance status
+
+Milestones 1–8 are implemented for Linux/SBCL/ncurses and covered by the daemon
+test suite, package builds, and a real pseudo-terminal attachment exercise:
 
 1. A headless daemon initializes exactly once and remains alive without clients.
-2. A Common Lisp client submits positioned single- and multi-file requests.
+2. The Common Lisp client submits positioned single- and multi-file requests.
 3. `--eval` returns values and structured errors over an authenticated local
    connection.
-4. One ncurses client attaches, edits, resizes, disconnects, and reconnects
+4. An ncurses client attaches, edits, resizes, disconnects, and reconnects
    without losing daemon state.
-5. Two ncurses clients have independent frames while observing shared buffer
-   edits.
+5. Two clients have independent frames while observing shared buffer edits.
 6. Client crashes and malformed requests leave the daemon and other clients
    usable.
 7. Modified-buffer shutdown policy, forced shutdown, endpoint cleanup, named
    daemons, and alternate-editor fallback are covered by integration tests.
-8. The existing lem-yath file-request test matrix passes without tmux-specific
-   assertions.
-9. Windows transport and terminal prototypes validate that the abstractions do
-   not require a Linux-only redesign.
+8. The non-tmux lem-yath file-request matrix is covered: positioned and
+   multi-file visits, blocking and no-wait behavior, save, clean finish,
+   recoverable abort, zero-file attachment, legacy keys, and editor variables.
+
+Milestone 9 remains a portability acceptance target: Windows named-pipe and
+terminal prototypes must validate the backend boundary on Windows before that
+platform is declared supported.
 
 ## Remaining design questions
 
@@ -270,9 +279,10 @@ tests before committing to a broad public protocol.
 ## Current limits
 
 - Linux/SBCL Unix sockets and ncurses are the only implemented transport and
-  interactive client combination. The wire framing is portable, but extracting
-  endpoint and peer-credential operations behind a Windows-capable backend,
-  then validating a named-pipe/console prototype, remains outstanding.
+  interactive client combination. The wire protocol, request lifecycle, and
+  local transport interface are portable Common Lisp; Unix endpoint and peer
+  credential operations are isolated in `transport-unix.lisp`. Implementing
+  and validating a Windows named-pipe/console backend remains outstanding.
 - Terminal text, cursor position, wide-character layout, resize, keys, and
   bracketed paste are supported. Face/color runs and mouse events are not yet
   transported.

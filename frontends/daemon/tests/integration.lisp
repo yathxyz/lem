@@ -127,6 +127,14 @@
                              (string= expected (uiop:getenv variable)))
                            '("GIT_EDITOR" "VISUAL" "EDITOR"))))
                  "daemon clients populate the editor environment"))
+           (setf (uiop:getenv "GIT_EDITOR") "preserved-git"
+                 (uiop:getenv "VISUAL") "preserved-visual"
+                 (uiop:getenv "EDITOR") "preserved-editor")
+           (lem-daemon::configure-editor-environment)
+           (ok (equal '("preserved-git" "preserved-visual" "preserved-editor")
+                      (mapcar #'uiop:getenv
+                              '("GIT_EDITOR" "VISUAL" "EDITOR")))
+               "daemon startup respects existing editor environment values")
            (let* ((directory (uiop:pathname-directory-pathname endpoint))
                   (directory-stat
                     (sb-posix:lstat (uiop:native-namestring directory)))
