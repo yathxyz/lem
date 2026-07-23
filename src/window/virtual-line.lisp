@@ -1,5 +1,56 @@
 (in-package :lem-core)
 
+;; A mode may provide a non-destructive line-visibility predicate.  Keeping
+;; this at the display/movement layer lets parsers and structural commands
+;; continue to address the real buffer while outline-like modes hide rows.
+(define-editor-variable line-hidden-function nil)
+
+(defun line-hidden-p (point)
+  (alexandria:when-let
+      ((function (variable-value 'line-hidden-function :default point)))
+    (not (null (funcall function point)))))
+
+(defun move-to-next-visible-line (point &optional (n 1))
+  "Move POINT forward by N non-hidden logical lines."
+  (check-type n (integer 0 *))
+  (with-point ((candidate point))
+    (dotimes (_ n)
+      (loop
+        (unless (line-offset candidate 1)
+          (return-from move-to-next-visible-line nil))
+        (unless (line-hidden-p candidate)
+          (return))))
+    (move-point point candidate)))
+
+(defun move-to-previous-visible-line (point &optional (n 1))
+  "Move POINT backward by N non-hidden logical lines."
+  (check-type n (integer 0 *))
+  (with-point ((candidate point))
+    (dotimes (_ n)
+      (loop
+        (unless (line-offset candidate -1)
+          (return-from move-to-previous-visible-line nil))
+        (unless (line-hidden-p candidate)
+          (return))))
+    (move-point point candidate)))
+
+(defun count-visible-lines (start-point end-point)
+  "Return the number of visible logical-line steps between two points."
+  (assert (eq (point-buffer start-point) (point-buffer end-point)))
+  (with-point ((start start-point)
+               (end end-point))
+    (when (point< end start)
+      (rotatef start end))
+    (line-start start)
+    (line-start end)
+    (loop :with count := 0
+          :until (same-line-p start end)
+          :do (unless (line-offset start 1)
+                (return count))
+              (unless (line-hidden-p start)
+                (incf count))
+          :finally (return count))))
+
 (defun window-recenter (window &key line from-bottom)
   "Recenter WINDOW to the given LINE number.
 LINE must be NIL or a positive number.
@@ -35,6 +86,59 @@ If cursor is on top then move move WINDOW to the bottom."
       ((= line top) (window-recenter window :line scrolloff :from-bottom t))
       (t (window-recenter window :line nil :from-bottom nil)))))
 
+(declaim (inline line-wrap-whitespace-p))
+(defun line-wrap-whitespace-p (character)
+  (or (char= character #\Space)
+      (char= character #\Tab)))
+
+(defun wrapping-line-break-index (string width
+                                  &key
+                                    (start 0)
+                                    (tab-size +default-tab-size+)
+                                    word-boundary-p)
+  "Return the next display-row boundary in STRING after START.
+When WORD-BOUNDARY-P is true, prefer the end of the last complete space or
+tab run that fits.  A word wider than WIDTH still uses the exact display-width
+boundary.  The second value is true only when a word boundary was selected."
+  (let ((hard-boundary
+          (wide-index string width :start start :tab-size tab-size)))
+    (unless (and hard-boundary word-boundary-p)
+      (return-from wrapping-line-break-index hard-boundary))
+    (let ((seen-content-p nil)
+          (in-whitespace-p nil)
+          (word-boundary nil))
+      (loop :for index :from start :below hard-boundary
+            :for character := (schar string index)
+            :do (cond ((line-wrap-whitespace-p character)
+                       (when seen-content-p
+                         (setf in-whitespace-p t)))
+                      (t
+                       (when in-whitespace-p
+                         (setf word-boundary index
+                               in-whitespace-p nil))
+                       (setf seen-content-p t))))
+      (when in-whitespace-p
+        (setf word-boundary hard-boundary))
+      (if word-boundary
+          (values word-boundary t)
+          hard-boundary))))
+
+(defun wrapping-line-start-index (window string charpos)
+  (let ((tab-size (variable-value 'tab-width :default (window-buffer window)))
+        (word-boundary-p
+          (variable-value 'line-wrap-at-word-boundary
+                          :default (window-buffer window)))
+        (width (1- (window-body-width window))))
+    (loop :with start := 0
+          :for next := (wrapping-line-break-index
+                        string width
+                        :start start
+                        :tab-size tab-size
+                        :word-boundary-p word-boundary-p)
+          :while (and next (<= next charpos))
+          :do (setf start next)
+          :finally (return start))))
+
 (defun %calc-window-cursor-x (point window)
   "Return (values cur-x next). the 'next' is a flag if the cursor goes to
 next line because it is at the end of width."
@@ -44,16 +148,17 @@ next line because it is at the end of width."
          (charpos (point-charpos point))
          (line    (line-string point))
          (width   (1- (window-body-width window)))
-         (cur-x   0)
-         (add-x   (if (< charpos (length line))
-                      (char-width (schar line charpos) 0 :tab-size tab-size)
-                      1)))
-    (loop :for i :from 0 :below charpos
-          :for c := (schar line i)
-          :do (setf cur-x (char-width c cur-x :tab-size tab-size))
-              (when (< width cur-x)
-                (setf cur-x (char-width c 0 :tab-size tab-size))))
-    (if (< width (+ cur-x add-x))
+         (start   (wrapping-line-start-index window line charpos))
+         (cur-x   (string-width line
+                                :start start
+                                :end charpos
+                                :tab-size tab-size))
+         (next-x  (if (< charpos (length line))
+                      (char-width (schar line charpos)
+                                  cur-x
+                                  :tab-size tab-size)
+                      (1+ cur-x))))
+    (if (< width next-x)
         (values 0     t)
         (values cur-x nil))))
 
@@ -71,10 +176,17 @@ next line because it is at the end of width."
     next))
 
 (defun map-wrapping-line (window string fn)
-  (let ((tab-size (variable-value 'tab-width :default (window-buffer window))))
+  (let ((tab-size (variable-value 'tab-width :default (window-buffer window)))
+        (word-boundary-p
+          (variable-value 'line-wrap-at-word-boundary
+                          :default (window-buffer window))))
     (loop :with start := 0
           :and width := (1- (window-body-width window))
-          :for i := (wide-index string width :start start :tab-size tab-size)
+          :for i := (wrapping-line-break-index
+                     string width
+                     :start start
+                     :tab-size tab-size
+                     :word-boundary-p word-boundary-p)
           :while i
           :do ;; A glyph at START alone can exceed the width goal (goal <= 1
               ;; with a width-2 glyph), making wide-index return its own start
@@ -102,18 +214,20 @@ next line because it is at the end of width."
     (labels ((inc (arg)
                (declare (ignore arg))
                (incf offset)))
-      (map-region start-point
+      (with-point ((line start-point))
+        (line-start line)
+        (map-region start-point
                   end-point
                   (lambda (string lastp)
                     (declare (ignore lastp))
-                    (map-wrapping-line window
-                                       string
-                                       #'inc)))
+                    (unless (line-hidden-p line)
+                      (map-wrapping-line window string #'inc))
+                    (line-offset line 1))))
       offset)))
 
 (defun window-cursor-y-not-wrapping (window)
-  (count-lines (window-buffer-point window)
-               (window-view-point window)))
+  (count-visible-lines (window-buffer-point window)
+                       (window-view-point window)))
 
 (defun window-cursor-y (window)
   (if (point< (window-buffer-point window)
@@ -181,14 +295,14 @@ next line because it is at the end of width."
 (defun move-to-next-virtual-line-1 (point window)
   (assert (eq (point-buffer point) (window-buffer window)))
   (or (forward-line-wrap point window)
-      (line-offset point 1)))
+      (move-to-next-visible-line point)))
 
 (defun move-to-previous-virtual-line-1 (point window)
   (assert (eq (point-buffer point) (window-buffer window)))
   (backward-line-wrap point window t)
   (or (backward-line-wrap point window nil)
       (progn
-        (and (line-offset point -1)
+        (and (move-to-previous-visible-line point)
              (line-end point)
              (backward-line-wrap point window t)))))
 
@@ -197,7 +311,8 @@ next line because it is at the end of width."
   (when (<= n 0)
     (return-from move-to-next-virtual-line-n point))
   (unless (variable-value 'line-wrap :default (point-buffer point))
-    (return-from move-to-next-virtual-line-n (line-offset point n)))
+    (return-from move-to-next-virtual-line-n
+      (move-to-next-visible-line point n)))
   (loop :with n1 := n
         :do (map-wrapping-line
              window
@@ -210,7 +325,7 @@ next line because it is at the end of width."
                    (line-offset point 0 i)
                    (return-from move-to-next-virtual-line-n point)))))
             ;; go to next line
-            (unless (line-offset point 1)
+            (unless (move-to-next-visible-line point)
               (return-from move-to-next-virtual-line-n nil))
             (decf n1)
             (when (<= n1 0)
@@ -221,7 +336,8 @@ next line because it is at the end of width."
   (when (<= n 0)
     (return-from move-to-previous-virtual-line-n point))
   (unless (variable-value 'line-wrap :default (point-buffer point))
-    (return-from move-to-previous-virtual-line-n (line-offset point (- n))))
+    (return-from move-to-previous-virtual-line-n
+      (move-to-previous-visible-line point n)))
   (let ((pos-ring  (make-array (1+ n))) ; ring buffer of wrapping position
         (pos-size  (1+ n))
         (pos-count 0)
@@ -253,7 +369,7 @@ next line because it is at the end of width."
                   (line-offset point 0 (aref pos-ring pos-last))
                   (return-from move-to-previous-virtual-line-n point))
                 ;; go to previous line
-                (unless (line-offset point -1)
+                (unless (move-to-previous-visible-line point)
                   (return-from move-to-previous-virtual-line-n nil))
                 (setf first-line nil)
                 (decf n1 pos-count)
@@ -300,13 +416,23 @@ next line because it is at the end of width."
 
 (defun move-to-virtual-line-column (point column &optional (window (current-window)))
   (backward-line-wrap point window t)
-  (let ((w 0))
-    (loop
-      :while (< w column)
-      :do (setf w (char-width (character-at point) w))
-          (when (end-line-p point) (return nil))
-          (character-offset point 1)
-      :finally (return t))))
+  (let* ((line (line-string point))
+         (start (point-charpos point))
+         (tab-size
+           (variable-value 'tab-width :default (point-buffer point)))
+         (index (wide-index
+                 line
+                 column
+                 :start start
+                 :tab-size tab-size))
+         (remaining-width
+           (string-width line
+                         :start start
+                         :tab-size tab-size)))
+    (line-offset point 0 (or index (length line)))
+    ;; Preserve the old success contract for mouse hit testing: reaching the
+    ;; exact EOL succeeds, but a column beyond the text returns NIL.
+    (and (<= column remaining-width) point)))
 
 (defun window-scroll-down (window)
   (move-to-next-virtual-line (window-view-point window) 1 window))

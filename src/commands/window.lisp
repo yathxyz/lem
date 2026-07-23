@@ -98,6 +98,7 @@
   (let ((buffer (get-buffer buffer-or-name)))
     (unless buffer
       (editor-error "buffer does not exist: ~A" buffer-or-name))
+    (lem-core/commands/file:confirm-kill-buffer buffer)
     (when (cdr (buffer-list))
       (delete-buffer buffer))))
 

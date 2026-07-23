@@ -54,6 +54,7 @@
            :insert
            :visual
            :option-value
+           :replace-insert-character
            :leader-key))
 (in-package :lem-vi-mode)
 
@@ -115,22 +116,35 @@
   (unless *macro-running-p*
     (buffer-enable-undo-boundary buffer)))
 
-(let ((replaced-chars '()))
-  (defmethod pre-command-hook ((state replace-state))
-    (let ((command (this-command)))
-      (cond
-        ((typep command 'self-insert)
-         (if (end-line-p (current-point))
-             (push nil replaced-chars)
-             (progn
-               (push (character-at (current-point)) replaced-chars)
-               (delete-next-char))))
-        ((eq (command-name command) 'delete-previous-char)
-         (when-let ((char (pop replaced-chars)))
-           (insert-character (current-point) char)
-           (character-offset (current-point) -1)))
-        (t
-         (setf replaced-chars '()))))))
+(defvar *replace-state-replaced-chars* '())
+
+(defun replace-state-record-next-character ()
+  (if (end-line-p (current-point))
+      (push nil *replace-state-replaced-chars*)
+      (progn
+        (push (character-at (current-point)) *replace-state-replaced-chars*)
+        (delete-next-char))))
+
+(defun replace-insert-character (character &optional (count 1))
+  "Insert CHARACTER COUNT times with Replace-state restoration semantics."
+  (check-type character character)
+  (check-type count (integer 0 *))
+  (dotimes (_ count)
+    (declare (ignore _))
+    (replace-state-record-next-character)
+    (insert-character (current-point) character)))
+
+(defmethod pre-command-hook ((state replace-state))
+  (let ((command (this-command)))
+    (cond
+      ((typep command 'self-insert)
+       (replace-state-record-next-character))
+      ((eq (command-name command) 'delete-previous-char)
+       (when-let ((char (pop *replace-state-replaced-chars*)))
+         (insert-character (current-point) char)
+         (character-offset (current-point) -1)))
+      (t
+       (setf *replace-state-replaced-chars* '())))))
 
 (defmethod buffer-state-enabled-hook ((state replace-state) buffer)
   (buffer-state-enabled-hook (ensure-state 'insert) buffer))

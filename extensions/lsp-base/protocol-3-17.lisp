@@ -558,6 +558,7 @@
            :base-symbol-information-tags
            :base-symbol-information-kind
            :base-symbol-information-name
+           :base-symbol-information-score
            :document-highlight-options
            :reference-options
            :include-declaration
@@ -5236,6 +5237,9 @@ requesting references."))
     common-lisp:nil
   ((name :type lem-lsp-base/type:lsp-string :initarg :name :accessor base-symbol-information-name
     :documentation "The name of this symbol.")
+   (score :type lem-lsp-base/type:lsp-number :initarg :score :accessor
+    base-symbol-information-score :optional common-lisp:t :documentation
+    "The optional Consult-Eglot workspace-symbol ranking extension.")
    (kind :type symbol-kind :initarg :kind :accessor base-symbol-information-kind :documentation
     "The kind of this symbol.")
    (tags :type (lem-lsp-base/type:lsp-array symbol-tag) :initarg :tags :accessor

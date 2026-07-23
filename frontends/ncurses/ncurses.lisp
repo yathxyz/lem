@@ -38,7 +38,8 @@
   (lem-ncurses/term:get-display-height))
 
 (defmethod lem-if:make-view ((implementation ncurses) window x y width height use-modeline)
-  (lem-ncurses/view:make-view x
+  (lem-ncurses/term:with-input-resize-lock
+    (lem-ncurses/view:make-view x
                               y
                               width
                               height
@@ -53,25 +54,32 @@
                               :border (lem:window-border window)
                               :border-shape (and (lem:floating-window-p window)
                                                  (lem:floating-window-border-shape window))
-                              :cursor-invisible (lem:window-cursor-invisible-p window)))
+                              :cursor-invisible (lem:window-cursor-invisible-p window))))
 
 (defmethod lem-if:delete-view ((implementation ncurses) view)
-  (lem-ncurses/view:delete-view view))
+  (lem-ncurses/term:with-input-resize-lock
+    (lem-ncurses/view:delete-view view)))
 
 (defmethod lem-if:clear ((implementation ncurses) view)
   (lem-ncurses/view:clear view))
 
 (defmethod lem-if:set-view-size ((implementation ncurses) view width height)
-  (lem-ncurses/view:set-view-size view width height))
+  (lem-ncurses/term:with-input-resize-lock
+    (lem-ncurses/view:set-view-size view width height)))
 
 (defmethod lem-if:set-view-pos ((implementation ncurses) view x y)
-  (lem-ncurses/view:set-view-pos view x y))
+  (lem-ncurses/term:with-input-resize-lock
+    (lem-ncurses/view:set-view-pos view x y)))
 
 (defmethod lem-if:redraw-view-after ((implementation ncurses) view)
   (lem-ncurses/view:redraw-view-after view))
 
 (defmethod lem-if:update-display ((implementation ncurses))
   (lem-ncurses/view:update-display (lem:window-view (lem:current-window))))
+
+(defmethod lem-if:resize-display-before ((implementation ncurses))
+  (declare (ignore implementation))
+  (lem-ncurses/term:resize-term))
 
 (defmethod lem-if:clipboard-paste ((implementation ncurses))
   (lem-ncurses/clipboard:paste))

@@ -65,6 +65,7 @@
          'lsp-integer
          'lsp-uinteger
          'lsp-decimal
+         'lsp-number
          'lsp-regexp
          'lsp-string
          'lsp-null)

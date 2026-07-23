@@ -392,22 +392,89 @@ now fixed; see tests/pbt/layout-conformance.lisp.)"
                                  :within-cursor (text-object-within-cursor-p object))))))
       (third kernel-object)))
 
+(defun kernel-word-wrappable-string (kernel-objects)
+  "Return the displayed text in KERNEL-OBJECTS when it maps to characters."
+  (block invalid
+    (with-output-to-string (stream)
+      (dolist (kernel-object kernel-objects)
+        (ecase (first kernel-object)
+          (:text
+           (destructuring-bind (codes widths object) (rest kernel-object)
+             (declare (ignore widths))
+             (when (typep object 'line-end-object)
+               (return-from invalid nil))
+             (dolist (code codes)
+               (write-char (code-char code) stream))))
+          (:opaque
+           (let ((object (third kernel-object)))
+             (unless (typep object '(or void-object
+                                        eol-cursor-object
+                                        extend-to-eol-object))
+               (return-from invalid nil)))))))))
+
+(defun kernel-word-boundary-view-width (kernel-objects view-width buffer)
+  "Reduce VIEW-WIDTH to the preferred complete-word row boundary."
+  (unless (variable-value 'line-wrap-at-word-boundary :default buffer)
+    (return-from kernel-word-boundary-view-width view-width))
+  (let* ((character-width (lem-if:get-char-width (implementation)))
+         (view-columns (floor view-width character-width)))
+    (when (<= view-columns 1)
+      (return-from kernel-word-boundary-view-width view-width))
+    (alexandria:when-let
+        ((string (kernel-word-wrappable-string kernel-objects)))
+      (multiple-value-bind (boundary word-boundary-p)
+          (wrapping-line-break-index
+           string
+           (1- view-columns)
+           :tab-size (variable-value 'tab-width :default buffer)
+           :word-boundary-p t)
+        (when (and boundary word-boundary-p)
+          (let* ((content-columns
+                   (string-width string
+                                 :end boundary
+                                 :tab-size (variable-value 'tab-width
+                                                           :default buffer)))
+                 (word-view-width
+                   (* (1+ content-columns) character-width)))
+            (min view-width word-view-width)))))))
+
+(defun wrap-padding-object (width)
+  (let ((columns (floor width (lem-if:get-char-width (implementation)))))
+    (when (plusp columns)
+      (make-object-with-type
+       (make-string columns :initial-element #\Space)
+       nil
+       (char-type #\Space)))))
+
 (defun kernel-wrap-row (kernel-objects view-width buffer)
   "One physical row via the certified k-wrap-row.  Values: the row as drawing
 objects with the wrap marker appended exactly when the row wrapped (the kernel
 abstracts the marker as the row boundary: rest non-nil), and the KERNEL-record
 leftover for the next row -- kept in kernel form so the redraw loop converts
 each object once per frame instead of once per remaining row."
-  (multiple-value-bind (kernel-row kernel-rest)
-      (lem/kernel:k-wrap-row kernel-objects view-width 0)
-    (let ((row (mapcar #'kernel-object-to-clos kernel-row)))
-      (values (if kernel-rest
-                  (nconc row
-                         (list (make-letter-object
-                                (variable-value 'wrap-line-character :default buffer)
-                                (variable-value 'wrap-line-attribute :default buffer))))
-                  row)
-              kernel-rest))))
+  (let* ((original-view-width view-width)
+         (word-view-width
+           (kernel-word-boundary-view-width kernel-objects view-width buffer))
+         (view-width (or word-view-width view-width))
+         (padding-width
+           (if word-view-width
+               (- original-view-width word-view-width)
+               0)))
+    (multiple-value-bind (kernel-row kernel-rest)
+        (lem/kernel:k-wrap-row kernel-objects view-width 0)
+      (let ((row (mapcar #'kernel-object-to-clos kernel-row)))
+        (values (if kernel-rest
+                    (nconc row
+                           (alexandria:when-let
+                               ((padding (wrap-padding-object padding-width)))
+                             (list padding))
+                           (list (make-letter-object
+                                  (variable-value 'wrap-line-character
+                                                  :default buffer)
+                                  (variable-value 'wrap-line-attribute
+                                                  :default buffer))))
+                    row)
+                kernel-rest)))))
 
 (defun separate-objects-by-width (objects view-width buffer)
   "Split OBJECTS into one physical row of at most VIEW-WIDTH columns and the
@@ -617,7 +684,7 @@ over the top-level spine and tolerant of improper (dotted) lists."
             (setf hash (djb2 hash item))))
       hash)))
 
-(defun compute-line-fingerprint (logical-line scroll-start left-side-width)
+(defun compute-line-fingerprint (logical-line scroll-start left-side-width right-side-width)
   "Compute a cheap fingerprint for a logical line's display state."
   (mix-hashes
    (logical-line-string logical-line)
@@ -626,7 +693,8 @@ over the top-level spine and tolerant of improper (dotted) lists."
    (logical-line-extend-to-end logical-line)
    (logical-line-line-end-overlay logical-line)
    scroll-start
-   left-side-width))
+   left-side-width
+   right-side-width))
 
 (defun check-line-fingerprint (window y fingerprint)
   "Check if the fingerprint for line at Y matches. Returns cached height or NIL."
@@ -644,11 +712,14 @@ over the top-level spine and tolerant of improper (dotted) lists."
                                                y
                                                logical-line
                                                left-side-objects
-                                               left-side-width)
+                                               left-side-width
+                                               right-side-width)
   (let* ((left-side-characters (loop :for obj :in left-side-objects
                                      :when (typep obj 'text-object)
                                      :sum (length (text-object-string obj))))
-         (view-width (- (window-view-width window) left-side-width))
+         (view-width (- (window-view-width window)
+                        left-side-width
+                        right-side-width))
          (buffer (window-buffer window)))
     ;; The row loop runs on KERNEL records (converted once per logical line);
     ;; only each emitted row is materialized back to drawing objects, so a
@@ -714,11 +785,13 @@ approximated per-char width as total/len) and rebuilt content-correctly."
                                                    y
                                                    logical-line
                                                    left-side-objects
-                                                   left-side-width)
+                                                   left-side-width
+                                                   right-side-width)
   (let* ((scroll-before (horizontal-scroll-start window))
          (fingerprint (compute-line-fingerprint logical-line
                                                 scroll-before
-                                                left-side-width)))
+                                                left-side-width
+                                                right-side-width)))
     ;; Early exit if line content unchanged
     (alexandria:when-let ((cached-height (check-line-fingerprint window y fingerprint)))
       (return-from redraw-logical-line-when-horizontal-scroll cached-height))
@@ -729,7 +802,9 @@ approximated per-char width as total/len) and rebuilt content-correctly."
       (multiple-value-bind (cursor-object cursor-x)
           (find-cursor-object objects)
         (when cursor-object
-          (let ((width (- (window-view-width window) left-side-width)))
+          (let ((width (- (window-view-width window)
+                          left-side-width
+                          right-side-width)))
             (cond ((< cursor-x (horizontal-scroll-start window))
                    (setf (horizontal-scroll-start window) cursor-x))
                   ((< (+ (horizontal-scroll-start window)
@@ -744,7 +819,9 @@ approximated per-char width as total/len) and rebuilt content-correctly."
                 objects
                 (horizontal-scroll-start window)
                 (+ (horizontal-scroll-start window)
-                   (window-view-width window)))))
+                   (- (window-view-width window)
+                      left-side-width
+                      right-side-width)))))
         (render-line-with-caching window 0 y (append left-side-objects objects) height))
       ;; Reuse fingerprint if scroll position didn't change; avoids redundant sxhash
       (update-line-fingerprint
@@ -753,16 +830,41 @@ approximated per-char width as total/len) and rebuilt content-correctly."
            fingerprint
            (compute-line-fingerprint logical-line
                                      (horizontal-scroll-start window)
-                                     left-side-width))
+                                     left-side-width
+                                     right-side-width))
        height)
       height)))
+
+(defun centered-display-margin-width (window content-width)
+  (if content-width
+      (let ((char-width (lem-if:get-char-width (implementation))))
+        (* char-width
+           (floor (max 0
+                       (- (window-view-width window)
+                          (* content-width char-width)))
+                  (* 2 char-width))))
+      0))
+
+(defun left-margin-drawing-objects (width)
+  (when (plusp width)
+    (create-drawing-object
+     (make-string-with-attribute-item
+      :string (make-string
+               (floor width (lem-if:get-char-width (implementation)))
+               :initial-element #\space)))))
 
 (defun redraw-lines (window)
   (let* ((*line-wrap* (variable-value 'line-wrap
                                       :default (window-buffer window)))
          (redraw-fn (if *line-wrap*
                         #'redraw-logical-line-when-line-wrapping
-                        #'redraw-logical-line-when-horizontal-scroll)))
+                        #'redraw-logical-line-when-horizontal-scroll))
+         (content-width
+           (compute-window-content-width (get-active-modes-class-instance (window-buffer window))
+                                         (window-buffer window)
+                                         window))
+         (right-side-width
+           (centered-display-margin-width window content-width)))
     (let ((y 0)
           (height (window-view-height window))
           left-side-width)
@@ -774,10 +876,16 @@ approximated per-char width as total/len) and rebuilt content-correctly."
                              (compute-items-from-string-and-attributes
                               (lem/buffer/line:content-string content)
                               (lem/buffer/line:content-attributes content))))))
-            (setf left-side-width
-                  (loop :for object :in left-side-objects
-                        :sum (object-width object)))
-            (incf y (funcall redraw-fn window y logical-line left-side-objects left-side-width))
+            (let* ((gutter-width
+                     (loop :for object :in left-side-objects
+                           :sum (object-width object)))
+                   (padding-width (max 0 (- right-side-width gutter-width))))
+              (setf left-side-objects
+                    (append (left-margin-drawing-objects padding-width)
+                            left-side-objects)
+                    left-side-width (+ padding-width gutter-width)))
+            (incf y (funcall redraw-fn window y logical-line
+                             left-side-objects left-side-width right-side-width))
             (unless (< y height)
               (return-from outer)))))
       (when (< y height)
@@ -785,7 +893,9 @@ approximated per-char width as total/len) and rebuilt content-correctly."
         (invalidate-drawing-cache-from window y)
         (lem-if:clear-to-end-of-window (implementation) (window-view window) y))
       (setf (window-left-width window)
-            (floor left-side-width (lem-if:get-char-width (implementation)))))))
+            (floor left-side-width (lem-if:get-char-width (implementation)))
+            (window-right-width window)
+            (floor right-side-width (lem-if:get-char-width (implementation)))))))
 
 (defun call-with-display-error (function)
   (handler-bind ((error (lambda (e)

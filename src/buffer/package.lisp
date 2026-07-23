@@ -76,6 +76,7 @@
    :buffer-filename
    :buffer-directory
    :buffer-unmark
+   :buffer-mark-saved
    :buffer-mark-cancel
    :buffer-rename
    :buffer-undo
@@ -83,6 +84,25 @@
    :buffer-undo-boundary
    :buffer-enable-undo-boundary
    :buffer-disable-undo-boundary
+   :buffer-undo-tree-root
+   :buffer-undo-tree-current
+   :buffer-undo-tree-saved
+   :buffer-undo-tree-move
+   :buffer-undo-tree-finalize
+   :buffer-undo-tree-truncated-p
+   :buffer-undo-tree-node-count
+   :buffer-undo-tree-payload-bytes
+   :buffer-undo-tree-snapshot
+   :buffer-undo-tree-node-id
+   :buffer-undo-tree-node-parent
+   :buffer-undo-tree-node-children
+   :buffer-undo-tree-node-preferred
+   :buffer-undo-tree-node-saved-sequence
+   :buffer-prepare-change-group
+   :buffer-accept-change-group
+   :buffer-cancel-change-group
+   :buffer-abort-change-group
+   :buffer-change-group-active-p
    :buffer-value
    :buffer-unbound
    :clear-buffer-variables
@@ -331,8 +351,11 @@
         :lem/common/var)
   (:export
    :*find-file-hook*
+   :*before-find-file-hook*
+   :*find-file-read-options*
    :before-save-hook
    :after-save-hook
+   :find-file-literally
    :*external-format-function*
    :*find-directory-function*
    :*default-external-format*

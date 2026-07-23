@@ -65,8 +65,10 @@
   (let* ((buffer (make-buffer (unique-buffer-name "*Terminal*") :enable-undo-p nil))
          (terminal (terminal:create :cols 80 :rows 24 :buffer buffer
                                     :directory buffer-directory)))
-    (setf (buffer-terminal buffer) terminal)
+    (setf (buffer-directory buffer) buffer-directory
+          (buffer-terminal buffer) terminal)
     (change-buffer-mode buffer 'terminal-mode)
+    (buffer-unmark buffer)
     buffer))
 
 (defun on-kill-buffer (buffer)

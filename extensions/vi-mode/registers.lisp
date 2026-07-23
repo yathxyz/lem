@@ -2,8 +2,6 @@
   (:use :cl
         :lem)
   (:shadow :yank)
-  (:import-from :lem-vi-mode/core
-                :vi-current-window)
   (:import-from :lem/common/killring
                 :make-item
                 :peek-killring-item)
@@ -24,6 +22,11 @@
            :downcase-char
            :yank-region
            :delete-region
+           :valid-register-p
+           :take-selected-register
+           :with-selected-register
+           :set-last-insertion-register-function
+           :set-expression-register-function
            :paste-yank))
 (in-package :lem-vi-mode/registers)
 
@@ -69,6 +72,44 @@
 
 (defvar *unnamed-register* nil)
 (defvar *small-deletion-register* nil)
+
+(defvar *selected-register* nil)
+(defvar *selected-register-value* nil)
+(defvar *last-insertion-register-function* nil)
+(defvar *expression-register-function* nil)
+
+(defun set-last-insertion-register-function (function)
+  (check-type function (or null function))
+  (setf *last-insertion-register-function* function)
+  (values))
+
+(defun set-expression-register-function (function)
+  (check-type function (or null function))
+  (setf *expression-register-function* function)
+  (values))
+
+(defun valid-register-p (name)
+  (and (characterp name)
+       (or (named-register-p name)
+           (numbered-register-p name)
+           (find name "\"-_:%.#/=" :test #'char=))))
+
+(defun take-selected-register ()
+  (prog1 *selected-register*
+    (setf *selected-register* nil)))
+
+(defmacro with-selected-register ((name) &body body)
+  `(let ((*selected-register* ,name)
+         (*selected-register-value* nil))
+     (when (char= *selected-register* #\=)
+       (setf *selected-register-value*
+             (multiple-value-list (register *selected-register*))))
+     ,@body))
+
+(defun writable-register-p (name)
+  (or (null name)
+      (named-register-p name)
+      (member name '(#\" #\_) :test #'char=)))
 
 (defvar *last-ex-command* nil)
 (defvar *last-search-query* nil)
@@ -210,6 +251,22 @@
                 finally
                 (return (format nil "~{~A~^~%~}" results))))))))
 
+(defun write-explicit-register (name item)
+  (unless (writable-register-p name)
+    (editor-error "Register '\"~A' is read-only." name))
+  (when (named-register-p name)
+    (set-named-register (downcase-char name)
+                        item
+                        :append (upper-case-p name)))
+  ;; Evil's unnamed register contains the text written by the operation, not
+  ;; the accumulated value of an uppercase named register.
+  (setf *unnamed-register* item)
+  (values))
+
+(defun ensure-writable-register (name)
+  (unless (writable-register-p name)
+    (editor-error "Register '\"~A' is read-only." name)))
+
 (defun yank-region (start end &key type append)
   ;; A motion that mutates the buffer (e.g. `k` in the REPL, which swaps in a
   ;; history item and deletes the old input) can leave START or END on a line
@@ -219,52 +276,98 @@
   (unless (and (lem:alive-point-p start)
                (lem:alive-point-p end))
     (return-from yank-region))
-  (with-killring-context (:options (case type
-                                     (:line :vi-line)
-                                     (:block :vi-block)))
-    (copy-to-clipboard-with-killring
-     (case type
-       (:block
-        (process-block-region start end))
-       (otherwise
-        (points-to-string start end)))))
-  (let ((item (make-yank (peek-killring-item (current-killring) 0)
-                         (case type
-                           ((:line :block) type)
-                           (otherwise :char)))))
-    (setf *yank-text*
-          (if append
-              (append-register-item *yank-text* item)
-              item)))
-  (setf *unnamed-register* #\0)
+  (let ((register (take-selected-register)))
+    (ensure-writable-register register)
+    (unless (char= (or register #\") #\_)
+      (with-killring-context (:options (case type
+                                         ((:line :screen-line) :vi-line)
+                                         (:block :vi-block)))
+        (copy-to-clipboard-with-killring
+         (case type
+           (:block
+            (process-block-region start end))
+           ((:line :screen-line)
+            (let ((text (points-to-string start end)))
+              (if (and (plusp (length text))
+                       (eql (char text (1- (length text))) #\Newline))
+                  text
+                  (concatenate 'string text (string #\Newline)))))
+           (otherwise
+            (points-to-string start end)))))
+      (let ((item (make-yank (peek-killring-item (current-killring) 0)
+                             (case type
+                               (:screen-line :line)
+                               ((:line :block) type)
+                               (otherwise :char)))))
+        (cond
+          ((or (null register) (char= register #\"))
+           (setf *yank-text*
+                 (if append
+                     (append-register-item *yank-text* item)
+                     item)
+                 *unnamed-register* #\0))
+          (t
+           (write-explicit-register register item))))))
   (values))
 
 (defun small-deletion-p (start end type)
   (and (= (line-number-at-point start)
           (line-number-at-point end))
-       (not (member type '(:line :block)))))
+       (not (member type '(:line :screen-line :block)))))
 
 (defun delete-region (start end &key type)
-  (let ((small (small-deletion-p start end type)))
-    (with-killring-context (:options (case type
-                                       (:line :vi-line)
-                                       (:block :vi-block)))
-      (copy-to-clipboard-with-killring
-       (case type
-         (:block
-          (process-block-region start end t))
-         (otherwise
-          (delete-between-points start end)))))
-    (let ((yank (make-yank (peek-killring-item (current-killring) 0)
-                           (case type
-                             ((:line :block) type)
-                             (otherwise :char)))))
-      (unless small
-        (ring-push *deletion-history* yank))
-      (if small
-          (setf *small-deletion-register* yank
-                *unnamed-register* #\-)
-          (setf *unnamed-register* #\1))))
+  (let ((register (take-selected-register)))
+    (ensure-writable-register register)
+    (if (and register (char= register #\_))
+        (case type
+          (:block
+           (process-block-region start end t))
+          (otherwise
+           (delete-between-points start end)))
+        (let* ((small (small-deletion-p start end type))
+               (line-text
+                 (and (member type '(:line :screen-line))
+                      (points-to-string start end)))
+               (line-small
+                 (and line-text
+                      (not (find #\Newline line-text)))))
+          (with-killring-context (:options (case type
+                                             ((:line :screen-line) :vi-line)
+                                             (:block :vi-block)))
+            (copy-to-clipboard-with-killring
+             (case type
+               (:block
+                (process-block-region start end t))
+               ((:line :screen-line)
+                (delete-between-points start end)
+                (if (and (plusp (length line-text))
+                         (eql (char line-text
+                                    (1- (length line-text)))
+                              #\Newline))
+                    line-text
+                    (concatenate 'string
+                                 line-text
+                                 (string #\Newline))))
+               (otherwise
+                (delete-between-points start end)))))
+          (let ((yank (make-yank (peek-killring-item (current-killring) 0)
+                                 (case type
+                                   (:screen-line :line)
+                                   ((:line :block) type)
+                                   (otherwise :char)))))
+            (when (and line-small
+                       (or (null register) (char= register #\")))
+              (setf *small-deletion-register*
+                    (make-yank line-text :char)))
+            (ring-push *deletion-history* yank)
+            (cond
+              ((or (null register) (char= register #\"))
+               (if small
+                   (setf *small-deletion-register* yank
+                         *unnamed-register* #\-)
+                   (setf *unnamed-register* #\1)))
+              (t
+               (write-explicit-register register yank)))))))
   (values))
 
 (defun paste-yank (string type &optional (position :after))
@@ -273,7 +376,7 @@
     (let ((point (current-point)))
       (ecase type
         (:line
-         (lem:yank)
+         (lem-core/commands/edit::yank-string point string)
          (move-point point (cursor-yank-start point))
          (back-to-indentation point))
         (:block
@@ -290,8 +393,19 @@
           (setf (cursor-yank-end point) (copy-point point :left-inserting))
           (move-point point (cursor-yank-start point)))
         (:char
-         (lem:yank)
+         (lem-core/commands/edit::yank-string point string)
          (character-offset point -1))))))
+
+(defun special-register-string (value empty-message)
+  (if value
+      (values value :char)
+      (editor-error "~A" empty-message)))
+
+(defun file-register-string (buffer)
+  (special-register-string
+   (alexandria:when-let ((filename (and buffer (buffer-filename buffer))))
+     (namestring filename))
+   "No file name"))
 
 (defun register (name)
   (let ((name (ensure-char name)))
@@ -317,17 +431,26 @@
            *small-deletion-register*))
          ;; Most recent Ex command (read-only)
          (#\:
-          *last-ex-command*)
+          (special-register-string *last-ex-command*
+                                   "No previous command line"))
          ;; Last inserted text (read-only)
-         ;(#\.)
+         (#\.
+          (if *last-insertion-register-function*
+              (funcall *last-insertion-register-function*)
+              (values nil :char)))
          ;; Current file name (read-only)
          (#\%
-          (buffer-filename (current-buffer)))
+          (file-register-string (current-buffer)))
          ;; Alternate file name register
          (#\#
-          (buffer-filename (window-buffer (vi-current-window))))
+          (file-register-string (other-buffer)))
          ;; Expression register
-         ;(#\=)
+         (#\=
+          (if *selected-register-value*
+              (values-list *selected-register-value*)
+              (if *expression-register-function*
+                  (funcall *expression-register-function*)
+                  (values nil :char))))
          ;; Selection register
          ;((#\* #\+))
          ;; Blackhole register
@@ -335,7 +458,8 @@
           nil)
          ;; Last search register
          (#\/
-          *last-search-query*))))))
+          (special-register-string *last-search-query*
+                                   "No previous regular expression")))))))
 
 (defun (setf register) (value name)
   (flet ((value-to-item (value)

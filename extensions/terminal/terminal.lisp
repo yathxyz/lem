@@ -500,7 +500,9 @@ Called when transitioning from scrollback-active to normal view."
              (setf (terminal-dirty-any-p terminal) nil)))))
       ;; Position cursor
       (move-to-line point (1+ (ffi::terminal-cursor-row viscus)))
-      (move-to-column point (ffi::terminal-cursor-col viscus)))))
+      (move-to-column point (ffi::terminal-cursor-col viscus)))
+    ;; Terminal output is process state, never an unsaved user edit.
+    (buffer-unmark buffer)))
 
 (defmethod adjust-point ((terminal terminal))
   (let* ((buffer (terminal-buffer terminal))

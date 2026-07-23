@@ -48,6 +48,12 @@ Currently Git-only. Concretely, this calls Git with the -w option.")
 (defvar *show-stashes* t "List stashes on the Legit status buffer.")
 
 
+(defvar *status-section-functions* '()
+  "Hook functions called with the VCS and collector while rendering status.")
+
+(defvar *status-bottom-section-functions* '()
+  "Hook functions called after built-in status sections are rendered.")
+
 ;; Supercharge patch-mode with our keys.
 (define-major-mode legit-diff-mode lem-patch-mode:patch-mode
     (:name "legit-diff"
@@ -609,6 +615,8 @@ Currently Git-only. Concretely, this calls Git with the -w option.")
                                        :read-only t)))
             (collector-insert "<none>"))
 
+        (run-hooks *status-section-functions* vcs collector)
+
         ;; Latest commits.
         (collector-insert "")
         (collector-insert "Latest commits:" :header t)
@@ -641,9 +649,11 @@ Currently Git-only. Concretely, this calls Git with the -w option.")
                             (when hash
                               (put-text-property start point :commit-hash hash)))))
               (collector-insert "<none>")))
+        (run-hooks *status-bottom-section-functions* vcs collector)
+
 
         (add-hook (variable-value 'after-change-functions :buffer (collector-buffer collector))
-                  'change-grep-buffer)))))
+                  'lem/grep::change-grep-buffer)))))
 
 (defun legit-status-active-p ()
   "Return t if the legit status window is currently open."

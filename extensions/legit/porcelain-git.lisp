@@ -57,7 +57,9 @@
 (defun git-project-p ()
   "When we find a .git/ directory in the current directory (which should be the project root. Use `lem/porcelain:with-current-project`),
   return a VCS object representing the repo: otherwise, return nil"
-  (when (uiop:directory-exists-p ".git")
+  (when (or (uiop:directory-exists-p ".git")
+            ;; Linked worktrees and submodules use a .git pointer file.
+            (uiop:file-exists-p ".git"))
     (get-or-create-project)))
 
 (defun run-git (arglist)
@@ -105,15 +107,25 @@ allows to learn about the file state: modified, deleted, ignored… "
   (loop for line in (str:lines (porcelain))
         for file = (subseq line 3)
         for status = (subseq line 0 2)
+        for conflicted = (member status
+                                 '("DD" "AU" "UD" "UA" "DU" "AA" "UU")
+                                 :test #'string=)
         unless (str:blankp line)
+        if conflicted
+        collect (list :file file :type :modified) into modified-unstaged-files
+        unless conflicted
         if (equal (elt status 0) #\M)
         collect (list :file file :type :modified) into modified-staged-files
+        unless conflicted
         if (equal (elt status 0) #\A)
         collect (list :file file :type :added) into modified-staged-files
+        unless conflicted
         if (equal (elt status 0) #\D)
         collect (list :file file :type :deleted) into modified-staged-files
+        unless conflicted
         if (equal (elt status 1) #\M)
         collect (list :file file :type :modified) into modified-unstaged-files
+        unless conflicted
         if (equal (elt status 1) #\D)
         collect (list :file file :type :deleted) into modified-unstaged-files
         if (str:starts-with-p "??" status)

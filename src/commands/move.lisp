@@ -48,8 +48,9 @@
 (defun next-line-aux (n
                       point-column-fn
                       forward-line-fn
-                      move-to-column-fn)
-  (if (continue-flag :next-line)
+                      move-to-column-fn
+                      continue-flag)
+  (if (continue-flag continue-flag)
       (unless (not (null (cursor-saved-column (current-point))))
         (log:error "asseriton error: (not (null (cursor-saved-column (current-point))))"))
       (setf (cursor-saved-column (current-point))
@@ -68,14 +69,16 @@
   (next-line-aux n
                  #'point-virtual-line-column
                  #'move-to-next-virtual-line
-                 #'move-to-virtual-line-column))
+                 #'move-to-virtual-line-column
+                 :next-display-line))
 
 (define-command (next-logical-line (:advice-classes movable-advice)) (&optional n) (:universal)
   "Move the cursor to the next logical line."
   (next-line-aux n
                  #'point-column
                  #'line-offset
-                 #'move-to-column))
+                 #'move-to-column
+                 :next-logical-line))
 
 (define-command (previous-line (:advice-classes movable-advice)) (&optional (n 1)) (:universal)
   "Move the cursor to the previous line."

@@ -22,10 +22,10 @@
     :initform nil
     :accessor buffer-%directory
     :documentation "The buffer's directory. See: `buffer-directory'.")
-   (%modified-p
+   (%modified-tick
     :initform 0
     :reader buffer-modified-tick
-    :accessor buffer-%modified-p
+    :accessor buffer-%modified-tick
     :type integer)
    (%enable-undo-p
     :initarg :%enable-undo-p
@@ -80,9 +80,62 @@
    (edit-history
     :initform (make-array 0 :adjustable t :fill-pointer 0)
     :accessor buffer-edit-history)
+   ;; The edit-history vector is the open command.  Sealed commands live in
+   ;; the authoritative tree below.
    (redo-stack
     :initform '()
     :accessor buffer-redo-stack)
+   (%undo-tree-generation
+    :initform 0
+    :accessor buffer-%undo-tree-generation)
+   (%undo-tree-table
+    :initform nil
+    :accessor buffer-%undo-tree-table)
+   (%undo-tree-root
+    :initform nil
+    :accessor buffer-%undo-tree-root)
+   (%undo-tree-current
+    :initform nil
+    :accessor buffer-%undo-tree-current)
+   (%undo-tree-clean
+    :initform nil
+    :accessor buffer-%undo-tree-clean)
+   (%undo-tree-last-saved
+    :initform nil
+    :accessor buffer-%undo-tree-last-saved)
+   (%undo-tree-next-id
+    :initform 1
+    :accessor buffer-%undo-tree-next-id)
+   (%undo-tree-save-sequence
+    :initform 0
+    :accessor buffer-%undo-tree-save-sequence)
+   (%undo-tree-payload-bytes
+    :initform 0
+    :accessor buffer-%undo-tree-payload-bytes)
+   (%undo-tree-node-count
+    :initform 0
+    :accessor buffer-%undo-tree-node-count)
+   (%undo-tree-edit-count
+    :initform 0
+    :accessor buffer-%undo-tree-edit-count)
+   (%undo-tree-pending-payload-bytes
+    :initform 0
+    :accessor buffer-%undo-tree-pending-payload-bytes)
+   (%undo-tree-discard-open-p
+    :initform nil
+    :accessor buffer-%undo-tree-discard-open-p)
+   (%undo-tree-truncated-p
+    :initform nil
+    :accessor buffer-%undo-tree-truncated-p)
+   (%undo-tree-untracked-dirty-p
+    :initform nil
+    :accessor buffer-%undo-tree-untracked-dirty-p)
+   (%undo-tree-pending-dirty-p
+    :initform nil
+    :accessor buffer-%undo-tree-pending-dirty-p)
+   (%active-change-group
+    :initform nil
+    :accessor buffer-%active-change-group)
    (encoding
     :initform nil
     :accessor buffer-encoding)
@@ -182,7 +235,11 @@ Options that can be specified by arguments are ignored if `temporary` is NIL and
 
 (defun buffer-modified-p (&optional (buffer (current-buffer)))
   "Return T if 'buffer' has been modified, NIL otherwise."
-  (/= 0 (buffer-%modified-p buffer)))
+  (or (buffer-%undo-tree-untracked-dirty-p buffer)
+      (buffer-%undo-tree-pending-dirty-p buffer)
+      (plusp (fill-pointer (buffer-edit-history buffer)))
+      (not (eq (buffer-%undo-tree-current buffer)
+               (buffer-%undo-tree-clean buffer)))))
 
 (defmethod print-object ((buffer buffer) stream)
   (print-unreadable-object (buffer stream :identity t :type t)
@@ -198,6 +255,7 @@ Options that can be specified by arguments are ignored if `temporary` is NIL and
       (delete-point point))))
 
 (defun buffer-free (buffer)
+  (buffer-release-undo-tree buffer)
   (%buffer-clear-keep-binfo buffer)
   (delete-point (buffer-point buffer))
   (set-buffer-point nil buffer))
@@ -232,7 +290,11 @@ Options that can be specified by arguments are ignored if `temporary` is NIL and
 
 (defun buffer-unmark (buffer)
   "Unflag the change flag of 'buffer'."
-  (setf (buffer-%modified-p buffer) 0))
+  (buffer-mark-undo-tree-clean buffer nil))
+
+(defun buffer-mark-saved (buffer)
+  "Mark BUFFER's current undo node as having been written to its file."
+  (buffer-mark-undo-tree-clean buffer t))
 
 (defun (setf buffer-mark) (point &optional (buffer (current-buffer)))
   (let ((already-active (buffer-mark-p buffer)))
@@ -406,5 +468,4 @@ Options that can be specified by arguments are ignored if `temporary` is NIL and
       (return buffer))))
 
 (defun clear-buffer-edit-history (buffer)
-  (setf (buffer-edit-history buffer)
-        (make-array 0 :adjustable t :fill-pointer 0)))
+  (buffer-clear-undo-tree buffer))

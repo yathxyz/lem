@@ -1,14 +1,23 @@
+#define _GNU_SOURCE
+
 // linux check Dockerfile or Dockerfile.musl
 // osx   gcc terminal.c -I/opt/homebrew/include -L/opt/homebrew/lib -lvterm -o terminal.so -shared -fPIC
 
 #include <stdio.h>
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <spawn.h>
 #include <sys/select.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 #include <vterm.h>
 #include <signal.h>
+
+extern char **environ;
 
 #ifdef __APPLE__
   #include <util.h>
@@ -23,19 +32,101 @@ typedef struct {
   int fd;
 } run_shell_result;
 
-static run_shell_result run_shell(int rows, int cols, const char *program, char* const argv[])
+static char **terminal_environment(void)
 {
-  int fd;
-  struct winsize win = { rows, cols, 0, 0 };
-  pid_t pid = forkpty(&fd, NULL, NULL, &win);
-  assert(pid >= 0);
-  if (pid == 0) {
-    setenv("TERM", "xterm-256color", 1);
-    assert(execvp(program, argv) >= 0);
+  size_t count = 0;
+  size_t output = 0;
+  int term_found = 0;
+  while (environ[count] != NULL) count++;
+
+  char **environment = calloc(count + 2, sizeof(char *));
+  assert(environment != NULL);
+  for (size_t index = 0; index < count; index++) {
+    if (strncmp(environ[index], "TERM=", 5) == 0) {
+      if (!term_found) {
+        environment[output++] = "TERM=xterm-256color";
+        term_found = 1;
+      }
+    } else {
+      environment[output++] = environ[index];
+    }
   }
+  if (!term_found) environment[output++] = "TERM=xterm-256color";
+  environment[output] = NULL;
+  return environment;
+}
+
+static run_shell_result run_shell(int rows, int cols, const char *directory,
+                                  const char *program, char* const argv[])
+{
+  int fd, slave_fd;
+  int status;
+  char slave_name[1024];
+  struct winsize win = { rows, cols, 0, 0 };
+  pid_t pid;
+  char **environment = terminal_environment();
+  posix_spawn_file_actions_t actions;
+  posix_spawnattr_t attributes;
+  sigset_t default_signals;
+  sigset_t child_mask;
+  short spawn_flags = POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK;
+
+  assert(openpty(&fd, &slave_fd, NULL, NULL, &win) == 0);
+  assert(fd > STDERR_FILENO && slave_fd > STDERR_FILENO);
+  assert(ttyname_r(slave_fd, slave_name, sizeof(slave_name)) == 0);
+
+  assert(posix_spawn_file_actions_init(&actions) == 0);
+  assert(posix_spawn_file_actions_addchdir_np(&actions, directory) == 0);
+  assert(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, slave_name,
+                                          O_RDWR, 0) == 0);
+  assert(posix_spawn_file_actions_adddup2(&actions, STDIN_FILENO,
+                                          STDOUT_FILENO) == 0);
+  assert(posix_spawn_file_actions_adddup2(&actions, STDIN_FILENO,
+                                          STDERR_FILENO) == 0);
+  assert(posix_spawn_file_actions_addclose(&actions, fd) == 0);
+  assert(posix_spawn_file_actions_addclose(&actions, slave_fd) == 0);
+
+  assert(posix_spawnattr_init(&attributes) == 0);
+  assert(sigfillset(&default_signals) == 0);
+  assert(sigdelset(&default_signals, SIGKILL) == 0);
+  assert(sigdelset(&default_signals, SIGSTOP) == 0);
+  assert(sigemptyset(&child_mask) == 0);
+  assert(posix_spawnattr_setsigdefault(&attributes, &default_signals) == 0);
+  assert(posix_spawnattr_setsigmask(&attributes, &child_mask) == 0);
+#ifdef POSIX_SPAWN_SETSID
+  spawn_flags |= POSIX_SPAWN_SETSID;
+#endif
+  assert(posix_spawnattr_setflags(&attributes, spawn_flags) == 0);
+
+  status = posix_spawn(&pid, program, &actions, &attributes, argv, environment);
+  posix_spawnattr_destroy(&attributes);
+  posix_spawn_file_actions_destroy(&actions);
+  free(environment);
+  close(slave_fd);
+  if (status != 0) {
+    close(fd);
+    errno = status;
+  }
+  assert(status == 0);
 
   run_shell_result result = { pid, fd };
   return result;
+}
+
+static void terminate_shell(pid_t pid)
+{
+  int child_status;
+  pid_t result;
+
+  if (pid <= 0) return;
+  result = waitpid(pid, &child_status, WNOHANG);
+  if (result == pid || (result < 0 && errno == ECHILD)) return;
+
+  kill(-pid, SIGKILL);
+  kill(pid, SIGKILL);
+  do {
+    result = waitpid(pid, &child_status, 0);
+  } while (result < 0 && errno == EINTR);
 }
 
 ///
@@ -150,6 +241,7 @@ VTermScreenCallbacks screen_callbacks = {
 struct terminal *terminal_new(int id,
                               int rows,
                               int cols,
+                              const char *directory,
                               const char *program,
                               char* const argv[],
 			      void *cb_damage,
@@ -161,7 +253,7 @@ struct terminal *terminal_new(int id,
 			      void *cb_sb_pushline,
                               void *cb_sb_popline)
 {
-  run_shell_result result = run_shell(rows, cols, program, argv);
+  run_shell_result result = run_shell(rows, cols, directory, program, argv);
 
   VTerm *vterm = vterm_new(rows, cols);
   vterm_set_utf8(vterm, 1);
@@ -198,6 +290,8 @@ struct terminal *terminal_new(int id,
 
 void terminal_delete(struct terminal *terminal)
 {
+  close(terminal->fd);
+  terminate_shell(terminal->pid);
   vterm_free(terminal->vterm);
   free(terminal);
 }

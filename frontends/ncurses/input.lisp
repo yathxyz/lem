@@ -10,19 +10,26 @@
 ;;  (we don't use stdscr for input because it calls wrefresh implicitly
 ;;   and causes the display confliction by two threads)
 (defvar *padwin* nil)
+(defvar *wait-for-terminal-input-p* t)
 
 (defun getch ()
-  (unless *padwin*
-    (setf *padwin* (charms/ll:newpad 1 1))
-    (charms/ll:keypad *padwin* 1)
-    (charms/ll:wtimeout *padwin* -1))
-  (charms/ll:wgetch *padwin*))
+  (lem-ncurses/term:with-input-resize-lock
+    (unless *padwin*
+      (setf *padwin* (charms/ll:newpad 1 1))
+      (charms/ll:keypad *padwin* 1)
+      (charms/ll:wtimeout *padwin* 0)))
+  (when *wait-for-terminal-input-p*
+    (lem-ncurses/term:wait-for-input))
+  (lem-ncurses/term:with-input-resize-lock
+    (charms/ll:wgetch *padwin*)))
 
 (defmacro with-getch-input-timeout ((time) &body body)
-  `(progn
-     (charms/ll:wtimeout *padwin* ,time)
+  `(let ((*wait-for-terminal-input-p* nil))
+     (lem-ncurses/term:with-input-resize-lock
+       (charms/ll:wtimeout *padwin* ,time))
      (unwind-protect (progn ,@body)
-       (charms/ll:wtimeout *padwin* -1))))
+       (lem-ncurses/term:with-input-resize-lock
+         (charms/ll:wtimeout *padwin* 0)))))
 
 (defun utf8-bytes (c)
   (cond
@@ -165,7 +172,9 @@ falls back to Escape, keeping the editor responsive to malformed input."
       (return-from get-event
         (let ((code (getch)))
           (cond ((= code -1) (go :start))
-                ((= code resize-code) :resize)
+                ((= code resize-code)
+                 #+sbcl (go :start)
+                 #-sbcl :resize)
                 ((= code abort-code) :abort)
                 ((= code escape-code)
                  (let ((code (with-getch-input-timeout

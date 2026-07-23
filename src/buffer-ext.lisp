@@ -1,5 +1,6 @@
 (in-package :lem-core)
 
+(define-editor-variable kill-buffer-query-hook '())
 (define-editor-variable kill-buffer-hook '())
 
 (defun strip-buffer-from-frame-windows (buffer frame)
@@ -13,6 +14,8 @@
 (defmethod delete-buffer-using-manager :before
     ((manager buffer-list-manager)
      buffer)
+  (run-hooks
+   (make-per-buffer-hook :var 'kill-buffer-query-hook :buffer buffer) buffer)
   (dolist (frame (all-frames))
     (strip-buffer-from-frame-windows buffer frame))
   (run-hooks (make-per-buffer-hook :var 'kill-buffer-hook :buffer buffer) buffer))

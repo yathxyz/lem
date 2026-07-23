@@ -246,7 +246,8 @@
         (insert-directories-and-files p directory
                                       :sort-method sort-method
                                       :without-parent-directory nil)
-        (move-to-line p line-number)))))
+        (move-to-line p line-number)))
+    (buffer-unmark buffer)))
 
 (defun create-directory-buffer (name filename)
   (let ((buffer (make-buffer name :enable-undo-p nil :read-only-p t)))

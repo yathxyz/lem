@@ -1,6 +1,7 @@
 (in-package :lem-core)
 
 (define-editor-variable line-wrap t)
+(define-editor-variable line-wrap-at-word-boundary nil)
 
 (defparameter *window-sufficient-width* 150)
 (defparameter *scroll-recenter-p* t)
@@ -96,6 +97,9 @@
    (left-width
     :initform 0
     :accessor window-left-width)
+   (right-width
+    :initform 0
+    :accessor window-right-width)
    (modeline-elements-cache
     :initform '()
     :accessor window-modeline-elements-cache)
@@ -193,7 +197,9 @@ uses pixel-aware view creation if the implementation supports it."
 (defun window-body-width (window)
   "Return the width of the body of WINDOW.
 This is the content area in which the buffer is displayed, without any side margins."
-  (- (window-width window) (window-left-width window)))
+  (- (window-width window)
+     (window-left-width window)
+     (window-right-width window)))
 
 (defun clear-screens-of-window-list ()
   (flet ((clear-screen (window)
@@ -964,6 +970,15 @@ You can pass in the optional argument WINDOW-LIST to replace the default
                                             :parent-window parent-window))
             (current-window))))))
 
+(defun confirm-buffer-kill (buffer)
+  "Abort unless BUFFER is unmodified or the user confirms discarding it."
+  (when (and (buffer-modified-p buffer)
+             (not (prompt-for-y-or-n-p
+                   (format nil "Buffer ~A is modified; kill anyway"
+                           (buffer-name buffer)))))
+    (error 'editor-abort))
+  t)
+
 (defun quit-window (window &key kill-buffer)
   (let* ((pop-to-buffer-state
            (window-pop-to-buffer-state window))
@@ -974,14 +989,18 @@ You can pass in the optional argument WINDOW-LIST to replace the default
       ((and (not (one-window-p))
             (get-pop-to-buffer-state-split-p pop-to-buffer-state))
        (if kill-buffer
-           (delete-buffer (window-buffer window))
+           (progn
+             (confirm-buffer-kill (window-buffer window))
+             (delete-buffer (window-buffer window)))
            (bury-buffer (window-buffer window)))
        (delete-window window)
        (unless (deleted-window-p parent-window)
          (setf (current-window) parent-window)))
       (t
        (if kill-buffer
-           (delete-buffer (window-buffer window))
+           (progn
+             (confirm-buffer-kill (window-buffer window))
+             (delete-buffer (window-buffer window)))
            (switch-to-buffer (bury-buffer (window-buffer window)) nil))
        (unless (deleted-window-p parent-window)
          (setf (current-window) parent-window))))))

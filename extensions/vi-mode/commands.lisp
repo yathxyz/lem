@@ -86,6 +86,7 @@
            :vi-join-line
            :vi-yank
            :vi-yank-line
+           :vi-use-register
            :vi-paste-after
            :vi-paste-before
            :vi-replace-char
@@ -218,7 +219,7 @@
   (line-offset (current-point) (1- n)))
 
 (define-motion vi-next-display-line (&optional (n 1)) (:universal)
-    (:type :line)
+    (:type :exclusive)
   (next-line n))
 
 (define-motion vi-previous-line (&optional (n 1)) (:universal)
@@ -226,7 +227,7 @@
   (previous-logical-line n))
 
 (define-motion vi-previous-display-line (&optional (n 1)) (:universal)
-    (:type :line)
+    (:type :exclusive)
   (previous-line n))
 
 (define-motion vi-scroll-down (&optional (n nil)) (:universal-nil)
@@ -414,13 +415,14 @@ Move the cursor to the first non-blank character of the line."
 (define-operator vi-delete (start end type) ("<R>")
     (:move-point nil)
   (when (point= start end)
+    (unless (member type '(:line :screen-line))
     ;; 'dd' on the empty line at the end of a buffer deletes trailing newlines,
     ;; but only if the buffer is not empty (i.e. cursor is not at the start of buffer)
     (if (and (eq 'vi-delete (command-name (this-command)))
              (not (this-motion-command))
              (not (start-buffer-p end)))
         (character-offset end -1)
-        (return-from vi-delete)))
+        (return-from vi-delete))))
   (let ((pos (point-charpos (current-point)))
         (ends-with-newline (and (character-at end -1)
                                 (char= (character-at end -1) #\Newline)))
@@ -470,6 +472,11 @@ Move the cursor to the first non-blank character of the line."
 (define-operator vi-change (beg end type) ("<R>")
     (:move-point nil)
   (when (point= beg end)
+    (delete-region beg end :type type)
+    (when (eq type :line)
+      (insert-character (current-point) #\Newline)
+      (character-offset (current-point) -1))
+    (setf (buffer-state) 'insert)
     (return-from vi-change))
   (let ((end-with-newline (char= (character-at end -1) #\Newline)))
     (case type
@@ -480,9 +487,11 @@ Move the cursor to the first non-blank character of the line."
           (insert-character (current-point) #\Newline)
           (character-offset (current-point) -1))
          (t
-          (insert-character (current-point) #\Newline)))
+          (insert-character (current-point) #\Newline)
+          (character-offset (current-point) -1)))
        (indent-line (current-point)))
-      (t (unless (eql (character-at (current-point)) #\Space)
+      (t (unless (or end-with-newline
+                     (eql (character-at (current-point)) #\Space))
            (skip-whitespace-backward end))
          (vi-delete beg end type))))
   (setf (buffer-state) 'insert))
@@ -547,7 +556,7 @@ Move the cursor to the first non-blank character of the line."
                                         (line-number-at-point end)))
      (move-to-column (current-point) (min (point-column start)
                                           (point-column end))))
-    (:line
+    ((:line :screen-line)
      (move-to-column start (point-charpos (current-point)))
      (move-point (current-point) start))
     (otherwise
@@ -567,13 +576,22 @@ Move the cursor to the first non-blank character of the line."
                   (t :char)))
         (and (enable-clipboard-p) (values (get-clipboard-data) :block)))))
 
+(defun vi-selected-yank ()
+  (let ((register (take-selected-register)))
+    (if register
+        (multiple-value-bind (string type) (register register)
+          (values string (or type :char)))
+        (vi-yank-from-clipboard-or-killring))))
+
 (define-command vi-paste-after (&optional (n 1)) (:universal)
-  (dotimes (i n)
-    (multiple-value-bind (string type)
-        (vi-yank-from-clipboard-or-killring)
+  (multiple-value-bind (string type) (vi-selected-yank)
+    (unless string
+      (return-from vi-paste-after))
+    (dotimes (i n)
       (cond
         ((visual-p)
-         (let ((visual-line (visual-line-p)))
+         (let ((visual-line (or (visual-line-p)
+                                (visual-screen-line-p))))
            (lem-core::with-enable-clipboard nil
              (multiple-value-bind (beg end type)
                  (visual-region)
@@ -593,9 +611,10 @@ Move the cursor to the first non-blank character of the line."
       (paste-yank string type :after))))
 
 (define-command vi-paste-before (&optional (n 1)) (:universal)
-  (dotimes (i n)
-    (multiple-value-bind (string type)
-        (vi-yank-from-clipboard-or-killring)
+  (multiple-value-bind (string type) (vi-selected-yank)
+    (unless string
+      (return-from vi-paste-before))
+    (dotimes (i n)
       (cond
         ((visual-p)
          (lem-core::with-enable-clipboard nil
@@ -709,6 +728,26 @@ Move the cursor to the first non-blank character of the line."
        (escape))
       (t
        (lem-core:key-to-char key)))))
+
+(define-command (vi-use-register
+                 (:advice-classes vi-command)
+                 (:initargs :repeat t))
+    (&optional outer-count) (:universal-nil)
+  (let ((register (read-register)))
+    (unless (valid-register-p register)
+      (editor-error "Invalid register: ~A" register))
+    (with-selected-register (register)
+      (let* ((inner-count (read-universal-argument))
+             (count (cond
+                      ((and outer-count inner-count)
+                       (* outer-count inner-count))
+                      (outer-count outer-count)
+                      (inner-count inner-count)))
+             (command-name (read-command)))
+        (unless command-name
+          (editor-error "Expected a command after register ~A" register))
+        (let ((lem-core::*universal-argument* count))
+          (call-command command-name count))))))
 
 (define-command vi-record-macro (register) ((if (key-recording-p)
                                                 *kbdmacro-recording-register*
@@ -861,10 +900,10 @@ on the same line or at eol if there are none."
       (with-point ((p (current-point)))
         (vi-forward-char (length lem/isearch::*isearch-string*))
         (loop repeat n
-              for found = (lem/isearch:isearch-next)
-              unless found
-              do (move-point (current-point) p)
-                 (return)
+              unless (lem/isearch:isearch-next)
+              do (unless (lem/isearch:isearch-next)
+                   (move-point (current-point) p)
+                   (return))
               finally
                  (vi-backward-char (length lem/isearch::*isearch-string*)))))))
 
@@ -872,7 +911,9 @@ on the same line or at eol if there are none."
   (when-let ((query (register #\/)))
     (lem/isearch::change-previous-string query)
     (with-jumplist
-      (dotimes (i n) (lem/isearch:isearch-prev)))))
+      (dotimes (i n)
+        (unless (lem/isearch:isearch-prev)
+          (lem/isearch:isearch-prev))))))
 
 (define-command vi-search-next (n) (:universal)
   (case *last-search-direction*
@@ -885,6 +926,8 @@ on the same line or at eol if there are none."
     (:backward (vi-search-repeat-forward n))))
 
 (define-command vi-search-forward-symbol-at-point (&optional (n 1)) (:universal)
+  (setf *last-search-direction* :forward)
+  (add-hook *isearch-finish-hooks* 'vi-isearch-finish-hook)
   (with-jumplist
     (lem/isearch:isearch-forward-symbol-at-point)
     (lem/isearch:isearch-finish)
@@ -899,6 +942,8 @@ on the same line or at eol if there are none."
         (message "Search wrapped around from bottom to top")))))
 
 (define-command vi-search-backward-symbol-at-point (&optional (n 1)) (:universal)
+  (setf *last-search-direction* :backward)
+  (add-hook *isearch-finish-hooks* 'vi-isearch-finish-hook)
   (with-jumplist
     (lem/isearch:isearch-forward-symbol-at-point)
     (lem/isearch:isearch-finish)

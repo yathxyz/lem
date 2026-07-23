@@ -99,7 +99,10 @@
                 :editor-error
                 :editor-abort)
   (:export :*mcp-server-default-port*
+           :*mcp-server-auth-token*
            :*mcp-server-default-hostname*
+           :*mcp-disabled-tools*
+           :*mcp-allow-file-resources*
            :current-mcp-server
            :start-mcp-server
            :stop-mcp-server

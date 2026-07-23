@@ -82,6 +82,7 @@
   (id :int)
   (rows :int)
   (cols :int)
+  (directory :string)
   (program :string)
   (argv (string-of-strings))
   (cb_damage :pointer)
@@ -95,10 +96,11 @@
 
 (defun terminal-new (directory id rows cols)
   (let* ((shell (or (uiop:getenv "SHELL") "/bin/bash"))
-         (argv (list shell "-c" (concatenate 'string "cd " directory "; " shell))))
+         (argv (list shell)))
     (%terminal-new id
                    rows
                    cols
+                   directory
                    shell
                    argv
                    (cffi:callback cb-damage)

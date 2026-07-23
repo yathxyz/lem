@@ -1,9 +1,13 @@
 (in-package :lem/buffer/file)
 
 (defvar *find-file-hook* '())
+(defvar *before-find-file-hook* '())
+(defvar *find-file-read-options* nil)
 
 (define-editor-variable before-save-hook '())
 (define-editor-variable after-save-hook '())
+(define-editor-variable find-file-literally nil)
+(define-editor-variable write-file-function nil)
 
 (defvar *external-format-function* nil)
 (defvar *find-directory-function* nil)
@@ -129,7 +133,11 @@ fails and preserves the file's bytes on round-trip."
         ((and (not temporary)
               (find filename (buffer-list) :key #'buffer-filename :test #'equal)))
         (t
-         (let* ((name (file-namestring filename))
+         (let ((*find-file-read-options* nil))
+           ;; Run before allocating a buffer or reading any file content.  A
+           ;; callback may abort or select bounded read options for this visit.
+           (run-hooks *before-find-file-hook* filename temporary)
+           (let* ((name (file-namestring filename))
                 (buffer (make-buffer (if temporary
                                          name
                                          (if (get-buffer name)
@@ -137,12 +145,20 @@ fails and preserves the file's bytes on round-trip."
                                              name))
                                      :enable-undo-p nil
                                      :temporary temporary)))
-           (setf (buffer-filename buffer) filename)
+             (setf (buffer-filename buffer) filename
+                   (variable-value 'find-file-literally :buffer buffer)
+                   (not (null (getf *find-file-read-options* :literal))))
            (when (probe-file filename)
              (let ((*inhibit-modification-hooks* t))
                (let ((encoding
                        (handler-case
-                           (insert-file-contents (buffer-start-point buffer) filename)
+                           (insert-file-contents
+                            (buffer-start-point buffer) filename
+                            :external-format
+                            (getf *find-file-read-options* :external-format
+                                  *default-external-format*)
+                            :end-of-line
+                            (getf *find-file-read-options* :end-of-line :auto))
                          (encoding-read-error ()
                            ;; The detected encoding could not decode the file.
                            ;; Rather than deleting the buffer and refusing to
@@ -159,13 +175,14 @@ fails and preserves the file's bytes on round-trip."
                                         filename
                                         *encoding-fallback-external-format*)))))))
                  (setf (buffer-encoding buffer) encoding)))
-             (buffer-unmark buffer))
+             (buffer-mark-saved buffer))
            (buffer-start (buffer-point buffer))
            (when enable-undo-p (buffer-enable-undo buffer))
            (when syntax-table-p (setf (buffer-syntax-table buffer) syntax-table))
            (update-changed-disk-date buffer)
-           (run-hooks *find-file-hook* buffer)
-           (values buffer t)))))
+             (unless (variable-value 'find-file-literally :default buffer)
+               (run-hooks *find-file-hook* buffer))
+             (values buffer t))))))
 
 (defun write-to-file-without-write-hook (buffer filename)
   (write-region-to-file (buffer-start-point buffer)
@@ -179,18 +196,34 @@ fails and preserves the file's bytes on round-trip."
   (run-hooks (make-per-buffer-hook :var 'after-save-hook :buffer buffer)
              buffer))
 
-(defun call-with-write-hook (buffer function)
+(defun call-with-write-hook (buffer function &optional mark-saved-p)
   (run-before-save-hooks buffer)
+  ;; A saved identity must name a stable undo node.  Commit an active
+  ;; transaction before external I/O so a splice refusal cannot happen after
+  ;; the file has already changed.
+  (when mark-saved-p
+    (alexandria:when-let
+        ((group (lem/buffer/internal::buffer-%active-change-group buffer)))
+      (buffer-accept-change-group group)))
   (funcall function)
+  ;; Mark the exact bytes just written before after-save hooks are allowed to
+  ;; create a new dirty descendant.
+  (when mark-saved-p
+    (buffer-mark-saved buffer))
   (update-changed-disk-date buffer)
   (run-after-save-hooks buffer))
 
 (defmacro with-write-hook (buffer &body body)
   `(call-with-write-hook ,buffer (lambda () ,@body)))
 
-(defun write-to-file (buffer filename)
-  (with-write-hook buffer
-    (write-to-file-without-write-hook buffer filename)))
+(defun write-to-file (buffer filename &optional mark-saved-p)
+  (call-with-write-hook
+   buffer
+   (lambda ()
+     (alexandria:if-let ((writer (buffer-value buffer 'write-file-function)))
+       (funcall writer buffer filename)
+       (write-to-file-without-write-hook buffer filename)))
+   mark-saved-p))
 
 (defun %write-region-to-file (end-of-line out)
   (lambda (string eof-p)

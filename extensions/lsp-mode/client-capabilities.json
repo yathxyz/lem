@@ -1,6 +1,24 @@
 {
-  "workspace": {},
+  "workspace": {
+    "configuration": true,
+    "didChangeWatchedFiles": {
+      "dynamicRegistration": true,
+      "relativePatternSupport": true
+    }
+  },
+  "window": {
+    "workDoneProgress": true
+  },
+  "general": {
+    "positionEncodings": [
+      "utf-16"
+    ]
+  },
   "textDocument": {
+    "diagnostic": {
+      "dynamicRegistration": false,
+      "relatedDocumentSupport": false
+    },
     "synchronization": {
       "didSave": true
     },

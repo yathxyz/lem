@@ -10,11 +10,43 @@
            :destructuring-lsp-range))
 (in-package :lem-lsp-base/utils)
 
+(defun encode-uri-path (path)
+  (with-output-to-string (stream)
+    (loop :with start := 0
+          :for slash := (position #\/ path :start start)
+          :do (write-string (quri:url-encode
+                             (subseq path start (or slash (length path))))
+                            stream)
+          :when slash
+            :do (write-char #\/ stream)
+                (setf start (1+ slash))
+          :unless slash
+            :return nil)))
+
+(defun decode-uri-path (path)
+  ;; Quri's decoder follows form semantics and maps a raw + to a space.
+  ;; A plus in a URI path is literal, so protect it before percent-decoding.
+  (quri:url-decode
+   (with-output-to-string (stream)
+     (loop :for character :across path
+           :do (if (char= character #\+)
+                   (write-string "%2B" stream)
+                   (write-char character stream))))))
+
 (defun pathname-to-uri (pathname)
-  (format nil "file://~A" (namestring pathname)))
+  (format nil "file://~A" (encode-uri-path (namestring pathname))))
 
 (defun uri-to-pathname (uri)
-  (pathname (quri:uri-path (quri:uri uri))))
+  (let* ((parsed (quri:uri uri))
+         (scheme (quri:uri-scheme parsed))
+         (host (quri:uri-host parsed)))
+    (unless (and (stringp scheme)
+                 (string-equal scheme "file")
+                 (or (null host)
+                     (string= host "")
+                     (string-equal host "localhost")))
+      (error "Not a local file URI: ~S" uri))
+    (pathname (decode-uri-path (quri:uri-path parsed)))))
 
 (defun point-lsp-line-number (point)
   (1- (lem:line-number-at-point point)))

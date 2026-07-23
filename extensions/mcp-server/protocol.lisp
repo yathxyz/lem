@@ -43,13 +43,18 @@
                        :input-schema input-schema
                        :handler handler)))
 
+(defun tool-disabled-p (name)
+  (member name *mcp-disabled-tools* :test #'string=))
+
 (defun get-tool (name)
   "Get a registered tool by name."
-  (gethash name *registered-tools*))
+  (unless (tool-disabled-p name)
+    (gethash name *registered-tools*)))
 
 (defun list-all-tools ()
-  "Return list of all registered tools."
+  "Return all registered tools permitted by the current policy."
   (loop :for tool :being :the :hash-values :of *registered-tools*
+        :unless (tool-disabled-p (tool-name tool))
         :collect tool))
 
 (defun tool-to-json (tool)

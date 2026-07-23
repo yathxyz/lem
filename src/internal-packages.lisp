@@ -269,6 +269,7 @@
    :prompt-for-library)
   ;; buffer.lisp
   (:export
+   :kill-buffer-query-hook
    :kill-buffer-hook)
   ;; window-tree.lisp
   (:export
@@ -276,6 +277,7 @@
   ;; window.lisp
   (:export
    :line-wrap
+   :line-wrap-at-word-boundary
    :*window-sufficient-width*
    :*scroll-recenter-p*
    :*window-scroll-functions*
@@ -295,6 +297,7 @@
    :window-y
    :window-width
    :window-left-width
+   :window-right-width
    :window-height
    :window-buffer
    :window-screen
@@ -671,6 +674,7 @@
    :inactive-window-background-color
    :redraw-buffer
    :compute-left-display-area-content
+   :compute-window-content-width
    :compute-wrap-left-area-content)
   ;; display/logical-line.lisp
   (:export

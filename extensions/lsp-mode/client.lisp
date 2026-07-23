@@ -4,6 +4,7 @@
   (:import-from :lem-lsp-mode/lem-stdio-transport
                 :lem-stdio-transport)
   (:export :dispose
+           :alive-p
            :tcp-client
            :stdio-client)
   #+sbcl
@@ -11,6 +12,7 @@
 (in-package :lem-lsp-mode/client)
 
 (defgeneric dispose (client))
+(defgeneric alive-p (client))
 
 (defclass tcp-client (lem-language-client/client:client)
   ((port
@@ -30,6 +32,10 @@
   (when (tcp-client-process client)
     (lem-process:delete-process (tcp-client-process client))))
 
+(defmethod alive-p ((client tcp-client))
+  (or (null (tcp-client-process client))
+      (lem-process:process-alive-p (tcp-client-process client))))
+
 (defclass stdio-client (lem-language-client/client:client)
   ((process :initarg :process
             :reader stdio-client-process)))
@@ -40,4 +46,16 @@
                                              :process (stdio-client-process client)))
 
 (defmethod dispose ((client stdio-client))
-  (async-process:delete-process (stdio-client-process client)))
+  (let ((process (stdio-client-process client)))
+    (when (ignore-errors (uiop:process-alive-p process))
+      (ignore-errors (uiop:terminate-process process :urgent t)))
+    (ignore-errors (uiop:wait-process process))
+    (dolist (stream (list (uiop:process-info-input process)
+                          (uiop:process-info-output process)
+                          (uiop:process-info-error-output process)))
+      (when (streamp stream)
+        (ignore-errors (close stream))))))
+
+(defmethod alive-p ((client stdio-client))
+  (ignore-errors
+    (uiop:process-alive-p (stdio-client-process client))))

@@ -71,7 +71,9 @@
   (loop :for dir := (uiop:truename* directory)
           :then (uiop:pathname-parent-directory-pathname dir)
         :while dir
-        :when (uiop:directory-exists-p (merge-pathnames ".git/" dir))
+        :when (or (uiop:directory-exists-p (merge-pathnames ".git/" dir))
+                  ;; Linked worktrees and submodules use a .git pointer file.
+                  (uiop:file-exists-p (merge-pathnames ".git" dir)))
           :return dir
         :when (equal dir (uiop:pathname-parent-directory-pathname dir))
           :return nil))
@@ -80,8 +82,8 @@
   "Get git diff for a buffer's file (on disk).
    Returns the diff output string or nil."
   (alexandria:when-let ((filepath (buffer-filename buffer)))
-    (let ((directory (or (buffer-directory buffer)
-                         (uiop:pathname-directory-pathname filepath))))
+    (let ((directory (or (uiop:pathname-directory-pathname filepath)
+                         (buffer-directory buffer))))
       (alexandria:when-let ((git-root (find-git-root directory)))
         (uiop:with-current-directory (git-root)
           (let ((relative-path (enough-namestring filepath git-root)))
@@ -98,8 +100,8 @@
   "Get git diff for unsaved buffer content using temp files.
    Returns the diff output string or nil."
   (alexandria:when-let ((filepath (buffer-filename buffer)))
-    (let ((directory (or (buffer-directory buffer)
-                         (uiop:pathname-directory-pathname filepath))))
+    (let ((directory (or (uiop:pathname-directory-pathname filepath)
+                         (buffer-directory buffer))))
       (alexandria:when-let ((git-root (find-git-root directory)))
         (uiop:with-current-directory (git-root)
           (let* ((relative-path (enough-namestring filepath git-root))

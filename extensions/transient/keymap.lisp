@@ -26,15 +26,22 @@ otherwise, wait *transient-popup-delay* milliseconds before showing."
         ;; show immediately: no delay configured, or popup already visible (sub-menu navigation)
         (show-transient keymap)
         ;; delayed: start a one-shot timer
-        (let ((target-keymap keymap))
+        (let ((target-keymap keymap)
+              (timer nil))
+          (setf timer
+                (make-timer
+                 (lambda ()
+                   ;; A stopped timer may already have queued this callback on
+                   ;; the editor event loop.  Only the currently registered
+                   ;; timer may display its captured keymap.
+                   (when (eq timer *transient-delay-timer*)
+                     (setf *transient-delay-timer* nil)
+                     (let ((resolved (resolve-transient-keymap target-keymap)))
+                       (when resolved
+                         (show-transient resolved)))))
+                 :name "transient-popup-delay"))
           (setf *transient-delay-timer*
-                (start-timer
-                 (make-timer (lambda ()
-                               (let ((resolved (resolve-transient-keymap target-keymap)))
-                                 (when resolved
-                                   (show-transient resolved))))
-                             :name "transient-popup-delay")
-                 delay))))))
+                (start-timer timer delay))))))
 
 (defmethod keymap-activate ((keymap keymap))
   (let ((resolved (resolve-transient-keymap keymap)))

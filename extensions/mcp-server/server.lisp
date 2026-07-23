@@ -93,18 +93,31 @@
   ((mcp-server :initarg :mcp-server
                :reader acceptor-mcp-server)))
 
+(defun authorized-request-p ()
+  (let ((authorization (hunchentoot:header-in* :authorization)))
+    (and (stringp *mcp-server-auth-token*)
+         (string= authorization
+                  (concatenate 'string "Bearer " *mcp-server-auth-token*)))))
+
+(defun reject-unauthorized-request ()
+  (setf (hunchentoot:return-code*) hunchentoot:+http-authorization-required+
+        (hunchentoot:header-out :www-authenticate) "Bearer"
+        (hunchentoot:content-type*) "application/json")
+  (encode-error-response nil +invalid-request+ "Unauthorized"))
+
 (defun handle-mcp-request ()
   "Handle incoming MCP HTTP request."
   (let* ((server (acceptor-mcp-server hunchentoot:*acceptor*))
-         (request-method (hunchentoot:request-method*))
-         (content-type (hunchentoot:content-type*)))
+         (request-method (hunchentoot:request-method*)))
     (cond
+      ((eq request-method :options)
+       (handle-options-request))
+      ((not (authorized-request-p))
+       (reject-unauthorized-request))
       ((eq request-method :post)
        (handle-post-request server))
       ((eq request-method :get)
        (handle-get-request server))
-      ((eq request-method :options)
-       (handle-options-request))
       (t
        (setf (hunchentoot:return-code*) hunchentoot:+http-method-not-allowed+)
        ""))))
@@ -114,7 +127,7 @@
   (setf (hunchentoot:header-out :access-control-allow-origin) "*")
   (setf (hunchentoot:header-out :access-control-allow-methods) "GET, POST, OPTIONS")
   (setf (hunchentoot:header-out :access-control-allow-headers)
-        "Content-Type, Accept, Mcp-Protocol-Version, Mcp-Session-Id")
+        "Authorization, Content-Type, Accept, Mcp-Protocol-Version, Mcp-Session-Id")
   (setf (hunchentoot:return-code*) hunchentoot:+http-no-content+)
   "")
 
@@ -246,6 +259,9 @@
   "Start the MCP HTTP server."
   (when *current-mcp-server*
     (error "MCP server is already running"))
+  (unless (and (stringp *mcp-server-auth-token*)
+               (>= (length *mcp-server-auth-token*) 32))
+    (error "MCP server requires a bearer token of at least 32 characters"))
   (let ((hostname (mcp-server-hostname server))
         (port (mcp-server-port server)))
     (setf (mcp-server-acceptor server)

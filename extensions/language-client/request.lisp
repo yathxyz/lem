@@ -84,13 +84,23 @@
                       (request-message-method message)
                       (convert-to-json params)
                       (lambda (response)
-                        (handler-bind ((error (lambda (e)
-                                                (log:error "~A"
-                                                          (with-output-to-string (stream)
-                                                            (uiop:println e stream)
-                                                            (uiop:print-backtrace :stream stream
-                                                                                  :condition e))))))
-                          (let ((value (coerce-response message response)))
+                        (multiple-value-bind (value converted-p)
+                            (handler-case
+                                (values (coerce-response message response) t)
+                              (error (condition)
+                                (log:error "~A"
+                                           (with-output-to-string (stream)
+                                             (uiop:println condition stream)
+                                             (uiop:print-backtrace
+                                              :stream stream
+                                              :condition condition)))
+                                (if error-callback
+                                    (funcall error-callback
+                                             (princ-to-string condition)
+                                             nil)
+                                    (error condition))
+                                (values nil nil)))
+                          (when converted-p
                             (funcall callback value))))
                       error-callback))
 

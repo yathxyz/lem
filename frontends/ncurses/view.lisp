@@ -102,10 +102,16 @@
 
 (defun delete-view (view)
   "Destroy the view's main and modeline windows, ignoring curses errors."
-  ;; XXX: Muffle "Unhandled memory fault at ..." error
-  (ignore-errors (charms/ll:delwin (view-scrwin view)))
-  (when (view-modeline-scrwin view)
-    (charms/ll:delwin (view-modeline-scrwin view))))
+  (let ((scrwin (view-scrwin view))
+        (modeline-scrwin (view-modeline-scrwin view)))
+    ;; Clear the foreign pointers before entering curses so repeated or
+    ;; reentrant teardown cannot pass an already freed WINDOW back to delwin.
+    (setf (slot-value view 'scrwin) nil
+          (slot-value view 'modeline-scrwin) nil)
+    (when scrwin
+      (ignore-errors (charms/ll:delwin scrwin)))
+    (when modeline-scrwin
+      (ignore-errors (charms/ll:delwin modeline-scrwin)))))
 
 (defun clear (view)
   (charms/ll:clearok (view-scrwin view) 1)

@@ -107,7 +107,7 @@ if a bottom-side window already exists, switch its buffer instead."
   (let ((frame (current-frame)))
     (cond ((frame-bottomside-window frame)
            (let ((window (frame-bottomside-window frame)))
-             (set-window-buffer window buffer)
+             (set-window-buffer buffer window)
              window))
           (t
            (let* ((y (- (display-height) height))

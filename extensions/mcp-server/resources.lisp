@@ -95,6 +95,9 @@
                                 ("mimeType" . ,(buffer-mime-type buffer))
                                 ("text" . ,(buffer-text buffer)))))))))
         ((string-equal scheme "file")
+         (unless *mcp-allow-file-resources*
+           (mcp-error +invalid-params+
+                      "file:// resources are disabled by editor policy"))
          (let ((filepath path))
            (unless (probe-file filepath)
              (mcp-error +invalid-params+

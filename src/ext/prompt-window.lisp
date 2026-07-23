@@ -17,6 +17,7 @@
 
 (defvar *fill-width* nil)
 (defvar *history-table* (make-hash-table))
+(defvar *prompt-history-limit* nil)
 
 (defvar *special-paths*
   #+unix '(("//" . "/")
@@ -294,9 +295,15 @@
     (delete-window prompt-window)))
 
 (defun get-history (history-name)
-  (or (gethash history-name *history-table*)
-      (setf (gethash history-name *history-table*)
-            (lem/common/history:make-history))))
+  (let ((history
+          (or (gethash history-name *history-table*)
+              (setf (gethash history-name *history-table*)
+                    (lem/common/history:make-history
+                     :limit *prompt-history-limit*)))))
+    (when *prompt-history-limit*
+      (setf (lem/common/history::history-limit history)
+            *prompt-history-limit*))
+    history))
 
 (defmacro with-unwind-setf (bindings form &body cleanup-forms)
   (let ((gensyms (mapcar (lambda (b)

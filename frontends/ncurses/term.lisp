@@ -15,7 +15,10 @@
            :disable-mouse
            :update-cursor-shape
            :get-display-width
-           :get-display-height))
+           :get-display-height
+           :resize-term
+           :wait-for-input
+           :with-input-resize-lock))
 (in-package :lem-ncurses/term)
 
 (cffi:defcvar ("COLOR_PAIRS" *COLOR-PAIRS* :library charms/ll::libcurses) :int)
@@ -545,13 +548,109 @@ simply mirrors the standard xterm-256 palette values."
 
 (defvar *tty-name* nil)
 (defvar *term-io* nil)
+(defvar *input-resize-lock* (bt2:make-lock :name "ncurses input/resize lock"))
+(defvar *terminal-input-fd* nil)
+
+(defmacro with-input-resize-lock (&body body)
+  `(bt2:with-lock-held (*input-resize-lock*)
+     ,@body))
+
+#+sbcl
+(defvar *resize-monitor-thread* nil)
+
+#+sbcl
+(defvar *resize-monitor-running-p* nil)
+
+#+sbcl
+(defvar *resize-event-pending-p* nil)
+
+#+sbcl
+(defvar *applied-terminal-rows* nil)
+
+#+sbcl
+(defvar *applied-terminal-cols* nil)
+
+(defun terminal-input-fd ()
+  (or *terminal-input-fd*
+      (let ((term-io (or *term-io* (c-file "stdin"))))
+        (when term-io
+          (setf *terminal-input-fd* (fileno term-io))))))
+
+(defun terminal-size ()
+  (alexandria:when-let ((fd (terminal-input-fd)))
+      (cffi:with-foreign-object (ws '(:struct winsize))
+        (when (= 0 (ioctl fd 21523 :pointer ws))
+          (cffi:with-foreign-slots ((ws-row ws-col) ws (:struct winsize))
+            (when (and (plusp ws-row) (plusp ws-col))
+              (values ws-row ws-col)))))))
+
+(defun wait-for-input ()
+  #+sbcl
+  (alexandria:when-let ((fd (terminal-input-fd)))
+    (sb-sys:wait-until-fd-usable fd :input))
+  #-sbcl
+  t)
+
+#+sbcl
+(defun resize-monitor-loop ()
+  (loop
+    (sleep 0.05)
+    (unless *resize-monitor-running-p* (return))
+    (multiple-value-bind (rows cols) (terminal-size)
+      (when (and rows cols
+                 (not *resize-event-pending-p*)
+                 (or (null *applied-terminal-rows*)
+                     (null *applied-terminal-cols*)
+                     (/= rows *applied-terminal-rows*)
+                     (/= cols *applied-terminal-cols*)))
+        (setf *resize-event-pending-p* t)
+        (handler-case
+            (lem:send-event
+             (lambda ()
+               (unwind-protect
+                    (multiple-value-bind (current-rows current-cols)
+                        (terminal-size)
+                      (when (and current-rows current-cols
+                                 (or (null *applied-terminal-rows*)
+                                     (null *applied-terminal-cols*)
+                                     (/= current-rows *applied-terminal-rows*)
+                                     (/= current-cols *applied-terminal-cols*)))
+                        (lem:update-on-display-resized)))
+                 (setf *resize-event-pending-p* nil))))
+          (error (condition)
+            (setf *resize-event-pending-p* nil)
+            (error condition)))))))
+
+#+sbcl
+(defun start-resize-monitor ()
+  (multiple-value-bind (rows cols) (terminal-size)
+    (setf *applied-terminal-rows* rows
+          *applied-terminal-cols* cols))
+  (setf *resize-event-pending-p* nil
+        *resize-monitor-running-p* t
+        *resize-monitor-thread*
+        (bt2:make-thread #'resize-monitor-loop
+                         :name "Lem ncurses resize monitor")))
+
+#+sbcl
+(defun stop-resize-monitor ()
+  (setf *resize-monitor-running-p* nil)
+  (when *resize-monitor-thread*
+    (ignore-errors (bt2:join-thread *resize-monitor-thread*))
+    (setf *resize-monitor-thread* nil))
+  (setf *resize-event-pending-p* nil
+        *applied-terminal-rows* nil
+        *applied-terminal-cols* nil
+        *terminal-input-fd* nil))
 
 (defun resize-term ()
-  (when *term-io*
-    (cffi:with-foreign-object (ws '(:struct winsize))
-      (when (= 0 (ioctl (fileno *term-io*) 21523 :pointer ws))
-        (cffi:with-foreign-slots ((ws-row ws-col) ws (:struct winsize))
-          (charms/ll:resizeterm ws-row ws-col))))))
+  (multiple-value-bind (rows cols) (terminal-size)
+    (when (and rows cols)
+      (with-input-resize-lock
+        (charms/ll:resizeterm rows cols)
+        #+sbcl
+        (setf *applied-terminal-rows* rows
+              *applied-terminal-cols* cols)))))
 
 (defun try-newterm (term-name out-fp in-fp)
   "Create a curses screen for terminfo entry TERM-NAME. Return true when the
@@ -655,6 +754,10 @@ global key trie, so it also governs the input pad used for reading."
   (when (= *mouse-mode* 1)
     (enable-mouse))
   (enable-bracketed-paste)
+  #+sbcl
+  (progn
+    (ignore-errors (sb-sys:enable-interrupt sb-unix:sigwinch :ignore))
+    (start-resize-monitor))
   t)
 
 (defun term-set-tty (tty-name)
@@ -669,6 +772,10 @@ Mirrors lem-ncurses/mouse:disable-mouse-reporting."
   (write-terminal-string (format nil "~C[?1006l~C[?1002l~C[?1000l" #\Esc #\Esc #\Esc)))
 
 (defun term-finalize ()
+  #+sbcl
+  (stop-resize-monitor)
+  #+sbcl
+  (ignore-errors (sb-sys:enable-interrupt sb-unix:sigwinch :default))
   (disable-bracketed-paste)
   (emit-mouse-reporting-off)
   (when *term-io*

@@ -16,5 +16,8 @@ SPEC.md, DS-8.")
 checkpoint mechanism. Intended to run from a terminating-signal handler on a dying
 process: it never signals (a failure to checkpoint one buffer must not prevent the
 process from exiting) and returns NIL."
-  (ignore-errors (lem/checkpoint:checkpoint-modified-buffers))
+  (when (some (lambda (buffer)
+                (mode-active-p buffer 'lem/checkpoint:checkpoint-mode))
+              (buffer-list))
+    (ignore-errors (lem/checkpoint:checkpoint-modified-buffers)))
   nil)

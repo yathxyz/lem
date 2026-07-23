@@ -20,12 +20,19 @@
            :vi-visual-end
            :vi-visual-char
            :vi-visual-line
+           :vi-visual-screen-line
            :vi-visual-block
            :visual
            :visual-p
            :visual-char-p
            :visual-line-p
+           :visual-screen-line-p
            :visual-block-p
+           :respect-visual-line-mode
+           :respect-visual-line-mode-p
+           :screen-line-start
+           :screen-line-end
+           :screen-line-range
            :visual-range
            :apply-visual-range
            :vi-visual-insert
@@ -35,6 +42,37 @@
 (in-package :lem-vi-mode/visual)
 
 (defvar *visual-keymap* (make-keymap :description '*visual-keymap*))
+
+(define-editor-variable respect-visual-line-mode nil
+  "Whether Vi line commands follow displayed rows while line wrapping is on.")
+
+(defun respect-visual-line-mode-p (&optional (buffer (current-buffer)))
+  (and (variable-value 'respect-visual-line-mode :default buffer)
+       (variable-value 'line-wrap :default buffer)))
+
+(defun screen-line-start (point &optional (window (current-window)))
+  "Return a temporary point at the start of POINT's displayed row."
+  (with-point ((start point))
+    (backward-line-wrap start window t)
+    (copy-point start :temporary)))
+
+(defun screen-line-end (point &optional (window (current-window)))
+  "Return a temporary exclusive end for POINT's displayed row."
+  (let ((end (screen-line-start point window)))
+    (or (move-to-next-virtual-line end 1 window)
+        (buffer-end end))
+    end))
+
+(defun screen-line-range (start end &optional (window (current-window)))
+  "Expand START and END to complete displayed rows in WINDOW."
+  (with-point ((start start)
+               (end end))
+    (when (point< end start)
+      (rotatef start end))
+    (move-point start (screen-line-start start window))
+    (move-point end (screen-line-end end window))
+    (list (copy-point start :temporary)
+          (copy-point end :temporary))))
 
 (defmethod make-region-overlays-using-global-mode ((global-mode vi-mode) cursor)
   (let ((buffer (point-buffer cursor)))
@@ -58,6 +96,10 @@
                              (push (make-line-overlay p 'region :temporary t)
                                    overlays)))
        overlays))
+    ;; Displayed-row mode
+    ((visual-screen-line-p buffer)
+     (destructuring-bind (start end) (visual-range buffer)
+       (list (make-overlay start end 'region :temporary t))))
     ;; Block mode
     ((visual-block-p buffer)
      (let ((overlays '()))
@@ -97,6 +139,10 @@
   (:default-initargs
    :name "V-LINE"))
 
+(define-state visual-screen-line (visual) ()
+  (:default-initargs
+   :name "V-SCREEN"))
+
 (define-state visual-block (visual) ()
   (:default-initargs
    :name "V-BLOCK"))
@@ -126,14 +172,22 @@
        (unless (buffer-mark-p buffer)
          (setf (buffer-mark buffer) (current-point)))))))
 
+(defun enable-command-visual (new-state buffer)
+  (unless (visual-p buffer)
+    (buffer-mark-cancel buffer))
+  (enable-visual new-state buffer))
+
 (define-command vi-visual-char (&optional (buffer (current-buffer))) ()
-  (enable-visual 'visual-char buffer))
+  (enable-command-visual 'visual-char buffer))
 
 (define-command vi-visual-line (&optional (buffer (current-buffer))) ()
-  (enable-visual 'visual-line buffer))
+  (enable-command-visual 'visual-line buffer))
+
+(define-command vi-visual-screen-line (&optional (buffer (current-buffer))) ()
+  (enable-command-visual 'visual-screen-line buffer))
 
 (define-command vi-visual-block (&optional (buffer (current-buffer))) ()
-  (enable-visual 'visual-block buffer))
+  (enable-command-visual 'visual-block buffer))
 
 (defun visual-p (&optional (buffer (current-buffer)))
   (typep (buffer-state buffer) 'visual))
@@ -143,6 +197,9 @@
 
 (defun visual-line-p (&optional (buffer (current-buffer)))
   (typep (buffer-state buffer) 'visual-line))
+
+(defun visual-screen-line-p (&optional (buffer (current-buffer)))
+  (typep (buffer-state buffer) 'visual-screen-line))
 
 (defun visual-block-p (&optional (buffer (current-buffer)))
   (typep (buffer-state buffer) 'visual-block))
@@ -159,6 +216,8 @@
        (list start end))
       ((visual-block-p buffer)
        (list start end))
+      ((visual-screen-line-p buffer)
+       (screen-line-range start end))
       (t
        (when (point< end start)
          (rotatef start end))
@@ -178,6 +237,9 @@
     (cond
       ((or (visual-char-p buffer)
            (visual-block-p buffer))
+       (setf (buffer-mark buffer) start)
+       (move-point (buffer-point buffer) end))
+      ((visual-screen-line-p buffer)
        (setf (buffer-mark buffer) start)
        (move-point (buffer-point buffer) end))
       ((visual-line-p buffer)

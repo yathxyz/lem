@@ -5,8 +5,6 @@
                 :connection)
   (:import-from :jsonrpc/request-response
                 :parse-message)
-  (:import-from :lem-lsp-mode/async-process-stream
-                :make-input-stream)
   (:export :lem-stdio-transport))
 (in-package :lem-lsp-mode/lem-stdio-transport)
 
@@ -22,7 +20,8 @@
   (let ((instance (call-next-method)))
     (unless (lem-stdio-transport-stream instance)
       (setf (lem-stdio-transport-stream instance)
-            (make-input-stream (lem-stdio-transport-process instance))))
+            (uiop:process-info-output
+             (lem-stdio-transport-process instance))))
     instance))
 
 (defmethod start-client ((transport lem-stdio-transport))
@@ -50,9 +49,11 @@
                        #\Return
                        #\Newline
                        json)))
-    (async-process:process-send-input
-     (lem-stdio-transport-process transport)
-     body)))
+    (let ((stream
+            (uiop:process-info-input
+             (lem-stdio-transport-process transport))))
+      (write-string body stream)
+      (finish-output stream))))
 
 (defmethod receive-message-using-transport ((transport lem-stdio-transport) connection)
   (let* ((stream (lem-stdio-transport-stream transport))

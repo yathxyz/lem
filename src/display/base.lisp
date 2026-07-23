@@ -2,6 +2,13 @@
 
 (define-editor-variable wrap-line-character #\\)
 (define-editor-variable wrap-line-attribute nil)
+(define-editor-variable display-line-transform-function nil
+  "Optional function called with BUFFER, the source POINT, a freshly
+constructed LOGICAL-LINE, and the rendering WINDOW before conversion to
+drawing objects.  WINDOW is NIL for callers which construct a logical line
+outside redisplay.  The function may replace display strings and attributes
+but must not modify the buffer or change the number of cells corresponding to
+existing text.")
 
 (defvar *inactive-window-background-color* nil)
 
@@ -15,6 +22,13 @@
 
 (defgeneric compute-left-display-area-content (mode buffer point)
   (:method (mode buffer point) nil))
+
+(defgeneric compute-window-content-width (mode buffer window)
+  (:documentation
+   "Return the preferred maximum content width in columns for WINDOW, or NIL.")
+  (:method (mode buffer window)
+    (declare (ignore mode buffer window))
+    nil))
 
 (defgeneric compute-wrap-left-area-content (mode left-side-width left-side-characters)
   (:method (mode left-side-width left-side-characters)

@@ -77,7 +77,7 @@
                                       over-attribute))))
     (lem/buffer/line:normalization-elements merged-attributes)))
 
-(defun create-logical-line (point overlays active-modes)
+(defun create-logical-line (point overlays active-modes &optional window)
   (flet ((overlay-start-charpos (overlay point)
            (if (same-line-p point (overlay-start overlay))
                (point-charpos (overlay-start overlay))
@@ -140,12 +140,18 @@
           (when (< 0 charpos)
             (psetf string (subseq string charpos)
                    attributes (lem/buffer/line:subseq-elements attributes charpos (length string)))))
-        (make-logical-line :string string
-                           :attributes attributes
-                           :left-content left-content
-                           :extend-to-end extend-to-end-attribute
-                           :end-of-line-cursor-attribute end-of-line-cursor-attribute
-                           :line-end-overlay line-end-overlay)))))
+        (let ((logical-line
+                (make-logical-line :string string
+                                   :attributes attributes
+                                   :left-content left-content
+                                   :extend-to-end extend-to-end-attribute
+                                   :end-of-line-cursor-attribute end-of-line-cursor-attribute
+                                   :line-end-overlay line-end-overlay)))
+          (alexandria:when-let
+              ((function (variable-value 'display-line-transform-function
+                                         :default (point-buffer point))))
+            (funcall function (point-buffer point) point logical-line window))
+          logical-line)))))
 
 (defstruct string-with-attribute-item
   string
@@ -289,9 +295,15 @@
     (let* ((overlays (get-window-overlays window))
            (active-modes (get-active-modes-class-instance (window-buffer window)))
            (*active-modes* active-modes))
-      (loop :for logical-line := (create-logical-line point overlays active-modes)
+      ;; A view point can become hidden after a fold is created.  Normalize
+      ;; the rendering copy without changing the window's persistent point.
+      (when (line-hidden-p point)
+        (unless (move-to-next-visible-line point)
+          (move-to-previous-visible-line point)))
+      (loop :for logical-line := (create-logical-line
+                                  point overlays active-modes window)
             :do (funcall function logical-line)
-                (unless (line-offset point 1)
+                (unless (move-to-next-visible-line point)
                   (return))))))
 
 (defmacro do-logical-line ((logical-line window) &body body)

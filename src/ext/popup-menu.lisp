@@ -2,7 +2,11 @@
   (:use :cl :lem)
   (:export :write-header
            :get-focus-item
-           :apply-print-spec)
+           :apply-print-spec
+           :item-group
+           :popup-menu-focus-active-p
+           :popup-menu-clear-focus
+           :popup-menu-activate-focus)
   #+sbcl
   (:lock t))
 (in-package :lem/popup-menu)
@@ -22,17 +26,27 @@
     :accessor popup-menu-action-callback)
    (focus-attribute
     :initarg :focus-attribute
-    :accessor popup-menu-focus-attribute)))
+    :accessor popup-menu-focus-attribute)
+   (focus-active
+    :initform t
+    :accessor popup-menu-focus-active-p)))
 
 (define-attribute popup-menu-attribute
   (t :foreground "white" :background "RoyalBlue"))
 (define-attribute non-focus-popup-menu-attribute)
+
+(define-attribute popup-menu-group-attribute
+  (t :foreground :base0D :bold t))
 
 (defun focus-point (popup-menu)
   (buffer-point (popup-menu-buffer popup-menu)))
 
 (defun make-focus-overlay (point focus-attribute)
   (make-line-overlay point focus-attribute))
+
+(defun selectable-point-p (point)
+  "Return true when POINT is on a row backed by a popup item."
+  (not (null (text-property-at (line-start point) :item))))
 
 (defun update-focus-overlay (popup-menu point)
   "Refresh the focus highlight so it tracks POINT in POPUP-MENU.
@@ -41,12 +55,32 @@ focus overlay unless POINT is on the header line."
   (alexandria:when-let ((focus-overlay (popup-menu-focus-overlay popup-menu)))
     (delete-overlay focus-overlay))
   (clear-overlays (popup-menu-buffer popup-menu))
-  (unless (header-point-p point)
+  (setf (popup-menu-focus-overlay popup-menu) nil)
+  (when (and (popup-menu-focus-active-p popup-menu)
+             (selectable-point-p point))
     (setf (popup-menu-focus-overlay popup-menu)
           (make-focus-overlay point (popup-menu-focus-attribute popup-menu)))))
 
+(defun popup-menu-clear-focus (popup-menu)
+  "Make POPUP-MENU's prompt row authoritative, not merely unhighlighted."
+  (setf (slot-value popup-menu 'focus-active) nil)
+  (update-focus-overlay popup-menu (focus-point popup-menu))
+  nil)
+
+(defun popup-menu-activate-focus (popup-menu)
+  "Activate POPUP-MENU's current physical row."
+  (setf (slot-value popup-menu 'focus-active) t)
+  (update-focus-overlay popup-menu (focus-point popup-menu))
+  t)
+
 (defgeneric write-header (print-spec point)
   (:method (print-spec point)))
+
+(defgeneric item-group (print-spec item)
+  (:documentation "Return ITEM's optional non-selectable group heading.")
+  (:method (print-spec item)
+    (declare (ignore print-spec item))
+    nil))
 
 (defgeneric apply-print-spec (print-spec point item)
   (:documentation "Applies the function `print-spec` to an `item` at `point`.  Typically this
@@ -56,18 +90,42 @@ will get the string representation of `item` and insert it at `point` (the defau
       (insert-string point string))))
 
 (defun insert-items (point items print-spec)
-  (with-point ((start point :right-inserting))
-    (loop :for (item . continue-p) :on items
-          :do (move-point start point)
-              (apply-print-spec print-spec point item)
-              (line-end point)
-              (put-text-property start point :item item)
-              (when continue-p
-                (insert-character point #\newline)))
-    (buffer-start point)))
+  "Insert ITEMS and return the number of candidate and group rows."
+  (let ((previous-group (gensym "NO-GROUP"))
+        (first-row-p t)
+        (row-count 0))
+    (labels ((begin-row ()
+               (unless first-row-p
+                 (insert-character point #\newline))
+               (setf first-row-p nil)
+               (incf row-count)))
+      (dolist (item items)
+        (let ((group (item-group print-spec item)))
+          (unless (equal group previous-group)
+            (setf previous-group group)
+            (when group
+              (begin-row)
+              (insert-string point group
+                             :attribute 'popup-menu-group-attribute))))
+        (begin-row)
+        (with-point ((start point :right-inserting))
+          (apply-print-spec print-spec point item)
+          (line-end point)
+          (put-text-property start point :item item))))
+    (buffer-start point)
+    row-count))
+
+(defun seek-selectable-point (point direction)
+  "Move POINT in DIRECTION until it reaches a selectable row."
+  (loop
+    (when (selectable-point-p point)
+      (return t))
+    (unless (line-offset point direction)
+      (return nil))))
 
 (defun get-focus-item (popup-menu)
-  (alexandria:when-let (p (focus-point popup-menu))
+  (alexandria:when-let (p (and (popup-menu-focus-active-p popup-menu)
+                               (focus-point popup-menu)))
     (text-property-at (line-start p) :item)))
 
 (defun make-menu-buffer ()
@@ -93,17 +151,17 @@ will get the string representation of `item` and insert it at `point` (the defau
                  (< 0 (length items)))
         (insert-character point #\newline))
       (setf (buffer-start-line buffer) start-line)
-      (insert-items point items print-spec)
-      (buffer-start point)
-      (when header-exists
-        (move-to-line point start-line))
-      (when last-line (move-to-line point last-line))
-      (let ((focus-overlay (make-focus-overlay point focus-attribute))
-            (width (lem/popup-window::compute-buffer-width buffer)))
-        (values width
-                focus-overlay
-                (+ (1- start-line)
-                   (length items)))))))
+      (let ((row-count (insert-items point items print-spec)))
+        (buffer-start point)
+        (when header-exists
+          (move-to-line point start-line))
+        (when last-line (move-to-line point last-line))
+        (seek-selectable-point point 1)
+        (let ((focus-overlay (make-focus-overlay point focus-attribute))
+              (width (lem/popup-window::compute-buffer-width buffer)))
+          (values width
+                  focus-overlay
+                  (+ (1- start-line) row-count)))))))
 
 (defparameter *style* '(:use-border t :offset-y 0))
 
@@ -141,6 +199,8 @@ will get the string representation of `item` and insert it at `point` (the defau
 
 (defmethod lem-if:popup-menu-update (implementation popup-menu items &key print-spec (max-display-items 20) keep-focus)
   (when popup-menu
+    (unless keep-focus
+      (setf (slot-value popup-menu 'focus-active) t))
     (let ((last-line (line-number-at-point (buffer-point (popup-menu-buffer popup-menu)))))
       (multiple-value-bind (menu-width focus-overlay height)
           (setup-menu-buffer (popup-menu-buffer popup-menu)
@@ -170,46 +230,56 @@ will get the string representation of `item` and insert it at `point` (the defau
   (delete-buffer (popup-menu-buffer popup-menu)))
 
 (defun header-point-p (point)
-  (< (line-number-at-point point)
-     (buffer-start-line (point-buffer point))))
+  (not (selectable-point-p point)))
 
-(defun move-focus (popup-menu function)
+(defun move-focus (popup-menu function &optional direction)
   (alexandria:when-let (point (focus-point popup-menu))
+    (setf (slot-value popup-menu 'focus-active) t)
     (funcall function point)
+    (when (and direction (not (seek-selectable-point point direction)))
+      (if (plusp direction)
+          (buffer-start point)
+          (buffer-end point))
+      (seek-selectable-point point (- direction)))
     (line-start point)
     (window-see (popup-menu-window popup-menu))
-    (let ((buffer (point-buffer point)))
-      (when (header-point-p point)
-        (move-to-line point (buffer-start-line buffer))))
     (update-focus-overlay popup-menu point)))
 
 (defmethod lem-if:popup-menu-down (implementation popup-menu)
-  (move-focus
-   popup-menu
-   (lambda (point)
-     (unless (line-offset point 1)
-       (buffer-start point)))))
+  (if (popup-menu-focus-active-p popup-menu)
+      (move-focus
+       popup-menu
+       (lambda (point)
+         (unless (line-offset point 1)
+           (buffer-start point)))
+       1)
+      (popup-menu-activate-focus popup-menu)))
 
 (defmethod lem-if:popup-menu-up (implementation popup-menu)
-  (move-focus
-   popup-menu
-   (lambda (point)
-     (unless (line-offset point -1)
-       (buffer-end point))
-     (when (header-point-p point)
-       (buffer-end point)))))
+  (if (popup-menu-focus-active-p popup-menu)
+      (move-focus
+       popup-menu
+       (lambda (point)
+         (unless (line-offset point -1)
+           (buffer-end point)))
+       -1)
+      (popup-menu-activate-focus popup-menu)))
 
 (defmethod lem-if:popup-menu-first (implementation popup-menu)
+  (setf (slot-value popup-menu 'focus-active) t)
   (move-focus
    popup-menu
    (lambda (point)
-     (buffer-start point))))
+     (buffer-start point))
+   1))
 
 (defmethod lem-if:popup-menu-last (implementation popup-menu)
+  (setf (slot-value popup-menu 'focus-active) t)
   (move-focus
    popup-menu
    (lambda (point)
-     (buffer-end point))))
+     (buffer-end point))
+   -1))
 
 (defmethod lem-if:popup-menu-select (implementation popup-menu)
   (alexandria:when-let ((f (popup-menu-action-callback popup-menu))

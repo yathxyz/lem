@@ -10,6 +10,7 @@
            :lsp-integer
            :lsp-uinteger
            :lsp-decimal
+           :lsp-number
            :lsp-regexp
            :lsp-string
            :lsp-boolean
@@ -64,7 +65,7 @@
 (defconstant +true+ t)
 (defconstant +false+ nil)
 
-(define-condition json-type-error ()
+(define-condition json-type-error (error)
   ((type :initarg :type)
    (value :initarg :value)
    (context :initarg :context :initform nil))
@@ -89,6 +90,7 @@
 (deftype lsp-integer () 'integer)
 (deftype lsp-uinteger () '(integer 0 *))
 (deftype lsp-decimal () 'integer)
+(deftype lsp-number () 'real)
 (deftype lsp-regexp () 'string)
 (deftype lsp-string (&optional (string nil stringp))
   (if stringp

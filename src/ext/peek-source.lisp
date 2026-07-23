@@ -67,10 +67,18 @@
   (list *source-window* *peek-window*))
 
 (defvar *is-finalizing* nil)
+(defvar *preview-timer* nil)
+
+(defun cancel-preview-timer ()
+  (when *preview-timer*
+    (let ((timer *preview-timer*))
+      (setf *preview-timer* nil)
+      (stop-timer timer))))
 
 (defun finalize-peek-source ()
   (when (and *parent-window* (not *is-finalizing*))
     (let ((*is-finalizing* t))
+      (cancel-preview-timer)
       (setf (current-window) *parent-window*)
       (setf *parent-window* nil)
       (finalize-highlight-overlays)
@@ -193,15 +201,27 @@
     (let* ((point (copy-point point :temporary))
            (buffer (point-buffer point)))
       (with-current-window *source-window*
-        (switch-to-buffer buffer nil nil)
+        (lem-core::%switch-to-buffer buffer nil nil)
         (update-highlight-overlay point)
         (move-point (buffer-point buffer) point)
         (window-see (current-window))))))
 
+(defun schedule-show-matched-line ()
+  (cancel-preview-timer)
+  (let ((timer nil))
+    (setf timer
+          (make-idle-timer
+           (lambda ()
+             (when (eq timer *preview-timer*)
+               (setf *preview-timer* nil)
+               (when *parent-window*
+                 (show-matched-line))))
+           :name "peek-source-preview"))
+    (setf *preview-timer* (start-timer timer 100))))
+
 (defmethod execute :after ((mode peek-source-mode) command argument)
   (when (eq (current-window) *peek-window*)
-    (start-timer (make-idle-timer (lambda () (show-matched-line)))
-                 100)))
+    (schedule-show-matched-line)))
 
 (defun highlight-matched-line (point)
   (let ((overlay (make-line-overlay point 'highlight)))

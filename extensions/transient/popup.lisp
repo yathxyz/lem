@@ -42,6 +42,48 @@ both must be reachable from `hide-transient' and from any subsequent
 `keymap-activate' so the pending popup can be canceled regardless of
 which call site aborts the transient sequence.")
 
+(defstruct transient-bottom-state
+  buffer
+  height
+  point-position
+  view-position
+  cursor-invisible-p
+  horizontal-scroll-start)
+
+(defvar *transient-previous-bottom-state* nil
+  "State displaced when the transient popup borrows a bottom-side window.")
+
+(defun snapshot-transient-bottom-state (window)
+  (make-transient-bottom-state
+   :buffer (window-buffer window)
+   :height (window-height window)
+   :point-position (position-at-point (lem-core::%window-point window))
+   :view-position (position-at-point (window-view-point window))
+   :cursor-invisible-p (window-cursor-invisible-p window)
+   :horizontal-scroll-start
+   (window-parameter window 'lem-core::horizontal-scroll-start)))
+
+(defun restore-transient-bottom-state (window state)
+  (let ((buffer (transient-bottom-state-buffer state)))
+    (when (and buffer (not (deleted-buffer-p buffer)))
+      (lem-core::set-window-buffer buffer window)
+      (move-to-position
+       (lem-core::%window-point window)
+       (max 1 (min (transient-bottom-state-point-position state)
+                   (position-at-point (buffer-end-point buffer)))))
+      (move-to-position
+       (window-view-point window)
+       (max 1 (min (transient-bottom-state-view-position state)
+                   (position-at-point (buffer-end-point buffer)))))
+      (resize-bottomside-window
+       window (transient-bottom-state-height state))
+      (setf (window-parameter window 'lem-core::horizontal-scroll-start)
+            (transient-bottom-state-horizontal-scroll-start state))
+      (if (transient-bottom-state-cursor-invisible-p state)
+          (hide-cursor window)
+          (show-cursor window))
+      t)))
+
 (define-attribute transient-matched-key-attribute
   (t
    :foreground (attribute-foreground (ensure-attribute 'syntax-string-attribute))))
@@ -458,8 +500,13 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
         (if existing-window
             (unless (= (window-height existing-window) height)
               (resize-bottomside-window existing-window height))
-            (setf *transient-popup-window*
-                  (make-bottomside-window buffer :height height))))
+            (progn
+              (setf *transient-previous-bottom-state*
+                    (alexandria:when-let
+                        ((bottom (frame-bottomside-window (current-frame))))
+                      (snapshot-transient-bottom-state bottom)))
+              (setf *transient-popup-window*
+                    (make-bottomside-window buffer :height height)))))
       ;; restore vertical scroll position for same-keymap re-renders
       (when (and saved-vp-line (> saved-vp-line 1))
         (move-to-line (window-view-point *transient-popup-window*) saved-vp-line))
@@ -536,15 +583,23 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
   (setf *transient-delay-timer* nil))
 
 (defun hide-transient ()
-  "hide (delete) the transient window."
+  "Hide the transient window and restore any bottom pane it borrowed."
   (cancel-transient-delay-timer)
-  (when (and *transient-popup-window*
-             (not (deleted-window-p *transient-popup-window*)))
+  (let ((window *transient-popup-window*)
+        (previous *transient-previous-bottom-state*))
+    ;; Clear ownership before window operations so their hooks cannot recurse
+    ;; through stale transient state.
+    (setf *transient-popup-window* nil
+          *transient-previous-bottom-state* nil
+          *transient-shown-keymap* nil)
     (modeline-remove-status-list 'transient-scroll-status)
-    (delete-bottomside-window)
-    (setf *transient-popup-window* nil)
-    (setf *transient-shown-keymap* nil)
     (transient-mode nil)
+    (when (and window
+               (not (deleted-window-p window))
+               (eq window (frame-bottomside-window (current-frame))))
+      (unless (and previous
+                   (restore-transient-bottom-state window previous))
+        (delete-bottomside-window)))
     (redraw-display)))
 
 (add-hook *post-command-hook* 'transient-post-command-update)

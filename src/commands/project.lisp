@@ -182,6 +182,7 @@
 (defun maybe-delete-repl-buffer (buffer)
   (if *delete-repl-buffer*
       (progn
+        (confirm-kill-buffer buffer)
         (delete-buffer buffer)
         (signal 'buffer-deleted-p))
       (message "Keeping the REPL buffer. You can change this by setting lem-core/commands/project::*delete-repl-buffer* to nil.")))
@@ -189,6 +190,7 @@
 (defun maybe-delete-last-buffer (buffer)
   (if *delete-last-buffer*
       (progn
+        (confirm-kill-buffer buffer)
         (delete-buffer buffer)
         (signal 'buffer-deleted-p))
       (message "Keeping the last buffer. You can change this by setting lem-core/commands/project::*delete-last-buffer* to t.")))
@@ -217,6 +219,7 @@
           do (if (buffer-repl-p buffer)
                  (maybe-delete-repl-buffer buffer)
                  (progn
+                   (confirm-kill-buffer buffer)
                    (delete-buffer buffer)
                    (signal 'buffer-deleted-p)))))
 

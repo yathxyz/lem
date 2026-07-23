@@ -112,6 +112,7 @@
 (define-key *motion-keymap* "C-i" 'vi-jump-next)
 (define-key *motion-keymap* "'" 'vi-goto-mark)
 (define-key *motion-keymap* ":" 'vi-ex)
+(define-key *motion-keymap* "\"" 'vi-use-register)
 
 (define-key *motion-keymap* "v" 'vi-visual-char)
 (define-key *motion-keymap* "V" 'vi-visual-line)

@@ -1,6 +1,7 @@
 (defpackage :lem-core/commands/file
   (:use :cl :lem-core)
   (:export :*find-file-executor*
+           :*after-sync-buffer-hook*
            :find-file-executor
            :execute-find-file
            :find-file
@@ -9,6 +10,7 @@
            :read-file
            :add-newline-at-eof-on-writing-file
            :save-buffer
+           :confirm-kill-buffer
            :save-current-buffer
            :change-file-name
            :write-file
@@ -41,6 +43,98 @@
 (define-key *global-keymap* "C-x C-w" 'write-file)
 (define-key *global-keymap* "C-x C-h" 'find-recent-file)
 (define-key *global-keymap* "C-x Tab" 'insert-file)
+(defvar *after-sync-buffer-hook* '())
+(defparameter *safe-reload-byte-limit* (* 64 1024 1024))
+
+(defun confirm-kill-buffer (buffer)
+  (lem-core::confirm-buffer-kill buffer))
+
+(defclass byte-snapshot-input-stream
+    (trivial-gray-streams:fundamental-binary-input-stream)
+  ((octets :initarg :octets :reader snapshot-stream-octets)
+   (position :initform 0 :accessor snapshot-stream-position)))
+
+(defmethod stream-element-type ((stream byte-snapshot-input-stream))
+  (declare (ignore stream))
+  '(unsigned-byte 8))
+
+(defmethod trivial-gray-streams:stream-read-byte
+    ((stream byte-snapshot-input-stream))
+  (let ((position (snapshot-stream-position stream))
+        (octets (snapshot-stream-octets stream)))
+    (if (< position (length octets))
+        (prog1 (aref octets position)
+          (incf (snapshot-stream-position stream)))
+        :eof)))
+
+(defmethod trivial-gray-streams:stream-read-sequence
+    ((stream byte-snapshot-input-stream) sequence start end &key)
+  (let* ((position (snapshot-stream-position stream))
+         (octets (snapshot-stream-octets stream))
+         (count (min (- end start) (- (length octets) position))))
+    (replace sequence octets
+             :start1 start :end1 (+ start count)
+             :start2 position :end2 (+ position count))
+    (incf (snapshot-stream-position stream) count)
+    (+ start count)))
+
+(defun read-file-byte-snapshot (filename)
+  "Read exactly one finite regular-file snapshot or fail before buffer mutation."
+  (with-open-file (stream filename :element-type '(unsigned-byte 8))
+    (let ((size (file-length stream)))
+      (unless (and (integerp size)
+                   (<= 0 size *safe-reload-byte-limit*
+                       (1- array-total-size-limit)))
+        (error "File exceeds the safe reload size limit: ~A" filename))
+      (let ((octets (make-array size :element-type '(unsigned-byte 8))))
+        (unless (and (= (read-sequence octets stream) size)
+                     (eq (read-byte stream nil :eof) :eof))
+          (error "File changed while being read: ~A" filename))
+        octets))))
+
+(defun insert-byte-snapshot
+    (point octets filename
+     &key (external-format lem/buffer/file::*default-external-format*)
+          (end-of-line :auto))
+  "Decode finite OCTETS into POINT using the original filename's policy."
+  (when (eql external-format :detect-encoding)
+    (if lem/buffer/file::*external-format-function*
+        (multiple-value-setq (external-format end-of-line)
+          (funcall lem/buffer/file::*external-format-function* filename))
+        (setf external-format :utf-8)))
+  (let* ((encoding
+           (lem/buffer/encodings:encoding external-format end-of-line))
+         (internal-p
+           (typep encoding 'lem/buffer/encodings:internal-encoding)))
+    (handler-case
+        (with-point ((point point :left-inserting))
+          (if internal-p
+              (let ((string
+                      #+sbcl
+                      (sb-ext:octets-to-string
+                       octets :external-format external-format)
+                      #-sbcl
+                      (error "Finite file snapshots require SBCL")))
+                (with-input-from-string (stream string)
+                  (lem/buffer/file::%encoding-read
+                   encoding point stream filename)))
+              (with-open-stream
+                  (stream (make-instance 'byte-snapshot-input-stream
+                                         :octets octets))
+                (lem/buffer/encodings:encoding-read
+                 encoding stream
+                 (lem/buffer/encodings:encoding-read-detect-eol
+                  (lambda (code)
+                    (when code
+                      (insert-character point (code-char code)))))))))
+      (lem/buffer/file:encoding-read-error (condition)
+        (error condition))
+      (error (condition)
+        (error 'lem/buffer/file:encoding-read-error
+               :condition condition
+               :filename filename)))
+    encoding))
+
 (define-key *global-keymap* "C-x s" 'save-some-buffers)
 
 ;; Programs to find files recursively:
@@ -294,8 +388,10 @@ FUNCTION unchanged."
 
 (defun save-buffer (buffer &optional force-p)
   (cond
-    ((and (or force-p (buffer-modified-p buffer))
-          (buffer-filename buffer))
+    ((and (buffer-filename buffer)
+          (or force-p
+              (buffer-modified-p buffer)
+              (not (probe-file (buffer-filename buffer)))))
      ;; Clobber protection: if the file changed on disk since we loaded or last
      ;; saved it, writing would silently discard the other process's changes.
      ;; A forced save (e.g. write-file changing the target) skips this check
@@ -307,8 +403,7 @@ FUNCTION unchanged."
                         (buffer-filename buffer))))
        (add-newline-at-eof buffer)
        (clear-trailing-whitespace-on-write buffer)
-       (write-to-file buffer (buffer-filename buffer))
-       (buffer-unmark buffer)
+       (write-to-file buffer (buffer-filename buffer) t)
        (buffer-filename buffer)))
     ((null (buffer-filename buffer))
      (editor-error "No file name"))
@@ -324,22 +419,37 @@ FUNCTION unchanged."
   "Saves the text in the current buffer to the specified file"
   (let* ((old (buffer-name))
          (new (file-namestring filename))
-         (expand-file-name (expand-file-name filename)))
-    (unless (and (find expand-file-name (mapcar #'buffer-filename
-                                                (buffer-list))
-                       :test #'equal)
-                 (not (prompt-for-y-or-n-p (format nil
-                                                   "~a is opened, overwrite it?"
-                                                   expand-file-name))))
+         (buffer (current-buffer))
+         (old-filename (lem/buffer/internal::buffer-%filename buffer))
+         (old-directory (lem/buffer/internal::buffer-%directory buffer))
+         (expand-file-name (expand-file-name filename))
+         (existing-other-p
+           (and (probe-file expand-file-name)
+                (not (equal expand-file-name (buffer-filename))))))
+    (when (or (not existing-other-p)
+              (prompt-for-y-or-n-p
+               (format nil "~a exists; overwrite it" expand-file-name)))
       (directory-for-file-or-lose filename)
-      (unless (string= old new)
-        (buffer-rename (current-buffer)
-                       (if (get-buffer new)
-                           (unique-buffer-name new)
-                           new)))
-      (setf (buffer-filename) expand-file-name)
-      (add-newline-at-eof (current-buffer))
-      (save-current-buffer t))))
+      (let ((save-succeeded-p nil))
+        (unwind-protect
+             (progn
+               (unless (string= old new)
+                 (buffer-rename buffer
+                                (if (get-buffer new)
+                                    (unique-buffer-name new)
+                                    new)))
+               (setf (buffer-filename buffer) expand-file-name)
+               (add-newline-at-eof buffer)
+               (setf (buffer-value
+                      buffer 'write-file-overwrite-confirmed)
+                     existing-other-p)
+               (save-current-buffer t)
+               (setf save-succeeded-p t))
+          (setf (buffer-value buffer 'write-file-overwrite-confirmed) nil)
+          (unless save-succeeded-p
+            (setf (lem/buffer/internal::buffer-%filename buffer) old-filename
+                  (lem/buffer/internal::buffer-%directory buffer) old-directory
+                  (lem/buffer/internal::buffer-%name buffer) old)))))))
 
 (define-command write-region-file (start end filename)
     (:region (:new-file "Write Region To File: "))
@@ -387,30 +497,64 @@ FUNCTION unchanged."
         function))
 
 (defun sync-buffer-with-file-content (buffer)
-  (with-buffer-read-only buffer nil
-    (let* ((point (buffer-point buffer))
-           (line-number (line-number-at-point point))
-           (column (point-column point)))
-      (erase-buffer buffer)
-      (insert-file-contents point (buffer-filename buffer))
-      (buffer-unmark buffer)
-      (update-changed-disk-date buffer)
-      (move-to-line point line-number)
-      (move-to-column point column)
-      t)))
+  ;; Read and decode first.  A disappearing, unreadable, or malformed file
+  ;; must not leave the visited buffer empty or partially replaced.
+  (let ((staging
+          (make-buffer (format nil " *revert staging ~A*" (gensym))
+                       :enable-undo-p nil
+                       :temporary t)))
+    (unwind-protect
+         (let* ((staging-point (buffer-start-point staging))
+                (octets
+                  (read-file-byte-snapshot (buffer-filename buffer)))
+                (encoding
+                  (let ((*inhibit-modification-hooks* t))
+                    (insert-byte-snapshot
+                     staging-point octets (buffer-filename buffer)
+                     :external-format
+                     (if (variable-value 'find-file-literally :default buffer)
+                         :latin-1
+                         lem/buffer/file::*default-external-format*)
+                     :end-of-line
+                     (if (variable-value 'find-file-literally :default buffer)
+                         :lf
+                         :auto))))
+                (contents
+                  (points-to-string (buffer-start-point staging)
+                                    (buffer-end-point staging))))
+           (with-buffer-read-only buffer nil
+             (let* ((point (buffer-point buffer))
+                    (line-number (line-number-at-point point))
+                    (column (point-column point)))
+               (erase-buffer buffer)
+               (insert-string point contents)
+               (setf (buffer-encoding buffer) encoding)
+               ;; A verified reload establishes a new root.  The erase and
+               ;; insertion above must never remain as two file-sized edits.
+               (clear-buffer-edit-history buffer)
+               (buffer-mark-saved buffer)
+               (update-changed-disk-date buffer)
+               (move-to-line point line-number)
+               (move-to-column point column)
+               (run-hooks *after-sync-buffer-hook* buffer)
+               t)))
+      (delete-buffer staging))))
 
 (define-command revert-buffer (does-not-ask-p) (:universal-nil)
   "Restores the buffer. Normally this command will cause the contents of the file to be reflected in the buffer."
   (let ((ask (not does-not-ask-p))
         (buffer (current-buffer)))
-    (alexandria:if-let (fn (revert-buffer-function buffer))
-      (funcall fn buffer)
-      (when (and (or (buffer-modified-p buffer)
-                     (changed-disk-p buffer))
-                 (if ask
-                     (prompt-for-y-or-n-p (format nil "Revert buffer from file ~A" (buffer-filename)))
-                     t))
-        (sync-buffer-with-file-content buffer)))))
+    (when (or (revert-buffer-function buffer)
+              (buffer-modified-p buffer)
+              (changed-disk-p buffer))
+      (when (or (not ask)
+                (not (buffer-modified-p buffer))
+                (prompt-for-y-or-n-p
+                 (format nil "Discard unsaved changes in ~A?"
+                         (or (buffer-filename buffer) (buffer-name buffer)))))
+        (alexandria:if-let (fn (revert-buffer-function buffer))
+          (funcall fn buffer)
+          (sync-buffer-with-file-content buffer))))))
 
 (defvar *external-format-candidates*
   '("latin-1" "utf-8" "utf-8-bom" "utf-16" "utf-16le" "utf-16be"

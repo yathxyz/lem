@@ -13,15 +13,38 @@
           :type string
           :read-only t))
 
+(defun valid-edit-position-p (point position &optional (delete-length 0))
+  (let ((end-position
+          (position-at-point (buffer-end-point (point-buffer point)))))
+    (and (integerp position)
+         (<= 1 position end-position)
+         (<= (+ position delete-length) end-position))))
+
+(defun expected-delete-text-p (point edit)
+  (with-point ((end point))
+    (and (or (zerop (length (edit-string edit)))
+             (character-offset end (length (edit-string edit))))
+         (string= (edit-string edit) (points-to-string point end)))))
+
 (defun apply-edit (point edit)
   (ecase (edit-kind edit)
     ((:insert-string)
+     (unless (valid-edit-position-p point (edit-position edit))
+       (editor-error "Invalid undo insertion position ~D" (edit-position edit)))
      (move-to-position point (edit-position edit))
      (with-point ((p point))
        (insert-string/point point (edit-string edit))
        (move-point point p)))
     ((:delete-string)
+     (unless (valid-edit-position-p point
+                                    (edit-position edit)
+                                    (length (edit-string edit)))
+       (editor-error "Undo deletion is out of bounds at ~D"
+                     (edit-position edit)))
      (move-to-position point (edit-position edit))
+     (unless (expected-delete-text-p point edit)
+       (editor-error "Undo deletion does not match buffer text at ~D"
+                     (edit-position edit)))
      (delete-char/point point (length (edit-string edit))))))
 
 (defun apply-inverse-edit (point edit)

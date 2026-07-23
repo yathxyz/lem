@@ -27,7 +27,10 @@
   (:import-from :lem-vi-mode/visual
                 :visual-p
                 :visual-line-p
+                :visual-screen-line-p
                 :visual-block-p
+                :respect-visual-line-mode-p
+                :screen-line-range
                 :visual-range
                 :vi-visual-end)
   (:import-from :lem/common/command
@@ -100,7 +103,7 @@
     (t (values arg-list '("P") nil))))
 
 (defmacro define-motion (name arg-list arg-descriptors (&key type jump (repeat :motion) (default-n-arg 1)) &body body)
-  (check-type type (or null (member :inclusive :exclusive :line :block)))
+  (check-type type (or null (member :inclusive :exclusive :line :screen-line :block)))
   (check-type jump boolean)
   `(define-command (,name (:advice-classes vi-motion)
                           (:initargs
@@ -160,9 +163,16 @@
                  (if (eq command-name (command-name (this-command)))
                      ;; Recursive call of the operator like 'dd', 'cc'
                      (save-excursion
-                       (ignore-some-conditions (end-of-buffer)
-                         (next-logical-line (1- (or uarg 1))))
-                       (values start (copy-point (current-point) :temporary) :line))
+                       (if (respect-visual-line-mode-p)
+                           (ignore-some-conditions (end-of-buffer)
+                             (next-line (1- (or uarg 1))))
+                           (ignore-some-conditions (end-of-buffer)
+                             (next-logical-line (1- (or uarg 1)))))
+                       (values start
+                               (copy-point (current-point) :temporary)
+                               (if (respect-visual-line-mode-p)
+                                   :screen-line
+                                   :line)))
                      ;; raise error for invalid commands
                      (error 'editor-abort :message nil)))
                 (otherwise
@@ -175,6 +185,7 @@
            (list
             (cond
               ((visual-line-p) :line)
+              ((visual-screen-line-p) :screen-line)
               ((visual-block-p) :block)
               (t :exclusive))))))
 
@@ -191,10 +202,15 @@
                    (line-start start)
                    (or (line-offset end 1 0)
                        (line-end end))))
+          (:screen-line
+           (unless (visual-p)
+             (destructuring-bind (screen-start screen-end)
+                 (screen-line-range start end)
+               (move-point start screen-start)
+               (move-point end screen-end))))
           (:block)
           (:inclusive
-           (unless (point= start end)
-             (character-offset end 1)))
+           (character-offset end 1))
           (:exclusive))
         (values start end type))
     (multiple-value-prog1

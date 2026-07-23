@@ -81,6 +81,10 @@
     (unless buffer
       (mcp-error +invalid-params+
                  (format nil "Buffer not found: ~A" buffer-name)))
+    (when (buffer-modified-p buffer)
+      (mcp-error +invalid-params+
+                 (format nil "Buffer is modified; refusing deletion: ~A"
+                         buffer-name)))
     (delete-buffer buffer)
     (redraw-display :force t)
     (format nil "Buffer deleted: ~A" buffer-name)))
