@@ -47,7 +47,7 @@
 (defstruct asynchronous-response
   thread value error)
 
-(defun start-waiting-visit (connection pathname)
+(defun start-waiting-visit-many (connection entries)
   (let* ((id (client::next-id))
          (response (make-asynchronous-response)))
     (client::client-send
@@ -55,9 +55,7 @@
      (protocol:make-object
       "version" protocol:+protocol-version+
       "type" "visit" "id" id "wait" "wait"
-      "files" (vector (protocol:make-object
-                       "path" (uiop:native-namestring pathname)
-                       "line" 1 "column" 0))))
+      "files" entries))
     (setf (asynchronous-response-thread response)
           (bt2:make-thread
            (lambda ()
@@ -68,6 +66,13 @@
            :name "waiting lemclient integration request"))
     (values response id)))
 
+(defun start-waiting-visit (connection pathname)
+  (start-waiting-visit-many
+   connection
+   (vector (protocol:make-object
+            "path" (uiop:native-namestring pathname)
+            "line" 1 "column" 0))))
+
 (defun finish-asynchronous-response (response)
   (bt2:join-thread (asynchronous-response-thread response))
   (values (asynchronous-response-value response)
@@ -75,6 +80,9 @@
 
 (deftest daemon-client-round-trip
   (let* ((old-runtime (uiop:getenv "XDG_RUNTIME_DIR"))
+         (old-git-editor (uiop:getenv "GIT_EDITOR"))
+         (old-visual (uiop:getenv "VISUAL"))
+         (old-editor (uiop:getenv "EDITOR"))
          (root (merge-pathnames
                 (format nil "lem-daemon-test-~d-~d/"
                         (sb-posix:getpid) (random 1000000000))
@@ -92,7 +100,10 @@
          (progn
            (ensure-directories-exist (merge-pathnames "marker" root))
            (setf (uiop:getenv "XDG_RUNTIME_DIR")
-                 (uiop:native-namestring root)
+                 (uiop:native-namestring root))
+           (setf (uiop:getenv "GIT_EDITOR") nil
+                 (uiop:getenv "VISUAL") nil
+                 (uiop:getenv "EDITOR") nil
                  endpoint (transport:local-endpoint
                            (transport:require-local-backend) server-name)
                  metadata (transport:local-metadata
@@ -109,6 +120,13 @@
            (ok (wait-until (lambda () (probe-file endpoint)))
                "named daemon publishes its endpoint")
            (ok (null daemon-error) "daemon starts without an error")
+           (let ((expected (format nil "lemclient --server-name ~a" server-name)))
+             (ok (wait-until
+                  (lambda ()
+                    (every (lambda (variable)
+                             (string= expected (uiop:getenv variable)))
+                           '("GIT_EDITOR" "VISUAL" "EDITOR"))))
+                 "daemon clients populate the editor environment"))
            (let* ((directory (uiop:pathname-directory-pathname endpoint))
                   (directory-stat
                     (sb-posix:lstat (uiop:native-namestring directory)))
@@ -270,6 +288,88 @@
                                       "(subseq (lem:buffer-text (lem:current-buffer)) 0 1)"))
                "client frames observe shared buffer edits")
 
+           (let ((first-file (merge-pathnames "matrix first;safe.txt" root))
+                 (second-file (merge-pathnames "matrix-second.txt" root))
+                 (nowait-file (merge-pathnames "matrix-nowait.txt" root))
+                 (client-thread nil)
+                 (client-status nil)
+                 (client-error nil))
+             (with-open-file (stream first-file :direction :output
+                                                :if-exists :supersede)
+               (format stream "alpha~%bravo~%"))
+             (with-open-file (stream second-file :direction :output
+                                                 :if-exists :supersede)
+               (write-string "second" stream))
+             (with-open-file (stream nowait-file :direction :output
+                                                 :if-exists :supersede)
+               (format stream "nowait-one~%nowait-two~%"))
+             (eval-primary
+              admin
+              "(progn (lem:switch-to-buffer (lem:make-buffer \"daemon-matrix-origin\")) :ready)")
+             (setf client-thread
+                   (bt2:make-thread
+                    (lambda ()
+                      (handler-case
+                          (setf client-status
+                                (client:run-client
+                                 (list "--server-name" server-name
+                                       "+2:3"
+                                       (uiop:native-namestring first-file)
+                                       (uiop:native-namestring second-file))))
+                        (error (condition) (setf client-error condition))))
+                    :name "lemclient compatibility matrix"))
+             (unwind-protect
+                  (progn
+                    (ok (wait-until
+                         (lambda ()
+                           (string= "(\"matrix first;safe.txt\" 2 3)"
+                                    (eval-primary
+                                     admin
+                                     "(list (lem:buffer-name (lem:current-buffer)) (lem:line-number-at-point (lem:current-point)) (lem:point-charpos (lem:current-point)))"))))
+                   "blocking multi-file visits begin at the first location")
+                    (eval-primary
+                     admin
+                     "(progn (lem:insert-string (lem:current-point) \"X\") (lem-daemon:daemon-edit-save-and-done))")
+                    (ok (bt2:thread-alive-p client-thread)
+                        "the client keeps waiting until every file is finished")
+                    (ok (string= "(\"matrix-second.txt\" 1)"
+                                 (eval-primary
+                                  admin
+                                  "(list (lem:buffer-name (lem:current-buffer)) (length (lem-daemon::request-buffer-list)))"))
+                        "finishing one file advances to the next edit buffer")
+                    (eval-primary
+                     admin
+                     "(progn (lem:buffer-end (lem:current-point)) (lem:insert-string (lem:current-point) \"TWO\") (lem-daemon:daemon-edit-save-and-done))")
+                    (bt2:join-thread client-thread)
+                    (setf client-thread nil)
+                    (ok (and (null client-error) (= 0 client-status))
+                        "the native multi-file client returns after the final file")
+                    (ok (string= (format nil "alpha~%braXvo~%")
+                                 (uiop:read-file-string first-file))
+                        "the first positioned edit is saved")
+                    (ok (string= "secondTWO" (uiop:read-file-string second-file))
+                        "the second edit is saved")
+                    (ok (string= "\"daemon-matrix-origin\""
+                                 (eval-primary
+                                  admin
+                                  "(lem:buffer-name (lem:current-buffer))"))
+                        "finishing the request restores its origin buffer")
+                    (ok (= 0 (client:run-client
+                              (list "--server-name" server-name "--no-wait"
+                                    "+2:1"
+                                    (uiop:native-namestring nowait-file))))
+                        "the native no-wait client returns immediately")
+                    (ok (string= "(\"matrix-nowait.txt\" 2 1 NIL 0)"
+                                 (eval-primary
+                                  admin
+                                  "(list (lem:buffer-name (lem:current-buffer)) (lem:line-number-at-point (lem:current-point)) (lem:point-charpos (lem:current-point)) (lem:mode-active-p (lem:current-buffer) 'lem-daemon::daemon-edit-mode) (length (lem-daemon::request-buffer-list)))"))
+                        "no-wait positioning creates no edit-session state"))
+               (when (and client-thread (bt2:thread-alive-p client-thread))
+                 (ignore-errors
+                   (bt2:interrupt-thread client-thread
+                                         (lambda () (error "test cleanup"))))
+                 (ignore-errors (bt2:join-thread client-thread)))))
+
            (let ((edit-file (merge-pathnames "blocking-edit.txt" root)))
              (with-open-file (stream edit-file :direction :output
                                                :if-exists :supersede)
@@ -336,10 +436,69 @@
                  (ok (and error (search "cancelled" error :test #'char-equal))
                      "cancellation releases the client with a useful error")))
              (client::close-client waiting)
+             (setf waiting nil)
+
+             (let ((abort-file (merge-pathnames "matrix-abort.txt" root))
+                   (abort-thread nil)
+                   (abort-status nil)
+                   (abort-error nil))
+               (with-open-file (stream abort-file :direction :output
+                                                   :if-exists :supersede)
+                 (write-string "abort-original" stream))
+               (eval-primary
+                admin
+                "(progn (lem:switch-to-buffer (lem:make-buffer \"daemon-abort-origin\")) :ready)")
+               (setf abort-thread
+                     (bt2:make-thread
+                      (lambda ()
+                        (handler-case
+                            (setf abort-status
+                                  (client:run-client
+                                   (list "--server-name" server-name
+                                         (uiop:native-namestring abort-file))))
+                          (error (condition) (setf abort-error condition))))
+                      :name "aborting native lemclient"))
+               (unwind-protect
+                    (progn
+                      (ok (wait-until
+                           (lambda ()
+                             (string= "1"
+                                      (eval-primary
+                                       admin
+                                       "(length (lem-daemon::request-buffer-list))"))))
+                          "an abortable blocking visit is pending")
+                      (eval-primary
+                       admin
+                       "(progn (lem:buffer-end (lem:current-point)) (lem:insert-string (lem:current-point) \"-discard\") (lem-daemon:daemon-edit-abort))")
+                      (bt2:join-thread abort-thread)
+                      (setf abort-thread nil)
+                      (ok (and (null abort-error) (= 1 abort-status))
+                          "editor-side abort returns the compatible client status")
+                      (ok (string= "\"daemon-abort-origin\""
+                                   (eval-primary
+                                    admin
+                                    "(lem:buffer-name (lem:current-buffer))"))
+                          "abort restores the request origin")
+                      (ok (string= "abort-original"
+                                   (uiop:read-file-string abort-file))
+                          "abort does not persist the edit")
+                      (ok (string= "(\"abort-original-discard\" T NIL)"
+                                   (eval-primary
+                                    admin
+                                    "(let ((buffer (lem:get-buffer \"matrix-abort.txt\"))) (list (lem:buffer-text buffer) (lem-core::buffer-modified-p buffer) (lem:mode-active-p buffer 'lem-daemon::daemon-edit-mode)))"))
+                          "abort retains an unsaved, recoverable buffer without edit mode"))
+                 (when (and abort-thread (bt2:thread-alive-p abort-thread))
+                   (ignore-errors
+                     (bt2:interrupt-thread abort-thread
+                                           (lambda () (error "test cleanup"))))
+                   (ignore-errors (bt2:join-thread abort-thread)))))
              (setf waiting (client::connect-client server-name))
 
+             (eval-primary
+              admin
+              "(progn (lem:switch-to-buffer (lem:make-buffer \"daemon-zero-file-origin\")) :ready)")
              (multiple-value-bind (response id)
-                 (start-waiting-visit waiting edit-file)
+                 (start-waiting-visit-many waiting #())
                (declare (ignore id))
                (ok (wait-until
                     (lambda ()
@@ -347,13 +506,12 @@
                                (eval-primary
                                 admin
                                 "(length (lem-daemon::request-buffer-list))"))))
-                   "an abortable blocking visit is pending")
-               (eval-primary admin "(lem-daemon:daemon-edit-abort)")
+                   "a zero-file client waits on the current buffer")
+               (eval-primary admin "(lem-daemon:daemon-edit-done)")
                (multiple-value-bind (value error)
                    (finish-asynchronous-response response)
-                 (declare (ignore value))
-                 (ok (and error (search "aborted" error :test #'char-equal))
-                     "editor-side abort is recoverable by the daemon")))
+                 (ok (and (null error) (string= "finished" value))
+                     "clean finish releases a zero-file client")))
              (client::close-client waiting)
              (setf waiting nil))
 
@@ -380,5 +538,8 @@
                                 (lambda () (error "test cleanup"))))
         (ignore-errors (bt2:join-thread daemon-thread)))
       (setf (uiop:getenv "XDG_RUNTIME_DIR") old-runtime)
+      (setf (uiop:getenv "GIT_EDITOR") old-git-editor
+            (uiop:getenv "VISUAL") old-visual
+            (uiop:getenv "EDITOR") old-editor)
       (when (uiop:directory-exists-p root)
         (uiop:delete-directory-tree root :validate t)))))

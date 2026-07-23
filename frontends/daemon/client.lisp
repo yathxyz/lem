@@ -58,6 +58,10 @@
         (protocol:field error "message" "Daemon request failed")
         "Daemon request failed")))
 
+(defun response-error-code (message)
+  (let ((error (protocol:field message "error")))
+    (and (hash-table-p error) (protocol:field error "code"))))
+
 (defun wait-for-response (connection id &key pending-callback)
   (loop :for message := (protocol:read-message (client-stream connection))
         :while message
@@ -72,7 +76,9 @@
                      (values (protocol:field message "value") nil)))
                   ((string= status "error")
                    (return-from wait-for-response
-                     (values nil (response-error-message message))))))
+                     (values nil
+                             (response-error-message message)
+                             (response-error-code message))))))
         :finally (return (values nil "Daemon disconnected before responding"))))
 
 (defun request (connection type &rest fields)
@@ -130,9 +136,12 @@
                   "wait" (if wait-p "wait" "nowait")
                   "files" (build-file-entries arguments)))
     (handler-case
-        (multiple-value-bind (value error) (wait-for-response connection id)
+        (multiple-value-bind (value error code)
+            (wait-for-response connection id)
           (declare (ignore value))
-          (if error (error "~a" error) 0))
+          (cond ((null error) 0)
+                ((string= code "aborted") 1)
+                (t (error "~a" error))))
       #+sbcl
       (sb-sys:interactive-interrupt ()
         (ignore-errors

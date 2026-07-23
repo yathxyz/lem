@@ -44,6 +44,8 @@
 (define-key *daemon-edit-mode-keymap* "C-x #" 'daemon-edit-done)
 (define-key *daemon-edit-mode-keymap* "C-c C-c" 'daemon-edit-save-and-done)
 (define-key *daemon-edit-mode-keymap* "C-c C-k" 'daemon-edit-abort)
+(define-key *daemon-edit-mode-keymap* "Z Z" 'daemon-edit-save-and-done)
+(define-key *daemon-edit-mode-keymap* "Z Q" 'daemon-edit-abort)
 
 (defun daemon-running-p () *daemon-running-p*)
 (defun daemon-endpoint () *daemon-endpoint*)
@@ -129,18 +131,28 @@
                         (daemon-request-id request) status
                         (or value status)))))
 
+(defun restore-request-origin (request)
+  (let ((origin (daemon-request-origin-buffer request)))
+    (when (live-buffer-p origin)
+      (switch-to-buffer origin))))
+
 (defun complete-buffer-requests (buffer abort-p)
   (let ((requests (request-buffer-list buffer)))
     (dolist (request requests)
       (if abort-p
-          (complete-request request "aborted" "File request aborted")
+          (progn
+            (complete-request request "aborted" "File request aborted")
+            (restore-request-origin request))
           (progn
             (setf (daemon-request-buffers request)
                   (delete buffer (daemon-request-buffers request) :test #'eq))
             (setf (request-buffer-list buffer)
                   (delete request (request-buffer-list buffer) :test #'eq))
-            (unless (daemon-request-buffers request)
-              (complete-request request "ok" "finished")))))
+            (if (daemon-request-buffers request)
+                (switch-to-buffer (first (daemon-request-buffers request)))
+                (progn
+                  (complete-request request "ok" "finished")
+                  (restore-request-origin request))))))
     (unless (request-buffer-list buffer)
       (with-current-buffer buffer (daemon-edit-mode nil)))
     requests))
@@ -516,6 +528,12 @@
               (error ()
                 (unless *daemon-running-p* (return))))))
 
+(defun configure-editor-environment ()
+  (let ((command (format nil "lemclient --server-name ~a" *daemon-name*)))
+    (dolist (variable '("GIT_EDITOR" "VISUAL" "EDITOR"))
+      (unless (uiop:getenv variable)
+        (setf (uiop:getenv variable) command)))))
+
 (defun start-daemon-transport ()
   (let* ((backend (transport:require-local-backend))
          (listener (transport:open-local-listener
@@ -528,7 +546,8 @@
            (lambda ()
              (handler-case (accept-loop listener)
                (stop-accept-loop () nil)))
-           :name "Lem daemon accept"))))
+           :name "Lem daemon accept"))
+    (configure-editor-environment)))
 
 (defun stop-daemon-transport ()
   (setf *daemon-running-p* nil)
