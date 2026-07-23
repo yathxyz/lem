@@ -204,6 +204,14 @@ case "$test_name" in
     ;;
 esac
 
+host_name="${host##*@}"
+if [[ "$host_name" == "$(hostname)" || "$host_name" == "$(hostname -s)" ]]; then
+  local_command="${remote_command//path:\$PWD/.}"
+  cd "$root"
+  LEM_YATH_CHECK_ID="ex44-$$" bash -c "$local_command"
+  exit
+fi
+
 printf -v remote_root_q '%q' "$remote_root"
 remote_root="$(
   ssh -o BatchMode=yes "$host" "
@@ -253,7 +261,17 @@ rsync -a --delete \
   --protect-args \
   --exclude .git/ \
   --exclude .direnv/ \
+  --exclude .qlot/ \
+  --exclude /lem \
   --exclude result \
+  --exclude 'result-*' \
+  --exclude bench/corpora/cache/ \
+  --exclude bench/profiles/ \
+  --exclude bench/results/ \
+  --exclude '*.fasl' \
+  --exclude 'verified/*.cert' \
+  --exclude 'verified/*.cert.out' \
+  --exclude 'verified/*.port' \
   "$root/" "$host:$remote_root/"
 
 ssh -o BatchMode=yes "$host" \
