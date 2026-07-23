@@ -24,6 +24,23 @@
       (ok (buf= #?"hello[ ]foo\n"))
       (ok (state= :normal)))))
 
+(deftest vi-insert-kill-last-word
+  (with-fake-interface ()
+    (testing "word"
+      (with-vi-buffer (#?"[f]oo bar\n")
+        (cmd "A<C-w><Esc>")
+        (ok (buf= #?"foo[ ]\n"))))
+    (testing "trailing whitespace"
+      (with-vi-buffer (#?"[f]oo bar  \n")
+        (cmd "A<C-w><Esc>")
+        (ok (buf= #?"foo[ ]\n"))))
+    (testing "punctuation is a separate word"
+      (with-vi-buffer (#?"[f]oo.bar\n")
+        (cmd "A<C-w><Esc>")
+        (ok (buf= #?"foo[.]\n"))
+        (cmd "a<C-w><Esc>")
+        (ok (buf= #?"fo[o]\n"))))))
+
 (deftest vi-append
   (with-fake-interface ()
     (with-vi-buffer (#?"[f]oo\n")

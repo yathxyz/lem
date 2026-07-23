@@ -653,7 +653,7 @@ Move the cursor to the first non-blank character of the line."
             (character-offset (current-point) *cursor-offset*)))))
 
 (define-operator vi-kill-last-word (start end) ("<r>")
-    (:motion vi-backward-word-end)
+    (:motion vi-backward-word-begin)
   (kill-region-without-appending start end))
 
 (define-operator vi-upcase (start end type) ("<R>")
