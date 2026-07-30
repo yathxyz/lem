@@ -7,6 +7,18 @@
 
 (in-package :lem-yath)
 
+#+(and sbcl os-windows)
+(progn
+  (sb-alien:define-alien-routine
+      ("CreateHardLinkW" %org-download-create-hard-link)
+      (sb-alien:boolean 32)
+    (new-link-name (sb-alien:c-string :external-format :ucs-2))
+    (existing-file-name (sb-alien:c-string :external-format :ucs-2))
+    (security-attributes (* t)))
+  (sb-alien:define-alien-routine
+      ("GetLastError" %org-download-win32-last-error)
+      (sb-alien:unsigned 32)))
+
 (defparameter *org-download-byte-limit* (* 64 1024 1024)
   "Largest image accepted by one configured Org download command.")
 
@@ -443,6 +455,27 @@
           (editor-error "Malformed Org property drawer: missing :END:"))))
     heading))
 
+(defun org-download-link-temporary (temporary target)
+  "Atomically link TEMPORARY at TARGET without replacing an existing file."
+  #+os-windows
+  (unless (%org-download-create-hard-link
+           (uiop:native-namestring target)
+           (uiop:native-namestring temporary)
+           nil)
+    (let ((code (%org-download-win32-last-error)))
+      (if (member code '(80 183))
+          (editor-error "Org download target already exists: ~a" target)
+          (error "CreateHardLinkW failed for Org download target ~a (Win32 error ~d)"
+                 target code))))
+  #-os-windows
+  (handler-case
+      (sb-posix:link (uiop:native-namestring temporary)
+                     (uiop:native-namestring target))
+    (sb-posix:syscall-error (condition)
+      (if (= (sb-posix:syscall-errno condition) sb-posix:eexist)
+          (editor-error "Org download target already exists: ~a" target)
+          (error condition)))))
+
 (defun org-download-commit (temporary target source time &optional heading)
   "Commit TEMPORARY and its Org link as one best-effort cross-resource edit."
   #+sbcl
@@ -456,13 +489,7 @@
            (when heading
              (org-id-get-create-at-heading heading))
            (org-download-insert-link point source target time)
-           (handler-case
-               (sb-posix:link (uiop:native-namestring temporary)
-                              (uiop:native-namestring target))
-             (sb-posix:syscall-error (condition)
-               (if (= (sb-posix:syscall-errno condition) sb-posix:eexist)
-                   (editor-error "Org download target already exists: ~a" target)
-                   (error condition))))
+           (org-download-link-temporary temporary target)
            (setf linked-p t)
            (delete-file temporary)
            (buffer-accept-change-group group)
