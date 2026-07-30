@@ -37,7 +37,7 @@
 
 (defun project-history-owned-by-current-user-p (stat)
   #+os-windows
-  (progn (declare (ignore stat)) t)
+  (progn stat t)
   #-os-windows
   (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
 
@@ -58,6 +58,7 @@
     (error "Project history must be an owned regular file not writable by other users: ~a"
            pathname)))
 
+#-os-windows
 (defun call-with-project-history-lock (function)
   "Serialize one project-history operation across Lem processes."
   (bt2:with-lock-held (*project-history-process-lock*)
@@ -85,6 +86,32 @@
           (ignore-errors (sb-posix:close descriptor))))
       #-sbcl
       (error "Safe project history requires the supported SBCL runtime"))))
+
+#+os-windows
+(defun call-with-project-history-lock (function)
+  "Serialize project history inside this native Windows Lem process."
+  (bt2:with-lock-held (*project-history-process-lock*)
+    (let* ((pathname (project-history-pathname))
+           (directory (uiop:pathname-directory-pathname pathname)))
+      (ensure-directories-exist pathname)
+      (validate-project-history-directory directory)
+      (funcall function))))
+
+(defun project-history-secure-descriptor (descriptor)
+  #+os-windows
+  (progn descriptor nil)
+  #-os-windows
+  (sb-posix:fchmod descriptor #o600))
+
+(defun project-history-sync-descriptor (descriptor)
+  #+os-windows
+  (progn descriptor nil)
+  #-os-windows
+  (sb-posix:fsync descriptor))
+
+(defun project-history-process-id ()
+  #+os-windows 0
+  #-os-windows (sb-posix:getpid))
 
 (defun project-history-whitespace-p (character)
   (find character '(#\Space #\Tab #\Newline #\Return #\Page)
@@ -289,7 +316,7 @@
   (uiop:parse-native-namestring
    (format nil "~a.tmp.~d.~16,'0x"
            (uiop:native-namestring (project-history-pathname))
-           #+sbcl (sb-posix:getpid)
+           #+sbcl (project-history-process-id)
            #-sbcl 0
            (random (ash 1 60)))))
 
@@ -310,7 +337,7 @@
                     (logior sb-posix:o-creat sb-posix:o-excl
                             sb-posix:o-wronly sb-posix:o-nofollow)
                     #o600))
-             (sb-posix:fchmod descriptor #o600)
+             (project-history-secure-descriptor descriptor)
              (setf stream
                    (sb-sys:make-fd-stream
                     descriptor :output t
@@ -319,7 +346,7 @@
                     :name (uiop:native-namestring temporary)))
              (write-sequence octets stream)
              (finish-output stream)
-             (sb-posix:fsync descriptor)
+             (project-history-sync-descriptor descriptor)
              (close stream)
              (setf stream nil descriptor nil))
            #-sbcl
