@@ -432,4 +432,4 @@
 
 (remove-hook *post-command-hook* 'record-current-window-layout)
 (add-hook *post-command-hook* 'record-current-window-layout)
-(ensure-window-layout-history)
+(initialize-editor-feature 'ensure-window-layout-history)
