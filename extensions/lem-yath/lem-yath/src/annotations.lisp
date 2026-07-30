@@ -803,7 +803,7 @@ On failure, retain the provider's original item and detail unchanged."
                    (not (uiop:directory-exists-p filename))
                    (<= (completion-pathname-file-size filename)
                        *completion-bookmark-context-byte-limit*))
-            (uiop:read-file-string filename))))
+          (uiop:read-file-string filename)))
     (error () nil)))
 
 (defun completion-bookmark-position-context (text position)
