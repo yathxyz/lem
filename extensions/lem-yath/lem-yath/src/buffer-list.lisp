@@ -37,9 +37,12 @@
   (declare (ignore window))
   (buffer-list-record-display-time buffer))
 
-;; The initial editor window predates the configuration load.
-(dolist (window (window-list))
-  (buffer-list-record-display-time (window-buffer window)))
+(defun initialize-buffer-list-display-times ()
+  "Record display times for windows that predate the configuration load."
+  (dolist (window (window-list))
+    (buffer-list-record-display-time (window-buffer window))))
+
+(initialize-editor-feature 'initialize-buffer-list-display-times)
 
 (defun buffer-list-buffer-locked-p (buffer)
   "Return true when BUFFER has GNU Emacs's default `all' lock."
