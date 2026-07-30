@@ -942,8 +942,10 @@ is a bounded character parser, not a Common Lisp or Emacs Lisp reader."
     (lem/common/killring:peek-killring-item (current-killring) 0)))
 
 (defun snippet-user-full-name ()
-  (let* ((passwd (ignore-errors
-                   (completion-posix-call "GETPWUID" (sb-posix:getuid))))
+  (let* ((uid (ignore-errors (completion-posix-call "GETUID")))
+         (passwd (and uid
+                      (ignore-errors
+                        (completion-posix-call "GETPWUID" uid))))
          (gecos (and passwd
                      (ignore-errors
                        (completion-posix-call "PASSWD-GECOS" passwd))))
