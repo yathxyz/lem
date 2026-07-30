@@ -492,6 +492,12 @@ Each nonempty group begins with a distinct heading entry."
          (ignore-errors
            (funcall (symbol-function 'compilation-process-alive-p) session)))))
 
+(defun buffer-list-current-terminal ()
+  (let* ((package (find-package "LEM-TERMINAL/TERMINAL-MODE"))
+         (function (and package (find-symbol "GET-CURRENT-TERMINAL" package))))
+    (when (and function (fboundp function))
+      (funcall function))))
+
 (defun buffer-list-process-buffer-p (buffer)
   "Return true when BUFFER owns a process visible to Lem."
   (or (buffer-list-live-process-p
@@ -501,8 +507,7 @@ Each nonempty group begins with a distinct heading entry."
       (buffer-list-compilation-process-buffer-p buffer)
       (ignore-errors
         (with-current-buffer buffer
-          (not (null
-                (lem-terminal/terminal-mode::get-current-terminal)))))))
+          (not (null (buffer-list-current-terminal)))))))
 
 (defun buffer-list-content-mark-excluded-p (buffer)
   "Return true when GNU Ibuffer normally skips BUFFER's content."

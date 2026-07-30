@@ -21,7 +21,7 @@
                (:file "cursor-state")
                (:file "vi")
                (:file "digraphs")
-               (:file "terminal")
+               (:file "terminal" :if-feature (:not :os-windows))
                (:file "avy")
                (:file "structural")
                (:file "electric-pair")
