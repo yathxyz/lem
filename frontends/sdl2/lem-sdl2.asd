@@ -33,7 +33,8 @@
                "rove")
   :components ((:module "tests"
                 :components ((:file "font")
-                             (:file "drawing"))))
+                             (:file "drawing")
+                             (:file "keyboard"))))
   :perform (test-op (op c) (symbol-call :rove '#:run c)))
 
 (defsystem "lem-sdl2/executable"
