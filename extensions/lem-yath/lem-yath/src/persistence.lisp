@@ -1659,6 +1659,8 @@ the visited file byte-for-byte."
 
 ;;; --- activation -----------------------------------------------------------
 
+(defun initialize-persistence ()
+  "Activate persistence after Lem's editor and timer managers exist."
 ;; The configured Emacs disables all automatic/backup writes.  Lem's optional
 ;; auto-save mode writes directly to the visited file, while the daily-driver
 ;; checkpoint mode writes recovery sidecars.  Force both off.
@@ -1740,4 +1742,6 @@ the visited file byte-for-byte."
 ;; the last loaded state live.  Capture it once instead of treating every live
 ;; entry as a new addition on the first subsequent flush.
 (unless *persistence-state-baseline*
-  (setf *persistence-state-baseline* (collect-persistence-state)))
+    (setf *persistence-state-baseline* (collect-persistence-state))))
+
+(initialize-editor-feature 'initialize-persistence)
