@@ -29,10 +29,13 @@
 ;;; assert.
 
 (defclass stub-display ()
-  ((char-height :initarg :char-height :reader display::display-char-height)))
+  ((char-width :initarg :char-width :reader display::display-char-width)
+   (char-height :initarg :char-height :reader display::display-char-height)))
 
-(defun make-stub-display (&key (char-height 17))
-  (make-instance 'stub-display :char-height char-height))
+(defun make-stub-display (&key (char-width 9) (char-height 17))
+  (make-instance 'stub-display
+                 :char-width char-width
+                 :char-height char-height))
 
 (defun make-text-object (string)
   (make-instance 'lem-core/display:text-object
@@ -73,3 +76,9 @@
         (obj   (make-text-object "py")))
     (ok (= (drawing::object-height obj small) 14))
     (ok (= (drawing::object-height obj large) 28))))
+
+(deftest empty-text-object-does-not-reach-sdl-ttf
+  (let ((display (make-stub-display))
+        (object (make-text-object "")))
+    (testing "an empty run occupies no cells and needs no glyph surface"
+      (ok (zerop (drawing::draw-object object 0 17 display nil))))))

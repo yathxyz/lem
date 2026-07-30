@@ -291,7 +291,9 @@ widths, for the multi-character text run DRAWING-OBJECT."
 every cell of the run; PHASE :GLYPH blits each glyph at its natural surface
 width so the rasterizer's right-edge anti-aliasing tail is preserved."
   (let ((string (text-object-string drawing-object)))
-    (cond ((<= (length string) 1)
+    (cond ((zerop (length string))
+           nil)
+          ((= (length string) 1)
            (draw-text-glyph-surface drawing-object x bottom-y display view
                                     (object-width drawing-object display)
                                     :clip t :phase phase))
