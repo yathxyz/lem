@@ -35,11 +35,17 @@
 (defun project-history-file-type-p (stat type)
   (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt) type))
 
+(defun project-history-owned-by-current-user-p (stat)
+  #+os-windows
+  (progn (declare (ignore stat)) t)
+  #-os-windows
+  (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
+
 (defun validate-project-history-directory (directory)
   (multiple-value-bind (stat exists-p) (project-history-lstat directory)
     (unless (and exists-p
                  (project-history-file-type-p stat sb-posix:s-ifdir)
-                 (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+                 (project-history-owned-by-current-user-p stat)
                  (zerop (logand (sb-posix:stat-mode stat) #o022)))
       (error "Project history directory must be owned by this user and not writable by other users: ~a"
              directory))
@@ -47,7 +53,7 @@
 
 (defun validate-project-history-stat (stat pathname)
   (unless (and (project-history-file-type-p stat sb-posix:s-ifreg)
-               (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+               (project-history-owned-by-current-user-p stat)
                (zerop (logand (sb-posix:stat-mode stat) #o022)))
     (error "Project history must be an owned regular file not writable by other users: ~a"
            pathname)))
