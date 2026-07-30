@@ -186,7 +186,7 @@
       (let ((stat (sb-posix:lstat (uiop:native-namestring directory))))
         (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                         sb-posix:s-ifdir)
-                     (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+                     (platform-stat-owned-by-current-user-p stat)
                      (zerop (logand (sb-posix:stat-mode stat) #o077)))
           (error "Copilot token directory must be private and user-owned"))))
     #-sbcl (error "Safe Copilot token storage requires SBCL")
@@ -198,7 +198,7 @@
     (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
       (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                       sb-posix:s-ifreg)
-                   (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+                   (platform-stat-owned-by-current-user-p stat)
                    (zerop (logand (sb-posix:stat-mode stat) #o077)))
         (error "Copilot token file must be private, regular, and user-owned")))
     #-sbcl (error "Safe Copilot token storage requires SBCL")))
@@ -252,7 +252,7 @@
                     (logior sb-posix:o-creat sb-posix:o-excl
                             sb-posix:o-wronly sb-posix:o-nofollow)
                     #o600))
-             (sb-posix:fchmod descriptor #o600)
+             (platform-secure-file-descriptor descriptor #o600)
              (setf stream
                    (sb-sys:make-fd-stream
                     descriptor :output t :element-type '(unsigned-byte 8)
@@ -260,7 +260,7 @@
                     :name (uiop:native-namestring temporary)))
              (write-sequence octets stream)
              (finish-output stream)
-             (sb-posix:fsync descriptor)
+             (platform-sync-file-descriptor descriptor)
              (close stream)
              (setf stream nil descriptor nil))
            #-sbcl (error "Safe Copilot token storage requires SBCL")

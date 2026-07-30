@@ -497,6 +497,8 @@ Existing symbolic-link or non-directory components are rejected."
   (alexandria:when-let ((stat (org-publish-lstat target)))
     (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                     sb-posix:s-ifreg)
+                 #+os-windows t
+                 #-os-windows
                  (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
       (error "Refusing to replace a non-regular or unowned output: ~a" target))))
 
@@ -516,6 +518,7 @@ Existing symbolic-link or non-directory components are rejected."
                   (logior sb-posix:o-creat sb-posix:o-excl
                           sb-posix:o-wronly sb-posix:o-nofollow)
                   #o644))
+           #-os-windows
            (sb-posix:fchmod descriptor #o644)
            (setf stream
                  (sb-sys:make-fd-stream
@@ -523,6 +526,7 @@ Existing symbolic-link or non-directory components are rejected."
                   :buffering :full :name (uiop:native-namestring temporary)))
            (write-sequence octets stream)
            (finish-output stream)
+           #-os-windows
            (sb-posix:fsync descriptor)
            (close stream)
            (setf stream nil

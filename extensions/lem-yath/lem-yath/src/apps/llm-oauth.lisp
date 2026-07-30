@@ -45,6 +45,9 @@
 
 ;;;; Private auth files
 
+(defvar *llm-oauth-process-lock*
+  (bt2:make-lock :name "lem-yath/oauth"))
+
 (defun llm-oauth-pathname (environment fallback)
   (uiop:parse-native-namestring
    (or (uiop:getenv environment)
@@ -69,7 +72,7 @@
     (let ((stat (sb-posix:stat (uiop:native-namestring directory))))
       (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                       sb-posix:s-ifdir)
-                   (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+                   (platform-stat-owned-by-current-user-p stat)
                    (zerop (logand (sb-posix:stat-mode stat) #o022)))
         (error "OAuth credential directory must be user-owned and not writable by others")))
     #-sbcl (error "Safe OAuth credential access requires SBCL")
@@ -93,7 +96,7 @@
                   (length (sb-posix:stat-size stat)))
              (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                              sb-posix:s-ifreg)
-                          (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+                          (platform-stat-owned-by-current-user-p stat)
                           (zerop (logand (sb-posix:stat-mode stat) #o077)))
                (error "OAuth credential file must be private, regular, and user-owned"))
              (when (> length *llm-oauth-auth-file-limit*)
@@ -148,7 +151,7 @@
                     (logior sb-posix:o-creat sb-posix:o-excl
                             sb-posix:o-wronly sb-posix:o-nofollow)
                     #o600))
-             (sb-posix:fchmod descriptor #o600)
+             (platform-secure-file-descriptor descriptor #o600)
              (setf stream
                    (sb-sys:make-fd-stream
                     descriptor :output t :element-type '(unsigned-byte 8)
@@ -156,7 +159,7 @@
                     :name (uiop:native-namestring temporary)))
              (write-sequence octets stream)
              (finish-output stream)
-             (sb-posix:fsync descriptor)
+             (platform-sync-file-descriptor descriptor)
              (close stream)
              (setf stream nil descriptor nil))
            #-sbcl (error "Safe OAuth credential persistence requires SBCL")
@@ -173,7 +176,7 @@
 (defun call-with-llm-oauth-file-lock (pathname function)
   "Call FUNCTION while holding Lem's cross-process lock for PATHNAME."
   (llm-oauth-prepare-parent pathname)
-  #+sbcl
+  #+(and sbcl (not os-windows))
   (let* ((lock-pathname (llm-oauth-lock-pathname pathname))
          (descriptor
            (sb-posix:open
@@ -182,25 +185,36 @@
             #o600)))
     (unwind-protect
          (progn
-           (sb-posix:fchmod descriptor #o600)
+           (platform-secure-file-descriptor descriptor #o600)
            (let ((stat (sb-posix:fstat descriptor)))
              (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                              sb-posix:s-ifreg)
-                          (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
+                          (platform-stat-owned-by-current-user-p stat))
                (error "OAuth credential lock must be a regular user-owned file")))
            (sb-posix:lockf descriptor sb-posix:f-lock 0)
            (funcall function))
       (ignore-errors (sb-posix:lockf descriptor sb-posix:f-ulock 0))
       (ignore-errors (sb-posix:close descriptor))))
-  #-sbcl
+  #+os-windows
+  (progn
+    pathname
+    (bt2:with-lock-held (*llm-oauth-process-lock*)
+      (funcall function)))
+  #-(or sbcl os-windows)
   (declare (ignore pathname function))
-  #-sbcl (error "Safe OAuth credential locking requires SBCL"))
+  #-(or sbcl os-windows)
+  (error "Safe OAuth credential locking requires SBCL"))
 
 
 ;;;; Encoding and token helpers
 
 (defun llm-oauth-random-octets (count)
   (let ((octets (make-array count :element-type '(unsigned-byte 8))))
+    #+os-windows
+    (let ((state (sb-ext:seed-random-state t)))
+      (dotimes (index count)
+        (setf (aref octets index) (random 256 state))))
+    #-os-windows
     (with-open-file (stream #P"/dev/urandom" :element-type '(unsigned-byte 8))
       (unless (= count (read-sequence octets stream))
         (error "Could not read secure random bytes")))

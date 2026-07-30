@@ -2,6 +2,9 @@
 
 (in-package :lem-yath)
 
+(defvar *llm-preset-process-lock*
+  (bt2:make-lock :name "lem-yath/llm-presets"))
+
 (defparameter *llm-preset-file-size-limit* (* 1024 1024))
 (defparameter *llm-preset-count-limit* 100)
 (defparameter *llm-preset-name-limit* 80)
@@ -118,7 +121,7 @@
     #+sbcl
     (if (and (llm-preset-file-override) existed)
         (let ((stat (sb-posix:stat (uiop:native-namestring directory))))
-          (unless (and (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+          (unless (and (platform-stat-owned-by-current-user-p stat)
                        (zerop (logand (sb-posix:stat-mode stat) #o077)))
             (error "LLM preset override directory must be private and user-owned")))
         (sb-posix:chmod (uiop:native-namestring directory) #o700))
@@ -132,7 +135,7 @@
     (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
       (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                       sb-posix:s-ifreg)
-                   (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
+                   (platform-stat-owned-by-current-user-p stat))
         (error "LLM preset file must be a regular user-owned file")))
     #-sbcl
     (error "Safe LLM preset persistence requires SBCL")))
@@ -141,7 +144,7 @@
   "Call FUNCTION while holding the private cross-process preset lock."
   (llm-preset-prepare-private-directory)
   (llm-preset-validate-existing-file (llm-preset-pathname))
-  #+sbcl
+  #+(and sbcl (not os-windows))
   (let ((descriptor
           (sb-posix:open
            (uiop:native-namestring (llm-preset-lock-pathname))
@@ -149,17 +152,20 @@
            #o600)))
     (unwind-protect
          (progn
-           (sb-posix:fchmod descriptor #o600)
+           (platform-secure-file-descriptor descriptor #o600)
            (let ((stat (sb-posix:fstat descriptor)))
              (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                              sb-posix:s-ifreg)
-                          (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
+                          (platform-stat-owned-by-current-user-p stat))
                (error "LLM preset lock must be a regular user-owned file")))
            (sb-posix:lockf descriptor sb-posix:f-lock 0)
            (funcall function))
       (ignore-errors (sb-posix:lockf descriptor sb-posix:f-ulock 0))
       (ignore-errors (sb-posix:close descriptor))))
-  #-sbcl
+  #+os-windows
+  (bt2:with-lock-held (*llm-preset-process-lock*)
+    (funcall function))
+  #-(or sbcl os-windows)
   (error "Safe LLM preset persistence requires SBCL"))
 
 (defun llm-preset-read-text (pathname)
@@ -320,7 +326,7 @@
                     (logior sb-posix:o-creat sb-posix:o-excl
                             sb-posix:o-wronly sb-posix:o-nofollow)
                     #o600))
-             (sb-posix:fchmod descriptor #o600)
+             (platform-secure-file-descriptor descriptor #o600)
              (setf stream
                    (sb-sys:make-fd-stream
                     descriptor :output t :element-type '(unsigned-byte 8)
@@ -328,7 +334,7 @@
                     :name (uiop:native-namestring temporary)))
              (write-sequence octets stream)
              (finish-output stream)
-             (sb-posix:fsync descriptor)
+             (platform-sync-file-descriptor descriptor)
              (close stream)
              (setf stream nil descriptor nil))
            #-sbcl

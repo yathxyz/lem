@@ -769,7 +769,7 @@ clean marker is deliberately not an actual save."
                   (logior sb-posix:o-creat sb-posix:o-excl
                           sb-posix:o-wronly sb-posix:o-nofollow)
                   #o600))
-           (sb-posix:fchmod descriptor #o600)
+           (platform-secure-file-descriptor descriptor #o600)
            (setf stream
                  (sb-sys:make-fd-stream
                   descriptor :output t :element-type 'character

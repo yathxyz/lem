@@ -1234,7 +1234,9 @@ control lock serializes interrupt, release, and teardown requests."
                    (guardian-pgid
                      (and (integerp pid)
                           (> pid 1)
-                          (ignore-errors (sb-posix:getpgid pid)))))
+                          #-os-windows
+                          (ignore-errors (sb-posix:getpgid pid))
+                          #+os-windows nil)))
               (unless (and (integerp guardian-pgid)
                            (= pid guardian-pgid))
                 ;; No command was spawned, so closing the private control pipe

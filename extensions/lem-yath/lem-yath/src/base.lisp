@@ -1,5 +1,8 @@
 ;;;; Shared helpers: paths, processes, fuzzy matching, boot reporting.
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  #+sbcl (require :sb-posix))
+
 (in-package :lem-yath)
 
 (defun initialize-editor-feature (function)
@@ -38,6 +41,27 @@ Returns the containing directory pathname, or NIL."
                             (uiop:probe-file*
                              (merge-pathnames name (uiop:ensure-directory-pathname dir))))))
                 (when path (return path)))))
+
+(defun platform-stat-owned-by-current-user-p (stat)
+  "Whether STAT belongs to the current user where numeric ownership exists."
+  #+os-windows
+  (progn stat t)
+  #-os-windows
+  (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
+
+(defun platform-secure-file-descriptor (descriptor mode)
+  "Apply Unix MODE to DESCRIPTOR; Windows relies on the containing ACL."
+  #+os-windows
+  (progn descriptor mode nil)
+  #-os-windows
+  (sb-posix:fchmod descriptor mode))
+
+(defun platform-sync-file-descriptor (descriptor)
+  "Request durable descriptor contents where SB-POSIX exposes fsync."
+  #+os-windows
+  (progn descriptor nil)
+  #-os-windows
+  (sb-posix:fsync descriptor))
 
 ;;; --- calendar dates ------------------------------------------------------
 

@@ -72,7 +72,7 @@
 (defun llm-model-cache-directory-private-p (directory)
   #+sbcl
   (let ((stat (sb-posix:stat (uiop:native-namestring directory))))
-    (and (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+    (and (platform-stat-owned-by-current-user-p stat)
          (zerop (logand (sb-posix:stat-mode stat) #o077))))
   #-sbcl
   (declare (ignore directory))
@@ -99,7 +99,7 @@
     (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
       (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                       sb-posix:s-ifreg)
-                   (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+                   (platform-stat-owned-by-current-user-p stat)
                    (zerop (logand (sb-posix:stat-mode stat) #o077)))
         (error "~a model cache must be a private user-owned regular file" label)))
     #-sbcl
@@ -172,7 +172,7 @@
                     (logior sb-posix:o-creat sb-posix:o-excl
                             sb-posix:o-wronly sb-posix:o-nofollow)
                     #o600))
-             (sb-posix:fchmod descriptor #o600)
+             (platform-secure-file-descriptor descriptor #o600)
              (setf stream
                    (sb-sys:make-fd-stream
                     descriptor :output t :element-type '(unsigned-byte 8)
@@ -180,7 +180,7 @@
                     :name (uiop:native-namestring temporary)))
              (write-sequence octets stream)
              (finish-output stream)
-             (sb-posix:fsync descriptor)
+             (platform-sync-file-descriptor descriptor)
              (close stream)
              (setf stream nil descriptor nil))
            #-sbcl

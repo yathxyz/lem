@@ -109,6 +109,7 @@
                         (logior sb-posix:o-creat sb-posix:o-excl
                                 sb-posix:o-wronly sb-posix:o-nofollow)
                         #o600)))
+                 #-os-windows
                  (sb-posix:fchmod descriptor #o600)
                  (return (values pathname descriptor)))
              (sb-posix:syscall-error (condition)
@@ -153,7 +154,9 @@
                    descriptor nil)
              (funcall writer stream)
              (finish-output stream)
+             #-os-windows
              (sb-posix:fsync (sb-sys:fd-stream-fd stream))
+             #-os-windows
              (sb-posix:fchmod (sb-sys:fd-stream-fd stream) #o644)
              (close stream)
              (setf stream nil complete-p t)
