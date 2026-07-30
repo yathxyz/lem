@@ -5,7 +5,10 @@
 
 (in-package :lem-yath)
 
-(lem-vi-mode:vi-mode)
+(defun enable-lem-yath-vi-mode ()
+  (lem-vi-mode:vi-mode))
+
+(initialize-editor-feature 'enable-lem-yath-vi-mode)
 
 ;; A long terminal ESC ambiguity window makes fast Escape-then-motion input
 ;; become a Meta chord.  Keep Vim state changes responsive while retaining

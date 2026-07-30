@@ -10,6 +10,11 @@ name: Windows Release
 
 on:
   workflow_dispatch:
+    inputs:
+      configured_only:
+        description: Build and smoke-test only the configured SDL2 image
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -119,6 +124,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "mklink failed (needed so deploy's bin/ lands in the workspace)" }
 
       - name: Build lem (deploy-op)
+        if: ${{ ! inputs.configured_only }}
         shell: pwsh
         run: |
           & sbcl --dynamic-space-size 4096 --non-interactive `
@@ -132,6 +138,7 @@ jobs:
           Get-ChildItem bin | Format-Table Name, Length
 
       - name: Package webview build
+        if: ${{ ! inputs.configured_only }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -177,6 +184,7 @@ jobs:
           echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Build lem-sdl2 (deploy-op)
+        if: ${{ ! inputs.configured_only }}
         shell: pwsh
         run: |
           & sbcl --dynamic-space-size 4096 --non-interactive `
@@ -192,6 +200,7 @@ jobs:
           Get-ChildItem bin | Format-Table Name, Length
 
       - name: Package sdl2 build
+        if: ${{ ! inputs.configured_only }}
         shell: pwsh
         run: |
           Compress-Archive -Path bin\* -DestinationPath dist\lem-sdl2-windows.zip
@@ -202,7 +211,7 @@ jobs:
       - name: Build configured lem-yath SDL2 image
         shell: pwsh
         run: |
-          Remove-Item bin -Recurse -Force
+          Remove-Item bin -Recurse -Force -ErrorAction SilentlyContinue
           $env:LEM_YATH_OPENROUTER_MODEL_REFRESH = "0"
           $env:LEM_YATH_CODEX_MODEL_REFRESH = "0"
           & sbcl --dynamic-space-size 4096 --non-interactive `
@@ -226,6 +235,7 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "configured executable exited $($process.ExitCode)" }
 
       - name: Package configured SDL2 build
+        if: ${{ ! inputs.configured_only }}
         shell: pwsh
         run: |
           Compress-Archive -Path bin\* -DestinationPath dist\lem-yath-sdl2-windows.zip
@@ -234,6 +244,7 @@ jobs:
           Write-Host "sha256: $hash"
 
       - name: Compute release tag
+        if: ${{ ! inputs.configured_only }}
         id: ver
         shell: pwsh
         run: |
@@ -242,6 +253,7 @@ jobs:
           Write-Host "Release tag: $tag"
 
       - name: Create release
+        if: ${{ ! inputs.configured_only }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
