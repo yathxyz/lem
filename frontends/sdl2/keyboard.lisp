@@ -275,6 +275,11 @@
                 :sym sym)))
 
 (defun handle-text-input-internal (text)
+  ;; SDL_TEXTINPUT commits the active IME composition (or represents direct
+  ;; text input when no composition was active).  Do not leave the preceding
+  ;; SDL_TEXTEDITING value latched: handle-key-down-internal suppresses command
+  ;; keys while that value is non-empty.
+  (setf *textediting-text* "")
   (unless (or (modifier-hyper *modifier*)
               (modifier-super *modifier*)
               (modifier-meta *modifier*)
