@@ -28,7 +28,8 @@
 
 (defun rebuild-evil-leader-keymap ()
   "Replace the shared leader tree and discard obsolete popup state."
-  (lem/transient::hide-transient)
+  (when lem-core::*in-the-editor*
+    (lem/transient::hide-transient))
   (setf *evil-leader-keymap*
         (make-evil-leader-keymap *evil-leader-bindings*))
   (bind-evil-leader-keymap lem-vi-mode:*normal-keymap*
