@@ -123,6 +123,15 @@ jobs:
           cmd /c mklink /D "$lp\lem" "${{ github.workspace }}"
           if ($LASTEXITCODE -ne 0) { throw "mklink failed (needed so deploy's bin/ lands in the workspace)" }
 
+      - name: Restore Common Lisp compilation cache
+        id: asdf-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/AppData/Local/cache/common-lisp
+          key: windows-asdf-${{ hashFiles('qlfile.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            windows-asdf-${{ hashFiles('qlfile.lock') }}-
+
       - name: Build lem (deploy-op)
         if: ${{ ! inputs.configured_only }}
         shell: pwsh
@@ -225,6 +234,13 @@ jobs:
           if (-not (Test-Path "bin\SDL2.dll")) { throw "deploy did not bundle SDL2.dll" }
           Copy-Item -Recurse frontends\sdl2\resources bin\resources
           Get-ChildItem bin | Format-Table Name, Length
+
+      - name: Save Common Lisp compilation cache
+        if: ${{ always() && steps.asdf-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/AppData/Local/cache/common-lisp
+          key: ${{ steps.asdf-cache.outputs.cache-primary-key }}
 
       - name: Smoke-test configured executable
         shell: pwsh
