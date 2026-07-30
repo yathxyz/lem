@@ -522,8 +522,13 @@ Explicit Lem transients retain their native timing and behavior."
      :hide-from-modeline t)
   "Show available continuations after an incomplete key sequence.")
 
-(which-key-install-input-binding)
-(add-hook *post-command-hook* 'which-key-post-command-cleanup)
-(lem/transient::hide-transient)
-(which-key-reset-session)
-(which-key-mode t)
+(defun initialize-which-key ()
+  "Install and enable Which-Key after an editor implementation exists."
+  (which-key-install-input-binding)
+  (remove-hook *post-command-hook* 'which-key-post-command-cleanup)
+  (add-hook *post-command-hook* 'which-key-post-command-cleanup)
+  (lem/transient::hide-transient)
+  (which-key-reset-session)
+  (which-key-mode t))
+
+(initialize-editor-feature 'initialize-which-key)
