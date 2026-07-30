@@ -11,7 +11,8 @@
   :pathname "src/"
   :components ((:file "package")
                (:file "base")
-               (:file "server")
+               (:file "server" :if-feature (:not :os-windows))
+               (:file "server-windows" :if-feature :os-windows)
                (:file "workspace")
                (:file "direnv")
                (:file "sops")
