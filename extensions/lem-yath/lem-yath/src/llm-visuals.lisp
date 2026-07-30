@@ -299,4 +299,4 @@
       (remove 'llm-visual-request-finish *llm-request-finish-functions*))
 (push 'llm-visual-request-finish *llm-request-finish-functions*)
 
-(llm-role-sync-all-buffers)
+(initialize-editor-feature 'llm-role-sync-all-buffers)
