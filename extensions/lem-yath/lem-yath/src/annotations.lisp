@@ -735,18 +735,21 @@ On failure, retain the provider's original item and detail unchanged."
               (with-current-window prompt-window
                 (lem/completion-mode:completion-repaint)))))))))
 
-(remove-hook *window-size-change-functions*
-             'completion-annotation-window-size-change)
-(when *completion-annotation-baseline-timer*
-  (ignore-errors (stop-timer *completion-annotation-baseline-timer*)))
-(setf *completion-annotation-resize-ready-p* nil
-      *completion-annotation-last-display-width* (display-width)
-      *completion-annotation-baseline-timer*
-      (make-timer #'completion-annotation-establish-resize-baseline
-                  :name "lem-yath completion resize baseline"))
-(add-hook *window-size-change-functions*
-          'completion-annotation-window-size-change)
-(start-timer *completion-annotation-baseline-timer* 100 :repeat nil)
+(defun initialize-completion-annotation-resize ()
+  (remove-hook *window-size-change-functions*
+               'completion-annotation-window-size-change)
+  (when *completion-annotation-baseline-timer*
+    (ignore-errors (stop-timer *completion-annotation-baseline-timer*)))
+  (setf *completion-annotation-resize-ready-p* nil
+        *completion-annotation-last-display-width* (display-width)
+        *completion-annotation-baseline-timer*
+        (make-timer #'completion-annotation-establish-resize-baseline
+                    :name "lem-yath completion resize baseline"))
+  (add-hook *window-size-change-functions*
+            'completion-annotation-window-size-change)
+  (start-timer *completion-annotation-baseline-timer* 100 :repeat nil))
+
+(initialize-editor-feature 'initialize-completion-annotation-resize)
 
 ;;; Recent files -------------------------------------------------------------
 
