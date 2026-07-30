@@ -1656,7 +1656,7 @@ post-command hook, opening it removes `unread' from those messages once."
                     (let ((stat (sb-posix:lstat
                                  (uiop:native-namestring pathname))))
                       (unless
-                          (and (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+                          (and (platform-stat-owned-by-current-user-p stat)
                                (= (logand (sb-posix:stat-mode stat)
                                           sb-posix:s-ifmt)
                                   sb-posix:s-ifdir)
@@ -1693,7 +1693,7 @@ When PDF-P is true, also require PDF magic before accepting the file."
                   (logior sb-posix:o-creat sb-posix:o-excl
                           sb-posix:o-wronly sb-posix:o-nofollow)
                   #o600))
-           (sb-posix:fchmod descriptor #o600)
+           (platform-secure-file-descriptor descriptor #o600)
            (setf file-stream
                  (sb-sys:make-fd-stream
                   descriptor :output t :element-type '(unsigned-byte 8)

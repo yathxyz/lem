@@ -32,6 +32,8 @@
 (defvar *last-persistence-save-time* 0)
 (defvar *last-persistence-failure-time* nil)
 (defvar *persistence-failure-reported-p* nil)
+(defvar *persistence-process-lock*
+  (bt2:make-lock :name "lem-yath/persistence"))
 (defvar *persistence-state-baseline* nil
   "Normalized state last applied to this process from shared storage.")
 (defvar *last-auto-revert-check-time* nil)
@@ -343,6 +345,7 @@
           (error () (empty-persistence-state)))
         (empty-persistence-state))))
 
+#-os-windows
 (defun call-with-persistence-lock (function)
   "Serialize state merges across Lem processes with an OS-released lock."
   (let* ((pathname (persistence-state-pathname))
@@ -384,6 +387,14 @@
           (ignore-errors (sb-posix:close descriptor)))))
   #-sbcl
     (error "Safe persistence requires the supported SBCL runtime")))
+
+#+os-windows
+(defun call-with-persistence-lock (function)
+  "Serialize persistence inside this native Windows Lem process."
+  (bt2:with-lock-held (*persistence-process-lock*)
+    (let ((pathname (persistence-state-pathname)))
+      (ensure-directories-exist pathname)
+      (funcall function))))
 
 (defun serialize-persistence-state (state)
   "Return normalized UTF-8 state bytes, refusing an unreadable future file."
@@ -428,7 +439,7 @@
                     (logior sb-posix:o-creat sb-posix:o-excl
                             sb-posix:o-wronly sb-posix:o-nofollow)
                     #o600))
-             (sb-posix:fchmod descriptor #o600)
+             (platform-secure-file-descriptor descriptor #o600)
              (setf stream
                    (sb-sys:make-fd-stream
                     descriptor
@@ -438,7 +449,7 @@
                     :name (uiop:native-namestring temporary)))
              (write-sequence octets stream)
              (finish-output stream)
-             (sb-posix:fsync descriptor)
+             (platform-sync-file-descriptor descriptor)
              (close stream)
              (setf stream nil
                    descriptor nil))
@@ -1225,10 +1236,12 @@ processes without discarding independent concurrent additions."
                   (logior sb-posix:o-creat sb-posix:o-excl
                           sb-posix:o-rdwr sb-posix:o-nofollow)
                   #o600))
-           (sb-posix:fchmod descriptor #o600)
-           (sb-posix:unlink (uiop:native-namestring temporary))
-           (setf temporary nil
-                 output-descriptor (sb-posix:dup descriptor)
+           (platform-secure-file-descriptor descriptor #o600)
+           #-os-windows
+           (progn
+             (sb-posix:unlink (uiop:native-namestring temporary))
+             (setf temporary nil))
+           (setf output-descriptor (sb-posix:dup descriptor)
                  output-stream
                  (sb-sys:make-fd-stream
                   output-descriptor

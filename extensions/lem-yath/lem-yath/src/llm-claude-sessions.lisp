@@ -6,6 +6,8 @@
 (defparameter *llm-claude-session-index-limit* (* 8 1024 1024))
 (defparameter *llm-claude-message-id-limit* 256)
 (defvar *llm-claude-projects-directory-override* nil)
+(defvar *llm-claude-session-process-lock*
+  (bt2:make-lock :name "lem-yath/claude-sessions"))
 
 (defun llm-claude-projects-directory ()
   (uiop:ensure-directory-pathname
@@ -28,7 +30,7 @@
       (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
         (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                 sb-posix:s-ifdir)
-             (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+             (platform-stat-owned-by-current-user-p stat)
              (zerop (logand (sb-posix:stat-mode stat) #o022))))
     (error () nil))
   #-sbcl
@@ -40,7 +42,7 @@
       (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
         (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                 sb-posix:s-ifreg)
-             (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+             (platform-stat-owned-by-current-user-p stat)
              (zerop (logand (sb-posix:stat-mode stat) #o022))))
     (error () nil))
   #-sbcl
@@ -224,7 +226,7 @@
       (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
         (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                         sb-posix:s-ifreg)
-                     (= (sb-posix:stat-uid stat) (sb-posix:getuid))
+                     (platform-stat-owned-by-current-user-p stat)
                      (zerop (logand (sb-posix:stat-mode stat) #o022))
                      (<= (sb-posix:stat-size stat) limit))
           (editor-error "Claude history file is unsafe or oversized: ~a"
@@ -288,7 +290,7 @@
            #o600)))
     (handler-case
         (progn
-          (sb-posix:fchmod descriptor #o600)
+          (platform-secure-file-descriptor descriptor #o600)
           (values
            (sb-sys:make-fd-stream
             descriptor :output t :element-type 'character
@@ -314,7 +316,7 @@
              (llm-claude-open-private-output pathname))
            (dolist (line lines) (write-line line stream))
            (finish-output stream)
-           #+sbcl (sb-posix:fsync descriptor)
+           #+sbcl (platform-sync-file-descriptor descriptor)
            (close stream)
            (setf stream nil descriptor nil complete-p t))
       (when stream
@@ -344,7 +346,7 @@
            (yason:encode object stream)
            (terpri stream)
            (finish-output stream)
-           #+sbcl (sb-posix:fsync descriptor)
+           #+sbcl (platform-sync-file-descriptor descriptor)
            (close stream)
            (setf stream nil descriptor nil)
            (uiop:rename-file-overwriting-target temporary pathname)
@@ -407,7 +409,7 @@
     (llm-claude-write-json-atomically index-pathname index)))
 
 (defun llm-claude-call-with-session-lock (directory function)
-  #+sbcl
+  #+(and sbcl (not os-windows))
   (let* ((pathname (merge-pathnames ".lem-yath-session.lock" directory))
          (descriptor
            (sb-posix:open
@@ -416,20 +418,25 @@
             #o600)))
     (unwind-protect
          (progn
-           (sb-posix:fchmod descriptor #o600)
+           (platform-secure-file-descriptor descriptor #o600)
            (let ((stat (sb-posix:fstat descriptor)))
              (unless (and (= (logand (sb-posix:stat-mode stat)
                                      sb-posix:s-ifmt)
                              sb-posix:s-ifreg)
-                          (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
+                          (platform-stat-owned-by-current-user-p stat))
                (editor-error "Unsafe Claude session lock")))
            (sb-posix:lockf descriptor sb-posix:f-lock 0)
            (funcall function))
       (ignore-errors (sb-posix:lockf descriptor sb-posix:f-ulock 0))
       (ignore-errors (sb-posix:close descriptor))))
-  #-sbcl
+  #+os-windows
+  (progn
+    directory
+    (bt2:with-lock-held (*llm-claude-session-process-lock*)
+      (funcall function)))
+  #-(or sbcl os-windows)
   (declare (ignore directory function))
-  #-sbcl
+  #-(or sbcl os-windows)
   (editor-error "Safe Claude session handling requires SBCL"))
 
 (defun llm-claude-create-session-fork
