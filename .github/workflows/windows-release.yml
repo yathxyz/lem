@@ -94,6 +94,22 @@ jobs:
           }
           Write-Host "Cloned $($found.Count) pinned git deps."
 
+      - name: Apply required JSONRPC timeout cleanup patch
+        shell: pwsh
+        run: |
+          $jsonrpc = Join-Path $env:USERPROFILE "common-lisp\jsonrpc"
+          $patch = Join-Path $env:GITHUB_WORKSPACE "extensions\lem-yath\patches\jsonrpc-timeout-cleanup.patch"
+          if (-not (Test-Path (Join-Path $jsonrpc "connection.lisp"))) {
+            throw "locked JSONRPC source was not cloned to $jsonrpc"
+          }
+          git -C $jsonrpc apply --check $patch
+          if ($LASTEXITCODE -ne 0) { throw "JSONRPC patch does not apply to the locked source" }
+          git -C $jsonrpc apply $patch
+          if ($LASTEXITCODE -ne 0) { throw "failed to apply JSONRPC patch" }
+          if (-not (Select-String -Quiet -SimpleMatch "(defun remove-callback-for-id" (Join-Path $jsonrpc "connection.lisp"))) {
+            throw "patched JSONRPC API is absent"
+          }
+
       - name: Link repo into quicklisp local-projects
         shell: pwsh
         run: |
