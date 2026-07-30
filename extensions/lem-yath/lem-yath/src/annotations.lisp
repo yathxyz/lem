@@ -369,6 +369,7 @@ On failure, retain the provider's original item and detail unchanged."
     (when (fboundp symbol)
       (apply (symbol-function symbol) arguments))))
 
+#-os-windows
 (defun completion-file-owner (stat)
   (let ((uid (sb-posix:stat-uid stat))
         (gid (sb-posix:stat-gid stat)))
@@ -385,6 +386,12 @@ On failure, retain the provider's original item and detail unchanged."
                                     (completion-posix-call "GROUP-NAME" group)))
                              gid)))
         (format nil "~a:~a" user group-name)))))
+
+(defun completion-pathname-file-size (pathname)
+  (with-open-file (stream pathname
+                          :direction :input
+                          :element-type '(unsigned-byte 8))
+    (file-length stream)))
 
 (defun completion-relative-age (seconds)
   (let* ((remaining (max 0 (floor seconds)))
@@ -420,6 +427,7 @@ On failure, retain the provider's original item and detail unchanged."
                       (aref *completion-month-names* (1- month))
                       day hour minute))))))
 
+#-os-windows
 (defun completion-file-detail (pathname)
   "Return local file modes, size, age, and conditional owner for PATHNAME."
   (handler-case
@@ -436,6 +444,21 @@ On failure, retain the provider's original item and detail unchanged."
          (format nil "~7@a" (completion-human-readable-size size))
          (format nil "~12a" (completion-file-time time))
          owner))
+    (error () "")))
+
+#+os-windows
+(defun completion-file-detail (pathname)
+  "Return portable file type, size, and age metadata for PATHNAME."
+  (handler-case
+      (let* ((directory-p (uiop:directory-exists-p pathname))
+             (size (if directory-p 0 (completion-pathname-file-size pathname)))
+             (write-date (file-write-date pathname)))
+        (completion-join-annotation-fields
+         (if directory-p "d---------" "----------")
+         (format nil "~7@a" (completion-human-readable-size size))
+         (and write-date
+              (format nil "~12a"
+                      (completion-file-time (- write-date 2208988800))))))
     (error () "")))
 
 (defun completion-file-candidate-path (input directory label)
@@ -508,8 +531,7 @@ On failure, retain the provider's original item and detail unchanged."
 (defun completion-library-form-metadata (pathname)
   "Read literal ASDF description/version fields without evaluating PATHNAME."
   (handler-case
-      (let ((size (sb-posix:stat-size
-                   (sb-posix:stat (uiop:native-namestring pathname)))))
+      (let ((size (completion-pathname-file-size pathname)))
         (when (<= size *completion-library-metadata-byte-limit*)
           (with-open-file (stream pathname :direction :input)
             (let ((*read-eval* nil))
@@ -777,12 +799,10 @@ On failure, retain the provider's original item and detail unchanged."
                   *completion-bookmark-context-byte-limit*)
           (points-to-string (buffer-start-point buffer)
                             (buffer-end-point buffer)))
-        (let* ((native (uiop:native-namestring (pathname filename)))
-               (stat (sb-posix:stat native))
-               (mode (sb-posix:stat-mode stat)))
-          (when (and (= #o100000 (logand mode #o170000))
-                     (<= (sb-posix:stat-size stat)
-                         *completion-bookmark-context-byte-limit*))
+        (when (and (uiop:file-exists-p filename)
+                   (not (uiop:directory-exists-p filename))
+                   (<= (completion-pathname-file-size filename)
+                       *completion-bookmark-context-byte-limit*))
             (uiop:read-file-string filename))))
     (error () nil)))
 
@@ -804,6 +824,7 @@ On failure, retain the provider's original item and detail unchanged."
               (subseq text line-start line-end))))
       (values line column context))))
 
+#-os-windows
 (defun completion-bookmark-file-kind (filename)
   (handler-case
       (case (completion-file-mode-character
@@ -817,6 +838,13 @@ On failure, retain the provider's original item and detail unchanged."
         ((#\c #\b) "device")
         (otherwise "file"))
     (error () "missing")))
+
+#+os-windows
+(defun completion-bookmark-file-kind (filename)
+  (cond
+    ((uiop:directory-exists-p filename) "directory")
+    ((uiop:file-exists-p filename) "file")
+    (t "missing")))
 
 (defun completion-bookmark-detail (entry)
   "Return type, path, position, and bounded context for bookmark ENTRY."
