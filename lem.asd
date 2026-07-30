@@ -343,3 +343,21 @@
   :pathname "src"
   :components ((:file "macosx" :if-feature :os-macosx)
                (:file "windows" :if-feature :os-windows)))
+
+;; Standalone SDL2 build with the integrated lem-yath configuration already
+;; loaded into the deployed image.  This target is intentionally separate from
+;; lem/sdl2 so the ordinary editor remains available without personal policy.
+;; Runtime helpers which do not exist on a host are handled by lem-yath's
+;; capability checks; loading the configured image must not require its source
+;; checkout to remain beside the executable.
+(defsystem "lem/yath-sdl2"
+  :version "2.3.0"
+  :defsystem-depends-on ("deploy")
+  :build-operation "deploy-op"
+  :build-pathname "lem-yath-sdl2"
+  :entry-point "lem:main"
+  :depends-on ("lem-sdl2"
+               "lem-yath")
+  :pathname "src"
+  :components ((:file "macosx" :if-feature :os-macosx)
+               (:file "windows" :if-feature :os-windows)))

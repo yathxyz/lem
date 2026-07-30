@@ -1,6 +1,6 @@
 name: Windows Release
 
-# Fork-owned Windows builds of lem (webview + sdl2 frontends) for the
+# Fork-owned Windows builds of lem (webview, sdl2, and configured sdl2) for the
 # yathxyz/scoop-yath private Scoop bucket.
 # Adapted from upstream's Windows CD (removed upstream at
 # 7f7a21a5 as "doesn't work properly") with two fixes: git deps are cloned at
@@ -183,6 +183,40 @@ jobs:
           "$hash  lem-sdl2-windows.zip" | Out-File -Encoding ascii -NoNewline dist\lem-sdl2-windows.zip.sha256
           Write-Host "sha256: $hash"
 
+      - name: Build configured lem-yath SDL2 image
+        shell: pwsh
+        run: |
+          Remove-Item bin -Recurse -Force
+          $env:LEM_YATH_OPENROUTER_MODEL_REFRESH = "0"
+          $env:LEM_YATH_CODEX_MODEL_REFRESH = "0"
+          & sbcl --dynamic-space-size 4096 --non-interactive `
+                 --eval "(require :asdf)" `
+                 --eval "(asdf:load-system :uiop)" `
+                 --eval "(assert (find-package :uiop/cl) () `"pinned uiop 3.3.7 not in effect`")" `
+                 --eval "(ql:quickload :lem/yath-sdl2)" `
+                 --eval "(asdf:make :lem/yath-sdl2)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "bin\lem-yath-sdl2.exe")) { throw "bin/lem-yath-sdl2.exe not produced" }
+          if (-not (Test-Path "bin\SDL2.dll")) { throw "deploy did not bundle SDL2.dll" }
+          Copy-Item -Recurse frontends\sdl2\resources bin\resources
+          Get-ChildItem bin | Format-Table Name, Length
+
+      - name: Smoke-test configured executable
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "bin\lem-yath-sdl2.exe" `
+                                   -ArgumentList "--version" `
+                                   -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "configured executable exited $($process.ExitCode)" }
+
+      - name: Package configured SDL2 build
+        shell: pwsh
+        run: |
+          Compress-Archive -Path bin\* -DestinationPath dist\lem-yath-sdl2-windows.zip
+          $hash = (Get-FileHash dist\lem-yath-sdl2-windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  lem-yath-sdl2-windows.zip" | Out-File -Encoding ascii -NoNewline dist\lem-yath-sdl2-windows.zip.sha256
+          Write-Host "sha256: $hash"
+
       - name: Compute release tag
         id: ver
         shell: pwsh
@@ -203,3 +237,5 @@ jobs:
             dist/lem-windows.zip.sha256
             dist/lem-sdl2-windows.zip
             dist/lem-sdl2-windows.zip.sha256
+            dist/lem-yath-sdl2-windows.zip
+            dist/lem-yath-sdl2-windows.zip.sha256

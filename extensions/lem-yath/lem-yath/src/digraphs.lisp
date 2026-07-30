@@ -8,7 +8,12 @@
   (let ((path (uiop:getenv "LEM_YATH_EVIL_DIGRAPHS"))
         (table (make-hash-table :test #'equal)))
     (unless (and path (probe-file path))
-      (error "LEM_YATH_EVIL_DIGRAPHS does not name a readable table"))
+      #-os-windows
+      (error "LEM_YATH_EVIL_DIGRAPHS does not name a readable table")
+      #+os-windows
+      (progn
+        (warn "Evil digraph data is unavailable; C-k retains literal fallback behavior")
+        (return-from lem-yath-load-evil-digraphs table)))
     (with-open-file (stream path :direction :input)
       (loop :for line := (read-line stream nil nil)
             :while line
