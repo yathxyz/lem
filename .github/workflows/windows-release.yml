@@ -250,6 +250,79 @@ jobs:
                                    -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "configured executable exited $($process.ExitCode)" }
 
+      - name: Trace configured SDL keyboard input
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+
+          public static class LemWindow {
+              [DllImport("user32.dll")]
+              public static extern bool SetForegroundWindow(IntPtr handle);
+          }
+          '@
+
+          $testFile = Join-Path $env:RUNNER_TEMP "lem-keyboard-smoke.txt"
+          $traceFile = Join-Path $env:RUNNER_TEMP "lem-keyboard-trace.txt"
+          [IO.File]::WriteAllText($testFile, "")
+          $env:LEM_SDL2_KEYBOARD_TRACE = "1"
+          $env:LEM_YATH_OPENROUTER_MODEL_REFRESH = "0"
+          $env:LEM_YATH_CODEX_MODEL_REFRESH = "0"
+
+          $process = Start-Process -FilePath "bin\lem-yath-sdl2.exe" `
+                                   -ArgumentList $testFile `
+                                   -RedirectStandardError $traceFile `
+                                   -PassThru
+          try {
+              $handle = [IntPtr]::Zero
+              for ($attempt = 0; $attempt -lt 60; $attempt++) {
+                  Start-Sleep -Milliseconds 500
+                  $process.Refresh()
+                  if ($process.HasExited) {
+                      throw "Lem exited during startup with code $($process.ExitCode)"
+                  }
+                  $handle = $process.MainWindowHandle
+                  if ($handle -ne [IntPtr]::Zero) { break }
+              }
+              if ($handle -eq [IntPtr]::Zero) { throw "Lem did not create a window" }
+              if (-not [LemWindow]::SetForegroundWindow($handle)) {
+                  throw "Could not focus the Lem window"
+              }
+              Start-Sleep -Seconds 20
+
+              [System.Windows.Forms.SendKeys]::SendWait("abc{BACKSPACE}")
+              Start-Sleep -Milliseconds 500
+              [System.Windows.Forms.SendKeys]::SendWait("%x")
+              Start-Sleep -Milliseconds 500
+              [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+              Start-Sleep -Milliseconds 500
+              [System.Windows.Forms.SendKeys]::SendWait("z")
+              [System.Windows.Forms.SendKeys]::SendWait("^x")
+              Start-Sleep -Milliseconds 300
+              [System.Windows.Forms.SendKeys]::SendWait("^s")
+              Start-Sleep -Seconds 3
+          }
+          finally {
+              if (-not $process.HasExited) {
+                  Stop-Process -Id $process.Id -Force
+              }
+              $process.WaitForExit()
+          }
+
+          $trace = Get-Content $traceFile -Raw
+          Write-Host $trace
+          foreach ($expected in @('Backspace', 'Escape', 'M-x', 'C-x', 'C-s')) {
+              if ($trace -notmatch [regex]::Escape($expected)) {
+                  throw "Keyboard trace did not contain $expected"
+              }
+          }
+          $actual = [IO.File]::ReadAllText($testFile)
+          if ($actual -ne "abz") {
+              throw "Keyboard smoke test saved '$actual' instead of 'abz'"
+          }
+
       - name: Package configured SDL2 build
         if: ${{ ! inputs.configured_only }}
         shell: pwsh
