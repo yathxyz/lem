@@ -297,17 +297,17 @@ jobs:
               private static extern uint SendInput(uint count, Input[] inputs, int size);
 
               private const uint InputKeyboard = 1;
-              private const uint FlagScanCode = 0x0008;
               private const uint FlagKeyUp = 0x0002;
 
-              private static void Send(ushort scanCode, bool keyUp) {
+              private static void Send(ushort virtualKey, ushort scanCode, bool keyUp) {
                   var inputs = new[] {
                       new Input {
                           Type = InputKeyboard,
                           Data = new InputUnion {
                               Keyboard = new KeyboardInput {
+                                  VirtualKey = virtualKey,
                                   ScanCode = scanCode,
-                                  Flags = FlagScanCode | (keyUp ? FlagKeyUp : 0)
+                                  Flags = keyUp ? FlagKeyUp : 0
                               }
                           }
                       }
@@ -318,15 +318,16 @@ jobs:
                   Thread.Sleep(40);
               }
 
-              public static void Tap(ushort scanCode) {
-                  Send(scanCode, false);
-                  Send(scanCode, true);
+              public static void Tap(ushort virtualKey, ushort scanCode) {
+                  Send(virtualKey, scanCode, false);
+                  Send(virtualKey, scanCode, true);
               }
 
-              public static void Chord(ushort modifierScanCode, ushort scanCode) {
-                  Send(modifierScanCode, false);
-                  Tap(scanCode);
-                  Send(modifierScanCode, true);
+              public static void Chord(ushort modifierVirtualKey, ushort modifierScanCode,
+                                       ushort virtualKey, ushort scanCode) {
+                  Send(modifierVirtualKey, modifierScanCode, false);
+                  Tap(virtualKey, scanCode);
+                  Send(modifierVirtualKey, modifierScanCode, true);
               }
           }
           '@
@@ -363,22 +364,22 @@ jobs:
               }
               Start-Sleep -Milliseconds 500
 
-              # Set 1 hardware scan codes: A, B, C, Backspace.
-              [LemWindow]::Tap(0x1E)
-              [LemWindow]::Tap(0x30)
-              [LemWindow]::Tap(0x2E)
-              [LemWindow]::Tap(0x0E)
+              # Virtual-key and Set 1 scan-code pairs: A, B, C, Backspace.
+              [LemWindow]::Tap(0x41, 0x1E)
+              [LemWindow]::Tap(0x42, 0x30)
+              [LemWindow]::Tap(0x43, 0x2E)
+              [LemWindow]::Tap(0x08, 0x0E)
               Start-Sleep -Milliseconds 500
               # Left Alt + X, then Escape.
-              [LemWindow]::Chord(0x38, 0x2D)
+              [LemWindow]::Chord(0x12, 0x38, 0x58, 0x2D)
               Start-Sleep -Milliseconds 500
-              [LemWindow]::Tap(0x01)
+              [LemWindow]::Tap(0x1B, 0x01)
               Start-Sleep -Milliseconds 500
-              [LemWindow]::Tap(0x2C)
+              [LemWindow]::Tap(0x5A, 0x2C)
               # Left Ctrl + X, Left Ctrl + S.
-              [LemWindow]::Chord(0x1D, 0x2D)
+              [LemWindow]::Chord(0x11, 0x1D, 0x58, 0x2D)
               Start-Sleep -Milliseconds 300
-              [LemWindow]::Chord(0x1D, 0x1F)
+              [LemWindow]::Chord(0x11, 0x1D, 0x53, 0x1F)
               Start-Sleep -Seconds 3
           }
           finally {
