@@ -283,6 +283,30 @@
                 :shift shift
                 :sym sym)))
 
+(defun windows-modifier-key-event-p (code modifier)
+  (or (member code (list sdl2-ffi:+sdlk-lshift+
+                         sdl2-ffi:+sdlk-rshift+
+                         sdl2-ffi:+sdlk-lctrl+
+                         sdl2-ffi:+sdlk-rctrl+
+                         sdl2-ffi:+sdlk-lalt+
+                         sdl2-ffi:+sdlk-ralt+
+                         sdl2-ffi:+sdlk-lgui+
+                         sdl2-ffi:+sdlk-rgui+))
+      (member code '(16 17 18 91 92))
+      (and (zerop code)
+           (or (modifier-shift modifier)
+               (modifier-ctrl modifier)
+               (modifier-meta modifier)
+               (modifier-super modifier)
+               (modifier-hyper modifier)))))
+
+(defun normalize-windows-key-symbol (sym modifier)
+  (if (and (= 1 (length sym))
+           (upper-case-p (char sym 0))
+           (not (modifier-shift modifier)))
+      (string-downcase sym)
+      sym))
+
 (defun handle-text-input-internal (text)
   (trace-keyboard-event :text-input
                         :length (length text)
@@ -305,7 +329,7 @@
                                    :sym (convert-to-sym (char-code c)))))
                 (send-key-event key)))))
 
-(defun handle-key-down-internal (key-event)
+(defun handle-key-down-internal (key-event &optional windows-p)
   (let ((code (key-event-code key-event))
         (modifier (key-event-modifier key-event)))
     (trace-keyboard-event :key-down
@@ -318,8 +342,12 @@
                           :hyper (not (null (modifier-hyper modifier)))
                           :composition-length (length *textediting-text*))
     (update-modifier *modifier* modifier)
-    (when (equal *textediting-text* "")
+    (when (and (not (and windows-p
+                         (windows-modifier-key-event-p code modifier)))
+               (equal *textediting-text* ""))
       (multiple-value-bind (sym text-input-p) (convert-to-sym code)
+        (when (and windows-p sym)
+          (setf sym (normalize-windows-key-symbol sym modifier)))
         (when (and sym
                    (or (not text-input-p)
                        (modifier-ctrl modifier)
@@ -352,7 +380,7 @@
   (handle-text-input-internal text))
 
 (defmethod handle-key-down ((platform lem-sdl2/platform:windows) key-event)
-  (handle-key-down-internal key-event))
+  (handle-key-down-internal key-event t))
 
 (defmethod handle-key-up ((platform lem-sdl2/platform:windows) key-event)
   (handle-key-up-internal key-event))
