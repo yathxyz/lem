@@ -364,7 +364,10 @@ jobs:
               }
               Start-Sleep -Milliseconds 500
 
-              # Virtual-key and Set 1 scan-code pairs: A, B, C, Backspace.
+              # The configured image starts in Vi Normal state. Enter Insert,
+              # then type A, B, C and Backspace.
+              [LemWindow]::Tap(0x49, 0x17)
+              Start-Sleep -Milliseconds 300
               [LemWindow]::Tap(0x41, 0x1E)
               [LemWindow]::Tap(0x42, 0x30)
               [LemWindow]::Tap(0x43, 0x2E)
