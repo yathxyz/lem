@@ -94,6 +94,8 @@
      (display:notify-required-redisplay display))
     (sdl2-ffi:+sdl-windowevent-exposed+
      (display:notify-required-redisplay display))
+    (sdl2-ffi:+sdl-windowevent-focus-lost+
+     (reset-keyboard-state))
     (sdl2-ffi:+sdl-windowevent-resized+
      (display:update-texture display)
      (display:notify-required-redisplay display))
