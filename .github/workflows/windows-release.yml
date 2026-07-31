@@ -37,8 +37,15 @@ jobs:
 
       - name: Install SBCL (x86-64 MSI)
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/roswell/sbcl_bin/releases/latest" -Headers @{ "User-Agent" = "gh-actions" }
+          $headers = @{
+            "Authorization" = "Bearer $env:GH_TOKEN"
+            "User-Agent" = "gh-actions"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/roswell/sbcl_bin/releases/latest" -Headers $headers
           $asset = $rel.assets | Where-Object { $_.name -match 'x86-64-windows.*\.msi$' } | Select-Object -First 1
           if (-not $asset) { throw "x86-64 Windows SBCL MSI not found in latest sbcl_bin release." }
           $msi = Join-Path $env:RUNNER_TEMP "sbcl.msi"
