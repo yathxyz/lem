@@ -253,7 +253,6 @@ jobs:
       - name: Trace configured SDL keyboard input
         shell: pwsh
         run: |
-          Add-Type -AssemblyName System.Windows.Forms
           Add-Type -TypeDefinition @'
           using System;
           using System.Runtime.InteropServices;
@@ -261,6 +260,22 @@ jobs:
           public static class LemWindow {
               [DllImport("user32.dll")]
               public static extern bool SetForegroundWindow(IntPtr handle);
+
+              [DllImport("user32.dll")]
+              private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+
+              private const uint KeyUp = 0x0002;
+
+              public static void Tap(byte virtualKey) {
+                  keybd_event(virtualKey, 0, 0, UIntPtr.Zero);
+                  keybd_event(virtualKey, 0, KeyUp, UIntPtr.Zero);
+              }
+
+              public static void Chord(byte modifier, byte virtualKey) {
+                  keybd_event(modifier, 0, 0, UIntPtr.Zero);
+                  Tap(virtualKey);
+                  keybd_event(modifier, 0, KeyUp, UIntPtr.Zero);
+              }
           }
           '@
 
@@ -292,16 +307,19 @@ jobs:
               }
               Start-Sleep -Seconds 20
 
-              [System.Windows.Forms.SendKeys]::SendWait("abc{BACKSPACE}")
+              [LemWindow]::Tap(0x41)
+              [LemWindow]::Tap(0x42)
+              [LemWindow]::Tap(0x43)
+              [LemWindow]::Tap(0x08)
               Start-Sleep -Milliseconds 500
-              [System.Windows.Forms.SendKeys]::SendWait("%x")
+              [LemWindow]::Chord(0x12, 0x58)
               Start-Sleep -Milliseconds 500
-              [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+              [LemWindow]::Tap(0x1B)
               Start-Sleep -Milliseconds 500
-              [System.Windows.Forms.SendKeys]::SendWait("z")
-              [System.Windows.Forms.SendKeys]::SendWait("^x")
+              [LemWindow]::Tap(0x5A)
+              [LemWindow]::Chord(0x11, 0x58)
               Start-Sleep -Milliseconds 300
-              [System.Windows.Forms.SendKeys]::SendWait("^s")
+              [LemWindow]::Chord(0x11, 0x53)
               Start-Sleep -Seconds 3
           }
           finally {
@@ -311,7 +329,7 @@ jobs:
               $process.WaitForExit()
           }
 
-          $trace = Get-Content $traceFile -Raw
+          $trace = Get-Content $traceFile -Encoding Unicode -Raw
           Write-Host $trace
           foreach ($expected in @('Backspace', 'Escape', 'M-x', 'C-x', 'C-s')) {
               if ($trace -notmatch [regex]::Escape($expected)) {
