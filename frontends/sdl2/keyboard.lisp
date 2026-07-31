@@ -6,7 +6,6 @@
            :handle-text-input
            :handle-key-down
            :handle-key-up
-           :reset-keyboard-state
            :right-alt-is-meta))
 (in-package :lem-sdl2/keyboard)
 
@@ -83,17 +82,15 @@
 
 (defstruct (key-event (:constructor %make-key-event))
   code
-  scancode
   modifier)
 
-(defun make-key-event (code scancode modifier)
-  (%make-key-event :code code :scancode scancode :modifier modifier))
+(defun make-key-event (code modifier)
+  (%make-key-event :code code :modifier modifier))
 
 (defun keysym-to-key-event (keysym)
   (let ((code (sdl2:sym-value keysym))
-        (scancode (sdl2:scancode-value keysym))
         (modifier (get-modifier keysym)))
-    (make-key-event code scancode modifier)))
+    (make-key-event code modifier)))
 
 (defun right-alt-is-meta (on)
   (let ((val (if on
@@ -115,7 +112,8 @@
         (cdr (assoc mod-type *modifier-code-table*))))
 
 (defun get-modifier (keysym)
-  (let* ((mod (sdl2:mod-value keysym))
+  (let* ((mod (logior (sdl2:mod-value keysym)
+                      (sdl2-ffi.functions:sdl-get-mod-state)))
          (shift (mod-p mod :shift))
          (ctrl (mod-p mod :ctrl))
          (meta (mod-p mod :meta))
@@ -131,56 +129,7 @@
   (setf (modifier-hyper modifier) (modifier-hyper new-modifier)))
 
 (defvar *modifier* (make-modifier))
-(defvar *pressed-modifier-scancodes* '())
 (defvar *textediting-text* "")
-
-(defun modifier-scancode-type (scancode)
-  (cond
-    ((or (sdl2:scancode= scancode :scancode-lshift)
-         (sdl2:scancode= scancode :scancode-rshift))
-     :shift)
-    ((or (sdl2:scancode= scancode :scancode-lctrl)
-         (sdl2:scancode= scancode :scancode-rctrl))
-     :ctrl)
-    ((or (sdl2:scancode= scancode :scancode-lalt)
-         (and (sdl2:scancode= scancode :scancode-ralt)
-              (member sdl2-ffi:+kmod-ralt+
-                      (cdr (assoc :meta *modifier-code-table*)))))
-     :meta)
-    ((sdl2:scancode= scancode :scancode-lgui)
-     :super)
-    ((sdl2:scancode= scancode :scancode-rgui)
-     :hyper)))
-
-(defun note-modifier-scancode (scancode pressed-p)
-  (when (modifier-scancode-type scancode)
-    (if pressed-p
-        (pushnew scancode *pressed-modifier-scancodes*)
-        (setf *pressed-modifier-scancodes*
-              (delete scancode *pressed-modifier-scancodes*)))))
-
-(defun pressed-modifier-p (type)
-  (some (lambda (scancode)
-          (eq type (modifier-scancode-type scancode)))
-        *pressed-modifier-scancodes*))
-
-(defun effective-modifier (event-modifier)
-  (make-modifier
-   :shift (or (modifier-shift event-modifier)
-              (pressed-modifier-p :shift))
-   :ctrl (or (modifier-ctrl event-modifier)
-             (pressed-modifier-p :ctrl))
-   :meta (or (modifier-meta event-modifier)
-             (pressed-modifier-p :meta))
-   :super (or (modifier-super event-modifier)
-              (pressed-modifier-p :super))
-   :hyper (or (modifier-hyper event-modifier)
-              (pressed-modifier-p :hyper))))
-
-(defun reset-keyboard-state ()
-  (setf *pressed-modifier-scancodes* '()
-        *modifier* (make-modifier)
-        *textediting-text* ""))
 
 (defun trace-keyboard-event (event &rest fields)
   (when (uiop:getenv "LEM_SDL2_KEYBOARD_TRACE")
@@ -358,42 +307,36 @@
 
 (defun handle-key-down-internal (key-event)
   (let ((code (key-event-code key-event))
-        (scancode (key-event-scancode key-event))
-        (event-modifier (key-event-modifier key-event)))
-    (note-modifier-scancode scancode t)
-    (let ((modifier (effective-modifier event-modifier)))
-      (trace-keyboard-event :key-down
-                            :code code
-                            :scancode scancode
-                            :shift (not (null (modifier-shift modifier)))
-                            :ctrl (not (null (modifier-ctrl modifier)))
-                            :meta (not (null (modifier-meta modifier)))
-                            :super (not (null (modifier-super modifier)))
-                            :hyper (not (null (modifier-hyper modifier)))
-                            :composition-length (length *textediting-text*))
-      (update-modifier *modifier* modifier)
-      (when (and (not (modifier-scancode-type scancode))
-                 (equal *textediting-text* ""))
-        (multiple-value-bind (sym text-input-p) (convert-to-sym code)
-          (when (and sym
-                     (or (not text-input-p)
-                         (modifier-ctrl modifier)
-                         (modifier-meta modifier)
-                         (modifier-super modifier)
-                         (modifier-hyper modifier)
-                         (< 256 code)))
-            (let ((key (make-key-with-shift-careful :shift (modifier-shift modifier)
-                                                    :ctrl (modifier-ctrl modifier)
-                                                    :meta (modifier-meta modifier)
-                                                    :super (modifier-super modifier)
-                                                    :hyper (modifier-hyper modifier)
-                                                    :sym sym)))
-              (send-key-event key))))))))
+        (modifier (key-event-modifier key-event)))
+    (trace-keyboard-event :key-down
+                          :code code
+                          :mod-mask (sdl2-ffi.functions:sdl-get-mod-state)
+                          :shift (not (null (modifier-shift modifier)))
+                          :ctrl (not (null (modifier-ctrl modifier)))
+                          :meta (not (null (modifier-meta modifier)))
+                          :super (not (null (modifier-super modifier)))
+                          :hyper (not (null (modifier-hyper modifier)))
+                          :composition-length (length *textediting-text*))
+    (update-modifier *modifier* modifier)
+    (when (equal *textediting-text* "")
+      (multiple-value-bind (sym text-input-p) (convert-to-sym code)
+        (when (and sym
+                   (or (not text-input-p)
+                       (modifier-ctrl modifier)
+                       (modifier-meta modifier)
+                       (modifier-super modifier)
+                       (modifier-hyper modifier)
+                       (< 256 code)))
+          (let ((key (make-key-with-shift-careful :shift (modifier-shift modifier)
+                                                  :ctrl (modifier-ctrl modifier)
+                                                  :meta (modifier-meta modifier)
+                                                  :super (modifier-super modifier)
+                                                  :hyper (modifier-hyper modifier)
+                                                  :sym sym)))
+            (send-key-event key)))))))
 
 (defun handle-key-up-internal (key-event)
-  (note-modifier-scancode (key-event-scancode key-event) nil)
-  (update-modifier *modifier*
-                   (effective-modifier (key-event-modifier key-event))))
+  (update-modifier *modifier* (key-event-modifier key-event)))
 
 (defmethod handle-text-input ((platform lem-sdl2/platform:mac) text)
   (handle-text-input-internal text))
