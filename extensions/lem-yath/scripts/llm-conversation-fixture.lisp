@@ -290,7 +290,7 @@
            (llm-conversation-test-fresh-session-bypasses-auto-fork-p))
          (ok (and (string= (buffer-name buffer) "*scratch*")
                   (mode-active-p buffer 'org-mode)
-                  (llm-conversation-buffer-p buffer)
+                  (not (llm-conversation-buffer-p buffer))
                   (eq command 'lem-yath-llm-send)
                   (null (get-buffer *llm-buffer-name*))
                   fresh-session-p))
@@ -308,7 +308,10 @@
      (or command "none")
      (if (get-buffer *llm-buffer-name*) "yes" "no")
      (if gutter "reserved" "none")
-     (if fresh-session-p "yes" "no"))))
+     (if fresh-session-p "yes" "no"))
+    ;; Conversation buffers remain opt-in.  Enable the mode only after the
+    ;; startup assertion so the remaining scenarios can exercise the feature.
+    (lem-yath-llm-conversation-mode t)))
 
 (define-command lem-yath-test-llm-conversation-record () ()
   (let* ((scratch (get-buffer "*scratch*"))

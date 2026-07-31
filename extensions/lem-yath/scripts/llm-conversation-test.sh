@@ -102,10 +102,10 @@ pass boot 'configured Lem loaded the isolated conversation fixture'
 
 send_key F3
 if ! wait_report_count \
-  '^PASS STATIC buffer=\*scratch\* org=yes conversation=yes key=LEM-YATH-LLM-SEND shared=no gutter=none fresh-session=yes$' 1; then
-  die startup-mode 'startup scratch, mode, or C-c Return binding differed'
+  '^PASS STATIC buffer=\*scratch\* org=yes conversation=no key=LEM-YATH-LLM-SEND shared=no gutter=none fresh-session=yes$' 1; then
+  die startup-mode 'startup scratch was not plain Org or the opt-in binding differed'
 fi
-pass startup-mode 'startup is an Org LLM conversation with C-c Return'
+pass startup-mode 'startup is plain Org; LLM conversation mode remains opt-in'
 
 if ! run_mx lem-yath-llm-request-trace-toggle ||
    ! lem_wait_for "$session" 'LLM request tracing enabled' 5 >/dev/null; then
