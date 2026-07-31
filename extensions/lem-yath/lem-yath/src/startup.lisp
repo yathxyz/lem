@@ -3,10 +3,9 @@
 (in-package :lem-yath)
 
 (defun open-initial-scratch ()
-  "Present an empty Org LLM conversation instead of Lem's welcome dashboard."
+  "Present an empty Org buffer instead of Lem's welcome dashboard."
   (let ((buffer (current-buffer)))
     (buffer-rename buffer "*scratch*")
-    (change-buffer-mode buffer 'org-mode)
-    (lem-yath-llm-conversation-mode t)))
+    (change-buffer-mode buffer 'org-mode)))
 
 (setf *splash-function* #'open-initial-scratch)
