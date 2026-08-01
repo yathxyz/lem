@@ -240,6 +240,9 @@ jobs:
           if (-not (Test-Path "bin\lem-yath-sdl2.exe")) { throw "bin/lem-yath-sdl2.exe not produced" }
           if (-not (Test-Path "bin\SDL2.dll")) { throw "deploy did not bundle SDL2.dll" }
           Copy-Item -Recurse frontends\sdl2\resources bin\resources
+          # The deployed image has no ASDF source tree; the compilation
+          # guardian is resolved next to the executable at runtime.
+          Copy-Item extensions\lem-yath\lem-yath\src\compilation-guardian.py bin\
           Get-ChildItem bin | Format-Table Name, Length
 
       - name: Save Common Lisp compilation cache
