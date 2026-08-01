@@ -33,14 +33,49 @@ Returns the containing directory pathname, or NIL."
                        (try parent)))))))
     (ignore-errors (try (uiop:ensure-directory-pathname start)))))
 
+(defun executable-path-separator ()
+  "The platform's PATH-style search list separator, as a string."
+  (string (uiop:inter-directory-separator)))
+
+(defun executable-candidate-names (name)
+  "NAME, expanded with the Windows PATHEXT suffixes when NAME lacks one.
+Windows resolves bare command names through PATHEXT (\"git\" -> \"git.exe\");
+an extensionless file is not executable there, so it is tried last."
+  (if (uiop:os-windows-p)
+      (let ((extensions
+              (loop :for extension
+                      :in (uiop:split-string
+                           (or (uiop:getenv "PATHEXT") ".COM;.EXE;.BAT;.CMD")
+                           :separator ";")
+                    :when (and (< 1 (length extension))
+                               (char= (char extension 0) #\.))
+                      :collect extension)))
+        (if (some (lambda (extension)
+                    (uiop:string-suffix-p (string-downcase name)
+                                          (string-downcase extension)))
+                  extensions)
+            (list name)
+            (append (mapcar (lambda (extension)
+                              (concatenate 'string name extension))
+                            extensions)
+                    (list name))))
+      (list name)))
+
 (defun executable-find (name)
-  "Locate NAME on PATH; returns the full pathname or NIL."
-  (loop :for dir :in (uiop:split-string (or (uiop:getenv "PATH") "") :separator ":")
-        :unless (zerop (length dir))
-          :do (let ((path (ignore-errors
-                            (uiop:probe-file*
-                             (merge-pathnames name (uiop:ensure-directory-pathname dir))))))
-                (when path (return path)))))
+  "Locate NAME on the platform PATH; returns the full pathname or NIL."
+  (loop :with candidates := (executable-candidate-names name)
+        :for dir :in (uiop:split-string (or (uiop:getenv "PATH") "")
+                                        :separator (executable-path-separator))
+        :for trimmed := (string-trim "\"" dir)
+        :unless (zerop (length trimmed))
+          :do (loop :for candidate :in candidates
+                    :for path := (ignore-errors
+                                   (uiop:probe-file*
+                                    (merge-pathnames
+                                     candidate
+                                     (uiop:ensure-directory-pathname trimmed))))
+                    :when (and path (not (uiop:directory-pathname-p path)))
+                      :do (return-from executable-find path))))
 
 (defun platform-stat-owned-by-current-user-p (stat)
   "Whether STAT belongs to the current user where numeric ownership exists."
