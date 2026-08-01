@@ -422,6 +422,28 @@
            #-sbcl 0
            (random (ash 1 60)))))
 
+#+os-windows
+(defun write-persistence-state-file (state)
+  "Atomically replace the state file via a temporary file and rename."
+  ;; SB-POSIX on Windows lacks O_NOFOLLOW and mode bits; the profile
+  ;; directory ACL protects the state file instead.
+  (let* ((pathname (persistence-state-pathname))
+         (temporary (persistence-temporary-pathname pathname))
+         (octets (serialize-persistence-state state)))
+    (unwind-protect
+         (progn
+           (with-open-file (stream temporary
+                            :direction :output
+                            :if-exists :error
+                            :if-does-not-exist :create
+                            :element-type '(unsigned-byte 8))
+             (write-sequence octets stream)
+             (finish-output stream))
+           (uiop:rename-file-overwriting-target temporary pathname))
+      (when (uiop:file-exists-p temporary)
+        (ignore-errors (delete-file temporary))))))
+
+#-os-windows
 (defun write-persistence-state-file (state)
   "Atomically replace the state file with mode 0600."
   (let* ((pathname (persistence-state-pathname))

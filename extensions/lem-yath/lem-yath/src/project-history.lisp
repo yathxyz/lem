@@ -41,6 +41,14 @@
   #-os-windows
   (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
 
+#+os-windows
+(defun validate-project-history-directory (directory)
+  ;; CRT stat has no usable ownership or permission bits (directories always
+  ;; report 0777), so the profile directory ACL is the protection here.
+  (unless (uiop:directory-exists-p directory)
+    (error "Project history directory is missing: ~a" directory)))
+
+#-os-windows
 (defun validate-project-history-directory (directory)
   (multiple-value-bind (stat exists-p) (project-history-lstat directory)
     (unless (and exists-p
@@ -250,6 +258,25 @@
       (setf result (last result *project-history-entry-limit*)))
     result))
 
+#+os-windows
+(defun read-project-history-file ()
+  "Read the project history through the ACL-protected profile directory."
+  (let ((pathname (project-history-pathname)))
+    (unless (uiop:file-exists-p pathname)
+      (return-from read-project-history-file '()))
+    (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+      (let ((size (file-length stream)))
+        (when (> size *project-history-file-size-limit*)
+          (error "Project history exceeds the size limit"))
+        (let ((octets (make-array size :element-type '(unsigned-byte 8))))
+          (unless (and (= (read-sequence octets stream) size)
+                       (eq (read-byte stream nil :eof) :eof))
+            (error "Project history changed while being read"))
+          (normalize-project-history-entries
+           (parse-project-history-text
+            (sb-ext:octets-to-string octets :external-format :utf-8))))))))
+
+#-os-windows
 (defun read-project-history-file ()
   "Read the owned project history without following a symlink."
   (let ((pathname (project-history-pathname)))
@@ -320,6 +347,29 @@
            #-sbcl 0
            (random (ash 1 60)))))
 
+#+os-windows
+(defun write-project-history-file (entries)
+  "Atomically replace the project history via a temporary file and rename."
+  (let* ((pathname (project-history-pathname))
+         (temporary (project-history-temporary-pathname))
+         (octets (serialize-project-history-entries entries)))
+    (unwind-protect
+         (progn
+           (with-open-file (stream temporary
+                            :direction :output
+                            :if-exists :error
+                            :if-does-not-exist :create
+                            :element-type '(unsigned-byte 8))
+             (write-sequence octets stream)
+             (finish-output stream))
+           ;; The typeless target must carry :unspecific, or rename-file
+           ;; merges the temporary's random suffix in as its type.
+           (uiop:rename-file-overwriting-target
+            temporary (make-pathname :type :unspecific :defaults pathname)))
+      (when (uiop:file-exists-p temporary)
+        (ignore-errors (delete-file temporary))))))
+
+#-os-windows
 (defun write-project-history-file (entries)
   "Atomically replace the project history with an owned mode-0600 file."
   (let* ((pathname (project-history-pathname))
