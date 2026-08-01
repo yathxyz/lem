@@ -411,6 +411,45 @@ jobs:
               throw "Keyboard smoke test saved '$actual' instead of 'abz'"
           }
 
+      - name: Assert stdio redirect resolves lem-home at runtime
+        shell: pwsh
+        run: |
+          # The GUI image has no console, so the *init-hooks* stdio redirect
+          # must open <lem-home>/logs/lem-stdio.log resolved from the runtime
+          # environment.  LEM_HOME is set to a directory that did not exist
+          # when the image was dumped, so the log appearing under it proves
+          # the destination was not baked in at build time (the original bug:
+          # uiop's temporary-directory cached the build machine's %TEMP%).
+          $lemHome = Join-Path $env:RUNNER_TEMP "lem-home-probe"
+          New-Item -ItemType Directory -Force -Path $lemHome | Out-Null
+          $env:LEM_HOME = "$lemHome\"
+          $env:LEM_YATH_OPENROUTER_MODEL_REFRESH = "0"
+          $env:LEM_YATH_CODEX_MODEL_REFRESH = "0"
+          $process = Start-Process -FilePath "bin\lem-yath-sdl2.exe" -PassThru
+          try {
+              $log = Join-Path $lemHome "logs\lem-stdio.log"
+              $found = $false
+              for ($attempt = 0; $attempt -lt 60; $attempt++) {
+                  Start-Sleep -Milliseconds 500
+                  if (Test-Path $log) { $found = $true; break }
+                  if ($process.HasExited) { break }
+              }
+              if (-not $found) {
+                  throw "lem-stdio.log was not created under the runtime LEM_HOME"
+              }
+          }
+          finally {
+              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+              $process.WaitForExit()
+          }
+
+      - name: Upload configured build for local validation
+        if: ${{ inputs.configured_only }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lem-yath-sdl2-windows
+          path: bin/
+
       - name: Package configured SDL2 build
         if: ${{ ! inputs.configured_only }}
         shell: pwsh

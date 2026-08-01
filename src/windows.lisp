@@ -14,17 +14,37 @@
 ;; this must be an SBCL init hook that runs before the toplevel function.
 #+sbcl
 (progn
+  (defun invalid-stdio-log-candidates ()
+    ;; uiop:temporary-directory must not be used here: it returns the
+    ;; value uiop cached when the release image was dumped (the build
+    ;; machine's %TEMP%), because uiop's image-restore hooks have not run
+    ;; yet at *init-hooks* time.  Resolve every destination from the
+    ;; environment of the running process instead.
+    (list (lambda ()
+            (let ((logdir (lem-logdir-pathname)))
+              (ensure-directories-exist logdir)
+              (merge-pathnames "lem-stdio.log" logdir)))
+          (lambda ()
+            (let ((temp (or (sb-ext:posix-getenv "TEMP")
+                            (sb-ext:posix-getenv "TMP"))))
+              (when temp
+                (merge-pathnames "lem-stdio.log"
+                                 (uiop:ensure-directory-pathname
+                                  (uiop:parse-native-namestring temp))))))))
   (defun redirect-invalid-windows-stdio ()
     (when (and (deploy:deployed-p)
                (cffi:null-pointer-p
                 (cffi:foreign-funcall "GetConsoleWindow" :pointer)))
-      (let ((sink (or (ignore-errors
-                        (open (merge-pathnames "lem-stdio.log"
-                                               (uiop:temporary-directory))
-                              :direction :output
-                              :if-exists :supersede
-                              :if-does-not-exist :create
-                              :external-format :utf-8))
+      (let ((sink (or (loop :for candidate :in (invalid-stdio-log-candidates)
+                            :for pathname := (ignore-errors (funcall candidate))
+                            :for stream := (and pathname
+                                                (ignore-errors
+                                                  (open pathname
+                                                        :direction :output
+                                                        :if-exists :supersede
+                                                        :if-does-not-exist :create
+                                                        :external-format :utf-8)))
+                            :when stream :return stream)
                       (make-broadcast-stream))))
         (setf sb-sys:*stdout* sink
               sb-sys:*stderr* sink
