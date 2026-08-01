@@ -31,35 +31,45 @@
               :element-type '(unsigned-byte 8)
               :initial-contents '(76 69 77 69 78 86 49 0)))
 
+(defun compilation-find-runtime-path-program (name)
+  "Resolve NAME from the wrapper's immutable runtime path only."
+  (loop :for directory
+          :in (uiop:split-string
+               (or (uiop:getenv "LEM_YATH_RUNTIME_PATH") "")
+               :separator (executable-path-separator))
+        :when (plusp (length directory))
+          :do (loop :for candidate-name :in (executable-candidate-names name)
+                    :for candidate :=
+                      (merge-pathnames
+                       candidate-name
+                       (uiop:ensure-directory-pathname directory))
+                    :when (and (ignore-errors (probe-file candidate))
+                               (not (uiop:directory-pathname-p candidate)))
+                      :do (return-from compilation-find-runtime-path-program
+                            candidate))))
+
 (defun compilation-find-runtime-program (name)
   "Resolve NAME from the wrapper's immutable runtime path when available."
-  (or (loop :for directory
-              :in (uiop:split-string
-                   (or (uiop:getenv "LEM_YATH_RUNTIME_PATH") "")
-                   :separator ":")
-            :for candidate :=
-              (and (plusp (length directory))
-                   (merge-pathnames
-                    name (uiop:ensure-directory-pathname directory)))
-            :when (and candidate
-                       (ignore-errors (probe-file candidate))
-                       (not (uiop:directory-pathname-p candidate)))
-              :return candidate)
+  (or (compilation-find-runtime-path-program name)
       (executable-find name)))
 
-(defun compilation-find-pinned-runtime-program (variable name)
-  "Resolve a wrapper-pinned absolute program, falling back to runtime NAME."
+(defun compilation-pinned-program (variable)
+  "Resolve VARIABLE as a pinned absolute program pathname, or NIL."
   (let* ((value (uiop:getenv variable))
          (candidate
            (and value
                 (plusp (length value))
                 (ignore-errors (pathname value)))))
-    (or (and candidate
-             (uiop:absolute-pathname-p candidate)
-             (ignore-errors (probe-file candidate))
-             (not (uiop:directory-pathname-p candidate))
-             candidate)
-        (compilation-find-runtime-program name))))
+    (and candidate
+         (uiop:absolute-pathname-p candidate)
+         (ignore-errors (probe-file candidate))
+         (not (uiop:directory-pathname-p candidate))
+         candidate)))
+
+(defun compilation-find-pinned-runtime-program (variable name)
+  "Resolve a wrapper-pinned absolute program, falling back to runtime NAME."
+  (or (compilation-pinned-program variable)
+      (compilation-find-runtime-program name)))
 
 ;; Trusted executables are cached on first use, before a selected project can
 ;; change PATH.  They must not be resolved at load time: a release image would
@@ -69,10 +79,73 @@
 (defvar *compilation-nproc-program* nil)
 (defvar *compilation-guardian-path* nil)
 
+#+os-windows
+(defun compilation-windows-untrusted-bash-p (pathname)
+  "Whether PATHNAME is one of the deceptive Windows bash.exe stubs.
+The WindowsApps execution-alias directory and System32 both ship a
+bash.exe that launches WSL (or, without a distribution, an error
+dialog); neither can run a native Windows compilation."
+  (flet ((normalized (pathname)
+           (string-downcase (uiop:native-namestring pathname))))
+    (let ((name (normalized pathname))
+          (windir (uiop:getenv "SystemRoot")))
+      (or (search "\\windowsapps\\" name)
+          (and windir
+               (plusp (length windir))
+               (uiop:string-prefix-p
+                (normalized (uiop:ensure-directory-pathname windir))
+                name))))))
+
+#+os-windows
+(defun compilation-windows-bash-candidates ()
+  "MSYS Bash locations derived from Git for Windows and MSYS2 installs.
+The usr/bin binary is the real Bash; the bin/ launcher shim is tried
+second.  A git.exe already trusted by PATH pins its own install root."
+  (append
+   (alexandria:when-let ((git (executable-find "git")))
+     (unless (compilation-windows-untrusted-bash-p git)
+       (let ((root (uiop:pathname-parent-directory-pathname
+                    (uiop:pathname-directory-pathname git))))
+         (list (merge-pathnames "usr/bin/bash.exe" root)
+               (merge-pathnames "bin/bash.exe" root)))))
+   (loop :for (variable subdirectory)
+           :in '(("ProgramFiles" "Git/")
+                 ("ProgramW6432" "Git/")
+                 ("ProgramFiles(x86)" "Git/")
+                 ("LOCALAPPDATA" "Programs/Git/"))
+         :for base := (uiop:getenv variable)
+         :when (and base (plusp (length base)))
+           :append (let ((root (merge-pathnames
+                                subdirectory
+                                (uiop:ensure-directory-pathname base))))
+                     (list (merge-pathnames "usr/bin/bash.exe" root)
+                           (merge-pathnames "bin/bash.exe" root))))
+   (list #p"c:/msys64/usr/bin/bash.exe"
+         #p"c:/msys32/usr/bin/bash.exe")))
+
+#+os-windows
+(defun compilation-windows-find-bash ()
+  "Locate a trusted MSYS Bash, never the WSL stubs on PATH."
+  (flet ((usable-p (candidate)
+           (and candidate
+                (ignore-errors (probe-file candidate))
+                (not (uiop:directory-pathname-p candidate))
+                (not (compilation-windows-untrusted-bash-p candidate)))))
+    (or (alexandria:when-let ((pinned (compilation-pinned-program
+                                       "LEM_YATH_BASH")))
+          (and (usable-p pinned) pinned))
+        (alexandria:when-let ((runtime (compilation-find-runtime-path-program
+                                        "bash")))
+          (and (usable-p runtime) runtime))
+        (find-if #'usable-p (compilation-windows-bash-candidates))
+        (alexandria:when-let ((found (executable-find "bash")))
+          (and (usable-p found) found)))))
+
 (defun compilation-bash-program ()
   (or *compilation-bash-program*
       (setf *compilation-bash-program*
-            (compilation-find-runtime-program "bash"))))
+            #+os-windows (compilation-windows-find-bash)
+            #-os-windows (compilation-find-runtime-program "bash"))))
 
 (defun compilation-guardian-python-program ()
   (or *compilation-guardian-python-program*
@@ -85,6 +158,19 @@
       (setf *compilation-nproc-program*
             (compilation-find-runtime-program "nproc"))))
 
+(defun compilation-guardian-image-candidate ()
+  "The guardian bundled beside a deployed image's executable.
+A dumped release image has no ASDF source tree, so the release packaging
+ships compilation-guardian.py next to the executable itself."
+  #+sbcl
+  (ignore-errors
+    (probe-file
+     (merge-pathnames "compilation-guardian.py"
+                      (uiop:pathname-directory-pathname
+                       sb-ext:*core-pathname*))))
+  #-sbcl
+  nil)
+
 (defun compilation-guardian-path ()
   (or *compilation-guardian-path*
       (setf *compilation-guardian-path*
@@ -95,7 +181,19 @@
                 (ignore-errors
                   (probe-file
                    (asdf:system-relative-pathname
-                    :lem-yath "compilation-guardian.py")))))))
+                    :lem-yath "compilation-guardian.py")))
+                (compilation-guardian-image-candidate)))))
+
+(defun compilation-ensure-supported ()
+  "Fail early on hosts that lack a usable compilation backend.
+POSIX hosts validate their process-group guardian at launch time.
+Windows instead needs a trusted MSYS Bash before prompting is useful:
+the bash.exe stubs in WindowsApps and System32 only launch WSL."
+  #+os-windows
+  (unless (compilation-bash-program)
+    (editor-error
+     "Compilation requires Git for Windows or MSYS2 Bash; none was found"))
+  t)
 
 (defvar *lem-yath-compilation-mode-keymap* (make-keymap))
 (defvar *compilation-session* nil)
@@ -118,6 +216,10 @@
   environment
   process
   pid
+  ;; Windows backend state: the Job Object HANDLE (a raw integer) that owns
+  ;; the command tree, and the private launch script deleted at reap time.
+  job
+  script-pathname
   control-armed-p
   (control-lock (bt2:make-lock :name "lem-yath/compilation-control"))
   reader-thread
@@ -178,6 +280,12 @@
                                               '("LC_ALL=C" "PATH="))))
                (count (and output
                            (parse-integer output :junk-allowed t))))
+          (and count (plusp count) count)))
+      #+os-windows
+      (ignore-errors
+        (let ((count (parse-integer
+                      (or (uiop:getenv "NUMBER_OF_PROCESSORS") "")
+                      :junk-allowed t)))
           (and count (plusp count) count)))
       1))
 
@@ -752,10 +860,16 @@ control lock serializes interrupt, release, and teardown requests."
 (defun compilation-force-stop (session)
   ;; The live broker signals a separately anchored command group whose leader
   ;; remains unreaped.  Lem disarms the capability with the same lock hold.
+  #+os-windows
+  (compilation-windows-force-stop session)
+  #-os-windows
   (compilation-send-guardian-command session "KILL" :disarm t))
 
 (defun compilation-stop-process-group-as (session state)
   "Set terminal STATE, request group SIGKILL, and disarm atomically."
+  #+os-windows
+  (compilation-windows-stop-tree-as session state)
+  #-os-windows
   (bt2:with-lock-held ((compilation-session-control-lock session))
     (setf (compilation-session-state session) state)
     (when (compilation-session-control-armed-p session)
@@ -765,6 +879,9 @@ control lock serializes interrupt, release, and teardown requests."
 
 (defun compilation-request-interrupt (session)
   "Atomically arm the grace deadline and ask the live broker for SIGINT."
+  #+os-windows
+  (compilation-windows-request-interrupt session)
+  #-os-windows
   (bt2:with-lock-held ((compilation-session-control-lock session))
     (when (compilation-session-control-armed-p session)
       (setf (compilation-session-interrupted-p session) t
@@ -783,13 +900,15 @@ control lock serializes interrupt, release, and teardown requests."
         sent-p))))
 
 (defun compilation-reap-process (session)
-  "Wait for SESSION's guardian, close its streams, and clear OS handles."
+  "Wait for SESSION's command owner, close its streams, and clear OS handles."
   (let ((process (compilation-session-process session))
         (exit-code nil))
     (when process
       (setf exit-code (ignore-errors (uiop:wait-process process)))
       (ignore-errors (uiop:close-streams process)))
     (compilation-disarm-control session)
+    #+os-windows
+    (compilation-windows-cleanup-session-resources session)
     (setf (compilation-session-process session) nil
           (compilation-session-pid session) nil)
     exit-code))
@@ -1032,6 +1151,412 @@ control lock serializes interrupt, release, and teardown requests."
             (compilation-session-control-armed-p session) nil)
       (compilation-write-guardian-line session "RELEASE")
       t)))
+
+;;; Windows backend ----------------------------------------------------------
+;;;
+;;; Windows has no fork, setpgid, or killpg, so the POSIX guardian cannot
+;;; run there.  This backend launches the trusted MSYS Bash directly and
+;;; anchors tree containment in a Job Object instead of a process group:
+;;;
+;;;   - the command never appears in any argv: it lives in a private launch
+;;;     script whose first line gates execution on Lem's START write;
+;;;   - Lem assigns Bash to a kill-on-close Job before sending START, so no
+;;;     part of the command can ever run outside the Job;
+;;;   - KILL is TerminateJobObject over the whole tree, and an exiting or
+;;;     crashed editor kills the tree when its last Job handle closes;
+;;;   - normal completion clears kill-on-close first, mirroring the POSIX
+;;;     guardian's RELEASE so intentional daemons may outlive the session;
+;;;   - interrupt is best effort: an MSYS `kill -INT` toward Bash's emulated
+;;;     tree, with the usual grace deadline escalating to the Job kill.
+
+#+os-windows
+(progn
+  (defconstant +compilation-win32-job-extended-limit-information+ 9
+    "The JobObjectExtendedLimitInformation information class.")
+  (defconstant +compilation-win32-job-limit-kill-on-job-close+ #x2000
+    "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.")
+  (defconstant +compilation-win32-job-limit-information-size+ 144
+    "sizeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION) on x86-64.")
+  (defconstant +compilation-win32-job-limit-flags-offset+ 16
+    "Byte offset of LimitFlags inside the basic limit information.")
+  (defconstant +compilation-win32-process-adopt-access+ #x0101
+    "PROCESS_SET_QUOTA | PROCESS_TERMINATE, as Job assignment requires.")
+  (defconstant +compilation-win32-kill-exit-code+ 137
+    "The exit status the POSIX backend reports for a SIGKILLed command.")
+
+  (sb-alien:define-alien-routine ("CreateJobObjectW"
+                                  %compilation-win32-create-job-object)
+      sb-alien:unsigned-long-long
+    (security-attributes sb-alien:unsigned-long-long)
+    (name sb-alien:unsigned-long-long))
+
+  (sb-alien:define-alien-routine ("SetInformationJobObject"
+                                  %compilation-win32-set-information-job-object)
+      sb-alien:int
+    (job sb-alien:unsigned-long-long)
+    (information-class sb-alien:int)
+    (information sb-alien:unsigned-long-long)
+    (information-length sb-alien:unsigned-int))
+
+  (sb-alien:define-alien-routine ("AssignProcessToJobObject"
+                                  %compilation-win32-assign-process-to-job-object)
+      sb-alien:int
+    (job sb-alien:unsigned-long-long)
+    (process sb-alien:unsigned-long-long))
+
+  (sb-alien:define-alien-routine ("TerminateJobObject"
+                                  %compilation-win32-terminate-job-object)
+      sb-alien:int
+    (job sb-alien:unsigned-long-long)
+    (exit-code sb-alien:unsigned-int))
+
+  (sb-alien:define-alien-routine ("OpenProcess"
+                                  %compilation-win32-open-process)
+      sb-alien:unsigned-long-long
+    (desired-access sb-alien:unsigned-int)
+    (inherit-handle sb-alien:int)
+    (process-id sb-alien:unsigned-int))
+
+  (sb-alien:define-alien-routine ("TerminateProcess"
+                                  %compilation-win32-terminate-process)
+      sb-alien:int
+    (process sb-alien:unsigned-long-long)
+    (exit-code sb-alien:unsigned-int))
+
+  (sb-alien:define-alien-routine ("CloseHandle"
+                                  %compilation-win32-close-handle)
+      sb-alien:int
+    (handle sb-alien:unsigned-long-long)))
+
+#+os-windows
+(defun compilation-windows-set-job-limit-flags (job flags)
+  "Install FLAGS as JOB's only basic limit; return whether it succeeded."
+  (sb-alien:with-alien ((information (sb-alien:array sb-alien:unsigned-char
+                                                     144)))
+    (dotimes (index +compilation-win32-job-limit-information-size+)
+      (setf (sb-alien:deref information index) 0))
+    (dotimes (index 4)
+      (setf (sb-alien:deref information
+                           (+ +compilation-win32-job-limit-flags-offset+
+                              index))
+            (ldb (byte 8 (* 8 index)) flags)))
+    (not (zerop
+          (%compilation-win32-set-information-job-object
+           job
+           +compilation-win32-job-extended-limit-information+
+           (sb-sys:sap-int (sb-alien:alien-sap information))
+           +compilation-win32-job-limit-information-size+)))))
+
+#+os-windows
+(defun compilation-windows-kill-job-locked (session)
+  "Terminate SESSION's Job tree and disarm; the control lock must be held."
+  (let ((job (compilation-session-job session)))
+    (when (and job
+               (not (zerop job))
+               (compilation-session-control-armed-p session))
+      (ignore-errors
+        (%compilation-win32-terminate-job-object
+         job +compilation-win32-kill-exit-code+))))
+  (setf (compilation-session-control-armed-p session) nil))
+
+#+os-windows
+(defun compilation-windows-force-stop (session)
+  "Kill SESSION's whole Job tree and disarm atomically."
+  (when session
+    (bt2:with-lock-held ((compilation-session-control-lock session))
+      (compilation-windows-kill-job-locked session))))
+
+#+os-windows
+(defun compilation-windows-stop-tree-as (session state)
+  "Set terminal STATE, kill the whole Job tree, and disarm atomically."
+  (bt2:with-lock-held ((compilation-session-control-lock session))
+    (setf (compilation-session-state session) state)
+    (compilation-windows-kill-job-locked session)))
+
+#+os-windows
+(defun compilation-windows-send-best-effort-interrupt (session)
+  "Ask a sibling MSYS process to deliver SIGINT toward Bash's tree.
+Windows has no console-free equivalent of killpg(SIGINT).  MSYS's kill
+reaches only MSYS descendants and native build tools ignore it entirely,
+so the grace deadline still escalates to the Job kill either way."
+  (ignore-errors
+    (let ((pid (compilation-session-pid session))
+          (bash (compilation-bash-program)))
+      (when (and (integerp pid) (plusp pid) bash)
+        (let ((process
+                (uiop:launch-program
+                 (list (namestring bash) "--noprofile" "--norc" "-c"
+                       (format nil
+                               "kill -INT -- -~d 2>/dev/null || kill -INT ~d"
+                               pid pid))
+                 :input nil
+                 :output nil
+                 :error-output nil)))
+          (bt2:make-thread
+           (lambda ()
+             (ignore-errors (uiop:wait-process process))
+             (ignore-errors (uiop:close-streams process)))
+           :name "lem-yath/compilation-interrupt"))))))
+
+#+os-windows
+(defun compilation-windows-request-interrupt (session)
+  "Atomically arm the grace deadline and send the best-effort SIGINT."
+  (bt2:with-lock-held ((compilation-session-control-lock session))
+    (when (compilation-session-control-armed-p session)
+      (setf (compilation-session-interrupted-p session) t
+            (compilation-session-state session) :interrupting
+            (compilation-session-interrupt-deadline session)
+            (or (compilation-session-interrupt-deadline session)
+                (+ (get-internal-real-time)
+                   (round (* *compilation-force-kill-delay*
+                             internal-time-units-per-second)))))
+      (compilation-windows-send-best-effort-interrupt session)
+      t)))
+
+#+os-windows
+(defun compilation-windows-release-job (session)
+  "Mirror the guardian's RELEASE: drop kill-on-close on normal completion
+so intentional daemons survive the Job handle closing at reap time."
+  (bt2:with-lock-held ((compilation-session-control-lock session))
+    (let ((job (compilation-session-job session)))
+      (when (and (compilation-session-control-armed-p session)
+                 (eq (compilation-session-state session) :running)
+                 (not (compilation-session-interrupted-p session))
+                 job
+                 (not (zerop job)))
+        (setf (compilation-session-state session) :finalizing
+              (compilation-session-control-armed-p session) nil)
+        (ignore-errors
+          (compilation-windows-set-job-limit-flags job 0))
+        t))))
+
+#+os-windows
+(defun compilation-windows-cleanup-session-resources (session)
+  "Close the Job handle and delete the private launch script; idempotent."
+  (bt2:with-lock-held ((compilation-session-control-lock session))
+    (let ((job (compilation-session-job session)))
+      (when (and job (not (zerop job)))
+        (ignore-errors (%compilation-win32-close-handle job)))
+      (setf (compilation-session-job session) nil))
+    (let ((script (compilation-session-script-pathname session)))
+      (when script
+        (ignore-errors (delete-file script))
+        (setf (compilation-session-script-pathname session) nil)))))
+
+#+os-windows
+(defun compilation-windows-restrict-file-acl (pathname)
+  "Best-effort: replace PATHNAME's inherited ACEs with a user-only grant.
+%TEMP% already inherits a user-private ACL, so failure here (redirected
+temp, unusual SIDs, missing icacls) must not block compilation."
+  (ignore-errors
+    (let* ((system-root (uiop:getenv "SystemRoot"))
+           (icacls (and system-root
+                        (plusp (length system-root))
+                        (probe-file
+                         (merge-pathnames
+                          "System32/icacls.exe"
+                          (uiop:ensure-directory-pathname system-root)))))
+           (user (uiop:getenv "USERNAME")))
+      (when (and icacls user (plusp (length user)))
+        (uiop:run-program
+         (list (namestring icacls)
+               (uiop:native-namestring pathname)
+               "/inheritance:r"
+               "/grant:r"
+               (format nil "~a:F" user))
+         :ignore-error-status t
+         :input nil
+         :output nil
+         :error-output nil)))))
+
+#+os-windows
+(defun compilation-windows-script-octets (command)
+  "The private launch script: a START gate, then COMMAND with null stdin.
+Bash may not execute any part of COMMAND until Lem has assigned it to
+the session's Job Object and written the gate line to its stdin."
+  (when (find (code-char 0) command)
+    (error "Compilation command contains NUL"))
+  ;; One physical line: a multi-line ~-continued control string breaks
+  ;; under a CRLF checkout, where ~Return is an invalid format directive.
+  (babel:string-to-octets
+   (format nil
+           "read -r lem_yath_start_gate || exit 125~%unset lem_yath_start_gate~%exec </dev/null~%~a~%"
+           command)
+   :encoding :utf-8
+   :errorp t))
+
+#+os-windows
+(defun compilation-windows-create-script (command)
+  "Write COMMAND to a fresh private script file and return its pathname.
+The command therefore never appears in any process's argv.  Exclusive
+creation defeats name squatting, and the ACL is tightened before any
+command text lands in the file."
+  (let ((octets (compilation-windows-script-octets command))
+        (directory (uiop:temporary-directory)))
+    (loop :for attempt :from 0 :below 128
+          :for pathname
+            := (merge-pathnames
+                (format nil "lem-yath-compile-~d-~d-~d.sh"
+                        (get-universal-time)
+                        (get-internal-real-time)
+                        attempt)
+                directory)
+          :for stream := (open pathname
+                               :direction :output
+                               :element-type '(unsigned-byte 8)
+                               :if-exists nil
+                               :if-does-not-exist :create)
+          :when stream
+            :do (unwind-protect
+                     (progn
+                       (compilation-windows-restrict-file-acl pathname)
+                       (write-sequence octets stream)
+                       (finish-output stream))
+                  (close stream))
+                (return pathname)
+          :finally (error "Cannot create a private compilation script"))))
+
+#+os-windows
+(defun compilation-windows-adopt-process (session)
+  "Assign the just-launched Bash to the session's Job and arm control.
+On failure the gated Bash is terminated directly: it has not run any
+part of the command yet, so killing that single process is complete
+cleanup (and its gate `read' fails closed when stdin is reaped anyway)."
+  (let* ((pid (compilation-session-pid session))
+         (handle (and (integerp pid)
+                      (plusp pid)
+                      (%compilation-win32-open-process
+                       +compilation-win32-process-adopt-access+ 0 pid))))
+    (when (or (null handle) (zerop handle))
+      (error "Cannot open the compilation Bash process"))
+    (unwind-protect
+         (if (zerop (%compilation-win32-assign-process-to-job-object
+                     (compilation-session-job session) handle))
+             (progn
+               (ignore-errors
+                 (%compilation-win32-terminate-process
+                  handle +compilation-win32-kill-exit-code+))
+               (error "Cannot assign the compilation Bash to its Job"))
+             (compilation-arm-control session))
+      (ignore-errors (%compilation-win32-close-handle handle)))))
+
+#+os-windows
+(defun compilation-launch-process-windows (session)
+  "Launch Bash inside a kill-on-close Job Object and gate its script.
+Mirrors the POSIX launch contract: on return the session is armed and
+the command is running; on error every OS resource is reclaimed."
+  (let ((bash (or (compilation-bash-program)
+                  (editor-error
+                   "Compilation requires Git for Windows or MSYS2 Bash; none was found")))
+        (job (%compilation-win32-create-job-object 0 0)))
+    (when (zerop job)
+      (editor-error "Cannot create a compilation Job Object"))
+    (setf (compilation-session-job session) job)
+    (handler-case
+        (progn
+          (unless (compilation-windows-set-job-limit-flags
+                   job +compilation-win32-job-limit-kill-on-job-close+)
+            (error "Cannot configure the compilation Job Object"))
+          (setf (compilation-session-script-pathname session)
+                (compilation-windows-create-script
+                 (compilation-session-command session)))
+          (let ((process
+                  (uiop:launch-program
+                   (list (namestring bash) "--noprofile" "--norc"
+                         (uiop:native-namestring
+                          (compilation-session-script-pathname session)))
+                   :directory (compilation-session-directory session)
+                   ;; The captured project environment reaches Bash as its
+                   ;; ordinary environment block; only the script path is
+                   ;; ever visible in process arguments.
+                   :environment (compilation-session-environment session)
+                   :input :stream
+                   :output :stream
+                   :error-output :output
+                   :element-type '(unsigned-byte 8))))
+            (setf (compilation-session-process session) process
+                  (compilation-session-pid session)
+                  (uiop:process-info-pid process))
+            (compilation-windows-adopt-process session)
+            ;; Bash's first script line blocks reading this gate, so no
+            ;; part of the command could run before the Job assignment.
+            (compilation-write-guardian-line session "START")
+            process))
+      (error (condition)
+        (if (compilation-control-armed-p session)
+            (compilation-force-stop session)
+            (bt2:with-lock-held ((compilation-session-control-lock session))
+              (ignore-errors
+                (%compilation-win32-terminate-job-object
+                 job +compilation-win32-kill-exit-code+))))
+        (compilation-reap-process session)
+        (error condition)))))
+
+#+os-windows
+(defun compilation-reader-worker-windows (session)
+  "Drain Bash's merged output until its process exits, then reap and report.
+Unlike the POSIX reader there is no control protocol: process liveness is
+authoritative, and pipe EOF is deliberately ignored because descendants
+inherit the output handle."
+  (let ((process (compilation-session-process session))
+        (octet-count 0)
+        (utf8-tail (make-array 0 :element-type '(unsigned-byte 8)))
+        (overflow-p nil)
+        (reader-error nil)
+        (force-kill-sent-p nil))
+    (handler-case
+        (let ((stream (uiop:process-info-output process))
+              (chunk (make-array 8192 :element-type '(unsigned-byte 8))))
+          (loop
+            (when (and (not force-kill-sent-p)
+                       (compilation-session-interrupted-p session)
+                       (compilation-interrupt-deadline-reached-p session))
+              (compilation-force-stop session)
+              (setf force-kill-sent-p t))
+            (multiple-value-bind (length output-eof-p)
+                (compilation-read-live-octets stream chunk)
+              (declare (ignore output-eof-p))
+              (let* ((remaining (- *compilation-output-limit* octet-count))
+                     (accepted (max 0 (min remaining length))))
+                (when (plusp accepted)
+                  (incf octet-count accepted)
+                  (multiple-value-bind (text tail)
+                      (compilation-decode-utf8-prefix
+                       utf8-tail chunk accepted)
+                    (setf utf8-tail tail)
+                    (when (plusp (length text))
+                      (compilation-queue-event
+                       (lambda ()
+                         (compilation-deliver-chunk session text))))))
+                (when (< accepted length)
+                  (setf overflow-p t)
+                  (compilation-force-stop session)
+                  (setf force-kill-sent-p t)
+                  (return))
+                (when (and (not (uiop:process-alive-p process))
+                           (compilation-output-burst-drained-p length chunk))
+                  (when (plusp (length utf8-tail))
+                    (error
+                     "Compilation output ended within a UTF-8 character"))
+                  (return))
+                (when (zerop length)
+                  (sleep 0.01))))))
+      (error (condition)
+        (unless (member (compilation-session-state session)
+                        '(:replaced :buffer-killed :reload :editor-exit))
+          (setf reader-error (princ-to-string condition))
+          ;; Nobody drains the pipe once decoding fails; stop the Job
+          ;; before waiting so a verbose tree cannot block on a full
+          ;; stdout buffer.
+          (compilation-force-stop session))))
+    (unless (or overflow-p reader-error)
+      (compilation-windows-release-job session))
+    (let ((exit-code (compilation-reap-process session)))
+      (setf (compilation-session-interrupt-deadline session) nil)
+      (compilation-queue-event
+       (lambda ()
+         (compilation-deliver-exit
+          session exit-code reader-error overflow-p))))))
 
 (defun compilation-reader-worker (session)
   (let ((process (compilation-session-process session))
@@ -1277,6 +1802,16 @@ control lock serializes interrupt, release, and teardown requests."
           (compilation-reap-process session)
           (error condition))))))
 
+(defun compilation-launch-session-process (session)
+  "Start SESSION's command with the platform process backend."
+  #+os-windows (compilation-launch-process-windows session)
+  #-os-windows (compilation-launch-process session))
+
+(defun compilation-session-reader-worker (session)
+  "Run the platform reader that owns SESSION's process until exit."
+  #+os-windows (compilation-reader-worker-windows session)
+  #-os-windows (compilation-reader-worker session))
+
 (defun compilation-render-header (session)
   (let ((buffer (compilation-session-buffer session)))
     (with-buffer-read-only buffer nil
@@ -1316,10 +1851,10 @@ control lock serializes interrupt, release, and teardown requests."
     (compilation-render-header session)
     (handler-case
         (progn
-          (compilation-launch-process session)
+          (compilation-launch-session-process session)
           (let ((reader-thread
                   (bt2:make-thread
-                   (lambda () (compilation-reader-worker session))
+                   (lambda () (compilation-session-reader-worker session))
                    :name "lem-yath/compilation-reader")))
             (setf (compilation-session-reader-thread session) reader-thread
                   (compilation-session-state session) :running
@@ -1343,6 +1878,7 @@ control lock serializes interrupt, release, and teardown requests."
 
 (define-command lem-yath-compile () ()
   "Prompt for and run a shell compilation in the current buffer directory."
+  (compilation-ensure-supported)
   (let* ((origin-buffer (current-buffer))
          (origin-window (current-window))
          (directory (compilation-directory-for-buffer origin-buffer))
@@ -1365,6 +1901,7 @@ control lock serializes interrupt, release, and teardown requests."
 
 (define-command lem-yath-recompile () ()
   "Rerun the last compilation with its exact command, directory, and environment."
+  (compilation-ensure-supported)
   (let ((session (or (and (eq (buffer-major-mode (current-buffer))
                               'lem-yath-compilation-mode)
                           (buffer-value (current-buffer)
