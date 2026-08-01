@@ -2,10 +2,16 @@
 
 (in-package :lem-yath)
 
-(defparameter *org-publish-output-directory*
-  (uiop:ensure-directory-pathname
-   (merge-pathnames "proj/web/org-publishing/" (user-homedir-pathname)))
-  "Configured destination for the Org-roam publishing projects.")
+(defvar *org-publish-output-directory* nil
+  "Configured destination for the Org-roam publishing projects.
+Resolved under the running user's home on first use, never at load time.")
+
+(defun org-publish-output-directory ()
+  (or *org-publish-output-directory*
+      (setf *org-publish-output-directory*
+            (uiop:ensure-directory-pathname
+             (merge-pathnames "proj/web/org-publishing/"
+                              (user-homedir-pathname))))))
 
 (defparameter *org-publish-file-count-limit* 20000)
 (defparameter *org-publish-source-byte-limit* (* 16 1024 1024))
@@ -656,7 +662,7 @@ Existing symbolic-link or non-directory components are rejected."
                       (make-hash-table :test #'equal)))
         (make-org-publish-plan
          :project project
-         :output-root *org-publish-output-directory*
+         :output-root (org-publish-output-directory)
          :sources sources
          :static-files static-files
          :id-index ids

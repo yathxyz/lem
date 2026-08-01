@@ -13,10 +13,15 @@
 
 (declaim (ftype function project-path-in-directory-p))
 
-(defvar *citar-bib-files*
-  (list (merge-pathnames "librarium/nodes.bib" (workdir))
-        (merge-pathnames "librarium/zotero.bib" (workdir)))
-  "BibTeX files searched in order, mirroring citar's bibliography list.")
+(defvar *citar-bib-files* nil
+  "BibTeX files searched in order, mirroring citar's bibliography list.
+Resolved from `workdir' on first use, never at load time.")
+
+(defun citar-bib-files ()
+  (or *citar-bib-files*
+      (setf *citar-bib-files*
+            (list (merge-pathnames "librarium/nodes.bib" (workdir))
+                  (merge-pathnames "librarium/zotero.bib" (workdir))))))
 
 (defvar *citar-fields* '("title" "author" "year" "file" "url")
   "BibTeX fields kept on each parsed entry plist (plus :key and :type).")
@@ -185,12 +190,12 @@ dropped rather than aborting the whole parse."
         nil))))
 
 (defun citar-entries ()
-  "Parse every existing bib file in *citar-bib-files* (in order) and return the
+  "Parse every existing bib file in `citar-bib-files' (in order) and return the
 concatenated list of entry plists. Earlier files take precedence on duplicate
 keys, matching citar's lookup order."
   (let ((seen (make-hash-table :test 'equal))
         (out '()))
-    (dolist (file *citar-bib-files*)
+    (dolist (file (citar-bib-files))
       (dolist (entry (citar-parse-file file))
         (let ((key (getf entry :key)))
           (unless (gethash key seen)
@@ -326,7 +331,7 @@ Resolution order: the `file' field (pdf/html externally, else find-file),
 then `url' externally, then a note under $WORKDIR/roam/references/."
   (let ((entries (citar-entries)))
     (if (null entries)
-        (message "No bibliography entries (checked ~{~a~^, ~})" *citar-bib-files*)
+        (message "No bibliography entries (checked ~{~a~^, ~})" (citar-bib-files))
         (alexandria:when-let ((entry (citar-prompt-entry "Open citation: " entries)))
           (citar-open-entry entry)))))
 
@@ -334,6 +339,6 @@ then `url' externally, then a note under $WORKDIR/roam/references/."
   "Pick a bibliography entry and insert @<key> at point (citar-insert-citation)."
   (let ((entries (citar-entries)))
     (if (null entries)
-        (message "No bibliography entries (checked ~{~a~^, ~})" *citar-bib-files*)
+        (message "No bibliography entries (checked ~{~a~^, ~})" (citar-bib-files))
         (alexandria:when-let ((entry (citar-prompt-entry "Insert key: " entries)))
           (insert-string (current-point) (format nil "@~a" (getf entry :key)))))))

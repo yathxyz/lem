@@ -16,9 +16,15 @@ Falls back to $SALTA_SUPABASE_URL then the credentials file.")
   "Supabase service_role key, used as both apikey header and Bearer token.
 Falls back to $SALTA_SUPABASE_KEY then the credentials file.")
 
-(defvar *salta-credentials-file*
-  (merge-pathnames ".config/salta/credentials.json" (user-homedir-pathname))
-  "JSON file {\"url\":..,\"key\":..} consulted after defvars and env vars.")
+(defvar *salta-credentials-file* nil
+  "JSON file {\"url\":..,\"key\":..} consulted after defvars and env vars.
+Resolved under the running user's home on first use, never at load time.")
+
+(defun salta-credentials-file ()
+  (or *salta-credentials-file*
+      (setf *salta-credentials-file*
+            (merge-pathnames ".config/salta/credentials.json"
+                             (user-homedir-pathname)))))
 
 (defvar *salta-web-base-url* "https://backup.ecolink.ie"
   "Base URL for browser-bound Salta application links.")
@@ -34,9 +40,8 @@ Falls back to $SALTA_SUPABASE_KEY then the credentials file.")
 (declaim (special *project-process-timeout*))
 
 (defun salta-read-credentials ()
-  "Parsed credentials hash-table from `*salta-credentials-file*', or NIL."
-  (let ((path (and *salta-credentials-file*
-                   (uiop:probe-file* *salta-credentials-file*))))
+  "Parsed credentials hash-table from `salta-credentials-file', or NIL."
+  (let ((path (uiop:probe-file* (salta-credentials-file))))
     (when path
       (handler-case
           (with-open-file (s path)

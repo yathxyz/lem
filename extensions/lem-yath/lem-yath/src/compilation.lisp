@@ -61,23 +61,41 @@
              candidate)
         (compilation-find-runtime-program name))))
 
-;; Cache trusted executables before a selected project can change PATH.
-(defvar *compilation-bash-program*
-  (compilation-find-runtime-program "bash"))
-(defvar *compilation-guardian-python-program*
-  (compilation-find-pinned-runtime-program
-   "LEM_YATH_GUARDIAN_PYTHON" "python3"))
-(defvar *compilation-nproc-program*
-  (compilation-find-runtime-program "nproc"))
-(defvar *compilation-guardian-path*
-  (or (ignore-errors
-        (probe-file
-         (asdf:system-relative-pathname
-          :lem-yath "src/compilation-guardian.py")))
-      (ignore-errors
-        (probe-file
-         (asdf:system-relative-pathname
-          :lem-yath "compilation-guardian.py")))))
+;; Trusted executables are cached on first use, before a selected project can
+;; change PATH.  They must not be resolved at load time: a release image would
+;; bake the build machine's lookups (or their absence) into the dumped values.
+(defvar *compilation-bash-program* nil)
+(defvar *compilation-guardian-python-program* nil)
+(defvar *compilation-nproc-program* nil)
+(defvar *compilation-guardian-path* nil)
+
+(defun compilation-bash-program ()
+  (or *compilation-bash-program*
+      (setf *compilation-bash-program*
+            (compilation-find-runtime-program "bash"))))
+
+(defun compilation-guardian-python-program ()
+  (or *compilation-guardian-python-program*
+      (setf *compilation-guardian-python-program*
+            (compilation-find-pinned-runtime-program
+             "LEM_YATH_GUARDIAN_PYTHON" "python3"))))
+
+(defun compilation-nproc-program ()
+  (or *compilation-nproc-program*
+      (setf *compilation-nproc-program*
+            (compilation-find-runtime-program "nproc"))))
+
+(defun compilation-guardian-path ()
+  (or *compilation-guardian-path*
+      (setf *compilation-guardian-path*
+            (or (ignore-errors
+                  (probe-file
+                   (asdf:system-relative-pathname
+                    :lem-yath "src/compilation-guardian.py")))
+                (ignore-errors
+                  (probe-file
+                   (asdf:system-relative-pathname
+                    :lem-yath "compilation-guardian.py")))))))
 
 (defvar *lem-yath-compilation-mode-keymap* (make-keymap))
 (defvar *compilation-session* nil)
@@ -151,7 +169,7 @@
 (defun compilation-number-of-processors ()
   "Return the affinity-aware processor count used by Emacs 31's default."
   (or (ignore-errors
-        (let* ((program *compilation-nproc-program*)
+        (let* ((program (compilation-nproc-program))
                (output (and program
                             (uiop:run-program (list (namestring program))
                                               :output :string
@@ -1194,11 +1212,11 @@ control lock serializes interrupt, release, and teardown requests."
       (message "~a" status))))
 
 (defun compilation-launch-process (session)
-  (let ((bash (or *compilation-bash-program*
+  (let ((bash (or (compilation-bash-program)
                   (editor-error "Pinned Bash is unavailable")))
-        (python (or *compilation-guardian-python-program*
+        (python (or (compilation-guardian-python-program)
                     (editor-error "Pinned Python is unavailable")))
-        (guardian (or *compilation-guardian-path*
+        (guardian (or (compilation-guardian-path)
                       (editor-error "Compilation guardian is unavailable"))))
     (let ((process
             (uiop:launch-program

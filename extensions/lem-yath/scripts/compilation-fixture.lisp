@@ -49,9 +49,10 @@
                           :direction :output
                           :if-exists :supersede
                           :if-does-not-exist :create)
-    (write-line (if *compilation-guardian-path*
-                    (uiop:native-namestring *compilation-guardian-path*)
-                    "<missing>")
+    (write-line (let ((guardian (compilation-guardian-path)))
+                  (if guardian
+                      (uiop:native-namestring guardian)
+                      "<missing>"))
                 stream)))
 (defun compilation-test-output-burst-drained-probe (octet-count buffer)
   "Record positive underfull calls made by the active live reader."
@@ -158,27 +159,30 @@
            (leader-binding-command lem-vi-mode:*normal-keymap* "c c"))
          (expected *compilation-test-expected-make-command*)
          (make (executable-find "make"))
+         (pinned-bash (compilation-bash-program))
+         (pinned-python (compilation-guardian-python-program))
+         (pinned-nproc (compilation-nproc-program))
+         (pinned-guardian (compilation-guardian-path))
          (pinned-ok
-           (and *compilation-bash-program*
-                *compilation-guardian-python-program*
-                *compilation-nproc-program*
-                *compilation-guardian-path*
-                (probe-file *compilation-bash-program*)
-                (probe-file *compilation-guardian-python-program*)
-                (probe-file *compilation-nproc-program*)
-                (probe-file *compilation-guardian-path*)
+           (and pinned-bash
+                pinned-python
+                pinned-nproc
+                pinned-guardian
+                (probe-file pinned-bash)
+                (probe-file pinned-python)
+                (probe-file pinned-nproc)
+                (probe-file pinned-guardian)
                 (or (not *compilation-test-shadow-path*)
                     (and
                      (not (search
                            *compilation-test-shadow-path*
-                           (namestring *compilation-bash-program*)))
+                           (namestring pinned-bash)))
                      (not (search
                            *compilation-test-shadow-path*
-                           (namestring
-                            *compilation-guardian-python-program*)))
+                           (namestring pinned-python)))
                      (not (search
                            *compilation-test-shadow-path*
-                           (namestring *compilation-nproc-program*)))))))
+                           (namestring pinned-nproc)))))))
          (drain-buffer
            (make-array 8192 :element-type '(unsigned-byte 8)))
          (drain-ok

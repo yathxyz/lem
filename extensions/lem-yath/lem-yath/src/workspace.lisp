@@ -22,10 +22,12 @@
           (setf (uiop:getenv "WORKDIR") "~/work")
           "~/work"))))
 
-(defparameter *workdir*
-  (resolve-workdir (configured-workdir))
-  "Absolute notes root fixed at startup so later `:cd' cannot retarget writes.")
+(defvar *workdir* nil
+  "Absolute notes root, fixed on first use so later `:cd' cannot retarget
+writes.  Must not be initialized at load time: a release image would bake
+the build machine's home directory into the dumped value.")
 
 (defun workdir ()
   "The absolute notes root initialized from $WORKDIR."
-  *workdir*)
+  (or *workdir*
+      (setf *workdir* (resolve-workdir (configured-workdir)))))

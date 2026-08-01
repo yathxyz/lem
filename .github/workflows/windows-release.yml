@@ -443,6 +443,57 @@ jobs:
               $process.WaitForExit()
           }
 
+      - name: Assert workspace roots resolve at runtime
+        shell: pwsh
+        run: |
+          # Machine-contingent roots (lem-yath's $WORKDIR chain, the salta and
+          # org-publish home paths) must resolve in the running process, not
+          # at image dump time.  WORKDIR points at a directory that did not
+          # exist when the image was dumped; the probe writes the resolved
+          # values so any baked build-machine path fails the assertion.
+          $workdir = Join-Path $env:RUNNER_TEMP "workdir-probe"
+          New-Item -ItemType Directory -Force -Path $workdir | Out-Null
+          $env:WORKDIR = $workdir
+          $env:LEM_YATH_OPENROUTER_MODEL_REFRESH = "0"
+          $env:LEM_YATH_CODEX_MODEL_REFRESH = "0"
+          $report = Join-Path $env:RUNNER_TEMP "workdir-probe-report.txt"
+          $reportLisp = $report -replace '\\', '/'
+          $probe = Join-Path $env:RUNNER_TEMP "workdir-probe.lisp"
+          @"
+          (cl:with-open-file (s "$reportLisp" :direction :output
+                                :if-exists :supersede :if-does-not-exist :create)
+            (cl:format s "workdir=~a~%" (cl:namestring (lem-yath::workdir)))
+            (cl:format s "salta=~a~%" (cl:namestring (lem-yath::salta-credentials-file)))
+            (cl:format s "publish=~a~%" (cl:namestring (lem-yath::org-publish-output-directory))))
+          "@ | Out-File -Encoding ascii $probe
+          $probeLisp = $probe -replace '\\', '/'
+          $process = Start-Process -FilePath "bin\lem-yath-sdl2.exe" `
+            -ArgumentList '--eval', "`"(cl:load \`"$probeLisp\`")`"" -PassThru
+          try {
+              $found = $false
+              for ($attempt = 0; $attempt -lt 120; $attempt++) {
+                  Start-Sleep -Milliseconds 500
+                  if (Test-Path $report) { $found = $true; break }
+                  if ($process.HasExited) { break }
+              }
+              if (-not $found) {
+                  throw "Workspace probe report was not written"
+              }
+              Start-Sleep -Milliseconds 500
+              $content = Get-Content $report -Raw
+              Write-Host $content
+              if ($content -notmatch [regex]::Escape(($workdir -replace '\\', '/'))) {
+                  throw "workdir did not resolve to the runtime WORKDIR"
+              }
+              if ($content -match 'runneradmin') {
+                  throw "A workspace root leaked a build-time path"
+              }
+          }
+          finally {
+              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+              $process.WaitForExit()
+          }
+
       - name: Upload configured build for local validation
         if: ${{ inputs.configured_only }}
         uses: actions/upload-artifact@v4
