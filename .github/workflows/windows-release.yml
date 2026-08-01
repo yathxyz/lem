@@ -250,6 +250,160 @@ jobs:
                                    -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "configured executable exited $($process.ExitCode)" }
 
+      - name: Trace configured SDL keyboard input
+        shell: pwsh
+        run: |
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Threading;
+
+          public static class LemWindow {
+              [DllImport("user32.dll")]
+              public static extern bool SetForegroundWindow(IntPtr handle);
+
+              [StructLayout(LayoutKind.Sequential)]
+              private struct Input {
+                  public uint Type;
+                  public InputUnion Data;
+              }
+
+              [StructLayout(LayoutKind.Explicit)]
+              private struct InputUnion {
+                  [FieldOffset(0)] public KeyboardInput Keyboard;
+                  [FieldOffset(0)] public MouseInput Mouse;
+              }
+
+              [StructLayout(LayoutKind.Sequential)]
+              private struct KeyboardInput {
+                  public ushort VirtualKey;
+                  public ushort ScanCode;
+                  public uint Flags;
+                  public uint Time;
+                  public UIntPtr ExtraInfo;
+              }
+
+              [StructLayout(LayoutKind.Sequential)]
+              private struct MouseInput {
+                  public int X;
+                  public int Y;
+                  public uint MouseData;
+                  public uint Flags;
+                  public uint Time;
+                  public UIntPtr ExtraInfo;
+              }
+
+              [DllImport("user32.dll", SetLastError = true)]
+              private static extern uint SendInput(uint count, Input[] inputs, int size);
+
+              private const uint InputKeyboard = 1;
+              private const uint FlagKeyUp = 0x0002;
+
+              private static void Send(ushort virtualKey, ushort scanCode, bool keyUp) {
+                  var inputs = new[] {
+                      new Input {
+                          Type = InputKeyboard,
+                          Data = new InputUnion {
+                              Keyboard = new KeyboardInput {
+                                  VirtualKey = virtualKey,
+                                  ScanCode = scanCode,
+                                  Flags = keyUp ? FlagKeyUp : 0
+                              }
+                          }
+                      }
+                  };
+                  if (SendInput(1, inputs, Marshal.SizeOf(typeof(Input))) != 1) {
+                      throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                  }
+                  Thread.Sleep(40);
+              }
+
+              public static void Tap(ushort virtualKey, ushort scanCode) {
+                  Send(virtualKey, scanCode, false);
+                  Send(virtualKey, scanCode, true);
+              }
+
+              public static void Chord(ushort modifierVirtualKey, ushort modifierScanCode,
+                                       ushort virtualKey, ushort scanCode) {
+                  Send(modifierVirtualKey, modifierScanCode, false);
+                  Tap(virtualKey, scanCode);
+                  Send(modifierVirtualKey, modifierScanCode, true);
+              }
+          }
+          '@
+
+          $testFile = Join-Path $env:RUNNER_TEMP "lem-keyboard-smoke.txt"
+          $traceFile = Join-Path $env:RUNNER_TEMP "lem-keyboard-trace.txt"
+          [IO.File]::WriteAllText($testFile, "")
+          $env:LEM_SDL2_KEYBOARD_TRACE = "1"
+          $env:LEM_YATH_OPENROUTER_MODEL_REFRESH = "0"
+          $env:LEM_YATH_CODEX_MODEL_REFRESH = "0"
+
+          $process = Start-Process -FilePath "bin\lem-yath-sdl2.exe" `
+                                   -ArgumentList $testFile `
+                                   -RedirectStandardError $traceFile `
+                                   -PassThru
+          try {
+              $handle = [IntPtr]::Zero
+              for ($attempt = 0; $attempt -lt 60; $attempt++) {
+                  Start-Sleep -Milliseconds 500
+                  $process.Refresh()
+                  if ($process.HasExited) {
+                      throw "Lem exited during startup with code $($process.ExitCode)"
+                  }
+                  $handle = $process.MainWindowHandle
+                  if ($handle -ne [IntPtr]::Zero) { break }
+              }
+              if ($handle -eq [IntPtr]::Zero) { throw "Lem did not create a window" }
+              if (-not [LemWindow]::SetForegroundWindow($handle)) {
+                  throw "Could not focus the Lem window"
+              }
+              Start-Sleep -Seconds 20
+              if (-not [LemWindow]::SetForegroundWindow($handle)) {
+                  throw "Could not refocus the Lem window"
+              }
+              Start-Sleep -Milliseconds 500
+
+              # The configured image starts in Vi Normal state. Enter Insert,
+              # then type A, B, C and Backspace.
+              [LemWindow]::Tap(0x49, 0x17)
+              Start-Sleep -Milliseconds 300
+              [LemWindow]::Tap(0x41, 0x1E)
+              [LemWindow]::Tap(0x42, 0x30)
+              [LemWindow]::Tap(0x43, 0x2E)
+              [LemWindow]::Tap(0x08, 0x0E)
+              Start-Sleep -Milliseconds 500
+              # Left Alt + X, then Escape.
+              [LemWindow]::Chord(0x12, 0x38, 0x58, 0x2D)
+              Start-Sleep -Milliseconds 500
+              [LemWindow]::Tap(0x1B, 0x01)
+              Start-Sleep -Milliseconds 500
+              [LemWindow]::Tap(0x5A, 0x2C)
+              # Left Ctrl + X, Left Ctrl + S.
+              [LemWindow]::Chord(0x11, 0x1D, 0x58, 0x2D)
+              Start-Sleep -Milliseconds 300
+              [LemWindow]::Chord(0x11, 0x1D, 0x53, 0x1F)
+              Start-Sleep -Seconds 3
+          }
+          finally {
+              if (-not $process.HasExited) {
+                  Stop-Process -Id $process.Id -Force
+              }
+              $process.WaitForExit()
+          }
+
+          $trace = Get-Content $traceFile -Encoding Unicode -Raw
+          Write-Host $trace
+          foreach ($expected in @('Backspace', 'Escape', 'M-x', 'C-x', 'C-s')) {
+              if ($trace -notmatch [regex]::Escape($expected)) {
+                  throw "Keyboard trace did not contain $expected"
+              }
+          }
+          $actual = [IO.File]::ReadAllText($testFile)
+          if ($actual -ne "abz") {
+              throw "Keyboard smoke test saved '$actual' instead of 'abz'"
+          }
+
       - name: Package configured SDL2 build
         if: ${{ ! inputs.configured_only }}
         shell: pwsh

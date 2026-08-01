@@ -130,10 +130,18 @@
 (defvar *modifier* (make-modifier))
 (defvar *textediting-text* "")
 
+(defun trace-keyboard-event (event &rest fields)
+  (when (uiop:getenv "LEM_SDL2_KEYBOARD_TRACE")
+    (format *error-output* "LEM_SDL2_KEYBOARD_TRACE ~S~%"
+            (cons event fields))
+    (finish-output *error-output*)))
+
 (defmethod handle-textediting (platform text)
+  (trace-keyboard-event :text-editing :length (length text))
   (setf *textediting-text* text))
 
 (defun send-key-event (key)
+  (trace-keyboard-event :lem-key :key (princ-to-string key))
   (if (lem:match-key key :ctrl t :sym "]")
       (lem:send-abort-event (lem:find-editor-thread) nil)
       ;; t0: the SDL key event is now in hand -- this frontend's closest
@@ -275,6 +283,9 @@
                 :sym sym)))
 
 (defun handle-text-input-internal (text)
+  (trace-keyboard-event :text-input
+                        :length (length text)
+                        :composition-length (length *textediting-text*))
   ;; SDL_TEXTINPUT commits the active IME composition (or represents direct
   ;; text input when no composition was active).  Do not leave the preceding
   ;; SDL_TEXTEDITING value latched: handle-key-down-internal suppresses command
@@ -296,6 +307,14 @@
 (defun handle-key-down-internal (key-event)
   (let ((code (key-event-code key-event))
         (modifier (key-event-modifier key-event)))
+    (trace-keyboard-event :key-down
+                          :code code
+                          :shift (not (null (modifier-shift modifier)))
+                          :ctrl (not (null (modifier-ctrl modifier)))
+                          :meta (not (null (modifier-meta modifier)))
+                          :super (not (null (modifier-super modifier)))
+                          :hyper (not (null (modifier-hyper modifier)))
+                          :composition-length (length *textediting-text*))
     (update-modifier *modifier* modifier)
     (when (equal *textediting-text* "")
       (multiple-value-bind (sym text-input-p) (convert-to-sym code)
