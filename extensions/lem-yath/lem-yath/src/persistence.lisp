@@ -1159,12 +1159,20 @@ processes without discarding independent concurrent additions."
            (return (values hash
                            (eq (read-byte stream nil :eof) :eof)))))))))
 
+(defun windows-file-metadata (pathname stream)
+  ;; sb-posix's stat family cannot be used on Windows: SBCL streams carry
+  ;; NT handles, not CRT descriptors, so fstat fails on every call.  Size
+  ;; and write time (re-read after hashing) provide the stability check;
+  ;; the dev/ino slots hold constants so the shape matches
+  ;; stat-file-metadata for file-signatures-equal-p.
+  (list 0 0 (file-length stream) (file-write-date pathname) 0))
+
 (defun file-state-signature (pathname &key digest full-digest)
   "Read one stable descriptor and return metadata plus an optional bounded hash."
   (unless (uiop:file-exists-p pathname)
     (return-from file-state-signature (list :missing)))
   (handler-case
-      #+sbcl
+      #+(and sbcl (not os-windows))
       (with-open-file (stream pathname :element-type '(unsigned-byte 8))
         (let* ((descriptor (sb-sys::fd-stream-fd stream))
                (before (stat-file-metadata (sb-posix:fstat descriptor)))
@@ -1183,6 +1191,21 @@ processes without discarding independent concurrent additions."
             (if (and complete (equal before after) (equal after path-after))
                 (append (list :present) after (list hash))
                 (list :unstable)))))
+      #+(and sbcl os-windows)
+      (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+        (let* ((before (windows-file-metadata pathname stream))
+               (size (third before))
+               (hash nil)
+               (complete t))
+          (when (and digest
+                     (or full-digest
+                         (<= size *safe-auto-revert-digest-limit*)))
+            (multiple-value-setq (hash complete)
+              (bounded-stream-content-digest stream size)))
+          (let ((after (windows-file-metadata pathname stream)))
+            (if (and complete (equal before after))
+                (append (list :present) after (list hash))
+                (list :unstable)))))
       #-sbcl
       (error "Safe external-change handling requires SBCL")
     (error () (list :unreadable))))
@@ -1199,8 +1222,11 @@ processes without discarding independent concurrent additions."
 (defun buffer-file-path-key (buffer)
   (alexandria:when-let ((filename (buffer-filename buffer)))
     (handler-case
+        ;; :namestring :native, not uiop's default unix parsing: a Windows
+        ;; drive-letter path ("C:/...") reads as relative under unix
+        ;; semantics, which made every buffer's key NIL there.
         (uiop:native-namestring
-         (uiop:ensure-pathname filename :want-absolute t))
+         (uiop:ensure-pathname filename :namestring :native :want-absolute t))
       (error () nil))))
 
 (defun buffer-fingerprint-temporary-pathname ()
@@ -1213,7 +1239,8 @@ processes without discarding independent concurrent additions."
 
 (defun buffer-output-fingerprint (buffer)
   "Stream BUFFER through Lem's exact writer and return its byte size and hash."
-  #+sbcl
+  #+(and sbcl os-windows) (windows-buffer-output-fingerprint buffer)
+  #+(and sbcl (not os-windows))
   (let* ((encoding (buffer-encoding buffer))
          (internal-p
            (or (null encoding)
@@ -1306,6 +1333,56 @@ processes without discarding independent concurrent additions."
                         (uiop:native-namestring temporary))))))
   #-sbcl
   (error "Safe persistence requires the supported SBCL runtime"))
+
+#+(and sbcl os-windows)
+(defun windows-buffer-output-fingerprint (buffer)
+  ;; The POSIX implementation's descriptor tricks (O_NOFOLLOW, dup,
+  ;; unlink-while-open) are unavailable here; :if-exists :error on a
+  ;; random per-process name provides the exclusive create, and the file
+  ;; is deleted in the cleanup instead of unlinked up front.
+  (let* ((encoding (buffer-encoding buffer))
+         (internal-p
+           (or (null encoding)
+               (typep encoding 'lem/buffer/encodings:internal-encoding)))
+         (check (lem/buffer/encodings:encoding-check encoding))
+         (temporary (buffer-fingerprint-temporary-pathname)))
+    (when check
+      (map-region (buffer-start-point buffer) (buffer-end-point buffer) check))
+    (unwind-protect
+         (progn
+           (with-open-file (output-stream temporary
+                            :direction :output
+                            :if-exists :error
+                            :if-does-not-exist :create
+                            :element-type (if internal-p
+                                              'character
+                                              '(unsigned-byte 8))
+                            :external-format
+                            (if (and internal-p encoding)
+                                (lem/buffer/encodings:encoding-external-format
+                                 encoding)
+                                :utf-8))
+             (map-region
+              (buffer-start-point buffer)
+              (buffer-end-point buffer)
+              (if internal-p
+                  (lem/buffer/file::%write-region-to-file
+                   (if encoding
+                       (lem/buffer/encodings:encoding-end-of-line encoding)
+                       :lf)
+                   output-stream)
+                  (lem/buffer/file::%%write-region-to-file
+                   encoding output-stream)))
+             (finish-output output-stream))
+           (with-open-file (input-stream temporary
+                            :element-type '(unsigned-byte 8))
+             (let ((size (file-length input-stream)))
+               (multiple-value-bind (digest complete)
+                   (bounded-stream-content-digest input-stream size)
+                 (unless complete
+                   (error "Encoded buffer fingerprint changed while being read"))
+                 (values size digest)))))
+      (ignore-errors (delete-file temporary)))))
 
 (defun stable-buffer-file-signature (buffer pathname)
   "Return BUFFER's stable on-disk identity.

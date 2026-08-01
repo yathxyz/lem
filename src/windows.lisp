@@ -49,6 +49,16 @@
         (setf sb-sys:*stdout* sink
               sb-sys:*stderr* sink
               sb-sys:*stdin* (make-concatenated-stream)))))
+  (defun refresh-uiop-image-caches ()
+    ;; uiop caches its temporary directory (and friends) at image dump
+    ;; time; nothing in the deployed boot sequence runs uiop's
+    ;; image-restore hooks, so uiop:temporary-directory kept returning the
+    ;; build machine's %TEMP% forever.  Every consumer breaks silently:
+    ;; the persistence save fingerprint, emergency save, vundo diffs.
+    ;; Re-derive it from the running process's environment.
+    (ignore-errors
+      (uiop:symbol-call :uiop/stream :setup-temporary-directory)))
+  (pushnew 'refresh-uiop-image-caches sb-ext:*init-hooks*)
   (pushnew 'redirect-invalid-windows-stdio sb-ext:*init-hooks*))
 
 ;; Tell the deploy library not to bundle OS-provided DLLs.  async-process
