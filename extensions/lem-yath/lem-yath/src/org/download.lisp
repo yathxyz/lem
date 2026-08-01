@@ -104,6 +104,7 @@
       (editor-error "The file URL is not absolute"))
     pathname))
 
+#-os-windows
 (defun org-download-open-temporary (root)
   "Return a new owner-only temporary pathname and descriptor below ROOT."
   #+sbcl
@@ -150,6 +151,39 @@
       (editor-error "Org download produced no data"))
     count))
 
+#+os-windows
+(defun org-download-call-with-temporary-output (root writer)
+  "Call WRITER with a plain binary stream on an exclusively created file.
+SB-POSIX on Windows lacks O_NOFOLLOW, and binary fd-streams over CRT
+descriptors cannot write; ROOT's ACL protects the reserved file."
+  (loop :repeat 32
+        :for pathname :=
+          (merge-pathnames
+           (format nil ".lem-yath-download.~d.~16,'0x"
+                   (sb-posix:getpid) (random (ash 1 60)))
+           root)
+        :do
+           (alexandria:when-let
+               ((stream (open pathname
+                              :direction :output
+                              :if-exists nil
+                              :if-does-not-exist :create
+                              :element-type '(unsigned-byte 8))))
+             (let ((complete-p nil))
+               (unwind-protect
+                    (progn
+                      (funcall writer stream)
+                      (finish-output stream)
+                      (close stream)
+                      (setf complete-p t)
+                      (return pathname))
+                 (unless complete-p
+                   (ignore-errors (close stream :abort t))
+                   (ignore-errors (delete-file pathname))))))
+        :finally
+           (editor-error "Could not reserve an Org download temporary file")))
+
+#-os-windows
 (defun org-download-call-with-temporary-output (root writer)
   "Call WRITER with a binary stream and return its complete temporary file."
   #+sbcl

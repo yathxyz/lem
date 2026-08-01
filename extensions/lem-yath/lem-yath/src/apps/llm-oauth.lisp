@@ -69,15 +69,38 @@
   (let ((directory (uiop:pathname-directory-pathname pathname)))
     (ensure-directories-exist pathname)
     #+sbcl
-    (let ((stat (sb-posix:stat (uiop:native-namestring directory))))
+    (let ((stat (sb-posix:stat (platform-stat-namestring directory))))
       (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                       sb-posix:s-ifdir)
                    (platform-stat-owned-by-current-user-p stat)
-                   (zerop (logand (sb-posix:stat-mode stat) #o022)))
+                   (platform-stat-mode-private-p stat #o022))
         (error "OAuth credential directory must be user-owned and not writable by others")))
     #-sbcl (error "Safe OAuth credential access requires SBCL")
     directory))
 
+#+os-windows
+(defun llm-oauth-read-json-file (pathname &key required)
+  "Read one private JSON PATHNAME through the profile directory ACL."
+  ;; SB-POSIX on Windows lacks O_NOFOLLOW and real mode bits, and binary
+  ;; fd-streams over CRT descriptors cannot write, so credential files are
+  ;; read with plain streams under the ACL-protected profile directory.
+  (unless (uiop:file-exists-p pathname)
+    (when required (error "OAuth credential file is missing"))
+    (return-from llm-oauth-read-json-file nil))
+  (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+    (let ((length (file-length stream)))
+      (when (> length *llm-oauth-auth-file-limit*)
+        (error "OAuth credential file exceeds the size limit"))
+      (let ((octets (make-array length :element-type '(unsigned-byte 8))))
+        (unless (= length (read-sequence octets stream))
+          (error "Could not read the complete OAuth credential file"))
+        (handler-case
+            (yason:parse
+             (sb-ext:octets-to-string octets :external-format :utf-8))
+          (error ()
+            (error "OAuth credential file contains malformed JSON")))))))
+
+#-os-windows
 (defun llm-oauth-read-json-file (pathname &key required)
   "Read one private, regular, user-owned JSON PATHNAME through a descriptor."
   (unless (uiop:file-exists-p pathname)
@@ -129,6 +152,30 @@
            #-sbcl 0
            (llm-http-random-hex 16))))
 
+#+os-windows
+(defun llm-oauth-write-json-file (pathname object)
+  "Atomically replace private JSON PATHNAME via a temporary file and rename."
+  (llm-oauth-prepare-parent pathname)
+  (let* ((temporary (llm-oauth-temporary-pathname pathname))
+         (text (with-output-to-string (stream) (yason:encode object stream)))
+         (octets (sb-ext:string-to-octets text :external-format :utf-8)))
+    (when (> (length octets) *llm-oauth-auth-file-limit*)
+      (error "Refusing an oversized OAuth credential object"))
+    (unwind-protect
+         (progn
+           (with-open-file (stream temporary
+                            :direction :output
+                            :if-exists :error
+                            :if-does-not-exist :create
+                            :element-type '(unsigned-byte 8))
+             (write-sequence octets stream)
+             (finish-output stream))
+           (uiop:rename-file-overwriting-target temporary pathname)
+           object)
+      (when (uiop:file-exists-p temporary)
+        (ignore-errors (delete-file temporary))))))
+
+#-os-windows
 (defun llm-oauth-write-json-file (pathname object)
   "Atomically write OBJECT to private JSON PATHNAME."
   (llm-oauth-prepare-parent pathname)

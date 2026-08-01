@@ -68,10 +68,9 @@
 (defun llm-context-symlink-p (pathname)
   #+sbcl
   (handler-case
-      (= (logand (sb-posix:stat-mode
-                  (sb-posix:lstat (uiop:native-namestring pathname)))
-                 sb-posix:s-ifmt)
-         sb-posix:s-iflnk)
+      (platform-symlink-mode-p
+       (sb-posix:stat-mode
+        (sb-posix:lstat (platform-stat-namestring pathname))))
     (error () nil))
   #-sbcl
   (declare (ignore pathname))

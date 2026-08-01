@@ -166,6 +166,7 @@ directory symlinks.  A failed or unavailable scanner produces no candidates."
         (roam-stat-optional-value stat "STAT-MTIME-NSEC")
         (roam-stat-optional-value stat "STAT-CTIME-NSEC")))
 
+#-os-windows
 (defun roam-read-open-flags ()
   (let ((no-follow (find-symbol "O-NOFOLLOW" :sb-posix)))
     (logior sb-posix:o-rdonly
@@ -184,6 +185,57 @@ directory symlinks.  A failed or unavailable scanner produces no candidates."
          (string= (uiop:native-namestring opened)
                   (uiop:native-namestring pathname)))))
 
+#+os-windows
+(defun roam-read-note (pathname &optional
+                                  (root (ignore-errors
+                                          (truename (roam-directory)))))
+  "Read one bounded regular UTF-8 note through plain streams.
+Returns text, byte count, and a status keyword.  SB-POSIX on Windows
+lacks O_NOFOLLOW/O_NONBLOCK and /proc descriptor paths, so containment
+is checked against the resolved pathname instead."
+  (handler-case
+      (let ((opened (ignore-errors (truename pathname))))
+        (unless (and opened root (roam-path-in-root-p opened root))
+          (return-from roam-read-note (values nil 0 :outside)))
+        (let ((before (handler-case
+                          (sb-posix:stat (platform-stat-namestring pathname))
+                        (sb-posix:syscall-error () nil))))
+          (unless (and before
+                       (= (logand (sb-posix:stat-mode before) sb-posix:s-ifmt)
+                          sb-posix:s-ifreg))
+            (return-from roam-read-note (values nil 0 :special)))
+          (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+            (let ((size (file-length stream)))
+              (when (> size *roam-file-byte-limit*)
+                (return-from roam-read-note (values nil 0 :oversized)))
+              (let ((octets (make-array size :element-type '(unsigned-byte 8)))
+                    (after nil))
+                (cond
+                  ((not (and (= (read-sequence octets stream) size)
+                             (eq (read-byte stream nil :eof) :eof)
+                             (setf after
+                                   (handler-case
+                                       (sb-posix:stat
+                                        (platform-stat-namestring pathname))
+                                     (sb-posix:syscall-error () nil)))
+                             (equal (roam-stat-signature before)
+                                    (roam-stat-signature after))))
+                   (values nil size :changed))
+                  ((find 0 octets)
+                   (values nil size :binary))
+                  (t
+                   (handler-case
+                       (values
+                        (babel:octets-to-string octets
+                                                :encoding :utf-8
+                                                :errorp t)
+                        size
+                        :ok)
+                     (error ()
+                       (values nil size :unreadable))))))))))
+    (error () (values nil 0 :unreadable))))
+
+#-os-windows
 (defun roam-read-note (pathname &optional
                                   (root (ignore-errors
                                           (truename (roam-directory)))))

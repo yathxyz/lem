@@ -120,9 +120,9 @@
     (ensure-directories-exist pathname)
     #+sbcl
     (if (and (llm-preset-file-override) existed)
-        (let ((stat (sb-posix:stat (uiop:native-namestring directory))))
+        (let ((stat (sb-posix:stat (platform-stat-namestring directory))))
           (unless (and (platform-stat-owned-by-current-user-p stat)
-                       (zerop (logand (sb-posix:stat-mode stat) #o077)))
+                       (platform-stat-mode-private-p stat #o077))
             (error "LLM preset override directory must be private and user-owned")))
         (sb-posix:chmod (uiop:native-namestring directory) #o700))
     #-sbcl
@@ -305,6 +305,31 @@
       :test #'equal)
      stream)))
 
+#+os-windows
+(defun llm-write-user-presets (presets)
+  "Atomically replace the presets via a temporary file and rename."
+  ;; SB-POSIX on Windows lacks O_NOFOLLOW and mode bits; the preset
+  ;; directory ACL protects the file instead.
+  (let* ((pathname (llm-preset-pathname))
+         (temporary (llm-preset-temporary-pathname pathname))
+         (text (llm-preset-json-text presets))
+         (octets (sb-ext:string-to-octets text :external-format :utf-8)))
+    (when (> (length octets) *llm-preset-file-size-limit*)
+      (error "Refusing an oversized LLM preset file"))
+    (unwind-protect
+         (progn
+           (with-open-file (stream temporary
+                            :direction :output
+                            :if-exists :error
+                            :if-does-not-exist :create
+                            :element-type '(unsigned-byte 8))
+             (write-sequence octets stream)
+             (finish-output stream))
+           (uiop:rename-file-overwriting-target temporary pathname))
+      (when (uiop:file-exists-p temporary)
+        (ignore-errors (delete-file temporary))))))
+
+#-os-windows
 (defun llm-write-user-presets (presets)
   "Atomically write validated PRESETS with private permissions."
   (let* ((pathname (llm-preset-pathname))

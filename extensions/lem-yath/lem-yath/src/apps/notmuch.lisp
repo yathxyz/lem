@@ -1654,14 +1654,13 @@ post-command hook, opening it removes `unread' from those messages once."
                     (sb-posix:mkdir (uiop:native-namestring pathname) #o700)
                     (setf created-p t)
                     (let ((stat (sb-posix:lstat
-                                 (uiop:native-namestring pathname))))
+                                 (platform-stat-namestring pathname))))
                       (unless
                           (and (platform-stat-owned-by-current-user-p stat)
                                (= (logand (sb-posix:stat-mode stat)
                                           sb-posix:s-ifmt)
                                   sb-posix:s-ifdir)
-                               (zerop (logand (sb-posix:stat-mode stat)
-                                             #o077)))
+                               (platform-stat-mode-private-p stat #o077))
                         (error "Unsafe attachment directory")))
                     (return pathname))
                 (error ()
@@ -1673,13 +1672,43 @@ post-command hook, opening it removes `unread' from those messages once."
   #-sbcl
   (editor-error "Secure attachment preview requires the supported SBCL runtime"))
 
+#+os-windows
+(defun notmuch-open-private-part-stream (pathname)
+  "Exclusively create PATHNAME as a plain binary output stream.
+SB-POSIX on Windows lacks O_NOFOLLOW, and binary fd-streams over CRT
+descriptors cannot write; the private directory ACL guards the file."
+  (open pathname
+        :direction :output
+        :if-exists :error
+        :if-does-not-exist :create
+        :element-type '(unsigned-byte 8)))
+
+#-os-windows
+(defun notmuch-open-private-part-stream (pathname)
+  "Exclusively create private mode-0600 PATHNAME as a binary output stream."
+  (let ((descriptor
+          (sb-posix:open
+           (uiop:native-namestring pathname)
+           (logior sb-posix:o-creat sb-posix:o-excl
+                   sb-posix:o-wronly sb-posix:o-nofollow)
+           #o600)))
+    (handler-case
+        (progn
+          (platform-secure-file-descriptor descriptor #o600)
+          (sb-sys:make-fd-stream
+           descriptor :output t :element-type '(unsigned-byte 8)
+           :buffering :full
+           :name (uiop:native-namestring pathname)))
+      (error (condition)
+        (ignore-errors (sb-posix:close descriptor))
+        (error condition)))))
+
 (defun notmuch-extract-raw-part (attachment pathname &key (pdf-p t))
   "Extract ATTACHMENT's decoded raw bytes into a new private PATHNAME.
 When PDF-P is true, also require PDF magic before accepting the file."
   #+sbcl
   (let ((notmuch (or (executable-find "notmuch")
                      (editor-error "notmuch not found on PATH")))
-        (descriptor nil)
         (file-stream nil)
         (process nil)
         (finished-p nil)
@@ -1687,19 +1716,7 @@ When PDF-P is true, also require PDF magic before accepting the file."
         (*project-process-timeout* *notmuch-process-timeout*))
     (unwind-protect
          (progn
-           (setf descriptor
-                 (sb-posix:open
-                  (uiop:native-namestring pathname)
-                  (logior sb-posix:o-creat sb-posix:o-excl
-                          sb-posix:o-wronly sb-posix:o-nofollow)
-                  #o600))
-           (platform-secure-file-descriptor descriptor #o600)
-           (setf file-stream
-                 (sb-sys:make-fd-stream
-                  descriptor :output t :element-type '(unsigned-byte 8)
-                  :buffering :full
-                  :name (uiop:native-namestring pathname))
-                 descriptor nil)
+           (setf file-stream (notmuch-open-private-part-stream pathname))
            (setf process
                  (uiop:launch-program
                   (project-timeout-command
@@ -1746,7 +1763,6 @@ When PDF-P is true, also require PDF magic before accepting the file."
            (setf complete-p t)
            pathname)
       (when file-stream (ignore-errors (close file-stream :abort t)))
-      (when descriptor (ignore-errors (sb-posix:close descriptor)))
       (when (and process (not finished-p))
         (ignore-errors (uiop:terminate-process process))
         (ignore-errors (uiop:wait-process process)))
@@ -1903,9 +1919,18 @@ When PDF-P is true, also require PDF magic before accepting the file."
                                      (notmuch-received-stat-snapshot current))))
                (editor-error
                 "The destination changed after overwrite confirmation")))
-           #+sbcl
+           #+(and sbcl (not os-windows))
            (sb-posix:rename (uiop:native-namestring temporary)
                             (uiop:native-namestring target))
+           ;; CRT rename cannot replace an existing destination.  The typeless
+           ;; target must carry :unspecific, or rename-file merges the
+           ;; temporary's type in.
+           #+os-windows
+           (uiop:rename-file-overwriting-target
+            temporary
+            (if (pathname-type target)
+                target
+                (make-pathname :type :unspecific :defaults target)))
            #-sbcl
            (editor-error "Safe MIME-part saving requires the supported SBCL runtime")
            (setf temporary nil)

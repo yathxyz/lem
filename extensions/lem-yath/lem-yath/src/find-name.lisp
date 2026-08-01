@@ -403,9 +403,9 @@
     (editor-error "Not a find-name result buffer")))
 
 (defun find-name-native-path (path)
-  (etypecase path
-    (string path)
-    (pathname (uiop:native-namestring path))))
+  ;; CRT stat rejects trailing separators, so directory pathnames are
+  ;; trimmed on Windows; elsewhere this is the plain native namestring.
+  (platform-stat-namestring path))
 
 (defun find-name-path-stat (path)
   "Return PATH's lstat data, including for dangling symbolic links."

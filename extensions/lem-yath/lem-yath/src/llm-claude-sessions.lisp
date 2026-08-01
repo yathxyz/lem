@@ -280,6 +280,20 @@
                     message-id))
     (nreverse lines)))
 
+#+os-windows
+(defun llm-claude-open-private-output (pathname)
+  "Exclusively create PATHNAME as a plain stream under the profile ACL.
+Returns the stream and a NIL descriptor: SB-POSIX on Windows lacks
+O_NOFOLLOW, and binary fd-streams over CRT descriptors cannot write."
+  (values
+   (open pathname
+         :direction :output
+         :if-exists :error
+         :if-does-not-exist :create
+         :external-format :utf-8)
+   nil))
+
+#-os-windows
 (defun llm-claude-open-private-output (pathname)
   #+sbcl
   (let ((descriptor

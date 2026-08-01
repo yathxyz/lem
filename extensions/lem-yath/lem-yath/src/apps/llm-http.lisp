@@ -183,11 +183,11 @@
     (progn
       (when (or (not override) (not existed))
         (sb-posix:chmod (uiop:native-namestring directory) #o700))
-      (let ((stat (sb-posix:lstat (uiop:native-namestring directory))))
+      (let ((stat (sb-posix:lstat (platform-stat-namestring directory))))
         (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                         sb-posix:s-ifdir)
                      (platform-stat-owned-by-current-user-p stat)
-                     (zerop (logand (sb-posix:stat-mode stat) #o077)))
+                     (platform-stat-mode-private-p stat #o077))
           (error "Copilot token directory must be private and user-owned"))))
     #-sbcl (error "Safe Copilot token storage requires SBCL")
     directory))
@@ -195,11 +195,11 @@
 (defun llm-copilot-validate-token-file (pathname)
   (when (uiop:file-exists-p pathname)
     #+sbcl
-    (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
+    (let ((stat (sb-posix:lstat (platform-stat-namestring pathname))))
       (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                       sb-posix:s-ifreg)
                    (platform-stat-owned-by-current-user-p stat)
-                   (zerop (logand (sb-posix:stat-mode stat) #o077)))
+                   (platform-stat-mode-private-p stat #o077))
         (error "Copilot token file must be private, regular, and user-owned")))
     #-sbcl (error "Safe Copilot token storage requires SBCL")))
 
@@ -229,6 +229,33 @@
            #-sbcl 0
            (llm-http-random-hex 16))))
 
+#+os-windows
+(defun llm-copilot-write-token-object (kind object)
+  "Atomically replace the token file via a temporary file and rename."
+  ;; SB-POSIX on Windows lacks O_NOFOLLOW and mode bits; the cache
+  ;; directory ACL protects the token files instead.
+  (llm-copilot-prepare-private-directory)
+  (let* ((pathname (llm-copilot-token-pathname kind))
+         (temporary (llm-copilot-temporary-pathname pathname))
+         (text (with-output-to-string (stream) (yason:encode object stream)))
+         (octets (sb-ext:string-to-octets text :external-format :utf-8)))
+    (when (> (length octets) *llm-http-token-file-limit*)
+      (error "Refusing an oversized Copilot token"))
+    (unwind-protect
+         (progn
+           (with-open-file (stream temporary
+                            :direction :output
+                            :if-exists :error
+                            :if-does-not-exist :create
+                            :element-type '(unsigned-byte 8))
+             (write-sequence octets stream)
+             (finish-output stream))
+           (uiop:rename-file-overwriting-target temporary pathname)
+           object)
+      (when (uiop:file-exists-p temporary)
+        (ignore-errors (delete-file temporary))))))
+
+#-os-windows
 (defun llm-copilot-write-token-object (kind object)
   "Atomically persist OBJECT as a private JSON token file."
   (llm-copilot-prepare-private-directory)

@@ -14,6 +14,24 @@
 
 (defparameter *git-marker-byte-limit* 4096)
 
+#+os-windows
+(defun read-git-marker (root)
+  "Read ROOT's bounded .git marker through a plain stream.
+SB-POSIX on Windows lacks O_NOFOLLOW/O_NONBLOCK, and fd-streams over
+CRT descriptors are unreliable, so the marker is read directly."
+  (handler-case
+      (let ((marker (merge-pathnames ".git" root)))
+        (with-open-file (stream marker :element-type '(unsigned-byte 8))
+          (let ((size (file-length stream)))
+            (when (<= size *git-marker-byte-limit*)
+              (let ((octets (make-array size
+                                        :element-type '(unsigned-byte 8))))
+                (when (= (read-sequence octets stream) size)
+                  (sb-ext:octets-to-string
+                   octets :external-format :utf-8)))))))
+    (error () nil)))
+
+#-os-windows
 (defun read-git-marker (root)
   "Read ROOT's .git marker through one bounded, verified descriptor."
   (let ((descriptor nil)

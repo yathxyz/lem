@@ -11,9 +11,9 @@
 (defconstant +dirvish-file-count-overflow+ 15000)
 
 (defun dirvish-native-path (path)
-  (etypecase path
-    (string path)
-    (pathname (uiop:native-namestring path))))
+  ;; CRT stat rejects trailing separators, so directory pathnames are
+  ;; trimmed on Windows; elsewhere this is the plain native namestring.
+  (platform-stat-namestring path))
 
 (defun dirvish-live-window-p (window)
   (and window (not (lem-core::window-deleted-p window))))
@@ -41,10 +41,9 @@
   (let ((pathname (dirvish-window-selected-path window)))
     (if (and pathname
              (ignore-errors
-               (= (logand (sb-posix:stat-mode
-                            (sb-posix:lstat (dirvish-native-path pathname)))
-                           sb-posix:s-ifmt)
-                  sb-posix:s-iflnk)))
+               (platform-symlink-mode-p
+                (sb-posix:stat-mode
+                 (sb-posix:lstat (dirvish-native-path pathname))))))
         (alexandria:when-let ((target (ignore-errors (probe-file pathname))))
           (values (format nil "→ ~a "
                           (completion-path-display-string
@@ -149,7 +148,7 @@
              (if (eq count :many)
                  " MANY "
                  (dirvish-human-readable count 1000))))
-          ((= type sb-posix:s-iflnk)
+          ((platform-symlink-mode-p type)
            (handler-case
                (let ((target (sb-posix:stat native)))
                  (if (= (logand (sb-posix:stat-mode target) sb-posix:s-ifmt)
@@ -371,9 +370,9 @@
             "~a~2%Type: ~a~%Size: ~d bytes~@[~2%~a~]~%"
             (dirvish-preview-display-path pathname)
             (cond
-              ((= type sb-posix:s-iflnk) "symbolic link")
+              ((platform-symlink-mode-p type) "symbolic link")
               ((= type sb-posix:s-ififo) "named pipe")
-              ((= type sb-posix:s-ifsock) "socket")
+              ((platform-socket-mode-p type) "socket")
               ((= type sb-posix:s-ifchr) "character device")
               ((= type sb-posix:s-ifblk) "block device")
               ((= type sb-posix:s-ifreg) "regular file")

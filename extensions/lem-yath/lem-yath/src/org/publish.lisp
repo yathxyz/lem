@@ -74,7 +74,7 @@ Resolved under the running user's home on first use, never at load time.")
 
 (defun org-publish-lstat (pathname)
   (handler-case
-      (sb-posix:lstat (uiop:native-namestring pathname))
+      (sb-posix:lstat (platform-stat-namestring pathname))
     (sb-posix:syscall-error () nil)))
 
 (defun org-publish-regular-file-p (pathname)
@@ -95,6 +95,36 @@ Resolved under the running user's home on first use, never at load time.")
          (project-path-in-directory-p opened root)
          (uiop:pathname-equal opened (truename pathname)))))
 
+#+os-windows
+(defun org-publish-read-octets (pathname root limit)
+  "Read a stable regular PATHNAME below ROOT through plain streams.
+SB-POSIX on Windows lacks O_NOFOLLOW and /proc descriptor paths, so
+containment is checked against the resolved source pathname instead."
+  (let ((opened (ignore-errors (truename pathname))))
+    (unless (and opened (project-path-in-directory-p opened root))
+      (error "Publishing source escaped its configured root: ~a" pathname))
+    (let ((before (org-publish-lstat pathname)))
+      (unless (and before
+                   (= (logand (sb-posix:stat-mode before) sb-posix:s-ifmt)
+                      sb-posix:s-ifreg))
+        (error "Publishing source is not a regular file: ~a" pathname))
+      (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+        (let ((size (file-length stream)))
+          (when (> size limit)
+            (error "Publishing source exceeds the ~:d-byte limit: ~a"
+                   limit pathname))
+          (let ((octets (make-array size :element-type '(unsigned-byte 8)))
+                (after nil))
+            (unless (and (= (read-sequence octets stream) size)
+                         (eq (read-byte stream nil :eof) :eof)
+                         (setf after (org-publish-lstat pathname))
+                         (equal (org-publish-stat-signature before)
+                                (org-publish-stat-signature after)))
+              (error "Publishing source changed while being read: ~a"
+                     pathname))
+            octets))))))
+
+#-os-windows
 (defun org-publish-read-octets (pathname root limit)
   "Read a stable regular PATHNAME below ROOT without following a symlink."
   (let ((descriptor nil)
@@ -508,6 +538,36 @@ Existing symbolic-link or non-directory components are rejected."
                  (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
       (error "Refusing to replace a non-regular or unowned output: ~a" target))))
 
+#+os-windows
+(defun org-publish-write-octets-atomically (root relative octets)
+  ;; SB-POSIX on Windows lacks O_NOFOLLOW, and binary fd-streams over CRT
+  ;; descriptors cannot write; plain streams and an atomic rename stand in.
+  (let* ((canonical-root (org-publish-ensure-output-root root))
+         (parent (org-publish-ensure-target-parent canonical-root relative))
+         (target (merge-pathnames (file-namestring relative) parent))
+         (temporary (org-publish-temporary-pathname target)))
+    (org-publish-check-existing-target target)
+    (unwind-protect
+         (progn
+           (with-open-file (stream temporary
+                            :direction :output
+                            :if-exists :error
+                            :if-does-not-exist :create
+                            :element-type '(unsigned-byte 8))
+             (write-sequence octets stream)
+             (finish-output stream))
+           ;; A typeless target must carry :unspecific, or rename-file
+           ;; merges the temporary's random suffix in as its type.
+           (uiop:rename-file-overwriting-target
+            temporary
+            (if (pathname-type target)
+                target
+                (make-pathname :type :unspecific :defaults target)))
+           target)
+      (when (org-publish-lstat temporary)
+        (ignore-errors (delete-file temporary))))))
+
+#-os-windows
 (defun org-publish-write-octets-atomically (root relative octets)
   (let* ((canonical-root (org-publish-ensure-output-root root))
          (parent (org-publish-ensure-target-parent canonical-root relative))

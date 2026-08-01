@@ -94,10 +94,10 @@
 (defun file-notify-symbolic-link-p (pathname)
   #+sbcl
   (handler-case
-      (= (logand (sb-posix:stat-mode
-                  (sb-posix:lstat (file-notify-path-key pathname)))
-                 sb-posix:s-ifmt)
-         sb-posix:s-iflnk)
+      (platform-symlink-mode-p
+       (sb-posix:stat-mode
+        (sb-posix:lstat (platform-stat-namestring
+                         (file-notify-path-key pathname)))))
     (sb-posix:syscall-error () nil))
   #-sbcl
   (declare (ignore pathname))

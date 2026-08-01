@@ -98,6 +98,47 @@ an extensionless file is not executable there, so it is tried last."
   #-os-windows
   (sb-posix:fsync descriptor))
 
+(defun platform-stat-namestring (path)
+  "A native namestring PATH that stat accepts on every platform.
+The Windows CRT fails with ENOENT on any path carrying a trailing
+directory separator, so directory namestrings are trimmed down to the
+bare path while drive roots keep the separator they require."
+  (let ((native (etypecase path
+                  (string path)
+                  (pathname (uiop:native-namestring path)))))
+    #+os-windows
+    (let ((trimmed (string-right-trim "\\/" native)))
+      (if (and (= (length trimmed) 2) (char= (char trimmed 1) #\:))
+          (concatenate 'string trimmed "\\")
+          trimmed))
+    #-os-windows
+    native))
+
+(defun platform-stat-mode-private-p (stat mask)
+  "Whether STAT's mode denies every MASK bit where mode bits are real.
+The Windows CRT fabricates 0777 directories and 0666 files, so mode
+checks can never pass there; the profile directory ACL is the guard."
+  #+os-windows
+  (progn stat mask t)
+  #-os-windows
+  (zerop (logand (sb-posix:stat-mode stat) mask)))
+
+(defun platform-symlink-mode-p (mode)
+  "Whether stat MODE denotes a symbolic link where lstat can report one.
+SB-POSIX:S-IFLNK is unbound on Windows, where CRT stat follows every
+link anyway."
+  #+os-windows
+  (progn mode nil)
+  #-os-windows
+  (= (logand mode sb-posix:s-ifmt) sb-posix:s-iflnk))
+
+(defun platform-socket-mode-p (mode)
+  "Whether stat MODE denotes a socket where the file system can hold one."
+  #+os-windows
+  (progn mode nil)
+  #-os-windows
+  (= (logand mode sb-posix:s-ifmt) sb-posix:s-ifsock))
+
 ;;; --- calendar dates ------------------------------------------------------
 
 (defun leap-year-p (year)

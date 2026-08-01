@@ -754,6 +754,27 @@ clean marker is deliberately not an actual save."
            (random (ash 1 60)))
    (uiop:temporary-directory)))
 
+#+os-windows
+(defun vundo-write-private-temporary-file (label text)
+  "Write TEXT through an exclusively created temporary file.
+SB-POSIX on Windows lacks O_NOFOLLOW and mode bits; the temporary
+directory ACL protects the diff inputs instead."
+  (let ((pathname (vundo-private-temporary-pathname label))
+        (complete-p nil))
+    (unwind-protect
+         (with-open-file (stream pathname
+                          :direction :output
+                          :if-exists :error
+                          :if-does-not-exist :create
+                          :external-format :utf-8)
+           (write-string text stream)
+           (finish-output stream)
+           (setf complete-p t)
+           pathname)
+      (unless complete-p
+        (ignore-errors (delete-file pathname))))))
+
+#-os-windows
 (defun vundo-write-private-temporary-file (label text)
   "Write TEXT through an O_EXCL/O_NOFOLLOW mode-0600 temporary file."
   #+sbcl

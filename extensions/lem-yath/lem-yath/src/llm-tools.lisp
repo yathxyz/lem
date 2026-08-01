@@ -231,6 +231,41 @@
         (let ((symbol (find-symbol "STAT-CTIME-NSEC" :sb-posix)))
           (and symbol (fboundp symbol) (funcall symbol stat)))))
 
+#+os-windows
+(defun llm-tool-read-file-octets (pathname root)
+  "Read a stable regular PATHNAME below ROOT through plain streams.
+SB-POSIX on Windows lacks O_NOFOLLOW and /proc descriptor paths, so
+containment is checked against the resolved pathname instead."
+  (let ((opened (ignore-errors (truename pathname))))
+    (unless (and opened (project-path-in-directory-p opened root))
+      (error "Opened file escaped the project root"))
+    (let ((before (handler-case
+                      (sb-posix:stat (platform-stat-namestring pathname))
+                    (sb-posix:syscall-error () nil))))
+      (unless (and before
+                   (= (logand (sb-posix:stat-mode before) sb-posix:s-ifmt)
+                      sb-posix:s-ifreg))
+        (error "Path is not a regular file"))
+      (when (> (sb-posix:stat-size before) *llm-tool-file-byte-limit*)
+        (error "File exceeds the ~d-byte inspection limit"
+               *llm-tool-file-byte-limit*))
+      (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+        (let* ((size (file-length stream))
+               (octets (make-array size :element-type '(unsigned-byte 8)))
+               (after nil))
+          (unless (and (= (read-sequence octets stream) size)
+                       (eq (read-byte stream nil :eof) :eof)
+                       (setf after
+                             (handler-case
+                                 (sb-posix:stat
+                                  (platform-stat-namestring pathname))
+                               (sb-posix:syscall-error () nil)))
+                       (equal (llm-tool-stat-signature before)
+                              (llm-tool-stat-signature after)))
+            (error "File changed while it was being read"))
+          octets)))))
+
+#-os-windows
 (defun llm-tool-read-file-octets (pathname root)
   "Read a stable regular PATHNAME through a verified descriptor below ROOT."
   #+sbcl

@@ -71,9 +71,9 @@
 
 (defun llm-model-cache-directory-private-p (directory)
   #+sbcl
-  (let ((stat (sb-posix:stat (uiop:native-namestring directory))))
+  (let ((stat (sb-posix:stat (platform-stat-namestring directory))))
     (and (platform-stat-owned-by-current-user-p stat)
-         (zerop (logand (sb-posix:stat-mode stat) #o077))))
+         (platform-stat-mode-private-p stat #o077)))
   #-sbcl
   (declare (ignore directory))
   #-sbcl nil)
@@ -96,11 +96,11 @@
 (defun llm-model-cache-validate-file (pathname label)
   (when (uiop:file-exists-p pathname)
     #+sbcl
-    (let ((stat (sb-posix:lstat (uiop:native-namestring pathname))))
+    (let ((stat (sb-posix:lstat (platform-stat-namestring pathname))))
       (unless (and (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt)
                       sb-posix:s-ifreg)
                    (platform-stat-owned-by-current-user-p stat)
-                   (zerop (logand (sb-posix:stat-mode stat) #o077)))
+                   (platform-stat-mode-private-p stat #o077))
         (error "~a model cache must be a private user-owned regular file" label)))
     #-sbcl
     (error "Safe ~a model caching requires SBCL" label)))
@@ -149,6 +149,32 @@
      stream)
     (terpri stream)))
 
+#+os-windows
+(defun llm-model-cache-write (pathname models limit override-p label)
+  "Atomically replace the model cache via a temporary file and rename."
+  ;; SB-POSIX on Windows lacks O_NOFOLLOW and mode bits; the cache
+  ;; directory ACL protects the file instead.
+  (let* ((temporary (llm-model-cache-temporary-pathname pathname))
+         (text (llm-model-cache-json models))
+         (octets (sb-ext:string-to-octets text :external-format :utf-8)))
+    (when (> (length octets) limit)
+      (error "~a model cache exceeds the size limit" label))
+    (llm-model-cache-prepare-directory pathname override-p label)
+    (llm-model-cache-validate-file pathname label)
+    (unwind-protect
+         (progn
+           (with-open-file (stream temporary
+                            :direction :output
+                            :if-exists :error
+                            :if-does-not-exist :create
+                            :element-type '(unsigned-byte 8))
+             (write-sequence octets stream)
+             (finish-output stream))
+           (uiop:rename-file-overwriting-target temporary pathname))
+      (when (uiop:file-exists-p temporary)
+        (ignore-errors (delete-file temporary))))))
+
+#-os-windows
 (defun llm-model-cache-write (pathname models limit override-p label)
   "Atomically replace PATHNAME with a private JSON cache containing MODELS."
   (let* ((temporary (llm-model-cache-temporary-pathname pathname))

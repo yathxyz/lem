@@ -282,6 +282,23 @@
                      (incf index)))
                  (write-char character stream)))))
 
+#+os-windows
+(defun project-picker-read-preview-text (pathname)
+  "Read at most the preview limit from PATHNAME through a plain stream.
+SB-POSIX on Windows lacks O_NONBLOCK, and fd-streams over CRT
+descriptors are unreliable."
+  (handler-case
+      (with-open-file (stream pathname :element-type '(unsigned-byte 8))
+        (let ((size (file-length stream)))
+          (when (<= size *project-picker-preview-byte-limit*)
+            (let ((octets (make-array size :element-type '(unsigned-byte 8))))
+              (when (= (read-sequence octets stream) size)
+                (unless (find 0 octets)
+                  (project-picker-normalize-preview-newlines
+                   (babel:octets-to-string octets :encoding :utf-8))))))))
+    (error () nil)))
+
+#-os-windows
 (defun project-picker-read-preview-text (pathname)
   "Read at most the preview limit from one nonblocking regular-file descriptor."
   (let ((descriptor nil)
