@@ -8,8 +8,8 @@
 (define-attribute org-modern-symbol-attribute
   (t :bold t))
 
-(defparameter *org-modern-folded-stars* #("▶" "▷" "⯈" "▹" "▹"))
-(defparameter *org-modern-expanded-stars* #("▿" "▽" "⯆" "▿" "▿"))
+(defparameter *org-modern-folded-stars* #("►" "▹" "‣" "▹" "▹"))
+(defparameter *org-modern-expanded-stars* #("▿" "▿" "▿" "▿" "▿"))
 
 (defun org-modern-redraw ()
   (redraw-display :force t))
@@ -185,8 +185,8 @@
                    (member (char source (1+ checkbox))
                            '(#\Space #\X #\x #\-)))
           (let ((glyph (case (char source (1+ checkbox))
-                         ((#\X #\x) #\☑)
-                         (#\- #\⊟)
+                         ((#\X #\x) #\■)
+                         (#\- #\▣)
                          (otherwise #\□))))
             (setf (aref string checkbox) #\Space
                   (aref string (1+ checkbox)) glyph
@@ -289,7 +289,7 @@
           (aref string (1- end)) #\Space))
   (setf attributes
         (org-modern-transform-target source string attributes
-                                     "<<<" ">>>" #\⛯))
+                                     "<<<" ">>>" #\◉))
   ;; Radio targets have already consumed every triple delimiter.  Rejecting
   ;; adjacent angle brackets keeps this pass from treating them as <<targets>>.
   (loop :with offset = 0
@@ -307,7 +307,7 @@
                         (not (char= (char source (+ close-start 2)) #\>)))
                     (org-modern-target-content-p source (+ start 2) close-start))
                (let ((end (+ close-start 2)))
-                 (setf (aref string start) #\↪
+                 (setf (aref string start) #\→
                        (aref string (1+ start)) #\Space)
                  (org-modern-replace-range string close-start end #\Space)
                  (setf attributes

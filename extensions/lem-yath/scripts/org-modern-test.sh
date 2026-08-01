@@ -85,11 +85,11 @@ baseline_ok=1
 for expected in \
   'LINE label=keyword display=..title:.Modern.fixture' \
   'LINE label=heading display=▿.TODO...A..Parent..work.focus.' \
-  'LINE label=child display=.▽.NEXT.Child' \
-  'LINE label=inline display=Body..2026-07-16.Thu..and.↪.target...plus.⛯..radio....' \
+  'LINE label=child display=.▿.NEXT.Child' \
+  'LINE label=inline display=Body..2026-07-16.Thu..and.→.target...plus.◉..radio....' \
   'LINE label=list-open display=–..□..open' \
-  'LINE label=list-done display=◦..☑..done' \
-  'LINE label=list-partial display=..∙..⊟..partial' \
+  'LINE label=list-done display=◦..■..done' \
+  'LINE label=list-partial display=..∙..▣..partial' \
   'LINE label=table display=│.name.│.value.│' \
   'LINE label=table-rule display=│──────┼───────│' \
   'LINE label=rule display=─────────' \
@@ -114,7 +114,7 @@ fi
 screen="$(lem_capture "$session")"
 # A startup direnv notification can temporarily cover the parent row.  The
 # child heading remains visible and exercises the same ncurses projection.
-if grep -Fq '▽ NEXT Child' <<<"$screen" &&
+if grep -Fq '▿ NEXT Child' <<<"$screen" &&
    grep -Fq '–  □  open' <<<"$screen" &&
    grep -Fq '│ name │ value │' <<<"$screen" &&
    grep -Fq -- '- [ ] source decoy <2026-01-01 Thu>' <<<"$screen"; then
@@ -125,7 +125,7 @@ fi
 
 lem_keys "$session" F2
 if wait_report '^FOLD folds=1 next-hidden=yes modified=no bytes=same$' &&
-   grep -q '^LINE label=folded display=▶\.TODO' "$LEM_YATH_ORG_MODERN_REPORT" &&
+   grep -q '^LINE label=folded display=►\.TODO' "$LEM_YATH_ORG_MODERN_REPORT" &&
    lem_wait_for "$session" 'Parent.*\[\.\.\.\]' 15 >/dev/null; then
   pass folding "the heading indicator follows the real Org fold state"
 else

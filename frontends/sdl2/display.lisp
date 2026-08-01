@@ -189,6 +189,32 @@ e.g. -3 for NotoSansMono at 12pt). |descent| pixels sit below the baseline."
   (set-render-color display (display-background-color display))
   (sdl2:render-fill-rect (display-renderer display) nil))
 
+(defun font-provides-glyph-p (font character)
+  "True when FONT has its own glyph for CHARACTER.
+sdl2-ttf does not wrap `TTF_GlyphIsProvided'; it takes a Uint16, so
+codepoints outside the BMP cannot be asked about and answer NIL."
+  (let ((code (char-code character)))
+    (and (<= code #xFFFF)
+         (/= 0 (cffi:foreign-funcall "TTF_GlyphIsProvided"
+                                     :pointer (autowrap:ptr font)
+                                     :unsigned-short code
+                                     :int)))))
+
+(defmethod cjk-display-font ((display display) bold character)
+  "Font for a CHARACTER typed :cjk.  `lem-core::char-type' routes every
+codepoint it does not otherwise classify to :cjk, so symbols the latin
+font covers are served from there — the CJK font rasterizes them at its
+own wider advance, or lacks them entirely.  Ideographs are unaffected:
+the latin font provides none of them."
+  (let ((latin (if bold
+                   (display-latin-bold-font display)
+                   (display-latin-font display))))
+    (if (and character (font-provides-glyph-p latin character))
+        latin
+        (if bold
+            (display-cjk-bold-font display)
+            (display-cjk-normal-font display)))))
+
 (defmethod get-display-font ((display display) &key type bold character)
   (check-type type lem-core::char-type)
   (cond ((eq type :control)
@@ -205,11 +231,11 @@ e.g. -3 for NotoSansMono at 12pt). |descent| pixels sit below the baseline."
         (bold
          (case type
            ((:latin :zero-width) (display-latin-bold-font display))
-           (otherwise (display-cjk-bold-font display))))
+           (otherwise (cjk-display-font display t character))))
         (t
          (case type
            ((:latin :zero-width) (display-latin-font display))
-           (otherwise (display-cjk-normal-font display))))))
+           (otherwise (cjk-display-font display nil character))))))
 
 (defmethod scaled-char-width ((display display) x)
   (let ((scale-x (round (first (display-scale display)))))

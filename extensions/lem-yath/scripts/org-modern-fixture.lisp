@@ -95,7 +95,7 @@
          :key (lambda (entry) (if (consp entry) (car entry) entry))))
 
 (defun org-modern-test-glyph-widths ()
-  (let ((glyphs "▶▷⯈▹▿▽⯆∙◦–☑□⊟│─┼▏↪⛯"))
+  (let ((glyphs "►▹‣▹▿▿▿∙◦–■□▣│─┼▏→◉"))
     (values
      (every (lambda (character)
               (= 1 (lem/common/character:string-width (string character))))

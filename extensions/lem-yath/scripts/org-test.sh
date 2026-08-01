@@ -449,7 +449,7 @@ if start_org lists; then
   tmux_cmd send-keys -t "$ORG_SESSION" C-c C-x C-b
   sleep 0.3
   toggle_ok=0
-  screen_has "$ORG_SESSION" '☑.*first$' && toggle_ok=1
+  screen_has "$ORG_SESSION" '■.*first$' && toggle_ok=1
   if [ "$above_ok" = 1 ] && [ "$continuation_ok" = 1 ] &&
      [ "$toggle_ok" = 1 ]; then
     pass lists "O/o edit the new checklist item and C-c C-x C-b toggles it"

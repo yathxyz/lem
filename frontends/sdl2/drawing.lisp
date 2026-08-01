@@ -177,6 +177,18 @@ per-string SDL_ttf surface-width drift."
     (:underline
      (draw-rect display x (+ y surface-height -1) surface-width 1 background))))
 
+(defun glyph-render-width (surface-width cell-pixel-width)
+  "Destination width for a glyph surface SURFACE-WIDTH pixels wide occupying a
+slot CELL-PIXEL-WIDTH pixels wide.  Up to 2px over budget renders at the
+natural width — that slack is the rasterizer's anti-aliasing tail, and it
+keeps 11px box-drawing glyphs joining across a 9px cell.  Beyond it the
+surface is squished to the budget rather than spilling into the next column.
+A non-positive budget imposes no cap."
+  (if (and (plusp cell-pixel-width)
+           (> surface-width (+ cell-pixel-width 2)))
+      cell-pixel-width
+      surface-width))
+
 (defun draw-text-glyph-surface (drawing-object x bottom-y display view cell-width
                                 &key clip (phase :both))
   "Draws DRAWING-OBJECT's cached SDL surface in a (CELL-WIDTH × cell-height) slot
@@ -190,12 +202,14 @@ CLIP / PHASE control how the glyph and its background are composited:
   `render-copy-ex' allowed to scale it down to fit, preventing oversized glyph
   surfaces from spilling into adjacent columns or rows.
 
-* CLIP T (text characters): the surface is rendered at its natural pixel size.
-  At small font sizes the NotoSansMono rasterizer produces some glyphs (`p',
-  `g', `T', ...) whose blended surface-width is one pixel wider than the
-  advance width — that overhang is anti-aliasing tail that must not be
-  squished by `render-copy-ex' (which is what made `P' and the other exact-
-  width letters look visually different from their neighbours).
+* CLIP T (text characters): the surface is rendered at the width
+  `glyph-render-width' allows.  At small font sizes the NotoSansMono
+  rasterizer produces some glyphs (`p', `g', `T', ...) whose blended
+  surface-width is one pixel wider than the advance width — that overhang is
+  anti-aliasing tail that must not be squished by `render-copy-ex' (which is
+  what made `P' and the other exact-width letters look visually different
+  from their neighbours).  Surfaces well past the cell budget are squished,
+  since those would land on top of the following character.
 
 PHASE selects what to draw:
   :BG     — background fill + cursor box + underline only (no glyph).
@@ -246,9 +260,10 @@ is not erased by the next glyph's background fill."
            ;; erase it.
            (let* ((ascent (display:display-font-ascent display))
                   (descent (display:display-font-descent display))
-                  (glyph-y (- bottom-y ascent (abs descent))))
+                  (glyph-y (- bottom-y ascent (abs descent)))
+                  (glyph-width (glyph-render-width surface-width cell-width)))
              (display:with-scratch-rect (dst-rect display x glyph-y
-                                                  surface-width surface-height)
+                                                  glyph-width surface-height)
                (sdl2:render-copy-ex (display:display-renderer display)
                                     texture
                                     :source-rect nil
