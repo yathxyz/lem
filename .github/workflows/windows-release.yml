@@ -463,6 +463,7 @@ jobs:
           (cl:with-open-file (s "$reportLisp" :direction :output
                                 :if-exists :supersede :if-does-not-exist :create)
             (cl:format s "workdir=~a~%" (cl:namestring (lem-yath::workdir)))
+            (cl:format s "home=~a~%" (cl:namestring (cl:user-homedir-pathname)))
             (cl:format s "salta=~a~%" (cl:namestring (lem-yath::salta-credentials-file)))
             (cl:format s "publish=~a~%" (cl:namestring (lem-yath::org-publish-output-directory))))
           "@ | Out-File -Encoding ascii $probe
@@ -485,8 +486,20 @@ jobs:
               if ($content -notmatch [regex]::Escape(($workdir -replace '\\', '/'))) {
                   throw "workdir did not resolve to the runtime WORKDIR"
               }
-              if ($content -match 'runneradmin') {
-                  throw "A workspace root leaked a build-time path"
+              # The builder's own home may legitimately contain "runneradmin",
+              # so assert the home-derived roots sit under the home the RUNNING
+              # process reports, rather than grepping for a user name.
+              if ($content -notmatch '(?m)^home=(.+)$') {
+                  throw "probe did not report the runtime home"
+              }
+              $homeDir = $Matches[1].Trim()
+              foreach ($key in 'salta', 'publish') {
+                  if ($content -notmatch "(?m)^$key=(.+)$") {
+                      throw "probe did not report $key"
+                  }
+                  if (-not $Matches[1].Trim().StartsWith($homeDir)) {
+                      throw "$key did not resolve under the runtime home"
+                  }
               }
           }
           finally {
