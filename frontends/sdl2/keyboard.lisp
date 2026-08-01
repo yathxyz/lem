@@ -87,8 +87,31 @@
 (defun make-key-event (code modifier)
   (%make-key-event :code code :modifier modifier))
 
+;; Deployed Windows images carry cl-sdl2 autowrap metadata that inflates
+;; SDL2's Uint8 fields to 4 bytes: SDL_KeyboardEvent is believed to span 44
+;; bytes (real ABI: 32), so the keysym wrapper points 12 bytes past the true
+;; keysym and every non-text key decodes from out-of-bounds stack garbage.
+;; When the believed size disagrees with the ABI, read the keysym fields at
+;; their true offsets (keysym at event+16; sym at keysym+4, mod at keysym+8)
+;; relative to the wrapper's believed position.
+(defvar *keysym-layout-delta*
+  (let ((believed-size (autowrap:sizeof 'sdl2-ffi:sdl-keyboard-event)))
+    (if (= believed-size 32)
+        0
+        (- 16 (- believed-size (autowrap:sizeof 'sdl2-ffi:sdl-keysym))))))
+
+(defun keysym-sym-value (keysym)
+  (if (zerop *keysym-layout-delta*)
+      (sdl2:sym-value keysym)
+      (cffi:mem-ref (autowrap:ptr keysym) :int (+ *keysym-layout-delta* 4))))
+
+(defun keysym-mod-value (keysym)
+  (if (zerop *keysym-layout-delta*)
+      (sdl2:mod-value keysym)
+      (cffi:mem-ref (autowrap:ptr keysym) :unsigned-short (+ *keysym-layout-delta* 8))))
+
 (defun keysym-to-key-event (keysym)
-  (let ((code (sdl2:sym-value keysym))
+  (let ((code (keysym-sym-value keysym))
         (modifier (get-modifier keysym)))
     (make-key-event code modifier)))
 
@@ -112,7 +135,7 @@
         (cdr (assoc mod-type *modifier-code-table*))))
 
 (defun get-modifier (keysym)
-  (let* ((mod (sdl2:mod-value keysym))
+  (let* ((mod (keysym-mod-value keysym))
          (shift (mod-p mod :shift))
          (ctrl (mod-p mod :ctrl))
          (meta (mod-p mod :meta))
@@ -309,6 +332,7 @@
         (modifier (key-event-modifier key-event)))
     (trace-keyboard-event :key-down
                           :code code
+                          :mod-mask (sdl2-ffi.functions:sdl-get-mod-state)
                           :shift (not (null (modifier-shift modifier)))
                           :ctrl (not (null (modifier-ctrl modifier)))
                           :meta (not (null (modifier-meta modifier)))
