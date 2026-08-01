@@ -75,13 +75,16 @@ By default, persist M-x commands to disk. See *persist-M-x-commands*.")
 (defun commands-history ()
   "Return or create the commands' history struct.
   The history file is saved on (lem-home)/history/commands"
-  (unless (boundp '*commands-history*)
-    (let* ((pathname (merge-pathnames "history/commands" (lem-home)))
-           (history (lem/common/history:make-history
-                     :pathname pathname
-                     :limit *history-limit*)))
-      (setf *commands-history* history)))
-  *commands-history*)
+  ;; Revalidate against the current (lem-home); see file-history.
+  (let ((pathname (merge-pathnames "history/commands" (lem-home))))
+    (unless (and (boundp '*commands-history*)
+                 (equal pathname
+                        (lem/common/history:history-pathname *commands-history*)))
+      (setf *commands-history*
+            (lem/common/history:make-history
+             :pathname pathname
+             :limit *history-limit*)))
+    *commands-history*))
 
 (defun remember-command (input)
   "Add this command (string) to the history file if *persist-M-x-commands* is non nil."

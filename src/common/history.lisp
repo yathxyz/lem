@@ -1,6 +1,7 @@
 (defpackage :lem/common/history
   (:use :cl)
   (:export :make-history
+           :history-pathname
            :history-data-list
            :save-file
            :last-history

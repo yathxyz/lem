@@ -242,11 +242,14 @@
 (defun history ()
   "Return or create the projects' history struct.
   The history file is saved on (lem-home)/history/projects"
-  (unless (boundp '*projects-history*)
-    (let* ((pathname (merge-pathnames "history/projects" (lem-home)))
-           (history (lem/common/history:make-history :pathname pathname)))
-      (setf *projects-history* history)))
-  *projects-history*)
+  ;; Revalidate against the current (lem-home); see file-history.
+  (let ((pathname (merge-pathnames "history/projects" (lem-home))))
+    (unless (and (boundp '*projects-history*)
+                 (equal pathname
+                        (lem/common/history:history-pathname *projects-history*)))
+      (setf *projects-history*
+            (lem/common/history:make-history :pathname pathname)))
+    *projects-history*))
 
 (defun remember-project (input)
   "Add this project path to the history file.
