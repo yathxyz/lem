@@ -431,7 +431,8 @@
                   exit 1
                 fi
 
-                expected=$(find ${self}/lem-yath/src -type f -name '*.lisp' | wc -l)
+                # ASDF selects exactly one platform-specific server implementation.
+                expected=$(find ${self}/lem-yath/src -type f -name '*.lisp' ! -name 'server-windows.lisp' | wc -l)
                 actual=$(find "$out" -type f -name '*.fasl' | wc -l)
                 if [ "$actual" -ne "$expected" ]; then
                   echo "expected $expected lem-yath FASLs, built $actual" >&2
