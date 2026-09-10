@@ -338,12 +338,12 @@
 
 (define-command lem-yath-legit-commit-continue () ()
   (cond
-    ((server-buffer-requests)
+    ((lem-daemon:request-buffer-list)
      ;; Git invokes the packaged blocking client for reword.  COMMIT_EDITMSG
      ;; still selects Legit's commit major mode, so its ordinary command would
      ;; incorrectly start a second `git commit'.  Save the file and release
      ;; the waiting Git process instead.
-     (lem-yath-server-save-done))
+     (lem-daemon:daemon-edit-save-and-done))
     ((legit-amend-buffer-p)
      (legit-amend-continue))
     ((and (fboundp 'legit-cherry-message-buffer-p)
@@ -364,8 +364,8 @@
 
 (define-command lem-yath-legit-commit-abort () ()
   (cond
-    ((server-buffer-requests)
-     (lem-yath-server-abort))
+    ((lem-daemon:request-buffer-list)
+     (lem-daemon:daemon-edit-abort))
     ((legit-amend-buffer-p)
      (legit-amend-abort))
     ((and (fboundp 'legit-cherry-message-buffer-p)

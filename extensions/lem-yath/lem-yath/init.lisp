@@ -36,4 +36,6 @@
       (asdf:load-system "lem-yath"))
   (error (e)
     (setf *lem-yath-boot-error* (princ-to-string e))
-    (ignore-errors (message "lem-yath failed to load: ~a" e))))
+    (ignore-errors (message "lem-yath failed to load: ~a" e))
+    (when (eq :daemon (lem-core::implementation-name (implementation)))
+      (error e))))

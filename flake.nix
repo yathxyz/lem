@@ -531,7 +531,7 @@
                 nixpkgs = inputs.nixpkgs;
                 lem = {
                   outPath = ./.;
-                  packages.${system}.lem-ncurses = lem-ncurses;
+                  packages.${system} = { inherit lem-ncurses lemclient; };
                 };
                 yasnippet-snippets = inputs.yasnippet-snippets;
               })

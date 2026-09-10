@@ -5,6 +5,10 @@
                :reader daemon-implementation-connection)
    (width :initarg :width :initform 80 :accessor daemon-implementation-width)
    (height :initarg :height :initform 24 :accessor daemon-implementation-height)
+   (foreground :initform (make-color 255 255 255)
+               :accessor daemon-implementation-foreground)
+   (background :initform (make-color 0 0 0)
+               :accessor daemon-implementation-background)
    (previous-screen :initform nil
                     :accessor daemon-implementation-previous-screen)
    (previous-screen-width :initform nil
@@ -175,7 +179,16 @@
   (daemon-implementation-height implementation))
 
 (defmethod lem-if:get-foreground-color ((implementation daemon-implementation))
-  (make-color 255 255 255))
+  (daemon-implementation-foreground implementation))
+
+(defmethod lem-if:get-background-color ((implementation daemon-implementation))
+  (daemon-implementation-background implementation))
+
+(defmethod lem-if:update-foreground ((implementation daemon-implementation) name)
+  (setf (daemon-implementation-foreground implementation) (parse-color name)))
+
+(defmethod lem-if:update-background ((implementation daemon-implementation) name)
+  (setf (daemon-implementation-background implementation) (parse-color name)))
 
 (defmethod lem-if:display-title ((implementation daemon-implementation))
   "Lem daemon")
@@ -286,5 +299,8 @@
   (start-daemon-transport)
   (unwind-protect
        (let ((editor-thread (funcall function)))
-         (bt2:join-thread editor-thread))
+         (let ((result (bt2:join-thread editor-thread)))
+           (when (typep result 'error)
+             (error result))
+           result))
     (stop-daemon-transport)))

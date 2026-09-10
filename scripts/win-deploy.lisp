@@ -28,6 +28,7 @@
      :inherit-configuration)))
 
 (ql:quickload :lem)
+(ql:quickload :lem-daemon)
 
 (lem:init-at-build-time)
 

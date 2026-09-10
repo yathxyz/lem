@@ -47,31 +47,33 @@ the installed editor loads immutable `.fasl` files without compiling into the
 user cache. A direct development load still redirects ASDF output under
 `XDG_CACHE_HOME` instead of writing beside the sources.
 
-The installed package still provides the legacy `lemclient`. A configured Lem
-running in tmux publishes an owner-only local socket and its pane, so shell and
-Git edit requests can reuse that editor:
+The configured editor uses the native Common Lisp daemon and client:
 
 ```sh
-lemclient file.txt
-lemclient +42:3 file.txt other.txt
+lem --daemon
+lemclient -t                         # independent terminal frame
+lemclient +42:3 file.txt other.txt    # wait for editing to finish
 lemclient --no-wait file.txt
+lemclient --eval '(length (lem:buffer-list))'
+lemclient --stop-server
 ```
 
-A waiting file shows the `Server` minor mode. `ZZ` or `C-c C-c` saves and
-finishes that file, `C-x #` finishes an already clean file, and `ZQ` or
-`C-c C-k` aborts the complete request without discarding unsaved buffer text.
-With no files, `lemclient` attaches to the current editor buffer. From another
-pane in the same tmux server it switches to Lem while the request is active and
-then restores the originating pane. If no reusable pane is available it starts
-a fresh configured Lem instead. The running editor sets `GIT_EDITOR` to the
-client's non-focusing form and fills
-otherwise-unset `VISUAL`/`EDITOR` for its child processes; a parent shell can
-opt in with `export EDITOR=lemclient VISUAL=lemclient GIT_EDITOR=lemclient`.
+The daemon owns shared buffers and Lisp state across client connections.
+`ZZ` or `C-c C-c` saves and finishes a waiting file, `C-x #` finishes a clean
+file, and `ZQ` or `C-c C-k` aborts the request while retaining unsaved text.
+A plain interactive `lem` also starts an in-session listener for file/eval
+requests; terminal attachment requires a headless daemon. If `server` is
+occupied, the interactive listener uses `session-<pid>`.
 
-This tmux/socat implementation is retained only until the native persistent
-daemon and Common Lisp client replace it. The agreed requirements are recorded
-in [`../../docs/daemon-client.md`](../../docs/daemon-client.md); no daemon
-implementation is part of this migration.
+The editor routes child `GIT_EDITOR` requests to its own listener using the
+packaged native client. It fills otherwise-unset `VISUAL` and `EDITOR`; parent
+shells keep their existing environment. Unreachable daemons produce a client
+error unless `--alternate-editor` was explicitly supplied.
+
+See [daemon/client behavior](../../docs/daemon-client.md) and
+[service integration](../../docs/daemon-service-migration.md). Graphical
+attachments and recovery of unsaved state after daemon death remain separate
+milestones. Runtime client routing requires neither tmux nor socat.
 
 ## What's in the port
 
@@ -103,12 +105,10 @@ implementation is part of this migration.
   `C-c C-z` toggles whether Escape goes to the child. The Nix build patches the
   native terminal to spawn directly in the literal buffer directory without a
   shell command string and to terminate and reap the child on buffer cleanup
-- an `emacsclient`-style `lemclient` backed by an owner-private local Unix
-  socket: blocking and no-wait file requests, `+LINE:COLUMN`, multi-file
-  progression, clean finish, save-and-finish, recoverable abort, and tmux-pane
-  handoff all reuse the running ncurses editor. It intentionally does not
-  emulate graphical frame creation, arbitrary Lisp evaluation, or a headless
-  editor daemon
+- an `emacsclient`-style native Lisp client with private Unix sockets,
+  independent terminal frames, evaluation, positioned file visits, blocking
+  multi-file completion, save-and-finish, and recoverable abort; the configured
+  editor loads in the persistent daemon and routes child Git edits to it
 - Winner-style window history on `C-c Left` / `C-c Right`: each tab frame keeps
   a bounded 200-layout route over split topology, proportions, displayed
   buffers, selection, and scroll state while retaining live buffer points;
@@ -1045,7 +1045,7 @@ python3 scripts/check-parity-ledger.py
 nix run .#compile-check
 nix run .#compilation-test
 nix run .#terminal-test
-nix run .#server-test
+nix run .#daemon-test
 nix run .#boot-test
 nix run .#startup-test
 nix run .#completion-test

@@ -32,7 +32,8 @@
    :connect-local
    :local-connection-stream
    :close-local-connection
-   :close-local-listener))
+   :close-local-listener
+   :local-endpoint-in-use))
 
 (defpackage :lem-daemon
   (:use :cl :lem)
@@ -43,7 +44,14 @@
    :invoke-daemon
    :daemon-running-p
    :daemon-endpoint
+   :server-name
+   :configure-editor-environment
+   :start-server
+   :stop-server
    :stop-daemon
+   :daemon-server-start
+   :daemon-server-stop
+   :request-buffer-list
    :daemon-edit-done
    :daemon-edit-save-and-done
    :daemon-edit-abort))

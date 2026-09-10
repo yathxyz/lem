@@ -140,13 +140,15 @@
         (command-loop-body))
     (fix-current-buffer-if-broken)))
 
-(defun toplevel-command-loop (initialize-function)
+(defun toplevel-command-loop (initialize-function &key (handle-init-errors-p t))
   (handler-bind ((exit-editor
                    (lambda (c)
                      (return-from toplevel-command-loop
                        (exit-editor-report c)))))
-    (with-error-handler ()
-      (funcall initialize-function))
+    (if handle-init-errors-p
+        (with-error-handler ()
+          (funcall initialize-function))
+        (funcall initialize-function))
     (with-editor-stream ()
       (command-loop))))
 

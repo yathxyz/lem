@@ -58,6 +58,17 @@
         (protocol:field error "message" "Daemon request failed")
         "Daemon request failed")))
 
+(defun connect-client-with-wait (server-name seconds)
+  "Retry connection failures for SECONDS while a supervised daemon starts."
+  (let ((deadline (+ (get-internal-real-time)
+                     (* seconds internal-time-units-per-second))))
+    (loop
+      (handler-case (return (connect-client server-name))
+        (error (condition)
+          (when (>= (get-internal-real-time) deadline)
+            (error condition))
+          (sleep 0.05))))))
+
 (defun response-error-code (message)
   (let ((error (protocol:field message "error")))
     (and (hash-table-p error) (protocol:field error "code"))))
@@ -363,12 +374,13 @@
       --stop-server            stop the daemon if buffers are clean~%\
       --force                  allow --stop-server to discard edits~%\
   -s, --server-name NAME       select a named daemon~%\
+      --wait-for-server SECS  retry connection failures during startup~%\
   -a, --alternate-editor CMD   run CMD only when no daemon is reachable~%\
   -h, --help                   show this help~%"))
 
 (defun parse-client-arguments (arguments)
   (let ((tty nil) (wait t) (eval nil) (stop nil) (force nil)
-        (server "server") (alternate nil) (files '()) (options t))
+        (server "server") (alternate nil) (startup-wait 0) (files '()) (options t))
     (loop :while arguments
           :for argument := (pop arguments)
           :do (cond
@@ -383,6 +395,12 @@
                  (setf eval (or (pop arguments) (error "--eval requires FORM"))))
                 ((and options (string= argument "--stop-server")) (setf stop t))
                 ((and options (string= argument "--force")) (setf force t))
+                ((and options (string= argument "--wait-for-server"))
+                 (let ((value (pop arguments)))
+                   (unless (and value (plusp (length value))
+                                (every #'digit-char-p value))
+                     (error "--wait-for-server requires non-negative integer seconds"))
+                   (setf startup-wait (parse-integer value))))
                 ((and options (member argument '("-s" "--server-name") :test #'string=))
                  (setf server (or (pop arguments)
                                   (error "--server-name requires NAME"))))
@@ -398,7 +416,7 @@
       (error "--tty, --eval, and --stop-server are mutually exclusive"))
     (when (and force (not stop)) (error "--force requires --stop-server"))
     (values (cond (tty :tty) (eval :eval) (stop :stop) (t :visit))
-            (nreverse files) wait eval force server alternate)))
+            (nreverse files) wait eval force server alternate startup-wait)))
 
 (defun run-alternate-editor (command files)
   (when (every (lambda (character)
@@ -414,11 +432,11 @@
     0))
 
 (defun run-client (&optional (arguments (uiop:command-line-arguments)))
-  (multiple-value-bind (mode files wait eval force server alternate)
+  (multiple-value-bind (mode files wait eval force server alternate startup-wait)
       (parse-client-arguments arguments)
     (when (eq mode :help) (print-help) (return-from run-client 0))
     (let ((connection
-            (handler-case (connect-client server)
+            (handler-case (connect-client-with-wait server startup-wait)
               (error (condition)
                 (if alternate
                     (return-from run-client (run-alternate-editor alternate files))

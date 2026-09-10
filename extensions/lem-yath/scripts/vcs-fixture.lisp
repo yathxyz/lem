@@ -1616,7 +1616,7 @@
          (vcs-test-yes-no
           (and filename
                (string= (file-namestring filename) "COMMIT_EDITMSG")))
-         (vcs-test-yes-no (server-buffer-requests buffer))
+         (vcs-test-yes-no (lem-daemon:request-buffer-list buffer))
          (vcs-test-yes-no
           (or (search "porcelain commit from Lem" (buffer-text buffer))
               (search "porcelain commit reworded in Lem"

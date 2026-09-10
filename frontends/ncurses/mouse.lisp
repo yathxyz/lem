@@ -92,13 +92,15 @@ produced when MOUSE-MODE is enabled."
 (defun enable-mouse-reporting ()
   "Ask the terminal to report mouse events using SGR-1006 extended coordinates.
 Enables normal, button-event (drag) and SGR modes."
-  (lem-ncurses/term:write-terminal-string
-   (format nil "~C[?1000h~C[?1002h~C[?1006h" #\Esc #\Esc #\Esc)))
+  (when (eq :ncurses (lem-core::implementation-name (implementation)))
+    (lem-ncurses/term:write-terminal-string
+     (format nil "~C[?1000h~C[?1002h~C[?1006h" #\Esc #\Esc #\Esc))))
 
 (defun disable-mouse-reporting ()
   "Stop terminal mouse reporting, restoring native selection and copy/paste."
-  (lem-ncurses/term:write-terminal-string
-   (format nil "~C[?1006l~C[?1002l~C[?1000l" #\Esc #\Esc #\Esc)))
+  (when (eq :ncurses (lem-core::implementation-name (implementation)))
+    (lem-ncurses/term:write-terminal-string
+     (format nil "~C[?1006l~C[?1002l~C[?1000l" #\Esc #\Esc #\Esc))))
 
 (define-command toggle-mouse () ()
   "Toggle terminal mouse support. When on, clicking moves point and the wheel

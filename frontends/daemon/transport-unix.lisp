@@ -134,7 +134,7 @@
                      (= (sb-posix:stat-uid stat) (sb-posix:getuid)))
           (error "Refusing unsafe existing daemon endpoint: ~a" endpoint))
         (when (socket-live-p endpoint)
-          (error "A daemon is already running at ~a" endpoint))
+          (error 'local-endpoint-in-use :endpoint endpoint))
         (delete-owned-path endpoint identity sb-posix:s-ifsock))))
 
   (defun prepare-metadata (metadata)
@@ -219,8 +219,9 @@
 
   (defmethod connect-local ((backend unix-local-backend) server-name)
     (let* ((pathname (local-endpoint backend server-name))
-           (socket (make-instance 'sb-bsd-sockets:local-socket :type :stream)))
+           (socket nil))
       (validate-endpoint pathname)
+      (setf socket (make-instance 'sb-bsd-sockets:local-socket :type :stream))
       (handler-case
           (progn
             (sb-bsd-sockets:socket-connect

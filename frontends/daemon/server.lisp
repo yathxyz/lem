@@ -49,6 +49,7 @@
 
 (defun daemon-running-p () *daemon-running-p*)
 (defun daemon-endpoint () *daemon-endpoint*)
+(defun server-name () *daemon-name*)
 
 (defun hash-values-vector (table)
   (let ((values '()))
@@ -157,6 +158,14 @@
       (with-current-buffer buffer (daemon-edit-mode nil)))
     requests))
 
+(defun daemon-kill-buffer-hook (buffer)
+  (dolist (request (request-buffer-list buffer))
+    (setf (daemon-request-buffers request)
+          (delete buffer (daemon-request-buffers request) :test #'eq))
+    (unless (daemon-request-buffers request)
+      (complete-request request "ok" "finished")))
+  (setf (request-buffer-list buffer) '()))
+
 (define-command daemon-edit-done () ()
   "Finish waiting daemon clients without saving this buffer."
   (unless (request-buffer-list)
@@ -251,11 +260,14 @@
     (error (condition)
       (complete-request request "visit-error" (princ-to-string condition)))))
 
-(defun readable-value (value)
+(defun printed-value (value)
   (let ((*print-length* 100)
         (*print-level* 20)
         (*print-circle* t))
-    (let ((text (write-to-string value :readably t)))
+    ;; Editor objects such as buffers have useful printed representations but
+    ;; cannot be reconstructed by READ. Do not report successful edits as
+    ;; failed evaluations merely because they return one of these objects.
+    (let ((text (write-to-string value :readably nil :escape t)))
       (if (> (length text) 65536)
           (concatenate 'string (subseq text 0 65536) "...")
           text))))
@@ -278,7 +290,7 @@
               (error "Evaluation request contains trailing data"))
             (let* ((*package* (find-package :lem-user))
                    (values (multiple-value-list (eval form)))
-                   (printed (map 'vector #'readable-value values)))
+                   (printed (map 'vector #'printed-value values)))
               (complete-request
                request "ok"
                (protocol:make-object
@@ -320,6 +332,10 @@
       (activate-implementation restore))))
 
 (defun handle-attach-on-editor (connection id width height)
+  (unless *daemon-root-implementation*
+    (response-error connection id "attach-unsupported"
+                    "Terminal attachment requires a `lem --daemon' server")
+    (return-from handle-attach-on-editor))
   (when (connection-implementation connection)
     (error "Connection already owns a frame"))
   (let ((implementation (make-instance 'daemon-implementation
@@ -528,10 +544,15 @@
               (error ()
                 (unless *daemon-running-p* (return))))))
 
-(defun configure-editor-environment ()
-  (let ((command (format nil "lemclient --server-name ~a" *daemon-name*)))
+(defun configure-editor-environment (&key force-git-editor)
+  "Route child editors to this listener, optionally overriding GIT_EDITOR."
+  (let ((command
+          (uiop:escape-sh-command
+           (list (or (uiop:getenvp "LEM_DAEMON_CLIENT") "lemclient")
+                 "--server-name" *daemon-name*))))
     (dolist (variable '("GIT_EDITOR" "VISUAL" "EDITOR"))
-      (unless (uiop:getenv variable)
+      (when (or (not (uiop:getenv variable))
+                (and force-git-editor (string= variable "GIT_EDITOR")))
         (setf (uiop:getenv variable) command)))))
 
 (defun start-daemon-transport ()
@@ -547,10 +568,16 @@
              (handler-case (accept-loop listener)
                (stop-accept-loop () nil)))
            :name "Lem daemon accept"))
+    (remove-hook (variable-value 'kill-buffer-hook :global t)
+                 'daemon-kill-buffer-hook)
+    (add-hook (variable-value 'kill-buffer-hook :global t)
+              'daemon-kill-buffer-hook)
     (configure-editor-environment)))
 
 (defun stop-daemon-transport ()
   (setf *daemon-running-p* nil)
+  (remove-hook (variable-value 'kill-buffer-hook :global t)
+               'daemon-kill-buffer-hook)
   (when *daemon-listener*
     (transport:close-local-listener *daemon-listener*))
   (dolist (connection (bt2:with-lock-held (*daemon-lock*)
@@ -567,6 +594,40 @@
   (setf *daemon-listener* nil *daemon-endpoint* nil *daemon-accept-thread* nil
         *daemon-connections* '() *daemon-requests* '()))
 
+(defun start-server (&key (name "server"))
+  "Start an in-session daemon listener and return its endpoint."
+  (when *daemon-listener*
+    (return-from start-server *daemon-endpoint*))
+  (unless (protocol:valid-server-name-p name)
+    (error "Unsafe daemon name: ~s" name))
+  (labels ((start (server-name)
+             (setf *daemon-name* server-name)
+             (start-daemon-transport)
+             *daemon-endpoint*))
+    (handler-case (start name)
+      (transport:local-endpoint-in-use (condition)
+        (unless (string= name "server")
+          (error condition))
+        (start (format nil "session-~d"
+                       (transport:backend-process-id
+                        (transport:require-local-backend))))))))
+
+(defun stop-server ()
+  "Stop the in-session daemon listener without exiting the editor."
+  (let ((endpoint *daemon-endpoint*))
+    (stop-daemon-transport)
+    endpoint))
+
+(define-command daemon-server-start () ()
+  "Start the in-session daemon listener."
+  (message "Lem daemon server listening at ~a" (start-server)))
+
+(define-command daemon-server-stop () ()
+  "Stop the in-session daemon listener without exiting Lem."
+  (alexandria:if-let ((endpoint (stop-server)))
+    (message "Stopped Lem daemon server at ~a" endpoint)
+    (message "Lem daemon server is not running")))
+
 (defun stop-daemon (&key force)
   (if (and (modified-buffers) (not force))
       (error "Modified buffers prevent daemon shutdown")
@@ -575,9 +636,9 @@
 (defun invoke-daemon (function &optional (name "server"))
   (unless (protocol:valid-server-name-p name)
     (error "Unsafe daemon name: ~s" name))
-  (let* ((*daemon-name* name)
-         (implementation (make-instance 'daemon-implementation)))
-    (setf *daemon-root-implementation* implementation)
+  (let ((implementation (make-instance 'daemon-implementation)))
+    (setf *daemon-name* name
+          *daemon-root-implementation* implementation)
     (unwind-protect
          (lem-core::invoke-frontend function :implementation implementation)
       (setf *daemon-root-implementation* nil))))

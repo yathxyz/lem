@@ -352,16 +352,7 @@
             (load #P"${self}/lem-yath/init.lisp")
           '';
 
-          lemClient = pkgs.writeShellApplication {
-            name = "lemclient";
-            runtimeInputs = with pkgs; [
-              coreutils
-              gnugrep
-              socat
-              tmux
-            ];
-            text = builtins.readFile ./scripts/lemclient.sh;
-          };
+          lemClient = lem.packages.${system}.lemclient;
 
           lemYathAotScript = pkgs.writeText "compile-lem-yath-aot.lisp" ''
             (in-package :cl-user)
@@ -400,7 +391,7 @@
                 export XDG_CACHE_HOME="$TMPDIR/cache"
                 export TERM=xterm-256color
                 export LEM_YATH_AOT_REPORT="$TMPDIR/aot-report"
-                export LEM_YATH_CLIENT=${lemClient}/bin/lemclient
+                export LEM_DAEMON_CLIENT=${lemClient}/bin/lemclient
                 export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
                 export LEM_YATH_GUARDIAN_PYTHON=${lib.getExe' pkgs.python3 "python3"}
                 export LEM_YATH_MCP_FETCH_PROGRAM=${lib.getExe' pkgs.uv "uvx"}
@@ -431,8 +422,7 @@
                   exit 1
                 fi
 
-                # ASDF selects exactly one platform-specific server implementation.
-                expected=$(find ${self}/lem-yath/src -type f -name '*.lisp' ! -name 'server-windows.lisp' | wc -l)
+                expected=$(find ${self}/lem-yath/src -type f -name '*.lisp' | wc -l)
                 actual=$(find "$out" -type f -name '*.fasl' | wc -l)
                 if [ "$actual" -ne "$expected" ]; then
                   echo "expected $expected lem-yath FASLs, built $actual" >&2
@@ -444,8 +434,7 @@
             name = "lem";
             runtimeInputs = defaultRuntimeInputs;
             text = ''
-              export LEM_YATH_CLIENT=${lemClient}/bin/lemclient
-              export LEM_YATH_ALTERNATE_EDITOR="$0"
+              export LEM_DAEMON_CLIENT=${lemClient}/bin/lemclient
               export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
               export TZDIR=${pkgs.tzdata}/share/zoneinfo
               export LEM_YATH_ASPELL_PROGRAM=${lib.getExe' aspellRuntime "aspell"}
@@ -535,7 +524,6 @@
             name = "lem-yath";
             paths = [
               lemYathEditor
-              lemClient
               smtpSubmit
             ];
           };
@@ -586,6 +574,16 @@
           mkTestAppWithLem = lemPackage: mkTestAppWithLemAndInputs lemPackage [ ];
 
           mkTestApp = mkTestAppWithLem lemNcurses;
+
+          daemonTest = pkgs.writeShellApplication {
+            name = "lem-yath-daemon-test";
+            runtimeInputs = [ pkgs.python3 ];
+            text = ''
+              export LEM_BIN=${lemYath}/bin/lem
+              export LEMCLIENT_BIN=${lemClient}/bin/lemclient
+              exec python3 ${self}/scripts/daemon-test.py
+            '';
+          };
 
           mkRealLspTestApp =
             name: script:
@@ -687,12 +685,9 @@
             compile-check = mkTestApp "lem-yath-compile-check" "compile-check.sh";
             compilation-test = mkTestAppWithLem lemYath "lem-yath-compilation-test" "compilation-test.sh";
             terminal-test = mkTestAppWithLem lemYath "lem-yath-terminal-test" "terminal-test.sh";
-            server-test = mkTestAppWithLemAndInputs lemYath [
-              pkgs.socat
-              pkgs.util-linux
-            ] "lem-yath-server-test" "server-test.sh";
             boot-test = mkTestApp "lem-yath-boot-test" "boot-test.sh";
             startup-test = mkTestAppWithLem lemYath "lem-yath-startup-test" "startup-test.sh";
+            daemon-test = mkApp "${daemonTest}/bin/lem-yath-daemon-test" "Test the configured native daemon lifecycle";
             completion-test = mkTestApp "lem-yath-completion-test" "completion-test.sh";
             completion-lifecycle-test = mkTestApp "lem-yath-completion-lifecycle-test" "completion-lifecycle-test.sh";
             auto-completion-test = mkTestApp "lem-yath-auto-completion-test" "auto-completion-test.sh";
@@ -830,9 +825,12 @@
             compile = mkCheck "compile" "compile-check.sh";
             compilation = mkCheckWithLem lemYath "compilation" "compilation-test.sh";
             terminal = mkCheckWithLem lemYath "terminal" "terminal-test.sh";
-            server = mkCheckWithLemAndInputs lemYath [ pkgs.socat pkgs.util-linux ] "server" "server-test.sh";
             boot = mkCheck "boot" "boot-test.sh";
             startup = mkCheckWithLem lemYath "startup" "startup-test.sh";
+            daemon = pkgs.runCommand "lem-yath-daemon-check" { } ''
+              ${daemonTest}/bin/lem-yath-daemon-test
+              touch "$out"
+            '';
             completion = mkCheck "completion" "completion-test.sh";
             completion-lifecycle = mkCheck "completion-lifecycle" "completion-lifecycle-test.sh";
             auto-completion = mkCheck "auto-completion" "auto-completion-test.sh";

@@ -1646,37 +1646,27 @@ prose exclusion, and reload idempotence. `scripts/vundo-test.sh` independently
 checks ordinary nested insert/delete hook ordering and throwing change-group
 cancellation in the patched core.
 
-### Reusable ncurses editor client — `lem-yath/src/server.lisp`, `scripts/lemclient.sh` (verified approximation)
+### Native daemon and editor client — `frontends/daemon/`, `lem-yath/src/daemon.lisp`
 
-The packaged editor starts a bounded local Unix-socket listener only when its
-packaged `lemclient` is available. The socket lives below `XDG_RUNTIME_DIR` or
-the Lem-yath cache, with a user-owned 0700 parent, a 0600 socket, and an
-optional 0600 tmux pane file. Existing non-socket paths, symlink pane metadata,
-overlong socket paths, foreign ownership, malformed protocol fields, more than
-64 files, and more than 64 simultaneous connections fail closed. A live socket
-is reused rather than unlinked; only stale owner sockets and metadata created by
-this process are removed.
+The configured editor uses the native Common Lisp daemon/client implementation.
+A headless `lem --daemon[=NAME]` owns shared buffers and supports independent
+terminal frames, local evaluation, and blocking/nonblocking positioned file
+visits. A plain interactive editor also starts a file/eval listener, falling
+back from the default name to `session-<pid>` when needed. In-session listeners
+refuse terminal attachment. Child Git edits always target the listener in the
+same editor process using the packaged native client.
 
-`lemclient` accepts blocking or `--no-wait` requests and Emacs-style
-`+LINE[:COLUMN]` positions. Blocking buffers enable a `Server` minor mode:
-`ZZ`/`C-c C-c` saves and completes, `C-x #` completes only when clean, and
-`ZQ`/`C-c C-k` aborts the request while preserving unsaved text. Multi-file
-requests advance through every unfinished buffer before returning. A request
-without files attaches to the current buffer. Killing a waiting buffer counts
-as completion, while editor exit reports an error and closes every connection.
+The Unix transport validates same-user peers and private endpoints, refuses
+live endpoint replacement, and reclaims stale owned sockets. Waiting edits
+support multi-file completion, clean finish, save-and-finish, and abort that
+retains unsaved text. Missing daemons fail visibly unless the caller explicitly
+chooses an alternate editor. No tmux pane metadata or socat client is used.
 
-Inside tmux, the client validates the publishing tmux-server identity and pane,
-switches the invoking client to Lem after `OPENED`, and restores the original
-pane after the final result. `--no-focus` supports automation. If the socket or usable pane is
-missing, the client executes a fresh configured Lem. Successful startup points
-`GIT_EDITOR` at the packaged client's `--no-focus` form, because editor child
-processes are already inside Lem's pane, and points otherwise-unset `VISUAL`
-and `EDITOR` at the ordinary client. Parent shells must export those values
-separately. This is deliberately narrower than Emacs's daemon: there is one
-authoritative ncurses UI, no arbitrary Lisp evaluation, and no graphical or new
-terminal frame creation. `scripts/server-test.sh` drives the real editor through
-multi-file finish, no-wait, abort/recovery, zero-file attach, invalid input,
-private metadata, partial-start rollback, and clean shutdown.
+`frontends/daemon/tests/` covers the protocol and core lifecycle;
+`scripts/daemon-test.py` exercises the packaged configuration and native client
+without a terminal server. See `../../docs/daemon-client.md` for the protocol
+limits. Graphical attachments, terminal face transport, and crash recovery of
+unsaved editor state are subsequent milestones.
 
 ### Current-buffer Direnv environment — `lem-yath/src/direnv.lisp` (verified approximation)
 

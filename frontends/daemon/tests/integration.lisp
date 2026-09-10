@@ -78,6 +78,224 @@
   (values (asynchronous-response-value response)
           (asynchronous-response-error response)))
 
+(defclass in-session-test-implementation
+    (lem-daemon:daemon-implementation)
+  ())
+
+(defmethod lem-if:invoke ((implementation in-session-test-implementation)
+                          function)
+  (declare (ignore implementation))
+  (bt2:join-thread (funcall function)))
+
+(defun call-on-editor (function)
+  (let ((done nil) (value nil) (condition nil))
+    (lem:send-event
+     (lambda ()
+       (handler-case (setf value (funcall function))
+         (error (error) (setf condition error)))
+       (setf done t)))
+    (unless (wait-until (lambda () done))
+      (error "Timed out waiting for the in-session editor"))
+    (when condition (error condition))
+    value))
+
+(deftest in-session-server
+  (let* ((old-runtime (uiop:getenv "XDG_RUNTIME_DIR"))
+         (old-config (uiop:getenv "XDG_CONFIG_HOME"))
+         (root (merge-pathnames
+                (format nil "lem-in-session-test-~d-~d/"
+                        (sb-posix:getpid) (random 1000000000))
+                (uiop:temporary-directory)))
+         (server-name (format nil "in-session-~d" (random 1000000000)))
+         (editor-thread nil)
+         (editor-error nil)
+         (connection nil)
+         (waiting nil)
+         (occupied-listener nil))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist (merge-pathnames "marker" root))
+           (setf (uiop:getenv "XDG_RUNTIME_DIR")
+                 (uiop:native-namestring root)
+                 (uiop:getenv "XDG_CONFIG_HOME")
+                 (uiop:native-namestring root)
+                 editor-thread
+                 (bt2:make-thread
+                  (lambda ()
+                    (handler-case
+                        (lem-core::invoke-frontend
+                         (lambda (&optional initialize finalize)
+                           (lem-core::run-editor-thread
+                            initialize (lem:parse-args '("-q")) finalize))
+                         :implementation
+                         (make-instance 'in-session-test-implementation))
+                      (error (condition) (setf editor-error condition))))
+                  :name "Lem in-session integration test"))
+           (ok (wait-until (lambda () lem-core::*in-the-editor*))
+               "the interactive editor starts")
+           (ok (null editor-error) "the interactive editor starts cleanly")
+           (let ((endpoint
+                   (call-on-editor
+                    (lambda () (lem-daemon:start-server :name server-name)))))
+             (ok (probe-file endpoint) "the in-session listener publishes its endpoint"))
+           (setf connection (client::connect-client server-name))
+           (setf waiting (client::connect-client server-name))
+
+           (testing "eval round-trips through an in-session listener"
+             (ok (string= "42" (eval-primary connection "(+ 19 23)"))))
+
+           (testing "a blocking visit completes after save-and-done"
+             (let ((pathname (merge-pathnames "save-and-done.txt" root)))
+               (with-open-file (stream pathname :direction :output
+                                                   :if-exists :supersede)
+                 (write-string "before" stream))
+               (multiple-value-bind (response id)
+                   (start-waiting-visit waiting pathname)
+                 (declare (ignore id))
+                 (ok (wait-until
+                      (lambda ()
+                        (string= "1"
+                                 (eval-primary
+                                  connection
+                                  "(length (lem-daemon:request-buffer-list))"))))
+                     "the blocking visit becomes pending")
+                 (eval-primary
+                  connection
+                  "(progn (lem:buffer-end (lem:current-point)) (lem:insert-string (lem:current-point) \"-saved\") (lem-daemon:daemon-edit-save-and-done))")
+                 (multiple-value-bind (value error)
+                     (finish-asynchronous-response response)
+                   (ok (and (null error) (string= "finished" value))))
+                 (ok (string= "before-saved" (uiop:read-file-string pathname))))))
+
+           (testing "killing a pending visit buffer releases the client"
+             (let ((pathname (merge-pathnames "killed-buffer.txt" root)))
+               (with-open-file (stream pathname :direction :output
+                                                   :if-exists :supersede)
+                 (write-string "kill me" stream))
+               (multiple-value-bind (response id)
+                   (start-waiting-visit waiting pathname)
+                 (declare (ignore id))
+                 (ok (wait-until
+                      (lambda ()
+                        (string= "1"
+                                 (eval-primary
+                                  connection
+                                  "(length (lem-daemon:request-buffer-list))")))))
+                 (eval-primary connection
+                               "(progn (lem:delete-buffer (lem:current-buffer)) :deleted)")
+                 (multiple-value-bind (value error)
+                     (finish-asynchronous-response response)
+                   (ok (and (null error) (string= "finished" value)))))))
+
+           (testing "terminal attachment is refused with a structured error"
+             (let ((id (client::next-id)))
+               (client::client-send
+                connection
+                (protocol:make-object
+                 "version" protocol:+protocol-version+
+                 "type" "attach" "id" id "width" 80 "height" 24))
+               (multiple-value-bind (value error code)
+                   (client::wait-for-response connection id)
+                 (declare (ignore value))
+                 (ok (and (string= code "attach-unsupported")
+                          (search "lem --daemon" error))))))
+
+           (testing "stop-server releases the endpoint but leaves Lem running"
+             (let ((endpoint (lem-daemon:daemon-endpoint)))
+               (client::close-client connection)
+               (client::close-client waiting)
+               (setf connection nil waiting nil)
+               (ok (equal endpoint (call-on-editor #'lem-daemon:stop-server)))
+               (ok (wait-until (lambda () (not (probe-file endpoint))))
+                   "the endpoint is released")
+               (ok (bt2:thread-alive-p editor-thread)
+                   "the interactive editor remains alive")))
+
+           (testing "the default name falls back when a live daemon owns it"
+             (let* ((backend (transport:require-local-backend))
+                    (occupied-endpoint (transport:local-endpoint backend "server")))
+               (setf occupied-listener
+                     (transport:open-local-listener backend "server" 4))
+               (let* ((endpoint (call-on-editor #'lem-daemon:start-server))
+                      (expected-name
+                        (format nil "session-~d"
+                                (transport:backend-process-id backend))))
+                 (ok (string= expected-name (lem-daemon:server-name)))
+                 (ok (equal endpoint
+                            (transport:local-endpoint backend expected-name)))
+                 (ok (probe-file occupied-endpoint)
+                     "fallback preserves the live default endpoint"))
+               (call-on-editor #'lem-daemon:stop-server))))
+      (when connection (client::close-client connection))
+      (when waiting (client::close-client waiting))
+      (ignore-errors (lem-daemon:stop-server))
+      (when occupied-listener
+        (transport:close-local-listener occupied-listener))
+      (when (and editor-thread (bt2:thread-alive-p editor-thread))
+        (lem:send-event #'lem:exit-editor)
+        (ignore-errors (bt2:join-thread editor-thread)))
+      (setf (uiop:getenv "XDG_RUNTIME_DIR") old-runtime)
+      (setf (uiop:getenv "XDG_CONFIG_HOME") old-config)
+      (when (uiop:directory-exists-p root)
+        (uiop:delete-directory-tree root :validate t)))))
+
+(deftest daemon-startup-failure
+  (let* ((old-runtime (uiop:getenv "XDG_RUNTIME_DIR"))
+         (root (merge-pathnames
+                (format nil "lem-failed-startup-~d-~d/"
+                        (sb-posix:getpid) (random 1000000000))
+                (uiop:temporary-directory)))
+         (name "failed-startup")
+         (condition nil))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist (merge-pathnames "marker" root))
+           (setf (uiop:getenv "XDG_RUNTIME_DIR") (namestring root))
+           (handler-case
+               (lem:launch
+                (lem:parse-args
+                 (list "--daemon=failed-startup" "-q" "--eval"
+                       "(progn (warn \"expected startup warning\") (error \"expected daemon startup failure\"))")))
+             (error (error) (setf condition error)))
+           (ok (and condition
+                    (search "expected daemon startup failure"
+                            (princ-to-string condition)))
+               "initialization failure reaches the daemon owner")
+           (ng lem-core::*in-the-editor*
+               "failed initialization does not leave an editor loop running")
+           (ng (lem-daemon:daemon-running-p))
+           (let ((backend (transport:require-local-backend)))
+             (ng (probe-file (transport:local-endpoint backend name))
+                 "failed startup releases the endpoint")
+             (ng (probe-file (transport:local-metadata backend name))
+                 "failed startup releases its metadata")))
+      (setf (uiop:getenv "XDG_RUNTIME_DIR") old-runtime)
+      (when (uiop:directory-exists-p root)
+        (uiop:delete-directory-tree root :validate t)))))
+
+(deftest daemon-warning-shutdown
+  (let* ((old-runtime (uiop:getenv "XDG_RUNTIME_DIR"))
+         (root (merge-pathnames
+                (format nil "lem-warning-test-~d-~d/"
+                        (sb-posix:getpid) (random 1000000000))
+                (uiop:temporary-directory)))
+         (condition nil))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist (merge-pathnames "marker" root))
+           (setf (uiop:getenv "XDG_RUNTIME_DIR") (namestring root))
+           (handler-case
+               (lem:launch
+                (lem:parse-args
+                 '("--daemon=warning-test" "-q" "--eval"
+                   "(progn (warn \"expected nonfatal startup warning\") (lem:exit-editor))")))
+             (error (error) (setf condition error)))
+           (ok (null condition) "a startup warning does not turn clean shutdown into failure")
+           (ng (lem-daemon:daemon-running-p)))
+      (setf (uiop:getenv "XDG_RUNTIME_DIR") old-runtime)
+      (when (uiop:directory-exists-p root)
+        (uiop:delete-directory-tree root :validate t)))))
+
 (deftest daemon-client-round-trip
   (let* ((old-runtime (uiop:getenv "XDG_RUNTIME_DIR"))
          (old-git-editor (uiop:getenv "GIT_EDITOR"))
@@ -149,8 +367,17 @@
                    "metadata is owner-private")))
 
            (setf admin (client::connect-client server-name))
+           (ok (string= (format nil "~s" server-name)
+                        (eval-primary admin "lem-daemon::*daemon-name*"))
+               "the editor thread retains the selected daemon name")
+           (eval-primary admin "(lem-daemon:configure-editor-environment :force-git-editor t)")
+           (ok (string= (format nil "lemclient --server-name ~a" server-name)
+                        (uiop:getenv "GIT_EDITOR"))
+               "configured Git edits return to the named daemon")
            (ok (string= "42" (eval-primary admin "(+ 20 22)"))
                "eval returns a structured value")
+           (ok (search "#<" (eval-primary admin "(lem:current-buffer)"))
+               "an evaluation returning a buffer still succeeds")
            (eval-primary admin
                          "(defparameter lem-user::*daemon-test-state* 73)")
            (ok (string= "73"

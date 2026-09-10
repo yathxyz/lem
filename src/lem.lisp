@@ -74,17 +74,35 @@ See scripts/build-ncurses.lisp or scripts/build-sdl2.lisp"
 (defun run-editor-thread (initialize args finalize)
   (bt2:make-thread
    (lambda ()
-     (when initialize (funcall initialize))
-     (unwind-protect
-          (let (#+lispworks (lw:*default-character-element-type* 'character))
-            (with-editor-stream ()
-              (with-timer-manager (make-instance 'lem-timer-manager)
-                (setf *in-the-editor* t)
-                (setup)
-                (let ((report (toplevel-command-loop (lambda () (init args)))))
-                  (when finalize (funcall finalize report))
-                  (teardown)))))
-       (setf *in-the-editor* nil)))
+     (labels ((run ()
+                (when initialize (funcall initialize))
+                (unwind-protect
+                     (let (#+lispworks (lw:*default-character-element-type* 'character))
+                       (with-editor-stream ()
+                         (with-timer-manager (make-instance 'lem-timer-manager)
+                           (setf *in-the-editor* t)
+                           (setup)
+                           (unwind-protect
+                                (let ((report
+                                        (toplevel-command-loop
+                                         (lambda () (init args))
+                                         :handle-init-errors-p
+                                         (not (command-line-arguments-daemon args)))))
+                                  (when finalize (funcall finalize report)))
+                             (teardown)))))
+                  (setf *in-the-editor* nil))))
+       (if (command-line-arguments-daemon args)
+           ;; Return the condition to the daemon's owner thread so transport
+           ;; cleanup runs before a failed startup exits the process.
+           (let ((diagnostics *error-output*))
+             ;; Bordeaux Threads records escaping warnings as abnormal exits
+             ;; even when execution continues. Report and handle them here so
+             ;; a successful daemon shutdown remains successful.
+             (handler-bind ((warning (lambda (condition)
+                                       (format diagnostics "~&WARNING: ~a~%" condition)
+                                       (muffle-warning condition))))
+               (handler-case (run) (error (condition) condition))))
+           (run))))
    :name "editor"))
 
 (defun find-editor-thread ()
@@ -148,7 +166,13 @@ See scripts/build-ncurses.lisp or scripts/build-sdl2.lisp"
   (launch (parse-args args)))
 
 (defun main (&optional (args (uiop:command-line-arguments)))
-  (apply #'lem args))
+  (let ((arguments (parse-args args)))
+    (if (command-line-arguments-daemon arguments)
+        (handler-case (launch arguments)
+          (error (condition)
+            (format *error-output* "~&Lem daemon failed: ~a~%" condition)
+            (uiop:quit 1)))
+        (launch arguments))))
 
 #+sbcl
 (push #'(lambda (x)

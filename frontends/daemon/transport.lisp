@@ -4,6 +4,12 @@
 (defclass local-listener () ())
 (defclass local-connection () ())
 
+(define-condition local-endpoint-in-use (error)
+  ((endpoint :initarg :endpoint :reader local-endpoint-in-use-endpoint))
+  (:report (lambda (condition stream)
+             (format stream "A daemon is already running at ~a"
+                     (local-endpoint-in-use-endpoint condition)))))
+
 (defvar *local-backend* nil)
 
 (defun require-local-backend ()

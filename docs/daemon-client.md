@@ -31,7 +31,7 @@ make daemon-client
 ./lemclient --no-wait README.md       # submit and return immediately
 ./lemclient +120:4 README.md          # line 120, column 4
 ./lemclient -t README.md              # attach an independent terminal frame
-./lemclient --eval '(length (lem:all-buffers))'
+./lemclient --eval '(length (lem:buffer-list))'
 ./lemclient --stop-server
 ```
 
@@ -45,9 +45,27 @@ A blocking file request enables `daemon-edit-mode` in each requested buffer:
 - `C-c C-c` or `Z Z` saves and finishes;
 - `C-c C-k` or `Z Q` aborts the request without killing the daemon or buffer.
 
-After a daemon starts successfully, unset `GIT_EDITOR`, `VISUAL`, and `EDITOR`
-variables are set to its named `lemclient` command. Existing values are left
-unchanged.
+### In-session server
+
+A normal interactive Lem can accept native client requests without becoming a
+headless daemon. Run `M-x daemon-server-start` to start its listener and
+`M-x daemon-server-stop` to stop only that listener. File visits and `--eval`
+use the current interactive frame. Terminal attachment is refused; `lemclient
+-t` must connect to a real `lem --daemon` process.
+
+The listener normally uses the `server` endpoint. If a live daemon already owns
+that name, the interactive editor claims `session-<pid>` instead. Configurations
+that launch clients from inside the editor should pass that name with
+`lemclient --server-name` so requests return to the same interactive session.
+
+The base daemon fills unset `GIT_EDITOR`, `VISUAL`, and `EDITOR` with its
+named native client command. The lem-yath configuration always overrides its
+child `GIT_EDITOR` to target its own listener; existing `VISUAL` and `EDITOR`
+values are preserved. `LEM_DAEMON_CLIENT` selects the packaged client executable.
+
+`--wait-for-server SECONDS` retries connection failures during supervised
+startup. It does not time out an evaluation after connecting. A service should
+bound its readiness command separately and require an eval response after init.
 
 `Ctrl-C` in a blocking SBCL client sends protocol cancellation and exits with
 status 130. A client connection failure is an error unless
@@ -286,5 +304,7 @@ tests before committing to a broad public protocol.
 - Terminal text, cursor position, wide-character layout, resize, keys, and
   bracketed paste are supported. Face/color runs and mouse events are not yet
   transported.
-- Socket activation, systemd user units, SDL2/webview attachment, and daemon
-  state restoration after a process restart remain future integrations.
+- Socket activation, SDL2/webview attachment, and daemon state restoration
+  after a process restart remain future integrations. A systemd user unit is
+  prepared in the companion Nix integration checkout; it has not been deployed.
+  See [service integration](daemon-service-migration.md).

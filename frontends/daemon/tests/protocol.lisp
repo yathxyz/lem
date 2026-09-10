@@ -51,6 +51,18 @@
           "overwriting a wide-character continuation repairs the row")
       (ok (string= " ab   " text)))))
 
+(deftest daemon-theme-interface
+  (let ((implementation (make-instance 'lem-daemon:daemon-implementation)))
+    (ng (lem/common/color:light-color-p
+         (lem-if:get-background-color implementation)))
+    (lem-if:update-background implementation "#ffffff")
+    (lem-if:update-foreground implementation "#123456")
+    (ok (lem/common/color:light-color-p
+         (lem-if:get-background-color implementation)))
+    (ok (lem/common/color:color-equal
+         (lem/common/color:parse-color "#123456")
+         (lem-if:get-foreground-color implementation)))))
+
 (deftest yath-file-client-compatibility
   (flet ((key-command (keys)
            (alexandria:when-let
