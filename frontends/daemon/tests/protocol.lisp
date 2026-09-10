@@ -12,7 +12,7 @@
                    "form" "(+ 20 22)"))
          (bytes (protocol:encode-message message))
          (decoded (protocol:decode-message bytes)))
-    (ok (= 1 (protocol:field decoded "version")))
+    (ok (= protocol:+protocol-version+ (protocol:field decoded "version")))
     (ok (string= "eval" (protocol:field decoded "type")))
     (ok (string= "(+ 20 22)" (protocol:field decoded "form")))))
 
@@ -62,6 +62,74 @@
     (ok (lem/common/color:color-equal
          (lem/common/color:parse-color "#123456")
          (lem-if:get-foreground-color implementation)))))
+
+(deftest styled-display-cells
+  (let* ((row (lem-daemon::make-cell-row 6))
+         (red (lem-daemon::drawing-face (lem:make-attribute :foreground "red" :bold t)))
+         (green (lem-daemon::drawing-face (lem:make-attribute :foreground "green")))
+         (text (format nil "漢e~c" (code-char #x301))))
+    (lem-daemon::overlay-text row 0 text red)
+    (let ((runs (lem-daemon::encode-face-runs
+                 (lem-daemon::cell-row-cells row) (lem-daemon::cell-row-faces row))))
+      (ok (= 1 (length runs)))
+      (ok (equalp (vector 0 text "#FF0000" nil 1) (aref runs 0))
+          "a wide character and combining mark remain in their styled run"))
+    (lem-daemon::overlay-text row 1 "ab" green)
+    (ok (string= " ab   " (lem-daemon::cell-row-string row)))
+    (let ((runs (lem-daemon::encode-face-runs
+                 (lem-daemon::cell-row-cells row) (lem-daemon::cell-row-faces row))))
+      (ok (= 1 (length runs)))
+      (ok (and (= 1 (aref (aref runs 0) 0))
+               (string= "ab" (aref (aref runs 0) 1)))
+          "overwriting a wide continuation clears the old glyph and face"))
+    (lem-daemon::clear-cell-row row 1)
+    (ok (zerop (length (lem-daemon::encode-face-runs
+                       (lem-daemon::cell-row-cells row) (lem-daemon::cell-row-faces row))))
+        "clearing text also removes its face")))
+
+(deftest modeline-and-eol-faces
+  (let* ((implementation (make-instance 'lem-daemon:daemon-implementation))
+         (view (lem-daemon::make-daemon-view :width 8 :height 1))
+         (attribute (lem:make-attribute :foreground "white" :background "blue"))
+         (object (make-instance 'lem-core/display:text-object :string "Mode"
+                                :attribute nil)))
+    (lem-if:render-line-on-modeline implementation view (list object) nil attribute 1)
+    (let ((row (gethash 1 (lem-daemon::daemon-view-grid view))))
+      (ok (string= "Mode    " (lem-daemon::cell-row-string row)))
+      (ok (every (lambda (face) (equal face '("#FFFFFF" "#0000FF" 0)))
+                 (lem-daemon::cell-row-faces row))
+          "the modeline's default face covers text and padding")
+      (lem-daemon::render-object-into-row
+       row 4 (make-instance 'lem-core/display:extend-to-eol-object
+                            :color (lem/common/color:make-color 1 2 3)))
+      (ok (equal '(nil "#010203" 0) (aref (lem-daemon::cell-row-faces row) 7))
+          "end-of-line background fill preserves its color"))))
+
+(deftest mouse-message-validation
+  (flet ((down (&rest overrides)
+           (let ((message (protocol:make-object "kind" "down" "x" 10 "y" 4
+                                                 "button" 1 "clicks" 2)))
+             (loop :for (key value) :on overrides :by #'cddr
+                   :do (setf (gethash key message) value))
+             message)))
+    (let ((event (lem-daemon::decode-mouse-message (down))))
+      (ok (typep event 'lem-core::mouse-button-down))
+      (ok (and (= 10 (lem-core::mouse-event-x event))
+               (= 4 (lem-core::mouse-event-y event))
+               (= 2 (lem-core::mouse-button-down-clicks event))
+               (eq :button-1 (lem-core::mouse-event-button event)))
+          "mouse coordinates, button, and click count reach a core event"))
+    (dolist (invalid '(("x" -1) ("x" 1000) ("y" "4")
+                       ("button" 0) ("button" 5) ("clicks" 0) ("kind" "evaluate")))
+      (ok (handler-case
+              (progn (lem-daemon::decode-mouse-message (apply #'down invalid)) nil)
+            (error () t))
+          (format nil "invalid mouse input is rejected: ~s" invalid))))
+  (let ((event (lem-daemon::decode-mouse-message
+                (protocol:make-object "kind" "wheel" "x" 2 "y" 3 "dx" 0 "dy" -1))))
+    (ok (and (typep event 'lem-core::mouse-wheel)
+             (= -1 (lem-core::mouse-wheel-y event)))
+        "wheel direction is preserved")))
 
 (deftest yath-file-client-compatibility
   (flet ((key-command (keys)

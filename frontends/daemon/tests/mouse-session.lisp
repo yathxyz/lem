@@ -1,0 +1,115 @@
+(defpackage :lem-daemon/tests/mouse-session
+  (:use :cl :rove)
+  (:local-nicknames (:core :lem-core)))
+(in-package :lem-daemon/tests/mouse-session)
+
+(defun call-with-two-frames (function)
+  (lem:with-current-buffers ()
+    (let ((core::*display-frame-map* (make-hash-table))
+          (core::*frames* nil)
+          (implementations (loop :repeat 2
+                                 :collect (make-instance 'lem-daemon:daemon-implementation))))
+      (unwind-protect
+           (progn
+             (loop :for implementation :in implementations
+                   :for index :from 0
+                   :do (lem:with-implementation implementation
+                         (let ((frame (lem:make-frame nil))
+                               (buffer (lem:make-buffer (format nil "mouse-frame-~d" index))))
+                           (lem:map-frame implementation frame)
+                           (lem:setup-frame frame buffer)
+                           (setf (lem:current-buffer) buffer)
+                           (lem:insert-string (lem:buffer-point buffer) "some text")
+                           (lem:buffer-start (lem:buffer-point buffer)))))
+             (apply function implementations))
+        (dolist (implementation implementations)
+          (lem:with-implementation implementation
+            (alexandria:when-let ((frame (lem:get-frame implementation)))
+              (lem:teardown-frame frame)
+              (lem:unmap-frame implementation))))))))
+
+(defun select-frame (implementation)
+  (setf core::*implementation* implementation
+        (lem:current-buffer) (lem:window-buffer (lem:current-window))))
+
+(defun mouse-event (class x y &optional (button :button-1))
+  (apply #'make-instance class :x x :y y :pixel-x x :pixel-y y :button button
+         (when (eq class 'core::mouse-button-down) (list :clicks 1))))
+
+(deftest separator-drag-is-owned-by-frame
+  (call-with-two-frames
+   (lambda (first second)
+     (let ((core::*implementation* first))
+       (select-frame first)
+       (lem:split-window-horizontally (lem:current-window))
+       (let* ((frame (lem:current-frame))
+              (right (car (sort (copy-list (lem:window-list)) #'> :key #'lem:window-x)))
+              (separator-x (1- (lem:window-x right)))
+              (width (lem:window-width right)))
+         (core::handle-mouse-event (mouse-event 'core::mouse-button-down separator-x 0))
+         (let ((separator (core::frame-dragged-separator frame)))
+           (ok separator "a separator press starts a drag in its frame")
+           (select-frame second)
+           (core::handle-mouse-event (mouse-event 'core::mouse-button-down 0 0))
+           (core::handle-mouse-event (mouse-event 'core::mouse-motion 10 0))
+           (ok (= width (lem:window-width right))
+               "dragging in another frame does not resize the first frame")
+           (core::handle-mouse-event (mouse-event 'core::mouse-button-up 10 0))
+           (ok (eq separator (core::frame-dragged-separator frame))
+               "another frame's release does not cancel the first drag")
+           (select-frame first)
+           (core::handle-mouse-event (mouse-event 'core::mouse-motion (+ separator-x 3) 0))
+           (ok (/= width (lem:window-width right))
+               "the original frame can continue its own drag")
+           (core::handle-mouse-event (mouse-event 'core::mouse-button-up (+ separator-x 3) 0))
+           (ok (null (core::frame-dragged-separator frame))
+               "the owner's release ends its drag")
+           (core::handle-mouse-event
+            (mouse-event 'core::mouse-button-down (1- (lem:window-x right)) 0))
+           (ok (core::frame-dragged-separator frame))
+           (lem:teardown-frame frame)
+           (lem:unmap-frame first)
+           (ok (null (core::frame-dragged-separator frame))
+               "teardown releases a drag left behind by a disconnected client")
+           (select-frame second)
+           (let ((width (lem:window-width (lem:current-window))))
+             (core::handle-mouse-event (mouse-event 'core::mouse-motion 15 0))
+             (core::handle-mouse-event (mouse-event 'core::mouse-button-up 15 0))
+             (ok (= width (lem:window-width (lem:current-window)))
+                 "the remaining frame accepts mouse input after the owner disappears"))))))))
+
+(deftest hover-and-last-event-are-owned-by-frame
+  (call-with-two-frames
+   (lambda (first second)
+     (let ((core::*implementation* first)
+           (entered nil) (left nil))
+       (select-frame first)
+       (let* ((first-frame (lem:current-frame))
+              (first-window (lem:current-window))
+              (point (lem:current-point))
+              (event (mouse-event 'core::mouse-motion 0 0 nil))
+              (overlay (lem:with-point ((end point))
+                         (lem:character-offset end 1)
+                         (lem:make-overlay point end (lem:make-attribute :underline t)))))
+         (lem:overlay-put overlay :hover-callback
+                          (lambda (window point) (declare (ignore point)) (push window entered)))
+         (lem:overlay-put overlay :unhover-callback
+                          (lambda (window point) (declare (ignore point)) (push window left)))
+         (core::set-last-mouse-event event)
+         (core::handle-mouse-event event)
+         (ok (equal entered (list first-window)) "the owner enters its hover overlay")
+         (select-frame second)
+         (ok (null (core::last-mouse-event)) "another frame starts with no last mouse event")
+         (core::handle-mouse-event (mouse-event 'core::mouse-motion 0 0 nil))
+         (ok (null left) "another frame's motion does not leave the owner's overlay")
+         (ok (eq overlay (core::frame-hover-overlay first-frame)))
+         (select-frame first)
+         (ok (eq event (core::last-mouse-event)) "frame switching preserves the owner's event")
+         (core::handle-mouse-event (mouse-event 'core::mouse-motion 3 0 nil))
+         (ok (equal left (list first-window)) "the owner's motion leaves its own overlay")
+         (core::handle-mouse-event event)
+         (lem:teardown-frame first-frame)
+         (lem:unmap-frame first)
+         (ok (and (null (core::frame-hover-overlay first-frame))
+                  (null (core::frame-last-mouse-event first-frame)))
+             "teardown releases hover and last-event references"))))))

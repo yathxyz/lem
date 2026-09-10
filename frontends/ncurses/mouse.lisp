@@ -4,6 +4,7 @@
            :decode-sgr-mouse-event
            :enable-mouse-reporting
            :disable-mouse-reporting
+           :*mouse-event-handler*
            :toggle-mouse))
 (in-package :lem-ncurses/mouse)
 
@@ -19,6 +20,16 @@
 
 (defconstant +sgr-motion-flag+ #x20)
 (defconstant +sgr-wheel-flag+ #x40)
+
+(defvar *mouse-event-handler*
+  (lambda (kind x y button wheel-x wheel-y)
+    (lambda ()
+      (ecase kind
+        (:down (receive-mouse-button-down x y x y button 1))
+        (:up (receive-mouse-button-up x y x y button))
+        (:move (receive-mouse-motion x y x y button))
+        (:wheel (receive-mouse-wheel x y x y wheel-x wheel-y)))))
+  "Convert a decoded mouse report into a core event or a native client message.")
 
 (defun sgr-button-keyword (button)
   "Map the low two bits of an SGR button field to a core mouse-button keyword,
@@ -40,19 +51,20 @@ calls the matching RECEIVE-MOUSE-* function when evaluated on the editor thread.
       ;; wheel: low bits 0 = up, 1 = down. Positive wheel-y scrolls toward the
       ;; top of the buffer (see HANDLE-MOUSE-EVENT for MOUSE-WHEEL).
       ((logtest button +sgr-wheel-flag+)
-       (let ((wheel-y (if (zerop (logand button #x03)) 1 -1)))
-         (lambda () (receive-mouse-wheel x y x y 0 wheel-y))))
+       (destructuring-bind (wheel-x wheel-y)
+           (aref #((0 1) (0 -1) (-1 0) (1 0)) (logand button #x03))
+         (funcall *mouse-event-handler* :wheel x y nil wheel-x wheel-y)))
       ;; motion (with or without a button held down).
       ((logtest button +sgr-motion-flag+)
        (let ((mouse-button (sgr-button-keyword button)))
-         (lambda () (receive-mouse-motion x y x y mouse-button))))
+         (funcall *mouse-event-handler* :move x y mouse-button 0 0)))
       ;; plain press or release.
       (t
        (let ((mouse-button (sgr-button-keyword button)))
          (when mouse-button
            (if (char= final #\M)
-               (lambda () (receive-mouse-button-down x y x y mouse-button 1))
-               (lambda () (receive-mouse-button-up x y x y mouse-button)))))))))
+               (funcall *mouse-event-handler* :down x y mouse-button 0 0)
+               (funcall *mouse-event-handler* :up x y mouse-button 0 0))))))))
 
 (defun read-sgr-mouse-event (getch-fn)
   "Read the rest of an SGR-1006 mouse sequence after the ESC[< introducer and
@@ -92,34 +104,34 @@ produced when MOUSE-MODE is enabled."
 (defun enable-mouse-reporting ()
   "Ask the terminal to report mouse events using SGR-1006 extended coordinates.
 Enables normal, button-event (drag) and SGR modes."
-  (when (eq :ncurses (lem-core::implementation-name (implementation)))
-    (lem-ncurses/term:write-terminal-string
-     (format nil "~C[?1000h~C[?1002h~C[?1006h" #\Esc #\Esc #\Esc))))
+  (lem-ncurses/term:write-terminal-string
+   (format nil "~C[?1000h~C[?1002h~C[?1006h" #\Esc #\Esc #\Esc)))
 
 (defun disable-mouse-reporting ()
   "Stop terminal mouse reporting, restoring native selection and copy/paste."
-  (when (eq :ncurses (lem-core::implementation-name (implementation)))
-    (lem-ncurses/term:write-terminal-string
-     (format nil "~C[?1006l~C[?1002l~C[?1000l" #\Esc #\Esc #\Esc))))
+  (lem-ncurses/term:write-terminal-string
+   (format nil "~C[?1006l~C[?1002l~C[?1000l" #\Esc #\Esc #\Esc)))
 
 (define-command toggle-mouse () ()
   "Toggle terminal mouse support. When on, clicking moves point and the wheel
 scrolls; when off, the terminal keeps native text selection and copy/paste."
   (cond ((variable-value 'lem:mouse-mode :global)
          (setf (variable-value 'lem:mouse-mode :global) nil)
-         (disable-mouse-reporting)
+         (disable-mouse-on-exit)
          (message "Mouse disabled"))
         (t
          (setf (variable-value 'lem:mouse-mode :global) t)
-         (enable-mouse-reporting)
+         (enable-mouse-on-startup)
          (message "Mouse enabled"))))
 
 (defun enable-mouse-on-startup ()
-  (when (variable-value 'lem:mouse-mode :global)
+  (when (and (eq :ncurses (lem-core::implementation-name (implementation)))
+             (variable-value 'lem:mouse-mode :global))
     (enable-mouse-reporting)))
 
 (defun disable-mouse-on-exit ()
-  (disable-mouse-reporting))
+  (when (eq :ncurses (lem-core::implementation-name (implementation)))
+    (disable-mouse-reporting)))
 
 (add-hook *after-init-hook* 'enable-mouse-on-startup)
 (add-hook *exit-editor-hook* 'disable-mouse-on-exit)

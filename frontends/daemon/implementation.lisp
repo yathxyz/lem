@@ -1,5 +1,7 @@
 (in-package :lem-daemon)
 
+(defvar *daemon-root-implementation* nil)
+
 (defclass daemon-implementation (lem:implementation)
   ((connection :initarg :connection :initform nil
                :reader daemon-implementation-connection)
@@ -9,6 +11,8 @@
                :accessor daemon-implementation-foreground)
    (background :initform (make-color 0 0 0)
                :accessor daemon-implementation-background)
+   (cursor-shape :initarg :cursor-shape :initform :box
+                 :accessor daemon-implementation-cursor-shape)
    (previous-screen :initform nil
                     :accessor daemon-implementation-previous-screen)
    (previous-screen-width :initform nil
@@ -22,13 +26,6 @@
   (grid (make-hash-table :test #'eql))
   cursor)
 
-(defun drawing-object-text (object)
-  (typecase object
-    (lem-core/display:text-object
-     (lem-core/display:text-object-string object))
-    (lem-core/display:eol-cursor-object " ")
-    (t "")))
-
 (defun drawing-object-width (object)
   (typecase object
     (lem-core/display:text-object
@@ -40,66 +37,101 @@
 
 (defconstant +continuation-cell+ :continuation-cell)
 
-(defun make-cell-row (width)
-  (make-array width :initial-element " "))
+(defstruct (cell-row (:constructor %make-cell-row (cells faces)))
+  cells faces)
 
-(defun clear-cell-row (row column)
-  (let ((column (max 0 column)))
-    (when (and (< column (length row))
-               (eq +continuation-cell+ (aref row column)))
+(defun make-cell-row (width &optional face)
+  (%make-cell-row (make-array width :initial-element " ")
+                  (make-array width :initial-element face)))
+
+(defun clear-cell-row (row column &optional face)
+  (let ((cells (cell-row-cells row))
+        (faces (cell-row-faces row))
+        (column (max 0 column)))
+    (when (and (< column (length cells))
+               (eq +continuation-cell+ (aref cells column)))
       (loop :for index :downfrom (1- column) :to 0
-            :when (stringp (aref row index))
-              :do (setf (aref row index) " ") (loop-finish)))
-    (loop :for index :from column :below (length row)
-          :do (setf (aref row index) " ")))
+            :when (stringp (aref cells index))
+              :do (setf (aref cells index) " " (aref faces index) face)
+                  (loop-finish)))
+    (loop :for index :from column :below (length cells)
+          :do (setf (aref cells index) " " (aref faces index) face)))
   row)
 
 (defun clear-cell-at (row column)
-  (when (< column (length row))
-    (let ((start column))
-      (when (eq +continuation-cell+ (aref row start))
-        (loop :while (and (plusp start)
-                          (eq +continuation-cell+ (aref row start)))
-              :do (decf start)))
-      (setf (aref row start) " ")
-      (loop :for index :from (1+ start) :below (length row)
-            :while (eq +continuation-cell+ (aref row index))
-            :do (setf (aref row index) " "))))
+  (let ((cells (cell-row-cells row))
+        (faces (cell-row-faces row)))
+    (when (<= 0 column (1- (length cells)))
+      (let ((start column))
+        (when (eq +continuation-cell+ (aref cells start))
+          (loop :while (and (plusp start)
+                            (eq +continuation-cell+ (aref cells start)))
+                :do (decf start)))
+        (setf (aref cells start) " " (aref faces start) nil)
+        (loop :for index :from (1+ start) :below (length cells)
+              :while (eq +continuation-cell+ (aref cells index))
+              :do (setf (aref cells index) " " (aref faces index) nil)))))
   row)
 
-(defun overlay-text (row column text)
-  (loop :with column := column
-        :for character :across text
-        :for string := (string character)
-        :for width := (string-width string)
-        :do (cond
-              ((zerop width)
-               (loop :for index :downfrom (1- column) :to 0
-                     :when (stringp (aref row index))
-                       :do (setf (aref row index)
-                                 (concatenate 'string (aref row index) string))
-                           (loop-finish)))
-              ((<= (+ column width) (length row))
-               (loop :for index :from column :below (+ column width)
-                     :do (clear-cell-at row index))
-               (setf (aref row column) string)
-               (loop :for index :from (1+ column) :below (+ column width)
-                     :do (setf (aref row index) +continuation-cell+))
-               (incf column width))
-              (t (return))))
+(defun overlay-text (row column text &optional face)
+  (let ((cells (cell-row-cells row))
+        (faces (cell-row-faces row)))
+    (loop :with column := column
+          :for character :across text
+          :for string := (string character)
+          :for width := (string-width string)
+          :do (cond
+                ((zerop width)
+                 (loop :for index :downfrom (1- column) :to 0
+                       :when (and (< index (length cells)) (stringp (aref cells index)))
+                         :do (setf (aref cells index)
+                                   (concatenate 'string (aref cells index) string))
+                             (loop-finish)))
+                ((minusp column) (incf column width))
+                ((<= (+ column width) (length cells))
+                 (loop :for index :from column :below (+ column width)
+                       :do (clear-cell-at row index))
+                 (setf (aref cells column) string (aref faces column) face)
+                 (loop :for index :from (1+ column) :below (+ column width)
+                       :do (setf (aref cells index) +continuation-cell+
+                                 (aref faces index) face))
+                 (incf column width))
+                (t (return)))))
   row)
 
 (defun overlay-cells (target column source)
-  (loop :for cell :across source
+  (loop :for cell :across (cell-row-cells source)
+        :for face :across (cell-row-faces source)
         :unless (eq cell +continuation-cell+)
-          :do (overlay-text target column cell)
+          :do (overlay-text target column cell face)
               (incf column (string-width cell)))
   target)
 
 (defun cell-row-string (row)
   (with-output-to-string (stream)
-    (loop :for cell :across row
+    (loop :for cell :across (cell-row-cells row)
           :when (stringp cell) :do (write-string cell stream))))
+
+(defun render-object-into-row (row column object &optional base-face)
+  (typecase object
+    (lem-core/display:extend-to-eol-object
+     (overlay-text row column
+                   (make-string (max 0 (- (length (cell-row-cells row)) column))
+                                :initial-element #\Space)
+                   (drawing-face nil (lem-core/display:extend-to-eol-object-color object))))
+    (lem-core/display:text-object
+     (overlay-text
+      row
+      (+ column (if (typep object 'lem-core/display:line-end-object)
+                    (lem-core/display:line-end-object-offset object) 0))
+      (lem-core/display:text-object-string object)
+      (merge-drawing-faces
+       base-face (drawing-face (lem-core/display:text-object-attribute object)
+                               nil (lem-core::cursor-object-p object)))))
+    (lem-core/display:eol-cursor-object
+     (overlay-text row column " "
+                   (drawing-face (lem-core/display:eol-cursor-object-attribute object)
+                                  nil (lem-core/display:eol-cursor-object-true-cursor-p object))))))
 
 (defmethod lem-if:make-view ((implementation daemon-implementation)
                              window x y width height use-modeline)
@@ -150,15 +182,18 @@
                                view x y objects height)
   (declare (ignore implementation height))
   (let* ((width (daemon-view-width view))
+         (base-face (drawing-face nil lem-if:*background-color-of-drawing-window*))
          (row (or (alexandria:when-let ((row (gethash y (daemon-view-grid view))))
-                    (and (= width (length row)) row))
+                    (and (= width (length (cell-row-cells row))) row))
                   (make-cell-row width))))
-    (clear-cell-row row x)
+    (clear-cell-row row x base-face)
     (loop :with column := x
           :for object :in objects
-          :do (when (lem-core::cursor-object-p object)
+          :do (when (if (typep object 'lem-core/display:eol-cursor-object)
+                        (lem-core/display:eol-cursor-object-true-cursor-p object)
+                        (lem-core::cursor-object-p object))
                 (setf (daemon-view-cursor view) (cons column y)))
-              (overlay-text row column (drawing-object-text object))
+              (render-object-into-row row column object base-face)
               (incf column (drawing-object-width object)))
     (setf (gethash y (daemon-view-grid view)) row)))
 
@@ -179,16 +214,22 @@
   (daemon-implementation-height implementation))
 
 (defmethod lem-if:get-foreground-color ((implementation daemon-implementation))
-  (daemon-implementation-foreground implementation))
+  (daemon-implementation-foreground (or *daemon-root-implementation* implementation)))
 
 (defmethod lem-if:get-background-color ((implementation daemon-implementation))
-  (daemon-implementation-background implementation))
+  (daemon-implementation-background (or *daemon-root-implementation* implementation)))
 
 (defmethod lem-if:update-foreground ((implementation daemon-implementation) name)
-  (setf (daemon-implementation-foreground implementation) (parse-color name)))
+  (setf (daemon-implementation-foreground (or *daemon-root-implementation* implementation))
+        (parse-color name)))
 
 (defmethod lem-if:update-background ((implementation daemon-implementation) name)
-  (setf (daemon-implementation-background implementation) (parse-color name)))
+  (setf (daemon-implementation-background (or *daemon-root-implementation* implementation))
+        (parse-color name)))
+
+(defmethod lem-if:update-cursor-shape ((implementation daemon-implementation) shape)
+  (check-type shape lem:cursor-type)
+  (setf (daemon-implementation-cursor-shape implementation) shape))
 
 (defmethod lem-if:display-title ((implementation daemon-implementation))
   "Lem daemon")
@@ -206,18 +247,19 @@
 (defmethod lem-if:render-line-on-modeline
     ((implementation daemon-implementation) view left-objects right-objects
      default-attribute height)
-  (declare (ignore default-attribute height))
+  (declare (ignore height))
   (let* ((width (daemon-view-width view))
+         (base-face (drawing-face default-attribute))
          (right-width (loop :for object :in right-objects
                             :sum (drawing-object-width object)))
-         (cells (make-cell-row width)))
+         (cells (make-cell-row width base-face)))
     (loop :with column := 0
           :for object :in left-objects
-          :do (overlay-text cells column (drawing-object-text object))
+          :do (render-object-into-row cells column object base-face)
               (incf column (drawing-object-width object)))
     (loop :with column := (max 0 (- width right-width))
           :for object :in right-objects
-          :do (overlay-text cells column (drawing-object-text object))
+          :do (render-object-into-row cells column object base-face)
               (incf column (drawing-object-width object)))
     (setf (gethash (daemon-view-height view) (daemon-view-grid view))
           cells)))
@@ -252,11 +294,21 @@
             (when (eq window (frame-current-window frame))
               (setf cursor-x (+ view-x (car cursor))
                     cursor-y (+ view-y (cdr cursor))))))))
-    (dotimes (row height)
-      (setf (aref rows row) (cell-row-string (aref rows row))))
     (values rows
             (min (max 0 cursor-x) (max 0 (1- width)))
             (min (max 0 cursor-y) (max 0 (1- height))))))
+
+(defun encode-screen-row (row &optional index)
+  (let ((object (protocol:make-object
+                 "text" (cell-row-string row)
+                 "runs" (encode-face-runs (cell-row-cells row) (cell-row-faces row)))))
+    (when index (setf (gethash "row" object) index))
+    object))
+
+(defun terminal-escape-delay ()
+  (let* ((package (find-package :lem-ncurses/config))
+         (symbol (and package (find-symbol "ESCAPE-DELAY" package))))
+    (if symbol (variable-value symbol :global) 200)))
 
 (defmethod lem-if:update-display ((implementation daemon-implementation))
   (alexandria:when-let ((connection
@@ -274,25 +326,34 @@
                (unless full-p
                  (let ((changed '()))
                    (dotimes (row (length rows))
-                     (unless (string= (aref previous row) (aref rows row))
-                       (push (protocol:make-object
-                              "row" row "text" (aref rows row))
+                     (unless (equalp (aref previous row) (aref rows row))
+                       (push (encode-screen-row (aref rows row) row)
                              changed)))
                    (coerce (nreverse changed) 'vector)))))
         (setf (daemon-implementation-previous-screen implementation) rows
               (daemon-implementation-previous-screen-width implementation)
               (daemon-implementation-width implementation))
-        (daemon-send
-         connection
-         (if full-p
-             (protocol:make-object
-              "version" protocol:+protocol-version+
-              "type" "screen" "full" t "rows" rows
-              "cursor" (protocol:make-object "x" cursor-x "y" cursor-y))
-             (protocol:make-object
-              "version" protocol:+protocol-version+
-              "type" "screen" "full" nil "changes" changes
-              "cursor" (protocol:make-object "x" cursor-x "y" cursor-y))))))))
+        (let* ((cursor-attribute (ensure-attribute 'cursor nil))
+               (message
+                 (protocol:make-object
+                  "version" protocol:+protocol-version+
+                  "type" "screen" "full" (and full-p t)
+                  "foreground" (wire-color (lem-if:get-foreground-color implementation))
+                  "background" (wire-color (lem-if:get-background-color implementation))
+                  "mouse" (and (variable-value 'lem:mouse-mode :global) t)
+                  "escape-delay" (terminal-escape-delay)
+                  "cursor" (protocol:make-object
+                            "x" cursor-x "y" cursor-y
+                            "shape" (string-downcase
+                                     (daemon-implementation-cursor-shape implementation))
+                            "color" (wire-color
+                                     (or (and cursor-attribute
+                                              (attribute-background cursor-attribute))
+                                         (lem-if:get-foreground-color implementation)))))))
+          (if full-p
+              (setf (gethash "rows" message) (map 'vector #'encode-screen-row rows))
+              (setf (gethash "changes" message) changes))
+          (daemon-send connection message))))))
 
 (defmethod lem-if:invoke ((implementation daemon-implementation) function)
   (declare (ignore implementation))

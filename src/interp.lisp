@@ -103,10 +103,14 @@
                          #'editor-abort-handler)
                        (editor-condition
                          #'editor-condition-handler))
-          (let ((*this-command-keys* nil))
+          (let ((*this-command-keys* nil)
+                (outer-input-session *routed-input-session*))
             (unwind-protect
                  (read-command-and-call)
-              (finish-routed-input-session))))
+              ;; Recursive command loops share a synchronous prompt/completion
+              ;; stack. Its caller keeps ownership until it returns or aborts.
+              (unless outer-input-session
+                (finish-routed-input-session)))))
       (editor-condition (c)
         (restart-case (error c)
           (lem-restart:message ()

@@ -389,22 +389,24 @@
             '';
           });
 
-          # Native client for the persistent daemon. It includes ncurses for
-          # `lemclient -t`, while file and eval requests remain lightweight.
+          # Native terminal and SDL clients share the daemon's editor state.
           lemclient = lem-base.overrideLispAttrs (o: {
             pname = "lemclient";
             meta.mainProgram = "lemclient";
             systems = [
               "lem-ncurses/core"
               "lem-daemon"
+              "lem-daemon/sdl-client"
             ];
             lispLibs =
               o.lispLibs
               ++ (with lisp.pkgs; [
                 cl-charms
                 cl-setlocale
+                sdl2
+                sdl2-ttf
               ]);
-            nativeLibs = [ pkgs.ncurses ];
+            nativeLibs = [ pkgs.ncurses pkgs.SDL2 pkgs.SDL2_ttf ];
             buildScript = mkBuildScript {
               entryPoint = "lem-daemon/client:main";
               outputName = "lemclient";
@@ -413,9 +415,30 @@
               runHook preInstall
               mkdir -p $out/bin
               install lemclient $out/bin
+              mkdir -p $out/share/lem
+              cp -r frontends/sdl2/resources $out/share/lem/
               wrapProgram $out/bin/lemclient \
+                --set LEM_CLIENT_RESOURCES "$out/share/lem/" \
                 --prefix LD_LIBRARY_PATH : "$LD_LIBRARY_PATH" \
                 --prefix DYLD_LIBRARY_PATH : "$DYLD_LIBRARY_PATH"
+              runHook postInstall
+            '';
+          });
+
+          lem-recover = lem-base.overrideLispAttrs (o: {
+            pname = "lem-recover";
+            meta.mainProgram = "lem-recover";
+            systems = [ "lem-daemon/recovery-cli" ];
+            lispLibs = o.lispLibs ++ [ lisp.pkgs.ironclad ];
+            nativeLibs = [ ];
+            buildScript = mkBuildScript {
+              entryPoint = "lem-daemon/recovery-cli:main";
+              outputName = "lem-recover";
+            };
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/bin
+              install lem-recover $out/bin
               runHook postInstall
             '';
           });
@@ -531,7 +554,7 @@
                 nixpkgs = inputs.nixpkgs;
                 lem = {
                   outPath = ./.;
-                  packages.${system} = { inherit lem-ncurses lemclient; };
+                  packages.${system} = { inherit lem-ncurses lemclient lem-recover; };
                 };
                 yasnippet-snippets = inputs.yasnippet-snippets;
               })
@@ -551,6 +574,7 @@
           }
           // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
             lem-yath = lemYath;
+            inherit lem-recover;
           };
 
           apps = {
@@ -576,6 +600,10 @@
             };
           }
           // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+            lem-recover = {
+              type = "app";
+              program = "${lem-recover}/bin/lem-recover";
+            };
             lem-yath = {
               type = "app";
               program = "${lemYath}/bin/lem";
@@ -588,7 +616,28 @@
             ]
           );
 
-          checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") lemYathOutputs.checks.${system};
+          checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") (
+            lemYathOutputs.checks.${system}
+            // {
+              native-terminal-failure = pkgs.runCommand "lem-native-terminal-failure-check" {
+                nativeBuildInputs = [ pkgs.python3 ];
+              } ''
+                export LEMCLIENT_BIN="${lemclient}/bin/lemclient"
+                python3 ${./scripts/daemon-terminal-failure-test.py} > "$out"
+              '';
+              native-client-display = pkgs.runCommand "lem-native-client-display-check" {
+                nativeBuildInputs = with pkgs; [ python3 xorg.xorgserver xdotool xclip imagemagick ];
+              } ''
+                set -o pipefail
+                mkdir -p "$out"
+                export LEM_BIN="${lemYath}/bin/lem"
+                export LEMCLIENT_BIN="${lemclient}/bin/lemclient"
+                export LEM_SCREENSHOT="$out/display.png"
+                export LEM_X11_LIBRARY="${pkgs.xorg.libX11}/lib/libX11.so.6"
+                python3 ${./scripts/daemon-client-display-test.py} | tee "$out/acceptance.log"
+              '';
+            }
+          );
 
           devShells.default = pkgs.mkShell {
             packages =

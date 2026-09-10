@@ -27,7 +27,7 @@
                "lem-daemon"))
 
 (defsystem "lem-ncurses/tests"
-  :depends-on ("lem-ncurses" "rove")
+  :depends-on ("lem-ncurses/core" "rove")
   :components ((:module "tests"
                 :components ((:file "csi-decode")
                              (:file "bracketed-paste")

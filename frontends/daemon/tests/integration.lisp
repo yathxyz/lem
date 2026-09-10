@@ -44,6 +44,11 @@
                 "shift" (and shift t)
                 "sym" symbol))
 
+(defvar *prompt-result* nil)
+
+(lem:define-command daemon-prompt-fixture () ()
+  (setf *prompt-result* (lem:prompt-for-string "Isolated prompt: ")))
+
 (defstruct asynchronous-response
   thread value error)
 
@@ -418,6 +423,39 @@
            (ok (string= "3" (eval-primary first "(length (lem:all-frames))"))
                "two client frames coexist with the headless frame")
 
+           (let ((pathname (merge-pathnames "visit-from-reserved.txt" root)))
+             (with-open-file (stream pathname :direction :output)
+               (format stream "first~%second~%"))
+             (eval-primary second
+                           "(defparameter lem-user::*other-visit-buffer* (lem:current-buffer))")
+             (eval-primary first
+                           "(progn
+                              (defparameter lem-user::*visit-window* (lem:current-window))
+                              (lem:split-window-horizontally (lem:current-window))
+                              (defparameter lem-user::*reserved-visit-window*
+                                (lem:get-next-window (lem:current-window)))
+                              (lem:switch-to-window lem-user::*reserved-visit-window*)
+                              (lem:switch-to-buffer (lem:make-buffer \"*reserved-visit*\"))
+                              (setf (lem:not-switchable-buffer-p (lem:current-buffer)) t))")
+             (visit-nowait first pathname 2 2)
+             (ok (string= "T"
+                          (eval-primary first
+                                        "(and (eq (lem:current-window) lem-user::*visit-window*)
+                                              (= 2 (lem:line-number-at-point (lem:current-point)))
+                                              (= 2 (lem:point-charpos (lem:current-point)))
+                                              (string= (lem:buffer-name
+                                                        (lem:window-buffer
+                                                         lem-user::*reserved-visit-window*))
+                                                       \"*reserved-visit*\"))"))
+                 "file visits preserve reserved windows and positioned selection in their frame")
+             (ok (string= "T"
+                          (eval-primary second
+                                        "(eq (lem:current-buffer) lem-user::*other-visit-buffer*)"))
+                 "a reserved-window visit does not select another client's frame")
+             (eval-primary first
+                           "(progn (lem:delete-window lem-user::*reserved-visit-window*)
+                                   (lem:delete-buffer (lem:get-buffer \"*reserved-visit*\")))"))
+
            (let ((transient (client::connect-client server-name)))
              (unwind-protect
                   (progn
@@ -511,6 +549,138 @@
                         (eval-primary second
                                       "(lem:buffer-text (lem:current-buffer))"))
                "deferred input runs in its originating frame")
+
+           (eval-primary admin "(setf (lem:variable-value 'lem:mouse-mode :global) t)")
+           (eval-primary second "(lem:buffer-end (lem:current-point))")
+           (send-key first "x" :ctrl t)
+           (send-request second "input" "mouse"
+                         (protocol:make-object "kind" "down" "x" 0 "y" 0
+                                               "button" 1 "clicks" 1))
+           (send-key first "u")
+           (send-request second "input" "mouse"
+                         (protocol:make-object "kind" "up" "x" 0 "y" 0 "button" 1))
+           (ok (wait-until
+                (lambda ()
+                  (string= "0" (eval-primary second "(lem:point-charpos (lem:current-point))"))))
+               "mouse input deferred by another client's prefix reaches its own frame")
+           (ok (string= "\"daemon-input-first\""
+                        (eval-primary first "(lem:buffer-name (lem:current-buffer))"))
+               "a remote click does not change the prefix owner's selected buffer")
+           (send-request second "resize" "width" 120 "height" 35)
+           (send-request second "input" "mouse"
+                         (protocol:make-object "kind" "move" "x" 110 "y" 0 "button" 0))
+           (ok (string= "(120 35)"
+                        (eval-primary second "(list (lem:display-width) (lem:display-height))"))
+               "resize and subsequent mouse input use the resized frame")
+           (ok (string= "(80 24)"
+                        (eval-primary first "(list (lem:display-width) (lem:display-height))"))
+               "resizing one frame preserves the other client's dimensions")
+
+           (send-key first "x" :ctrl t)
+           (send-request second "input" "paste" "pasted")
+           (ok (string= "\"b\""
+                        (eval-primary second "(lem:buffer-text (lem:current-buffer))"))
+               "another client's paste waits for the active prefix")
+           (send-key first "u")
+           (ok (wait-until
+                (lambda ()
+                  (string= "\"pastedb\""
+                           (eval-primary second "(lem:buffer-text (lem:current-buffer))"))))
+               "deferred paste inserts text in its originating buffer")
+           (send-key first "z")
+           (ok (wait-until
+                (lambda ()
+                  (string= "\"z\""
+                           (eval-primary first "(lem:buffer-text (lem:current-buffer))"))))
+               "paste completion releases its session for other clients")
+
+           (dolist (submit-p '(t nil))
+             (setf *prompt-result* nil)
+             (eval-primary
+              second
+              "(progn (lem:erase-buffer (lem:current-buffer)) (lem:insert-string (lem:current-point) \"peer\"))")
+             (send-key first "x" :meta t)
+             (map nil (lambda (character) (send-key first (string character)))
+                  "daemon-prompt-fixture")
+             (send-key first "Return")
+             (ok (wait-until
+                  (lambda ()
+                    (string= "T"
+                             (eval-primary
+                              first
+                              "(not (null (lem-core::frame-prompt-active-p (lem:current-frame))))"))))
+                 "the originating client opens its synchronous prompt")
+             (map nil (lambda (character) (send-key first (string character))) "alpha")
+             (ok (string= "42" (eval-primary admin "(+ 19 23)"))
+                 "administrative evaluation remains responsive during a prompt")
+             (send-key second "q")
+             (ok (string= "\"peer\""
+                          (eval-primary second "(lem:buffer-text (lem:current-buffer))"))
+                 "peer input waits while the originating minibuffer is active")
+             (ok (string= "\"alpha\""
+                          (eval-primary first
+                                        "(lem:get-prompt-input-string (lem/prompt-window:current-prompt-window))"))
+                 "peer input does not alter the prompt text")
+             (if submit-p (send-key first "Return") (send-key first "g" :ctrl t))
+             (ok (wait-until
+                  (lambda ()
+                    (string= "\"peerq\""
+                             (eval-primary second "(lem:buffer-text (lem:current-buffer))"))))
+                 "submitting or cancelling the prompt releases deferred peer input")
+             (ok (equal *prompt-result* (and submit-p "alpha"))
+                 "only prompt submission returns the entered text")
+             (ok (string= "(\"daemon-input-first\" NIL)"
+                          (eval-primary first
+                                        "(list (lem:buffer-name (lem:current-buffer)) (lem-core::frame-prompt-active-p (lem:current-frame)))"))
+                 "prompt cleanup restores the originating client's buffer"))
+
+           (let ((prompt-owner (client::connect-client server-name)))
+             (unwind-protect
+                  (progn
+                    (send-request prompt-owner "attach" "width" 60 "height" 20)
+                    (eval-primary
+                     prompt-owner
+                     "(lem:switch-to-buffer (lem:make-buffer \"daemon-prompt-disconnect\"))")
+                    (eval-primary
+                     second
+                     "(progn (lem:erase-buffer (lem:current-buffer)) (lem:insert-string (lem:current-point) \"peer\"))")
+                    (send-key prompt-owner "x" :meta t)
+                    (map nil (lambda (character) (send-key prompt-owner (string character)))
+                         "daemon-prompt-fixture")
+                    (send-key prompt-owner "Return")
+                    (ok (wait-until
+                         (lambda ()
+                           (string= "T"
+                                    (eval-primary
+                                     prompt-owner
+                                     "(not (null (lem-core::frame-prompt-active-p (lem:current-frame))))"))))
+                        "a disconnecting client owns an active prompt")
+                    (send-key second "q")
+                    (ok (string= "\"peer\""
+                                 (eval-primary second "(lem:buffer-text (lem:current-buffer))"))
+                        "peer input is pending when the prompt owner disconnects")
+                    (client::close-client prompt-owner)
+                    (setf prompt-owner nil)
+                    (ok (wait-until
+                         (lambda ()
+                           (string= "\"peerq\""
+                                    (eval-primary second "(lem:buffer-text (lem:current-buffer))"))))
+                        "owner disconnect aborts the prompt and releases deferred input")
+                    (ok (string= "3"
+                                 (eval-primary admin "(length (lem:all-frames))"))
+                        "owner disconnect removes only its frame")
+                    (ok (string= "T"
+                                 (eval-primary
+                                  admin
+                                  "(every (lambda (frame) (null (lem-core::frame-floating-prompt-window frame))) (lem:all-frames))"))
+                        "owner disconnect leaves no prompt attached to a surviving frame")
+                    (send-key second "r")
+                    (ok (wait-until
+                         (lambda ()
+                           (string= "\"peerqr\""
+                                    (eval-primary second "(lem:buffer-text (lem:current-buffer))"))))
+                        "the surviving client continues editing after prompt owner failure"))
+               (when prompt-owner (client::close-client prompt-owner))))
 
            (visit-nowait first (asdf:system-relative-pathname
                                 :lem-daemon #p"../../docs/daemon-client.md"))

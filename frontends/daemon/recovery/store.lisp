@@ -54,17 +54,20 @@
 
 (defun check-directory-ancestors (directory)
   ;; Private leaf permissions are insufficient if another user can replace an
-  ;; ancestor. Resolve parent symlinks and require a chain that other users cannot
-  ;; rename. Root-owned sticky /tmp is allowed; arbitrary shared writers are not.
-  (loop for parent = (truename directory)
+  ;; ancestor. The owner of / is our filesystem trust anchor: it is UID 0 on
+  ;; normal Linux and may appear unmapped in a Nix user namespace. Never trust
+  ;; an arbitrary unmapped UID merely because of its numeric value.
+  (loop with root-owner = (sb-posix:stat-uid (sb-posix:stat "/"))
+        for parent = (truename directory)
           then (uiop:pathname-parent-directory-pathname parent)
         for name = (uiop:native-namestring parent)
         for stat = (sb-posix:stat name)
         do (unless (and (kind-p stat sb-posix:s-ifdir)
-                        (member (sb-posix:stat-uid stat) (list 0 (sb-posix:getuid)))
+                        (member (sb-posix:stat-uid stat) (list root-owner (sb-posix:getuid)))
                         (or (zerop (logand (sb-posix:stat-mode stat) #o022))
                             (not (zerop (logand (sb-posix:stat-mode stat) #o1000)))))
-             (error "Recovery ancestor can be replaced by another user: ~a" name))
+             (error "Recovery ancestor is untrusted: ~a (owner ~d, mode ~o)"
+                    name (sb-posix:stat-uid stat) (logand (sb-posix:stat-mode stat) #o7777)))
         until (equal name "/")))
 
 (defun ensure-private-directory (directory)

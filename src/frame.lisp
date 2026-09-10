@@ -2,6 +2,8 @@
 
 (defvar *display-frame-map* (make-hash-table))
 (defvar *frames* '())
+(defvar *activate-frame-hook* '()
+  "Restore mode state when a frame becomes the active editor context.")
 
 (defgeneric update-prompt-window (window)
   (:method (window)))
@@ -76,7 +78,16 @@ redraw-display関数でキャッシュを捨てて画面全体を再描画しま
     :accessor frame-rightside-window)
    (bottomside-window
     :initform nil
-    :accessor frame-bottomside-window)))
+    :accessor frame-bottomside-window)
+   (last-mouse-event
+    :initform nil
+    :accessor frame-last-mouse-event)
+   (dragged-separator
+    :initform nil
+    :accessor frame-dragged-separator)
+   (hover-overlay
+    :initform nil
+    :accessor frame-hover-overlay)))
 
 (defmethod frame-window-bottom-margin ((frame frame))
   (if (frame-enable-window-modeline-per-window frame)
@@ -139,6 +150,9 @@ redraw-display関数でキャッシュを捨てて画面全体を再描画しま
 
 (defun teardown-frame (frame)
   (alexandria:deletef *frames* frame)
+  (setf (frame-last-mouse-event frame) nil
+        (frame-dragged-separator frame) nil
+        (frame-hover-overlay frame) nil)
   (teardown-windows frame))
 
 (defun teardown-frames ()

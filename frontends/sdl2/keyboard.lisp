@@ -1,6 +1,7 @@
 (defpackage :lem-sdl2/keyboard
   (:use :cl)
   (:export :set-keyboard-layout
+           :*key-event-handler*
            :keysym-to-key-event
            :handle-textediting
            :handle-text-input
@@ -163,7 +164,7 @@
   (trace-keyboard-event :text-editing :length (length text))
   (setf *textediting-text* text))
 
-(defun send-key-event (key)
+(defun send-editor-key-event (key)
   (trace-keyboard-event :lem-key :key (princ-to-string key))
   (if (lem:match-key key :ctrl t :sym "]")
       (lem:send-abort-event (lem:find-editor-thread) nil)
@@ -172,6 +173,11 @@
       (lem:send-input-event key
                             (when (lem:pipeline-recording-p)
                               (lem:pipeline-now)))))
+
+(defvar *key-event-handler* #'send-editor-key-event)
+
+(defun send-key-event (key)
+  (funcall *key-event-handler* key))
 
 ;; linux
 (defun modifier-is-accept-text-input-p (modifier)

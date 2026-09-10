@@ -234,6 +234,10 @@
   (defmethod close-local-connection ((connection unix-local-connection))
     (unless (unix-connection-closed-p connection)
       (setf (unix-connection-closed-p connection) t)
+      ;; Wake blocked reads and writes before closing their shared FD stream.
+      ;; CLOSE alone can wait for a writer that a stopped peer never drains.
+      (ignore-errors
+        (sb-bsd-sockets:socket-shutdown (unix-connection-socket connection) :direction :io))
       (ignore-errors (close (local-connection-stream connection) :abort t))
       (ignore-errors
         (sb-bsd-sockets:socket-close (unix-connection-socket connection))))

@@ -26,7 +26,10 @@
         let
           pkgs = import nixpkgs { inherit system; };
           lemPatchedSrc = lem.outPath;
-          lemNcurses = lem.packages.${system}.lem-ncurses;
+          lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (old: {
+            systems = old.systems ++ [ "lem-daemon/recovery" ];
+            lispLibs = old.lispLibs ++ [ pkgs.sbcl.pkgs.ironclad ];
+          });
           lemLspTest = lemNcurses.overrideLispAttrs (
             old:
             let
@@ -353,6 +356,7 @@
           '';
 
           lemClient = lem.packages.${system}.lemclient;
+          lemRecover = lem.packages.${system}.lem-recover;
 
           lemYathAotScript = pkgs.writeText "compile-lem-yath-aot.lisp" ''
             (in-package :cl-user)
@@ -581,6 +585,7 @@
             text = ''
               export LEM_BIN=${lemYath}/bin/lem
               export LEMCLIENT_BIN=${lemClient}/bin/lemclient
+              export LEM_RECOVER_BIN=${lemRecover}/bin/lem-recover
               exec python3 ${self}/scripts/daemon-test.py
             '';
           };

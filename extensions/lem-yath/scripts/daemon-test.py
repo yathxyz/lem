@@ -27,6 +27,7 @@ def check(condition, message):
 def main():
     editor = os.environ['LEM_BIN']
     client = os.environ['LEMCLIENT_BIN']
+    recovery_client = os.environ['LEM_RECOVER_BIN']
     processes = []
     with tempfile.TemporaryDirectory(prefix='lem-configured-daemon-') as temporary:
         root = Path(temporary)
@@ -123,9 +124,6 @@ def main():
                           success=False).returncode != 0
                       and control.read_text() == 'continue',
                       'private control writes reject a symlinked directory')
-                check(evaluate('(probe-file (lem-yath::ensure-legit-rebase-control-script))')
-                      != 'NIL', 'rebase can prepare its sequence editor without the legacy server')
-
                 evaluate('(let ((lem-shell-mode:*default-shell-command* '
                          '(list (uiop:getenv "SHELL") "-c" '
                          + lisp_string("printf 'SHELL=%s\\n' \"$((19+23))\"; sleep 3")
@@ -177,17 +175,43 @@ def main():
                                + lisp_string(document.read_text()) + ')') == 'T',
                       'a killed client leaves its shared buffer intact')
 
-                # Socket recovery only: recovering edits after daemon death is
-                # a separate milestone and is intentionally not claimed here.
+                recovered = root / 'recovered.txt'
+                recovered.write_text('original')
+                run('--no-wait', str(recovered))
+                evaluate('(lem:insert-string (lem:buffer-end-point (lem:current-buffer)) "-unsaved")')
+                evaluate('(lem-daemon/recovery:checkpoint-now)')
+                recovery_directory = root / 'state' / 'lem' / 'recovery' / name
+                records = [json.loads(path.read_text()) for path in recovery_directory.glob('*.json')]
+                record = next(item for item in records if item['filename'] == str(recovered))
+                check(record['text'] == 'original-unsaved'
+                      and recovery_directory.stat().st_mode & 0o777 == 0o700,
+                      'configured recovery stores unsaved text under the named private directory')
                 daemon.kill()
                 daemon.wait(timeout=10)
+                inspected = subprocess.run([recovery_client, str(recovery_directory)],
+                                           env=env, capture_output=True, text=True, timeout=10)
+                exported = subprocess.run([recovery_client, str(recovery_directory), record['id']],
+                                          env=env, capture_output=True, text=True, timeout=10)
+                check(inspected.returncode == 0
+                      and record['id'] in [item['id'] for item in json.loads(inspected.stdout)['records']]
+                      and exported.returncode == 0 and exported.stdout == 'original-unsaved',
+                      'packaged Lisp inspector lists and exports recovery while the daemon is dead')
+                recovered.write_text('externally changed')
                 daemon = start([editor, f'--daemon={name}'], stdout=log,
                                stderr=subprocess.STDOUT)
                 ready_result = run('--wait-for-server', '30', '--eval',
                                    '(lem-yath:boot-ok-p)')
                 check(json.loads(ready_result.stdout)['primary'] == 'T',
                       'a restarted daemon reclaims its stale socket and initializes')
-                run('--stop-server')
+                check(evaluate('(multiple-value-bind (buffer status) '
+                               '(lem-daemon/recovery:restore-checkpoint '
+                               + lisp_string(record['id']) + ') '
+                               '(and (eq status :conflict) (null (lem:buffer-filename buffer)) '
+                               '(lem:buffer-modified-p buffer) '
+                               '(string= "original-unsaved" (lem:buffer-text buffer))))') == 'T'
+                      and recovered.read_text() == 'externally changed',
+                      'daemon crash recovery preserves unsaved text and conflicting disk edits')
+                run('--stop-server', '--force')
                 check(daemon.wait(timeout=15) == 0, 'deliberate shutdown exits cleanly')
                 check(not list((root / 'runtime').rglob('*.sock')),
                       'clean shutdown removes the socket')

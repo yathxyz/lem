@@ -6,9 +6,15 @@
                (:file "protocol")
                (:file "transport")
                (:file "transport-unix")
+               (:file "faces")
                (:file "implementation")
                (:file "server")
                (:file "client")))
+
+(defsystem "lem-daemon/sdl-client"
+  :description "Native graphical attachment to an existing Lem daemon"
+  :depends-on ("lem-daemon" "lem-sdl2/client-support")
+  :components ((:file "sdl-client")))
 
 (defsystem "lem-daemon/tests"
   :depends-on ("lem-daemon" "rove")
@@ -16,7 +22,16 @@
   :components ((:module "tests"
                 :serial t
                 :components ((:file "protocol")
-                             #+sbcl (:file "integration"))))
+                             (:file "mouse-session")
+                             #+sbcl (:file "integration")
+                             #+sbcl (:file "backpressure"))))
+  :perform (test-op (op c)
+             (declare (ignore op))
+             (symbol-call :rove :run c)))
+
+(defsystem "lem-daemon/sdl-client/tests"
+  :depends-on ("lem-daemon/sdl-client" "rove")
+  :components ((:module "tests" :components ((:file "sdl-client"))))
   :perform (test-op (op c)
              (declare (ignore op))
              (symbol-call :rove :run c)))
@@ -40,3 +55,8 @@
   :perform (test-op (op c)
              (declare (ignore op))
              (symbol-call :rove :run c)))
+
+(defsystem "lem-daemon/recovery-cli"
+  :description "Standalone recovery inspector without editor initialization"
+  :depends-on ("lem-daemon/recovery-store")
+  :components ((:module "recovery" :components ((:file "cli")))))

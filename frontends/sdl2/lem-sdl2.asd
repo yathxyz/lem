@@ -1,22 +1,27 @@
+(defsystem "lem-sdl2/client-support"
+  :description "SDL fonts and input translation without an editor frontend"
+  :depends-on ("sdl2" "sdl2-ttf" "lem/core")
+  :serial t
+  :components ((:file "resource")
+               (:file "platform")
+               (:file "keyboard")
+               (:file "font")
+               (:file "icon-font")
+               (:file "mouse")))
+
 (defsystem "lem-sdl2"
   :depends-on ("sdl2"
                "sdl2-ttf"
                "sdl2-image"
-               "lem/core"
+               "lem-sdl2/client-support"
                "lem/extensions"
                "trivial-main-thread")
   :serial t
   :components ((:file "wm")
-               (:file "resource")
-               (:file "platform")
-               (:file "keyboard")
-               (:file "font")
                (:file "icon")
                (:file "text-surface-cache")
                (:file "log")
                (:file "sdl2")
-               (:file "icon-font")
-               (:file "mouse")
                (:file "utils")
                (:file "display")
                (:file "view")

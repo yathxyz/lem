@@ -37,7 +37,9 @@
                   (dequeue *editor-event-queue*
                            :timeout timeout
                            :timeout-value :timeout))))
-          (deferred-p nil))
+          (deferred-p nil)
+          (routed-callback-p nil)
+          (previous-session *routed-input-session*))
       (when (routed-input-event-p e)
         (cond
           ((and *routed-input-session*
@@ -49,7 +51,8 @@
           (t
            (setf *routed-input-session* (routed-input-event-session e))
            (funcall (routed-input-event-prepare e))
-           (setf e (routed-input-event-event e)))))
+           (setf e (routed-input-event-event e)
+                 routed-callback-p (or (functionp e) (symbolp e))))))
       (cond (deferred-p nil)
             ((null e) (return nil))
             ((eql e :timeout)
@@ -59,6 +62,10 @@
              (when (>= 1 (event-queue-length))
                (update-on-display-resized)))
             ((or (functionp e) (symbolp e))
-             (funcall e))
+             (unwind-protect (funcall e)
+               ;; A routed paste/callback completes here, while a key or mouse
+               ;; command retains ownership until the interpreter completes it.
+               (when routed-callback-p
+                 (setf *routed-input-session* previous-session))))
             (t
              (return e))))))

@@ -138,11 +138,32 @@
   (when-let ((state (buffer-state (window-buffer new))))
     (setf (current-state) state)))
 
+(defun vi-activate-frame (old new)
+  ;; A redisplay visit is a context switch, not an editing action. Preserve a
+  ;; pending operator's temporary state as well as the buffer's regular state.
+  (when old
+    (let* ((window (frame-current-window old))
+           (buffer (and window (window-buffer window))))
+      (when (and buffer (mode-active-p buffer 'lem-vi-mode/core:vi-mode))
+        (setf (window-parameter window 'vi-frame-context)
+              (list buffer (buffer-state buffer) (current-state)
+                    lem-vi-mode/core::*current-main-state*)))))
+  (let* ((window (frame-current-window new))
+         (buffer (window-buffer window))
+         (saved (window-parameter window 'vi-frame-context)))
+    (when (mode-active-p buffer 'lem-vi-mode/core:vi-mode)
+      (if (and (eq buffer (first saved)) (eq (buffer-state buffer) (second saved)))
+          (setf (current-state) (third saved)
+                lem-vi-mode/core::*current-main-state* (fourth saved))
+          (setf (current-state) (or (buffer-state buffer) (ensure-state 'normal))
+                lem-vi-mode/core::*current-main-state* nil)))))
+
 (defun vi-enable-hook ()
   (setf *region-end-offset* -1)
   (setf (current-state) (or (buffer-state (current-buffer)) (ensure-state 'normal)))
   (add-hook *switch-to-buffer-hook* 'vi-switch-to-buffer)
   (add-hook *switch-to-window-hook* 'vi-switch-to-window)
+  (add-hook *activate-frame-hook* 'vi-activate-frame)
   (add-hook *prompt-after-activate-hook* 'enter-prompt)
   (add-hook *prompt-deactivate-hook* 'exit-prompt))
 
@@ -150,6 +171,7 @@
   (setf *region-end-offset* 0)
   (remove-hook *switch-to-buffer-hook* 'vi-switch-to-buffer)
   (remove-hook *switch-to-window-hook* 'vi-switch-to-window)
+  (remove-hook *activate-frame-hook* 'vi-activate-frame)
   (remove-hook *prompt-after-activate-hook* 'enter-prompt)
   (remove-hook *prompt-deactivate-hook* 'exit-prompt))
 

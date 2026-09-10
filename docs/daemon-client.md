@@ -1,9 +1,8 @@
 # Persistent Lem daemon and clients
 
-Status: implemented for Linux, SBCL, and ncurses. The Unix transport, native
+Status: implemented for Linux and SBCL, with native ncurses and SDL clients. The Unix transport, native
 client, independent-frame routing, blocking edit lifecycle, and integration
-tests live under `frontends/daemon/`. Windows and graphical attachment remain
-later milestones.
+tests live under `frontends/daemon/`. Windows transport remains a later milestone.
 
 ## Purpose
 
@@ -31,13 +30,14 @@ make daemon-client
 ./lemclient --no-wait README.md       # submit and return immediately
 ./lemclient +120:4 README.md          # line 120, column 4
 ./lemclient -t README.md              # attach an independent terminal frame
+./lemclient -c README.md              # attach an independent SDL frame
 ./lemclient --eval '(length (lem:buffer-list))'
 ./lemclient --stop-server
 ```
 
-The Nix flake exposes `.#lemclient` as both a package and an app. The ncurses
-runtime is split from the optional language-mode bundle so the short-lived
-client image does not load LSPs and every extension.
+The Nix flake exposes `.#lemclient` as both a package and an app. Its ncurses
+runtime and SDL font/input support are separate from the optional language-mode
+bundle. File and eval clients do not initialize a graphical display.
 
 A blocking file request enables `daemon-edit-mode` in each requested buffer:
 
@@ -87,7 +87,8 @@ disconnects that do not stop the process.
 
 Redisplay composes a terminal cell matrix using Lem's width calculation, sends
 one full screen on attachment or width change, and then sends only changed rows
-plus the cursor. The client applies those rows through ncurses. Consequently,
+plus styled runs and cursor metadata. Clients apply those rows through ncurses
+or SDL. Consequently,
 wire traffic for an ordinary keystroke is proportional to the changed rows,
 while server-side composition remains proportional to the visible cell matrix.
 The protocol bounds every frame at 1 MiB and file collections at 64 entries.
@@ -95,7 +96,8 @@ The protocol bounds every frame at 1 MiB and file collections at 64 entries.
 This is suitable for a local Unix socket and avoids the original full-screen
 broadcast design, but it is not a claim of performance parity with GNU Emacs's
 decades-optimized C redisplay engine. Lem still composes a complete logical
-screen before diffing, and version one does not transmit face/color runs.
+screen before diffing. Each connection has a bounded output queue and a separate
+writer; a stalled reader is disconnected instead of blocking the editor thread.
 
 ## Required user model
 
@@ -230,8 +232,8 @@ Common Lisp. OS-specific endpoint and credential operations should live behind
 a small backend protocol. Windows support may initially omit Unix-only service
 manager integration, but not shared buffers, independent frames, or safe eval.
 
-SDL2 and webview attachments are later milestones. The architecture must allow
-them, but version one does not require implementing every frontend.
+SDL2 attachment uses the same styled character-grid protocol as ncurses. Webview
+attachment and embedded graphical objects remain later milestones.
 
 ## Compatibility and migration
 
@@ -249,12 +251,13 @@ Useful behavior to preserve includes:
 - editor environment suitable for `EDITOR`, `VISUAL`, and `GIT_EDITOR`;
 - bounded requests and owner-private local metadata.
 
-The compatibility promise does not include graphical frame creation in version
-one, tmux pane switching, or silently starting a daemon.
+Protocol 2 adds graphical frame creation with `-c`. Ship the daemon and client
+together: protocol 1 and 2 peers reject a version mismatch. Save or recover
+modified work and stop the old daemon before switching the packaged revision.
 
 ## Acceptance status
 
-Milestones 1–8 are implemented for Linux/SBCL/ncurses and covered by the daemon
+Milestones 1–8 are implemented for Linux/SBCL and covered by the daemon
 test suite, package builds, and a real pseudo-terminal attachment exercise:
 
 1. A headless daemon initializes exactly once and remains alive without clients.
@@ -280,10 +283,10 @@ platform is declared supported.
 
 - Whether session routing should eventually become a public core implementation
   abstraction rather than the daemon's routed-input extension.
-- Whether a future graphical attachment may own several Lem frames. Version one
+- Whether a future graphical attachment may own several Lem frames. Protocol 2
   maps each attachment to exactly one frame.
-- Whether `--eval` should add typed JSON values. Version one returns a JSON
-  object containing bounded readable Common Lisp representations.
+- Whether `--eval` should add typed JSON values. It currently returns a JSON
+  object containing bounded printed Common Lisp representations.
 - How interactive prompts requested by noninteractive file clients are surfaced.
 - Whether socket activation starts an uninitialized daemon or only transports
   requests to an already initialized process.
@@ -296,15 +299,24 @@ tests before committing to a broad public protocol.
 
 ## Current limits
 
-- Linux/SBCL Unix sockets and ncurses are the only implemented transport and
-  interactive client combination. The wire protocol, request lifecycle, and
+- Linux/SBCL Unix sockets support native ncurses and SDL clients. The wire protocol, request lifecycle, and
   local transport interface are portable Common Lisp; Unix endpoint and peer
   credential operations are isolated in `transport-unix.lisp`. Implementing
   and validating a Windows named-pipe/console backend remains outstanding.
-- Terminal text, cursor position, wide-character layout, resize, keys, and
-  bracketed paste are supported. Face/color runs and mouse events are not yet
-  transported.
-- Socket activation, SDL2/webview attachment, and daemon state restoration
+- Styled text, cursor shape/color, wide-character layout, resize, keys, mouse and
+  bracketed paste are supported. SDL uses a fixed character grid and bundled
+  fonts; embedded images and graphical widgets are not yet transported.
+- Socket activation, webview attachment, and daemon state restoration
   after a process restart remain future integrations. A systemd user unit is
   prepared in the companion Nix integration checkout; it has not been deployed.
   See [service integration](daemon-service-migration.md).
+  See [native display acceptance](daemon-client-display.md) for reproducible
+  two-terminal, two-SDL and mixed-client checks.
+
+## Synchronous prompts
+
+A synchronous prompt or completion command retains its originating client's input
+until completion or cancellation. Input from other clients waits; administrative
+evaluation and background callbacks continue. This protects Lem's recursive prompt
+and completion state. Agent approvals use the planned asynchronous session model,
+not a blocking prompt shared by all clients.

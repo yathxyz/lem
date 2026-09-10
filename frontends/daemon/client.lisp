@@ -190,38 +190,89 @@
       (error "Terminal client requires the lem-ncurses system"))
     (apply (symbol-function symbol) arguments)))
 
-(defstruct terminal-screen rows)
+(defstruct terminal-screen rows foreground background cursor-shape cursor-color mouse-enabled)
 
-(defun draw-screen-row (row text)
-  (ignore-errors (ncurses-call :charms/ll "MVADDSTR" row 0 text)))
+(defun terminal-face-bits (foreground background flags)
+  (check-type flags (integer 0 7))
+  (ncurses-call :lem-ncurses/attribute "ATTRIBUTE-TO-BITS"
+                (lem:make-attribute :foreground foreground :background background
+                                    :bold (logtest 1 flags)
+                                    :underline (logtest 2 flags)
+                                    :reverse (logtest 4 flags))))
 
-(defun render-screen (message lock screen)
+(defun draw-screen-text (row column text foreground background flags)
+  (check-type text string)
+  (ncurses-call :charms/ll "ATTRSET" (terminal-face-bits foreground background flags))
+  (ignore-errors (ncurses-call :charms/ll "MVADDSTR" row column text)))
+
+(defun draw-screen-row (row data foreground background)
+  (draw-screen-text row 0 (protocol:field data "text") foreground background 0)
+  (dolist (run (coerce (protocol:field data "runs") 'list))
+    (destructuring-bind (column text run-foreground run-background flags) (coerce run 'list)
+      (check-type column (integer 0 1000))
+      (draw-screen-text row column text (or run-foreground foreground)
+                        (or run-background background) flags)))
+  (ncurses-call :charms/ll "ATTRSET" 0))
+
+(defun render-screen-content (message screen)
   (let* ((rows (protocol:field message "rows"))
          (changes (protocol:field message "changes"))
          (full-p (eq t (protocol:field message "full")))
+         (foreground (protocol:field message "foreground"))
+         (background (protocol:field message "background"))
+         (theme-changed-p (not (and (equal foreground (terminal-screen-foreground screen))
+                                   (equal background (terminal-screen-background screen)))))
          (cursor (protocol:field message "cursor"))
-         (x (if (hash-table-p cursor) (protocol:field cursor "x" 0) 0))
-         (y (if (hash-table-p cursor) (protocol:field cursor "y" 0) 0)))
-    (bt2:with-lock-held (lock)
-      (cond
-        ((and full-p (typep rows 'sequence) (not (stringp rows)))
-         (setf (terminal-screen-rows screen) (coerce rows 'vector))
-         (ncurses-call :charms/ll "ERASE")
-         (loop :for text :across (terminal-screen-rows screen)
-               :for row :from 0
-               :do (draw-screen-row row text)))
-        ((and (terminal-screen-rows screen)
-              (typep changes 'sequence) (not (stringp changes)))
-         (loop :for change :in (coerce changes 'list)
-               :for row := (protocol:field change "row")
-               :for text := (protocol:field change "text")
-               :when (and (integerp row) (stringp text)
-                          (<= 0 row)
-                          (< row (length (terminal-screen-rows screen))))
-                 :do (setf (aref (terminal-screen-rows screen) row) text)
-                     (draw-screen-row row text))))
+         (x (protocol:field cursor "x" 0))
+         (y (protocol:field cursor "y" 0))
+         (shape (protocol:field cursor "shape"))
+         (color (lem-daemon::wire-color (protocol:field cursor "color"))))
+    (progn
+      (when full-p (setf (terminal-screen-rows screen) (coerce rows 'vector)))
+      (when (terminal-screen-rows screen)
+        (dolist (change (coerce changes 'list))
+          (let ((row (protocol:field change "row")))
+            (unless (and (integerp row) (<= 0 row) (< row (length (terminal-screen-rows screen))))
+              (error "Invalid screen row: ~s" row))
+            (setf (aref (terminal-screen-rows screen) row) change)))
+        (if (or full-p theme-changed-p)
+            (progn
+              (ncurses-call :charms/ll "ERASE")
+              (loop :for data :across (terminal-screen-rows screen)
+                    :for row :from 0
+                    :do (draw-screen-row row data foreground background)))
+            (dolist (change (coerce changes 'list))
+              (draw-screen-row (protocol:field change "row") change foreground background))))
+      (setf (terminal-screen-foreground screen) foreground
+            (terminal-screen-background screen) background)
+      (let ((mouse-enabled (eq t (protocol:field message "mouse")))
+            (escape-delay (protocol:field message "escape-delay")))
+        (check-type escape-delay (integer 0 1000))
+        (setf (lem:variable-value (find-symbol "ESCAPE-DELAY" :lem-ncurses/config) :global)
+              escape-delay
+              (lem:variable-value 'lem:mouse-mode :global) mouse-enabled)
+        (unless (eq mouse-enabled (terminal-screen-mouse-enabled screen))
+          (ncurses-call :lem-ncurses/mouse
+                        (if mouse-enabled "ENABLE-MOUSE-REPORTING" "DISABLE-MOUSE-REPORTING"))
+          (setf (terminal-screen-mouse-enabled screen) mouse-enabled)))
+      (unless (equal shape (terminal-screen-cursor-shape screen))
+        (ncurses-call :lem-ncurses/term "UPDATE-CURSOR-SHAPE"
+                      (cond ((equal shape "box") :box)
+                            ((equal shape "bar") :bar)
+                            ((equal shape "underline") :underline)
+                            (t (error "Invalid cursor shape: ~s" shape))))
+        (setf (terminal-screen-cursor-shape screen) shape))
+      (unless (equal color (terminal-screen-cursor-color screen))
+        (ncurses-call :lem-ncurses/term "WRITE-TERMINAL-STRING"
+                      (format nil "~c]12;~a~c" #\Esc color #\Bell))
+        (setf (terminal-screen-cursor-color screen) color))
       (ignore-errors (ncurses-call :charms/ll "MOVE" y x))
       (ncurses-call :charms/ll "REFRESH"))))
+
+(defun render-screen (message lock screen)
+  (bt2:with-lock-held (lock)
+    (ncurses-call :lem-ncurses/term "CALL-WITH-INPUT-RESIZE-LOCK"
+                  (lambda () (render-screen-content message screen)))))
 
 (define-condition terminal-server-exit (condition) ())
 
@@ -230,43 +281,76 @@
   (:report (lambda (condition stream)
              (write-string (terminal-server-error-message condition) stream))))
 
-(defstruct terminal-control stopping-p)
+(define-condition stop-terminal-reader (condition) ())
 
-(defun terminal-reader-loop (connection main-thread render-lock control)
-  (let ((screen (make-terminal-screen))
-        (reported-p nil))
-    (unwind-protect
-         (loop :for message := (protocol:read-message (client-stream connection))
-               :while message
-               :do (cond
-                     ((string= "screen" (protocol:field message "type" ""))
-                      (render-screen message render-lock screen))
-                     ((string= "close" (protocol:field message "type" ""))
-                      (setf reported-p t)
-                      (bt2:interrupt-thread
-                       main-thread
-                       (lambda () (signal 'terminal-server-exit)))
-                      (return))
-                     ((and (string= "response"
-                                    (protocol:field message "type" ""))
-                           (string= "error"
-                                    (protocol:field message "status" "")))
-                      (let ((text (response-error-message message)))
-                        (setf reported-p t)
-                        (bt2:interrupt-thread
-                         main-thread
-                         (lambda ()
-                           (error 'terminal-server-error :message text)))
-                        (return)))))
-      (when (and (not reported-p)
-                 (not (terminal-control-stopping-p control))
-                 (bt2:thread-alive-p main-thread))
-        (bt2:interrupt-thread main-thread
-                              (lambda () (signal 'terminal-server-exit)))))))
+(defstruct terminal-control
+  (lock (bt2:make-lock :name "lemclient/terminal-control"))
+  stopping-p reader-started-p)
+
+(defun terminal-reader-loop (connection main-thread render-lock control screen)
+  (let ((reported-p nil))
+    (labels ((fail (message)
+               (setf reported-p t)
+               (when (and (not (terminal-control-stopping-p control))
+                          (bt2:thread-alive-p main-thread))
+                 (bt2:interrupt-thread
+                  main-thread
+                  (lambda ()
+                    (unless (terminal-control-stopping-p control)
+                      (error 'terminal-server-error :message message)))))))
+      (handler-case
+          (unwind-protect
+               (handler-case
+                   (progn
+                     (bt2:with-lock-held ((terminal-control-lock control))
+                       (when (terminal-control-stopping-p control)
+                         (return-from terminal-reader-loop))
+                       (setf (terminal-control-reader-started-p control) t))
+                     (loop :for message := (protocol:read-message (client-stream connection))
+                           :while message
+                           :do (cond
+                                 ((string= "screen" (protocol:field message "type" ""))
+                                  (render-screen message render-lock screen))
+                                 ((string= "close" (protocol:field message "type" ""))
+                                  (setf reported-p t)
+                                  (bt2:interrupt-thread
+                                   main-thread
+                                   (lambda ()
+                                     (unless (terminal-control-stopping-p control)
+                                       (signal 'terminal-server-exit))))
+                                  (return))
+                                 ((and (string= "response" (protocol:field message "type" ""))
+                                       (string= "error" (protocol:field message "status" "")))
+                                  (fail (response-error-message message))
+                                  (return)))))
+                 (error (condition) (fail (princ-to-string condition))))
+            (bt2:with-lock-held ((terminal-control-lock control))
+              (setf (terminal-control-reader-started-p control) nil))
+            (unless reported-p (fail "Daemon disconnected before closing this client")))
+        (stop-terminal-reader () nil)))))
+
+(defun stop-terminal-reader (control reader)
+  (let ((started-p
+          (bt2:with-lock-held ((terminal-control-lock control))
+            (setf (terminal-control-stopping-p control) t)
+            (terminal-control-reader-started-p control))))
+    (when reader
+      (when (and started-p (bt2:thread-alive-p reader))
+        (ignore-errors
+          (bt2:interrupt-thread
+           reader (lambda ()
+                    (when (terminal-control-reader-started-p control)
+                      (signal 'stop-terminal-reader))))))
+      (bt2:join-thread reader))))
 
 (defun send-input (connection event)
   (let ((id (next-id)))
     (cond
+      ((and (consp event) (eq (first event) :mouse))
+       (client-send connection
+                    (protocol:make-object
+                     "version" protocol:+protocol-version+
+                     "type" "input" "id" id "mouse" (second event))))
       ((and (consp event) (eq (first event) :paste))
        (client-send connection
                     (protocol:make-object
@@ -283,6 +367,14 @@
                      "hyper" (and (lem:key-hyper event) t)
                      "shift" (and (lem:key-shift event) t)
                      "sym" (lem:key-sym event)))))))
+
+(defun terminal-mouse-event (kind x y button wheel-x wheel-y)
+  (list :mouse
+        (protocol:make-object
+         "kind" (string-downcase kind) "x" x "y" y
+         "button" (ecase button
+                    ((nil) 0) (:button-1 1) (:button-2 2) (:button-3 3) (:button-4 4))
+         "clicks" 1 "dx" wheel-x "dy" wheel-y)))
 
 (defun send-resize (connection rows columns)
   (when (and rows columns)
@@ -307,6 +399,7 @@
                                   (boundp resize-symbol)
                                   (symbol-value resize-symbol)))
          (control (make-terminal-control))
+         (screen (make-terminal-screen))
          (reader nil)
          (render-lock (bt2:make-lock :name "lemclient/render")))
     (when resize-symbol
@@ -330,7 +423,7 @@
                        (bt2:make-thread
                         (lambda ()
                           (terminal-reader-loop connection main-thread
-                                                render-lock control))
+                                                render-lock control screen))
                         :name "lemclient screen reader"))
                  (when files
                    (let ((visit-id (next-id)))
@@ -343,25 +436,31 @@
                  (let* ((handler-symbol
                           (find-symbol "*BRACKETED-PASTE-HANDLER*"
                                        :lem-ncurses/input))
-                        (old-handler (symbol-value handler-symbol)))
+                        (old-handler (symbol-value handler-symbol))
+                        (mouse-handler-symbol (find-symbol "*MOUSE-EVENT-HANDLER*" :lem-ncurses/mouse))
+                        (old-mouse-handler (symbol-value mouse-handler-symbol)))
                    (unwind-protect
                         (progn
                           (setf (symbol-value handler-symbol)
-                                (lambda (text) (list :paste text)))
+                                (lambda (text) (list :paste text))
+                                (symbol-value mouse-handler-symbol) #'terminal-mouse-event)
                           (loop (send-input
                                  connection
                                  (ncurses-call :lem-ncurses/input "GET-EVENT"))))
-                       (setf (symbol-value handler-symbol) old-handler)))))
+                       (setf (symbol-value handler-symbol) old-handler
+                             (symbol-value mouse-handler-symbol) old-mouse-handler)))))
              (terminal-server-exit () 0)))
-      (setf (terminal-control-stopping-p control) t)
+      (stop-terminal-reader control reader)
       (ignore-errors
         (client-send connection
                      (protocol:make-object
                       "version" protocol:+protocol-version+
                       "type" "detach" "id" (next-id))))
       (close-client connection)
-      (when (and reader (bt2:thread-alive-p reader))
-        (ignore-errors (bt2:join-thread reader)))
+      (when (terminal-screen-cursor-color screen)
+        (ignore-errors
+          (ncurses-call :lem-ncurses/term "WRITE-TERMINAL-STRING"
+                        (format nil "~c]112~c" #\Esc #\Bell))))
       (ignore-errors (ncurses-call :lem-ncurses/term "TERM-FINALIZE"))
       (when (and resize-symbol old-resize-handler)
         (setf (symbol-value resize-symbol) old-resize-handler)))))
@@ -369,6 +468,7 @@
 (defun print-help ()
   (format t "Usage: lemclient [OPTIONS] [FILE ...]~%\
   -t, --tty                    attach this terminal~%\
+  -c, --create-frame           attach a native graphical client~%\
   -n, --no-wait                return after files are opened~%\
   -e, --eval FORM              evaluate Common Lisp in the daemon~%\
       --stop-server            stop the daemon if buffers are clean~%\
@@ -379,7 +479,7 @@
   -h, --help                   show this help~%"))
 
 (defun parse-client-arguments (arguments)
-  (let ((tty nil) (wait t) (eval nil) (stop nil) (force nil)
+  (let ((tty nil) (gui nil) (wait t) (eval nil) (stop nil) (force nil)
         (server "server") (alternate nil) (startup-wait 0) (files '()) (options t))
     (loop :while arguments
           :for argument := (pop arguments)
@@ -389,6 +489,8 @@
                  (return-from parse-client-arguments (values :help)))
                 ((and options (member argument '("-t" "--tty") :test #'string=))
                  (setf tty t))
+                ((and options (member argument '("-c" "--create-frame") :test #'string=))
+                 (setf gui t))
                 ((and options (member argument '("-n" "--no-wait") :test #'string=))
                  (setf wait nil))
                 ((and options (member argument '("-e" "--eval") :test #'string=))
@@ -412,10 +514,10 @@
                       (char= (char argument 0) #\-))
                  (error "Unknown option: ~a" argument))
                 (t (push argument files))))
-    (when (> (count-if #'identity (list tty eval stop)) 1)
-      (error "--tty, --eval, and --stop-server are mutually exclusive"))
+    (when (> (count-if #'identity (list tty gui eval stop)) 1)
+      (error "--tty, --create-frame, --eval, and --stop-server are mutually exclusive"))
     (when (and force (not stop)) (error "--force requires --stop-server"))
-    (values (cond (tty :tty) (eval :eval) (stop :stop) (t :visit))
+    (values (cond (tty :tty) (gui :gui) (eval :eval) (stop :stop) (t :visit))
             (nreverse files) wait eval force server alternate startup-wait)))
 
 (defun run-alternate-editor (command files)
@@ -447,6 +549,7 @@
              (:visit (run-visit connection files wait))
              (:eval (run-eval connection eval))
              (:stop (run-shutdown connection force))
+             (:gui (uiop:symbol-call :lem-daemon/sdl-client :run-graphical connection files))
              (:tty (run-terminal connection files)))
         (unless (eq mode :tty) (close-client connection))))))
 

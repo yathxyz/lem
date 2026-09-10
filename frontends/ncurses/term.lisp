@@ -19,7 +19,8 @@
            :resize-term
            :wait-for-input
            :*resize-handler*
-           :with-input-resize-lock))
+           :with-input-resize-lock
+           :call-with-input-resize-lock))
 (in-package :lem-ncurses/term)
 
 (cffi:defcvar ("COLOR_PAIRS" *COLOR-PAIRS* :library charms/ll::libcurses) :int)
@@ -552,9 +553,11 @@ simply mirrors the standard xterm-256 palette values."
 (defvar *input-resize-lock* (bt2:make-lock :name "ncurses input/resize lock"))
 (defvar *terminal-input-fd* nil)
 
+(defun call-with-input-resize-lock (function)
+  (bt2:with-lock-held (*input-resize-lock*) (funcall function)))
+
 (defmacro with-input-resize-lock (&body body)
-  `(bt2:with-lock-held (*input-resize-lock*)
-     ,@body))
+  `(call-with-input-resize-lock (lambda () ,@body)))
 
 #+sbcl
 (defvar *resize-monitor-thread* nil)

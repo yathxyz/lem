@@ -14,7 +14,10 @@ filesystem durability. It does not change or delete older checkpoint files.
 
 ## Enable and use
 
-Include `lem-daemon/recovery` in the editor build. On the editor thread, after the
+The integration's configured Nix editor includes recovery and enables a five-second
+idle checkpoint interval under its actual daemon name. A deliberate editor exit
+also attempts a final checkpoint; failures are written to the error log.
+For other builds, include `lem-daemon/recovery`. On the editor thread, after the
 configuration has initialized, call:
 
 ```lisp
@@ -60,8 +63,7 @@ such as the recovery listing.
 Lisp callers can use `checkpoint-now`, `list-checkpoints`, `restore-checkpoint`, and
 `discard-checkpoint` without UI prompts. Buffer-facing operations must run on the
 editor thread. `disable` stops scheduling and waits for a pending writer; it retains
-existing records. The configured daemon integration chooses when to enable this
-module; this change alone does not enable it in the deployed editor.
+existing records. The deployed profile remains unchanged until the integration is installed.
 
 ## Failure and storage contract
 
@@ -72,7 +74,8 @@ It validates the schema, file size, JSON nesting, numeric token size, and identi
 The record ID determines its filename; saved source filenames are metadata.
 
 Directories must be owned by the current user, private, and not final-component
-symlinks. Resolved ancestors must belong to the user or root and must not permit
+symlinks. Resolved ancestors must belong to the user or the filesystem root's owner
+(UID 0 on ordinary Linux, possibly unmapped in a Nix namespace) and must not permit
 other users to replace path components (sticky `/tmp` is accepted). Files are created exclusively with mode `0600`; existing records must be
 owned private regular files with one link. Symlinks and public directories/files
 are rejected instead of silently changing their permissions. The writer flushes
@@ -105,7 +108,20 @@ that a process, agent decision, or external side effect has resumed or succeeded
 
 `lem-daemon/recovery-store` depends only on Yason, Ironclad, and Babel. It can read
 records without a running daemon, frontend, editor event loop, or Lem user init.
-With this checkout's installed Qlot dependencies:
+The Nix `lem-recover` package builds a standalone Common Lisp executable; it needs
+neither Qlot nor a working editor configuration at runtime:
+
+```sh
+lem-recover "$XDG_STATE_HOME/lem/recovery/server/"
+lem-recover "$XDG_STATE_HOME/lem/recovery/server/" RECORD-ID
+```
+
+The first command lists metadata as JSON; the second exports plain text. Listing
+returns status 1 if individual records are unreadable, and usage/storage errors
+return status 2. `--help` describes the syntax. The prepared Nix profile includes
+this command alongside `lem` and `lemclient`.
+
+For development with this checkout's installed Qlot dependencies:
 
 ```sh
 sbcl --noinform --disable-debugger --script scripts/lem-recovery.lisp \

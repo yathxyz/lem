@@ -1,6 +1,6 @@
 (in-package :lem-daemon/protocol)
 
-(defconstant +protocol-version+ 1)
+(defconstant +protocol-version+ 2)
 (defconstant +maximum-message-bytes+ (* 1024 1024))
 (defconstant +maximum-files+ 64)
 

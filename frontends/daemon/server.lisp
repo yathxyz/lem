@@ -1,6 +1,8 @@
 (in-package :lem-daemon)
 
 (defparameter +connection-limit+ 64)
+(defparameter +connection-output-message-limit+ 64)
+(defparameter +connection-output-byte-limit+ (* 4 1024 1024))
 (defparameter +capabilities+
   #("visit" "eval" "attach" "input" "redisplay" "resize" "detach"
     "shutdown" "cancel"))
@@ -10,18 +12,27 @@
 (defvar *daemon-endpoint* nil)
 (defvar *daemon-accept-thread* nil)
 (defvar *daemon-running-p* nil)
-(defvar *daemon-root-implementation* nil)
 (defvar *daemon-connections* '())
 (defvar *daemon-requests* '())
 (defvar *daemon-lock* (bt2:make-lock :name "lem-daemon/state"))
 
 (define-condition stop-accept-loop (condition) ())
+(define-condition stop-connection-reader (condition) ())
 
 (defclass daemon-connection ()
   ((transport :initarg :transport :reader connection-transport)
    (stream :initarg :stream :reader connection-stream)
    (write-lock :initform (bt2:make-lock :name "lem-daemon/write")
                :reader connection-write-lock)
+   (write-ready :initform (bt2:make-condition-variable :name "lem-daemon/output")
+                :reader connection-write-ready)
+   (write-head :initform nil :accessor connection-write-head)
+   (write-tail :initform nil :accessor connection-write-tail)
+   (write-count :initform 0 :accessor connection-write-count)
+   (write-bytes :initform 0 :accessor connection-write-bytes)
+   (writer :initform nil :accessor connection-writer)
+   (reader :initarg :reader :initform nil :reader connection-reader)
+   (reader-running-p :initform nil :accessor connection-reader-running-p)
    (implementation :initform nil :accessor connection-implementation)
    (closed-p :initform nil :accessor connection-closed-p)
    (negotiated-p :initform nil :accessor connection-negotiated-p)))
@@ -59,11 +70,66 @@
 (defun daemon-send (connection message)
   (unless (connection-closed-p connection)
     (handler-case
-        (bt2:with-lock-held ((connection-write-lock connection))
-          (protocol:write-message message (connection-stream connection)))
-      (error ()
-        (setf (connection-closed-p connection) t)
-        nil))))
+        (let* ((octets (protocol:encode-message message))
+               (bytes (+ 4 (length octets)))
+               (accepted nil))
+          ;; Only the writer performs socket I/O. Count its in-flight message
+          ;; too, so a stopped reader cannot make the queue grow without bound.
+          (bt2:with-lock-held ((connection-write-lock connection))
+            (unless (or (connection-closed-p connection)
+                        (>= (connection-write-count connection)
+                            +connection-output-message-limit+)
+                        (> (+ bytes (connection-write-bytes connection))
+                           +connection-output-byte-limit+))
+              (let ((entry (list octets)))
+                (if (connection-write-tail connection)
+                    (setf (cdr (connection-write-tail connection)) entry)
+                    (setf (connection-write-head connection) entry))
+                (setf (connection-write-tail connection) entry))
+              (incf (connection-write-count connection))
+              (incf (connection-write-bytes connection) bytes)
+              (setf accepted t)
+              (bt2:condition-broadcast (connection-write-ready connection))))
+          (if accepted message (progn (close-connection connection) nil)))
+      (error () (close-connection connection) nil))))
+
+(defun connection-writer-loop (connection)
+  (unwind-protect
+       (handler-case
+           (loop
+             (let ((octets
+                     (bt2:with-lock-held ((connection-write-lock connection))
+                       (loop :while (and (not (connection-closed-p connection))
+                                         (null (connection-write-head connection)))
+                             :do (bt2:condition-wait (connection-write-ready connection)
+                                                    (connection-write-lock connection)))
+                       (when (connection-closed-p connection) (return))
+                       (prog1 (pop (connection-write-head connection))
+                         (unless (connection-write-head connection)
+                           (setf (connection-write-tail connection) nil))))))
+               (let ((stream (connection-stream connection)))
+                 (protocol::write-u32 (length octets) stream)
+                 (write-sequence octets stream)
+                 (finish-output stream))
+               (bt2:with-lock-held ((connection-write-lock connection))
+                 (unless (connection-closed-p connection)
+                   (decf (connection-write-count connection))
+                   (decf (connection-write-bytes connection) (+ 4 (length octets))))
+                 (bt2:condition-broadcast (connection-write-ready connection)))))
+         (error () nil))
+    (close-connection connection)))
+
+(defun drain-connection-output (connection deadline)
+  "Allow queued final replies to finish until the shared monotonic DEADLINE."
+  (bt2:with-lock-held ((connection-write-lock connection))
+    (loop :while (and (not (connection-closed-p connection))
+                      (plusp (connection-write-count connection)))
+          :for remaining := (/ (- deadline (get-internal-real-time))
+                               internal-time-units-per-second)
+          :while (plusp remaining)
+          :do (bt2:condition-wait (connection-write-ready connection)
+                                 (connection-write-lock connection)
+                                 :timeout remaining))))
 
 (defun response (connection id &rest fields)
   (daemon-send
@@ -216,6 +282,21 @@
       (error "Client file path must be absolute: ~a" native))
     (values pathname line column)))
 
+(defun select-file-visit-window ()
+  "Select an editable window in this frame while preserving popup contents."
+  (let* ((windows (window-list))
+         (target
+           (find-if
+            (lambda (window)
+              (and (member window windows :test #'eq)
+                   (lem-core::window-buffer-switchable-p window)
+                   (not (lem-core::not-switchable-buffer-p
+                         (window-buffer window)))))
+            (append (list (current-window) (lem-core::last-focused-window)) windows))))
+    (unless target
+      (editor-error "This frame has no window available for a file visit"))
+    (switch-to-window target)))
+
 (defun handle-visit-on-editor (request message)
   (handler-case
       (let ((implementation
@@ -230,6 +311,9 @@
                      (<= (length entries) protocol:+maximum-files+))
           (error "files must be an array of at most ~d entries"
                  protocol:+maximum-files+))
+        ;; Status peeks, prompts, and other reserved windows must retain their
+        ;; buffers. A client visit uses a regular window in the selected frame.
+        (when (plusp (length entries)) (select-file-visit-window))
         (let ((origin (current-buffer)) (buffers '()) (first-location nil))
           (loop :for entry :in (coerce entries 'list)
                 :do (multiple-value-bind (pathname line column)
@@ -309,13 +393,14 @@
           (when (and old-window
                      (eq (window-buffer old-window) (current-buffer)))
             (move-point (lem-core::%window-point old-window)
-                        (buffer-point (current-buffer)))))))
-    (setf lem-core::*implementation* implementation)
-    (alexandria:when-let ((frame (get-frame implementation)))
-      (let* ((window (frame-current-window frame))
-             (buffer (window-buffer window)))
-        (setf (current-buffer) buffer)
-        (move-point (buffer-point buffer) (lem-core::%window-point window))))))
+                        (buffer-point (current-buffer))))))
+      (setf lem-core::*implementation* implementation)
+      (alexandria:when-let ((frame (get-frame implementation)))
+        (let* ((window (frame-current-window frame))
+               (buffer (window-buffer window)))
+          (setf (current-buffer) buffer)
+          (move-point (buffer-point buffer) (lem-core::%window-point window)))
+        (run-hooks *activate-frame-hook* old-frame frame)))))
 
 (defun redraw-other-sessions (active)
   (let ((restore (if (get-frame active)
@@ -331,6 +416,48 @@
                (redraw-display :force t))))
       (activate-implementation restore))))
 
+(defun redraw-daemon-sessions-after-command ()
+  (let ((implementation (implementation)))
+    (when (and (typep implementation 'daemon-implementation)
+               (daemon-implementation-connection implementation))
+      (redraw-other-sessions implementation))))
+
+(defun prepare-client-input (connection implementation &optional mouse-event)
+  (when (or (connection-closed-p connection) (not (get-frame implementation)))
+    (error 'lem-core::editor-abort))
+  ;; Resize and input are queued in order. Apply frame-dependent bounds here,
+  ;; after any preceding resize, and discard stale off-frame input harmlessly.
+  (when (and mouse-event
+             (or (>= (lem-core::mouse-event-x mouse-event)
+                     (daemon-implementation-width implementation))
+                 (>= (lem-core::mouse-event-y mouse-event)
+                     (daemon-implementation-height implementation))))
+    (error 'lem-core::editor-abort))
+  (activate-implementation implementation))
+
+(defun decode-mouse-message (message)
+  "Construct a core event directly, preserving the input's session routing."
+  (let* ((kind (require-string message "kind" 16))
+         (x (require-integer message "x" 0 999))
+         (y (require-integer message "y" 0 999))
+         (coordinates (list :x x :y y :pixel-x x :pixel-y y)))
+    (flet ((button (minimum)
+             (aref #(nil :button-1 :button-2 :button-3 :button-4)
+                   (require-integer message "button" minimum 4))))
+      (cond ((string= kind "down")
+             (apply #'make-instance 'lem-core::mouse-button-down
+                    :button (button 1)
+                    :clicks (require-integer message "clicks" 1 3) coordinates))
+            ((string= kind "up")
+             (apply #'make-instance 'lem-core::mouse-button-up :button (button 1) coordinates))
+            ((string= kind "move")
+             (apply #'make-instance 'lem-core::mouse-motion :button (button 0) coordinates))
+            ((string= kind "wheel")
+             (apply #'make-instance 'lem-core::mouse-wheel
+                    :wheel-x (require-integer message "dx" -100 100)
+                    :wheel-y (require-integer message "dy" -100 100) coordinates))
+            (t (error "Unknown mouse event kind: ~s" kind))))))
+
 (defun handle-attach-on-editor (connection id width height)
   (unless *daemon-root-implementation*
     (response-error connection id "attach-unsupported"
@@ -340,6 +467,9 @@
     (error "Connection already owns a frame"))
   (let ((implementation (make-instance 'daemon-implementation
                                        :connection connection
+                                       :cursor-shape
+                                       (daemon-implementation-cursor-shape
+                                        *daemon-root-implementation*)
                                        :width width :height height)))
     (setf (connection-implementation connection) implementation)
     (with-implementation implementation
@@ -351,6 +481,13 @@
     (response-ok connection id "attached")))
 
 (defun detach-connection-frame-on-editor (connection)
+  (when (eq connection lem-core::*routed-input-session*)
+    ;; A prompt's unwind code still needs its window and frame. Restore its
+    ;; context, abort the recursive command, and tear down on the next event.
+    (alexandria:when-let ((implementation (connection-implementation connection)))
+      (activate-implementation implementation))
+    (send-event (lambda () (detach-connection-frame-on-editor connection)))
+    (lem-core::cancel-routed-input-session connection))
   (alexandria:when-let ((implementation (connection-implementation connection)))
     (with-implementation implementation
       (alexandria:when-let ((frame (get-frame implementation)))
@@ -412,14 +549,24 @@
          (let ((implementation (or (connection-implementation connection)
                                    (error "Connection has no attached frame"))))
            (cond
+             ((protocol:field message "mouse")
+              (let ((event (decode-mouse-message (protocol:field message "mouse"))))
+                (when (variable-value 'lem:mouse-mode :global)
+                  (send-event
+                   (lem-core::make-routed-input-event
+                    connection
+                    (lambda () (prepare-client-input connection implementation event))
+                    event)))))
              ((protocol:field message "paste")
               (let ((text (require-string message "paste" 262144)))
                 (send-event
-                 (lambda ()
-                   (activate-implementation implementation)
-                   (insert-bracketed-paste (current-point) text)
-                   (redraw-display :force t)
-                   (redraw-other-sessions implementation)))))
+                 (lem-core::make-routed-input-event
+                  connection
+                  (lambda () (prepare-client-input connection implementation))
+                  (lambda ()
+                    (insert-bracketed-paste (current-point) text)
+                    (redraw-display :force t)
+                    (redraw-other-sessions implementation))))))
              (t
               (let ((key (make-key
                           :ctrl (bool-field message "ctrl")
@@ -431,10 +578,8 @@
                 (send-event
                  (lem-core::make-routed-input-event
                   connection
-                  (lambda () (activate-implementation implementation))
-                  key))
-                (send-event
-                 (lambda () (redraw-other-sessions implementation))))))
+                  (lambda () (prepare-client-input connection implementation))
+                  key)))))
            (response-ok connection id "accepted")))
         ((string= type "resize")
          (let ((implementation (or (connection-implementation connection)
@@ -496,40 +641,77 @@
     (complete-request request "disconnected" "Client disconnected")))
 
 (defun close-connection (connection)
-  (unless (connection-closed-p connection)
-    (setf (connection-closed-p connection) t))
-  (transport:close-local-connection (connection-transport connection))
-  (bt2:with-lock-held (*daemon-lock*)
-    (setf *daemon-connections*
-          (delete connection *daemon-connections* :test #'eq)))
-  (when lem-core::*in-the-editor*
-    (send-event (lambda ()
-                  (cancel-connection-requests-on-editor connection)
-                  (detach-connection-frame-on-editor connection)
-                  (lem-core::cancel-routed-input-session connection)))))
+  (let ((close-p nil))
+    (bt2:with-lock-held ((connection-write-lock connection))
+      (unless (connection-closed-p connection)
+        (setf (connection-closed-p connection) t
+              (connection-write-head connection) nil
+              (connection-write-tail connection) nil
+              (connection-write-count connection) 0
+              (connection-write-bytes connection) 0
+              close-p t)
+        (bt2:condition-broadcast (connection-write-ready connection))))
+    (when close-p
+      (let ((reader (connection-reader connection)))
+        (when (and reader (not (eq reader (bt2:current-thread)))
+                   (bt2:thread-alive-p reader))
+          (ignore-errors
+            (bt2:interrupt-thread
+             reader
+             (lambda ()
+               (when (connection-reader-running-p connection)
+                 (signal 'stop-connection-reader)))))))
+      (transport:close-local-connection (connection-transport connection))
+      (bt2:with-lock-held (*daemon-lock*)
+        (setf *daemon-connections*
+              (delete connection *daemon-connections* :test #'eq)))
+      (when lem-core::*in-the-editor*
+        (send-event (lambda ()
+                      (cancel-connection-requests-on-editor connection)
+                      (detach-connection-frame-on-editor connection)))))))
 
 (defun serve-connection (local-connection)
   (let ((connection nil))
     (unwind-protect
          (handler-case
-             (let ((stream
-                     (transport:local-connection-stream local-connection)))
-               (setf connection (make-instance 'daemon-connection
-                                               :transport local-connection
-                                               :stream stream))
-               (bt2:with-lock-held (*daemon-lock*)
-                 (push connection *daemon-connections*))
-               (loop :for message := (protocol:read-message stream)
-                     :while message
-                     :do (handler-case (handle-message connection message)
-                           (error (condition)
-                             (response-error connection
-                                             (protocol:field message "id")
-                                             "invalid-request"
-                                             (princ-to-string condition))))))
-           (error () nil))
+             (unwind-protect
+                  (handler-case
+                      (let ((stream (transport:local-connection-stream local-connection)))
+                        (setf connection (make-instance 'daemon-connection
+                                                        :transport local-connection
+                                                        :reader (bt2:current-thread)
+                                                        :stream stream)
+                              (connection-writer connection)
+                              (bt2:make-thread (lambda () (connection-writer-loop connection))
+                                               :name "Lem daemon output"))
+                        (bt2:with-lock-held (*daemon-lock*)
+                          (unless *daemon-running-p* (return-from serve-connection))
+                          (push connection *daemon-connections*))
+                        (bt2:with-lock-held ((connection-write-lock connection))
+                          (unless (connection-closed-p connection)
+                            (setf (connection-reader-running-p connection) t)))
+                        (loop
+                          (when (connection-closed-p connection) (return))
+                          (let ((message (protocol:read-message stream)))
+                            (unless (and message (not (connection-closed-p connection)))
+                              (return))
+                            (handler-case (handle-message connection message)
+                              (error (condition)
+                                (response-error connection (protocol:field message "id")
+                                                "invalid-request"
+                                                (princ-to-string condition)))))))
+                    (error () nil))
+               ;; A queued stop signal must become harmless before leaving its
+               ;; handler, including while the reader joins its writer below.
+               (when connection
+                 (bt2:with-lock-held ((connection-write-lock connection))
+                   (setf (connection-reader-running-p connection) nil))))
+           (stop-connection-reader () nil))
       (if connection
-          (close-connection connection)
+          (progn
+            (close-connection connection)
+            (when (connection-writer connection)
+              (bt2:join-thread (connection-writer connection))))
           (transport:close-local-connection local-connection)))))
 
 (defun accept-loop (listener)
@@ -572,17 +754,30 @@
                  'daemon-kill-buffer-hook)
     (add-hook (variable-value 'kill-buffer-hook :global t)
               'daemon-kill-buffer-hook)
+    (remove-hook *post-command-hook* 'redraw-daemon-sessions-after-command)
+    (add-hook *post-command-hook* 'redraw-daemon-sessions-after-command 10000)
     (configure-editor-environment)))
 
 (defun stop-daemon-transport ()
   (setf *daemon-running-p* nil)
   (remove-hook (variable-value 'kill-buffer-hook :global t)
                'daemon-kill-buffer-hook)
+  (remove-hook *post-command-hook* 'redraw-daemon-sessions-after-command)
   (when *daemon-listener*
     (transport:close-local-listener *daemon-listener*))
-  (dolist (connection (bt2:with-lock-held (*daemon-lock*)
-                        (copy-list *daemon-connections*)))
-    (close-connection connection))
+  (let ((connections (bt2:with-lock-held (*daemon-lock*)
+                       (copy-list *daemon-connections*)))
+        (deadline (+ (get-internal-real-time) internal-time-units-per-second)))
+    (dolist (connection connections)
+      (drain-connection-output connection deadline))
+    (dolist (connection connections)
+      (close-connection connection))
+    (dolist (connection connections)
+      ;; Readers join their writers; a writer never joins its reader.
+      (when (connection-reader connection)
+        (bt2:join-thread (connection-reader connection)))
+      (when (connection-writer connection)
+        (bt2:join-thread (connection-writer connection)))))
   (when (and *daemon-accept-thread*
              (not (eq *daemon-accept-thread* (bt2:current-thread))))
     (when (bt2:thread-alive-p *daemon-accept-thread*)
