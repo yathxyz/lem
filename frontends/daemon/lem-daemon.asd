@@ -20,3 +20,23 @@
   :perform (test-op (op c)
              (declare (ignore op))
              (symbol-call :rove :run c)))
+
+(defsystem "lem-daemon/recovery-store"
+  :description "Private durable text records, usable without an editor or user init"
+  :depends-on ("yason" "ironclad" "babel")
+  :serial t
+  :components ((:file "recovery/store")))
+
+(defsystem "lem-daemon/recovery"
+  :description "Opt-in durable recovery of modified file and scratch buffers"
+  :depends-on ("lem/core" "lem-daemon/recovery-store")
+  :serial t
+  :components ((:file "recovery/editor")))
+
+(defsystem "lem-daemon/recovery-tests"
+  :depends-on ("lem-daemon/recovery" "rove" "lem-daemon")
+  :serial t
+  :components ((:file "tests/recovery"))
+  :perform (test-op (op c)
+             (declare (ignore op))
+             (symbol-call :rove :run c)))
