@@ -338,6 +338,14 @@ allows to learn about the file state: modified, deleted, ignored… "
         (porcelain-error "lem/legit: our rebase script is only for Unix platforms currently. We need to run a shell script and trap a signal.")
         (setf *rebase-script-path* script-path))))
 
+(defmethod rebase-todo-pathname ((vcs vcs-git))
+  (multiple-value-bind (output error-output status)
+      (run-git '("rev-parse" "--path-format=absolute" "--git-path"
+                 "rebase-merge/git-rebase-todo"))
+    (unless (zerop status) (porcelain-error "~a" error-output))
+    (uiop:parse-native-namestring
+     (string-right-trim '(#\Newline #\Return) output))))
+
 (defmethod rebase-interactively ((vcs vcs-git) &key from)
   "Start a rebase session.
 

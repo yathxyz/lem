@@ -1,69 +1,29 @@
-;;;; Signal-free interactive-rebase sequence editor.
+;;;; Native Lisp client ownership for interactive Git rebase.
 
 (in-package :lem-yath)
 
-(defparameter *legit-rebase-control-script*
-  "#!/usr/bin/env bash
-set -u
-
-control=${LEM_YATH_REBASE_CONTROL:-}
-if [[ -z $control ]]; then
-  exit 2
-fi
-
-while [[ ! -s $control ]]; do
-  sleep 0.05
-done
-
-action=
-IFS= read -r action <\"$control\" || true
-rm -f -- \"$control\"
-
-case $action in
-  continue) exit 0 ;;
-  abort) exit 1 ;;
-  *) exit 2 ;;
-esac
-")
-
 (defstruct legit-rebase-session
   process
-  control-pathname
-  (waiting-p t))
+  directory
+  todo-pathname)
 
 (defvar *legit-rebase-sessions* (make-hash-table :test #'eq))
 
-(defun legit-rebase-private-directory ()
-  (merge-pathnames "legit/" (lem:lem-home)))
+(defun legit-rebase-metadata-pathname (name)
+  "Resolve Git metadata in ordinary repositories and linked worktrees."
+  (multiple-value-bind (output error-output status)
+      (lem/porcelain/git::run-git
+       (list "rev-parse" "--path-format=absolute" "--git-path" name))
+    (unless (zerop status)
+      (lem/porcelain:porcelain-error "~a" error-output))
+    (uiop:parse-native-namestring
+     (string-right-trim '(#\Newline #\Return) output))))
 
-(defun legit-rebase-control-script-pathname ()
-  (merge-pathnames "lem-yath-rebase-editor.sh"
-                   (legit-rebase-private-directory)))
-
-(defun ensure-legit-rebase-control-script ()
-  "Write the fixed sequence-editor helper below Lem's private directory."
-  (let ((pathname (legit-rebase-control-script-pathname)))
-    (write-private-control-file pathname *legit-rebase-control-script*)
-    #+sbcl
-    (sb-posix:chmod (uiop:native-namestring pathname) #o700)
-    #-sbcl
-    (error "The rebase control helper requires the supported SBCL runtime")
-    pathname))
-
-(defun fresh-legit-rebase-control-pathname ()
-  "Return an absent unpredictable control pathname in the private directory."
-  (let ((directory (legit-rebase-private-directory)))
-    (loop :repeat 100
-          :for pathname :=
-            (merge-pathnames
-             (format nil "rebase-control-~d-~16,'0x"
-                     #+sbcl (sb-posix:getpid)
-                     #-sbcl 0
-                     (random (ash 1 60)))
-             directory)
-          :unless (private-path-stat pathname)
-            :return pathname
-          :finally (error "Could not reserve a rebase control pathname"))))
+(defun legit-rebase-in-progress-p ()
+  (or (uiop:directory-exists-p
+       (legit-rebase-metadata-pathname "rebase-merge/"))
+      (uiop:directory-exists-p
+       (legit-rebase-metadata-pathname "rebase-apply/"))))
 
 (defun close-legit-rebase-process (process)
   "Release the native asynchronous process after UIOP has reaped it."
@@ -85,16 +45,9 @@ esac
         (unwind-protect
              (ignore-errors (uiop:wait-process process))
           (ignore-errors (close-legit-rebase-process process))
-          #+sbcl
-          (delete-owned-control-file
-           (legit-rebase-session-control-pathname session))
           (remhash vcs *legit-rebase-sessions*)
           (setf session nil))))
     session))
-
-(defun write-legit-rebase-action (pathname action)
-  "Publish literal ACTION for the waiting sequence editor."
-  (write-private-control-file pathname (format nil "~a~%" action)))
 
 (defun legit-rebase-child-environment (&rest overrides)
   "Copy Lem's environment and apply string name/value OVERRIDES for one child."
@@ -114,18 +67,51 @@ esac
   #-sbcl
   (error "Child-specific rebase environments require SBCL"))
 
-(defun wait-for-legit-rebase-todo (process)
+(defun launch-legit-rebase (vcs arguments &optional todo)
+  "Keep Git asynchronous: its editor callbacks need the Lisp event loop."
+  (unless (lem-daemon:daemon-running-p)
+    (lem/porcelain:porcelain-error "Start Lem's native server before rebasing."))
+  (let* ((editor (uiop:escape-sh-command
+                  (list (or (uiop:getenvp "LEM_DAEMON_CLIENT") "lemclient")
+                        "--server-name" (lem-daemon:server-name))))
+         (process
+           (uiop:launch-program
+            (append '("git" "rebase") arguments)
+            :environment
+            (legit-rebase-child-environment
+             "GIT_SEQUENCE_EDITOR" editor "GIT_EDITOR" editor)
+            :output nil :error-output nil :ignore-error-status t)))
+    (setf (gethash vcs *legit-rebase-sessions*)
+          (make-legit-rebase-session :process process :directory (uiop:getcwd)
+                                     :todo-pathname todo))
+    process))
+
+(defun wait-for-legit-rebase-todo (process todo)
   (loop :repeat 500
-        :when (uiop:file-exists-p ".git/rebase-merge/git-rebase-todo")
-          :return t
-        :unless (ignore-errors (uiop:process-alive-p process))
-          :return nil
+        :when (uiop:file-exists-p todo) :return t
+        :unless (ignore-errors (uiop:process-alive-p process)) :return nil
         :do (sleep 0.01)
         :finally (return nil)))
 
+(defun legit-rebase-waiting-buffer (session)
+  "Return the todo only while its native sequence-editor request is pending."
+  (alexandria:when-let*
+      ((todo (legit-rebase-session-todo-pathname session))
+       (buffer (get-file-buffer todo)))
+    (when (lem-daemon:request-buffer-list buffer) buffer)))
+
+(defun finish-legit-rebase-todo (buffer abort-p)
+  ;; These commands restore the request's origin in the selected window.
+  ;; A dynamic current-buffer binding would leave that window inconsistent.
+  (lem-daemon::select-file-visit-window)
+  (switch-to-buffer buffer)
+  (if abort-p
+      (lem-daemon:daemon-edit-abort)
+      (lem-daemon:daemon-edit-save-and-done)))
+
 (defmethod lem/porcelain:rebase-interactively
     ((vcs lem/porcelain/git::vcs-git) &key from)
-  (when (uiop:directory-exists-p ".git/rebase-merge/")
+  (when (legit-rebase-in-progress-p)
     (lem/porcelain:porcelain-error
      "A Git rebase is already in progress; continue, abort, or skip it first."))
   (when (release-finished-legit-rebase-session vcs :wait t)
@@ -134,84 +120,67 @@ esac
   (unless from
     (return-from lem/porcelain:rebase-interactively
       (values "Git rebase is missing the commit to rebase from." nil 1)))
-  (let* ((script (ensure-legit-rebase-control-script))
-         (control (fresh-legit-rebase-control-pathname))
-         (environment
-           (legit-rebase-child-environment
-            "GIT_SEQUENCE_EDITOR"
-            (format nil "bash ~a"
-                    (uiop:escape-shell-token
-                     (uiop:native-namestring script)))
-            "LEM_YATH_REBASE_CONTROL"
-            (uiop:native-namestring control)))
-         (process nil))
-    (setf process
-          (uiop:launch-program
-           (list "git" "rebase" "--autostash" "-i"
-                 (if (lem/porcelain/git::root-commit-p from)
-                     "--root"
-                     (format nil "~a^" from)))
-           :environment environment
-           :output nil
-           :error-output nil
-           :ignore-error-status t))
-    (setf (gethash vcs *legit-rebase-sessions*)
-          (make-legit-rebase-session
-           :process process :control-pathname control))
-    (unless (wait-for-legit-rebase-todo process)
-      (when (ignore-errors (uiop:process-alive-p process))
-        (write-legit-rebase-action control "abort"))
-      (release-finished-legit-rebase-session vcs :wait t)
-      (lem/porcelain:porcelain-error
-       "Git did not create an interactive-rebase todo within five seconds."))
+  (let ((todo (legit-rebase-metadata-pathname "rebase-merge/git-rebase-todo")))
+    ;; Native file clients retain their buffers. Git will create a new todo;
+    ;; do not silently reuse an old buffer or discard unsaved edits in it.
+    (alexandria:when-let ((buffer (get-file-buffer todo)))
+      (when (or (buffer-modified-p buffer)
+                (lem-daemon:request-buffer-list buffer))
+        (lem/porcelain:porcelain-error
+         "The previous rebase todo still has edits or a waiting client."))
+      (delete-buffer buffer))
+    (let ((process
+            (launch-legit-rebase
+             vcs (list "--autostash" "-i"
+                       (if (lem/porcelain/git::root-commit-p from)
+                           "--root" (format nil "~a^" from)))
+             todo)))
+      (unless (wait-for-legit-rebase-todo process todo)
+        ;; Do not leave a hook or unavailable client hanging after startup fails.
+        (when (ignore-errors (uiop:process-alive-p process))
+          (uiop:terminate-process process))
+        (release-finished-legit-rebase-session vcs :wait t)
+        (lem/porcelain:porcelain-error
+         "Git did not create an interactive-rebase todo within five seconds.")))
     (values "rebase started" nil 0)))
-
-(defun active-legit-rebase-control-session (vcs)
-  (let ((session (release-finished-legit-rebase-session vcs)))
-    (when (and session
-               (legit-rebase-session-waiting-p session)
-               (legit-rebase-session-control-pathname session))
-      session)))
 
 (defmethod lem/porcelain:rebase-continue
     ((vcs lem/porcelain/git::vcs-git))
-  (cond
-    ((active-legit-rebase-control-session vcs)
-     (let* ((session (gethash vcs *legit-rebase-sessions*))
-            (control (legit-rebase-session-control-pathname session)))
-       (write-legit-rebase-action control "continue")
-       (setf (legit-rebase-session-waiting-p session) nil)
-       (values "rebase continued" nil 0)))
-    ((uiop:directory-exists-p ".git/rebase-merge/")
-     (lem/porcelain/git::run-git '("rebase" "--continue")))
-    (t
-     (lem/porcelain:porcelain-error "No Git rebase is in progress."))))
+  (alexandria:when-let ((session (release-finished-legit-rebase-session vcs)))
+    (alexandria:when-let ((buffer (legit-rebase-waiting-buffer session)))
+      (finish-legit-rebase-todo buffer nil)
+      (return-from lem/porcelain:rebase-continue
+        (values "rebase continued" nil 0)))
+    (lem/porcelain:porcelain-error
+     "Git is still running; finish its editor request or wait for it to stop."))
+  (unless (legit-rebase-in-progress-p)
+    (lem/porcelain:porcelain-error "No Git rebase is in progress."))
+  (launch-legit-rebase vcs '("--continue"))
+  (values "rebase continuing" nil 0))
 
 (defmethod lem/porcelain:rebase-abort
     ((vcs lem/porcelain/git::vcs-git))
-  (cond
-    ((active-legit-rebase-control-session vcs)
-     (let* ((session (gethash vcs *legit-rebase-sessions*))
-            (control (legit-rebase-session-control-pathname session)))
-       (write-legit-rebase-action control "abort")
-       (setf (legit-rebase-session-waiting-p session) nil)
-       (release-finished-legit-rebase-session vcs :wait t)
-       (values "rebase aborted" nil 0)))
-    ((uiop:directory-exists-p ".git/rebase-merge/")
-     (lem/porcelain/git::run-git '("rebase" "--abort")))
-    (t
-     (lem/porcelain:porcelain-error "No Git rebase is in progress."))))
+  (alexandria:when-let ((session (release-finished-legit-rebase-session vcs)))
+    (alexandria:when-let ((buffer (legit-rebase-waiting-buffer session)))
+      (finish-legit-rebase-todo buffer t)
+      (release-finished-legit-rebase-session vcs :wait t)
+      (return-from lem/porcelain:rebase-abort
+        (values "rebase aborted" nil 0)))
+    (lem/porcelain:porcelain-error
+     "Git is still running; abort its editor request or wait for it to stop."))
+  (unless (legit-rebase-in-progress-p)
+    (lem/porcelain:porcelain-error "No Git rebase is in progress."))
+  (lem/porcelain/git::run-git '("rebase" "--abort")))
 
 (defmethod lem/porcelain:rebase-skip
     ((vcs lem/porcelain/git::vcs-git))
-  (cond
-    ((active-legit-rebase-control-session vcs)
-     (lem/porcelain:porcelain-error
-      "The interactive todo must be continued or aborted before skipping."))
-    ((uiop:directory-exists-p ".git/rebase-merge/")
-     (lem/porcelain/git::run-git '("rebase" "--skip")))
-    (t
-     (lem/porcelain:porcelain-error "No Git rebase is in progress."))))
+  (when (release-finished-legit-rebase-session vcs)
+    (lem/porcelain:porcelain-error
+     "Git is still running; finish its editor request before skipping."))
+  (unless (legit-rebase-in-progress-p)
+    (lem/porcelain:porcelain-error "No Git rebase is in progress."))
+  (launch-legit-rebase vcs '("--skip"))
+  (values "rebase skipping" nil 0))
 
 (defvar *legit-amend-operation-key* 'lem-yath-legit-amend-operation)
 
@@ -326,22 +295,24 @@ esac
   "Do not restore a stale cursor row when Git creates a fresh todo file."
   (alexandria:when-let ((filename (buffer-filename buffer)))
     (when (string= (file-namestring filename) "git-rebase-todo")
-      (buffer-start (buffer-point buffer)))))
+      (buffer-start (buffer-point buffer))
+      (maphash (lambda (vcs session)
+                 (declare (ignore vcs))
+                 (when (uiop:pathname-equal
+                        filename (legit-rebase-session-todo-pathname session))
+                   (setf (buffer-directory buffer)
+                         (legit-rebase-session-directory session))))
+               *legit-rebase-sessions*))))
 
 (defun shutdown-legit-rebase-sessions ()
-  "Release every sequence editor still waiting when Lem exits or reloads."
-  (let ((sessions '()))
-    (maphash (lambda (vcs session)
-               (push (cons vcs session) sessions))
-             *legit-rebase-sessions*)
-    (dolist (entry sessions)
-      (let* ((vcs (car entry))
-             (session (cdr entry))
-             (control (legit-rebase-session-control-pathname session)))
-        (when (and control (legit-rebase-session-waiting-p session))
-          (ignore-errors (write-legit-rebase-action control "abort"))
-          (setf (legit-rebase-session-waiting-p session) nil))
-        (release-finished-legit-rebase-session vcs :wait t)))))
+  "Release sequence editors before the native listener closes."
+  (let ((projects (loop :for vcs :being :the :hash-keys :of *legit-rebase-sessions*
+                        :collect vcs)))
+    (dolist (vcs projects)
+      (alexandria:when-let* ((session (gethash vcs *legit-rebase-sessions*))
+                            (buffer (legit-rebase-waiting-buffer session)))
+        (finish-legit-rebase-todo buffer t))
+      (release-finished-legit-rebase-session vcs :wait t))))
 
 (shutdown-legit-rebase-sessions)
 (remove-hook *find-file-hook* 'position-legit-rebase-todo-at-first-command)

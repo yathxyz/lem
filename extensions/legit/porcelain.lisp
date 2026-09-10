@@ -19,6 +19,7 @@
    :rebase-abort
    :rebase-continue
    :rebase-interactively
+   :rebase-todo-pathname
    :rebase-skip
    :rebase-in-progress-p
    :show-commit-diff
@@ -240,6 +241,11 @@ M       src/ext/porcelain.lisp
     (porcelain-error "lem/porcelain:push-default not implemented for vcs ~a" (vcs-name vcs))))
 
 ;; Interactive rebase
+(defgeneric rebase-todo-pathname (vcs)
+  (:documentation "Return the pathname of VCS's interactive rebase todo.")
+  (:method (vcs)
+    (porcelain-error "Interactive rebase todo is unavailable for ~a" (vcs-name vcs))))
+
 (defgeneric rebase-interactively (vcs &key from)
   (:method (vcs &key from)
     (declare (ignorable from))

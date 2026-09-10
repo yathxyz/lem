@@ -743,7 +743,7 @@ If the legit window is already open, close it (toggle behavior)."
       (run-function (lambda ()
                       (lem/porcelain:rebase-interactively vcs :from commit-hash)))
 
-      (let ((buffer (find-file-buffer ".git/rebase-merge/git-rebase-todo")))
+      (let ((buffer (find-file-buffer (lem/porcelain:rebase-todo-pathname vcs))))
         (when buffer
           (%legit-quit)
           (switch-to-buffer buffer)
