@@ -63,6 +63,28 @@
       (sb-posix:chmod (namestring path) #o600)
       (ok (signals (store:read-record directory id)) "excessive JSON nesting is rejected"))))
 
+(deftest bounded-private-json-for-other-schemas
+  (with-recovery-directory (directory)
+    (let* ((id (store:new-id))
+           (value (loop with value = "leaf" repeat 24 do (setf value (vector value)) finally (return value))))
+      (ok (signals (store:write-private-json directory id value)) "default nesting bound applies before publication")
+      (ok (not (probe-file directory)) "invalid values do not create storage")
+      (store:write-private-json directory id value :maximum-depth 24)
+      (ok (signals (store:read-private-json directory id)) "reader independently enforces its bound")
+      (ok (store:read-private-json directory id :maximum-depth 24))
+      (multiple-value-bind (records failures) (store:list-private-json directory :maximum-depth 24)
+        (ok (equal id (caar records))) (ok (null failures)))
+      (multiple-value-bind (records failures) (store:list-private-json directory)
+        (ok (null records)) (ok (= 1 (length failures))))
+      (let ((cycle (list 1)))
+        (setf (cdr cycle) cycle)
+        (ok (signals (store:write-private-json directory id cycle)) "circular lists are not object graphs to serialize"))
+      (ok (signals (store:write-private-json directory id (store:object "self" (make-pathname :name "not-json")))))
+      (ok (signals (store:write-private-json directory id (expt 10 65))) "large numeric atoms are bounded before parsing")
+      (ok (signals (store:write-private-json directory id sb-ext:double-float-positive-infinity)))
+      (store:write-private-json directory id (store:object "nested" (vector "safe")))
+      (ok (equal "safe" (first (store:field (store:read-private-json directory id) "nested")))))))
+
 (deftest recover-file-and-scratch-with-conflict
   (with-test-frame ()
     (with-recovery-directory (directory)

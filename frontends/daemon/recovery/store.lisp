@@ -3,7 +3,8 @@
   (:use :cl)
   (:export :default-directory :new-id :write-record :read-record :list-records
            :discard-record :file-baseline :text-digest :object :field
-           :+maximum-text-length+))
+           :write-private-json :read-private-json :list-private-json :ensure-private-directory
+           :+maximum-text-length+ :+maximum-record-bytes+))
 (in-package :lem-daemon/recovery-store)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -129,18 +130,52 @@
     (error "Invalid recovery record schema"))
   record)
 
-(defun write-record (directory record)
-  "Durably publish one bounded JSON record. Errors leave the preceding record intact
-until rename; a directory-fsync error after rename is reported as uncertain durability."
-  (validate-record record)
+(defun check-json-value (object maximum-depth)
+  ;; Restrict encoding to JSON data, before dispatching Yason's generic encoder.
+  ;; The lower size bound stops large collections; depth and proper-list checks
+  ;; reject cycles without serializing arbitrary Lisp object graphs.
+  (let ((size 0))
+    (labels ((count-size (n)
+               (when (> (incf size n) +maximum-record-bytes+)
+                 (error "Recovery record is too large")))
+             (walk (value depth)
+               (count-size 1)
+               (cond
+                 ((stringp value) (count-size (length value)))
+                 ((member value '(nil t yason:true yason:false :null)))
+                 ((integerp value)
+                  (when (> (integer-length value) 213) (error "Recovery JSON integer is too large")))
+                 ((floatp value)
+                  (when (or (sb-ext:float-nan-p value) (sb-ext:float-infinity-p value))
+                    (error "JSON numbers must be finite")))
+                 ((or (hash-table-p value) (vectorp value) (consp value))
+                  (when (> (1+ depth) maximum-depth) (error "Recovery JSON nesting is too deep"))
+                  (cond
+                    ((hash-table-p value)
+                     (maphash (lambda (key item)
+                                (unless (stringp key) (error "JSON object keys must be strings"))
+                                (count-size (1+ (length key)))
+                                (walk item (1+ depth))) value))
+                    ((vectorp value) (loop for item across value do (walk item (1+ depth))))
+                    (t
+                     (unless (list-length value) (error "Circular JSON array"))
+                     (dolist (item value) (walk item (1+ depth))))))
+                 (t (error "Unsupported JSON value type")))))
+      (walk object 0))))
+
+(defun write-private-json (directory id object &key (maximum-depth 16))
+  "Durably publish bounded JSON under a validated ID. Callers validate their schema.
+Errors after rename report uncertain durability. No Lisp reader is used."
+  (unless (typep maximum-depth '(integer 1 64)) (error "Invalid JSON depth bound"))
+  (check-json-value object maximum-depth)
   (let* ((directory (ensure-private-directory directory))
-         (path (record-path directory (field record "id")))
-         (octets (babel:string-to-octets
-                  (with-output-to-string (out) (yason:encode record out))
-                  :encoding :utf-8))
+         (path (record-path directory id))
+         (text (with-output-to-string (out) (yason:encode object out)))
+         (octets (babel:string-to-octets text :encoding :utf-8))
          (temporary (merge-pathnames (format nil ".~a.tmp" (new-id)) directory))
          (created nil))
     (when (> (length octets) +maximum-record-bytes+) (error "Recovery record is too large"))
+    (check-json-depth text maximum-depth)
     (when (path-stat path) (check-private-file-stat (path-stat path) path))
     (unwind-protect
          (let ((fd (sb-posix:open (uiop:native-namestring temporary)
@@ -160,7 +195,11 @@ until rename; a directory-fsync error after rename is reported as uncertain dura
            path)
       (when created (uiop:delete-file-if-exists temporary)))))
 
-(defun check-json-depth (text)
+(defun write-record (directory record)
+  (validate-record record)
+  (write-private-json directory (field record "id") record :maximum-depth 4))
+
+(defun check-json-depth (text &optional (maximum-depth 4))
   ;; Bound recursive parsing and integer conversion before handing state to Yason.
   ;; Strings contain arbitrary text; no Lisp reader or symbol interning is used.
   (let ((depth 0) (atom-length 0) (quoted nil) (escaped nil))
@@ -170,13 +209,14 @@ until rename; a directory-fsync error after rename is reported as uncertain dura
             ((char= c #\") (setf quoted (not quoted) atom-length 0))
             ((not quoted)
              (cond ((find c "[{") (setf atom-length 0)
-                    (when (> (incf depth) 4) (error "Recovery JSON nesting is too deep")))
+                    (when (> (incf depth) maximum-depth) (error "Recovery JSON nesting is too deep")))
                    ((find c "]}") (setf atom-length 0) (decf depth))
                    ((or (find c ",:") (find c '(#\Space #\Tab #\Newline #\Return)))
                     (setf atom-length 0))
                    ((> (incf atom-length) 64) (error "Recovery JSON atom is too long"))))))))
 
-(defun read-record (directory id)
+(defun read-private-json (directory id &key (maximum-depth 16))
+  (unless (typep maximum-depth '(integer 1 64)) (error "Invalid JSON depth bound"))
   (let* ((directory (ensure-private-directory directory))
          (path (record-path directory id))
          (fd (sb-posix:open (uiop:native-namestring path)
@@ -191,14 +231,33 @@ until rename; a directory-fsync error after rename is reported as uncertain dura
         (let ((bytes (make-array size :element-type '(unsigned-byte 8))))
           (unless (= size (read-sequence bytes stream)) (error "Truncated recovery record"))
           (let ((text (babel:octets-to-string bytes :encoding :utf-8)))
-            (check-json-depth text)
+            (check-json-depth text maximum-depth)
             (with-input-from-string (input text)
-              (let ((record (validate-record (yason:parse input :object-as :hash-table))))
+              (let ((record (yason:parse input :object-as :hash-table)))
                 (unless (loop for c = (read-char input nil) while c
                               always (find c '(#\Space #\Tab #\Newline #\Return)))
                   (error "Trailing data in recovery record"))
-                (unless (equal id (field record "id")) (error "Recovery identifier mismatch"))
                 record))))))))
+
+(defun read-record (directory id)
+  (let ((record (validate-record (read-private-json directory id :maximum-depth 4))))
+    (unless (equal id (field record "id")) (error "Recovery identifier mismatch"))
+    record))
+
+(defun list-private-json (directory &key (maximum-depth 16))
+  "Return (ID . parsed JSON) entries and (pathname . diagnostic) failures separately.
+This reads only, creates no absent directory, and imposes no application schema."
+  (unless (typep maximum-depth '(integer 1 64)) (error "Invalid JSON depth bound"))
+  (let ((records nil) (failures nil)
+        (directory (uiop:ensure-directory-pathname directory)))
+    (when (probe-file directory)
+      (ensure-private-directory directory)
+      (dolist (path (uiop:directory-files directory "*.json"))
+        (handler-case
+            (push (cons (pathname-name path)
+                        (read-private-json directory (pathname-name path) :maximum-depth maximum-depth)) records)
+          (error (condition) (push (cons path (princ-to-string condition)) failures)))))
+    (values (sort records #'string< :key #'car) (nreverse failures))))
 
 (defun list-records (directory)
   "Return valid records and, separately, (pathname . diagnostic) failures."

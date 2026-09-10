@@ -136,6 +136,31 @@ recovery systems resolve to this checkout. This entry point loads installed Lisp
 dependencies, so a known working SBCL/dependency installation remains necessary.
 It deliberately checks that the editor package was not loaded.
 
+## Reusable private JSON storage
+
+Other optional Lisp systems can depend on `lem-daemon/recovery-store` without
+loading the editor. `new-id` generates a random 32-character hex identifier.
+`write-private-json(directory, id, object :maximum-depth 16)` and
+`read-private-json(directory, id :maximum-depth 16)` reuse the same ownership,
+symlink, atomic replacement and fsync checks. Callers own their application schema.
+`list-private-json(directory :maximum-depth 16)` returns two values: an alist of
+`(id . parsed-object)` entries and an alist of `(pathname . diagnostic)` failures.
+Listing an absent directory returns empty values without creating it.
+
+The encoded record limit is 16 MiB. Nesting bounds are explicit integers from 1 to
+64; numeric atoms are limited to 64 characters. Writes accept JSON data only:
+string-keyed hash tables, vectors/proper lists, strings, finite floats, bounded
+integers, and JSON boolean/null values. Cyclic/deep structures and arbitrary Lisp
+objects are rejected before encoding. Parsing uses Yason's defaults: hash objects,
+list arrays, T/NIL booleans and NIL null. Schemas should distinguish optional values
+explicitly when that representation matters. The recovery-specific wrappers retain
+their stricter buffer schema and depth bound.
+
+The ancestor ownership check anchors trust at the owner of filesystem root `/`
+and the current UID. This equals root UID 0 on normal Linux, and also handles Nix
+build namespaces where the root owner is unmapped. All existing ancestor
+write/sticky permission checks and private leaf ownership checks still apply.
+
 ## Validation
 
 ```sh
