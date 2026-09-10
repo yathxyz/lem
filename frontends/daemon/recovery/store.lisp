@@ -80,7 +80,11 @@
       (let ((parent (uiop:pathname-parent-directory-pathname directory)))
         (unless (probe-file parent) (ensure-private-directory parent))
         (check-directory-ancestors parent))
-      (sb-posix:mkdir name #o700)
+      (handler-case (sb-posix:mkdir name #o700)
+        (sb-posix:syscall-error (condition)
+          ;; A concurrent writer may have created the same namespace. Validate
+          ;; its ownership/type/permissions below exactly as for any existing leaf.
+          (unless (= sb-posix:eexist (sb-posix:syscall-errno condition)) (error condition))))
       (fsync-directory (uiop:pathname-parent-directory-pathname directory)))
     (let ((stat (path-stat name)))
       (unless (and (kind-p stat sb-posix:s-ifdir)
