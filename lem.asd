@@ -307,6 +307,7 @@
                "lem-claude-code"
                "lem-bookmark"
                "lem-mcp-server"
+               "lem-buffer-proposals"
                "lem-transient"
                #+sbcl
                "lem-living-canvas"

@@ -13,11 +13,12 @@
   'lem-yath-llm-rewrite-preview-state)
 (defparameter *llm-rewrite-preview-buffer-prefix* "*LLM Rewrite: ")
 (defparameter *llm-rewrite-diff-buffer-name* "*LLM Rewrite Diff*")
-(defparameter *llm-rewrite-response-limit* (* 4 1024 1024))
+(defparameter *llm-rewrite-response-limit* (* 1024 1024))
 (defvar *llm-rewrite-sequence* 0)
 
 (defstruct llm-rewrite-state
   id
+  proposal
   source-buffer
   start
   end
@@ -52,6 +53,10 @@
 (defmethod lem-vi-mode/core:mode-specific-keymaps
     ((mode lem-yath-llm-rewrite-diff-mode))
   (list *llm-rewrite-diff-mode-keymap*))
+
+(defmethod lem-vi-mode/core:mode-specific-keymaps
+    ((mode lem-buffer-proposals::proposal-review-mode))
+  (list lem-buffer-proposals::*proposal-review-keymap*))
 
 (declaim (ftype function vundo-unified-diff))
 
@@ -90,6 +95,10 @@
   (let ((source (llm-rewrite-state-source-buffer state)))
     (unless (llm-rewrite-state-discarded-p state)
       (setf (llm-rewrite-state-discarded-p state) t)
+      (alexandria:when-let ((proposal (llm-rewrite-state-proposal state)))
+        (unless (member (lem-buffer-proposals:proposal-state proposal)
+                        '(:applied :rejected :forgotten))
+          (lem-buffer-proposals:reject-proposal proposal)))
       (alexandria:when-let ((overlay (llm-rewrite-state-overlay state)))
         (setf (llm-rewrite-state-overlay state) nil)
         (ignore-errors (delete-overlay overlay)))
@@ -112,6 +121,13 @@
                (alive-point-p (llm-rewrite-state-end state)))
       (points-to-string (llm-rewrite-state-start state)
                         (llm-rewrite-state-end state)))))
+
+(defmethod lem-buffer-proposals:proposal-finished :after
+    ((proposal lem-buffer-proposals:proposal))
+  (alexandria:when-let ((source (lem-buffer-proposals:proposal-source-buffer proposal)))
+    (dolist (state (copy-list (buffer-value source *llm-rewrite-states-key*)))
+      (when (eq proposal (llm-rewrite-state-proposal state))
+        (llm-rewrite-remove-state state)))))
 
 (defun llm-rewrite-overlap-p (buffer start end)
   (some
@@ -172,12 +188,19 @@
   (format nil
           (concatenate
            'string
-           "LLM rewrite ready~%"
+           "LLM rewrite ~a~%"
+           "Proposal: ~a   Source revision: ~d   Candidate: ~d~%"
            "Source: ~a~%"
            "Backend: ~(~a~) / ~a~%"
            "Instruction: ~a~2%"
            "A accept   K reject   r iterate   D diff   M merge   q keep pending~2%"
            "--- Proposed replacement ---~%~a")
+          (if (eq :conflict (lem-buffer-proposals:proposal-state
+                            (llm-rewrite-state-proposal state)))
+              "conflict — source edits preserved" "ready")
+          (lem-buffer-proposals:proposal-id (llm-rewrite-state-proposal state))
+          (lem-buffer-proposals:proposal-revision (llm-rewrite-state-proposal state))
+          (lem-buffer-proposals:proposal-generation (llm-rewrite-state-proposal state))
           (buffer-name (llm-rewrite-state-source-buffer state))
           (llm-rewrite-state-backend state)
           (llm-rewrite-state-model state)
@@ -258,8 +281,10 @@
           (t
            (handler-case
                (progn
-                 (setf (llm-rewrite-state-response state)
-                       (llm-rewrite-normalize-response state text))
+                 (let ((replacement (llm-rewrite-normalize-response state text)))
+                   (lem-buffer-proposals:stage-replacement
+                    (llm-rewrite-state-proposal state) replacement)
+                   (setf (llm-rewrite-state-response state) replacement))
                  (llm-rewrite-set-overlay-ready state t)
                  (llm-rewrite-show-preview state)
                  (message
@@ -327,10 +352,12 @@
         (editor-error "The source buffer already owns an LLM request"))
       (when (llm-rewrite-overlap-p source start end)
         (editor-error "The selected region overlaps a pending LLM rewrite"))
-      (let* ((original (points-to-string start end))
+      (let* ((proposal (lem-buffer-proposals:capture-region start end))
+             (original (lem-buffer-proposals:proposal-original proposal))
              (state
                (make-llm-rewrite-state
                 :id (incf *llm-rewrite-sequence*)
+                :proposal proposal
                 :source-buffer source
                 :start (copy-point start :right-inserting)
                 :end (copy-point end :left-inserting)
@@ -363,30 +390,18 @@
     (llm-rewrite-focus-buffer source)))
 
 (defun llm-rewrite-replace-source (state replacement)
-  (let* ((source (llm-rewrite-state-source-buffer state))
-         (start (llm-rewrite-state-start state))
-         (end (llm-rewrite-state-end state)))
-    (unless (and (llm-buffer-live-p source)
-                 (alive-point-p start)
-                 (alive-point-p end))
-      (editor-error "The LLM rewrite source is no longer available"))
-    (when (buffer-read-only-p source)
-      (editor-error "The LLM rewrite source is read only"))
-    (let ((group (buffer-prepare-change-group source))
-          (accepted-p nil)
-          (insertion (copy-point start :temporary)))
-      (unwind-protect
-           (progn
-             (delete-between-points start end)
-             (insert-string insertion replacement)
-             (buffer-accept-change-group group)
-             (buffer-undo-boundary source)
-             (setf accepted-p t)
-             (buffer-mark-cancel source)
-             (move-point (buffer-point source) insertion))
-        (unless accepted-p
-          (when (buffer-change-group-active-p group)
-            (ignore-errors (buffer-cancel-change-group group))))))
+  (let ((source (llm-rewrite-state-source-buffer state))
+        (proposal (llm-rewrite-state-proposal state)))
+    (unless proposal
+      (editor-error "The rewrite has no captured source revision; start a new rewrite"))
+    (unless (equal replacement (lem-buffer-proposals:proposal-replacement proposal))
+      (lem-buffer-proposals:stage-replacement proposal replacement))
+    (handler-case
+        (lem-buffer-proposals:apply-proposal proposal)
+      (lem-buffer-proposals:proposal-conflict (condition)
+        (lem-buffer-proposals:show-proposal proposal)
+        (editor-error "~a. Review the preserved source and create a new proposal." condition)))
+    (buffer-mark-cancel source)
     (llm-rewrite-return-to-source state)
     (llm-rewrite-remove-state state)
     (jump-feedback-pulse-line (buffer-point source))))

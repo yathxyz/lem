@@ -590,6 +590,16 @@
             '';
           };
 
+          bufferProposalTest = pkgs.writeShellApplication {
+            name = "lem-yath-buffer-proposal-test";
+            runtimeInputs = [ pkgs.python3 ];
+            text = ''
+              export LEM_BIN=${lemYath}/bin/lem
+              export LEMCLIENT_BIN=${lemClient}/bin/lemclient
+              exec python3 ${self}/scripts/buffer-proposal-test.py
+            '';
+          };
+
           gitRebaseTest = pkgs.writeShellApplication {
             name = "lem-yath-git-rebase-test";
             runtimeInputs = [ pkgs.python3 pkgs.git ];
@@ -703,6 +713,7 @@
             boot-test = mkTestApp "lem-yath-boot-test" "boot-test.sh";
             startup-test = mkTestAppWithLem lemYath "lem-yath-startup-test" "startup-test.sh";
             daemon-test = mkApp "${daemonTest}/bin/lem-yath-daemon-test" "Test the configured native daemon lifecycle";
+            buffer-proposal-test = mkApp "${bufferProposalTest}/bin/lem-yath-buffer-proposal-test" "Test revision-safe native buffer proposals";
             git-rebase-test = mkApp "${gitRebaseTest}/bin/lem-yath-git-rebase-test" "Test native Git rebase editor callbacks";
             completion-test = mkTestApp "lem-yath-completion-test" "completion-test.sh";
             completion-lifecycle-test = mkTestApp "lem-yath-completion-lifecycle-test" "completion-lifecycle-test.sh";
@@ -849,6 +860,10 @@
             '';
             git-rebase = pkgs.runCommand "lem-yath-git-rebase-check" { } ''
               ${gitRebaseTest}/bin/lem-yath-git-rebase-test
+              touch "$out"
+            '';
+            buffer-proposal = pkgs.runCommand "lem-yath-buffer-proposal-check" { } ''
+              ${bufferProposalTest}/bin/lem-yath-buffer-proposal-test
               touch "$out"
             '';
             completion = mkCheck "completion" "completion-test.sh";
