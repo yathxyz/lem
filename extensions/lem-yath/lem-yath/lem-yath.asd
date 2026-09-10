@@ -11,6 +11,7 @@
   :pathname "src/"
   :components ((:file "package")
                (:file "base")
+               (:file "private-files")
                (:file "daemon")
                (:file "workspace")
                (:file "direnv")

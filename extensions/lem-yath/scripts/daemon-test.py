@@ -104,6 +104,28 @@ def main():
                 check(evaluate('lem-user::*daemon-test-persistent*') == '73',
                       'Lisp state survives separate client connections')
 
+                control = root / 'private-controls' / 'action'
+                target = root / 'unrelated.txt'
+                target.write_text('preserve')
+                control.parent.mkdir()
+                control.symlink_to(target)
+                evaluate('(lem-yath::write-private-control-file '
+                         + lisp_string(control) + ' "continue")')
+                check(control.read_text() == 'continue' and not control.is_symlink()
+                      and target.read_text() == 'preserve'
+                      and control.stat().st_mode & 0o777 == 0o600
+                      and control.parent.stat().st_mode & 0o777 == 0o700,
+                      'private control writes replace links without changing their target')
+                linked_directory = root / 'linked-controls'
+                linked_directory.symlink_to(control.parent, target_is_directory=True)
+                check(run('--eval', '(lem-yath::write-private-control-file '
+                          + lisp_string(linked_directory / 'action') + ' "bad")',
+                          success=False).returncode != 0
+                      and control.read_text() == 'continue',
+                      'private control writes reject a symlinked directory')
+                check(evaluate('(probe-file (lem-yath::ensure-legit-rebase-control-script))')
+                      != 'NIL', 'rebase can prepare its sequence editor without the legacy server')
+
                 evaluate('(let ((lem-shell-mode:*default-shell-command* '
                          '(list (uiop:getenv "SHELL") "-c" '
                          + lisp_string("printf 'SHELL=%s\\n' \"$((19+23))\"; sleep 3")

@@ -43,8 +43,7 @@ esac
 (defun ensure-legit-rebase-control-script ()
   "Write the fixed sequence-editor helper below Lem's private directory."
   (let ((pathname (legit-rebase-control-script-pathname)))
-    (server-ensure-private-directory pathname)
-    (server-write-private-file pathname *legit-rebase-control-script*)
+    (write-private-control-file pathname *legit-rebase-control-script*)
     #+sbcl
     (sb-posix:chmod (uiop:native-namestring pathname) #o700)
     #-sbcl
@@ -62,7 +61,7 @@ esac
                      #-sbcl 0
                      (random (ash 1 60)))
              directory)
-          :unless (server-stat-if-present pathname)
+          :unless (private-path-stat pathname)
             :return pathname
           :finally (error "Could not reserve a rebase control pathname"))))
 
@@ -87,16 +86,15 @@ esac
              (ignore-errors (uiop:wait-process process))
           (ignore-errors (close-legit-rebase-process process))
           #+sbcl
-          (server-delete-owned-path
-           (legit-rebase-session-control-pathname session)
-           sb-posix:s-ifreg)
+          (delete-owned-control-file
+           (legit-rebase-session-control-pathname session))
           (remhash vcs *legit-rebase-sessions*)
           (setf session nil))))
     session))
 
 (defun write-legit-rebase-action (pathname action)
   "Publish literal ACTION for the waiting sequence editor."
-  (server-write-private-file pathname (format nil "~a~%" action)))
+  (write-private-control-file pathname (format nil "~a~%" action)))
 
 (defun legit-rebase-child-environment (&rest overrides)
   "Copy Lem's environment and apply string name/value OVERRIDES for one child."

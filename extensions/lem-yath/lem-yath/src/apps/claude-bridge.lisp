@@ -138,8 +138,7 @@
                  '("eval_expression" "command_execute")
                  lem-mcp-server:*mcp-allow-file-resources* nil)
            (setf server (claude-bridge-start-server))
-           (server-ensure-private-directory pathname)
-           (server-write-private-file
+           (write-private-control-file
             pathname
             (claude-bridge-config-json
              (lem-mcp-server:mcp-server-port server) token))
