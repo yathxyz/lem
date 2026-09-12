@@ -2,7 +2,8 @@
   (:use :cl)
   (:local-nicknames (:store :lem-daemon/recovery-store) (:wire :lem-toolkit/jobs-wire))
   (:export :open-job-manager :close-job-manager :start-job :cancel-job :wait-job
-           :inspect-job-journal :job-manager-ready-p
+           :inspect-job-journal :job-manager-ready-p :job-manager-status
+           :list-job-journal :inspect-job-record :discard-job
            :list-jobs :find-job :job-id :job-owner :job-directory :job-snapshot :job-result :job-output-octets
            :*guardian-program* :*guardian-path* :*default-manager*))
 (in-package :lem-toolkit/jobs)
@@ -11,6 +12,7 @@
 (defvar *guardian-path* nil)
 (defvar *default-manager* nil)
 (defconstant +fd-cloexec+ 1) ; Linux FD_CLOEXEC is not exported by SB-POSIX.
+(defconstant +default-maximum-jobs+ 256)
 (defconstant +maximum-output-limit+ (* 1024 1024))
 (defparameter +terminal-states+ '("exited" "signaled" "cancelled" "timed-out" "failed" "interrupted"))
 
@@ -43,7 +45,10 @@
 (defun ring-text (ring) (babel:octets-to-string (ring-copy ring) :encoding :utf-8 :errorp nil))
 
 (defstruct (job-manager (:conc-name manager-))
-  directory lease
+  directory lease directory-identity
+  (maximum-jobs +default-maximum-jobs+) (count 0) (unloaded 0) (ignored 0)
+  (diagnostics nil) pending-deletion
+  (maintenance-lock (bt2:make-lock :name "Lisp job journal maintenance"))
   (jobs (make-hash-table :test #'equal))
   (lock (bt2:make-lock :name "Lisp job registry"))
   (closed nil))
@@ -53,7 +58,7 @@
   (state "queued") (reason nil) (exit-code nil) (started 0) (finished 0)
   stdout stderr timeout-ms output-limit
   guardian-program guardian-path environment environment-p input on-output
-  (done nil)
+  (done nil) (retired nil)
   (lock (bt2:make-lock :name "Lisp managed job"))
   thread (cancel-requested nil) (journal-error nil))
 
@@ -154,6 +159,9 @@
       record)))
 
 (defun persist-job (job)
+  (bt2:with-lock-held ((%job-lock job))
+    (when (or (%job-retired job) (null (manager-lease (%job-manager job))))
+      (error "Job no longer owns a journal writer")))
   (handler-case
       (progn
         (store:write-private-json (manager-directory (%job-manager job)) (%job-id job) (job-journal job))
@@ -199,32 +207,202 @@
   (uiop:ensure-directory-pathname
    (or directory (merge-pathnames "jobs/" (store:default-directory name)))))
 
-(defun inspect-job-journal (&key directory (name "server"))
-  "Read validated records and return (pathname . diagnostic) failures separately.
-No editor, manager lease, reconciliation, process launch or journal write is involved.
-Running records describe the last durable state, not proof of a live process."
-  (let ((directory (journal-directory directory name)) (records nil))
-    (multiple-value-bind (entries failures) (store:list-private-json directory)
-      (dolist (entry entries)
-        (handler-case (push (validate-journal (cdr entry) (car entry)) records)
-          (error (condition)
-            (push (cons (store::record-path directory (car entry)) (princ-to-string condition)) failures))))
-      (values (sort records #'< :key (lambda (record) (store:field record "started"))) failures))))
+(defun journal-page-ids (directory after limit &optional extra-ids)
+  (unless (and (or (null after) (store::valid-id-p after))
+               (typep limit '(integer 1 64)))
+    (error "Invalid job journal page"))
+  (let ((ids nil) (total 0) (ignored 0) (remaining 0) (missing (make-hash-table :test #'equal)))
+    (dolist (id extra-ids) (setf (gethash id missing) t))
+    (flet ((consider (id)
+             (when (or (null after) (string< after id))
+               (incf remaining)
+               (when (or (< (length ids) limit) (string< id (car (last ids))))
+                 (setf ids (sort (cons id ids) #'string<))
+                 (when (> (length ids) limit) (setf ids (subseq ids 0 limit)))))))
+      (store:map-private-json
+       directory (lambda (id path)
+                   (declare (ignore path))
+                   (cond ((not (store::valid-id-p id)) (incf ignored))
+                         (t (incf total) (remhash id missing) (consider id)))))
+      ;; Only the already bounded registry/pending receipt contributes absent IDs;
+      ;; disk enumeration never accumulates an unbounded name catalog.
+      (maphash (lambda (id value) (declare (ignore value)) (consider id)) missing))
+    (values ids (store:object "total" total "ignored-names" ignored
+                             "reserved-without-journal" (hash-table-count missing)
+                             "next-after" (when (> remaining (length ids)) (car (last ids)))
+                             "truncated" (if (> remaining (length ids)) t yason:false)))))
 
-(defun open-job-manager (&key directory (name "server"))
-  "Blocking setup/recovery API. Use during startup or off the editor thread.
-Acquire exclusive journal ownership; mark prior active records interrupted. Never signal stored PIDs."
+(defun inspect-disk-job (directory id)
+  (handler-case
+      (multiple-value-bind (record fingerprint diagnostic) (store:inspect-private-json directory id)
+        (unless diagnostic
+          (handler-case (validate-journal record id)
+            (error () (setf diagnostic "invalid-job-schema" record nil))))
+        (store:object "id" (copy-seq id) "record" record "fingerprint" fingerprint
+                      "diagnostic" diagnostic))
+    (error (condition)
+      (store:object "id" (copy-seq id) "record" nil "fingerprint" nil
+                    "diagnostic" (princ-to-string (type-of condition))))))
+
+(defun inspect-job-journal (&key directory (name "server") after (limit 64))
+  "Read one bounded page without a lease or writes. Return records, failures, page metadata.
+Running records are historical observations, never proof of current process ownership."
+  (let ((directory (journal-directory directory name)) (records nil) (failures nil))
+    (multiple-value-bind (ids page) (journal-page-ids directory after limit)
+      (dolist (id ids)
+        (let ((entry (inspect-disk-job directory id)))
+          (if (store:field entry "diagnostic")
+              (push (cons (store::record-path directory id) (store:field entry "diagnostic")) failures)
+              (push (store:field entry "record") records))))
+      (values (nreverse records) (nreverse failures) page))))
+
+(defun directory-identity (directory)
+  (let ((stat (sb-posix:stat (uiop:native-namestring directory))))
+    (cons (sb-posix:stat-dev stat) (sb-posix:stat-ino stat))))
+
+(defun check-manager-ownership (manager)
+  ;; Called under the maintenance lock, never under the short registry lock.
+  (when (or (manager-closed manager) (null (manager-lease manager)))
+    (error "Job manager is closed"))
+  (store:ensure-private-directory (manager-directory manager) :create nil)
+  (unless (equal (manager-directory-identity manager) (directory-identity (manager-directory manager)))
+    (error "Job journal namespace was replaced")))
+
+(defun open-job-manager (&key directory (name "server") (maximum-jobs +default-maximum-jobs+))
+  "Blocking setup: examine at most MAXIMUM-JOBS records, preserve overflow without replay.
+Corrupt records leave a usable inspection manager with admission blocked until explicit cleanup."
+  (unless (typep maximum-jobs '(integer 1 4096)) (error "Invalid managed job capacity"))
   (let* ((directory (journal-directory directory name))
-         (manager (make-job-manager :directory directory :lease (acquire-lease directory))))
+         (manager (make-job-manager :directory directory :lease (acquire-lease directory)
+                                    :maximum-jobs maximum-jobs)))
     (handler-case
         (progn
-          (dolist (path (uiop:directory-files directory "*.json"))
-            (let* ((id (pathname-name path))
-                   (record (validate-journal (store:read-private-json directory id) id))
-                   (job (historical-job manager record)))
-              (setf (gethash id (manager-jobs manager)) job)))
+          (setf (manager-directory-identity manager) (directory-identity directory))
+          (let ((examined 0))
+            (store:map-private-json
+             directory
+             (lambda (id path)
+               (declare (ignore path))
+               (cond ((not (store::valid-id-p id)) (incf (manager-ignored manager)))
+                     (t (incf (manager-count manager))
+                        (when (< examined maximum-jobs)
+                          (incf examined)
+                          (handler-case
+                              (let* ((record (validate-journal (store:read-private-json directory id) id))
+                                     (job (historical-job manager record)))
+                                (setf (gethash id (manager-jobs manager)) job))
+                            (error (condition)
+                              (when (< (length (manager-diagnostics manager)) 16)
+                                (push (cons id (princ-to-string (type-of condition)))
+                                      (manager-diagnostics manager)))))))))))
+          (setf (manager-unloaded manager) (- (manager-count manager) (hash-table-count (manager-jobs manager))))
           manager)
       (error (condition) (sb-posix:close (manager-lease manager)) (error condition)))))
+
+(defun admission-ready-p (manager)
+  (and (not (manager-closed manager)) (zerop (manager-unloaded manager))
+       (null (manager-pending-deletion manager)) (< (manager-count manager) (manager-maximum-jobs manager))))
+
+(defun job-manager-status (&optional (manager *default-manager*))
+  "Copied bounded cached capacity metadata; no disk I/O. Counts include reserved unwritten jobs."
+  (unless manager (error "No managed job registry is open"))
+  (bt2:with-lock-held ((manager-lock manager))
+    (store:object "maximum-jobs" (manager-maximum-jobs manager) "retained-slots" (manager-count manager)
+                  "loaded" (hash-table-count (manager-jobs manager)) "unloaded" (manager-unloaded manager)
+                  "ignored-names" (manager-ignored manager) "open" (if (manager-closed manager) yason:false t)
+                  "admission-ready" (if (admission-ready-p manager) t yason:false)
+                  "pending-deletion" (when (manager-pending-deletion manager)
+                                       (store:object "id" (copy-seq (car (manager-pending-deletion manager)))
+                                                     "fingerprint" (copy-seq (cdr (manager-pending-deletion manager)))))
+                  "diagnostics" (coerce (mapcar (lambda (entry)
+                                                  (store:object "id" (copy-seq (car entry))
+                                                                "diagnostic" (copy-seq (cdr entry))))
+                                                (manager-diagnostics manager)) 'vector))))
+
+(defun inspect-manager-job (manager id)
+  (unless (store::valid-id-p id) (error "Invalid managed job identifier"))
+  (let ((job (find-job id manager)))
+    (if (and job (null (store::path-stat (store::record-path (manager-directory manager) id))))
+        (store:object "id" (copy-seq id) "record" nil "fingerprint" "missing" "diagnostic" "missing")
+        (inspect-disk-job (manager-directory manager) id))))
+
+(defun inspect-job-record (manager id)
+  "Blocking exact-ID disk inspection under live manager ownership; returns detached data."
+  (bt2:with-lock-held ((manager-maintenance-lock manager))
+    (check-manager-ownership manager)
+    (inspect-manager-job manager id)))
+
+(defun list-job-journal (manager &key after (limit 64))
+  "Blocking paginated disk inventory. Output tails/argv are available via exact inspection."
+  (bt2:with-lock-held ((manager-maintenance-lock manager))
+    (check-manager-ownership manager)
+    (multiple-value-bind (ids page)
+        (journal-page-ids (manager-directory manager) after limit
+                          (append (mapcar #'job-id (list-jobs manager))
+                                  (when (manager-pending-deletion manager)
+                                    (list (car (manager-pending-deletion manager))))))
+      (setf (gethash "entries" page)
+            (coerce (mapcar (lambda (id)
+                              (let* ((entry (inspect-manager-job manager id))
+                                     (record (store:field entry "record")))
+                                (remhash "record" entry)
+                                (setf (gethash "loaded" entry) (if (find-job id manager) t yason:false))
+                                (dolist (key '("state" "owner" "started" "finished" "exit-code"))
+                                  (setf (gethash key entry) (when record (store:field record key))))
+                                entry)) ids) 'vector))
+      page)))
+
+(defun job-settled-p (job)
+  (and (bt2:with-lock-held ((%job-lock job)) (and (%job-done job) (terminal-p job)))
+       (or (null (%job-thread job)) (not (bt2:thread-alive-p (%job-thread job))))))
+
+(defun uncertain-journal-p (entry job)
+  (let ((record (store:field entry "record")))
+    (or (store:field entry "diagnostic")
+        (not (member (store:field record "state") '("exited" "signaled" "cancelled" "timed-out") :test #'equal))
+        (store:field record "journal-error")
+        (and job (bt2:with-lock-held ((%job-lock job)) (%job-journal-error job))))))
+
+(defun discard-job (manager id &key expected-fingerprint acknowledge-uncertain)
+  "Blocking explicit cleanup. Refuse active writers, stale review or unacknowledged uncertainty.
+A failed unlink/fsync retains one pending receipt; retry that exact receipt before other cleanup."
+  (unless (and (store::valid-id-p id) (stringp expected-fingerprint)
+               (or (equal expected-fingerprint "missing")
+                   (and (= 64 (length expected-fingerprint))
+                        (every (lambda (c) (find c "0123456789abcdef")) expected-fingerprint))))
+    (error "Cleanup requires an exact reviewed job fingerprint"))
+  (bt2:with-lock-held ((manager-maintenance-lock manager))
+    (check-manager-ownership manager)
+    (let* ((job (find-job id manager)) (pending (manager-pending-deletion manager))
+           (path (store::record-path (manager-directory manager) id)))
+      (when (and pending (not (and (equal id (car pending)) (equal expected-fingerprint (cdr pending)))))
+        (error "Resolve the pending job deletion before other cleanup"))
+      (when (and job (not (job-settled-p job))) (error "Job controller or process cleanup is still active"))
+      (unless (or job pending (store::path-stat path)) (return-from discard-job nil))
+      (let ((entry (unless (and pending (null (store::path-stat path))) (inspect-manager-job manager id))))
+        (when entry
+          (unless (equal expected-fingerprint (store:field entry "fingerprint"))
+            (error "Job journal changed or cannot be safely fingerprinted"))
+          (when (and (uncertain-journal-p entry job) (not acknowledge-uncertain))
+            (error "Explicit acknowledgment of uncertain job history is required")))
+        (when (and pending (not acknowledge-uncertain))
+          (error "Explicit acknowledgment of uncertain deletion durability is required"))
+        ;; Keep the slot until the directory sync confirms absence. No controller
+        ;; is alive to recreate a loaded job; unloaded records have no writer.
+        (bt2:with-lock-held ((manager-lock manager))
+          (setf (manager-pending-deletion manager) (cons (copy-seq id) (copy-seq expected-fingerprint))))
+        ;; An absent-file retry still needs a directory sync; successful unlink
+        ;; already performs it inside the shared store.
+        (unless (store:discard-record (manager-directory manager) id)
+          (store::fsync-directory (manager-directory manager)))
+        (when job (bt2:with-lock-held ((%job-lock job)) (setf (%job-retired job) t)))
+        (bt2:with-lock-held ((manager-lock manager))
+          (remhash id (manager-jobs manager))
+          (decf (manager-count manager))
+          (unless job (decf (manager-unloaded manager)))
+          (setf (manager-diagnostics manager) (remove id (manager-diagnostics manager) :key #'car :test #'equal)
+                (manager-pending-deletion manager) nil))
+        t))))
 
 (defun list-jobs (&optional (manager *default-manager*))
   (unless manager (error "No managed job registry is open"))
@@ -266,10 +444,16 @@ No implicit shell. OWNER labels the caller; authorization belongs to the calling
                                           (asdf:system-relative-pathname "lem-toolkit/jobs" "guardian.lisp")))))
     (when (> (length input) (* 1024 1024)) (error "Managed job stdin exceeds 1 MiB"))
     (bt2:with-lock-held ((manager-lock manager))
-      (when (manager-closed manager) (error "Job manager is closed"))
+      (unless (admission-ready-p manager)
+        (error "Managed job capacity unavailable; inspect status and explicitly clean retained history"))
+      (incf (manager-count manager))
       (setf (gethash (%job-id job) (manager-jobs manager)) job)
-      (setf (%job-thread job) (bt2:make-thread (lambda () (control-job job))
-                                             :name (format nil "Lisp job ~a" (%job-id job)))))
+      (handler-case
+          (setf (%job-thread job) (bt2:make-thread (lambda () (control-job job))
+                                                 :name (format nil "Lisp job ~a" (%job-id job))))
+        (error (condition)
+          (remhash (%job-id job) (manager-jobs manager)) (decf (manager-count manager))
+          (error condition))))
     job))
 
 (defun cancel-job (job)
@@ -379,11 +563,12 @@ No implicit shell. OWNER labels the caller; authorization belongs to the calling
       (bt2:with-lock-held ((%job-lock job)) (setf (%job-done job) t)))))
 
 (defun close-job-manager (&optional (manager *default-manager*))
-  "Blocking orderly teardown for a supervisor: cancel jobs, join controllers, release journal lease."
+  "Blocking teardown: cancel/join all controllers before releasing the maintenance lease."
   (when manager
-    (bt2:with-lock-held ((manager-lock manager)) (setf (manager-closed manager) t))
-    (dolist (job (list-jobs manager)) (cancel-job job))
-    (dolist (job (list-jobs manager))
-      (when (%job-thread job) (bt2:join-thread (%job-thread job))))
-    (when (manager-lease manager) (sb-posix:close (manager-lease manager)) (setf (manager-lease manager) nil)))
+    (bt2:with-lock-held ((manager-maintenance-lock manager))
+      (bt2:with-lock-held ((manager-lock manager)) (setf (manager-closed manager) t))
+      (dolist (job (list-jobs manager)) (cancel-job job))
+      (dolist (job (list-jobs manager))
+        (when (%job-thread job) (bt2:join-thread (%job-thread job))))
+      (when (manager-lease manager) (sb-posix:close (manager-lease manager)) (setf (manager-lease manager) nil))))
   t)

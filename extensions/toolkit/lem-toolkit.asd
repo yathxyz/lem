@@ -16,3 +16,8 @@
   :depends-on ("lem-toolkit/jobs" "rove")
   :components ((:file "tests/jobs"))
   :perform (test-op (op c) (declare (ignore op)) (symbol-call :rove :run c)))
+
+(defsystem "lem-toolkit/jobs-ui-tests"
+  :depends-on ("lem-toolkit/jobs-ui" "lem-fake-interface" "rove")
+  :components ((:file "tests/ui"))
+  :perform (test-op (op c) (declare (ignore op)) (symbol-call :rove :run c)))

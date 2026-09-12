@@ -152,15 +152,24 @@ transitions, not on every incoming chunk; a daemon crash can lose newer output.
 
 On startup, validated `queued`/`running` records become `interrupted`. No command is
 replayed, no old process is reattached, and no stored PID is signalled. The journal
-schema has no PID/PGID field. Completed records remain inspectable. Malformed records
-fail manager initialization without starting commands; use the standalone recovery
-JSON reader to inspect/fix/archive them deliberately.
+schema has no PID/PGID field. Completed records remain inspectable. Startup examines
+at most the configured capacity of payloads, including invalid payloads in that
+budget. Valid examined records enter the runtime registry; corrupt and overflow
+records stay on disk without activation. Manager startup still succeeds so those
+records can be inspected and deliberately cleaned up. No new job is admitted while
+unloaded history remains. Directory order is unspecified; cleanup and reopen are
+explicit ways to load a smaller retained history. Records outside the examination
+budget are untouched, including saved `queued`/`running` states.
 
 `(lem-toolkit/jobs:inspect-job-journal :name "server")` reads the journal without
 loading Lem, acquiring the manager lease, launching commands, reconciling states,
-or writing files. It returns validated journal objects and, separately,
-`(pathname . diagnostic)` failures; `:directory` can name a private journal
-directly. These raw records contain `stdout-hex`/`stderr-hex`. A saved `running`
+or writing files. It returns at most 64 validated journal objects and, separately,
+`(pathname . diagnostic)` failures, plus a third JSON page object with `total`,
+`ignored-names`, `reserved-without-journal`, `next-after`, and `truncated`. `:after ID` and `:limit 1..64` select
+successive lexicographic pages; invalid records still occupy page positions.
+`:directory` can name a private journal directly. The standalone command accepts
+`lem-recover --jobs DIRECTORY [--after ID] [--limit 1..64]` and includes this page
+metadata in its JSON output; callers must follow `next-after` when present. These raw records contain `stdout-hex`/`stderr-hex`. A saved `running`
 state means only that it was the last recorded state, not that a process is alive.
 This operation remains useful while the daemon is down or its main configuration
 cannot load.
@@ -171,11 +180,98 @@ provide access through commands and the default manager. Closing an inspection
 buffer removes its view on the next refresh and leaves the job alive. No buffer
 kill hook cancels a job.
 
-No automatic journal eviction is implemented. Managers currently keep their job
-records and retained tails in memory; large histories need an explicit retention
-policy in a later integration. These files are private, not encrypted. External
-actions remain uncertain across a crash; this toolkit never treats restart as
-permission to retry them.
+## Bounded retention and deliberate cleanup
+
+`open-job-manager :maximum-jobs N` defaults to **256** slots (accepted range 1..4096).
+A slot holds a loaded job or a retained canonical journal, including malformed
+history. Newly submitted jobs reserve a slot before their controller starts;
+failed initial writes retain their failed job slot for explicit acknowledgment.
+Completion and viewing do not automatically release it. `start-job` refuses before
+launch when capacity is full, unloaded history remains, or a deletion has uncertain
+durability. An open inspection manager is therefore distinct from one admitting
+new work; `job-manager-ready-p` continues to describe lifecycle readiness.
+
+`job-manager-status` returns copied cached JSON without I/O: `maximum-jobs`,
+`retained-slots`, `loaded`, `unloaded`, `ignored-names`, `open`, `admission-ready`,
+up to 16 startup `diagnostics`, and an optional `pending-deletion` ID/fingerprint.
+Slots include reserved jobs whose initial journal has not yet been written. The
+actual disk count is available from a page scan. Only canonical lowercase
+32-hex-digit `.json` names count toward admission; the runtime never creates other
+record names. Noncanonical JSON names are counted as ignored manual files; they
+are neither parsed nor removed. The namespace lease is the cooperation boundary:
+other software must not publish or remove managed records while a manager owns it.
+
+Registry and canonical journal counts cannot grow beyond configured capacity under
+normal admission. Existing larger histories remain on disk and block admission;
+they are never silently evicted. Each raw journal has the shared store's 16 MiB
+ceiling (at default 256, at most 4 GiB of canonical journal payloads for new history).
+Each loaded job allocates two output rings, default 64 KiB each (32 MiB at 256 jobs),
+up to 1 MiB each when explicitly requested (512 MiB at 256). Existing launch/argument
+and private input/environment bounds still apply separately. The count cap is not
+an aggregate heap-byte quota; caller-held Lisp handles and editor buffers can keep
+copies after registry cleanup. Abandoned atomic-write temporary files and manual
+files are outside the canonical journal inventory and require deliberate filesystem
+inspection; cleanup never guesses their ownership.
+
+The following are **blocking worker/REPL APIs**, serialized with manager shutdown
+by a maintenance mutex separate from the short registry mutex:
+
+```lisp
+(lem-toolkit/jobs:job-manager-status manager)
+(lem-toolkit/jobs:list-job-journal manager :limit 32 :after nil)
+;; A page has bounded metadata entries; fetch a selected record's raw hex/argv:
+(defparameter *review* (lem-toolkit/jobs:inspect-job-record manager selected-id))
+(lem-toolkit/jobs:discard-job
+ manager selected-id
+ :expected-fingerprint (gethash "fingerprint" *review*)
+ :acknowledge-uncertain t) ; explicit human acknowledgment when required
+```
+
+`list-job-journal` scans names without accumulating an ID catalog and reads only
+its selected page, also including bounded registry IDs with no journal and the pending
+deletion ID. `total` counts actual disk journals; `reserved-without-journal` counts
+those extra reserved IDs, so failed initial writes remain visibly inspectable.
+It returns `entries` and the same page metadata as the standalone
+inspector. `inspect-job-record` returns copied `id`, `record`, `fingerprint`, and
+`diagnostic` values. The fingerprint hashes the exact private regular-file bytes;
+malformed UTF-8/JSON or an invalid job schema still receives a content-free
+diagnostic and a fingerprint when the file can safely be read. Unsafe symlinks,
+FIFOs, oversized files, or a replaced namespace cannot receive a cleanup fingerprint.
+A loaded failed job with no journal uses the explicit `"missing"` fingerprint and
+requires uncertainty acknowledgment; its live state remains available through
+`job-snapshot`. Unknown saved states/counts are not reported as successful exits or
+zero output.
+
+`discard-job` requires the exact displayed fingerprint and returns true when it
+removes the selected slot, NIL when the selected ID is already absent, or an error
+on stale/unsafe/active history. A loaded job must be terminal, have completed its
+final journal/process cleanup, and have a dead controller thread. In particular,
+an uncooperative output callback keeps its slot and prevents lease release during
+shutdown. `failed`, `interrupted`, saved active records, malformed history, or any
+journal failure additionally requires `:acknowledge-uncertain t`. Discard forgets
+history; it does not undo external effects, retry a command, or authorize replay.
+
+Unlink and directory fsync precede registry removal. If cleanup fails, one bounded
+pending ID/fingerprint remains visible, retaining the slot and blocking admissions
+and other deletions. Retry that exact receipt with uncertainty acknowledgment;
+when an earlier unlink succeeded, the retry fsyncs the confirmed absence before
+releasing capacity. A closed manager cannot inspect or mutate its old namespace,
+and a retired job handle cannot recreate its journal. The receipt is runtime state;
+after host death the next manager reconciles the directory contents actually
+present, without replaying uncertain deletion or job work.
+
+`jobs-list` shows a 32-row disk inventory with capacity and unloaded-history counts.
+`g` refreshes, `n` advances, `b` returns to the first page, and RET inspects the ID
+on the selected row; `i` prompts for an exact historical ID. In that historical inspection buffer, `g` rereads the record
+and `d` asks to permanently discard the exact displayed ID/fingerprint. Uncertain
+history requires a second acknowledgment. Failed/stale cleanup reports its error
+in that buffer and requires refreshing the review. Inventory, inspection, and
+deletion use at most 8 pending worker/event receipts, one per buffer; completion
+checks the buffer identity, never selects a view, and cannot recreate a killed
+buffer. Individual deletion is deliberate; there is no bulk or automatic eviction.
+
+These files are private, not encrypted. External actions remain uncertain across
+a crash; this toolkit never treats restart as permission to retry them.
 
 ## Runtime packaging and tests
 
@@ -196,6 +292,8 @@ Validation commands, with this checkout's installed Qlot/native-library environm
 LEM_TOOLKIT_SBCL=/path/to/sbcl bash scripts/run-tests.sh lem-toolkit/jobs-tests
 python3 scripts/test-daemon-jobs.py --sbcl /path/to/sbcl
 bash scripts/run-tests.sh lem-daemon/recovery-tests
+LEM_TOOLKIT_SBCL=/path/to/sbcl bash scripts/run-tests.sh lem-toolkit/jobs-ui-tests
+python3 scripts/test-job-journal-cli.py --sbcl /path/to/sbcl
 ```
 
 The Lisp tests execute real argv, failures, hangs, cancellation, bounded binary
