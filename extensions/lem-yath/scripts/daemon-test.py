@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import socket
+import struct
 import subprocess
 import tempfile
 import time
@@ -22,6 +24,122 @@ def check(condition, message):
     if not condition:
         raise AssertionError(message)
     print(f"PASS: {message}", flush=True)
+
+
+class AttachedClient:
+    """A bounded protocol peer for checks that need persistent client frames."""
+
+    def __init__(self, endpoint):
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sequence = 0
+        self.rows = []
+        try:
+            self.socket.settimeout(10)
+            self.socket.connect(str(endpoint))
+            self.send({'version': 2, 'type': 'hello'})
+            assert self.receive(time.monotonic() + 10)['type'] == 'hello'
+            self.request('attach', width=80, height=24)
+        except BaseException:
+            self.socket.close()
+            raise
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.socket.close()
+
+    def send(self, message):
+        payload = json.dumps(message).encode()
+        assert len(payload) <= 1024 * 1024
+        self.socket.sendall(struct.pack('!I', len(payload)) + payload)
+
+    def receive(self, deadline):
+        def exact(length):
+            result = bytearray()
+            while len(result) < length:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AssertionError('Attached client response timed out')
+                self.socket.settimeout(remaining)
+                chunk = self.socket.recv(length - len(result))
+                assert chunk, 'Attached client disconnected'
+                result.extend(chunk)
+            return result
+
+        length, = struct.unpack('!I', exact(4))
+        assert length <= 1024 * 1024, 'Oversized daemon message'
+        message = json.loads(exact(length))
+        if message['type'] == 'screen':
+            if message['full']:
+                self.rows = [row['text'] for row in message['rows']]
+            else:
+                for row in message['changes']:
+                    self.rows[row['row']] = row['text']
+        return message
+
+    def request(self, kind, **fields):
+        self.sequence += 1
+        identifier = str(self.sequence)
+        self.send(dict(version=2, type=kind, id=identifier, **fields))
+        deadline = time.monotonic() + 10
+        while True:
+            message = self.receive(deadline)
+            if message['type'] == 'response' and message['id'] == identifier:
+                assert message['status'] == 'ok', message
+                return message.get('value')
+
+    def evaluate(self, form):
+        return self.request('eval', form=form)['primary']
+
+    def await_text(self, text):
+        deadline = time.monotonic() + 10
+        while not any(text in row for row in self.rows):
+            self.receive(deadline)
+
+
+def exercise_client_redisplay(endpoint):
+    with AttachedClient(endpoint) as first, AttachedClient(endpoint) as second:
+        first.evaluate(
+            '(progn (defparameter lem-user::*redraw-key-context* nil) '
+            '(lem:define-command lem-user::redraw-fixture-key () () '
+            '(setf lem-user::*redraw-key-context* '
+            '(list (eq (lem:current-buffer) (lem:window-buffer (lem:current-window))) '
+            '(lem:buffer-name))) (lem:insert-string (lem:current-point) "|key|")) '
+            '(lem:define-key lem:*global-keymap* "F12" \'lem-user::redraw-fixture-key))')
+        for operation in ('resize', 'redisplay'):
+            for peer, name in ((second, 'redraw-second'), (first, 'redraw-first')):
+                peer.evaluate(
+                    '(let ((buffer (lem:make-buffer ' + lisp_string(name) + '))) '
+                    '(lem:switch-to-buffer buffer) (lem:erase-buffer buffer) '
+                    '(lem:insert-string (lem:current-point) ' + lisp_string(name) + ') '
+                    '(setf lem-user::*redraw-key-context* nil))')
+            # The acknowledgement proves the peer's event is queued before the
+            # next key. Do not evaluate between them: eval activates its client
+            # and could conceal a leaked current-buffer from passive redisplay.
+            second.request(operation, **({'width': 79, 'height': 23} if operation == 'resize' else {}))
+            first.request('input', sym='F12')
+            deadline = time.monotonic() + 10
+            while first.evaluate('lem-user::*redraw-key-context*') == 'NIL':
+                assert time.monotonic() < deadline, 'Next client key did not execute'
+                time.sleep(0.02)
+            check(first.evaluate('lem-user::*redraw-key-context*') == '(T "redraw-first")'
+                  and first.evaluate('(lem:buffer-text (lem:get-buffer "redraw-first"))')
+                  == '"redraw-first|key|"'
+                  and second.evaluate('(lem:buffer-text (lem:get-buffer "redraw-second"))')
+                  == '"redraw-second"',
+                  f'peer {operation} preserves current buffer and the next client key target')
+
+        for peer in (first, second):
+            peer.evaluate('(lem:switch-to-buffer (lem:make-buffer "redraw-shared"))')
+        first.evaluate(
+            '(lem:send-event (lambda () '
+            '(lem:insert-string (lem:buffer-end-point (lem:get-buffer "redraw-shared")) '
+            '"ASYNC-IDLE-CLIENTS") (lem:redraw-display :force t)))')
+        # Receiving screens sends no input or refresh request to either client.
+        first.await_text('ASYNC-IDLE-CLIENTS')
+        second.await_text('ASYNC-IDLE-CLIENTS')
+        check(True, 'an asynchronous buffer redraw reaches both idle attached clients')
 
 
 def main():
@@ -94,6 +212,8 @@ def main():
                 check(evaluate('(string= (uiop:getenv "GIT_EDITOR") '
                                + lisp_string(child_command) + ')') == 'T',
                       'child Git edits use the packaged native client and selected daemon')
+
+                exercise_client_redisplay(root / 'runtime' / 'lem' / f'{name}.sock')
 
                 document = root / 'file with spaces.txt'
                 document.write_text('first\nsecond\nthird\n')
