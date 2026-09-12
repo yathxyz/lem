@@ -85,6 +85,19 @@
       (store:write-private-json directory id (store:object "nested" (vector "safe")))
       (ok (equal "safe" (first (store:field (store:read-private-json directory id) "nested")))))))
 
+(deftest inspecting-missing-records-does-not-create-storage
+  (with-recovery-directory (directory)
+    (ok (signals (store:read-private-json directory (store:new-id))))
+    (ok (not (probe-file directory)) "direct inspection never creates an absent namespace")
+    (multiple-value-bind (records failures) (store:list-private-json directory)
+      (ok (null records)) (ok (null failures)))
+    (ok (not (probe-file directory)) "listing an absent namespace is read-only")
+    (store:ensure-private-directory directory)
+    (let ((missing (merge-pathnames "missing/nested/" directory)))
+      (ok (signals (store:read-record missing (store:new-id))))
+      (ok (not (probe-file (merge-pathnames "missing/" directory)))
+          "failed text export does not create parent directories"))))
+
 (deftest recover-file-and-scratch-with-conflict
   (with-test-frame ()
     (with-recovery-directory (directory)

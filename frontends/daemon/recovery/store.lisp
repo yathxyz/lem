@@ -71,12 +71,13 @@
                     name (sb-posix:stat-uid stat) (logand (sb-posix:stat-mode stat) #o7777)))
         until (equal name "/")))
 
-(defun ensure-private-directory (directory)
+(defun ensure-private-directory (directory &key (create t))
   (let* ((directory (uiop:ensure-directory-pathname directory))
          ;; LSTAT of a trailing slash follows the final symlink on Linux.
          (name (string-right-trim "/" (uiop:native-namestring directory))))
     (unless (uiop:absolute-pathname-p directory) (error "Recovery directory must be absolute"))
     (unless (path-stat name)
+      (unless create (error "Recovery directory does not exist: ~a" name))
       (let ((parent (uiop:pathname-parent-directory-pathname directory)))
         (unless (probe-file parent) (ensure-private-directory parent))
         (check-directory-ancestors parent))
@@ -221,7 +222,7 @@ Errors after rename report uncertain durability. No Lisp reader is used."
 
 (defun read-private-json (directory id &key (maximum-depth 16))
   (unless (typep maximum-depth '(integer 1 64)) (error "Invalid JSON depth bound"))
-  (let* ((directory (ensure-private-directory directory))
+  (let* ((directory (ensure-private-directory directory :create nil))
          (path (record-path directory id))
          (fd (sb-posix:open (uiop:native-namestring path)
                             (logior sb-posix:o-rdonly sb-posix:o-nofollow sb-posix:o-nonblock))))
@@ -255,7 +256,7 @@ This reads only, creates no absent directory, and imposes no application schema.
   (let ((records nil) (failures nil)
         (directory (uiop:ensure-directory-pathname directory)))
     (when (probe-file directory)
-      (ensure-private-directory directory)
+      (ensure-private-directory directory :create nil)
       (dolist (path (uiop:directory-files directory "*.json"))
         (handler-case
             (push (cons (pathname-name path)
@@ -268,7 +269,7 @@ This reads only, creates no absent directory, and imposes no application schema.
   (let ((records nil) (failures nil)
         (directory (uiop:ensure-directory-pathname directory)))
     (when (probe-file directory)
-      (ensure-private-directory directory)
+      (ensure-private-directory directory :create nil)
       (dolist (path (uiop:directory-files directory "*.json"))
         (handler-case (push (read-record directory (pathname-name path)) records)
           (error (condition) (push (cons path (princ-to-string condition)) failures)))))
