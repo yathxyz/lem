@@ -1,14 +1,14 @@
 # Common Lisp managed jobs
 
 `lem-toolkit/jobs` supplies external jobs for Lisp callers, editor commands, and
-future native agent tools. `lem-toolkit/jobs-ui` adds inspection buffers. Neither
-system changes existing shell, compilation, or model integrations automatically.
+native agent tools. `lem-toolkit/jobs-ui` adds inspection buffers. The configured
+daemon owns a named manager used by compilation and interactive Git rebase;
+other callers explicitly choose this API.
 
 The existing `lem-process` runner does not provide a bounded durable result or an
-anchored process-group lifecycle. The configured compilation implementation has a
-careful guardian protocol, but that guardian is Python. This module uses the same
-useful ownership principle with a small Common Lisp supervisor. It
-does not wrap the old Python guardian or start an implicit shell.
+anchored process-group lifecycle. This module supplies both through a small
+Common Lisp supervisor. It replaces the former Python compilation guardian and
+does not start an implicit shell.
 
 ## API
 

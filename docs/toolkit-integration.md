@@ -1,8 +1,10 @@
 # Configured Lisp toolkit integration
 
-Status: integration under validation. The prepared checkout is separate from the
-installed editor and its running services. Source compilation and the integrated
-recovery/proposal suites pass; process and configured Nix gates are still pending.
+Status: the prepared integration passes source process/recovery/proposal tests,
+configured compilation, daemon, proposal, startup, rewrite and native Git gates,
+and a private service crash/restart check. The broader VCS gate exposed a rebase
+view transition regression; its correction is under validation. The installed
+editor and its running services have not been changed.
 
 The configured editor opens a named `lem-toolkit/jobs` manager during startup,
 using the same server name as its listener and text recovery directory. Commands
@@ -55,6 +57,26 @@ output, view closure, cancellation, and daemon crash/restart. Supervisor failure
 stopped groups and process ownership belong to the shared toolkit's real-process
 suite. These gates do not establish complete Emacs `compile.el` parity.
 
+## Interactive Git rebase
+
+Initial rebase, continue, skip and abort submit jobs to the same manager. The
+editor does not wait for Git to create its todo or finish. Git's native Lisp file
+client opens each request when its file exists. The initiating status command
+closes its floating panes synchronously so they cannot obscure the todo or commit
+message. Worktree metadata and request completion are scoped to the exact todo
+path, including simultaneous rebases in different repositories.
+
+Closing a Legit or job view preserves the job. Killing an editable managed todo
+aborts that editor request and produces an unsuccessful Git result; killing an
+ordinary visited file still completes its ordinary client normally. Native client
+loss does not discard the daemon's managed job. `lem-yath-legit-rebase-job` opens
+the worktree's retained result, including bounded failure diagnostics.
+
+Existing status and amend helpers remain upstream synchronous operations. This
+migration covers ownership of the interactive rebase process, rather than every
+Git operation. Legit's global display variables also need independent-frame
+acceptance before sustained daily use.
+
 ## Buffer proposals
 
 `lem-buffer-proposals` captures live unsaved regions, retains original and
@@ -84,3 +106,17 @@ Configured checks run in private temporary directories through native daemon
 clients. Python is an external acceptance driver, not part of the runtime job
 manager, agent loop, supervisor or client protocol. No provider credentials,
 existing notes, installed profiles or active user services are needed.
+
+As of 12 September 2026, configured gates pass 17 compilation, 22 daemon,
+12 proposal and 27 native Git assertions. Startup and the existing LLM workflow
+gate also pass. The rebuilt profile passes private systemd readiness, live-job,
+daemon SIGKILL/restart, interrupted job recovery and deliberate-stop checks.
+The broader VCS gate is being rerun after the status-pane fix in `6fd3268bb`.
+Archived logs include the earlier failures and subsequent correction evidence:
+[toolkit validation](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/toolkit).
+
+The native agent core in `559ca9cac` passes 18 source groups and remains optional.
+Its provider/tool adapters and disposable buffer views require configured
+integration and live-provider acceptance. Job records and retained output tails
+currently accumulate in the manager; an explicit retention policy is still needed
+before long-running daily operation.
