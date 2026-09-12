@@ -305,7 +305,9 @@ TEST-ENDPOINT permits only an explicitly selected numeric loopback HTTP fixture.
                             "--connect-timeout" (format nil "~,3f" (min 15 timeout))
                             "--max-time" (format nil "~,3f" timeout) "--config" "-")
                       :manager job-manager :owner (format nil "agent:~a:openrouter" (agent:operation-session-id context))
-                      :directory (agent:operation-root context) :timeout timeout :output-limit 1
+                      ;; HTTP transport must remain available when the project
+                      ;; disappears. Tool operations retain their original root.
+                      :directory "/" :timeout timeout :output-limit 1
                       :environment '("LC_ALL=C.UTF-8") :input config
                       :on-output
                       (lambda (job channel bytes)

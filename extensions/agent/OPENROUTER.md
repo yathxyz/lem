@@ -24,6 +24,11 @@ configuration must be available to the supplied job manager. No second process
 manager is created. Register this provider before creating or resuming sessions;
 the model comes from each session's explicitly selected `:model`.
 
+The HTTP process starts in `/`, so a missing or renamed project directory does
+not prevent provider requests needed to discuss and recover that problem. The
+session and operation roots remain unchanged; file and process tools still apply
+their own project-directory checks.
+
 The credential function runs on the provider worker once per round. Its default
 reads only `OPENROUTER_API_KEY`; it never reads `OPENAI_API_KEY` as a fallback. A
 missing key or a key containing whitespace/control characters fails before any
@@ -104,6 +109,8 @@ It covers bytewise UTF-8, multiline SSE, multiple fragmented calls, the native
 tool/result/provider round, malformed and bounded input, non-2xx and mid-stream
 errors, timeout, cancellation, nonzero curl exit after a valid protocol finish,
 credential transport and endpoint restrictions.
+It also verifies provider/tool rounds remain available with missing or renamed
+project directories while tool contexts preserve the original session root.
 
 This optional system is ready for the prepared profile to load and register.
 Daemon lifecycle wiring, credential selection UI, concrete tools, transcript views

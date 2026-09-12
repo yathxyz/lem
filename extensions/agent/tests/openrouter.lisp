@@ -323,3 +323,51 @@
           (ok (equal "failed" (field result "state")))
           (ok (not (search "fake-secret-in-consumer-error" journal))
               "consumer failure closes the guardian boundary without journaling arbitrary error arguments"))))))
+
+(deftest unavailable-project-does-not-disable-http-transport
+  (dolist (mode '(:missing :renamed))
+    (let ((tool-roots nil))
+      (with-transport (manager job-manager directory fixture
+                              (lambda (stream request index)
+                                (declare (ignore request))
+                                (send-wire
+                                 stream
+                                 (concatenate
+                                  'string (response-head)
+                                  (if (zerop index)
+                                      (concatenate
+                                       'string
+                                       (event (chunk "" :tools
+                                                     (vector (tool-fragment 0 :id "root-call" :name "inspect_root"
+                                                                             :arguments "{}"))
+                                                     :finish "tool_calls"))
+                                       (event "[DONE]"))
+                                      (success-body "Project recovery remains available"))))) :requests 2)
+        (install-provider manager job-manager fixture)
+        (agent:register-tool manager "inspect_root" :schema (object "type" "object")
+                             :validate #'hash-table-p
+                             :execute (lambda (arguments context)
+                                        (declare (ignore arguments))
+                                        (push (agent:operation-root context) tool-roots)
+                                        (object "root" (agent:operation-root context))))
+        (let ((root (merge-pathnames "project/" directory)))
+          (when (eq mode :renamed) (ensure-directories-exist root))
+          (let ((session (new-session manager root)))
+            (when (eq mode :renamed)
+              (rename-file root (merge-pathnames "renamed-project/" directory)))
+            (ok (not (probe-file root)) "the original project path is unavailable before the request")
+            (await (agent:submit-message session "Help recover the unavailable project"))
+            (wait-for
+             (lambda ()
+               (let ((snapshot (agent:session-snapshot session)))
+                 (and (equal "idle" (field snapshot "status"))
+                      (= 1 (length (field snapshot "turns")))
+                      (equal "completed" (field (aref (field snapshot "turns") 0) "status"))))))
+            (ok (= 2 (length (fixture-requests fixture)))
+                (format nil "~a project still permits both actual HTTP provider rounds" mode))
+            (ok (null (fixture-error fixture)))
+            (ok (equal (list (namestring root)) tool-roots)
+                "tool contexts retain the original root rather than the HTTP process cwd")
+            (ok (equal (namestring root) (field (agent:session-snapshot session) "root")))
+            (ok (every (lambda (job) (equal "/" (jobs:job-directory job))) (jobs:list-jobs job-manager))
+                "only the HTTP process cwd is neutral")))))))
