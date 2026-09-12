@@ -22,3 +22,15 @@
   :perform (test-op (operation component)
              (declare (ignore operation))
              (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/process-tools"
+  :description "Approved managed process tools for native Lisp agent sessions"
+  :depends-on ("lem-agent" "lem-toolkit/jobs")
+  :components ((:file "process-tools/tools")))
+
+(defsystem "lem-agent/process-tools-tests"
+  :depends-on ("lem-agent/process-tools" "rove")
+  :components ((:file "process-tools/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
