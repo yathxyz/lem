@@ -53,13 +53,25 @@
              (declare (ignore operation))
              (symbol-call :rove :run component)))
 
+(defsystem "lem-agent/drafts"
+  :description "Private durable agent composer drafts and exact submission reconciliation"
+  :depends-on ("lem-agent")
+  :components ((:file "drafts")))
+
+(defsystem "lem-agent/drafts/tests"
+  :depends-on ("lem-agent/drafts" "rove")
+  :components ((:file "tests/drafts"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
+
 (defsystem "lem-agent/ui"
   :description "Disposable native agent views and deliberate asynchronous input"
-  :depends-on ("lem-agent" "lem/core")
+  :depends-on ("lem-agent/drafts" "lem-daemon/recovery" "lem/core")
   :components ((:file "ui")))
 
 (defsystem "lem-agent/ui/tests"
-  :depends-on ("lem-agent/ui" "lem-fake-interface" "rove")
+  :depends-on ("lem-agent/ui" "lem-daemon/recovery" "lem-fake-interface" "rove")
   :components ((:file "tests/ui"))
   :perform (test-op (operation component)
              (declare (ignore operation))

@@ -1,16 +1,20 @@
 (defpackage :lem-agent/ui
   (:use :cl :lem)
-  (:local-nicknames (:agent :lem-agent))
+  (:local-nicknames (:agent :lem-agent) (:drafts :lem-agent/drafts))
   (:export :*default-manager* :*default-provider* :*default-model*
            :show-session :show-decisions :show-composer :show-session-list
            :submit-composer :composer-status
            :agent-new-session :agent-session-list :agent-open-session
            :agent-compose :agent-submit :agent-decisions :agent-allow :agent-deny
            :agent-answer :agent-interrupt :agent-resume :agent-close-session
-           :agent-refresh :agent-close-view :agent-composer-status))
+           :agent-refresh :agent-close-view :agent-composer-status
+           :*default-draft-store* :*require-durable-drafts* :show-draft-list :show-draft :restore-draft :checkpoint-composer
+           :agent-draft-list :agent-inspect-draft :agent-restore-draft :agent-discard-draft :agent-checkpoint-draft))
 (in-package :lem-agent/ui)
 
 (defvar *default-manager* nil "Configured by the host after worker-side startup.")
+(defvar *default-draft-store* nil "Opened on a startup worker after core session restoration.")
+(defvar *require-durable-drafts* nil "Configured hosts refuse new composers if durable draft storage is unavailable.")
 (defvar *default-provider* "openrouter")
 (defvar *default-model* nil "Explicitly configured model; no implicit model selection.")
 (defparameter *render-limit* 65536)
@@ -19,6 +23,8 @@
 (defvar *views* (make-hash-table :test 'eq))
 (defvar *pending-requests* 0)             ; editor-owned
 (defvar *buffer-sequence* 0)              ; editor-owned, never identity by name
+(defvar *composers* (make-hash-table :test 'eq))
+(defvar *draft-views* (make-hash-table :test 'eq))
 
 (defstruct (view (:constructor make-view (buffer session manager kind)))
   buffer session manager kind subscription
@@ -30,6 +36,8 @@
 (defvar *composer-keymap* (make-keymap :description "Native agent message"))
 (define-major-mode agent-view-mode nil (:name "Agent" :keymap *view-keymap*))
 (define-major-mode agent-composer-mode nil (:name "Agent message" :keymap *composer-keymap*))
+(defvar *draft-list-keymap* (make-keymap :description "Agent draft recovery"))
+(define-major-mode agent-draft-list-mode nil (:name "Agent drafts" :keymap *draft-list-keymap*))
 
 (defun require-editor-thread ()
   (let ((editor (find-editor-thread)))
@@ -56,7 +64,10 @@
 
 (defun composer-status (buffer)
   (require-editor-thread)
-  (buffer-value buffer 'operation-status))
+  (let ((status (buffer-value buffer 'operation-status)))
+    (if (gethash buffer *composers*)
+        (format nil "~a; ~a" status (draft-checkpoint-status buffer))
+        status)))
 
 (defun request-refresh (view)
   ;; The subscriber only signals an already existing worker; no snapshot copying.
@@ -76,6 +87,14 @@
         (agent:unsubscribe-session (view-session view) (view-subscription view))))))
 
 (defun buffer-killed (buffer)
+  (remhash buffer *draft-views*)
+  (when (gethash buffer *composers*)
+    (checkpoint-composer buffer)
+    (when (buffer-value buffer 'draft-store)
+      (drafts:release-draft (buffer-value buffer 'draft-store)
+                            (field (buffer-value buffer 'draft-record) "id")
+                            (buffer-value buffer 'draft-owner)))
+    (remhash buffer *composers*))
   (retire-view buffer)
   ;; Receipts still complete. Killed buffers cannot be reused by a late callback.
   (setf (buffer-value buffer 'agent-input-dead) t))
@@ -250,6 +269,8 @@
 (defun show-composer (session &key decision)
   "Return an editable draft without selecting it. DECISION is a displayed clarification."
   (require-editor-thread)
+  (when (and *require-durable-drafts* (not (drafts:store-open-p *default-draft-store*)))
+    (editor-error "Durable agent drafts are unavailable; inspect the host recovery report before composing"))
   (when (and decision (not (equal "clarification" (field decision "kind"))))
     (editor-error "Only clarification decisions accept an editable answer"))
   (let ((buffer (new-buffer (if decision
@@ -260,8 +281,74 @@
     (setf (buffer-value buffer 'agent-session) session
           (buffer-value buffer 'agent-decision) (and decision (agent:json-copy decision)))
     (change-buffer-mode buffer 'agent-composer-mode)
+    (track-composer buffer *default-draft-store* (drafts:new-record session "" 0 0) :new t)
     (set-status buffer "Draft — C-c C-c submits; C-c C-s shows receipt status")
     buffer))
+
+(defun track-composer (buffer store record &key new)
+  (setf (gethash "decision" record) (buffer-value buffer 'agent-decision))
+  (handler-case
+      (setf (buffer-value buffer 'draft-owner) (and store (drafts:claim-draft store record :new new)))
+    (error (condition) (delete-buffer buffer) (error condition)))
+  (setf (gethash buffer *composers*) t
+        (buffer-value buffer 'draft-store) store
+        (buffer-value buffer 'draft-record) record
+        (buffer-value buffer 'draft-tick) (buffer-modified-tick buffer))
+  (when store
+    (setf (buffer-value buffer 'lem-daemon/recovery::recovery-exclude) t))
+  (add-hook (variable-value 'after-change-functions :buffer buffer) 'composer-changed)
+  (checkpoint-composer buffer)
+  buffer)
+
+(defun capture-composer (buffer)
+  (when (> (1- (position-at-point (buffer-end-point buffer))) 65536)
+    (error "Draft exceeds 65536 characters"))
+  (let ((record (agent:json-copy (buffer-value buffer 'draft-record))))
+    (unless (= (buffer-value buffer 'draft-tick) (buffer-modified-tick buffer))
+      (incf (gethash "revision" record))
+      (setf (buffer-value buffer 'draft-tick) (buffer-modified-tick buffer)))
+    (setf (gethash "text" record) (buffer-text buffer)
+          (gethash "point" record) (1- (position-at-point (buffer-point buffer)))
+          (buffer-value buffer 'draft-record) record)
+    record))
+
+(defun checkpoint-composer (buffer)
+  "Capture text, point and exact authority metadata; the store writes on a worker."
+  (require-editor-thread)
+  (when (gethash buffer *composers*)
+    (handler-case
+        (let* ((record (capture-composer buffer)) (store (buffer-value buffer 'draft-store))
+               (saved (and store (drafts:find-draft store (field record "id")))))
+          (when (and store (not (and saved (= (field saved "revision") (field record "revision"))
+                                    (= (field saved "point") (field record "point")))))
+            (drafts:queue-snapshot store record :owner (buffer-value buffer 'draft-owner)))
+          (setf (buffer-value buffer 'draft-checkpoint-error) nil))
+      (error (condition)
+        (setf (buffer-value buffer 'draft-checkpoint-error)
+              (format nil "Not checkpointed (~a); text remains in memory" (type-of condition)))))))
+
+(defun composer-changed (start end old-length)
+  (declare (ignore end old-length))
+  (checkpoint-composer (point-buffer start)))
+
+(defun draft-checkpoint-status (buffer)
+  (let* ((store (buffer-value buffer 'draft-store))
+         (record (buffer-value buffer 'draft-record))
+         (saved (and store record (drafts:find-draft store (field record "id")))))
+    (or (buffer-value buffer 'draft-checkpoint-error)
+        (and store (drafts:store-error store))
+        (when (null store) "Not checkpointed: durable draft storage unavailable; text remains in memory")
+        (if (and saved (= (field saved "revision") (field record "revision"))
+                 (= (field saved "point") (field record "point")))
+            "Draft checkpoint durable" "Draft checkpoint queued; latest edits remain in memory"))))
+
+(defun checkpoint-current-composer ()
+  (let ((buffer (current-buffer)))
+    (when (gethash buffer *composers*)
+      (checkpoint-composer buffer)
+      (setf (variable-value 'modeline-format :buffer buffer)
+            (list "  " 'modeline-name "  " (composer-status buffer))))))
+(add-hook *post-command-hook* 'checkpoint-current-composer)
 
 (defun async-request (buffer operation thunk &key revision clear-draft immediate
                                              (slot 'pending-request))
@@ -323,12 +410,158 @@
          (text (buffer-text buffer))
          (revision (buffer-modified-tick buffer)))
     (when (> (length text) 65536) (editor-error "Agent input exceeds 65536 characters"))
+    (when (and (null decision) (zerop (length text))) (editor-error "Enter a message before submitting"))
+    (when (buffer-value buffer 'draft-submit-disabled)
+      (editor-error "~a" (buffer-value buffer 'draft-submit-disabled)))
+    (let ((store (buffer-value buffer 'draft-store)))
+      (when store
+        (let ((record (capture-composer buffer)) (owner (buffer-value buffer 'draft-owner)))
+          (return-from submit-composer
+            (async-request buffer (if decision "Answer" "Message")
+                           (lambda () (drafts:submit-draft store record session :owner owner))
+                           :revision revision :clear-draft t :immediate t)))))
     (async-request buffer (if decision "Answer" "Message")
                    (if decision
                        (let ((id (field decision "id")))
                          (lambda () (agent:resolve-decision session id text)))
                        (lambda () (agent:submit-message session text)))
                    :revision revision :clear-draft t)))
+
+(defun draft-availability (record manager)
+  (let* ((session (and manager (agent:find-session manager (field record "session_id"))))
+         (snapshot (and session (agent:session-snapshot session)))
+         (decision (field record "decision")) (attempt (field record "attempt")))
+    (values session
+            (cond
+              ((null session) "Original session unavailable; inspect or copy this text into a new deliberate draft")
+              ((equal "closed" (field snapshot "status")) "Original session is closed; this draft is inspection only")
+              ((and attempt (member (field attempt "status") '("prepared" "unknown") :test #'equal))
+               "Submission acceptance is unknown; recover the host before submitting")
+              ((and attempt (equal "accepted" (field attempt "status"))
+                    (= (field attempt "revision") (field record "revision")))
+               "This draft revision was already accepted; inspect or copy deliberately")
+              ((and decision
+                    (not (equalp decision (find (field decision "id") (field snapshot "decisions")
+                                               :key (lambda (item) (field item "id")) :test #'equal))))
+               "Original clarification is cancelled, resolved, or changed; this answer cannot be submitted")))))
+
+(defun restore-draft (id &optional (store *default-draft-store*) (manager *default-manager*))
+  "Return an unnamed draft buffer, without files, mode hooks, selection or submission."
+  (require-editor-thread)
+  (unless store (editor-error "No durable draft store is configured"))
+  (loop for buffer being the hash-keys of *composers*
+        when (and (eq store (buffer-value buffer 'draft-store))
+                  (equal id (field (buffer-value buffer 'draft-record) "id")))
+          do (return-from restore-draft buffer))
+  (let ((record (or (drafts:find-draft store id) (editor-error "Draft no longer exists; refresh the list"))))
+    (multiple-value-bind (session disabled) (draft-availability record manager)
+      (let ((buffer (new-buffer (format nil "recovered ~a session ~a" id (field record "session_id")) :editable t)))
+        (setf (buffer-value buffer 'agent-session) session
+              (buffer-value buffer 'agent-decision) (field record "decision")
+              (buffer-value buffer 'draft-submit-disabled) disabled
+              (buffer-major-mode buffer) 'agent-composer-mode
+              (buffer-syntax-table buffer) (mode-syntax-table 'agent-composer-mode))
+        (insert-string (buffer-point buffer) (field record "text"))
+        (move-to-position (buffer-point buffer) (1+ (field record "point")))
+        (track-composer buffer store record)
+        (set-status buffer (or disabled "Recovered draft; C-c C-c submits only by deliberate action"))
+        buffer))))
+
+(defun new-draft-view (label)
+  (when (>= (hash-table-count *draft-views*) 8)
+    (editor-error "Close a draft inspection view before opening another"))
+  (let ((buffer (new-buffer label)))
+    (setf (gethash buffer *draft-views*) t)
+    buffer))
+
+(defun render-draft-list (buffer store)
+  (require-editor-thread)
+  (unless store (editor-error "No durable draft store is configured"))
+  (with-buffer-read-only buffer nil
+    (erase-buffer buffer)
+    (change-buffer-mode buffer 'agent-draft-list-mode)
+    (setf (buffer-value buffer 'draft-inspected) nil)
+    (insert-string (buffer-point buffer) (format nil "Durable agent drafts — i inspect, Return restore, d discard, g refresh, q close view~2%"))
+    (dolist (record (drafts:list-drafts store))
+      (with-point ((start (buffer-point buffer)))
+        (insert-string (buffer-point buffer)
+                       (format nil "~a  session ~a  ~a  ~a  revision ~d  ~d characters~%"
+                               (field record "id") (field record "session_id")
+                               (if (field record "decision") "clarification" "message")
+                               (or (field (field record "attempt") "status") "unsent")
+                               (field record "revision") (length (field record "text"))))
+        (put-text-property start (buffer-point buffer) 'agent-draft-target
+                           (list store (field record "id") (field record "revision")))))
+    (buffer-start (buffer-point buffer)) (buffer-mark-saved buffer)
+    (setf (buffer-value buffer 'draft-list-store) store))
+  (setf (buffer-read-only-p buffer) t)
+  buffer)
+
+(defun show-draft-list (&optional (store *default-draft-store*))
+  (require-editor-thread)
+  (unless store (editor-error "No durable draft store is configured"))
+  (render-draft-list (new-draft-view "drafts") store))
+
+(defun show-draft (id &optional (store *default-draft-store*))
+  "Read-only bounded text and exact session/decision/submission metadata."
+  (require-editor-thread)
+  (let* ((record (or (and store (drafts:find-draft store id)) (editor-error "Draft no longer exists")))
+         (buffer (new-draft-view "draft inspection"))
+         (attempt (agent:json-copy (field record "attempt")))
+         (submitted (field attempt "text")))
+    (when attempt (remhash "text" attempt))
+    (change-buffer-mode buffer 'agent-draft-list-mode)
+    (insert-string (buffer-point buffer)
+                   (format nil "Draft ~a — Return restore, d discard, q close view~%Session: ~a~%Root: ~a~%Provider: ~a   Model: ~a~%Revision: ~d   Point: ~d~%Original decision: ~a~%Submission attempt: ~a~2%Complete draft text:~%~a"
+                           id (field record "session_id") (field record "root") (field record "provider")
+                           (field record "model") (field record "revision") (field record "point")
+                           (json-text (field record "decision")) (json-text attempt)
+                           (field record "text")))
+    (when (and submitted (not (equal submitted (field record "text"))))
+      (insert-string (buffer-point buffer) (format nil "~2%Exact submitted text (earlier revision):~%~a" submitted)))
+    (put-text-property (buffer-start-point buffer) (buffer-end-point buffer) 'agent-draft-target
+                       (list store id (field record "revision")))
+    (buffer-start (buffer-point buffer)) (buffer-mark-saved buffer)
+    (setf (buffer-read-only-p buffer) t
+          (buffer-value buffer 'draft-inspected) (list id (field record "revision") (json-text (field record "attempt")))
+          (buffer-value buffer 'draft-list-store) store)
+    buffer))
+
+(defun draft-target ()
+  (or (text-property-at (current-point) 'agent-draft-target)
+      (editor-error "Place point on a complete draft row")))
+
+(define-command agent-draft-list () () (select-agent-buffer (show-draft-list)))
+(define-command agent-inspect-draft () ()
+  (destructuring-bind (store id revision) (draft-target)
+    (declare (ignore revision)) (select-agent-buffer (show-draft id store))))
+(define-command agent-restore-draft () ()
+  (destructuring-bind (store id revision) (draft-target)
+    (declare (ignore revision)) (select-agent-buffer (restore-draft id store))))
+(define-command agent-discard-draft () ()
+  (destructuring-bind (store id revision) (draft-target)
+    (when (loop for buffer being the hash-keys of *composers*
+                thereis (and (eq store (buffer-value buffer 'draft-store))
+                             (equal id (field (buffer-value buffer 'draft-record) "id"))))
+      (editor-error "Close the draft composer before discarding its checkpoint"))
+    (let* ((record (or (drafts:find-draft store id) (editor-error "Draft no longer exists")))
+           (attempt (field record "attempt"))
+           (uncertain (and attempt (member (field attempt "status") '("prepared" "unknown") :test #'equal))))
+      (when (and uncertain (not (equal (buffer-value (current-buffer) 'draft-inspected)
+                                       (list id revision (json-text attempt)))))
+        (editor-error "Inspect this exact draft with i before discarding uncertain submission evidence"))
+      (when (prompt-for-y-or-n-p
+             (format nil "Discard ~d characters from draft ~a, session ~a~a? "
+                     (length (field record "text")) id (field record "session_id")
+                     (if uncertain (format nil "; acceptance of attempt ~a remains unknown; delete its evidence" (field attempt "id")) "")))
+        (async-request (current-buffer) "Draft discard"
+                       (lambda () (drafts:discard-draft store id :expected-revision revision
+                                                        :acknowledge-uncertainty (and uncertain t))))))))
+(define-command agent-checkpoint-draft () ()
+  (unless (gethash (current-buffer) *composers*) (editor-error "Checkpoint an agent composer"))
+  (checkpoint-current-composer) (message "~a" (composer-status (current-buffer))))
+(define-command agent-refresh-drafts () ()
+  (render-draft-list (current-buffer) (buffer-value (current-buffer) 'draft-list-store)))
 
 (defun decision-at-point ()
   (let ((target (text-property-at (current-point) 'agent-target)))
@@ -396,3 +629,7 @@
       by #'cddr do (define-key *view-keymap* key command))
 (define-key *composer-keymap* "C-c C-c" 'agent-submit)
 (define-key *composer-keymap* "C-c C-s" 'agent-composer-status)
+(define-key *composer-keymap* "C-c C-w" 'agent-checkpoint-draft)
+(loop for (key command) on '("Return" agent-restore-draft "i" agent-inspect-draft "d" agent-discard-draft
+                            "g" agent-refresh-drafts "q" agent-close-view)
+      by #'cddr do (define-key *draft-list-keymap* key command))

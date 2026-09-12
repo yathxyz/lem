@@ -1,6 +1,7 @@
 # Native agent buffers
 
-`lem-agent/ui` is an optional system depending on `lem-agent` and `lem/core`.
+`lem-agent/ui` is an optional system depending on `lem-agent/drafts`, `lem/core`,
+and the opt-in `lem-daemon/recovery` definitions (loading does not enable recovery).
 It registers no provider, tool, daemon hook, global key binding, or credential
 lookup. The host creates/restores the manager on a startup worker, registers its
 provider and tools, then supplies configuration:
@@ -97,11 +98,21 @@ apply edit proposals. Operation errors display condition types rather than
 printing arbitrary provider conditions. Explicit failure/reason fields supplied
 by the core are rendered as task data.
 
-The session journal owns accepted messages and decisions. Unsubmitted composer
-drafts are ordinary editor buffers; this module does not add draft persistence or
-reconnect-to-session metadata to buffer recovery. The daemon's configured buffer
-recovery policy remains responsible for unsent text. This optional module does
-not establish native-client redisplay, credentials, or live-provider acceptance.
+The session journal owns accepted messages and decisions. Configured composers
+use a separate private durable draft store with exact session and clarification
+metadata; see [DRAFTS.md](DRAFTS.md) for its startup, recovery, and shutdown contract.
+`agent-draft-list` lists checkpoints; `i` inspects complete text and authority,
+Return restores an unnamed composer, and `d` deliberately discards a checkpoint.
+There are at most eight draft list/inspection views; `g` refreshes the current
+buffer. Closing any such view or composer retains its checkpoint and admitted
+submission. Restoring never submits, visits files, or runs file/mode hooks.
+
+`C-c C-w` captures the composer explicitly; ordinary text edits and cursor commands
+also capture it. Disk writes run on the draft worker. `C-c C-s` distinguishes a
+durable checkpoint from queued/uncheckpointed edits. Configured hosts set
+`*require-durable-drafts*` to true, refusing new composers if storage is unavailable.
+Optional standalone users may leave the policy false; without a configured store,
+the composer explicitly reports that its text is retained only in memory.
 
 ## Source acceptance
 
