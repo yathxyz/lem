@@ -121,6 +121,13 @@ isolated X display: two GUI frames, shared edits, independent Vi state and promp
 Unicode clipboard input, resize/mouse routing, client loss and daemon death. The
 two-client screenshot is retained with the acceptance log.
 
+The prepared profile built through the isolated Nix computer configuration also
+passes the full native agent suite. Its private transient user-service check
+verifies native manager readiness, a live managed job, daemon crash/restart,
+interrupted recovery without replay, and deliberate shutdown staying stopped.
+The profile is retained under `validation/native-agent/prepared-profile-v1`;
+the installed profile and `lem.service` were not changed.
+
 One separate real OpenRouter check passed on the preceding configured package:
 one provider round, the requested `LEM_NATIVE_OK` reply, zero tool calls, and a
 durable completed turn. It used only a synthetic empty project. This verifies
