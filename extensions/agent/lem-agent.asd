@@ -59,3 +59,15 @@
   :perform (test-op (operation component)
              (declare (ignore operation))
              (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/edit-recovery"
+  :description "Historical agent edit inspection and deliberate live-region restaging"
+  :depends-on ("lem-agent/ui" "lem-buffer-proposals" "babel")
+  :components ((:file "edit-recovery")))
+
+(defsystem "lem-agent/edit-recovery-tests"
+  :depends-on ("lem-agent/edit-recovery" "lem-fake-interface" "rove")
+  :components ((:file "tests/edit-recovery"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
