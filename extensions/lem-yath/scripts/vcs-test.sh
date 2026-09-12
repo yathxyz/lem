@@ -4089,7 +4089,7 @@ if lem_wait_for "$porcelain_session" 'Configure remote' \
 fi
 if lem_wait_for "$porcelain_session" 'Fetch URL for managed-safe' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  enter_prompt_value "$porcelain_session" "$LEM_YATH_VCS_MANAGED_REMOTE"
+  submit_atomic_prompt_value "$porcelain_session" "$LEM_YATH_VCS_MANAGED_REMOTE"
 fi
 send_keys "$porcelain_session" U
 if lem_wait_for "$porcelain_session" 'Fetch refspec for managed-safe' \
