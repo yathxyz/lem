@@ -22,6 +22,11 @@
              (format stream "OpenRouter transport failed: ~a~@[ (~d)~]"
                      (transport-error-kind condition) (transport-error-status condition)))))
 (defun fail (kind &optional status) (error 'transport-error :kind kind :status status))
+(defmethod agent:operation-error-summary ((condition transport-error))
+  ;; These fields are adapter-owned categories and numeric HTTP/curl statuses.
+  ;; Response bodies, credentials and curl diagnostics never enter this condition.
+  (format nil "OpenRouter ~a~@[ (status ~d)~]"
+          (transport-error-kind condition) (transport-error-status condition)))
 (defun field (object name &optional default) (gethash name object default))
 (defun object (&rest fields) (apply #'agent:json-object fields))
 (defun json-text (value) (with-output-to-string (stream) (yason:encode value stream)))

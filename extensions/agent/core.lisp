@@ -386,6 +386,18 @@
 
 (defun limit (session name) (field (field (session-record session) "limits") name))
 
+(defgeneric operation-error-summary (condition)
+  (:documentation "Return a bounded, credential-free diagnostic for a failed adapter.
+Methods must perform no I/O and must not expose request bodies, headers, stderr,
+or arbitrary condition arguments. The default reports only the condition type.")
+  (:method ((condition t)) (format nil "~a" (type-of condition))))
+
+(defun bounded-operation-error-summary (condition)
+  (let ((summary (ignore-errors (operation-error-summary condition))))
+    (if (and (stringp summary) (<= 1 (length summary) 512))
+        summary
+        (format nil "~a" (type-of condition)))))
+
 (defun launch-operation (session kind function)
   (let* ((turn (current-turn session))
          (context (%make-operation :session session :session-id (session-id session)
@@ -413,10 +425,11 @@
                        (operation-result context (if (eq kind :provider) :provider-done :tool-done) result)))
                  (operation-cancelled () (operation-result context :operation-failed "Operation interrupted"))
                  (error (condition)
-                   ;; Adapter errors may contain request credentials. Persist the
-                   ;; condition type, never its arbitrary printed arguments.
+                   ;; Adapter errors may contain credentials. Only explicit safe
+                   ;; methods may supply more than the default condition type.
                    (operation-result context :operation-failed
-                                     (format nil "~a failed (~a)" kind (type-of condition))))))
+                                     (format nil "~a failed (~a)" kind
+                                             (bounded-operation-error-summary condition))))))
              :name (format nil "agent ~a" kind))))
       (bt2:with-lock-held ((session-lock session)) (push (cons worker context) (session-workers session))))
     context))

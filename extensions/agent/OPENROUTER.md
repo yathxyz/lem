@@ -51,9 +51,9 @@ The job retains only one output byte per channel; the session core owns the actu
 transcript. Diagnostics report safe transport categories and numeric status/exit
 codes without echoing provider error bodies, credentials, curl stderr or request
 contents. `transport-error-kind` and `transport-error-status` expose these fields
-to a caller catching `transport-error`. The current core's generic provider-error
-record includes the condition type; a later UI can deliberately expose these safe
-fields without printing arbitrary adapter conditions.
+to a caller catching `transport-error`. The adapter also specializes the core's
+`operation-error-summary`, so durable session failures include this safe category
+and status without printing arbitrary adapter conditions.
 
 ## Protocol and limits
 

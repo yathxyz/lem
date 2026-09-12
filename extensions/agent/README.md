@@ -68,3 +68,10 @@ lifecycle, duplicate identities, decision relationships, and unmatched completed
 tool exchanges are rejected without rewriting that journal. Authentication
 configuration is never part of the journal. User prompts and tool arguments/results are task data
 and are retained in the private journal.
+
+Adapters may specialize `operation-error-summary` to supply a bounded,
+credential-free category/status diagnostic. Its default reports only the condition
+type, never arbitrary printed error arguments. Methods must be pure and avoid
+request bodies, headers and raw stderr. Invalid, excessive or failing summaries
+fall back to the condition type. OpenRouter exposes its safe category and numeric
+status in durable session diagnostics so authentication failures are actionable.

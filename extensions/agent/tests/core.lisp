@@ -632,3 +632,38 @@
                  (idle session (+ 3 index)))
                (ok (= 4 executions) "one active worker slot supports successive provider and tool rounds"))
           (open-gate gate))))))
+
+
+(define-condition safe-summary-fixture (error)
+  ((summary :initarg :summary :reader fixture-summary))
+  (:report (lambda (condition stream)
+             (declare (ignore condition))
+             (write-string "private-adapter-error-argument" stream))))
+(defmethod agent:operation-error-summary ((condition safe-summary-fixture))
+  (let ((summary (fixture-summary condition)))
+    (if (eq summary :broken) (error "private-adapter-error-argument") summary)))
+
+(deftest durable-adapter-error-summaries
+  (with-manager (manager directory)
+    (dolist (case (list (cons (make-condition 'simple-error
+                                            :format-control "private-adapter-error-argument")
+                             "SIMPLE-ERROR")
+                       (cons (make-condition 'safe-summary-fixture :summary "HTTP authentication 401")
+                             "HTTP authentication 401")
+                       (cons (make-condition 'safe-summary-fixture :summary (make-string 513 :initial-element #\x))
+                             "SAFE-SUMMARY-FIXTURE")
+                       (cons (make-condition 'safe-summary-fixture :summary :broken)
+                             "SAFE-SUMMARY-FIXTURE")))
+      (let ((condition (car case)))
+        (agent:register-provider manager "fake"
+                                 (lambda (request emit context)
+                                   (declare (ignore request emit context))
+                                   (error condition)))
+        (let ((session (new-session manager directory)))
+          (await (agent:submit-message session "exercise safe failure"))
+          (wait-for (lambda () (equal "failed" (state session))))
+          (let* ((record (store:read-private-json directory (agent:session-id session) :maximum-depth 24))
+                 (text (with-output-to-string (stream) (yason:encode record stream))))
+            (ok (search (cdr case) text) "durable history contains the safe category or fallback type")
+            (ok (not (search "private-adapter-error-argument" text))
+                "arbitrary printed adapter arguments never enter the journal")))))))

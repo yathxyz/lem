@@ -242,6 +242,13 @@
         (await (agent:submit-message session "exercise failure"))
         (wait-for (lambda () (equal "failed" (state session))))
         (ok (not (equal "idle" (state session))) (format nil "HTTP fixture ~a is an explicit failure" mode))
+        (when (eq mode :unauthorized)
+          (let* ((record (store:read-private-json (merge-pathnames "agents/" directory)
+                                                 (agent:session-id session) :maximum-depth 24))
+                 (diagnostics (field record "diagnostics")))
+            (ok (some (lambda (text) (and (search "HTTP-STATUS" text) (search "401" text)))
+                      diagnostics)
+                "the durable session explains authentication failure using safe status fields")))
         (ok (fixture-requests fixture) "the failure follows a request to the actual local HTTP fixture")
         (ok (eq failure (ecase mode
                           (:unauthorized :http-status) (:truncated :truncated-stream)

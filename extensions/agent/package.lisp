@@ -10,4 +10,5 @@
            :operation-session-id :operation-turn-id :operation-generation
            :operation-root :operation-live-p :check-operation
            :register-cancellation :operation-cancelled
+           :operation-error-summary
            :json-object :json-copy))
