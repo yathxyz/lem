@@ -569,11 +569,17 @@ def main():
             check(len(snapshot(draft_session)['turns']) == 1,
                   'confirmed native draft discard removes metadata without undoing or repeating its accepted message')
 
-            check(retained(candidate)[-1] == historical
-                  and all(turn['id'] != origin_turn for turn in snapshot(candidate)['turns'])
-                  and evaluate('(null (lem-buffer-proposals:find-proposal '
-                               + quote(old_proposal) + '))') == 'T',
-                  'daemon restart preserves the trimmed historical candidate without reviving its old proposal')
+            recovered_historical = retained(candidate)[-1]
+            if recovered_historical != historical:
+                print('Historical candidate JSON mismatch: ' + json.dumps(
+                    {'before': historical, 'after': recovered_historical}), flush=True)
+            check(recovered_historical == historical,
+                  'daemon restart preserves the exact retained candidate JSON, including false and null values')
+            check(all(turn['id'] != origin_turn for turn in snapshot(candidate)['turns']),
+                  'daemon restart keeps the historical candidate origin trimmed from the transcript')
+            check(evaluate('(null (lem-buffer-proposals:find-proposal '
+                           + quote(old_proposal) + '))') == 'T',
+                  'daemon restart does not revive the historical candidate\'s old proposal')
             files_before_history = value('(lem-native-agent-fixture::editor-file-identities)')
             proposal_count = value('(length (lem-buffer-proposals:list-proposals))')
             show(left, candidate)
