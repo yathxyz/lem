@@ -13,44 +13,26 @@ reported workflow checks and 377 static assertions. Its legacy driver now waits
 for native asynchronous file visits and replaces entire remote URL prompts.
 Failed and passing evidence and original-worktree preservation are archived.
 
-## Complete recoverable agent workspaces
+## Completed recoverable agent workspaces
 
-The tested native provider/tools/UI configuration is integrated into the canonical
-checkout. The configured native agent, daemon, compilation
-and SDL gates already pass in the isolated agent integration checkout. One live
-OpenRouter round has passed; broader model quality is not implied.
+The native Lisp agent stage is integrated into the canonical checkout. Retained
+candidates live outside rolling history; recovery requires a human's fresh live
+selection and separate proposal acceptance. Composer checkpoints preserve exact
+session/decision metadata, current unsent text and submitted text independently.
+Core submission receipts resolve crash ambiguity without replay. Session and job
+admission reserve bounded slots, while native inventory/inspection provides
+explicit fingerprint-checked cleanup with protection for active/uncertain work.
 
-Add durable edit candidates outside rolling transcript history in the existing
-session journal and actor. Retain origin, exact original/replacement arguments,
-and bounded historical results before launching the staging executor. Reserve
-capacity first, reject explicitly on exhaustion, and never silently evict a
-candidate. Use 16 records, 64 KiB per record, and 512 KiB total per session only
-after checking these fit all enclosing journal and JSON limits. Applying or
-rejecting a live proposal does not prove its text reached recovery storage, so
-archive removal must remain explicit.
-
-After restart, candidates are unbound historical reviews. Old proposal IDs,
-buffer names, inspection tokens and revision numbers cannot prove applicability
-to a new image. A human selects a current buffer region and explicitly creates
-a new proposal, then reviews and accepts separately. Require exact original text
-and revalidate identity, revision, generation and text after prompts. Never search
-for matching text, open files, run mode hooks or apply on recovery. Surrounding
-unsaved buffers continue to use independent text checkpoints.
-
-Add unsent-composer recovery with exact session/decision metadata and explicit
-restoration. A restored draft must never submit itself or answer an old cancelled
-decision. Distinguish unsent drafts from durably accepted submissions, including
-crashes between acknowledgement and view cleanup.
-
-Bound long-lived job/session registries and stored history with an explicit,
-inspectable retention policy. Keep active work and uncertain outcomes protected;
-make capacity exhaustion and deliberate cleanup visible to the human.
-
-Acceptance must cover candidate survival beyond transcript trimming, quota and
-write failures before executor publication, crash before/after staging/results,
-no replay or file hooks, explicit fresh restaging, stale/ABA/empty selections,
-previously applied candidates, malformed records, draft recovery and ownership.
-Repeat relevant configured client/provider/tool/recovery gates after integration.
+The configured native agent gate passes 87 reported checks (62 distinct
+assertion descriptions across four startups), including actual candidate/draft
+inspection, restaging, submission, cleanup and degraded draft startup. The
+prepared computer profile passes those same 87 checks through its actual binaries,
+15 native terminal/SDL checks and five private service checks. Configured daemon,
+compilation, Git and proposal gates and the relevant source suites pass.
+The configured gate exposed JSON false/null and empty-array loss; all three
+relevant parsers now preserve types and regression tests cover clarification
+receipt reconciliation as well as candidate results. Evidence, failed attempts,
+exact derivations and a retained profile are in `validation/agent-recovery/`.
 
 ## Adopt notes and verify daily workflows
 

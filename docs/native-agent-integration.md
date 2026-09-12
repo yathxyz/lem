@@ -27,8 +27,9 @@ The configured Vi leader has a native agent group at `SPC A`:
 | `SPC A h` | `agent-retained-reviews` | Inspect historical edit candidates for the current session. |
 | `SPC A s` | `agent-restage-retained-review` | Capture the selected live region, choose a historical candidate, and create a fresh proposal. |
 | `SPC A H` | `agent-journals` | Inspect session capacity, stored history, and deliberate cleanup. |
+| `SPC A D` | `agent-draft-list` | Inspect, explicitly restore, or discard durable composer checkpoints. |
 | `SPC A j` | `jobs-list` | Inspect bounded job history and deliberate cleanup. |
-| `SPC A R` | `lem-yath-agent-recovery-report` | Inspect rejected session journals from startup. |
+| `SPC A R` | `lem-yath-agent-recovery-report` | Inspect session recovery failures, draft storage health, and session capacity. |
 
 In a composer, `C-c C-c` submits. The composer clears only after durable
 acceptance, and only if its captured contents have not changed. In a decision
@@ -112,16 +113,32 @@ See [session retention](../extensions/agent/RETENTION.md) and
 transcript trimming, so draft recovery can distinguish accepted input from unsent
 text without matching transcript contents.
 
-Shutdown closes agent actors before closing the shared job manager. Opening or
+Unsent composer text and point use the separate `agent-drafts/` namespace, with
+exact session and clarification metadata. Text changes queue asynchronous
+checkpoints; `C-c C-s` requests a checkpoint and reports whether it has reached
+durable storage. Inspection shows the current draft and exact submitted text
+separately when newer edits followed a submission. Restore opens an unnamed
+buffer without submitting it. An accepted unchanged revision, missing session,
+or cancelled question restores for inspection only. The store retains at most
+32 drafts, each with 65,536 text characters, within 1 MiB per encoded record and
+16 MiB total; exhaustion requires deliberate cleanup instead of silent eviction.
+See [durable drafts](../extensions/agent/DRAFTS.md).
+
+If draft storage is damaged, startup preserves its files and continues for
+editing, jobs, and session inspection. Mandatory durability blocks new composers;
+the recovery report explains the unavailable store. Generic text recovery
+excludes owned composers because text alone cannot establish submission authority.
+Edits not yet checkpointed remain vulnerable to a crash.
+
+Shutdown drains draft snapshots and admitted submissions while core actors are
+still running, then closes those actors and the shared job manager. Opening or
 refreshing a view does not initialize storage or wait for provider/tool work on
 the editor thread. The configured startup and exit phases are explicit blocking
 lifecycle boundaries.
 
 Proposal objects and revision-token identity are still image-local. Session
-history can retain candidate arguments, but it does not recreate a valid old
-proposal or preserve candidates after history eviction. A durable candidate
-review/recovery workflow is required before daily use. Unsent composer recovery
-also needs session metadata beyond the existing text-buffer checkpoint.
+recovery preserves historical candidates independently of history eviction, but
+does not recreate a valid old proposal or claim that its text was saved.
 
 ## Verified on 12 September 2026
 
@@ -161,7 +178,40 @@ Evidence is archived outside the checkout in
 Run `nix run .#native-agent-test` from `extensions/lem-yath` with the intended
 local Lem input override, or build `checks.x86_64-linux.native-agent`.
 
-Remaining acceptance includes durable candidates and unsent composers, global
-job/session retention, notes/daily workflows, and Legit's shared display state
-across independent frames. The frozen toolkit's broader legacy VCS gate remains
-under diagnosis. These are prerequisites for a reviewable editor cutover.
+## Recoverable workspaces verified on 13 September 2026
+
+The canonical runtime through `e5cf77f4f` passes the expanded Nix native agent
+gate: 87 reported checks, 62 distinct descriptions across four daemon starts.
+Candidates survive transcript trimming and SIGKILL with exact arguments/results;
+native inspection opens no files, stale restaging is refused, and a fresh human
+selection produces a separately accepted proposal. Unsent drafts survive restart,
+restore without submission, submit deliberately once, and require confirmed
+cleanup. Damaged draft storage leaves core/jobs ready, blocks composers, reports
+the failure, and preserves the corrupt synthetic journal byte for byte.
+
+Source tests pass 39 core, 13 draft, 13 agent UI, 11 historical review, 12 session
+retention, 4 session inventory UI, 19 job, 5 job UI, 9 provider, 7 process-tool,
+and 14 shared recovery groups. Configured daemon (25), compilation (17), Git
+rebase (27), and proposal (12) checks pass too. The broader toolkit VCS gate
+previously passed 275 reported workflow checks and 377 static assertions; its
+evidence remains in the adjacent `validation/toolkit/` archive.
+
+This acceptance exposed and fixed a real journal/parser defect: JSON `false`
+became `null` after restart, and empty arrays were also ambiguous. Journal,
+provider, and draft parsers now preserve those types explicitly, independently
+of ambient parser settings. Source regressions fail on the preceding readers
+and pass with the fix. Known true clarification receipts retain their `T` API.
+
+The Nix computer profile `jgcfnmcs2kpl2yyvaizxr0kxdsac6v40-lem-yath-profile`
+passes the same 87 native checks through its actual binaries, all 15 terminal/SDL
+display checks, and five private user-service checks including crash/restart and
+deliberate shutdown. It is retained under
+`validation/agent-recovery/prepared-profile-v3`. The service check requires the
+native core and mandatory open draft store on initial startup and after restart.
+No installed profile or deployed service was changed. The original five worktrees
+and all 13 archived prototype files still match the preservation archive.
+
+Passing and failed logs, exact derivations, screenshots and the final acceptance
+manifest are in `validation/agent-recovery/` beside the earlier native evidence.
+Notes/daily workflows and Legit's shared display state across independent frames
+remain prerequisites for a reviewable editor cutover.
