@@ -94,6 +94,7 @@
       (values (receipt-value receipt) t))))
 
 (defstruct tool name schema validate execute permission retain-for-review)
+(defparameter *maximum-submissions* 32)
 (defparameter *maximum-retained-reviews* 16)
 (defparameter *maximum-review-bytes* (* 64 1024))
 (defparameter *maximum-retained-review-bytes* (* 512 1024))
@@ -333,14 +334,35 @@
           (enqueue-locked session (list* kind receipt arguments))))
     receipt))
 
-(defun submit-message (session text)
+(defun submit-message (session text &key submission-id)
   (let ((maximum (field (field (session-record session) "limits") "message")))
     (unless (text-p text maximum 1) (error "Agent message exceeds its size limit")))
-  (enqueue-command session :submit (store:new-id) (copy-seq text)))
+  (when (and submission-id (not (valid-id-p submission-id))) (error "Invalid submission identity"))
+  (enqueue-command session :submit (store:new-id) (copy-seq text) (and submission-id (copy-seq submission-id))))
 
-(defun resolve-decision (session id answer)
+(defun resolve-decision (session id answer &key submission-id)
   (unless (and (text-p id 64 1) (text-p answer 65536)) (error "Invalid decision response"))
-  (enqueue-command session :resolve (copy-seq id) (copy-seq answer)))
+  (when (and submission-id (not (valid-id-p submission-id))) (error "Invalid submission identity"))
+  (enqueue-command session :resolve (copy-seq id) (copy-seq answer) (and submission-id (copy-seq submission-id))))
+
+(defun find-submission (session id)
+  "Return a copied durable acceptance receipt, independently of trimmed history.
+Absence is not rejection while a submission may still be enqueued or running."
+  (unless (valid-id-p id) (error "Invalid submission identity"))
+  (bt2:with-lock-held ((session-lock session))
+    ;; Failure publication may include actor mutations whose fsync was uncertain.
+    ;; Never present that diagnostic snapshot as a durable acceptance receipt.
+    (when (session-poisoned session)
+      (error "Journal durability is uncertain; restore before reconciling submissions"))
+    (let ((item (find id (field (session-cached-snapshot session) "submissions")
+                      :key (lambda (item) (field item "id")) :test #'equal)))
+      (when item (json-copy item)))))
+
+(defun acknowledge-submission (session id)
+  "Forget an acceptance receipt only after its owner durably records acceptance.
+This releases bounded receipt capacity; callers must never reuse an acknowledged ID."
+  (unless (valid-id-p id) (error "Invalid submission identity"))
+  (enqueue-command session :acknowledge-submission (copy-seq id)))
 
 (defun resume-session (session)
   "Deliberately process retained queued messages; never replay the interrupted turn."
@@ -849,10 +871,39 @@ or arbitrary condition arguments. The default reports only the condition type.")
 
 (defun reject (message) (error 'request-rejected :message message))
 
-(defun handle-resolution (session receipt id answer)
+(defun prepare-submission (record id kind decision-id text result)
+  "Actor-only. Return a prospective receipt and whether it was already accepted."
+  (when id
+    (let ((digest (store:text-digest text))
+          (old (find id (field record "submissions") :key (lambda (item) (field item "id")) :test #'equal)))
+      (when old
+        (unless (and (equal kind (field old "kind"))
+                     (equal decision-id (field old "decision_id"))
+                     (equal digest (field old "digest")))
+          (reject "Submission identity was already used for different input"))
+        (return-from prepare-submission (values old t)))
+      (when (>= (length (field record "submissions")) *maximum-submissions*)
+        (reject "Durable submission receipt capacity is full"))
+      (json-object "id" id "kind" kind "decision_id" decision-id "digest" digest "result" result))))
+
+(defun preflight-input (record submission change)
+  ;; Include both the input mutation and receipt before touching live actor state.
+  ;; CHECK-JOURNAL-CAPACITY also reserves pending retained tool result space.
+  (let ((candidate (json-copy record)))
+    (funcall change candidate)
+    (when submission (append-field candidate "submissions" submission))
+    (handler-case (check-journal-capacity candidate)
+      (error () (reject "Input exceeds the remaining journal capacity")))))
+
+(defun handle-resolution (session receipt id answer &optional submission-id)
   (let* ((record (session-record session))
          (decision (find id (array-value (field record "decisions"))
                          :key (lambda (decision) (field decision "id")) :test #'equal)))
+    (multiple-value-bind (submission duplicate)
+        (prepare-submission record submission-id "decision" id answer t)
+      (when duplicate
+        (finish-receipt receipt (field submission "result"))
+        (return-from handle-resolution))
     (unless (and decision (equal (field decision "status") "pending")
                  (= (field decision "generation") (session-generation session))
                  (equal id (session-waiting-decision session)))
@@ -860,7 +911,13 @@ or arbitrary condition arguments. The default reports only the condition type.")
     (let ((choices (array-value (field decision "choices"))))
       (when (and (plusp (length choices)) (not (find answer choices :test #'equal)))
         (reject "Answer is not one of this decision's choices")))
+    (preflight-input record submission
+                     (lambda (candidate)
+                       (let ((item (find id (field candidate "decisions")
+                                         :key (lambda (item) (field item "id")) :test #'equal)))
+                         (setf (field item "status") "resolved" (field item "answer") answer))))
     (setf (field decision "status") "resolved" (field decision "answer") answer)
+    (when submission (append-field record "submissions" submission))
     ;; This write must succeed before an approval or clarification can advance
     ;; the loop. On uncertain durability the actor is poisoned, never retried.
     (checkpoint session (json-object "type" "decision_resolved" "decision" decision))
@@ -871,7 +928,7 @@ or arbitrary condition arguments. The default reports only the condition type.")
             (tool-result session (json-object "error" "Permission denied")))
         (progn
           (append-message session (json-object "role" "user" "content" answer))
-          (begin-provider-round session)))))
+          (begin-provider-round session))))))
 
 (defun handle-delta (session context)
   (let ((fragment nil) (text nil))
@@ -894,29 +951,40 @@ or arbitrary condition arguments. The default reports only the condition type.")
 
 (defun process-event (session event)
   (destructuring-bind (kind receipt &rest arguments) event
-    (when (and (session-poisoned session) (member kind '(:submit :resolve :resume :discard-review)))
+    (when (and (session-poisoned session) (member kind '(:submit :resolve :resume :discard-review :acknowledge-submission)))
       (reject "Journal durability failed; reload this session before continuing"))
     (case kind
       (:initialize (checkpoint session (json-object "type" "session_ready"))
                    (finish-receipt receipt (session-id session)))
       (:submit
-       (destructuring-bind (id text) arguments
+       (destructuring-bind (id text &optional submission-id) arguments
+         (multiple-value-bind (submission duplicate)
+             (prepare-submission (session-record session) submission-id "message" nil text id)
+           (when duplicate
+             (finish-receipt receipt (field submission "result"))
+             (return-from process-event))
          (when (equal (field (session-record session) "status") "closed")
            (reject "Session is closed"))
          (when (>= (length (array-value (field (session-record session) "queue"))) (limit session "queued"))
            (reject "Session follow-up queue is full"))
-         (let* ((record (session-record session)) (previous (field record "queue")))
-           (append-field record "queue" (json-object "id" id "text" text))
-           (handler-case (check-journal-capacity record)
-             (error ()
-               (setf (field record "queue") previous)
-               (reject "Message exceeds the remaining journal capacity"))))
+         (let* ((record (session-record session)) (message (json-object "id" id "text" text)))
+           (preflight-input record submission (lambda (candidate) (append-field candidate "queue" message)))
+           (append-field record "queue" message)
+           (when submission (append-field record "submissions" submission)))
          (when (member (field (session-record session) "status") '("failed" "interrupted") :test #'equal)
            (setf (field (session-record session) "status") "idle"))
          (checkpoint session (json-object "type" "message_queued" "message_id" id))
          (finish-receipt receipt id)
-         (start-next-turn session)))
+         (start-next-turn session))))
       (:resolve (apply #'handle-resolution session receipt arguments))
+      (:acknowledge-submission
+       (let* ((record (session-record session)) (previous (field record "submissions"))
+              (item (find (first arguments) previous :key (lambda (item) (field item "id")) :test #'equal)))
+         (when item
+           (setf (field record "submissions") (remove item previous :test #'eq))
+           (handler-case (checkpoint session (json-object "type" "submission_acknowledged" "submission_id" (first arguments)))
+             (error (condition) (setf (field record "submissions") previous) (error condition))))
+         (finish-receipt receipt (not (null item)))))
       (:resume
        (when (equal (field (session-record session) "status") "closed") (reject "Session is closed"))
        (unless (current-turn session)
@@ -1032,7 +1100,7 @@ or arbitrary condition arguments. The default reports only the condition type.")
                   (json-object "version" 1 "id" (store:new-id) "provider" (copy-seq provider)
                                "model" (copy-seq model) "root" (uiop:native-namestring root)
                                "status" "idle" "generation" 0 "limits" (make-limits limits)
-                               "turns" #() "queue" #() "decisions" #() "diagnostics" #() "retained_reviews" #()
+                               "turns" #() "queue" #() "decisions" #() "diagnostics" #() "retained_reviews" #() "submissions" #()
                                "active_turn" nil "stream" "" "omitted_turns" 0)))
 
 (defun valid-id-p (id)
@@ -1213,6 +1281,18 @@ or arbitrary condition arguments. The default reports only the condition type.")
                (remember-journal-id queued (field message "id")))
       (unless (every (lambda (text) (text-p text 512 1)) (journal-array record "diagnostics" 32))
         (error "Invalid journal diagnostic")))
+    (let ((identities (make-hash-table :test 'equal)))
+      (loop for item across (journal-array record "submissions" *maximum-submissions*)
+            do (unless (and (hash-table-p item) (= 5 (hash-table-count item))
+                            (valid-id-p (field item "id"))
+                            (text-p (field item "digest") 64 64)
+                            (every (lambda (c) (find c "0123456789abcdef")) (field item "digest"))
+                            (or (and (equal "message" (field item "kind"))
+                                     (null (field item "decision_id")) (valid-id-p (field item "result")))
+                                (and (equal "decision" (field item "kind"))
+                                     (valid-id-p (field item "decision_id")) (eq t (field item "result")))))
+                 (error "Invalid durable submission receipt"))
+               (remember-journal-id identities (field item "id"))))
     (validate-retained-reviews record)
     (check-journal-capacity record)
     record))

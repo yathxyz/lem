@@ -144,3 +144,27 @@ type, never arbitrary printed error arguments. Methods must be pure and avoid
 request bodies, headers and raw stderr. Invalid, excessive or failing summaries
 fall back to the condition type. OpenRouter exposes its safe category and numeric
 status in durable session diagnostics so authentication failures are actionable.
+
+## Durable input identities
+
+`submit-message` and `resolve-decision` accept an optional `:submission-id`, a
+fresh 32-character lowercase hexadecimal identity owned by the input composer.
+The input and its acceptance receipt are written in the same session checkpoint,
+before finishing the request or continuing agent execution. Receipt capacity and
+combined journal capacity are checked before mutating the queue or decision.
+The normal pending tool result reservation also applies to these checkpoints.
+
+`find-submission session id` reads a copied cached acceptance record with exact
+ID, message/decision kind, decision ID, SHA-256 input digest, and accepted result.
+The 32 retained receipts are independent of conversation trimming. Repeating the
+same unacknowledged identity and input returns its original result without adding
+work; different input or decision reuse fails. Receipt presence proves durable
+acceptance; absence alone does not prove rejection while a worker might still
+submit. Restoring sessions does not replay either queued input or decisions.
+
+`acknowledge-submission session id` returns an asynchronous receipt for deleting
+that retained acceptance record. Only the input owner may call it, after first
+fsyncing its own accepted marker or clearing the exact submitted revision.
+Acknowledged IDs must never be reused. Capacity is never released by automatic
+history trimming or age-based eviction. A draft whose session is missing or
+invalid must preserve uncertain acceptance rather than guess from text/history.

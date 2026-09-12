@@ -8,6 +8,7 @@
            :list-retained-reviews :find-retained-review :discard-retained-review
            :subscribe-session :unsubscribe-session
            :submit-message :resume-session :resolve-decision :interrupt-session :close-session
+           :find-submission :acknowledge-submission
            :receipt-id :await-request
            :operation-session-id :operation-turn-id :operation-generation
            :operation-root :operation-live-p :check-operation

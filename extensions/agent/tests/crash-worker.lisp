@@ -37,6 +37,23 @@
                     (loop (sleep 1)))))
     (let ((session (lem-agent:create-session manager :provider "fake" :model "fake" :root directory)))
       (lem-agent:await-request (lem-agent:session-ready session))
+      (when (member phase '("submission-before" "submission-after") :test #'equal)
+        (flet ((stop-at-boundary ()
+                 (durable-marker (merge-pathnames "ready.txt" directory) (lem-agent:session-id session))
+                 (loop (sleep 1))))
+          (if (equal phase "submission-before")
+              (let ((write (symbol-function 'lem-daemon/recovery-store:write-private-json)))
+                (setf (symbol-function 'lem-daemon/recovery-store:write-private-json)
+                      (lambda (directory id record &rest options)
+                        (when (plusp (length (gethash "submissions" record))) (stop-at-boundary))
+                        (apply write directory id record options))))
+              (lem-agent:subscribe-session session
+                                           (lambda (event)
+                                             (when (equal "message_queued" (gethash "type" event))
+                                               (stop-at-boundary)))))
+          (lem-agent:await-request
+           (lem-agent:submit-message session "durable draft text"
+                                     :submission-id "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))))
       (when (equal phase "review-before")
         (lem-agent:subscribe-session session
                                     (lambda (event)
