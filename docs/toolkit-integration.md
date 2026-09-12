@@ -111,12 +111,21 @@ As of 12 September 2026, configured gates pass 17 compilation, 22 daemon,
 12 proposal and 27 native Git assertions. Startup and the existing LLM workflow
 gate also pass. The rebuilt profile passes private systemd readiness, live-job,
 daemon SIGKILL/restart, interrupted job recovery and deliberate-stop checks.
-The broader VCS gate is being rerun after the status-pane fix in `6fd3268bb`.
+The broader configured VCS gate passes after the status-pane fix in `6fd3268bb`
+and test readiness corrections in `391564e9e`/`aa4882ae6`: 275 reported workflow
+checks and 377 static assertions, with no failures. The driver now waits for an
+actual native todo view before sending mode keys; Git writing the file is an
+earlier event. A delayed-callback fixture proves that distinction. The long-URL
+fixture also replaces the whole prompt instead of deleting a fixed character count.
 Archived logs include the earlier failures and subsequent correction evidence:
 [toolkit validation](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/toolkit).
 
-The native agent core in `559ca9cac` passes 18 source groups and remains optional.
-Its provider/tool adapters and disposable buffer views require configured
-integration and live-provider acceptance. Job records and retained output tails
-currently accumulate in the manager; an explicit retention policy is still needed
-before long-running daily operation.
+The shared toolkit milestone is complete. The parallel native agent integration
+now has configured provider/tools/views, passing terminal/SDL and recovery gates,
+and one completed real OpenRouter round; it follows this frozen toolkit baseline
+into the canonical checkout. Durable edit-candidate and unsent-draft recovery
+remain subsequent work. Job records and retained output tails currently
+accumulate in the manager; an explicit retention policy is still needed before
+long-running daily operation. Original worktree heads, status, tracked patches
+and untracked prototype bytes were rechecked against the preservation archive
+after the final gate and still match. Installed profiles/services are unchanged.
