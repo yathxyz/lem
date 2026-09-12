@@ -22,6 +22,7 @@
                  (lem-toolkit/jobs:job-manager-ready-p lem-toolkit/jobs:*default-manager*))
       (setf lem-toolkit/jobs:*default-manager*
             (lem-toolkit/jobs:open-job-manager :name (lem-daemon:server-name))))
+    (configure-native-agent)
     (lem-daemon/recovery:enable :server-name (lem-daemon:server-name) :interval 5)))
 
 (defun stop-configured-daemon-server ()
@@ -32,9 +33,11 @@
          (error (condition)
            (format *error-output* "~&Final recovery checkpoint failed: ~a~%" condition)))
     (unwind-protect
-         (when lem-toolkit/jobs:*default-manager*
-           (lem-toolkit/jobs:close-job-manager lem-toolkit/jobs:*default-manager*)
-           (setf lem-toolkit/jobs:*default-manager* nil))
+         (unwind-protect
+              (stop-configured-native-agent)
+           (when lem-toolkit/jobs:*default-manager*
+             (lem-toolkit/jobs:close-job-manager lem-toolkit/jobs:*default-manager*)
+             (setf lem-toolkit/jobs:*default-manager* nil)))
       (lem-daemon/recovery:disable)
       (lem-daemon:stop-server))))
 

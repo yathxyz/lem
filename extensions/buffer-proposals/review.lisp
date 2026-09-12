@@ -1,5 +1,8 @@
 (in-package :lem-buffer-proposals)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (export '(buffer-proposal-list buffer-proposal-open)))
+
 (defparameter *review-section-limit* (* 64 1024))
 (defvar *proposal-review-keymap* (make-keymap :description "Buffer proposal"))
 
@@ -102,3 +105,101 @@
 (define-key *proposal-review-keymap* "Return" 'proposal-review-source)
 (define-key *proposal-review-keymap* "g" 'proposal-review-refresh)
 (define-key *proposal-review-keymap* "q" 'quit-active-window)
+
+(defvar *proposal-list-keymap* (make-keymap :description "Buffer proposals"))
+
+(define-major-mode proposal-list-mode nil
+    (:name "Proposals" :keymap *proposal-list-keymap*)
+  (setf (buffer-read-only-p (current-buffer)) t))
+
+(defun proposal-list-label (text limit)
+  "Keep untrusted source names on one bounded display line."
+  (let ((label (subseq text 0 (min (length text) limit))))
+    (map-into label (lambda (character) (if (graphic-char-p character) character #\?)) label)
+    (if (> (length text) limit) (concatenate 'string label "...") label)))
+
+(defun open-listed-proposal (id proposal)
+  (require-editor-thread)
+  (unless (eq proposal (find-proposal id))
+    (editor-error "This proposal is no longer retained; refresh the proposal list"))
+  (show-proposal proposal))
+
+(defun render-proposal-list (buffer)
+  (require-editor-thread)
+  (let ((proposals (list-proposals)))
+    (with-buffer-read-only buffer nil
+      (erase-buffer buffer)
+      (let ((point (buffer-point buffer)))
+        (insert-string point
+                       (format nil "Buffer proposals (~d)~%Return review   g refresh   q close~2%ID  STATE  SOURCE (line:column)~%"
+                               (length proposals)))
+        (let ((first-row (position-at-point point)))
+          (loop for proposal in proposals repeat 64
+                do (let* ((selected proposal)
+                          (id (proposal-id proposal))
+                          (location (proposal-source-location proposal))
+                          (source (proposal-source-buffer proposal)))
+                     (with-point ((start point :right-inserting))
+                       (lem/button:insert-button
+                        point
+                        (format nil "~a  ~(~a~)  ~a:~d:~d~a"
+                                (proposal-list-label id 128) (proposal-state proposal)
+                                (proposal-list-label (or (getf location :filename)
+                                                         (getf location :buffer-name)) 256)
+                                (getf location :line) (getf location :column)
+                                (if (and source (not (deleted-buffer-p source))) "" " [source closed]"))
+                        (lambda () (open-listed-proposal id selected)))
+                       (insert-character point #\Newline)
+                       ;; The row carries identity; its label is never parsed.
+                       (put-text-property start point 'listed-proposal (cons id proposal)))))
+          (cond ((null proposals) (insert-string point (format nil "No retained proposals.~%")))
+                ((> (length proposals) 64)
+                 (insert-string point (format nil "Only the first 64 proposals are displayed.~%"))))
+          (move-to-position point first-row)))
+      (buffer-mark-saved buffer)))
+  buffer)
+
+(define-command buffer-proposal-list () ()
+  "List retained edit proposals without applying or saving their candidates."
+  (require-editor-thread)
+  (let ((buffer (or (find-if (lambda (buffer) (buffer-value buffer 'proposal-list)) (buffer-list))
+                    (make-buffer (unique-buffer-name "*Buffer Proposals*") :enable-undo-p nil))))
+    (setf (buffer-value buffer 'proposal-list) t)
+    (change-buffer-mode buffer 'proposal-list-mode)
+    (setf (current-window) (pop-to-buffer buffer))
+    ;; Switching can restore an older cursor saved for this buffer. Render and
+    ;; choose the first row after that restoration, including when reopening.
+    (render-proposal-list buffer)
+    buffer))
+
+(define-command proposal-list-open-selected () ()
+  (require-editor-thread)
+  (with-point ((point (current-point)))
+    (line-start point)
+    (let ((row (text-property-at point 'listed-proposal)))
+      (unless row (editor-error "There is no proposal on this line"))
+      (open-listed-proposal (car row) (cdr row)))))
+
+(define-command proposal-list-refresh () ()
+  (require-editor-thread)
+  (unless (buffer-value (current-buffer) 'proposal-list)
+    (editor-error "This buffer does not list proposals"))
+  (render-proposal-list (current-buffer)))
+
+(defun prompt-for-proposal-id ()
+  (require-editor-thread)
+  (let ((ids (mapcar #'proposal-id (list-proposals))))
+    (unless ids (editor-error "There are no retained proposals"))
+    (prompt-for-string "Proposal ID: "
+                       :completion-function (lambda (input) (completion-strings input ids)))))
+
+(define-command buffer-proposal-open (id) ((prompt-for-proposal-id))
+  "Open a retained proposal by its exact ID for human review."
+  (require-editor-thread)
+  (let ((proposal (find-proposal id)))
+    (unless proposal (editor-error "Unknown or forgotten proposal ID: ~a" id))
+    (show-proposal proposal)))
+
+(define-key *proposal-list-keymap* "Return" 'proposal-list-open-selected)
+(define-key *proposal-list-keymap* "g" 'proposal-list-refresh)
+(define-key *proposal-list-keymap* "q" 'quit-active-window)

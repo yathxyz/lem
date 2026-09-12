@@ -10,3 +10,52 @@
   :perform (test-op (operation component)
              (declare (ignore operation))
              (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/openrouter"
+  :description "Bounded OpenRouter streaming transport using managed Lisp jobs"
+  :depends-on ("lem-agent" "lem-toolkit/jobs")
+  :components ((:file "openrouter")))
+
+(defsystem "lem-agent/openrouter-tests"
+  :depends-on ("lem-agent/openrouter" "rove")
+  :components ((:file "tests/openrouter"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/process-tools"
+  :description "Approved managed process tools for native Lisp agent sessions"
+  :depends-on ("lem-agent" "lem-toolkit/jobs")
+  :components ((:file "process-tools/tools")))
+
+(defsystem "lem-agent/process-tools-tests"
+  :depends-on ("lem-agent/process-tools" "rove")
+  :components ((:file "process-tools/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/ui"
+  :description "Disposable native agent views and deliberate asynchronous input"
+  :depends-on ("lem-agent" "lem/core")
+  :components ((:file "ui")))
+
+(defsystem "lem-agent/ui/tests"
+  :depends-on ("lem-agent/ui" "lem-fake-interface" "rove")
+  :components ((:file "tests/ui"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/editor-tools"
+  :description "Root-scoped native file inspection and human-reviewed buffer proposals"
+  :depends-on ("lem-agent" "lem-buffer-proposals" "babel" "ironclad")
+  :serial t
+  :components ((:file "file-access") (:file "editor-tools")))
+
+(defsystem "lem-agent/editor-tools-tests"
+  :depends-on ("lem-agent/editor-tools" "lem-fake-interface" "rove")
+  :components ((:file "tests/editor-tools"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))

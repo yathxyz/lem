@@ -104,7 +104,7 @@
   (lock (bt2:make-lock :name "agent session")) (wake (bt2:make-condition-variable))
   queue tail (queue-count 0) thread cached-snapshot (generation 0) operation
   (subscribers (make-hash-table :test 'equal)) (workers '())
-  interrupt-pending close-pending closed poisoned
+  interrupt-pending close-pending suspend-pending closed poisoned
   ;; The remaining fields belong exclusively to the actor.
   calls (call-index 0) waiting-decision pending-tool)
 
@@ -151,6 +151,12 @@
 (defun check-manager-open (manager)
   ;; Caller holds MANAGER-LOCK, including registration/attachment during close.
   (when (manager-closed manager) (error "Agent manager is closed")))
+
+(defun manager-open-p (manager)
+  "Check manager ownership without filesystem I/O."
+  (and manager
+       (bt2:with-lock-held ((manager-lock manager))
+         (not (manager-closed manager)))))
 
 (defun register-provider (manager name function)
   (unless (and (text-p name 128 1) (functionp function)) (error "Invalid provider registration"))
@@ -266,12 +272,30 @@
           receipt))))
 
 (defun close-session (session)
+  "Permanently close a session. Host shutdown uses CLOSE-MANAGER instead."
   (bt2:with-lock-held ((session-lock session))
+    (when (session-suspend-pending session)
+      (let ((receipt (make-receipt)))
+        (finish-receipt receipt nil (make-condition 'simple-error
+                                                  :format-control "Session host is closed; restore before closing the session"))
+        (return-from close-session receipt)))
     (or (session-close-pending session)
         (let ((receipt (make-receipt)))
           (incf (session-generation session))
           (setf (session-close-pending session) receipt (session-closed session) t)
           (enqueue-locked session (list :close receipt))
+          receipt))))
+
+(defun suspend-session (session)
+  ;; The manager owns this terminal actor event. An explicit close that already
+  ;; won the session lock keeps its permanent closure; subsequent closes cannot
+  ;; enqueue work into a suspended actor after the lease has been released.
+  (bt2:with-lock-held ((session-lock session))
+    (or (session-close-pending session) (session-suspend-pending session)
+        (let ((receipt (make-receipt)))
+          (incf (session-generation session))
+          (setf (session-suspend-pending session) receipt (session-closed session) t)
+          (enqueue-locked session (list :suspend receipt))
           receipt))))
 
 (defun operation-live-locked-p (context)
@@ -386,6 +410,18 @@
 
 (defun limit (session name) (field (field (session-record session) "limits") name))
 
+(defgeneric operation-error-summary (condition)
+  (:documentation "Return a bounded, credential-free diagnostic for a failed adapter.
+Methods must perform no I/O and must not expose request bodies, headers, stderr,
+or arbitrary condition arguments. The default reports only the condition type.")
+  (:method ((condition t)) (format nil "~a" (type-of condition))))
+
+(defun bounded-operation-error-summary (condition)
+  (let ((summary (ignore-errors (operation-error-summary condition))))
+    (if (and (stringp summary) (<= 1 (length summary) 512))
+        summary
+        (format nil "~a" (type-of condition)))))
+
 (defun launch-operation (session kind function)
   (let* ((turn (current-turn session))
          (context (%make-operation :session session :session-id (session-id session)
@@ -393,7 +429,8 @@
                                    :root (copy-seq (field (session-record session) "root"))
                                    :generation (field (session-record session) "generation") :kind kind)))
     (bt2:with-lock-held ((session-lock session))
-      (unless (= (operation-generation context) (session-generation session))
+      (unless (and (not (session-closed session))
+                   (= (operation-generation context) (session-generation session)))
         (return-from launch-operation nil))
       (setf (session-workers session)
             (remove-if-not (lambda (entry)
@@ -413,10 +450,11 @@
                        (operation-result context (if (eq kind :provider) :provider-done :tool-done) result)))
                  (operation-cancelled () (operation-result context :operation-failed "Operation interrupted"))
                  (error (condition)
-                   ;; Adapter errors may contain request credentials. Persist the
-                   ;; condition type, never its arbitrary printed arguments.
+                   ;; Adapter errors may contain credentials. Only explicit safe
+                   ;; methods may supply more than the default condition type.
                    (operation-result context :operation-failed
-                                     (format nil "~a failed (~a)" kind (type-of condition))))))
+                                     (format nil "~a failed (~a)" kind
+                                             (bounded-operation-error-summary condition))))))
              :name (format nil "agent ~a" kind))))
       (bt2:with-lock-held ((session-lock session)) (push (cons worker context) (session-workers session))))
     context))
@@ -488,6 +526,14 @@
   (setf (field (session-record session) "generation") (session-generation session))
   (checkpoint session (json-object "type" status "reason" reason)))
 
+(defun suspend-active (session)
+  (let ((context (cancel-operation session)))
+    (when (current-turn session)
+      (preserve-interrupted-stream session context)
+      (end-active-turn session "interrupted" "host-shutdown")))
+  (setf (field (session-record session) "generation") (session-generation session))
+  (checkpoint session (json-object "type" "host_suspended" "reason" "host-shutdown")))
+
 (defun fail-session (session reason)
   (bt2:with-lock-held ((session-lock session)) (incf (session-generation session)))
   (preserve-interrupted-stream session (cancel-operation session))
@@ -533,7 +579,8 @@
 
 (defun start-next-turn (session)
   (let* ((record (session-record session)) (queue (array-value (field record "queue"))))
-    (when (and (null (current-turn session)) (plusp (length queue))
+    (when (and (not (session-closed session))
+               (null (current-turn session)) (plusp (length queue))
                (= (field record "generation") (session-generation session))
                (equal (field record "status") "idle"))
       (let* ((message (aref queue 0))
@@ -542,7 +589,8 @@
                                 (vector (json-object "role" "user" "content" (field message "text"))))))
         (let ((generation
                 (bt2:with-lock-held ((session-lock session))
-                  (unless (= (field record "generation") (session-generation session))
+                  (unless (and (not (session-closed session))
+                               (= (field record "generation") (session-generation session)))
                     (return-from start-next-turn nil))
                   (incf (session-generation session)))))
           (setf (field record "generation") generation
@@ -746,6 +794,7 @@
        (bt2:with-lock-held ((session-lock session)) (setf (session-interrupt-pending session) nil))
        (finish-receipt receipt t))
       (:close (stop-active session "closed" "session-closed") (finish-receipt receipt t))
+      (:suspend (suspend-active session) (finish-receipt receipt t))
       (:diagnostic (diagnostic session (first arguments)) (checkpoint session))
       (:delta (handle-delta session (first arguments)))
       (:provider-done
@@ -784,7 +833,7 @@
             (error ()
               (setf (session-poisoned session) t)
               (publish session (json-object "type" "failed" "reason" "Journal could not be updated"))))))
-      (when (eq (first event) :close)
+      (when (member (first event) '(:close :suspend))
         (bt2:with-lock-held ((session-lock session))
           (dolist (pending (session-queue session))
             (finish-receipt (second pending) nil (make-condition 'request-rejected :message "Session closed")))
@@ -976,14 +1025,16 @@
       (values (nreverse sessions) failures))))
 
 (defun close-manager (manager &key (wait nil))
-  "Close sessions asynchronously. WAIT is a blocking supervisor API.
-The directory lease survives until all journal-writing actors have stopped."
+  "Suspend the host asynchronously without permanently closing its sessions.
+Active effects become interrupted/unknown and queued work is never replayed.
+WAIT is a blocking supervisor API. The directory lease survives until all
+journal-writing actors have stopped, independently of uncooperative workers."
   (let ((thread nil) (receipts nil))
     (bt2:with-lock-held ((manager-lock manager))
       (setf (manager-closed manager) t)
       (let ((sessions (loop for session being the hash-values of (manager-session-table manager)
                             collect session)))
-        (setf receipts (mapcar #'close-session sessions))
+        (setf receipts (mapcar #'suspend-session sessions))
         (unless (manager-close-thread manager)
           (setf (manager-close-thread manager)
                 (bt2:make-thread

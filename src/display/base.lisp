@@ -38,6 +38,10 @@ existing text.")
   "T if the screen is currently being redrawn by `redraw-display`.
 Used to prevent recursive `redraw-display` calls.")
 
+(defvar *after-redraw-display-hook* '()
+  "Run after a frame finishes redisplay, outside its recursive redraw guard.
+Frontends can use this to refresh other frames after asynchronous buffer edits.")
+
 (defgeneric window-redraw (window force)
   (:method (window force)
     (redraw-buffer (implementation) (window-buffer window) window force)
@@ -91,4 +95,5 @@ Used to prevent recursive `redraw-display` calls.")
               (adjust-all-window-size))
             (redraw-all-windows)
             (notify-frame-redraw-finished (current-frame)))))
-    (note-redisplay-done)))
+    (note-redisplay-done)
+    (run-hooks *after-redraw-display-hook*)))

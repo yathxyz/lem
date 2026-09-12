@@ -75,6 +75,23 @@ be rejected or replaced by a fresh capture. Existing `llm-rewrite` now uses this
 same API. Its normal accept and manual conflict-marker action both reject stale
 source. Its provider/backend behavior is unchanged.
 
+From any buffer, `M-x buffer-proposal-list` lists retained proposals with their
+IDs, states and source locations. Return or clicking a row opens that exact
+proposal; `g` refreshes the list and `q` closes it. The list displays at most 64
+rows, with bounded source labels and control characters replaced for display.
+Labels do not determine selection: each row retains its proposal object and ID.
+A forgotten row reports that it is no longer retained and requires a refresh.
+Closed sources remain reviewable as conflicts; source navigation explains that
+the original buffer is no longer open.
+
+Use `M-x buffer-proposal-open` to enter an ID copied from an agent tool result;
+completion offers the currently retained IDs. Listing and opening only display
+the proposal. Acceptance remains the explicit `A` action after reviewing its
+current candidate, and stale approvals preserve human text. Closing or killing
+either view leaves the proposal retained, so both commands can reopen it. These
+commands perform no disk or network I/O and do not restore IDs across daemon
+restart.
+
 Run the focused source-asserting suite with
 `scripts/run-tests.sh lem-buffer-proposals/tests` (set `LEM_QUICKLISP_SETUP` to a
 dependency environment if necessary). From the Lem root,

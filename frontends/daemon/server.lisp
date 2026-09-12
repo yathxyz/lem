@@ -402,8 +402,12 @@
           (move-point (buffer-point buffer) (lem-core::%window-point window)))
         (run-hooks *activate-frame-hook* old-frame frame)))))
 
+(defvar *redrawing-daemon-sessions* nil)
+
 (defun redraw-other-sessions (active)
-  (let ((restore (if (get-frame active)
+  (when *redrawing-daemon-sessions* (return-from redraw-other-sessions))
+  (let ((*redrawing-daemon-sessions* t)
+        (restore (if (get-frame active)
                      active
                      *daemon-root-implementation*)))
     (unwind-protect
@@ -416,11 +420,25 @@
                (redraw-display :force t))))
       (activate-implementation restore))))
 
-(defun redraw-daemon-sessions-after-command ()
+(defun redraw-daemon-sessions-after-display ()
   (let ((implementation (implementation)))
-    (when (and (typep implementation 'daemon-implementation)
-               (daemon-implementation-connection implementation))
+    (when (and *daemon-running-p*
+               (typep implementation 'daemon-implementation))
       (redraw-other-sessions implementation))))
+
+(defun call-with-client-implementation (target function)
+  ;; Asynchronous display requests must switch buffer/point together with the
+  ;; implementation. Binding only *IMPLEMENTATION* leaves input in a peer buffer.
+  ;; A queued request for a frame that has since detached has no work to do.
+  (when (get-frame target)
+    (let ((previous (implementation)))
+      (unwind-protect
+           (progn
+             (activate-implementation target)
+             (funcall function))
+        (activate-implementation (if (get-frame previous)
+                                     previous
+                                     *daemon-root-implementation*))))))
 
 (defun prepare-client-input (connection implementation &optional mouse-event)
   (when (or (connection-closed-p connection) (not (get-frame implementation)))
@@ -565,8 +583,7 @@
                   (lambda () (prepare-client-input connection implementation))
                   (lambda ()
                     (insert-bracketed-paste (current-point) text)
-                    (redraw-display :force t)
-                    (redraw-other-sessions implementation))))))
+                    (redraw-display :force t))))))
              (t
               (let ((key (make-key
                           :ctrl (bool-field message "ctrl")
@@ -588,18 +605,20 @@
                (height (require-integer message "height" 5 1000)))
            (send-event
             (lambda ()
-              (with-implementation implementation
-                (setf (daemon-implementation-width implementation) width
-                      (daemon-implementation-height implementation) height)
-                (lem-core::adjust-all-window-size)
-                (redraw-display :force t))))
+              (call-with-client-implementation
+               implementation
+               (lambda ()
+                 (setf (daemon-implementation-width implementation) width
+                       (daemon-implementation-height implementation) height)
+                 (lem-core::adjust-all-window-size)
+                 (redraw-display :force t)))))
            (response-ok connection id "accepted")))
         ((string= type "redisplay")
          (let ((implementation (or (connection-implementation connection)
                                    (error "Connection has no attached frame"))))
            (send-event (lambda ()
-                         (with-implementation implementation
-                           (redraw-display :force t))))
+                         (call-with-client-implementation
+                          implementation (lambda () (redraw-display :force t)))))
            (response-ok connection id "accepted")))
         ((string= type "detach")
          (send-event (lambda () (detach-connection-frame-on-editor connection)))
@@ -754,15 +773,15 @@
                  'daemon-kill-buffer-hook)
     (add-hook (variable-value 'kill-buffer-hook :global t)
               'daemon-kill-buffer-hook)
-    (remove-hook *post-command-hook* 'redraw-daemon-sessions-after-command)
-    (add-hook *post-command-hook* 'redraw-daemon-sessions-after-command 10000)
+    (remove-hook *after-redraw-display-hook* 'redraw-daemon-sessions-after-display)
+    (add-hook *after-redraw-display-hook* 'redraw-daemon-sessions-after-display 10000)
     (configure-editor-environment)))
 
 (defun stop-daemon-transport ()
   (setf *daemon-running-p* nil)
   (remove-hook (variable-value 'kill-buffer-hook :global t)
                'daemon-kill-buffer-hook)
-  (remove-hook *post-command-hook* 'redraw-daemon-sessions-after-command)
+  (remove-hook *after-redraw-display-hook* 'redraw-daemon-sessions-after-display)
   (when *daemon-listener*
     (transport:close-local-listener *daemon-listener*))
   (let ((connections (bt2:with-lock-held (*daemon-lock*)

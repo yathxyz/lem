@@ -27,7 +27,11 @@
           pkgs = import nixpkgs { inherit system; };
           lemPatchedSrc = lem.outPath;
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (old: {
-            systems = old.systems ++ [ "lem-daemon/recovery" "lem-toolkit/jobs-ui" ];
+            systems = old.systems ++ [
+              "lem-daemon/recovery" "lem-toolkit/jobs-ui"
+              "lem-agent/openrouter" "lem-agent/process-tools"
+              "lem-agent/editor-tools" "lem-agent/ui"
+            ];
             lispLibs = old.lispLibs ++ [ pkgs.sbcl.pkgs.ironclad ];
           });
           lemLspTest = lemNcurses.overrideLispAttrs (
@@ -399,6 +403,8 @@
                 export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
                 export LEM_TOOLKIT_SBCL=${lib.getExe pkgs.sbcl}
                 export LEM_TOOLKIT_GUARDIAN=${lemPatchedSrc}/extensions/toolkit/guardian.lisp
+                export LEM_AGENT_CURL=${lib.getExe pkgs.curl}
+                export LEM_AGENT_CA_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
                 export LEM_YATH_MCP_FETCH_PROGRAM=${lib.getExe' pkgs.uv "uvx"}
                 export LEM_YATH_MCP_DOCKER_PROGRAM=${lib.getExe pkgs.docker-client}
                 export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
@@ -446,6 +452,8 @@
               export LEM_YATH_TIMEOUT_PROGRAM=${lib.getExe' pkgs.coreutils "timeout"}
               export LEM_TOOLKIT_SBCL=${lib.getExe pkgs.sbcl}
               export LEM_TOOLKIT_GUARDIAN=${lemPatchedSrc}/extensions/toolkit/guardian.lisp
+              export LEM_AGENT_CURL=${lib.getExe pkgs.curl}
+              export LEM_AGENT_CA_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
               export LEM_YATH_LEM_SOURCE=${lemPatchedSrc}
               export LEM_YATH_MCP_FETCH_PROGRAM="''${LEM_YATH_MCP_FETCH_PROGRAM:-${lib.getExe' pkgs.uv "uvx"}}"
               export LEM_YATH_MCP_DOCKER_PROGRAM="''${LEM_YATH_MCP_DOCKER_PROGRAM:-${lib.getExe pkgs.docker-client}}"
@@ -602,6 +610,16 @@
             '';
           };
 
+          nativeAgentTest = pkgs.writeShellApplication {
+            name = "lem-yath-native-agent-test";
+            runtimeInputs = [ pkgs.python3 ];
+            text = ''
+              export LEM_BIN=${lemYath}/bin/lem
+              export LEMCLIENT_BIN=${lemClient}/bin/lemclient
+              exec python3 ${self}/scripts/native-agent-test.py
+            '';
+          };
+
           managedCompilationTest = pkgs.writeShellApplication {
             name = "lem-yath-managed-compilation-test";
             runtimeInputs = [ pkgs.python3 ];
@@ -726,6 +744,7 @@
             boot-test = mkTestApp "lem-yath-boot-test" "boot-test.sh";
             startup-test = mkTestAppWithLem lemYath "lem-yath-startup-test" "startup-test.sh";
             daemon-test = mkApp "${daemonTest}/bin/lem-yath-daemon-test" "Test the configured native daemon lifecycle";
+            native-agent-test = mkApp "${nativeAgentTest}/bin/lem-yath-native-agent-test" "Test native agent workflows and recovery with two terminal clients";
             buffer-proposal-test = mkApp "${bufferProposalTest}/bin/lem-yath-buffer-proposal-test" "Test revision-safe native buffer proposals";
             git-rebase-test = mkApp "${gitRebaseTest}/bin/lem-yath-git-rebase-test" "Test native Git rebase editor callbacks";
             completion-test = mkTestApp "lem-yath-completion-test" "completion-test.sh";
@@ -871,6 +890,10 @@
             startup = mkCheckWithLem lemYath "startup" "startup-test.sh";
             daemon = pkgs.runCommand "lem-yath-daemon-check" { } ''
               ${daemonTest}/bin/lem-yath-daemon-test
+              touch "$out"
+            '';
+            native-agent = pkgs.runCommand "lem-yath-native-agent-check" { } ''
+              ${nativeAgentTest}/bin/lem-yath-native-agent-test
               touch "$out"
             '';
             git-rebase = pkgs.runCommand "lem-yath-git-rebase-check" { } ''

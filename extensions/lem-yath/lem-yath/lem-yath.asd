@@ -12,6 +12,7 @@
   :components ((:file "package")
                (:file "base")
                (:file "private-files")
+               (:file "agent" :if-feature (:and :sbcl :linux))
                (:file "daemon")
                (:file "workspace")
                (:file "direnv")
