@@ -45,7 +45,10 @@
       (progn
         (store::check-json-depth text 16)
         (with-input-from-string (stream text)
-          (let ((value (yason:parse stream :object-as :hash-table)))
+          (let ((value (yason:parse stream :object-as :hash-table
+                                         :json-booleans-as-symbols t
+                                         :json-arrays-as-vectors t
+                                         :json-nulls-as-keyword nil)))
             (loop for c = (read-char stream nil) while c
                   unless (find c '(#\Space #\Tab #\Return #\Newline)) do (fail :trailing-json-data))
             (agent:json-copy value))))

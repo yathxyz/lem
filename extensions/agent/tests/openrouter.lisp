@@ -60,6 +60,29 @@
     (ok (equal "multiline" (field (parse-wire (concatenate 'string (response-head) body)) "content"))
         "SSE multiline data fields are joined before JSON parsing")))
 
+(deftest tool-json-values-ignore-ambient-parser-options
+  (let* ((yason:*parse-json-booleans-as-symbols* nil)
+         (yason:*parse-json-arrays-as-vectors* nil)
+         (yason:*parse-json-null-as-keyword* t)
+         (arguments "{\"false\":false,\"true\":true,\"null\":null,\"empty\":[],\"nested\":[false,true,null,[]]}")
+         (result (parse-wire
+                  (concatenate 'string (response-head)
+                               (event (chunk nil :tools (vector (tool-fragment 0 :id "typed" :name "read"
+                                                                                :arguments arguments))
+                                                 :finish "tool_calls"))
+                               (event "[DONE]"))))
+         (call (aref (field result "tool_calls") 0))
+         (parsed (field call "arguments")))
+    (ok (eq yason:false (field parsed "false")))
+    (ok (eq yason:true (field parsed "true")))
+    (ok (null (field parsed "null")) "JSON null retains the deliberate NIL API")
+    (ok (equalp #() (field parsed "empty")))
+    (ok (equalp (vector yason:false yason:true nil #()) (field parsed "nested")))
+    (ok (equalp parsed (yason:parse (field (field (router::wire-call call) "function") "arguments")
+                                  :object-as :hash-table :json-booleans-as-symbols t
+                                  :json-arrays-as-vectors t :json-nulls-as-keyword nil))
+        "provider arguments retain JSON values when encoded into subsequent tool history")))
+
 (deftest protocol-rejects-incomplete-and-malformed-results
   (dolist (case
             (list (cons :missing-finish (event "[DONE]"))

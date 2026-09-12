@@ -69,9 +69,12 @@
                    (equal (disk:text-digest (field attempt "text")) (field attempt "digest"))
                    (member (field attempt "status") '("prepared" "accepted" "rejected" "unknown") :test #'equal)
                    (if (equal "accepted" (field attempt "status"))
-                       (if decision (eq t (field attempt "result")) (id-p (field attempt "result")))
+                       (if decision (member (field attempt "result") '(t yason:true)) (id-p (field attempt "result")))
                        (null (field attempt "result"))))
-        (error "Invalid draft submission metadata"))))
+        (error "Invalid draft submission metadata"))
+      ;; This schema field is the core's true receipt, not arbitrary JSON data.
+      (when (and decision (equal "accepted" (field attempt "status")))
+        (setf (field attempt "result") t))))
   (unless (<= (reserved-size record) +maximum-record-bytes+) (error "Agent draft exceeds its encoded size limit"))
   record)
 
@@ -387,7 +390,10 @@ Closing a view does not cancel this request. Store ownership survives its worker
           (let ((text (babel:octets-to-string bytes :encoding :utf-8)))
             (disk::check-json-depth text 16)
             (with-input-from-string (stream text)
-              (let ((record (agent:json-copy (yason:parse stream :object-as :hash-table))))
+              (let ((record (agent:json-copy (yason:parse stream :object-as :hash-table
+                                                               :json-booleans-as-symbols t
+                                                               :json-arrays-as-vectors t
+                                                               :json-nulls-as-keyword nil))))
                 (unless (and (equal id (field record "id"))
                              (loop for c = (read-char stream nil) while c
                                    always (find c '(#\Space #\Tab #\Newline #\Return))))
