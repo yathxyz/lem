@@ -3,7 +3,7 @@
   (:use :cl)
   (:export :default-directory :new-id :write-record :read-record :list-records
            :discard-record :file-baseline :text-digest :object :field
-           :write-private-json :read-private-json :list-private-json :ensure-private-directory
+           :write-private-json :read-private-json :inspect-private-json :list-private-json :map-private-json :ensure-private-directory
            :+maximum-text-length+ :+maximum-record-bytes+))
 (in-package :lem-daemon/recovery-store)
 
@@ -220,8 +220,7 @@ Errors after rename report uncertain durability. No Lisp reader is used."
                     (setf atom-length 0))
                    ((> (incf atom-length) 64) (error "Recovery JSON atom is too long"))))))))
 
-(defun read-private-json (directory id &key (maximum-depth 16))
-  (unless (typep maximum-depth '(integer 1 64)) (error "Invalid JSON depth bound"))
+(defun read-private-octets (directory id)
   (let* ((directory (ensure-private-directory directory :create nil))
          (path (record-path directory id))
          (fd (sb-posix:open (uiop:native-namestring path)
@@ -234,20 +233,65 @@ Errors after rename report uncertain durability. No Lisp reader is used."
         (check-private-file-stat stat path)
         (unless (<= size +maximum-record-bytes+) (error "Recovery record is too large"))
         (let ((bytes (make-array size :element-type '(unsigned-byte 8))))
-          (unless (= size (read-sequence bytes stream)) (error "Truncated recovery record"))
-          (let ((text (babel:octets-to-string bytes :encoding :utf-8)))
-            (check-json-depth text maximum-depth)
-            (with-input-from-string (input text)
-              (let ((record (yason:parse input :object-as :hash-table)))
-                (unless (loop for c = (read-char input nil) while c
-                              always (find c '(#\Space #\Tab #\Newline #\Return)))
-                  (error "Trailing data in recovery record"))
-                record))))))))
+          (unless (and (= size (read-sequence bytes stream))
+                       (eq :end (read-byte stream nil :end)))
+            (error "Recovery record changed size while reading"))
+          bytes)))))
+
+(defun parse-private-json (bytes maximum-depth)
+  (let ((text (babel:octets-to-string bytes :encoding :utf-8)))
+    (check-json-depth text maximum-depth)
+    (with-input-from-string (input text)
+      (let ((record (yason:parse input :object-as :hash-table)))
+        (unless (loop for c = (read-char input nil) while c
+                      always (find c '(#\Space #\Tab #\Newline #\Return)))
+          (error "Trailing data in recovery record"))
+        record))))
+
+(defun read-private-json (directory id &key (maximum-depth 16))
+  (unless (typep maximum-depth '(integer 1 64)) (error "Invalid JSON depth bound"))
+  (parse-private-json (read-private-octets directory id) maximum-depth))
+
+(defun inspect-private-json (directory id &key (maximum-depth 16))
+  "Return parsed JSON, exact-byte SHA256, and NIL or a content-free parse diagnostic.
+Unsafe, missing, oversized or incomplete files signal without a fingerprint.
+Malformed JSON remains inspectable for deliberate fingerprint-checked cleanup."
+  (unless (typep maximum-depth '(integer 1 64)) (error "Invalid JSON depth bound"))
+  (let* ((bytes (read-private-octets directory id))
+         (fingerprint (ironclad:byte-array-to-hex-string (ironclad:digest-sequence :sha256 bytes))))
+    (handler-case (values (parse-private-json bytes maximum-depth) fingerprint nil)
+      (error (condition) (values nil fingerprint (princ-to-string (type-of condition)))))))
 
 (defun read-record (directory id)
   (let ((record (validate-record (read-private-json directory id :maximum-depth 4))))
     (unless (equal id (field record "id")) (error "Recovery identifier mismatch"))
     record))
+
+(defun map-private-json (directory function)
+  "Call FUNCTION with (ID PATHNAME) for each *.json entry, without reading payloads.
+Return the total entry count. IDs are unvalidated filename stems: malformed names,
+symlinks and nonregular entries still count; READ-PRIVATE-JSON validates selected
+records. Iteration order is unspecified and no ID catalog is retained. A missing
+directory returns zero without creating it. Callback errors close the iterator."
+  (check-type function function)
+  (let ((directory (uiop:ensure-directory-pathname directory)) (count 0))
+    (when (probe-file directory)
+      (ensure-private-directory directory :create nil)
+      (let* ((prefix (uiop:native-namestring directory))
+             (entries (sb-posix:opendir prefix)))
+        (unwind-protect
+             (loop for entry = (sb-posix:readdir entries)
+                   until (sb-alien:null-alien entry)
+                   for name = (sb-posix:dirent-name entry)
+                   when (and (>= (length name) 5)
+                             (string= ".json" name :start2 (- (length name) 5)))
+                     do (incf count)
+                        ;; Native parsing keeps wildcard characters in malformed
+                        ;; names literal; they must never become a pathname glob.
+                        (funcall function (subseq name 0 (- (length name) 5))
+                                 (sb-ext:parse-native-namestring (concatenate 'string prefix name))))
+          (sb-posix:closedir entries))))
+    count))
 
 (defun list-private-json (directory &key (maximum-depth 16))
   "Return (ID . parsed JSON) entries and (pathname . diagnostic) failures separately.
@@ -277,7 +321,7 @@ This reads only, creates no absent directory, and imposes no application schema.
             (nreverse failures))))
 
 (defun discard-record (directory id)
-  (let* ((directory (ensure-private-directory directory))
+  (let* ((directory (ensure-private-directory directory :create nil))
          (path (record-path directory id))
          (stat (path-stat path)))
     (when stat
