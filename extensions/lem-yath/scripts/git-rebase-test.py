@@ -54,7 +54,8 @@ def main():
 
         def client_run(*arguments, success=True):
             result = subprocess.run(command + list(arguments), env=env, cwd=root,
-                                    capture_output=True, text=True, timeout=20)
+                                    capture_output=True, text=True,
+                                    timeout=35 if '--wait-for-server' in arguments else 20)
             if success and result.returncode:
                 raise AssertionError(result.stderr)
             return result
@@ -228,7 +229,8 @@ def main():
                     '(not (lem-yath::legit-rebase-job-success-p result))))')) == 'T',
                       'killing an editable todo records explicit unsuccessful Git exit')
                 hook.write_text('#!' + sys.executable + '\n'
-                                'import sys\nsys.stderr.write("fixture hook refused rebase\\n")\n'
+                                'import sys\nsys.stderr.write("discarded-prefix\\n" + "x" * 70000 '
+                                '+ "\\nfixture hook refused rebase\\n")\n'
                                 'sys.exit(73)\n')
                 wait_step(delayed)
                 refused_job = start_rebase(delayed,
@@ -237,8 +239,29 @@ def main():
                 check(evaluate(job_form(refused_job,
                     '(let ((result (lem-toolkit/jobs:job-result job))) '
                     '(and (not (lem-yath::legit-rebase-job-success-p result)) '
+                    '(<= (gethash "stderr-retained-bytes" result) 65536) '
+                    '(> (gethash "stderr-bytes" result) 65536) '
+                    '(not (search "discarded-prefix" (gethash "stderr" result))) '
                     '(search "fixture hook refused rebase" (gethash "stderr" result))))')) != 'NIL',
                       'Git startup failure retains bounded diagnostic output in its job')
+
+                first_repo = fixture('concurrent-first')
+                second_repo = fixture('concurrent-second')
+                first_todo = begin(first_repo, 'HEAD')
+                second_todo = begin(second_repo, 'HEAD')
+                finish(second_todo, 'lem/legit::rebase-continue')
+                eventually(lambda: completed(second_repo) and not pending(second_todo),
+                           'selected concurrent rebase continuation')
+                check(pending(first_todo) and not job_done(last_jobs[str(first_repo)]),
+                      'continuing one repository preserves another repository\'s pending todo and job')
+                second_todo = begin(second_repo, 'HEAD')
+                finish(second_todo, 'lem/legit::rebase-abort')
+                eventually(lambda: completed(second_repo) and not pending(second_todo),
+                           'selected concurrent rebase abort')
+                check(pending(first_todo) and not job_done(last_jobs[str(first_repo)]),
+                      'aborting one repository preserves another repository\'s pending todo and job')
+                in_repo(first_repo, '(lem/porcelain:rebase-abort vcs)')
+                eventually(lambda: completed(first_repo), 'remaining concurrent rebase abort')
 
                 repo = fixture("repo ' $(touch escaped);safe")
                 todo = begin(repo)

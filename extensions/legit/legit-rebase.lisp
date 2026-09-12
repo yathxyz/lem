@@ -78,15 +78,23 @@ and
 
 (define-command rebase-abort () ()
   (with-current-project (vcs)
-    (run-function (lambda () (lem/porcelain:rebase-abort vcs)))
-    (when (get-buffer "git-rebase-todo")
-      (kill-buffer "git-rebase-todo"))))
+    (multiple-value-bind (output error-output status)
+        (lem/porcelain:rebase-abort vcs)
+      (run-function (lambda () (values output error-output status)))
+      (when (zerop status)
+        (alexandria:when-let
+            ((buffer (get-file-buffer (lem/porcelain:rebase-todo-pathname vcs))))
+          (kill-buffer buffer))))))
 
 (define-command rebase-continue () ()
   (with-current-project (vcs)
-    (run-function (lambda () (lem/porcelain:rebase-continue vcs)))
-    (when (get-buffer "git-rebase-todo")
-      (kill-buffer "git-rebase-todo"))))
+    (multiple-value-bind (output error-output status)
+        (lem/porcelain:rebase-continue vcs)
+      (run-function (lambda () (values output error-output status)))
+      (when (zerop status)
+        (alexandria:when-let
+            ((buffer (get-file-buffer (lem/porcelain:rebase-todo-pathname vcs))))
+          (kill-buffer buffer))))))
 
 (define-command rebase-skip () ()
   (with-current-project (vcs)

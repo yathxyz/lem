@@ -38,6 +38,8 @@ Git resolves the todo location through `rev-parse --git-path`, including linked
 worktrees. Todo buffers retain the selected worktree directory. An unmodified
 todo retained by a previous native client is replaced before starting another
 rebase; unsaved todo changes prevent that replacement.
+Continue and abort close only the selected repository's todo pathname, so
+simultaneous rebases with the same buffer basename remain independent.
 
 Native file requests choose a switchable text window within their destination
 frame. This lets Git open its editor while a Legit status peek is selected,
