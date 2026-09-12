@@ -80,7 +80,8 @@
          (result
            (agent:json-object
             "job_id" (jobs:job-id job) "state" state "exit_code" (field snapshot "exit-code")
-            "success" (if (and exited (eql 0 (field snapshot "exit-code"))) t yason:false)
+            "success" (if (and exited (eql 0 (field snapshot "exit-code"))
+                               (null (field snapshot "journal-error"))) t yason:false)
             "outcome" (cond (exited "completed")
                             ((member state '("cancelled" "timed-out" "signaled") :test #'equal) "interrupted")
                             (t "unknown"))

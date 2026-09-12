@@ -62,7 +62,11 @@ session and job alive. Cancellation, timeout, descendants and daemon failure use
 the shared Lisp supervisor's existing policy; there is no second process runner.
 
 Results contain JSON values only. `success` is true only for `state="exited"` and
-`exit_code=0`. A nonzero exit remains `outcome="completed"` with success false;
+`exit_code=0` and no journal error. A known exit still has `outcome="completed"`
+when its snapshot reports a durability error, but success is false and
+`journal_error` explains the storage failure. The current job controller changes
+final-write failures to `failed`; those results remain explicitly uncertain.
+A nonzero exit remains `outcome="completed"` with success false;
 signals, cancellation and timeout report `outcome="interrupted"`. Failed or
 historical interrupted jobs have `outcome="unknown"`; rejection before submission
 reports `outcome="not-started"`. The core separately records interrupted tool

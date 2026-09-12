@@ -231,3 +231,49 @@
       (allow session) (idle session)
       (ok (equal "rejected" (field (result session) "state")))
       (ok (equal "not-started" (field (result session) "outcome"))))))
+
+(deftest durability-failure-is-not-clean-process-success
+  (with-managers (manager registry root base)
+    (let* ((journal-directory (merge-pathnames "jobs/" base))
+           (session (new-session manager root
+                                 (arguments "printf ready; while ! test -f finish; do sleep 0.01; done; exit 0"))))
+      (allow session)
+      ;; Seeing output means the controller has already persisted its preceding
+      ;; running transition. Only the final journal write is denied below.
+      (wait-for (lambda ()
+                  (some (lambda (job) (search "ready" (field (jobs:job-snapshot job) "stdout")))
+                        (jobs:list-jobs registry))))
+      (unwind-protect
+           (progn
+             (sb-posix:chmod (namestring journal-directory) #o500)
+             (with-open-file (stream (merge-pathnames "finish" root)
+                                     :direction :output :if-exists :error)
+               (write-string "finish" stream))
+             (idle session)
+             (let ((result (result session)))
+               (ok (equal "failed" (field result "state")))
+               (ok (eq yason:false (field result "success")))
+               (ok (field result "journal_error") "a real denied final write remains visible")
+               (ok (equal "unknown" (field result "outcome"))
+                   "the adapter preserves the current controller's failed-state semantics")))
+        (sb-posix:chmod (namestring journal-directory) #o700))))
+  (with-managers (manager registry root base)
+    (let ((session (new-session manager root (arguments "exit 0"))))
+      (allow session) (idle session)
+      (let* ((id (field (result session) "job_id"))
+             (directory (merge-pathnames "jobs/" base))
+             (record (store:read-private-json directory id)))
+        ;; The durable schema admits a known terminal exit accompanied by a
+        ;; journal diagnostic. Load that complete record through the real API,
+        ;; rather than assuming state and journal_error are mutually exclusive.
+        (jobs:close-job-manager registry)
+        (setf (gethash "journal-error" record) "Terminal record retained a durability diagnostic")
+        (store:write-private-json directory id record)
+        (setf registry (jobs:open-job-manager :directory directory))
+        (let* ((job (jobs:find-job id registry))
+               (converted (process::process-result job (jobs:job-result job))))
+          (ok (equal "exited" (field converted "state")))
+          (ok (eql 0 (field converted "exit_code")))
+          (ok (equal "completed" (field converted "outcome")) "known process completion is preserved")
+          (ok (eq yason:false (field converted "success")) "a durability diagnostic prevents clean success")
+          (ok (equal "Terminal record retained a durability diagnostic" (field converted "journal_error"))))))))
