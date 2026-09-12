@@ -48,6 +48,8 @@
                 0)
                ((and (= (length arguments) 2) (equal (first arguments) "--jobs"))
                 (inspect-jobs (second arguments)))
+               ((and arguments (uiop:string-prefix-p "--" (first arguments)))
+                (error "Usage: lem-recover DIRECTORY [RECORD-ID] or --jobs DIRECTORY"))
                ((<= 1 (length arguments) 2)
                 (inspect-records (first arguments) (second arguments)))
                (t (error "Usage: lem-recover DIRECTORY [RECORD-ID]"))))

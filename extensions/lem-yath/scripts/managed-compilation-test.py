@@ -170,6 +170,16 @@ def main():
                                        capture_output=True, text=True, timeout=10)
                     check(r.returncode == 0 and job_id in r.stdout,
                           'standalone recovery inspects job records while the daemon is down')
+                    r = subprocess.run([recover, '--jobs'], env=env, capture_output=True,
+                                       text=True, timeout=10)
+                    check(r.returncode == 2 and 'Usage:' in r.stderr,
+                          'standalone job inspection rejects a missing directory argument')
+                    missing = root / 'absent-job-journal'
+                    r = subprocess.run([recover, '--jobs', str(missing)], env=env,
+                                       capture_output=True, text=True, timeout=10)
+                    check(r.returncode == 0 and not missing.exists()
+                          and json.loads(r.stdout)['records'] == [],
+                          'standalone job inspection creates no missing journal directory')
                 daemon = launch(log)
                 state = evaluate('(gethash "state" (lem-toolkit/jobs:job-snapshot '
                                  '(lem-toolkit/jobs:find-job ' + quoted(job_id) + ')))')
