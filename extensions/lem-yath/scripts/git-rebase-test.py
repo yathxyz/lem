@@ -206,13 +206,23 @@ def main():
                     '(let ((buffer (lem:make-buffer "rebase-command-fixture"))) '
                     '(lem:switch-to-buffer buffer) '
                     '(setf (lem:buffer-directory buffer) (uiop:getcwd)) '
-                    '(lem:insert-string (lem:buffer-point buffer) "commit" '
-                    ':commit-hash ' + quoted(delayed_hash) + ') '
-                    '(lem:buffer-start (lem:buffer-point buffer)) '
-                    '(lem/legit::legit-rebase-interactive))')
+                    '(lem/legit::show-legit-status) '
+                    '(lem:buffer-start (lem:current-point)) '
+                    '(assert (lem:search-forward (lem:current-point) "third")) '
+                    '(lem:line-start (lem:current-point)) '
+                    '(assert (alexandria:starts-with-subseq '
+                    '(lem:text-property-at (lem:current-point) :commit-hash) '
+                    + quoted(delayed_hash) + ')) '
+                    '(lem/legit::legit-rebase-interactive) '
+                    '(assert (not (lem/legit::legit-status-active-p))))')
                 check(time.monotonic() - started < 2,
                       'interactive rebase returns while a pre-rebase hook is blocked')
                 eventually(hook_started.exists, 'pre-rebase hook started')
+                eventually(lambda: evaluate('(not (lem/legit::legit-status-active-p))') == 'T',
+                           'rebase command dismisses its floating status panes')
+                check(evaluate('(string= "rebase-command-fixture" '
+                               '(lem:buffer-name (lem:current-buffer)))') == 'T',
+                      'rebase from real status restores an editable window before Git requests a file')
                 delayed_todo = metadata(delayed, 'rebase-merge/git-rebase-todo')
                 check(not delayed_todo.exists()
                       and evaluate('(null (lem:get-file-buffer ' + quoted(delayed_todo) + '))') == 'T'

@@ -743,12 +743,15 @@ If the legit window is already open, close it (toggle behavior)."
       (multiple-value-bind (output error-output status editor-request-p)
           (lem/porcelain:rebase-interactively vcs :from commit-hash)
         (run-function (lambda () (values output error-output status)))
+        ;; Leave the status peeks before the asynchronous editor request arrives;
+        ;; otherwise their floating panes cover the todo and commit message.
+        (when (and (zerop status) (legit-status-active-p))
+          (finalize-peek-legit))
         ;; Native clients display the file when Git requests its editor. Opening
         ;; it earlier could create an empty buffer before Git writes the todo.
         (when (and (zerop status) (not editor-request-p))
           (let ((buffer (find-file-buffer (lem/porcelain:rebase-todo-pathname vcs))))
             (when buffer
-              (%legit-quit)
               (switch-to-buffer buffer)
               (change-buffer-mode buffer 'legit-rebase-mode))))))))
 
