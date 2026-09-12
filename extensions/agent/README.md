@@ -16,6 +16,21 @@ return receipts. `await-request` is a **blocking worker/test API**, never an edi
 callback. `restore-sessions` and `close-manager :wait t` also belong on workers.
 Other public session operations perform no filesystem or network I/O.
 
+`close-manager` is orderly host shutdown: it invalidates operations immediately,
+stops the journal actors, and releases the manager lease. It preserves idle,
+interrupted, and failed sessions for restoration; it does not permanently close
+them. Active turns become `interrupted`; unfinished tool results distinguish
+`unknown` started effects from `not-started` calls, and pending decisions are
+retained as cancelled with a `host-shutdown` reason. Queued follow-ups remain
+durable and require explicit resume or a new submission after restoration.
+`close-session` is deliberate, permanent human closure, which survives both
+orderly shutdown and crash recovery. Session handles belonging to a shut-down
+manager cannot accept further work; restore them in a new manager first.
+Shutdown waits for journal actors before releasing ownership, even when the
+final checkpoint fails. It does not wait for arbitrary provider/tool or
+cancellation workers: those must cooperate, and their late output cannot write
+to a journal after its actor stops.
+
 Providers are functions `(request emit-text context)`. The request is a private
 JSON copy containing `model`, `messages`, and registered `tools`; credentials stay
 in adapter closures. Call `(funcall emit-text fragment)` for streamed text. Return
