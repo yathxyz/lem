@@ -14,7 +14,9 @@ session immediately; its `session-ready` receipt reports durable initialization.
 `submit-message`, `resume-session`, `resolve-decision`, `interrupt-session`, and `close-session`
 return receipts. `await-request` is a **blocking worker/test API**, never an editor
 callback. `restore-sessions` and `close-manager :wait t` also belong on workers.
-Other public session operations perform no filesystem or network I/O.
+Journal inventory, inspection, and discard are also blocking worker APIs; see
+[session retention](RETENTION.md). Other public session operations perform no
+filesystem or network I/O.
 
 `close-manager` is orderly host shutdown: it invalidates operations immediately,
 stops the journal actors, and releases the manager lease. It preserves idle,
@@ -97,7 +99,8 @@ inside the agent's 2 MiB encoded and 20,000-node journal bounds. These are stric
 than the shared store's 16 MiB record limit; archive nesting remains below the
 24-level store bound. Full capacity fails explicitly, never silently evicting
 records. Only an explicit discard frees space, including after human application
-or rejection. The number of session journals is not globally bounded by this API.
+or rejection. Manager admission separately bounds the number of session journals;
+see [session retention](RETENTION.md).
 Individual quotas are ceilings, not a promise that every maximum fits together:
 UTF-8 and JSON escaping affect the enclosing byte budget. Follow-up admission
 checks that combined budget, including reserved result growth, before modifying

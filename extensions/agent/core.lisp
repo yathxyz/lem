@@ -148,6 +148,8 @@
                                      (json-object "error" reason "outcome" "unknown"))))
 (defstruct (manager (:constructor %make-manager))
   directory lease closed close-thread (lock (bt2:make-lock :name "agent manager"))
+  (storage-lock (bt2:make-lock :name "agent journal maintenance"))
+  (maximum-sessions 64) (journal-count 0) (unloaded-count 0) pending-discard
   (providers (make-hash-table :test 'equal)) (tools (make-hash-table :test 'equal))
   (session-table (make-hash-table :test 'equal)))
 
@@ -191,13 +193,21 @@
           fd)
       (error (condition) (sb-posix:close fd) (error condition)))))
 
-(defun make-manager (&key directory)
+(declaim (ftype function count-manager-journals restore-manager-journals))
+
+(defun make-manager (&key directory (maximum-sessions 64))
   "Blocking startup API: acquire exclusive ownership before any journal access."
   (unless (and directory (uiop:absolute-pathname-p directory))
     (error "Agent manager needs an absolute private journal directory"))
+  (unless (typep maximum-sessions '(integer 1 64))
+    (error "Agent session capacity must be between 1 and 64"))
   (let* ((directory (uiop:ensure-directory-pathname directory))
          (lease (acquire-lease directory)))
-    (handler-case (%make-manager :directory directory :lease lease)
+    (handler-case
+        (let ((manager (%make-manager :directory directory :lease lease
+                                      :maximum-sessions maximum-sessions)))
+          (setf (manager-journal-count manager) (count-manager-journals manager))
+          manager)
       (error (condition) (sb-posix:close lease) (error condition)))))
 
 (defun check-manager-open (manager)
@@ -981,7 +991,7 @@ or arbitrary condition arguments. The default reports only the condition type.")
           (setf (session-queue session) nil (session-tail session) nil (session-queue-count session) 0))
         (return)))))
 
-(defun attach-session (manager record)
+(defun attach-session (manager record &key restoring)
   (let ((session (%make-session :manager manager :id (field record "id") :record record
                                 :generation (field record "generation")
                                 :cached-snapshot (json-copy record))))
@@ -989,12 +999,28 @@ or arbitrary condition arguments. The default reports only the condition type.")
       (check-manager-open manager)
       (when (gethash (session-id session) (manager-session-table manager))
         (error "Session identifier is already loaded"))
+      (when (manager-pending-discard manager)
+        (budget-error "Session cleanup durability is uncertain; retry that exact cleanup before admission"))
+      (when (or (>= (hash-table-count (manager-session-table manager))
+                    (manager-maximum-sessions manager))
+                (and (not restoring)
+                     (>= (manager-journal-count manager) (manager-maximum-sessions manager))))
+        (budget-error "Agent session capacity is full; inspect and explicitly discard closed history"))
+      ;; Reserve before the actor can publish its initial journal. Failed or
+      ;; uncertain initialization keeps its slot until deliberate cleanup.
+      (unless restoring (incf (manager-journal-count manager)))
       (bt2:with-lock-held ((session-lock session))
         (enqueue-locked session (list :initialize (session-ready session))))
-      (setf (session-thread session)
-            (bt2:make-thread (lambda () (call-with-agent-warnings session (lambda () (actor-loop session))))
-                             :name "agent session actor")
-            (gethash (session-id session) (manager-session-table manager)) session))
+      (handler-case
+          (setf (session-thread session)
+                (bt2:make-thread (lambda () (call-with-agent-warnings session (lambda () (actor-loop session))))
+                                 :name "agent session actor")
+                (gethash (session-id session) (manager-session-table manager)) session)
+        (error (condition)
+          ;; Thread creation failed before a writer existed. A later journal
+          ;; failure is handled by its actor and keeps the reservation instead.
+          (unless (or restoring (session-thread session)) (decf (manager-journal-count manager)))
+          (error condition))))
     session))
 
 (defun create-session (manager &key provider model root limits)
@@ -1193,30 +1219,7 @@ or arbitrary condition arguments. The default reports only the condition type.")
 
 (defun restore-sessions (manager)
   "Blocking worker API. Load journals; never restart their prior operations."
-  (bt2:with-lock-held ((manager-lock manager)) (check-manager-open manager))
-  (multiple-value-bind (records errors)
-      (store::list-private-json (manager-directory manager) :maximum-depth 24)
-    (let ((sessions '()) (failures errors))
-      (dolist (entry records)
-        (handler-case
-            (let* ((record (validate-restored-record (car entry) (cdr entry)))
-                   (prior-active (field record "active_turn")))
-              (when (find-session manager (car entry)) (error "Session is already loaded"))
-              (when (or prior-active (member (field record "status") '("running" "waiting") :test #'equal))
-                (interrupt-retained-reviews record "daemon-interrupted; external outcome unknown; not replayed")
-                (loop for turn across (field record "turns")
-                      when (equal (field turn "id") prior-active)
-                        do (finish-orphan-calls turn "daemon-interrupted; external outcome unknown; not replayed")
-                           (setf (field turn "status") "interrupted"))
-                (loop for decision across (field record "decisions")
-                      when (equal (field decision "status") "pending")
-                        do (setf (field decision "status") "cancelled" (field decision "reason") "daemon-interrupted"))
-                (setf (field record "status") "interrupted" (field record "active_turn") nil))
-              (incf (field record "generation"))
-              (setf (field record "stream") "")
-              (push (attach-session manager record) sessions))
-          (error (condition) (push (cons (car entry) (format nil "Invalid agent journal (~a)" (type-of condition))) failures))))
-      (values (nreverse sessions) failures))))
+  (restore-manager-journals manager))
 
 (defun close-manager (manager &key (wait nil))
   "Suspend the host asynchronously without permanently closing its sessions.
@@ -1236,10 +1239,11 @@ journal-writing actors have stopped, independently of uncooperative workers."
                    ;; Never release ownership while an actor can still write,
                    ;; even if its close receipt reports a durability failure.
                    (dolist (session sessions) (bt2:join-thread (session-thread session)))
-                   (bt2:with-lock-held ((manager-lock manager))
-                     (when (manager-lease manager)
-                       (sb-posix:close (manager-lease manager))
-                       (setf (manager-lease manager) nil))))
+                   (bt2:with-lock-held ((manager-storage-lock manager))
+                     (bt2:with-lock-held ((manager-lock manager))
+                       (when (manager-lease manager)
+                         (sb-posix:close (manager-lease manager))
+                         (setf (manager-lease manager) nil)))))
                  :name "agent manager close")))
         (setf thread (manager-close-thread manager))))
     (when wait (bt2:join-thread thread))

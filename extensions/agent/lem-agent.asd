@@ -2,11 +2,29 @@
   :description "Lisp-owned agent sessions, decisions, and turn execution"
   :depends-on ("bordeaux-threads" "lem-daemon/recovery-store")
   :serial t
-  :components ((:file "package") (:file "core")))
+  :components ((:file "package") (:file "core") (:file "retention")))
 
 (defsystem "lem-agent/tests"
   :depends-on ("lem-agent" "rove")
   :components ((:file "tests/core"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/retention-tests"
+  :depends-on ("lem-agent/tests")
+  :components ((:file "tests/retention"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/retention-ui"
+  :depends-on ("lem-agent/ui")
+  :components ((:file "retention-ui")))
+
+(defsystem "lem-agent/retention-ui-tests"
+  :depends-on ("lem-agent/retention-ui" "lem-agent/ui/tests")
+  :components ((:file "tests/retention-ui"))
   :perform (test-op (operation component)
              (declare (ignore operation))
              (symbol-call :rove :run component)))

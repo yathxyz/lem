@@ -3,6 +3,7 @@
   (:local-nicknames (:store :lem-daemon/recovery-store))
   (:export :make-manager :manager-open-p :register-provider :register-tool :create-session
            :restore-sessions :find-session :manager-sessions :close-manager
+           :session-capacity :list-session-journals :inspect-session-journal :discard-session-journal
            :session-id :session-ready :session-snapshot
            :list-retained-reviews :find-retained-review :discard-retained-review
            :subscribe-session :unsubscribe-session

@@ -1,0 +1,77 @@
+(defpackage :lem-agent/retention-ui-tests
+  (:use :cl :rove)
+  (:local-nicknames (:agent :lem-agent) (:journal :lem-agent/retention-ui)
+                    (:fixture :lem-agent/ui/tests) (:store :lem-daemon/recovery-store)))
+(in-package :lem-agent/retention-ui-tests)
+
+(defun ready (buffer)
+  (fixture::wait-for (lambda () (not (lem:buffer-value buffer 'journal::pending)))))
+
+(deftest inspection-is-inert-and-never-selects-a-window
+  (fixture::with-ui (manager directory)
+    (let* ((session (fixture::new-session manager directory))
+           (selected (lem:current-buffer)) (view (journal:show-journal manager (agent:session-id session))))
+      (ready view)
+      (ok (eq selected (lem:current-buffer)))
+      (ok (search "Stored turns: 0; queued messages: 0" (lem:buffer-text view)))
+      (ok (lem:buffer-read-only-p view))
+      (ok (null (lem:buffer-filename view)))
+      (ok (equal "idle" (fixture::state session)))
+      (let ((inventory (journal:show-journals manager)))
+        (ready inventory)
+        (ok (search (agent:session-id session) (lem:buffer-text inventory)))
+        (ok (search "Capacity:" (lem:buffer-text inventory)))
+        (ok (eq selected (lem:current-buffer)))))))
+
+(deftest malformed-history-never-presents-zero-counts
+  (fixture::with-ui (manager directory)
+    (let* ((session (fixture::new-session manager directory)) (id (agent:session-id session)))
+      (fixture::await (agent:close-session session))
+      (store:write-private-json directory id (agent:json-object "invalid" t))
+      (let ((view (journal:show-journal manager id)))
+        (ready view)
+        (ok (search "Stored turns: UNKNOWN; queued messages: UNKNOWN" (lem:buffer-text view)))
+        (ok (lem:buffer-value view 'journal::fingerprint))
+        (ok (null (lem:buffer-value view 'journal::record)))))))
+
+(deftest killed-view-cannot-be-replaced-by-a-late-inspection
+  (fixture::with-ui (manager directory)
+    (let ((gate (fixture::make-gate)) (entered nil)
+          (original (symbol-function 'agent:inspect-session-journal)))
+      (let ((session (fixture::new-session manager directory)))
+        (unwind-protect
+             (progn
+               (setf (symbol-function 'agent:inspect-session-journal)
+                     (lambda (&rest arguments) (setf entered t) (fixture::block-on gate) (apply original arguments)))
+               (let* ((view (journal:show-journal manager (agent:session-id session))) (name (lem:buffer-name view)))
+                 (fixture::wait-for (lambda () entered))
+                 (lem:delete-buffer view)
+                 (let ((replacement (lem:make-buffer name)))
+                   (lem:insert-string (lem:buffer-point replacement) "replacement buffer")
+                   (fixture::release gate)
+                   (fixture::wait-for (lambda () (zerop journal::*pending*)))
+                   (ok (equal "replacement buffer" (lem:buffer-text replacement))))))
+          (fixture::release gate) (setf (symbol-function 'agent:inspect-session-journal) original))))))
+
+(deftest discard-rechecks-exact-data-after-human-confirmation
+  (fixture::with-ui (manager directory)
+    (sb-ext:with-unlocked-packages (:lem-core)
+      (let* ((session (fixture::new-session manager directory)) (id (agent:session-id session))
+             (original (symbol-function 'lem:prompt-for-y-or-n-p)))
+        (fixture::await (agent:close-session session))
+        (let ((view (journal:show-journal manager id)))
+          (ready view) (lem:switch-to-buffer view)
+          (unwind-protect
+               (progn
+                 (setf (symbol-function 'lem:prompt-for-y-or-n-p)
+                       (lambda (&rest arguments)
+                         (declare (ignore arguments))
+                         (let ((record (store:read-private-json directory id :maximum-depth 24)))
+                           (setf (gethash "diagnostics" record) #("changed during confirmation"))
+                           (store:write-private-json directory id record :maximum-depth 24))
+                         t))
+                 (journal:agent-journal-discard) (ready view)
+                 (ok (search "failed" (lem-agent/ui:composer-status view))))
+            (setf (symbol-function 'lem:prompt-for-y-or-n-p) original))
+          (ok (store:read-private-json directory id :maximum-depth 24))
+          (ok (= 1 (gethash "reserved" (agent:session-capacity manager)))))))))
