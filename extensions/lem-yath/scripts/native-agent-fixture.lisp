@@ -101,6 +101,22 @@
 (defun retained-reviews (id)
   (coerce (agent:list-retained-reviews (session id)) 'vector))
 
+(defun draft (id)
+  (lem-agent/drafts:find-draft ui:*default-draft-store* id))
+
+(defun composer-draft (name)
+  ;; Cached metadata only; durability is checked separately through FIND-DRAFT.
+  (agent:json-copy (lem:buffer-value (lem:get-buffer name) 'ui::draft-record)))
+
+(defun draft-retired-p (id)
+  ;; Nonblocking administrative inspection of the exact draft's writer/claim.
+  (let ((store ui:*default-draft-store*))
+    (bt2:with-lock-held ((lem-agent/drafts::draft-store-lock store))
+      (not (or (gethash id (lem-agent/drafts::draft-store-owners store))
+               (gethash id (lem-agent/drafts::draft-store-retiring store))
+               (gethash id (lem-agent/drafts::draft-store-pending store))
+               (gethash id (lem-agent/drafts::draft-store-active store)))))))
+
 (defun prompt-label ()
   (let ((prompt (lem-core::frame-prompt-window (lem:current-frame))))
     (if prompt
@@ -181,8 +197,13 @@
                     collect (jobs:job-snapshot job)) 'vector)))
 
 (defun journal-directories ()
-  (agent:json-object "agents" (uiop:native-namestring (agent::manager-directory ui:*default-manager*))
-                     "jobs" (uiop:native-namestring (jobs::manager-directory jobs:*default-manager*))))
+  (let ((directories
+          (agent:json-object "agents" (uiop:native-namestring (agent::manager-directory ui:*default-manager*))
+                             "jobs" (uiop:native-namestring (jobs::manager-directory jobs:*default-manager*)))))
+    (when ui:*default-draft-store*
+      (setf (gethash "drafts" directories)
+            (uiop:native-namestring (lem-agent/drafts::draft-store-directory ui:*default-draft-store*))))
+    directories))
 
 (defun source-buffer () (lem:get-file-buffer (concatenate 'string *root* "source.txt")))
 (defun prepare-source ()

@@ -8,10 +8,12 @@ Python only orchestrates tests. The agent, tools, UI and job supervision are Lis
 
 PTY input drives message typing/submission, allow/deny, view closure, interrupt,
 resume, proposal acceptance/undo, historical restage ID prompts, and confirmed
-session-journal deletion. Administrative eval installs fake providers, creates
+session-journal deletion, plus draft checkpoint/inspection/restore/submission
+and confirmed discard. Administrative eval installs fake providers, creates
 sessions and scratch regions, selects views/points, releases a fake stream gate,
 injects one edit during a prompt, and inspects state. The driver kills isolated
-processes and reads temporary effects/journals.
+processes and reads temporary effects/journals. A fourth startup deliberately
+encounters a corrupt synthetic draft journal to test the configured failure path.
 """
 
 import fcntl
@@ -143,7 +145,7 @@ def main():
             assert condition, description
             print('PASS: ' + description, flush=True)
 
-        def start_daemon():
+        def start_daemon(drafts_available=True):
             log_path = root / f'daemon-{len(daemons)}.log'
             logs.append(log_path)
             with log_path.open('w') as log:
@@ -161,6 +163,19 @@ def main():
             check(evaluate('(not (null (and (find-package :lem-agent/edit-recovery) '
                            '(find-package :lem-agent/retention-ui))))') == 'T',
                   'configured image preloads candidate recovery and session journal UIs')
+            check(evaluate('lem-agent/ui:*require-durable-drafts*') == 'T',
+                  'configured startup requires durable drafts without a transient composer fallback')
+            if drafts_available:
+                check(evaluate('(and (lem-agent/drafts:store-open-p lem-agent/ui:*default-draft-store*) '
+                               '(eq lem-agent/ui:*default-draft-store* lem-yath::*native-agent-draft-store*))') == 'T',
+                      'configured startup supplies the shared open draft store')
+            else:
+                check(evaluate('(and (lem-yath::native-agent-ready-p) '
+                               '(lem-toolkit/jobs:job-manager-ready-p lem-toolkit/jobs:*default-manager*) '
+                               '(null lem-agent/ui:*default-draft-store*) '
+                               '(null lem-yath::*native-agent-draft-store*) '
+                               '(stringp lem-yath::*native-agent-draft-recovery-error*))') == 'T',
+                      'corrupt draft startup keeps core and jobs ready while draft admission remains unavailable')
             evaluate('(load ' + quote(fixture) + ')')
             private_directories = value('(lem-native-agent-fixture::journal-directories)')
             check(all(Path(path).resolve().is_relative_to(root) for path in private_directories.values()),
@@ -247,6 +262,9 @@ def main():
 
         def retained(identifier):
             return value('(lem-native-agent-fixture::retained-reviews ' + quote(identifier) + ')')
+
+        def draft(identifier):
+            return value('(lem-native-agent-fixture::draft ' + quote(identifier) + ')')
 
         def select_row(terminal, buffer, identifier):
             in_frame(terminal, '(lem-native-agent-fixture::point-at-text ' + quote(buffer)
@@ -434,6 +452,24 @@ def main():
             check(retained(candidate)[-1] == historical,
                   'retained candidate survives native transcript trimming without mutation')
 
+            draft_session = new_session()
+            show(left, draft_session)
+            mx(left, 'agent-compose')
+            draft_composer = current_buffer(left)
+            draft_message = 'complete:deliberately recovered draft'
+            type_text(left, draft_message)
+            eventually(lambda: text(draft_composer) == draft_message,
+                       'native unsent draft typing did not reach the composer')
+            mx(left, 'agent-checkpoint-draft')
+            saved_draft = value('(lem-native-agent-fixture::composer-draft ' + quote(draft_composer) + ')')
+            draft_id = saved_draft['id']
+            eventually(lambda: draft(draft_id) == saved_draft,
+                       'explicit native checkpoint did not durably store the exact unsent draft')
+            draft_path = Path(directories['drafts']) / (draft_id + '.json')
+            check(json.loads(draft_path.read_text()) == saved_draft
+                  and not snapshot(draft_session)['turns'] and not snapshot(draft_session)['queue'],
+                  'native checkpoint stores exact draft text, point and session without submitting a message')
+
             active, waiting = new_session(), new_session()
             submit(left, active, 'process:crash')
             decision_view(left, active)
@@ -468,6 +504,70 @@ def main():
             idle(active, 2)
             check((project / 'crash.effects').read_text() == 'effect\n',
                   'native resume after restart runs only the explicit retained follow-up')
+
+            check(draft(draft_id) == saved_draft and not snapshot(draft_session)['turns']
+                  and not snapshot(draft_session)['queue'] and snapshot(draft_session)['status'] == 'idle',
+                  'daemon restart restores the exact unsent draft without automatic submission')
+            draft_files_before = value('(lem-native-agent-fixture::editor-file-identities)')
+            mx(left, 'agent-draft-list')
+            draft_list = wait_view(left, draft_id)
+            select_row(left, draft_list, draft_id)
+            left.send(b'i')
+            draft_view = wait_view(left, 'Complete draft text:')
+            eventually(lambda: left.saw('Durable agent drafts') and left.saw('Complete draft text:'),
+                       'draft list and inspection did not reach the actual native terminal')
+            check(draft_message in text(draft_view) and draft_session in text(draft_view)
+                  and evaluate('(lem:buffer-read-only-p (lem:get-buffer ' + quote(draft_view) + '))') == 'T'
+                  and value('(lem-native-agent-fixture::editor-file-identities)') == draft_files_before
+                  and not snapshot(draft_session)['turns'],
+                  'native draft inspection shows complete text and exact session without file activation or submission')
+            left.send(b'\r')
+            eventually(lambda: current_buffer(left) != draft_view
+                       and text(current_buffer(left)) == draft_message,
+                       'native Return did not restore the exact draft composer')
+            restored_composer = current_buffer(left)
+            check(in_frame(left, '(null (lem:buffer-filename (lem:current-buffer)))') == 'T'
+                  and json.loads(in_frame(left, '(lem-agent:session-id '
+                                              '(lem:buffer-value (lem:current-buffer) '
+                                              '\'lem-agent/ui::agent-session))')) == draft_session
+                  and int(in_frame(left, '(1- (lem:position-at-point (lem:current-point)))')) == saved_draft['point']
+                  and not snapshot(draft_session)['turns'],
+                  'native draft restore creates an unnamed composer with the original session and point, still unsent')
+            left.send(b'\x03\x03')
+            eventually(lambda: text(restored_composer) == '',
+                       'deliberate C-c C-c did not durably accept and clear the recovered draft')
+            idle(draft_session)
+            eventually(lambda: draft(draft_id)['text'] == ''
+                       and draft(draft_id)['attempt']['status'] == 'accepted',
+                       'accepted draft marker and newer cleared checkpoint did not become durable')
+            accepted_draft = draft(draft_id)
+            check(accepted_draft['attempt']['revision'] == saved_draft['revision']
+                  and accepted_draft['revision'] > saved_draft['revision']
+                  and len(snapshot(draft_session)['turns']) == 1
+                  and sum(message['role'] == 'user' and message['content'] == draft_message
+                          for turn in snapshot(draft_session)['turns'] for message in turn['messages']) == 1,
+                  'explicit native draft submission runs once and distinguishes accepted text from the newer cleared revision')
+            mx(left, 'agent-close-view')
+            eventually(lambda: evaluate('(lem-native-agent-fixture::draft-retired-p '
+                                         + quote(draft_id) + ')') == 'T',
+                       'closed draft composer did not release its exact claim and pending checkpoints')
+            mx(left, 'agent-draft-list')
+            draft_list = wait_view(left, draft_id)
+            select_row(left, draft_list, draft_id)
+            left.send(b'i')
+            wait_view(left, 'Submission attempt:')
+            left.send(b'd')
+            wait_prompt(left, 'Discard 0 characters from draft ' + draft_id)
+            finish_prompt(left, 'n')
+            check(draft(draft_id) is not None and draft_path.exists(),
+                  'native draft discard cancellation preserves the accepted submission evidence')
+            left.send(b'd')
+            wait_prompt(left, 'Discard 0 characters from draft ' + draft_id)
+            finish_prompt(left, 'y')
+            eventually(lambda: draft(draft_id) is None and not draft_path.exists(),
+                       'confirmed native draft discard did not remove the exact checkpoint')
+            check(len(snapshot(draft_session)['turns']) == 1,
+                  'confirmed native draft discard removes metadata without undoing or repeating its accepted message')
 
             check(retained(candidate)[-1] == historical
                   and all(turn['id'] != origin_turn for turn in snapshot(candidate)['turns'])
@@ -586,6 +686,9 @@ def main():
                   and fast not in value('(lem-native-agent-fixture::loaded-session-ids)')
                   and not journal_path.exists(),
                   'orderly restart preserves retained candidates and keeps explicitly deleted session history absent')
+            check(draft(draft_id) is None and not draft_path.exists()
+                  and len(snapshot(draft_session)['turns']) == 1,
+                  'orderly restart keeps the discarded draft absent and its accepted message present exactly once')
             submit(left, active, 'complete:usable after orderly shutdown')
             idle(active, 3)
             check(any(message.get('content') == 'usable after orderly shutdown'
@@ -596,6 +699,42 @@ def main():
                   'orderly restart also leaves uncertain and cancelled effects unreplayed')
             run('--stop-server', '--force')
             check(daemon.wait(timeout=15) == 0, 'final native agent daemon shuts down cleanly')
+            for terminal in (left, right):
+                terminal.process.wait(timeout=10)
+
+            # This is an owned synthetic journal, created only while the daemon
+            # is stopped. No user file or existing recovery evidence is changed.
+            corrupt_path = Path(directories['drafts']) / ('f' * 32 + '.json')
+            check(not corrupt_path.exists(), 'synthetic corrupt draft fixture has a fresh exact identity')
+            corrupt_bytes = b'{"version":1,"native_fixture":"deliberately truncated draft"'
+            with corrupt_path.open('xb') as out:
+                out.write(corrupt_bytes)
+                out.flush()
+                os.fsync(out.fileno())
+            corrupt_path.chmod(0o600)
+            daemon = start_daemon(drafts_available=False)
+            left = attach(117)
+            transcript = show(left, draft_session)
+            wait_view(left, draft_session)
+            composer_count = value('(hash-table-count lem-agent/ui::*composers*)')
+            mx(left, 'agent-compose')
+            eventually(lambda: left.saw('Durable agent drafts are unavailable'),
+                       'degraded startup did not explain the native composer refusal')
+            check(current_buffer(left) == transcript
+                  and value('(hash-table-count lem-agent/ui::*composers*)') == composer_count
+                  and len(snapshot(draft_session)['turns']) == 1,
+                  'native composer creation refuses unavailable draft storage without a buffer or automatic message')
+            mx(left, 'lem-yath-agent-recovery-report')
+            report = wait_view(left, 'Draft recovery: unavailable')
+            eventually(lambda: left.saw('Draft recovery: unavailable'),
+                       'degraded recovery report did not reach the actual native terminal')
+            check('Agent core: ready' in text(report)
+                  and 'Draft recovery unavailable (' in text(report)
+                  and str(corrupt_path.parent) in text(report)
+                  and corrupt_path.read_bytes() == corrupt_bytes,
+                  'native recovery report explains degraded draft storage and preserves the corrupt journal byte for byte')
+            run('--stop-server', '--force')
+            check(daemon.wait(timeout=15) == 0, 'degraded native agent daemon shuts down cleanly')
             print(label + ' PASSED', flush=True)
         except BaseException:
             for path in logs:
