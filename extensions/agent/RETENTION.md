@@ -26,11 +26,14 @@ the shared reader imposes its independent 16 MiB bound before parsing.
 The following are **blocking worker APIs**:
 
 - `list-session-journals manager :after cursor :limit n` returns at most 64 name
-  entries, a next cursor, and the total JSON-name count. A final empty page ends
+  entries, a next cursor, and the total JSON-name count. Reserved loaded IDs and
+  pending deletion IDs remain in inventory even when no file exists. A final empty page ends
   traversal. This total includes noncanonical names and is not the slot count.
 - `inspect-session-journal manager id` returns a copied validated record, SHA-256
   of the exact bytes read, and a diagnostic. Malformed content has a fingerprint
-  and diagnostic with unknown contents/counts. Inspection never normalizes work
+  and diagnostic with unknown contents/counts. A loaded reservation whose write
+  never reached disk has the explicit `missing` fingerprint and unknown contents.
+  Inspection never normalizes work
   into a running session or checkpoints it.
 - `discard-session-journal manager id fingerprint :acknowledge-uncertain t`
   deliberately removes that entire inspected journal. The caller must obtain
@@ -40,7 +43,7 @@ The following are **blocking worker APIs**:
   and uncertain, never evidence of an active worker.
 
 A loaded session must first be explicitly closed. Cleanup waits for its closing
-actor to finish and refuses while it owns any live provider, tool, or cancellation
+actor to finish, including when the closing checkpoint failed, and refuses while it owns any live provider, tool, or cancellation
 worker. Old handles stay closed; inspection and cached views confer no execution
 authority. Subscribers retain the core's enqueue-only, nonblocking contract.
 Deletion neither reverses an external effect nor saves an editor buffer. Separate
@@ -66,7 +69,7 @@ Inspection limits its JSON preview to 65,536 characters. Eight views and eight
 pending operations are allowed. All I/O and receipt waiting runs on workers;
 completion never selects a window or overwrites a replacement for a killed view.
 
-Source acceptance covers 11 retention groups and four UI groups: concurrent
+Source acceptance covers 12 retention groups and four UI groups: concurrent
 admission, failed initialization/launch, bounded malformed startup, pagination,
 inert inspection, stale fingerprints, worker ownership, unknown tool outcomes,
 fsync failure and exact retry, lease retention without blocking manager lookups,

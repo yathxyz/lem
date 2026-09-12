@@ -237,3 +237,24 @@
                    (ok (agent:discard-session-journal manager (agent:session-id session) stamp
                                                       :acknowledge-uncertain t))))
             (fixture::open-gate gate)))))))
+
+(deftest unwritten-closed-slots-remain-visible-and-cleanable
+  (fixture::with-manager (manager directory)
+    (let ((original (symbol-function 'store:write-private-json)) (session nil))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'store:write-private-json)
+                   (lambda (&rest arguments) (declare (ignore arguments)) (error "Injected write failure before publication")))
+             (setf session (agent:create-session manager :provider "fake" :model "fake" :root directory))
+             (ok (signals (fixture::await (agent:session-ready session))))
+             (ok (signals (fixture::await (agent:close-session session))))
+             (bt2:join-thread (agent::session-thread session)))
+        (setf (symbol-function 'store:write-private-json) original))
+      (multiple-value-bind (entries cursor count) (agent:list-session-journals manager)
+        (ok (= 0 count)) (ok (equal (agent:session-id session) cursor))
+        (ok (equal (agent:session-id session) (field (first entries) "id"))))
+      (multiple-value-bind (record stamp diagnostic) (agent:inspect-session-journal manager (agent:session-id session))
+        (ok (null record)) (ok diagnostic) (ok (equal "missing" stamp))
+        (ok (signals (agent:discard-session-journal manager (agent:session-id session) stamp)))
+        (ok (agent:discard-session-journal manager (agent:session-id session) stamp :acknowledge-uncertain t)))
+      (ok (= 0 (capacity manager "reserved") (capacity manager "loaded"))))))
