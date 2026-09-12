@@ -31,6 +31,7 @@
               "lem-daemon/recovery" "lem-toolkit/jobs-ui"
               "lem-agent/openrouter" "lem-agent/process-tools"
               "lem-agent/editor-tools" "lem-agent/ui"
+              "lem-agent/edit-recovery" "lem-agent/retention-ui"
             ];
             lispLibs = old.lispLibs ++ [ pkgs.sbcl.pkgs.ironclad ];
           });

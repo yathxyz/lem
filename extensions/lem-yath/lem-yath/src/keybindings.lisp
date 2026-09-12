@@ -95,6 +95,9 @@
   #+linux ("A p" 'lem-buffer-proposals:buffer-proposal-list)
   #+linux ("A o" 'lem-buffer-proposals:buffer-proposal-open)
   #+linux ("A e" 'lem-agent/editor-tools:agent-activate-file-buffer)
+  #+linux ("A h" 'lem-agent/edit-recovery:agent-retained-reviews)
+  #+linux ("A s" 'lem-agent/edit-recovery:agent-restage-retained-review)
+  #+linux ("A H" 'lem-agent/retention-ui:agent-journals)
   #+linux ("A j" 'lem-toolkit/jobs-ui:jobs-list)
   #+linux ("A R" 'lem-yath-agent-recovery-report)
 

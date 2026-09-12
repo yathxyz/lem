@@ -50,8 +50,7 @@
             *maximum-views*)
     (editor-error "Close a journal view before opening another"))
   (let ((buffer (make-buffer (unique-buffer-name "*Agent journals*") :enable-undo-p nil)))
-    (setf (buffer-value buffer 'manager) manager (buffer-value buffer 'journal-id) id
-          (buffer-value buffer 'recovery-exclude) t)
+    (setf (buffer-value buffer 'manager) manager (buffer-value buffer 'journal-id) id)
     (change-buffer-mode buffer 'agent-journal-mode)
     (setf (buffer-read-only-p buffer) t)
     buffer))

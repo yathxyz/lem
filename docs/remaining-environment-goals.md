@@ -4,18 +4,19 @@ The user authorized implementation through successive goals and parallel agents.
 Original worktrees, installed profiles/services, and user documents remain
 preserved. No deployment or default-editor cutover is part of these goals.
 
-## Finish toolkit validation
+## Completed toolkit validation
 
 The shared Lisp job runtime, configured compilation, native Git ownership,
 proposal API, standalone recovery and private service checks are implemented and
-tested. Native Git passes 27 checks. Finish the broader configured VCS gate;
-diagnosis must distinguish product defects from the legacy driver's assumptions
-about synchronous file visits. Preserve failed and passing evidence.
+tested. Native Git passes 27 checks. The broader configured VCS gate passed 275
+reported workflow checks and 377 static assertions. Its legacy driver now waits
+for native asynchronous file visits and replaces entire remote URL prompts.
+Failed and passing evidence and original-worktree preservation are archived.
 
 ## Complete recoverable agent workspaces
 
-Integrate the tested native provider/tools/UI configuration into the canonical
-checkout after the toolkit gate. The configured native agent, daemon, compilation
+The tested native provider/tools/UI configuration is integrated into the canonical
+checkout. The configured native agent, daemon, compilation
 and SDL gates already pass in the isolated agent integration checkout. One live
 OpenRouter round has passed; broader model quality is not implied.
 
