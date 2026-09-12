@@ -1785,68 +1785,31 @@ Global `M-g n` and `M-g p` route through the most recently selected error
 provider. Starting or navigating a compilation selects its result sequence;
 using linter/LSP diagnostic navigation selects the current buffer's diagnostic
 sequence instead. `gr` reruns without prompting for a command and preserves the
-exact command, directory, and captured environment. `C-c C-k` asks the live
-guardian broker to signal its separately anchored command group with SIGINT
-and applies a bounded SIGKILL fallback to members that remain in that group.
+exact command, directory, and captured environment. `C-c C-k` now requests
+immediate cancellation through the shared Common Lisp job manager on Linux.
 
-There is deliberately only one active, fixed-name compilation session.
-Replacing it requires confirmation while its process is live. `C-c C-k`
-requests group SIGINT; the reader asynchronously applies bounded SIGKILL
-escalation, reports completion, and reaps the broker. Replacement,
-compilation-buffer kill, source reload, and editor exit synchronously terminate
-validated same-group descendants, join the reader, and reap the directly
-launched broker. The pinned Python broker starts with a fixed environment;
-Lem sends the command and captured environment over private framed stdin, so
-project values never enter its argv or environment and a project `PATH` cannot
-replace the pinned Python or Bash executables. Interrupt, kill, and release are
-serialized over that same private capability. The broker and watchdog stay
-outside the command group. The watchdog parents its unreaped anchor, and that
-anchor directly parents Bash, so stopping Bash's parent or the whole command
-group cannot stop control handling. The anchor pins the numeric group identity
-until an authorized release; Lem retains the broker pipe plus a locked
-armed-state Boolean, but never stores or signals the command PGID. The broker
-signals the pinned group, while the watchdog kills it if the broker dies. Control EOF
-disarms Lem's capability and fails the session closed. A gated fork cannot exec
-Bash until the anchor has queued `STARTED`, so even hostile project startup code
-cannot freeze Lem's synchronous launch handshake. Before exec it restores
-ordinary shell signal dispositions and drops every inherited descriptor except
-standard I/O and the anonymous script; the script's first line closes that last
-transport descriptor before the requested command launches descendants.
-Session identity plus buffer ownership prevent late events from an old process
-altering the reused buffer. Normal terminal status reaps the broker after its
-inner Bash command exits without waiting for a still-running descendant that
-merely retains inherited stdout. After the ordered `EXIT` status, an underfull
-read (possibly empty) establishes the bounded drain point; the continuously
-writing regression also proves the live reader takes the positive-underfull
-path. An out-of-group descendant therefore cannot deadlock normal completion
-or synchronous teardown, and Lem does not signal that descendant.
-`scripts/compilation-test.sh` drives all of this through real ncurses input,
-including the installed default Make, live split-SGR output, six diagnostic
-forms, navigation, deleted-origin `go`, exact recompile context,
-hostile Bash and Python startup variables, project `PATH` shadows, a strict
-broker-environment whitelist, secret-free broker argv, command-transport
-descriptor closure, stdout-retaining and continuously writing descendants,
-empty and positive underfull drain boundaries, complete and incomplete UTF-8,
-default SIGINT and SIGPIPE dispositions, broker-only death, an immediate-parent stop, and a
-SIGSTOPped command group,
-leader-only PGID reservation, resistant same-group descendants, stale
-callbacks, and synchronous buffer-kill/reload/exit cleanup.
+The compilation buffer is a view: killing it leaves its job alive and available
+through `jobs-list` and `job-open`. Replacing a running compilation still asks
+for confirmation and then requests cancellation asynchronously. Source reload
+cancels the previous adapter's job; orderly daemon shutdown closes the manager.
+The shared manager records queued intent and terminal results. Restart marks
+previous active jobs interrupted and never repeats a command automatically.
 
-This is a bounded reproduction of the configured daily workflow, not all of
-`compile.el`: commands run through non-login, non-interactive Bash and streams
-are decoded as UTF-8; the diagnostic grammar and SGR repertoire are finite;
-the captured environment is limited to 16 MiB and commands to 1 MiB; there is
-no Comint input, prefix-argument surface, custom compilation-buffer name, or
-concurrent named compilation sessions. The private command transport requires
-Linux `memfd_create` and `/proc/self/fd`, matching the flake's Linux-only target.
-The guardian is lifecycle isolation, not a same-UID security sandbox:
-`BASH_ENV` startup code can inspect the anonymous script descriptor before its
-first line closes it. Normal successful release deliberately preserves
-background jobs, including jobs that remain in the command group, while
-abnormal cleanup signals only the anchored group and cannot reach a descendant
-that escaped it. As with ordinary process supervision, an uninterruptible
-kernel sleep can also prevent a nominally bounded kill-and-reap operation from
-finishing.
+The Linux Python guardian has been removed. The stock SBCL supervisor receives
+the command and target environment through private pipes, uses bounded output,
+and owns process-group cleanup independently of editor frames. Successful
+completion also cleans same-group descendants. Closing clients does not cancel
+jobs. See the root `docs/managed-jobs.md` for supervisor failure recovery and
+`docs/toolkit-integration.md` for the configured adapter and validation boundary.
+
+There is one current fixed-name compilation view, an 8 MiB total output limit,
+a 1 MiB retained journal tail per stream, a 512 KiB private command-input limit,
+and a 24-hour timeout. UTF-8 decoding and the diagnostic/SGR grammar are bounded.
+Comint input, custom compilation-buffer names and concurrent named compilation
+views remain absent. Deliberately detached process groups and uninterruptible
+kernel waits remain outside the tested cleanup guarantee. The managed job
+registry can retain several independently inspectable jobs even though the
+compilation adapter uses one current view.
 
 ### Flycheck-style diagnostics — `lem-yath/src/lint.lisp` (verified subset)
 

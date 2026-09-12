@@ -20,17 +20,6 @@
   "Maximum incomplete ANSI control sequence retained between process chunks.")
 (defparameter *compilation-force-kill-delay* 1
   "Seconds between an interactive interrupt and a fail-safe SIGKILL.")
-(defparameter *compilation-environment-limit* (* 16 1024 1024)
-  "Maximum captured environment bytes sent to the private guardian.")
-(defparameter *compilation-environment-entry-limit* 65536
-  "Maximum captured environment entries sent to the private guardian.")
-(defparameter *compilation-command-limit* (* 1024 1024)
-  "Maximum UTF-8 command bytes sent to the private guardian.")
-(defparameter *compilation-environment-magic*
-  (make-array 8
-              :element-type '(unsigned-byte 8)
-              :initial-contents '(76 69 77 69 78 86 49 0)))
-
 (defun compilation-find-runtime-path-program (name)
   "Resolve NAME from the wrapper's immutable runtime path only."
   (loop :for directory
@@ -66,18 +55,11 @@
          (not (uiop:directory-pathname-p candidate))
          candidate)))
 
-(defun compilation-find-pinned-runtime-program (variable name)
-  "Resolve a wrapper-pinned absolute program, falling back to runtime NAME."
-  (or (compilation-pinned-program variable)
-      (compilation-find-runtime-program name)))
-
 ;; Trusted executables are cached on first use, before a selected project can
 ;; change PATH.  They must not be resolved at load time: a release image would
 ;; bake the build machine's lookups (or their absence) into the dumped values.
 (defvar *compilation-bash-program* nil)
-(defvar *compilation-guardian-python-program* nil)
 (defvar *compilation-nproc-program* nil)
-(defvar *compilation-guardian-path* nil)
 
 #+os-windows
 (defun compilation-windows-untrusted-bash-p (pathname)
@@ -147,42 +129,10 @@ second.  A git.exe already trusted by PATH pins its own install root."
             #+os-windows (compilation-windows-find-bash)
             #-os-windows (compilation-find-runtime-program "bash"))))
 
-(defun compilation-guardian-python-program ()
-  (or *compilation-guardian-python-program*
-      (setf *compilation-guardian-python-program*
-            (compilation-find-pinned-runtime-program
-             "LEM_YATH_GUARDIAN_PYTHON" "python3"))))
-
 (defun compilation-nproc-program ()
   (or *compilation-nproc-program*
       (setf *compilation-nproc-program*
             (compilation-find-runtime-program "nproc"))))
-
-(defun compilation-guardian-image-candidate ()
-  "The guardian bundled beside a deployed image's executable.
-A dumped release image has no ASDF source tree, so the release packaging
-ships compilation-guardian.py next to the executable itself."
-  #+sbcl
-  (ignore-errors
-    (probe-file
-     (merge-pathnames "compilation-guardian.py"
-                      (uiop:pathname-directory-pathname
-                       sb-ext:*core-pathname*))))
-  #-sbcl
-  nil)
-
-(defun compilation-guardian-path ()
-  (or *compilation-guardian-path*
-      (setf *compilation-guardian-path*
-            (or (ignore-errors
-                  (probe-file
-                   (asdf:system-relative-pathname
-                    :lem-yath "src/compilation-guardian.py")))
-                (ignore-errors
-                  (probe-file
-                   (asdf:system-relative-pathname
-                    :lem-yath "compilation-guardian.py")))
-                (compilation-guardian-image-candidate)))))
 
 (defun compilation-ensure-supported ()
   "Fail early on hosts that lack a usable compilation backend.
@@ -216,6 +166,15 @@ the bash.exe stubs in WindowsApps and System32 only launch WSL."
   environment
   process
   pid
+  managed-job
+  (pending-output nil)
+  output-event-p
+  terminal-result
+  terminal-delivered-p
+  (output-octets 0)
+  (output-limit *compilation-output-limit*)
+  output-overflow-p
+  output-error
   ;; Windows backend state: the Job Object HANDLE (a raw integer) that owns
   ;; the command tree, and the private launch script deleted at reap time.
   job
@@ -261,12 +220,15 @@ the bash.exe stubs in WindowsApps and System32 only launch WSL."
          (eq session (buffer-value buffer :lem-yath-compilation-session)))))
 
 (defun compilation-process-alive-p (session)
-  (let ((process (and session (compilation-session-process session))))
-    (and process
-         (bt2:with-lock-held ((compilation-session-control-lock session))
-           (compilation-session-control-armed-p session))
-         (member (compilation-session-state session)
-                 '(:starting :running :interrupting)))))
+  (and session
+       #+linux
+       (let ((job (compilation-session-managed-job session)))
+         (and job (not (lem-toolkit/jobs:job-result job))))
+       #-linux
+       (and (compilation-session-process session)
+            (compilation-control-armed-p session)
+            (member (compilation-session-state session)
+                    '(:starting :running :interrupting)))))
 
 (defun compilation-number-of-processors ()
   "Return the affinity-aware processor count used by Emacs 31's default."
@@ -840,65 +802,30 @@ the bash.exe stubs in WindowsApps and System32 only launch WSL."
     (bt2:with-lock-held ((compilation-session-control-lock session))
       (setf (compilation-session-control-armed-p session) nil))))
 
-(defun compilation-send-guardian-command (session command &key disarm)
-  "Ask SESSION's live guardian to signal its anchored command group.
-
-Lem stores no command-group ID and signals only through this private control
-pipe.  A request therefore fails closed if the guardian has exited, while the
-control lock serializes interrupt, release, and teardown requests."
-  (when session
-    (bt2:with-lock-held ((compilation-session-control-lock session))
-      (let ((sent-p
-              (and (compilation-session-control-armed-p session)
-                   (ignore-errors
-                     (compilation-write-guardian-line session command)
-                     t))))
-        (when (or disarm (not sent-p))
-          (setf (compilation-session-control-armed-p session) nil))
-        sent-p))))
-
 (defun compilation-force-stop (session)
-  ;; The live broker signals a separately anchored command group whose leader
-  ;; remains unreaped.  Lem disarms the capability with the same lock hold.
-  #+os-windows
-  (compilation-windows-force-stop session)
-  #-os-windows
-  (compilation-send-guardian-command session "KILL" :disarm t))
+  #+os-windows (compilation-windows-force-stop session)
+  #+linux
+  (when (compilation-session-managed-job session)
+    (lem-toolkit/jobs:cancel-job (compilation-session-managed-job session))))
 
 (defun compilation-stop-process-group-as (session state)
-  "Set terminal STATE, request group SIGKILL, and disarm atomically."
-  #+os-windows
-  (compilation-windows-stop-tree-as session state)
-  #-os-windows
-  (bt2:with-lock-held ((compilation-session-control-lock session))
+  #+os-windows (compilation-windows-stop-tree-as session state)
+  #+linux
+  (progn
     (setf (compilation-session-state session) state)
-    (when (compilation-session-control-armed-p session)
-      (ignore-errors
-        (compilation-write-guardian-line session "KILL")))
-    (setf (compilation-session-control-armed-p session) nil)))
+    (compilation-force-stop session)))
 
 (defun compilation-request-interrupt (session)
-  "Atomically arm the grace deadline and ask the live broker for SIGINT."
-  #+os-windows
-  (compilation-windows-request-interrupt session)
-  #-os-windows
-  (bt2:with-lock-held ((compilation-session-control-lock session))
-    (when (compilation-session-control-armed-p session)
-      (setf (compilation-session-interrupted-p session) t
-            (compilation-session-state session) :interrupting
-            (compilation-session-interrupt-deadline session)
-            (or (compilation-session-interrupt-deadline session)
-                (+ (get-internal-real-time)
-                   (round (* *compilation-force-kill-delay*
-                             internal-time-units-per-second)))))
-      (let ((sent-p
-              (ignore-errors
-                (compilation-write-guardian-line session "INT")
-                t)))
-        (unless sent-p
-          (setf (compilation-session-control-armed-p session) nil))
-        sent-p))))
+  "Request immediate cancellation through the live job owner."
+  #+os-windows (compilation-windows-request-interrupt session)
+  #+linux
+  (when (compilation-process-alive-p session)
+    (setf (compilation-session-interrupted-p session) t
+          (compilation-session-state session) :interrupting)
+    (compilation-force-stop session)
+    t))
 
+#+os-windows
 (defun compilation-reap-process (session)
   "Wait for SESSION's command owner, close its streams, and clear OS handles."
   (let ((process (compilation-session-process session))
@@ -915,23 +842,20 @@ control lock serializes interrupt, release, and teardown requests."
 
 (defun compilation-detach-session (session state)
   (when session
-    (let ((reader-thread (compilation-session-reader-thread session)))
+    ;; A result buffer is a view. The manager retains the job and its result.
+    (unless (eq state :buffer-killed)
       (compilation-stop-process-group-as session state)
-      ;; Teardown is synchronous: the reader never waits for pipe EOF after
-      ;; guardian exit, so joining also works when an out-of-group descendant
-      ;; retains stdout.  This finishes old closures before reload/editor exit.
-      (when reader-thread
-        (bt2:join-thread reader-thread))
-      (when (compilation-session-process session)
-        (compilation-reap-process session))
-      (setf (compilation-session-reader-thread session) nil
-            (compilation-session-interrupt-deadline session) nil))
+      #+os-windows
+      (progn
+        (when (compilation-session-reader-thread session)
+          (bt2:join-thread (compilation-session-reader-thread session)))
+        (when (compilation-session-process session)
+          (compilation-reap-process session)))
+      (when (eq *compilation-session* session)
+        (setf *compilation-session* nil)))
     (when (compilation-session-owns-buffer-p session)
       (setf (buffer-value (compilation-session-buffer session)
-                          :lem-yath-compilation-session)
-            nil))
-    (when (eq *compilation-session* session)
-      (setf *compilation-session* nil))
+                          :lem-yath-compilation-session) nil))
     (when (eq *lem-yath-next-error-source* :compilation)
       (setf *lem-yath-next-error-source* :diagnostic))))
 
@@ -956,52 +880,7 @@ control lock serializes interrupt, release, and teardown requests."
   "Return true when the currently available output did not fill BUFFER."
   (< octet-count (length buffer)))
 
-(defun compilation-write-uint32 (stream value)
-  (let ((octets (make-array 4 :element-type '(unsigned-byte 8))))
-    (dotimes (index 4)
-      (setf (aref octets index)
-            (ldb (byte 8 (* 8 (- 3 index))) value)))
-    (write-sequence octets stream)))
-
-(defun compilation-environment-entry-octets (entry)
-  (unless (and (stringp entry)
-               (let ((separator (position #\= entry)))
-                 (and separator (plusp separator)))
-               (not (find (code-char 0) entry)))
-    (error "Compilation captured an invalid environment entry"))
-  (babel:string-to-octets entry :encoding :utf-8 :errorp t))
-
-(defun compilation-write-guardian-frame (session)
-  "Send SESSION's environment and command without exposing either in argv."
-  (let* ((environment (compilation-session-environment session))
-         (entries
-           (mapcar #'compilation-environment-entry-octets environment))
-         (command
-           (babel:string-to-octets
-            (compilation-session-command session)
-            :encoding :utf-8
-            :errorp t))
-         (environment-size (reduce #'+ entries :key #'length :initial-value 0))
-         (stream
-           (uiop:process-info-input
-            (compilation-session-process session))))
-    (when (> (length entries) *compilation-environment-entry-limit*)
-      (error "Compilation environment has too many entries"))
-    (when (> environment-size *compilation-environment-limit*)
-      (error "Compilation environment exceeds ~d bytes"
-             *compilation-environment-limit*))
-    (when (> (length command) *compilation-command-limit*)
-      (error "Compilation command exceeds ~d bytes"
-             *compilation-command-limit*))
-    (write-sequence *compilation-environment-magic* stream)
-    (compilation-write-uint32 stream (length entries))
-    (dolist (entry entries)
-      (compilation-write-uint32 stream (length entry))
-      (write-sequence entry stream))
-    (compilation-write-uint32 stream (length command))
-    (write-sequence command stream)
-    (finish-output stream)))
-
+#+os-windows
 (defun compilation-write-guardian-line (session line)
   (let ((stream (uiop:process-info-input
                  (compilation-session-process session))))
@@ -1010,56 +889,6 @@ control lock serializes interrupt, release, and teardown requests."
                      :encoding :ascii)
                     stream)
     (finish-output stream)))
-
-(defun compilation-read-guardian-line (stream)
-  "Read one short trusted ASCII control line from the guardian."
-  (let ((octets (make-array 16
-                            :element-type '(unsigned-byte 8)
-                            :adjustable t
-                            :fill-pointer 0)))
-    (loop
-      :for octet := (read-byte stream nil :eof)
-      :do
-         (when (eq octet :eof)
-           (error "Compilation guardian closed its control stream"))
-         (when (= octet #x0a)
-           (return (babel:octets-to-string octets :encoding :ascii)))
-         (unless (<= octet #x7f)
-           (error "Compilation guardian emitted non-ASCII control data"))
-         (when (>= (length octets) 64)
-           (error "Compilation guardian control line is too long"))
-         (vector-push-extend octet octets))))
-
-(defun compilation-parse-guardian-exit-line (line)
-  (unless (uiop:string-prefix-p "EXIT " line)
-    (error "Invalid compilation guardian control line: ~s" line))
-  (let ((status (parse-integer line :start 5 :junk-allowed nil)))
-    (unless (<= 0 status 255)
-      (error "Invalid compilation child exit status: ~a" status))
-    status))
-
-(defun compilation-consume-guardian-control (tail buffer length)
-  "Parse guardian control octets and return TAIL plus an optional exit code."
-  (let ((text
-          (with-output-to-string (stream)
-            (write-string tail stream)
-            (dotimes (index length)
-              (let ((octet (aref buffer index)))
-                (unless (<= octet #x7f)
-                  (error "Compilation guardian emitted non-ASCII control data"))
-                (write-char (code-char octet) stream))))))
-    (when (> (length text) 64)
-      (error "Compilation guardian control line is too long"))
-    (let ((newline (position #\Newline text)))
-      (if newline
-          (let ((remainder (subseq text (1+ newline))))
-            (when (or (plusp (length remainder))
-                      (position #\Newline remainder))
-              (error "Compilation guardian emitted extra control data"))
-            (values ""
-                    (compilation-parse-guardian-exit-line
-                     (subseq text 0 newline))))
-          (values text nil)))))
 
 (defun compilation-utf8-continuation-p (octet minimum maximum)
   (and (<= minimum octet) (<= octet maximum)))
@@ -1138,19 +967,6 @@ control lock serializes interrupt, release, and teardown requests."
   (let ((deadline (compilation-session-interrupt-deadline session)))
     (and deadline
          (>= (get-internal-real-time) deadline))))
-
-(defun compilation-release-guardian (session)
-  "Disarm SESSION, then allow its live guardian to exit normally."
-  (bt2:with-lock-held ((compilation-session-control-lock session))
-    (when (and (compilation-session-control-armed-p session)
-               (eq (compilation-session-state session) :running)
-               (not (compilation-session-interrupted-p session)))
-      ;; Once RELEASE is observable the guardian may exit and SBCL may reap it
-      ;; asynchronously.  Drop the private control capability first.
-      (setf (compilation-session-state session) :finalizing
-            (compilation-session-control-armed-p session) nil)
-      (compilation-write-guardian-line session "RELEASE")
-      t)))
 
 ;;; Windows backend ----------------------------------------------------------
 ;;;
@@ -1558,152 +1374,14 @@ inherit the output handle."
          (compilation-deliver-exit
           session exit-code reader-error overflow-p))))))
 
-(defun compilation-reader-worker (session)
-  (let ((process (compilation-session-process session))
-        (octet-count 0)
-        (utf8-tail (make-array 0 :element-type '(unsigned-byte 8)))
-        (control-tail "")
-        (command-exit-code nil)
-        (overflow-p nil)
-        (reader-error nil)
-        (exit-code nil)
-        (guardian-exited-p nil)
-        (guardian-released-p nil)
-        (force-kill-sent-p nil))
-    (handler-case
-        (let ((stream (uiop:process-info-output process))
-              (control (uiop:process-info-error-output process)))
-          (let ((chunk (make-array 8192
-                                   :element-type '(unsigned-byte 8)))
-                (control-chunk
-                  (make-array 128 :element-type '(unsigned-byte 8))))
-            (loop
-              (when (and (not force-kill-sent-p)
-                         (compilation-session-interrupted-p session)
-                         (compilation-interrupt-deadline-reached-p session))
-                (compilation-force-stop session)
-                (setf force-kill-sent-p t))
-              (multiple-value-bind (control-length control-eof-p)
-                  (compilation-read-live-octets control control-chunk)
-                (when (plusp control-length)
-                  (multiple-value-bind (tail status)
-                      (compilation-consume-guardian-control
-                       control-tail control-chunk control-length)
-                    (setf control-tail tail)
-                    (when status
-                      (when command-exit-code
-                        (error "Compilation guardian repeated child status"))
-                      (setf command-exit-code status
-                            exit-code status))))
-                (when (and (compilation-control-armed-p session)
-                           (or control-eof-p
-                               (not (uiop:process-alive-p process))))
-                  ;; A trusted guardian normally cannot reach EOF while armed.
-                  ;; LISTEN can report false at a silent EOF, so process
-                  ;; liveness is the authoritative unexpected-death check.
-                  (compilation-disarm-control session)
-                  (error "Compilation guardian exited before release"))
-              ;; Binary polling is required here.  READ-CHAR-NO-HANG can still
-              ;; block on a partial UTF-8 code point while a descendant retains
-              ;; the pipe.  Decode only complete, strictly valid prefixes.
-                (multiple-value-bind (length output-eof-p)
-                    (compilation-read-live-octets stream chunk)
-                  (declare (ignore output-eof-p))
-                  (let* ((remaining
-                           (- *compilation-output-limit* octet-count))
-                         (accepted (max 0 (min remaining length))))
-                    (when (plusp accepted)
-                      (incf octet-count accepted)
-                      (multiple-value-bind (text tail)
-                          (compilation-decode-utf8-prefix
-                           utf8-tail chunk accepted)
-                        (setf utf8-tail tail)
-                        (when (plusp (length text))
-                          (compilation-queue-event
-                           (lambda ()
-                             (compilation-deliver-chunk session text))))))
-                    (when (< accepted length)
-                      (setf overflow-p t)
-                      (compilation-force-stop session)
-                      (setf force-kill-sent-p t)
-                      (return))
-                    (when (and command-exit-code
-                               (not guardian-released-p)
-                               (not (compilation-session-interrupted-p
-                                     session))
-                               (compilation-output-burst-drained-p
-                                length chunk))
-                      ;; EXIT is relayed only after the anchor has waited for
-                      ;; Bash, so every foreground write precedes this poll.
-                      ;; A zero-length underfull read is therefore drained;
-                      ;; later descendant writes are outside normal completion.
-                      (when (plusp (length utf8-tail))
-                        ;; The command has already exited.  Disarm/release the
-                        ;; guardian before reporting malformed terminal output;
-                        ;; a descendant retaining stdout is not part of Lem's
-                        ;; normal-completion cleanup contract.
-                        (when (compilation-release-guardian session)
-                          (setf guardian-released-p t)
-                          (error
-                           "Compilation output ended within a UTF-8 character")))
-                      (unless (plusp (length utf8-tail))
-                        (setf guardian-released-p
-                              (not (null
-                                    (compilation-release-guardian session))))))
-                    ;; Query status only after the group was atomically
-                    ;; disarmed by normal release or terminal SIGKILL.
-                    (when (and (not guardian-exited-p)
-                               (not (compilation-control-armed-p
-                                     session))
-                               (not (uiop:process-alive-p process)))
-                      (setf guardian-exited-p t))
-                    (when (and guardian-exited-p
-                               (compilation-output-burst-drained-p
-                                length chunk))
-                      (when (and (not command-exit-code)
-                                 (not force-kill-sent-p)
-                                 (not (member
-                                       (compilation-session-state session)
-                                       '(:replaced :buffer-killed :reload
-                                         :editor-exit))))
-                        (error
-                         "Compilation guardian exited without child status"))
-                      (return))
-                    (when (and (zerop length) (zerop control-length))
-                      (sleep 0.01))))))))
-      (error (condition)
-        (unless (member (compilation-session-state session)
-                        '(:replaced :buffer-killed :reload :editor-exit))
-          (setf reader-error (princ-to-string condition))
-          ;; Once decoding fails, nobody is draining the child's pipe.  Stop
-          ;; the validated group before waiting so a verbose child cannot
-          ;; block forever on a full stdout buffer.
-          (compilation-force-stop session))))
-    (let ((reaped-exit-code (compilation-reap-process session)))
-      (unless (integerp exit-code)
-        (setf exit-code reaped-exit-code))
-      (when (and (integerp command-exit-code)
-                 (integerp reaped-exit-code)
-                 (not (compilation-session-interrupted-p session))
-                 (/= command-exit-code reaped-exit-code))
-        (setf reader-error
-              (format nil
-                      "Compilation guardian status ~d disagreed with child status ~d"
-                      reaped-exit-code command-exit-code))))
-    (setf (compilation-session-interrupt-deadline session) nil)
-    (compilation-queue-event
-     (lambda ()
-       (compilation-deliver-exit
-        session exit-code reader-error overflow-p)))))
-
 (defun compilation-exit-message (session exit-code reader-error overflow-p)
   (cond
     (overflow-p
      (format nil
              "Compilation stopped: output exceeded ~d bytes"
-             *compilation-output-limit*))
+             (compilation-session-output-limit session)))
     ((compilation-session-interrupted-p session)
-     "Compilation interrupted")
+     "Compilation cancelled")
     (reader-error
      (format nil "Compilation reader failed: ~a" reader-error))
     ((and (integerp exit-code) (zerop exit-code))
@@ -1711,106 +1389,116 @@ inherit the output handle."
     (t
      (format nil "Compilation exited abnormally with code ~a" exit-code))))
 
-(defun compilation-deliver-exit
-    (session exit-code reader-error overflow-p)
+(defun compilation-deliver-exit (session exit-code reader-error overflow-p)
+  ;; Lifecycle state remains authoritative even when the view has been killed.
+  (compilation-disarm-control session)
+  (setf (compilation-session-process session) nil
+        (compilation-session-pid session) nil
+        (compilation-session-reader-thread session) nil
+        (compilation-session-state session)
+        (if (and (eql exit-code 0) (not reader-error) (not overflow-p)
+                 (not (compilation-session-interrupted-p session)))
+            :finished
+            (if (compilation-session-interrupted-p session) :interrupted :failed)))
   (when (compilation-session-owns-buffer-p session)
     (compilation-finish-pending-line session)
-    (let ((status (compilation-exit-message
-                   session exit-code reader-error overflow-p)))
-      (compilation-disarm-control session)
-      (setf (compilation-session-process session) nil
-            (compilation-session-pid session) nil
-            (compilation-session-reader-thread session) nil
-            (compilation-session-state session)
-            (if (and (integerp exit-code)
-                     (zerop exit-code)
-                     (not reader-error)
-                     (not overflow-p)
-                     (not (compilation-session-interrupted-p session)))
-                :finished
-                (if (compilation-session-interrupted-p session)
-                    :interrupted
-                    :failed)))
-      (compilation-append-plain
-       session
-       (format nil "~%~a at ~a~%" status (compilation-time-string)))
+    (let ((status (compilation-exit-message session exit-code reader-error overflow-p)))
+      (compilation-append-plain session (format nil "~%~a at ~a~%" status (compilation-time-string)))
       (message "~a" status))))
 
-(defun compilation-launch-process (session)
-  (let ((bash (or (compilation-bash-program)
-                  (editor-error "Pinned Bash is unavailable")))
-        (python (or (compilation-guardian-python-program)
-                    (editor-error "Pinned Python is unavailable")))
-        (guardian (or (compilation-guardian-path)
-                      (editor-error "Compilation guardian is unavailable"))))
-    (let ((process
-            (uiop:launch-program
-             (list (namestring python)
-                   (namestring guardian)
-                   (namestring bash))
-             :directory (compilation-session-directory session)
-             ;; The guardian starts from a fixed environment; the captured
-             ;; project environment and command arrive over private stdin and
-             ;; never appear in the guardian's process arguments.
-             :environment '("HOME=/" "LC_ALL=C" "PATH="
-                            "PYTHONNOUSERSITE=1"
-                            "PYTHONDONTWRITEBYTECODE=1")
-             :input :stream
-             :output :stream
-             :error-output :stream
-             :element-type '(unsigned-byte 8))))
-      (setf (compilation-session-process session) process
-            (compilation-session-pid session)
-            (uiop:process-info-pid process))
-      (handler-case
-          (let ((control (uiop:process-info-error-output process)))
-            ;; Before READY the guardian has no command child.  After READY it
-            ;; blocks on Lem's private stdin and cannot exit on its own.
-            (unless (string= "READY"
-                             (compilation-read-guardian-line control))
-              (error "Compilation guardian did not become ready"))
-            (compilation-write-guardian-frame session)
-            (unless (string= "ENV"
-                             (compilation-read-guardian-line control))
-              (error "Compilation guardian rejected its private frame"))
-            (let* ((pid (compilation-session-pid session))
-                   (guardian-pgid
-                     (and (integerp pid)
-                          (> pid 1)
-                          #-os-windows
-                          (ignore-errors (sb-posix:getpgid pid))
-                          #+os-windows nil)))
-              (unless (and (integerp guardian-pgid)
-                           (= pid guardian-pgid))
-                ;; No command was spawned, so closing the private control pipe
-                ;; is sufficient to release the unarmed guardian.
-                (error "Cannot isolate the compilation process group safely"))
-              ;; The numeric guardian PGID is deliberately discarded.  Lem
-              ;; retains the broker pipe plus its locked armed-state Boolean,
-              ;; and never stores or signals the command group's numeric ID.
-              (compilation-arm-control session))
-            (compilation-write-guardian-line session "START")
-            (unless (string= "STARTED"
-                             (compilation-read-guardian-line control))
-              (error "Compilation guardian did not start the command"))
-            process)
-        (error (condition)
-          (if (compilation-control-armed-p session)
-              (compilation-force-stop session)
-              (ignore-errors
-                (close (uiop:process-info-input process))))
-          (compilation-reap-process session)
-          (error condition))))))
+#+linux
+(defun compilation-schedule-output-locked (session)
+  ;; One queued editor event per session, bounded by the total output budget.
+  (unless (compilation-session-output-event-p session)
+    (setf (compilation-session-output-event-p session) t)
+    (send-event (lambda () (compilation-flush-managed-output session)))))
 
-(defun compilation-launch-session-process (session)
-  "Start SESSION's command with the platform process backend."
-  #+os-windows (compilation-launch-process-windows session)
-  #-os-windows (compilation-launch-process session))
+#+linux
+(defun compilation-flush-managed-output (session)
+  (multiple-value-bind (chunks result)
+      (bt2:with-lock-held ((compilation-session-control-lock session))
+        (let* ((ordered (nreverse (compilation-session-pending-output session)))
+               ;; Give other clients and commands a turn during a large burst.
+               (batch (loop repeat 16 while ordered collect (pop ordered))))
+          (setf (compilation-session-pending-output session) (nreverse ordered)
+                (compilation-session-output-event-p session) nil)
+          (when (compilation-session-pending-output session)
+            (compilation-schedule-output-locked session))
+          (values batch (unless (compilation-session-pending-output session)
+                          (compilation-session-terminal-result session)))))
+    (dolist (chunk chunks) (compilation-deliver-chunk session chunk))
+    (when (and result (not (compilation-session-terminal-delivered-p session)))
+      (setf (compilation-session-terminal-delivered-p session) t)
+      (let ((state (gethash "state" result)))
+        (when (and (equal state "cancelled")
+                   (not (compilation-session-output-overflow-p session))
+                   (not (compilation-session-output-error session)))
+          (setf (compilation-session-interrupted-p session) t))
+        (compilation-deliver-exit
+         session (gethash "exit-code" result)
+         (or (compilation-session-output-error session)
+             (unless (member state '("exited" "cancelled") :test #'equal)
+               (format nil "~a: ~a" state (gethash "reason" result))))
+         (compilation-session-output-overflow-p session))))))
 
-(defun compilation-session-reader-worker (session)
-  "Run the platform reader that owns SESSION's process until exit."
-  #+os-windows (compilation-reader-worker-windows session)
-  #-os-windows (compilation-reader-worker session))
+#+linux
+(defun compilation-launch-managed-job (session)
+  (let* ((manager (ensure-toolkit-job-manager))
+         (bash (or (compilation-bash-program) (editor-error "Bash is unavailable")))
+         (tails (make-hash-table :test #'eq))
+         (limit (compilation-session-output-limit session))
+         (job
+           (lem-toolkit/jobs:start-job
+            (list (namestring bash) "--noprofile" "--norc" "-c"
+                  "IFS= read -r -d '' lem_compilation_script; exec </dev/null 2>&1; eval \"$lem_compilation_script\"")
+            :manager manager :owner "human/compilation"
+            :directory (uiop:native-namestring (compilation-session-directory session))
+            :environment (compilation-session-environment session)
+            ;; The shell command and environment use private pipes, never argv
+            ;; or the durable journal. Deliberate shell output is still recorded.
+            :input (concatenate 'string (compilation-session-command session) (string #\Null))
+            :timeout 86400 :output-limit (min limit (* 1024 1024))
+            :on-output
+            (lambda (job channel octets)
+              (handler-case
+                  (let* ((remaining (- limit (compilation-session-output-octets session)))
+                         (accepted (max 0 (min remaining (length octets)))))
+                    (incf (compilation-session-output-octets session) accepted)
+                    (when (plusp accepted)
+                      (multiple-value-bind (text tail)
+                          (compilation-decode-utf8-prefix
+                           (or (gethash channel tails)
+                               (make-array 0 :element-type '(unsigned-byte 8)))
+                           octets accepted)
+                        (setf (gethash channel tails) tail)
+                        (when (plusp (length text))
+                          (bt2:with-lock-held ((compilation-session-control-lock session))
+                            (push text (compilation-session-pending-output session))
+                            (compilation-schedule-output-locked session)))))
+                    (when (< accepted (length octets))
+                      (setf (compilation-session-output-overflow-p session) t)
+                      (lem-toolkit/jobs:cancel-job job)))
+                (error (condition)
+                  (setf (compilation-session-output-error session) (princ-to-string condition))
+                  (error condition)))))))
+    (setf (compilation-session-managed-job session) job
+          (compilation-session-state session) :running)
+    ;; This waiter is an adapter worker, never the editor or output consumer.
+    (setf (compilation-session-reader-thread session)
+          (bt2:make-thread
+           (lambda ()
+             (let ((result (lem-toolkit/jobs:wait-job job)))
+               (unless (or (compilation-session-output-error session)
+                           (compilation-session-output-overflow-p session))
+                 (when (loop for tail being the hash-values of tails
+                             thereis (plusp (length tail)))
+                   (setf (compilation-session-output-error session)
+                         "Compilation output ended within a UTF-8 character")))
+               (bt2:with-lock-held ((compilation-session-control-lock session))
+                 (setf (compilation-session-terminal-result session) result)
+                 (compilation-schedule-output-locked session))))
+           :name "lem-yath/compilation-result"))
+    job))
 
 (defun compilation-render-header (session)
   (let ((buffer (compilation-session-buffer session)))
@@ -1851,15 +1539,17 @@ inherit the output handle."
     (compilation-render-header session)
     (handler-case
         (progn
-          (compilation-launch-session-process session)
-          (let ((reader-thread
+          #+linux (compilation-launch-managed-job session)
+          #+os-windows
+          (progn
+            (compilation-launch-process-windows session)
+            (setf (compilation-session-reader-thread session)
                   (bt2:make-thread
-                   (lambda () (compilation-session-reader-worker session))
-                   :name "lem-yath/compilation-reader")))
-            (setf (compilation-session-reader-thread session) reader-thread
-                  (compilation-session-state session) :running
-                  *compilation-session* session
-                  *lem-yath-next-error-source* :compilation))
+                   (lambda () (compilation-reader-worker-windows session))
+                   :name "lem-yath/compilation-reader")
+                  (compilation-session-state session) :running))
+          (setf *compilation-session* session
+                *lem-yath-next-error-source* :compilation)
           (let ((window (pop-to-buffer buffer)))
             (setf (current-window) window)
             ;; Emacs's default `compilation-scroll-output' is NIL: new output
@@ -1922,7 +1612,7 @@ inherit the output handle."
          (copy-list (compilation-session-environment session)))))))
 
 (define-command lem-yath-interrupt-compilation () ()
-  "Interrupt the current compilation process group, then kill it if needed."
+  "Cancel the current compilation job and its process group immediately."
   (let ((session (or (buffer-value (current-buffer)
                                    :lem-yath-compilation-session)
                      *compilation-session*)))
@@ -1930,7 +1620,7 @@ inherit the output handle."
       (editor-error "No compilation is running"))
     (unless (compilation-request-interrupt session)
       (editor-error "Compilation process group is no longer available"))
-    (message "Compilation interrupt requested")))
+    (message "Compilation cancellation requested")))
 
 ;;; Navigation --------------------------------------------------------------
 

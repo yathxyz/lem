@@ -58,5 +58,5 @@
 
 (defsystem "lem-daemon/recovery-cli"
   :description "Standalone recovery inspector without editor initialization"
-  :depends-on ("lem-daemon/recovery-store")
+  :depends-on ("lem-daemon/recovery-store" "lem-toolkit/jobs")
   :components ((:module "recovery" :components ((:file "cli")))))

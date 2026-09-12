@@ -4,6 +4,21 @@
   (:export :main))
 (in-package :lem-daemon/recovery-cli)
 
+(defun inspect-jobs (directory)
+  (when (find-package :lem-core)
+    (error "Recovery inspector unexpectedly loaded the editor"))
+  (multiple-value-bind (records failures)
+      (lem-toolkit/jobs:inspect-job-journal :directory directory)
+    (yason:encode
+     (store:object
+      "records" (coerce records 'vector)
+      "errors" (map 'vector (lambda (failure)
+                             (store:object "path" (namestring (car failure))
+                                           "error" (cdr failure))) failures))
+     *standard-output*)
+    (terpri)
+    (if failures 1 0)))
+
 (defun inspect-records (directory id)
   (when (find-package :lem-core)
     (error "Recovery inspector unexpectedly loaded the editor"))
@@ -29,8 +44,10 @@
    (handler-case
        (let ((arguments (uiop:command-line-arguments)))
          (cond ((equal arguments '("--help"))
-                (format t "Usage: lem-recover DIRECTORY [RECORD-ID]~%List private checkpoint metadata as JSON, or export one record's text.~%")
+                (format t "Usage: lem-recover DIRECTORY [RECORD-ID]~%       lem-recover --jobs DIRECTORY~%List private checkpoint metadata as JSON, export one record's text, or inspect job journals without changing them.~%")
                 0)
+               ((and (= (length arguments) 2) (equal (first arguments) "--jobs"))
+                (inspect-jobs (second arguments)))
                ((<= 1 (length arguments) 2)
                 (inspect-records (first arguments) (second arguments)))
                (t (error "Usage: lem-recover DIRECTORY [RECORD-ID]"))))

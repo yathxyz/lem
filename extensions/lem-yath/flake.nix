@@ -27,7 +27,7 @@
           pkgs = import nixpkgs { inherit system; };
           lemPatchedSrc = lem.outPath;
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (old: {
-            systems = old.systems ++ [ "lem-daemon/recovery" ];
+            systems = old.systems ++ [ "lem-daemon/recovery" "lem-toolkit/jobs-ui" ];
             lispLibs = old.lispLibs ++ [ pkgs.sbcl.pkgs.ironclad ];
           });
           lemLspTest = lemNcurses.overrideLispAttrs (
@@ -397,7 +397,8 @@
                 export LEM_YATH_AOT_REPORT="$TMPDIR/aot-report"
                 export LEM_DAEMON_CLIENT=${lemClient}/bin/lemclient
                 export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
-                export LEM_YATH_GUARDIAN_PYTHON=${lib.getExe' pkgs.python3 "python3"}
+                export LEM_TOOLKIT_SBCL=${lib.getExe pkgs.sbcl}
+                export LEM_TOOLKIT_GUARDIAN=${lemPatchedSrc}/extensions/toolkit/guardian.lisp
                 export LEM_YATH_MCP_FETCH_PROGRAM=${lib.getExe' pkgs.uv "uvx"}
                 export LEM_YATH_MCP_DOCKER_PROGRAM=${lib.getExe pkgs.docker-client}
                 export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
@@ -443,7 +444,8 @@
               export TZDIR=${pkgs.tzdata}/share/zoneinfo
               export LEM_YATH_ASPELL_PROGRAM=${lib.getExe' aspellRuntime "aspell"}
               export LEM_YATH_TIMEOUT_PROGRAM=${lib.getExe' pkgs.coreutils "timeout"}
-              export LEM_YATH_GUARDIAN_PYTHON=${lib.getExe' pkgs.python3 "python3"}
+              export LEM_TOOLKIT_SBCL=${lib.getExe pkgs.sbcl}
+              export LEM_TOOLKIT_GUARDIAN=${lemPatchedSrc}/extensions/toolkit/guardian.lisp
               export LEM_YATH_LEM_SOURCE=${lemPatchedSrc}
               export LEM_YATH_MCP_FETCH_PROGRAM="''${LEM_YATH_MCP_FETCH_PROGRAM:-${lib.getExe' pkgs.uv "uvx"}}"
               export LEM_YATH_MCP_DOCKER_PROGRAM="''${LEM_YATH_MCP_DOCKER_PROGRAM:-${lib.getExe pkgs.docker-client}}"
@@ -600,6 +602,17 @@
             '';
           };
 
+          managedCompilationTest = pkgs.writeShellApplication {
+            name = "lem-yath-managed-compilation-test";
+            runtimeInputs = [ pkgs.python3 ];
+            text = ''
+              export LEM_BIN=${lemYath}/bin/lem
+              export LEMCLIENT_BIN=${lemClient}/bin/lemclient
+              export LEM_RECOVER_BIN=${lemRecover}/bin/lem-recover
+              exec python3 ${self}/scripts/managed-compilation-test.py
+            '';
+          };
+
           gitRebaseTest = pkgs.writeShellApplication {
             name = "lem-yath-git-rebase-test";
             runtimeInputs = [ pkgs.python3 pkgs.git ];
@@ -708,7 +721,7 @@
             lem-yath = apps.default;
             lem-upstream = mkApp "${lemNcurses}/bin/lem" "Run upstream Lem ncurses without config";
             compile-check = mkTestApp "lem-yath-compile-check" "compile-check.sh";
-            compilation-test = mkTestAppWithLem lemYath "lem-yath-compilation-test" "compilation-test.sh";
+            compilation-test = mkApp "${managedCompilationTest}/bin/lem-yath-managed-compilation-test" "Test native Lisp managed compilation";
             terminal-test = mkTestAppWithLem lemYath "lem-yath-terminal-test" "terminal-test.sh";
             boot-test = mkTestApp "lem-yath-boot-test" "boot-test.sh";
             startup-test = mkTestAppWithLem lemYath "lem-yath-startup-test" "startup-test.sh";
@@ -850,7 +863,9 @@
           checks = {
             package = lemYath;
             compile = mkCheck "compile" "compile-check.sh";
-            compilation = mkCheckWithLem lemYath "compilation" "compilation-test.sh";
+            compilation = pkgs.runCommand "lem-yath-managed-compilation-check" { } ''
+              ${managedCompilationTest}/bin/lem-yath-managed-compilation-test > "$out"
+            '';
             terminal = mkCheckWithLem lemYath "terminal" "terminal-test.sh";
             boot = mkCheck "boot" "boot-test.sh";
             startup = mkCheckWithLem lemYath "startup" "startup-test.sh";
