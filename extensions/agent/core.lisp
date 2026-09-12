@@ -1290,8 +1290,12 @@ or arbitrary condition arguments. The default reports only the condition type.")
                             (or (and (equal "message" (field item "kind"))
                                      (null (field item "decision_id")) (valid-id-p (field item "result")))
                                 (and (equal "decision" (field item "kind"))
-                                     (valid-id-p (field item "decision_id")) (eq t (field item "result")))))
+                                     (valid-id-p (field item "decision_id"))
+                                     (member (field item "result") '(t yason:true)))))
                  (error "Invalid durable submission receipt"))
+               ;; This schema's decision receipt API returns T. Preserve generic
+               ;; JSON values elsewhere, including FALSE and empty arrays.
+               (when (equal "decision" (field item "kind")) (setf (field item "result") t))
                (remember-journal-id identities (field item "id"))))
     (validate-retained-reviews record)
     (check-journal-capacity record)

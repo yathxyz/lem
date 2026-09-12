@@ -242,7 +242,10 @@ Errors after rename report uncertain durability. No Lisp reader is used."
   (let ((text (babel:octets-to-string bytes :encoding :utf-8)))
     (check-json-depth text maximum-depth)
     (with-input-from-string (input text)
-      (let ((record (yason:parse input :object-as :hash-table)))
+      (let ((record (yason:parse input :object-as :hash-table
+                                      :json-booleans-as-symbols t
+                                      :json-arrays-as-vectors t
+                                      :json-nulls-as-keyword nil)))
         (unless (loop for c = (read-char input nil) while c
                       always (find c '(#\Space #\Tab #\Newline #\Return)))
           (error "Trailing data in recovery record"))

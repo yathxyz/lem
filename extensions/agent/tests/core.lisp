@@ -134,6 +134,19 @@
         (ok (eq t (field (agent:find-submission session submission-id) "result")))
         (ok (agent::validate-restored-record (agent:session-id session)
                                            (store:read-private-json directory (agent:session-id session) :maximum-depth 24)))
+        (agent:close-manager manager :wait t)
+        (setf manager (agent:make-manager :directory directory))
+        (multiple-value-bind (sessions errors) (agent:restore-sessions manager)
+          (ok (null errors)) (setf session (first sessions)) (await (agent:session-ready session)))
+        (ok (eq t (field (agent:find-submission session submission-id) "result")))
+        (ok (eq t (await (agent:resolve-decision session id "one" :submission-id submission-id)))
+            "restored clarification receipts preserve the public true result without replay")
+        (dolist (invalid (list yason:false nil #()))
+          (let* ((record (agent:session-snapshot session))
+                 (item (find submission-id (gethash "submissions" record)
+                             :key (lambda (item) (gethash "id" item)) :test #'equal)))
+            (setf (gethash "result" item) invalid)
+            (ok (signals (agent::validate-restored-record (agent:session-id session) record)))))
         (dolist (field '("kind" "digest" "decision_id" "result"))
           (let* ((record (agent:session-snapshot session))
                  (item (find submission-id (gethash "submissions" record)
@@ -162,7 +175,11 @@
 
 (deftest retained-review-durable-before-effect-and-independent-of-history
   (with-manager (manager directory)
-    (let ((durable nil))
+    (let ((durable nil)
+          (result (agent:json-object "proposal_id" "historical-proposal"
+                                     "needs_activation" yason:false "reviewed" yason:true
+                                     "optional" nil "empty" #()
+                                     "nested" (vector nil yason:false #()))))
       (register-review-fixture
        manager (lambda (arguments context)
                  (let* ((disk (store:read-private-json directory (agent:operation-session-id context) :maximum-depth 24))
@@ -170,7 +187,7 @@
                    (setf durable (and (equalp arguments (field review "arguments"))
                                       (equal "executing" (field review "status"))
                                       (= 0 (field review "generation")))))
-                 (agent:json-object "proposal_id" "historical-proposal")))
+                 result))
       (let ((session (new-session manager directory :limits (agent:json-object "turns" 1))))
         (await (agent:submit-message session "stage")) (idle session)
         (ok durable "the complete candidate is fsynced before the executor runs")
@@ -190,9 +207,8 @@
                    (ok (null errors))
                    (let ((restored (first sessions)))
                      (await (agent:session-ready restored))
-                     (ok (equal "historical-proposal"
-                                (field (field (agent:find-retained-review restored id) "result") "proposal_id"))
-                         "a completed candidate restores after its originating turn is gone")))
+                     (ok (equalp result (field (agent:find-retained-review restored id) "result"))
+                         "a completed candidate restores exact JSON values after its originating turn is gone")))
               (agent:close-manager reopened :wait t))))))))
 
 (deftest retained-review-quota-and-explicit-discard

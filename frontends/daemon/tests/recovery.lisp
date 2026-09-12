@@ -83,7 +83,25 @@
       (ok (signals (store:write-private-json directory id (expt 10 65))) "large numeric atoms are bounded before parsing")
       (ok (signals (store:write-private-json directory id sb-ext:double-float-positive-infinity)))
       (store:write-private-json directory id (store:object "nested" (vector "safe")))
-      (ok (equal "safe" (first (store:field (store:read-private-json directory id) "nested")))))))
+      (ok (equal "safe" (elt (store:field (store:read-private-json directory id) "nested") 0))))))
+
+(deftest private-json-preserves-literal-types
+  (with-recovery-directory (directory)
+    (let* ((id (store:new-id))
+           (original (store:object "false" yason:false "true" yason:true "null" nil
+                                   "empty" #() "nested" (vector #() nil yason:false yason:true)))
+           (path (store:write-private-json directory id original))
+           (fingerprint (store:file-baseline path)))
+      ;; A caller's parser preferences cannot change the journal's values.
+      (let ((yason:*parse-json-booleans-as-symbols* nil)
+            (yason:*parse-json-arrays-as-vectors* nil)
+            (yason:*parse-json-null-as-keyword* t))
+        (ok (equalp original (store:read-private-json directory id))
+            "false, true, null and empty arrays survive a durable JSON round trip distinctly")
+        (multiple-value-bind (inspected sha diagnostic) (store:inspect-private-json directory id)
+          (ok (equalp original inspected))
+          (ok (equal fingerprint sha))
+          (ok (null diagnostic)))))))
 
 (deftest inspecting-missing-records-does-not-create-storage
   (with-recovery-directory (directory)
