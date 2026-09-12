@@ -10,3 +10,15 @@
   :perform (test-op (operation component)
              (declare (ignore operation))
              (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/openrouter"
+  :description "Bounded OpenRouter streaming transport using managed Lisp jobs"
+  :depends-on ("lem-agent" "lem-toolkit/jobs")
+  :components ((:file "openrouter")))
+
+(defsystem "lem-agent/openrouter-tests"
+  :depends-on ("lem-agent/openrouter" "rove")
+  :components ((:file "tests/openrouter"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
