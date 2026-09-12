@@ -610,6 +610,16 @@
             '';
           };
 
+          nativeAgentTest = pkgs.writeShellApplication {
+            name = "lem-yath-native-agent-test";
+            runtimeInputs = [ pkgs.python3 ];
+            text = ''
+              export LEM_BIN=${lemYath}/bin/lem
+              export LEMCLIENT_BIN=${lemClient}/bin/lemclient
+              exec python3 ${self}/scripts/native-agent-test.py
+            '';
+          };
+
           managedCompilationTest = pkgs.writeShellApplication {
             name = "lem-yath-managed-compilation-test";
             runtimeInputs = [ pkgs.python3 ];
@@ -734,6 +744,7 @@
             boot-test = mkTestApp "lem-yath-boot-test" "boot-test.sh";
             startup-test = mkTestAppWithLem lemYath "lem-yath-startup-test" "startup-test.sh";
             daemon-test = mkApp "${daemonTest}/bin/lem-yath-daemon-test" "Test the configured native daemon lifecycle";
+            native-agent-test = mkApp "${nativeAgentTest}/bin/lem-yath-native-agent-test" "Test native agent workflows and recovery with two terminal clients";
             buffer-proposal-test = mkApp "${bufferProposalTest}/bin/lem-yath-buffer-proposal-test" "Test revision-safe native buffer proposals";
             git-rebase-test = mkApp "${gitRebaseTest}/bin/lem-yath-git-rebase-test" "Test native Git rebase editor callbacks";
             completion-test = mkTestApp "lem-yath-completion-test" "completion-test.sh";
@@ -879,6 +890,10 @@
             startup = mkCheckWithLem lemYath "startup" "startup-test.sh";
             daemon = pkgs.runCommand "lem-yath-daemon-check" { } ''
               ${daemonTest}/bin/lem-yath-daemon-test
+              touch "$out"
+            '';
+            native-agent = pkgs.runCommand "lem-yath-native-agent-check" { } ''
+              ${nativeAgentTest}/bin/lem-yath-native-agent-test
               touch "$out"
             '';
             git-rebase = pkgs.runCommand "lem-yath-git-rebase-check" { } ''
