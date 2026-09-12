@@ -2736,6 +2736,25 @@ press_report() {
   wait_report_count "$pattern" "$((before + 1))"
 }
 
+wait_rebase_view() {
+  local session=$1 second=$2 subject=$3 before latest
+  local deadline=$((SECONDS + WAIT_TIMEOUT))
+  # Git writes its todo before launching the asynchronous native editor client.
+  # Only a fresh editor report proves this buffer owns a pending request and is
+  # current at the first command; disk existence cannot authorize a mode key.
+  while ((SECONDS < deadline)); do
+    before=$(report_count '^REBASE ')
+    send_keys "$session" C-c v
+    if wait_report_count '^REBASE ' "$((before + 1))" 1; then
+      latest=$(latest_report '^REBASE ')
+      if [[ "$latest" == "REBASE mode=yes file=yes server=yes first=yes second=$second point=yes fixup=yes edit=yes commit=yes amend=yes diff=yes legacy-free=yes continue=yes abort=yes modified=no subject=$subject" ]]; then
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
 wait_jj_dispatch() {
   local session=$1 phase=$2 index=0 before latest
   while ((index < WAIT_TIMEOUT * 2)); do
@@ -4631,13 +4650,8 @@ else
 fi
 
 send_keys "$porcelain_session" r i
-rebase_before=$(report_count '^REBASE ')
-if wait_until "$WAIT_TIMEOUT" porcelain_rebase_todo_ready; then
-  send_keys "$porcelain_session" C-c v
-fi
-if wait_report_count '^REBASE ' "$((rebase_before + 1))" &&
-   [[ $(latest_report '^REBASE ') == \
-      'REBASE mode=yes file=yes first=yes second=yes point=yes fixup=yes edit=yes commit=yes amend=yes diff=yes legacy-free=yes continue=yes abort=yes modified=no' ]]; then
+if wait_until "$WAIT_TIMEOUT" porcelain_rebase_todo_ready &&
+   wait_rebase_view "$porcelain_session" yes porcelain_commit_from_Lem; then
   pass legit-rebase-open 'r i opened the two-commit todo in the native rebase mode'
 else
   fail legit-rebase-open 'interactive rebase did not expose the expected todo mode' \
@@ -4698,13 +4712,8 @@ else
 fi
 
 send_keys "$porcelain_session" r i
-rebase_before=$(report_count '^REBASE ')
-if wait_until "$WAIT_TIMEOUT" porcelain_repeat_rebase_todo_ready; then
-  send_keys "$porcelain_session" C-c v
-fi
-if wait_report_count '^REBASE ' "$((rebase_before + 1))" &&
-   [[ $(latest_report '^REBASE ') == \
-      'REBASE mode=yes file=yes first=yes second=no point=yes fixup=yes edit=yes commit=yes amend=yes diff=yes legacy-free=yes continue=yes abort=yes modified=no' ]]; then
+if wait_until "$WAIT_TIMEOUT" porcelain_repeat_rebase_todo_ready &&
+   wait_rebase_view "$porcelain_session" no porcelain_commit_reworded_in_Lem; then
   pass legit-repeat-rebase-open \
     'an immediate second r i opened a fresh one-commit todo'
 else
@@ -4769,8 +4778,13 @@ else
 fi
 
 send_keys "$porcelain_session" r i
-if wait_until "$WAIT_TIMEOUT" porcelain_edit_rebase_todo_ready; then
+if wait_until "$WAIT_TIMEOUT" porcelain_edit_rebase_todo_ready &&
+   wait_rebase_view "$porcelain_session" no porcelain_commit_reworded_twice_in_Lem; then
   send_keys "$porcelain_session" e
+else
+  fail legit-edit-rebase-open \
+    'the native edit-stop todo did not become current at the expected subject' \
+    "$porcelain_session"
 fi
 if wait_until "$WAIT_TIMEOUT" porcelain_edit_rebase_todo_marked; then
   pass legit-edit-rebase-action 'e persisted a real edit action in the todo'

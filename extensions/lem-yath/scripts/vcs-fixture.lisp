@@ -1508,17 +1508,21 @@
     (vcs-test-log
      (concatenate
       'string
-      "REBASE mode=~a file=~a first=~a second=~a "
+      "REBASE mode=~a file=~a server=~a first=~a second=~a "
       "point=~a fixup=~a edit=~a commit=~a amend=~a diff=~a legacy-free=~a "
-      "continue=~a abort=~a modified=~a")
+      "continue=~a abort=~a modified=~a subject=~a")
      (vcs-test-yes-no
       (eq (buffer-major-mode buffer) 'lem/legit::legit-rebase-mode))
      (vcs-test-yes-no
       (and filename
            (string= (file-namestring filename) "git-rebase-todo")))
      (vcs-test-yes-no
+      (and (eq buffer (window-buffer (current-window)))
+           (lem-daemon:request-buffer-list buffer)))
+     (vcs-test-yes-no
       (or (search "porcelain commit from Lem" text)
-          (search "porcelain commit reworded in Lem" text)))
+          (search "porcelain commit reworded in Lem" text)
+          (search "porcelain commit reworded twice in Lem" text)))
      (vcs-test-yes-no (search "porcelain-peer" text))
      (vcs-test-yes-no (= (line-number-at-point (buffer-point buffer)) 1))
      (vcs-test-yes-no
@@ -1553,7 +1557,14 @@
       (eq (vcs-test-key-command lem/legit::*legit-rebase-mode-keymap*
                                 "C-c C-k")
           'lem/legit::rebase-abort))
-     (vcs-test-yes-no (buffer-modified-p buffer)))))
+     (vcs-test-yes-no (buffer-modified-p buffer))
+     (vcs-test-encode
+      (or (find-if (lambda (subject)
+                     (search subject (line-string (buffer-start-point buffer))))
+                   '("porcelain commit from Lem"
+                     "porcelain commit reworded in Lem"
+                     "porcelain commit reworded twice in Lem"))
+          "other")))))
 
 (define-command lem-yath-test-vcs-reword-state () ()
   (let* ((buffer (current-buffer))
