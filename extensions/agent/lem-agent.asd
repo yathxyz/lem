@@ -46,3 +46,16 @@
   :perform (test-op (operation component)
              (declare (ignore operation))
              (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/editor-tools"
+  :description "Root-scoped native file inspection and human-reviewed buffer proposals"
+  :depends-on ("lem-agent" "lem-buffer-proposals" "babel" "ironclad")
+  :serial t
+  :components ((:file "file-access") (:file "editor-tools")))
+
+(defsystem "lem-agent/editor-tools-tests"
+  :depends-on ("lem-agent/editor-tools" "lem-fake-interface" "rove")
+  :components ((:file "tests/editor-tools"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
