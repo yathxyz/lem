@@ -367,7 +367,20 @@
   (when *legit-rebase-job-timer* (stop-timer *legit-rebase-job-timer*))
   (setf *legit-rebase-job-timer* nil))
 
+(defun abort-killed-legit-rebase-todo (buffer)
+  "An editable rebase todo needs explicit completion, not ordinary file closure."
+  (when (and (lem-daemon:request-buffer-list buffer)
+             (loop :for session :being :the :hash-values :of *legit-rebase-sessions*
+                   :thereis
+                   (and (not (lem-toolkit/jobs:job-result (legit-rebase-session-job session)))
+                        (eq buffer (legit-rebase-waiting-buffer session)))))
+    (lem-daemon::complete-buffer-requests buffer t)))
+
 (remove-hook *find-file-hook* 'position-legit-rebase-todo-at-first-command)
 (remove-hook *exit-editor-hook* 'shutdown-legit-rebase-sessions)
+(remove-hook (variable-value 'kill-buffer-hook :global t) 'abort-killed-legit-rebase-todo)
 (add-hook *find-file-hook* 'position-legit-rebase-todo-at-first-command -10000)
 (add-hook *exit-editor-hook* 'shutdown-legit-rebase-sessions)
+;; Run before the daemon's ordinary-file completion hook. Job/Legit inspection
+;; buffers carry no pending todo request and do not affect job ownership.
+(add-hook (variable-value 'kill-buffer-hook :global t) 'abort-killed-legit-rebase-todo 10000)

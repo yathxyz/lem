@@ -143,13 +143,21 @@ def main():
             # PID discovery belongs only to this external Linux failure fixture.
             # The production job API/journal deliberately stores no signal target.
             queue = [daemon.pid]
+            seen = set()
             while queue:
                 parent = queue.pop()
-                try:
-                    children = Path(f'/proc/{parent}/task/{parent}/children').read_text().split()
-                except FileNotFoundError:
+                if parent in seen:
                     continue
-                for child in map(int, children):
+                seen.add(parent)
+                # The manager launches from a controller thread. Linux records
+                # those children on that thread, not on the process's main TID.
+                children = set()
+                for child_list in Path(f'/proc/{parent}/task').glob('*/children'):
+                    try:
+                        children.update(map(int, child_list.read_text().split()))
+                    except FileNotFoundError:
+                        pass
+                for child in children:
                     try:
                         if (Path(f'/proc/{child}/comm').read_text().strip() == 'git'
                                 and Path(f'/proc/{child}/cwd').resolve() == repo.resolve()):
