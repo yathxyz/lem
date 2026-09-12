@@ -1,7 +1,7 @@
 (defpackage :lem-agent
   (:use :cl)
   (:local-nicknames (:store :lem-daemon/recovery-store))
-  (:export :make-manager :register-provider :register-tool :create-session
+  (:export :make-manager :manager-open-p :register-provider :register-tool :create-session
            :restore-sessions :find-session :manager-sessions :close-manager
            :session-id :session-ready :session-snapshot
            :subscribe-session :unsubscribe-session

@@ -152,6 +152,12 @@
   ;; Caller holds MANAGER-LOCK, including registration/attachment during close.
   (when (manager-closed manager) (error "Agent manager is closed")))
 
+(defun manager-open-p (manager)
+  "Check manager ownership without filesystem I/O."
+  (and manager
+       (bt2:with-lock-held ((manager-lock manager))
+         (not (manager-closed manager)))))
+
 (defun register-provider (manager name function)
   (unless (and (text-p name 128 1) (functionp function)) (error "Invalid provider registration"))
   (bt2:with-lock-held ((manager-lock manager))

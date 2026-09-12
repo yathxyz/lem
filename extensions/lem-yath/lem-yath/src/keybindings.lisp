@@ -85,6 +85,19 @@
   ("g n" 'lem-yath-llm-new-session)          ; SPC g n
   ("g a" 'lem-yath-llm-abort)                ; SPC g a
 
+  ;; Native persistent agent workspace (SPC A).
+  #+linux ("A n" 'lem-agent/ui:agent-new-session)
+  #+linux ("A l" 'lem-agent/ui:agent-session-list)
+  #+linux ("A c" 'lem-agent/ui:agent-compose)
+  #+linux ("A d" 'lem-agent/ui:agent-decisions)
+  #+linux ("A i" 'lem-agent/ui:agent-interrupt)
+  #+linux ("A r" 'lem-agent/ui:agent-resume)
+  #+linux ("A p" 'lem-buffer-proposals:buffer-proposal-list)
+  #+linux ("A o" 'lem-buffer-proposals:buffer-proposal-open)
+  #+linux ("A e" 'lem-agent/editor-tools:agent-activate-file-buffer)
+  #+linux ("A j" 'lem-toolkit/jobs-ui:jobs-list)
+  #+linux ("A R" 'lem-yath-agent-recovery-report)
+
   ;; notes (org-roam / org-journal / org-capture)
   ("n r f" 'lem-yath-roam-find)              ; SPC n r f
   ("n r i" 'lem-yath-roam-insert)            ; SPC n r i

@@ -27,7 +27,11 @@
           pkgs = import nixpkgs { inherit system; };
           lemPatchedSrc = lem.outPath;
           lemNcurses = lem.packages.${system}.lem-ncurses.overrideLispAttrs (old: {
-            systems = old.systems ++ [ "lem-daemon/recovery" "lem-toolkit/jobs-ui" ];
+            systems = old.systems ++ [
+              "lem-daemon/recovery" "lem-toolkit/jobs-ui"
+              "lem-agent/openrouter" "lem-agent/process-tools"
+              "lem-agent/editor-tools" "lem-agent/ui"
+            ];
             lispLibs = old.lispLibs ++ [ pkgs.sbcl.pkgs.ironclad ];
           });
           lemLspTest = lemNcurses.overrideLispAttrs (
@@ -399,6 +403,8 @@
                 export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
                 export LEM_TOOLKIT_SBCL=${lib.getExe pkgs.sbcl}
                 export LEM_TOOLKIT_GUARDIAN=${lemPatchedSrc}/extensions/toolkit/guardian.lisp
+                export LEM_AGENT_CURL=${lib.getExe pkgs.curl}
+                export LEM_AGENT_CA_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
                 export LEM_YATH_MCP_FETCH_PROGRAM=${lib.getExe' pkgs.uv "uvx"}
                 export LEM_YATH_MCP_DOCKER_PROGRAM=${lib.getExe pkgs.docker-client}
                 export LEM_YATH_TREE_SITTER_BUNDLE=${treeSitterBundle}
@@ -446,6 +452,8 @@
               export LEM_YATH_TIMEOUT_PROGRAM=${lib.getExe' pkgs.coreutils "timeout"}
               export LEM_TOOLKIT_SBCL=${lib.getExe pkgs.sbcl}
               export LEM_TOOLKIT_GUARDIAN=${lemPatchedSrc}/extensions/toolkit/guardian.lisp
+              export LEM_AGENT_CURL=${lib.getExe pkgs.curl}
+              export LEM_AGENT_CA_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
               export LEM_YATH_LEM_SOURCE=${lemPatchedSrc}
               export LEM_YATH_MCP_FETCH_PROGRAM="''${LEM_YATH_MCP_FETCH_PROGRAM:-${lib.getExe' pkgs.uv "uvx"}}"
               export LEM_YATH_MCP_DOCKER_PROGRAM="''${LEM_YATH_MCP_DOCKER_PROGRAM:-${lib.getExe pkgs.docker-client}}"
