@@ -4,6 +4,7 @@
   (:export :make-manager :manager-open-p :register-provider :register-tool :create-session
            :restore-sessions :find-session :manager-sessions :close-manager
            :session-id :session-ready :session-snapshot
+           :list-retained-reviews :find-retained-review :discard-retained-review
            :subscribe-session :unsubscribe-session
            :submit-message :resume-session :resolve-decision :interrupt-session :close-session
            :receipt-id :await-request

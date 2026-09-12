@@ -52,6 +52,57 @@ Permission answers are `"allow"` or `"deny"`; clarification answers are strings
 resolved records are fsynced **before** dependent execution. Tool-start intent is
 also durable before invocation, so recovery can report uncertain outcomes.
 
+`register-tool :retain-for-review t` additionally preserves the exact tool
+arguments and historical result in `retained_reviews`, outside rolling turns.
+Only `propose_edit` opts in among the supplied tools. The actor reserves space
+and fsyncs the review together with tool-start intent **before** launching the
+executor. Capacity or checkpoint failure prevents that launch. History trimming,
+interruption, session closure, and host restart never evict retained reviews.
+They are task data in the same private session journal and use its existing lease.
+
+Each record has `id` (a new random 32-hex review ID), `turn_id`, `call_id`, `tool`,
+`arguments`, `status`, `generation`, and `result`. Origin and arguments never
+change. Status starts as `executing`, generation 0, result null; a recorded tool
+return becomes `returned`, generation 1. Interruption, failure, excessive result
+structure, or recovery of an executing intent becomes `unknown`, generation 1,
+with an explicit unknown-outcome result. `returned` records a historical tool
+return; an old proposal ID or successful staging result does **not** establish
+current applicability, approval, or whether the human later applied/rejected it.
+Restoration never invokes a retained tool. Journals without `retained_reviews`
+normalize to an empty collection; already evicted transcript data cannot be rebuilt.
+
+`list-retained-reviews` returns a list of complete copied JSON records in creation
+order; `find-retained-review` returns a copied record or nil. Like snapshots, these
+read-only APIs remain usable on closed session handles. They perform no I/O and
+do not confer authority on a historical candidate. Human recovery must select a
+fresh current region, create a new proposal, and review that proposal separately.
+
+`discard-retained-review session id :expected-generation n` returns a receipt:
+true after a durable removal, nil if already absent, or an error when stale,
+executing, closed, or unable to checkpoint. A failed discard preserves the live
+copy and reports its uncertain durability. This is archive cleanup only; it never
+accepts, rejects, or edits a live proposal. Restored permanently closed sessions
+may process metadata cleanup while retaining their closed status; handles whose
+actors already stopped follow the ordinary closed-handle rejection contract.
+
+Per-session limits are 16 reviews, 64 KiB encoded per record, and 512 KiB encoded
+for the collection. Arguments keep the session's maximum 16 KiB bound; retained
+results are at most 32 KiB. Each argument/result value additionally has at most
+256 JSON nodes and depth 12. Excessive arguments fail before execution; excessive
+results become an explicit unknown/omitted result while preserving the candidate.
+Reservation includes maximum result growth, the current turn's history bound,
+and both copies in history/archive.
+Every checkpoint validates copying and preserves the remaining result space
+inside the agent's 2 MiB encoded and 20,000-node journal bounds. These are stricter
+than the shared store's 16 MiB record limit; archive nesting remains below the
+24-level store bound. Full capacity fails explicitly, never silently evicting
+records. Only an explicit discard frees space, including after human application
+or rejection. The number of session journals is not globally bounded by this API.
+Individual quotas are ceilings, not a promise that every maximum fits together:
+UTF-8 and JSON escaping affect the enclosing byte budget. Follow-up admission
+checks that combined budget, including reserved result growth, before modifying
+the queue; an oversized follow-up is rejected without stopping the active tool.
+
 Each provider/tool invocation has its own worker. `check-operation` must be used
 by an adapter immediately before a marshalled editor mutation; a generation change
 invalidates every late result and stream callback. Register a cancellation

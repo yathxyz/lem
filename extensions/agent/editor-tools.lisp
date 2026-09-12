@@ -311,7 +311,7 @@
                    (error "Invalid file inspection range")) t)
      :execute (lambda (arguments context) (read-file-tool tools context arguments)))
     (agent:register-tool
-     manager "propose_edit"
+     manager "propose_edit" :retain-for-review t
      :schema (object-schema (agent:json-object "path" (string-schema) "revision" (string-schema 128)
                                                "original" (string-schema +maximum-fragment-characters+)
                                                "replacement" (string-schema +maximum-fragment-characters+))
