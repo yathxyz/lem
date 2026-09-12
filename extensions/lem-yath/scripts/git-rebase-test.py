@@ -256,6 +256,20 @@ def main():
                 first_repo = fixture('concurrent-first')
                 second_repo = fixture('concurrent-second')
                 first_todo = begin(first_repo, 'HEAD')
+                ordinary_file = root / 'ordinary-file.txt'
+                ordinary_file.write_text('ordinary visit\n')
+                visitor = subprocess.Popen(command + [str(ordinary_file)], env=env, cwd=root,
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    eventually(lambda: pending(ordinary_file), 'ordinary native file visit')
+                    evaluate('(lem:delete-buffer (lem:get-file-buffer ' + quoted(ordinary_file) + '))')
+                    visitor.communicate(timeout=10)
+                    check(visitor.returncode == 0 and pending(first_todo),
+                          'ordinary file-buffer closure still completes its client without aborting a managed todo')
+                finally:
+                    if visitor.poll() is None:
+                        visitor.kill()
+                        visitor.communicate(timeout=10)
                 second_todo = begin(second_repo, 'HEAD')
                 finish(second_todo, 'lem/legit::rebase-continue')
                 eventually(lambda: completed(second_repo) and not pending(second_todo),
