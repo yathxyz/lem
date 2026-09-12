@@ -78,12 +78,56 @@
     (format t "~&Dependency isolation passed: ~{~a~^, ~}~%"
             (sort (copy-list loaded) #'string<))))
 
+(defun assert-notes-public-api ()
+  (let ((package (find-package "LEM-STRUCTURED-NOTES"))
+        (count 0))
+    ;; This source set declares its public types as structures, classes, and
+    ;; conditions. Include values and SETF functions, not just ordinary functions.
+    (do-external-symbols (symbol package)
+      (unless (or (fboundp symbol)
+                  (fboundp (list 'setf symbol))
+                  (boundp symbol)
+                  (find-class symbol nil))
+        (error "Public semantic symbol has no implementation: ~a" symbol))
+      (incf count))
+    (flet ((public-symbol (name)
+             (multiple-value-bind (symbol status) (find-symbol name package)
+               (unless (eq :external status)
+                 (error "Required semantic API is not exported: ~a" name))
+               symbol)))
+      (dolist (name '("SOURCE-PROVIDER" "LSM-PROVIDER" "SEMANTIC-MODEL-ERROR"
+                      "SOURCE-SPAN" "DAV-RESOLVED-HREF" "CALDAV-HTTPS-ORIGIN"))
+        (unless (find-class (public-symbol name) nil)
+          (error "Required public semantic type is not defined: ~a" name)))
+      (unless (boundp (public-symbol "+ICAL-REFRESH-DEFAULT-MINIMUM-SECONDS+"))
+        (error "The public refresh constant is not defined"))
+      (dolist (name '("SOURCE-SPAN-CHARACTER-START" "PARSE-SOURCE"
+                      "CLASSIFY-CALDAV-WRITE-RESPONSE"
+                      "CLASSIFY-CALDAV-WRITE-REPRESENTATION"
+                      "RESOLVE-CALDAV-DISCOVERY-LOCATION"))
+        (unless (fboundp (public-symbol name))
+          (error "Required public semantic function is not defined: ~a" name))))
+    (dolist (name '("PARSE-DAV-MULTISTATUS" "RUN-DAV-HTTP-REQUEST-WITH-DIGEST-SESSION"
+                    "CALDAV-WRITE-RESPONSE-RECORD" "CALDAV-WRITE-RESPONSE-RECORD-P"
+                    "MAKE-CALDAV-WRITE-RESPONSE-RECORD"
+                    "CALDAV-WRITE-RESPONSE-RECORD-STATUS"
+                    "CALDAV-WRITE-RESPONSE-RECORD-HEADERS"
+                    "CALDAV-WRITE-RESPONSE-RECORD-BODY-OCTETS"
+                    "CALDAV-WRITE-RETURNED-REPRESENTATION-INPUT"
+                    "CALDAV-WRITE-CONFLICT-RETURNED-REPRESENTATION-INPUT"))
+      (multiple-value-bind (symbol status) (find-symbol name package)
+        (when (or (eq :external status) (and symbol (fboundp symbol)))
+          (error "Excluded calendar API is present: ~a" name))))
+    (format t "~&Public API boundary passed: ~d implemented exports.~%" count)))
+
 (handler-case
     (let ((*compile-verbose* nil)
           (*load-verbose* nil))
       (assert-notes-source "lem-structured-notes")
       (assert-notes-source "lem-structured-notes/tests")
       (assert-notes-dependencies)
+      (asdf:load-system "lem-structured-notes")
+      (assert-notes-public-api)
       (asdf:load-system "lem-structured-notes/tests")
       (assert-notes-source "lem-structured-notes")
       (assert-notes-source "lem-structured-notes/tests")
@@ -94,6 +138,7 @@
           (error "Expected 390 semantic and 3 URI cases, found ~d" count)))
       (asdf:test-system "lem-structured-notes")
       (assert-notes-dependencies)
+      (assert-notes-public-api)
       (uiop:quit 0))
   (error (condition)
     (format *error-output* "~&Structured-notes gate failed: ~a~%" condition)

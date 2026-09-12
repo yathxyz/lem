@@ -141,39 +141,3 @@
          t
          (caldav-write-outcome-conflict base))
         base)))
-
-(defun caldav-write-returned-representation-input
-    (intent response &key (max-body-octets 16777216))
-  "Return the validated atomic representation input, or NIL for fallback."
-  (unless (caldav-write-response-record-p response)
-    (model-error :invalid-caldav-write-response-record response
-                 "returned representation requires an exact durable response"))
-  (let ((evidence
-          (classify-caldav-write-representation
-           intent
-           (caldav-write-response-record-status response)
-           (caldav-write-response-record-headers response)
-           (caldav-write-response-record-body-octets response)
-           :max-body-octets max-body-octets)))
-    (and (eq :resource
-             (caldav-write-representation-evidence-kind evidence))
-         (caldav-read-outcome-calendar-input
-          (caldav-write-representation-evidence-read-outcome evidence)))))
-
-(defun caldav-write-conflict-returned-representation-input
-    (intent response &key (max-body-octets 16777216))
-  "Return a validated RFC 8144 412 current representation, or NIL.
-
-The durable response remains a precondition conflict regardless of whether
-the optional representation is usable. This function only supplies exact
-current-server-state input to conflict handling; it never authorizes replay or
-converts the failed write to success."
-  (unless (caldav-write-response-record-p response)
-    (model-error :invalid-caldav-write-response-record response
-                 "conflict representation requires an exact durable response"))
-  (unless (= 412 (caldav-write-response-record-status response))
-    (model-error :invalid-caldav-write-conflict-response-status
-                 (caldav-write-response-record-status response)
-                 "conflict representation consumption requires status 412"))
-  (caldav-write-returned-representation-input
-   intent response :max-body-octets max-body-octets))
