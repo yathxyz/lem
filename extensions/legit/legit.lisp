@@ -740,14 +740,17 @@ If the legit window is already open, close it (toggle behavior)."
         (message "Not on a commit line?")
         (return-from legit-rebase-interactive))
 
-      (run-function (lambda ()
-                      (lem/porcelain:rebase-interactively vcs :from commit-hash)))
-
-      (let ((buffer (find-file-buffer (lem/porcelain:rebase-todo-pathname vcs))))
-        (when buffer
-          (%legit-quit)
-          (switch-to-buffer buffer)
-          (change-buffer-mode buffer 'legit-rebase-mode))))))
+      (multiple-value-bind (output error-output status editor-request-p)
+          (lem/porcelain:rebase-interactively vcs :from commit-hash)
+        (run-function (lambda () (values output error-output status)))
+        ;; Native clients display the file when Git requests its editor. Opening
+        ;; it earlier could create an empty buffer before Git writes the todo.
+        (when (and (zerop status) (not editor-request-p))
+          (let ((buffer (find-file-buffer (lem/porcelain:rebase-todo-pathname vcs))))
+            (when buffer
+              (%legit-quit)
+              (switch-to-buffer buffer)
+              (change-buffer-mode buffer 'legit-rebase-mode))))))))
 
 (define-command legit-next-header () ()
   "Move point to the next header of this VCS window."

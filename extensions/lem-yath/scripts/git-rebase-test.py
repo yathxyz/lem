@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -49,6 +50,7 @@ def main():
                    GIT_CONFIG_GLOBAL='/dev/null')
         name = 'native-rebase'
         command = [client, '--server-name', name]
+        last_jobs = {}
 
         def client_run(*arguments, success=True):
             result = subprocess.run(command + list(arguments), env=env, cwd=root,
@@ -104,11 +106,32 @@ def main():
             evaluate('(progn (lem:switch-to-buffer (lem:get-file-buffer ' + quoted(path)
                      + ')) (' + command + '))')
 
+        def start_rebase(repo, form):
+            identifier = json.loads(in_repo(repo, '(progn ' + form +
+                ' (lem-toolkit/jobs:job-id (lem-yath::legit-rebase-session-job '
+                '(gethash vcs lem-yath::*legit-rebase-sessions*))))'))
+            last_jobs[str(repo)] = identifier
+            return identifier
+
+        def job_form(identifier, body):
+            return ('(let ((job (lem-toolkit/jobs:find-job ' + quoted(identifier)
+                    + ' (lem-yath::ensure-toolkit-job-manager)))) ' + body + ')')
+
+        def job_done(identifier):
+            return evaluate(job_form(identifier, '(not (null (lem-toolkit/jobs:job-result job)))')) == 'T'
+
+        def wait_step(repo):
+            eventually(lambda: in_repo(repo, '(notany (lambda (job) '
+                                       '(null (lem-toolkit/jobs:job-result job))) '
+                                       '(lem-yath::legit-rebase-jobs))') == 'T',
+                       'managed Git job completes cleanup')
+
         def begin(repo, revision='HEAD~1'):
+            wait_step(repo)
             todo = metadata(repo, 'rebase-merge/git-rebase-todo')
             commit_hash = git_run(repo, 'rev-parse', revision)
-            in_repo(repo, '(lem/porcelain:rebase-interactively vcs :from '
-                    + quoted(commit_hash) + ')')
+            start_rebase(repo, '(lem/porcelain:rebase-interactively vcs :from '
+                         + quoted(commit_hash) + ')')
             eventually(lambda: pending(todo), 'native sequence-editor request')
             return todo
 
@@ -116,9 +139,24 @@ def main():
             return not metadata(repo, 'rebase-merge').exists()
 
         def git_process_id(repo):
-            return int(in_repo(repo, '(uiop:process-info-pid '
-                               '(lem-yath::legit-rebase-session-process '
-                               '(gethash vcs lem-yath::*legit-rebase-sessions*)))'))
+            # PID discovery belongs only to this external Linux failure fixture.
+            # The production job API/journal deliberately stores no signal target.
+            queue = [daemon.pid]
+            while queue:
+                parent = queue.pop()
+                try:
+                    children = Path(f'/proc/{parent}/task/{parent}/children').read_text().split()
+                except FileNotFoundError:
+                    continue
+                for child in map(int, children):
+                    try:
+                        if (Path(f'/proc/{child}/comm').read_text().strip() == 'git'
+                                and Path(f'/proc/{child}/cwd').resolve() == repo.resolve()):
+                            return child
+                    except FileNotFoundError:
+                        continue
+                    queue.append(child)
+            raise AssertionError('No owned Git process for fixture repository')
 
         def reword(repo, todo, message, direct=False):
             text = todo.read_text().replace('pick ', 'reword ', 1)
@@ -141,6 +179,67 @@ def main():
                                           start_new_session=True)
                 client_run('--wait-for-server', '30', '--eval',
                            '(assert (null lem-user::*lem-yath-boot-error*))')
+
+                delayed = fixture('delayed-hook')
+                hook_started = root / 'hook-started'
+                hook_release = root / 'hook-release'
+                hook = metadata(delayed, 'hooks/pre-rebase')
+                hook.write_text('#!' + sys.executable + '\n'
+                                'from pathlib import Path\nimport time\n'
+                                f'Path({str(hook_started)!r}).write_text("started")\n'
+                                f'while not Path({str(hook_release)!r}).exists(): time.sleep(0.05)\n')
+                hook.chmod(0o700)
+                delayed_hash = git_run(delayed, 'rev-parse', 'HEAD')
+                # Invoke the actual upstream command while no todo exists. Its
+                # fourth-value protocol must leave opening to the native client.
+                started = time.monotonic()
+                delayed_job = start_rebase(delayed,
+                    '(let ((buffer (lem:make-buffer "rebase-command-fixture"))) '
+                    '(lem:switch-to-buffer buffer) '
+                    '(setf (lem:buffer-directory buffer) (uiop:getcwd)) '
+                    '(lem:insert-string (lem:buffer-point buffer) "commit" '
+                    ':commit-hash ' + quoted(delayed_hash) + ') '
+                    '(lem:buffer-start (lem:buffer-point buffer)) '
+                    '(lem/legit::legit-rebase-interactive))')
+                check(time.monotonic() - started < 2,
+                      'interactive rebase returns while a pre-rebase hook is blocked')
+                eventually(hook_started.exists, 'pre-rebase hook started')
+                delayed_todo = metadata(delayed, 'rebase-merge/git-rebase-todo')
+                check(not delayed_todo.exists()
+                      and evaluate('(null (lem:get-file-buffer ' + quoted(delayed_todo) + '))') == 'T'
+                      and evaluate('(+ 20 22)') == '42',
+                      'delayed Git startup neither blocks the editor nor pre-opens an empty todo')
+                evaluate(job_form(delayed_job,
+                    '(let ((buffer (lem-toolkit/jobs-ui:show-job job))) (lem:delete-buffer buffer))'))
+                check(not job_done(delayed_job) and not hook_release.exists(),
+                      'closing a rebase job inspection buffer leaves Git running')
+                evaluate('(progn (lem:switch-to-buffer (lem:get-buffer "rebase-command-fixture")) '
+                         '(lem/legit::show-legit-status) (lem/legit::legit-quit))')
+                check(not job_done(delayed_job) and not hook_release.exists(),
+                      'closing the Legit status view leaves its managed rebase running')
+                hook_release.write_text('continue')
+                eventually(lambda: pending(delayed_todo), 'delayed native todo request')
+                evaluate('(lem:delete-buffer (lem:get-file-buffer ' + quoted(delayed_todo) + '))')
+                eventually(lambda: job_done(delayed_job), 'killed request buffer ends Git')
+                check(evaluate(job_form(delayed_job,
+                    '(let ((result (lem-toolkit/jobs:job-result job))) '
+                    '(and (equal "exited" (gethash "state" result)) '
+                    '(not (eql 0 (gethash "exit-code" result))) '
+                    '(not (lem-yath::legit-rebase-job-success-p result))))')) == 'T',
+                      'killing an editable todo records explicit unsuccessful Git exit')
+                hook.write_text('#!' + sys.executable + '\n'
+                                'import sys\nsys.stderr.write("fixture hook refused rebase\\n")\n'
+                                'sys.exit(73)\n')
+                wait_step(delayed)
+                refused_job = start_rebase(delayed,
+                    '(lem/porcelain:rebase-interactively vcs :from ' + quoted(delayed_hash) + ')')
+                eventually(lambda: job_done(refused_job), 'failed pre-rebase hook result')
+                check(evaluate(job_form(refused_job,
+                    '(let ((result (lem-toolkit/jobs:job-result job))) '
+                    '(and (not (lem-yath::legit-rebase-job-success-p result)) '
+                    '(search "fixture hook refused rebase" (gethash "stderr" result))))')) != 'NIL',
+                      'Git startup failure retains bounded diagnostic output in its job')
+
                 repo = fixture("repo ' $(touch escaped);safe")
                 todo = begin(repo)
                 text = todo.read_text().replace('pick ', 'reword ', 1)
@@ -156,6 +255,10 @@ def main():
                       and git_run(repo, 'log', '-1', '--format=%s') == 'native reword and fixup'
                       and git_run(repo, 'status', '--porcelain') == '',
                       'native todo and commit callbacks complete reword/fixup cleanly')
+                wait_step(repo)
+                check(evaluate(job_form(last_jobs[str(repo)],
+                    '(lem-yath::legit-rebase-job-success-p (lem-toolkit/jobs:job-result job))')) == 'T',
+                      'managed rebase success requires exited state and exit code zero')
 
                 reword(repo, begin(repo, 'HEAD'), 'repeated native reword', direct=True)
                 reword(repo, begin(repo, 'HEAD'), 'third native reword', direct=True)
@@ -178,8 +281,8 @@ def main():
                            'Git edit stop')
                 (repo / 'document.txt').write_text('base\nsecond\nthird\namended\n')
                 git_run(repo, 'add', 'document.txt')
-                in_repo(repo, '(lem-yath::release-finished-legit-rebase-session vcs :wait t) '
-                        '(lem-yath::show-legit-amend-buffer "native edit amend" (uiop:getcwd))')
+                wait_step(repo)
+                in_repo(repo, '(lem-yath::show-legit-amend-buffer "native edit amend" (uiop:getcwd))')
                 evaluate('(lem-yath::legit-amend-continue)')
                 in_repo(repo, '(lem/porcelain:rebase-continue vcs)')
                 eventually(lambda: completed(repo), 'continued edit/amend')
@@ -208,8 +311,8 @@ def main():
                            'reordered commit conflict')
                 (conflict / 'document.txt').write_text('base\nsecond\nthird\n')
                 git_run(conflict, 'add', 'document.txt')
-                in_repo(conflict, '(lem-yath::release-finished-legit-rebase-session vcs :wait t) '
-                        '(lem/porcelain:rebase-continue vcs)')
+                wait_step(conflict)
+                in_repo(conflict, '(lem/porcelain:rebase-continue vcs)')
                 message_path = metadata(conflict, 'COMMIT_EDITMSG')
                 eventually(lambda: pending(message_path), 'continue after conflict editor callback')
                 check(evaluate('(+ 20 22)') == '42',
@@ -217,8 +320,8 @@ def main():
                 finish(message_path, 'lem-yath::lem-yath-legit-commit-continue')
                 eventually(lambda: git_run(conflict, 'diff', '--name-only', '--diff-filter=U'),
                            'second reordered commit conflict')
-                in_repo(conflict, '(lem-yath::release-finished-legit-rebase-session vcs :wait t) '
-                        '(lem/porcelain:rebase-skip vcs)')
+                wait_step(conflict)
+                in_repo(conflict, '(lem/porcelain:rebase-skip vcs)')
                 eventually(lambda: completed(conflict), 'skipped conflicting commit')
                 check(git_run(conflict, 'status', '--porcelain') == '',
                       'native asynchronous skip completes a conflicted rebase cleanly')
@@ -243,12 +346,35 @@ def main():
 
                 todo = begin(linked, 'HEAD')
                 git_pid = git_process_id(linked)
-                client_run('--stop-server', '--force')
+                crashed_job = last_jobs[str(linked)]
+                original_head = git_run(linked, 'rev-parse', 'HEAD')
+                check(evaluate('(+ 20 22)') == '42' and not job_done(crashed_job),
+                      'ordinary client disconnection leaves a pending rebase job running')
+                os.kill(daemon.pid, signal.SIGKILL)
                 daemon.wait(timeout=15)
-                eventually(lambda: not Path(f'/proc/{git_pid}').exists(),
-                           'Git reaped after daemon stop')
-                check(completed(linked),
-                      'stopping the daemon releases a pending native sequence editor')
+                def git_not_running():
+                    try:
+                        return Path(f'/proc/{git_pid}/stat').read_text().split(') ', 1)[1][0] == 'Z'
+                    except FileNotFoundError:
+                        return True
+                eventually(git_not_running, 'owned Git stops after daemon SIGKILL')
+                daemon = subprocess.Popen([editor, f'--daemon={name}'], env=env,
+                                          cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                                          start_new_session=True)
+                client_run('--wait-for-server', '30', '--eval',
+                           '(assert (null lem-user::*lem-yath-boot-error*))')
+                check(evaluate(job_form(crashed_job,
+                    '(equal "interrupted" (gethash "state" (lem-toolkit/jobs:job-result job)))')) == 'T'
+                    and git_run(linked, 'rev-parse', 'HEAD') == original_head
+                    and not pending(todo),
+                      'daemon restart retains interrupted rebase intent without replay or implicit approval')
+                if not completed(linked):
+                    in_repo(linked, '(lem/porcelain:rebase-abort vcs)')
+                    wait_step(linked)
+                    eventually(lambda: completed(linked), 'explicit recovery abort')
+                client_run('--stop-server', '--force')
+                check(daemon.wait(timeout=15) == 0,
+                      'deliberate shutdown closes the managed-job daemon cleanly')
                 check(not list(Path(env['LEM_HOME']).rglob('*rebase*editor*.sh')),
                       'rebase requires no generated shell editor')
         except Exception:

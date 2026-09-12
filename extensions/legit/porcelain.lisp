@@ -247,6 +247,8 @@ M       src/ext/porcelain.lisp
     (porcelain-error "Interactive rebase todo is unavailable for ~a" (vcs-name vcs))))
 
 (defgeneric rebase-interactively (vcs &key from)
+  (:documentation "Return output, error output and submission status. A true fourth
+value delegates todo display to an asynchronous editor request.")
   (:method (vcs &key from)
     (declare (ignorable from))
     (porcelain-error "lem/porcelain:rebase-interactively not implemented for vcs ~a" (vcs-name vcs))))

@@ -80,8 +80,7 @@ and
   (with-current-project (vcs)
     (run-function (lambda () (lem/porcelain:rebase-abort vcs)))
     (when (get-buffer "git-rebase-todo")
-      (kill-buffer "git-rebase-todo"))
-    (message "rebase aborted.")))
+      (kill-buffer "git-rebase-todo"))))
 
 (define-command rebase-continue () ()
   (with-current-project (vcs)
