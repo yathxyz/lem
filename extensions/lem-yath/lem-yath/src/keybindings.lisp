@@ -98,6 +98,7 @@
   #+linux ("A h" 'lem-agent/edit-recovery:agent-retained-reviews)
   #+linux ("A s" 'lem-agent/edit-recovery:agent-restage-retained-review)
   #+linux ("A H" 'lem-agent/retention-ui:agent-journals)
+  #+linux ("A D" 'lem-agent/ui:agent-draft-list)
   #+linux ("A j" 'lem-toolkit/jobs-ui:jobs-list)
   #+linux ("A R" 'lem-yath-agent-recovery-report)
 
