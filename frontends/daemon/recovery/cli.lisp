@@ -40,7 +40,8 @@
   0)
 
 (defun inspect-jobs-arguments (arguments)
-  (unless arguments (error "Missing job journal directory"))
+  (unless arguments
+    (error "Usage: lem-recover --jobs DIRECTORY [--after ID] [--limit 1..64] (missing directory)"))
   (let ((directory (first arguments)) (after nil) (limit 64) (seen nil))
     (loop for (key value) on (rest arguments) by #'cddr
           do (unless (and value (member key '("--after" "--limit") :test #'equal)
