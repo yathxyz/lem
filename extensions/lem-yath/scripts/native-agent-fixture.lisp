@@ -87,9 +87,66 @@
   (agent:register-provider ui:*default-manager* "native-acceptance-fake" #'provider)
   t)
 
-(defun new-session ()
+(defun new-session (&optional retained-turns)
   (agent:session-id (agent:create-session ui:*default-manager* :provider "native-acceptance-fake"
-                                         :model "fixture-no-network" :root *root*)))
+                                         :model "fixture-no-network" :root *root*
+                                         :limits (when retained-turns (agent:json-object "turns" retained-turns)))))
+
+(defun session-initialized-p (id)
+  ;; Nonblocking administrative receipt inspection, never awaiting on the editor.
+  (let ((receipt (agent:session-ready (session id))))
+    (bt2:with-lock-held ((agent::receipt-lock receipt))
+      (and (agent::receipt-done receipt) (null (agent::receipt-error receipt))))))
+
+(defun retained-reviews (id)
+  (coerce (agent:list-retained-reviews (session id)) 'vector))
+
+(defun prompt-label ()
+  (let ((prompt (lem-core::frame-prompt-window (lem:current-frame))))
+    (if prompt
+        (lem/prompt-window::prompt-buffer-prompt-string (lem:window-buffer prompt)) "")))
+
+(defun point-at-text (buffer-name needle)
+  (let* ((buffer (lem:get-buffer buffer-name)) (offset (search needle (lem:buffer-text buffer))))
+    (assert offset () "Fixture view has not rendered its exact row")
+    (lem:switch-to-buffer buffer)
+    (lem:move-to-position (lem:current-point) (1+ offset))
+    (lem:redraw-display :force t)
+    t))
+
+(defun editor-file-identities ()
+  (coerce (sort (loop for buffer in (lem:buffer-list)
+                     when (lem:buffer-filename buffer)
+                       collect (vector (lem:buffer-name buffer) (lem:buffer-filename buffer)))
+                #'string< :key (lambda (entry) (aref entry 0))) 'vector))
+
+(defun loaded-session-ids ()
+  (coerce (sort (mapcar #'agent:session-id (agent:manager-sessions ui:*default-manager*)) #'string<) 'vector))
+
+(defun prepare-recovery-region (text)
+  ;; Fresh scratch text is deliberate administrative setup, never filename lookup
+  ;; or a product candidate-rebinding path. Human commands choose the exact record.
+  (let ((buffer (lem:make-buffer (lem:unique-buffer-name "*Native candidate recovery source*"))))
+    (lem:insert-string (lem:buffer-point buffer) text)
+    (lem:clear-buffer-edit-history buffer)
+    (select-recovery-region (lem:buffer-name buffer))
+    (lem:buffer-name buffer)))
+
+(defun select-recovery-region (name)
+  (let ((buffer (lem:get-buffer name)))
+    (lem:switch-to-buffer buffer)
+    (lem:buffer-start (lem:buffer-point buffer))
+    (lem:set-cursor-mark (lem:buffer-point buffer) (lem:buffer-end-point buffer))
+    (lem:redraw-display :force t)
+    t))
+
+(defun edit-recovery-region-during-prompt (name)
+  ;; Administrative race injection: daemon prompt ownership serializes keyboard
+  ;; input from other clients. No product functions are replaced or injected.
+  (let ((buffer (lem:get-buffer name)))
+    (lem:insert-string (lem:buffer-end-point buffer) " HUMAN changed during prompt")
+    (lem:redraw-display :force t)
+    (lem:buffer-text buffer)))
 
 (defun show (id kind)
   (let* ((session (session id))

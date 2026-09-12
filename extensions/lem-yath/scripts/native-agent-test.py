@@ -7,9 +7,11 @@ external source-bootstrap wrapper as LEM_BIN, but is never configured acceptance
 Python only orchestrates tests. The agent, tools, UI and job supervision are Lisp.
 
 PTY input drives message typing/submission, allow/deny, view closure, interrupt,
-resume, proposal acceptance and undo. Administrative eval installs fake providers,
-creates sessions, selects views/points, releases a fake stream gate and inspects
-state. The driver kills isolated processes and reads temporary effects/journals.
+resume, proposal acceptance/undo, historical restage ID prompts, and confirmed
+session-journal deletion. Administrative eval installs fake providers, creates
+sessions and scratch regions, selects views/points, releases a fake stream gate,
+injects one edit during a prompt, and inspects state. The driver kills isolated
+processes and reads temporary effects/journals.
 """
 
 import fcntl
@@ -156,6 +158,9 @@ def main():
                   'startup supplies the native agent manager before fixture loading')
             if not bootstrap:
                 check(evaluate('(lem-yath:boot-ok-p)') == 'T', 'configured startup has no boot error')
+            check(evaluate('(not (null (and (find-package :lem-agent/edit-recovery) '
+                           '(find-package :lem-agent/retention-ui))))') == 'T',
+                  'configured image preloads candidate recovery and session journal UIs')
             evaluate('(load ' + quote(fixture) + ')')
             private_directories = value('(lem-native-agent-fixture::journal-directories)')
             check(all(Path(path).resolve().is_relative_to(root) for path in private_directories.values()),
@@ -191,15 +196,43 @@ def main():
                                                      '(lem:current-frame)))') == 'T',
                        'M-x command did not finish in the originating client')
 
+        def prompt_label(terminal):
+            return json.loads(in_frame(terminal, '(lem-native-agent-fixture::prompt-label)'))
+
+        def wait_prompt(terminal, prefix):
+            eventually(lambda: prompt_label(terminal).startswith(prefix),
+                       'expected originating-client prompt: ' + prefix)
+
+        def prompted_mx(terminal, name, prefix):
+            terminal.send(b'\x1bx')
+            wait_prompt(terminal, 'Command:')
+            terminal.send(name.encode() + b'\r')
+            wait_prompt(terminal, prefix)
+
+        def finish_prompt(terminal, answer, line=False):
+            terminal.send(answer.encode() + (b'\r' if line else b''))
+            eventually(lambda: not prompt_label(terminal), 'native command prompt did not finish')
+
+        def current_buffer(terminal):
+            return json.loads(in_frame(terminal, '(lem:buffer-name (lem:current-buffer))'))
+
+        def wait_view(terminal, marker):
+            eventually(lambda: marker in text(current_buffer(terminal)),
+                       'native view did not render: ' + marker)
+            return current_buffer(terminal)
+
         def type_text(terminal, text):
             vi = evaluate('(not (null (find-package :lem-vi-mode/core)))') == 'T'
             terminal.send((b'i' if vi else b'') + text.encode() + (b'\x1b' if vi else b''))
             if vi:
                 time.sleep(0.15)  # separate Escape from the following Meta-x prefix
 
-        def new_session():
-            identifier = json.loads(evaluate('(lem-native-agent-fixture::new-session)'))
-            eventually(lambda: snapshot(identifier)['status'] == 'idle', 'session initialization failed')
+        def new_session(retained_turns=None):
+            argument = '' if retained_turns is None else ' ' + str(retained_turns)
+            identifier = json.loads(evaluate('(lem-native-agent-fixture::new-session' + argument + ')'))
+            eventually(lambda: evaluate('(lem-native-agent-fixture::session-initialized-p '
+                                         + quote(identifier) + ')') == 'T'
+                       and snapshot(identifier)['status'] == 'idle', 'durable session initialization failed')
             return identifier
 
         def snapshot(identifier):
@@ -211,6 +244,23 @@ def main():
 
         def text(buffer):
             return value('(lem:buffer-text (lem:get-buffer ' + quote(buffer) + '))')
+
+        def retained(identifier):
+            return value('(lem-native-agent-fixture::retained-reviews ' + quote(identifier) + ')')
+
+        def select_row(terminal, buffer, identifier):
+            in_frame(terminal, '(lem-native-agent-fixture::point-at-text ' + quote(buffer)
+                     + ' ' + quote(identifier) + ')')
+
+        def restage_prompts(terminal, identifier, review_id, change=None):
+            prompted_mx(terminal, 'agent-restage-retained-review', 'Historical session ID:')
+            if change is not None:
+                # Administrative race only; both ID choices still arrive via PTY.
+                evaluate('(lem-native-agent-fixture::edit-recovery-region-during-prompt '
+                         + quote(change) + ')')
+            terminal.send(identifier.encode() + b'\r')
+            wait_prompt(terminal, 'Historical review ID:')
+            finish_prompt(terminal, review_id, line=True)
 
         def submit(terminal, identifier, message):
             show(terminal, identifier)
@@ -368,6 +418,22 @@ def main():
                   and (project / 'source.txt').read_text() == 'disk original',
                   'one native undo restores the unsaved human text without writing disk')
 
+            candidate = new_session(retained_turns=1)
+            submit(left, candidate, 'edit:replacement retained beyond transcript')
+            idle(candidate)
+            historical = retained(candidate)[-1]
+            historical_id, origin_turn = historical['id'], historical['turn_id']
+            old_proposal = historical['result']['proposal_id']
+            check(historical['arguments']['original'] == human,
+                  'native propose_edit records exact original and replacement for historical review')
+            submit(left, candidate, 'complete:evict candidate origin from transcript')
+            eventually(lambda: snapshot(candidate)['omitted_turns'] > 0
+                       and all(turn['id'] != origin_turn for turn in snapshot(candidate)['turns'])
+                       and snapshot(candidate)['status'] == 'idle',
+                       'one-turn context did not evict the candidate origin')
+            check(retained(candidate)[-1] == historical,
+                  'retained candidate survives native transcript trimming without mutation')
+
             active, waiting = new_session(), new_session()
             submit(left, active, 'process:crash')
             decision_view(left, active)
@@ -402,6 +468,102 @@ def main():
             idle(active, 2)
             check((project / 'crash.effects').read_text() == 'effect\n',
                   'native resume after restart runs only the explicit retained follow-up')
+
+            check(retained(candidate)[-1] == historical
+                  and all(turn['id'] != origin_turn for turn in snapshot(candidate)['turns'])
+                  and evaluate('(null (lem-buffer-proposals:find-proposal '
+                               + quote(old_proposal) + '))') == 'T',
+                  'daemon restart preserves the trimmed historical candidate without reviving its old proposal')
+            files_before_history = value('(lem-native-agent-fixture::editor-file-identities)')
+            proposal_count = value('(length (lem-buffer-proposals:list-proposals))')
+            show(left, candidate)
+            mx(left, 'agent-retained-reviews')
+            historical_list = wait_view(left, historical_id)
+            select_row(left, historical_list, historical_id)
+            left.send(b'\r')
+            historical_view = wait_view(left, 'Original (JSON string):')
+            eventually(lambda: left.saw('Historical agent edit candidates'),
+                       'historical recovery view did not reach the actual native terminal')
+            check('Current applicability and prior application are UNKNOWN' in text(historical_view)
+                  and historical['arguments']['replacement'] in text(historical_view)
+                  and evaluate('(lem:buffer-read-only-p (lem:get-buffer '
+                               + quote(historical_view) + '))') == 'T'
+                  and value('(lem-native-agent-fixture::editor-file-identities)') == files_before_history
+                  and value('(length (lem-buffer-proposals:list-proposals))') == proposal_count,
+                  'native historical list and Return inspection stay read-only, with no file activation or automatic proposal')
+
+            stale_source = json.loads(in_frame(left, '(lem-native-agent-fixture::prepare-recovery-region '
+                                               + quote(historical['arguments']['original']) + ')'))
+            restage_prompts(left, candidate, historical_id, change=stale_source)
+            check('HUMAN changed during prompt' in text(stale_source)
+                  and value('(length (lem-buffer-proposals:list-proposals))') == proposal_count,
+                  'native restage prompts refuse an administratively injected concurrent source edit and clean the capture')
+            fresh_source = json.loads(in_frame(left, '(lem-native-agent-fixture::prepare-recovery-region '
+                                               + quote(historical['arguments']['original']) + ')'))
+            restage_prompts(left, candidate, historical_id)
+            restaged_view = wait_view(left, 'Captured revision:')
+            eventually(lambda: left.saw('Captured revision:'),
+                       'fresh proposal review did not reach the actual native terminal')
+            new_proposal = json.loads(in_frame(left, '(lem-buffer-proposals:proposal-id '
+                                              '(lem:buffer-value (lem:current-buffer) '
+                                              '\'lem-buffer-proposals::proposal))'))
+            check(new_proposal != old_proposal and 'State: pending' in text(restaged_view)
+                  and text(fresh_source) == historical['arguments']['original']
+                  and (project / 'source.txt').read_text() == 'disk original',
+                  'actual restage ID prompts create a fresh pending proposal without applying or saving text')
+            mx(left, 'proposal-review-accept')
+            check(text(fresh_source) == historical['arguments']['replacement']
+                  and 'HUMAN changed during prompt' in text(stale_source)
+                  and (project / 'source.txt').read_text() == 'disk original',
+                  'separate native proposal acceptance applies only the explicitly selected recovery region')
+
+            loaded_before = value('(lem-native-agent-fixture::loaded-session-ids)')
+            right_focus = current_buffer(right)
+            mx(left, 'agent-journals')
+            inventory = wait_view(left, 'Stored agent sessions')
+            eventually(lambda: fast in text(inventory), 'native journal inventory did not list the selected session')
+            select_row(left, inventory, fast)
+            left.send(b'\r')
+            journal_view = wait_view(left, 'Exact stored fingerprint:')
+            eventually(lambda: left.saw('Stored agent sessions') and left.saw('Stored session ' + fast),
+                       'journal inventory and inspection did not reach the actual native terminal')
+            check('Stored session ' + fast in text(journal_view)
+                  and value('(lem-native-agent-fixture::loaded-session-ids)') == loaded_before
+                  and value('(lem-native-agent-fixture::editor-file-identities)') == files_before_history,
+                  'native journal inventory and Return inspection neither activate sessions nor visit editor files')
+            left.send(b'x')
+            wait_prompt(left, 'Permanently close session ' + fast)
+            finish_prompt(left, 'y')
+            eventually(lambda: snapshot(fast)['status'] == 'closed'
+                       and 'Stored status: closed' in text(journal_view)
+                       and evaluate('(null (lem:buffer-value (lem:get-buffer ' + quote(journal_view)
+                                    + ') \'lem-agent/retention-ui::pending))') == 'T',
+                       'native confirmed journal close did not finish and refresh')
+            closed_generation = snapshot(fast)['generation']
+            mx(left, 'agent-journal-refresh')
+            eventually(lambda: evaluate('(null (lem:buffer-value (lem:get-buffer ' + quote(journal_view)
+                                         + ') \'lem-agent/retention-ui::pending))') == 'T',
+                       'closed journal inspection did not finish')
+            check(snapshot(fast)['generation'] == closed_generation
+                  and evaluate('(not (bt2:thread-alive-p (lem-agent::session-thread '
+                               '(lem-native-agent-fixture::session ' + quote(fast) + '))))') == 'T',
+                  'refreshing the closed journal does not recreate or resume its stopped actor')
+            journal_path = Path(directories['agents']) / (fast + '.json')
+            left.send(b'd')
+            wait_prompt(left, 'Discard ALL stored history for ' + fast)
+            finish_prompt(left, 'n')
+            check(journal_path.exists() and fast in value('(lem-native-agent-fixture::loaded-session-ids)'),
+                  'native journal discard cancellation preserves the selected history')
+            left.send(b'd')
+            wait_prompt(left, 'Discard ALL stored history for ' + fast)
+            finish_prompt(left, 'y')
+            eventually(lambda: 'durably discarded' in text(journal_view) and not journal_path.exists(),
+                       'native confirmed journal deletion did not become durable')
+            check(value('(lem-native-agent-fixture::loaded-session-ids)')
+                  == [identifier for identifier in loaded_before if identifier != fast]
+                  and current_buffer(right) == right_focus
+                  and text(fresh_source) == historical['arguments']['replacement'],
+                  'confirmed native journal deletion removes only the selected session and preserves other client focus and source buffers')
             for directory in directories.values():
                 records = list(Path(directory).glob('*.json'))
                 check(bool(records) and all((path.stat().st_mode & 0o777) == 0o600 for path in records)
@@ -420,6 +582,10 @@ def main():
             left, right = attach(95), attach(113)
             check(snapshot(active)['status'] == 'idle' and snapshot(denied)['status'] == 'closed',
                   'orderly daemon restart preserves idle sessions and explicit human session closure')
+            check(retained(candidate)[-1] == historical
+                  and fast not in value('(lem-native-agent-fixture::loaded-session-ids)')
+                  and not journal_path.exists(),
+                  'orderly restart preserves retained candidates and keeps explicitly deleted session history absent')
             submit(left, active, 'complete:usable after orderly shutdown')
             idle(active, 3)
             check(any(message.get('content') == 'usable after orderly shutdown'
