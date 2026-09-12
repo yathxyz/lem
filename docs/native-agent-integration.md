@@ -24,7 +24,10 @@ The configured Vi leader has a native agent group at `SPC A`:
 | `SPC A p` | `buffer-proposal-list` | List shared edit proposals. |
 | `SPC A o` | `buffer-proposal-open` | Open a proposal by its exact ID. |
 | `SPC A e` | `agent-activate-file-buffer` | Deliberately run normal file mode/hooks for a buffer prepared by a file tool. |
-| `SPC A j` | `jobs-list` | Inspect the shared process registry. |
+| `SPC A h` | `agent-retained-reviews` | Inspect historical edit candidates for the current session. |
+| `SPC A s` | `agent-restage-retained-review` | Capture the selected live region, choose a historical candidate, and create a fresh proposal. |
+| `SPC A H` | `agent-journals` | Inspect session capacity, stored history, and deliberate cleanup. |
+| `SPC A j` | `jobs-list` | Inspect bounded job history and deliberate cleanup. |
 | `SPC A R` | `lem-yath-agent-recovery-report` | Inspect rejected session journals from startup. |
 
 In a composer, `C-c C-c` submits. The composer clears only after durable
@@ -34,6 +37,8 @@ identities are attached to actionable text. Truncated text cannot grant approval
 Closing a view or disconnecting a client does not close its session, answer a
 decision, or cancel an already submitted message. Explicit `agent-close-session`
 permanently closes the session.
+`C-c C-z` opens a session transcript from a composer, historical candidate view,
+or newly restaged proposal review.
 
 Each client retains its own frame and focus. Background output redraws idle
 clients too. Peer resize and redisplay switch implementation, buffer and point
@@ -88,6 +93,24 @@ stops journal actors while preserving resumable sessions; `close-session` is the
 separate permanent human action. The manager lease remains held until all journal
 actors stop, including when the final checkpoint fails. Arbitrary uncooperative
 provider/tool Lisp workers cannot keep that lease or publish late results.
+
+Retained edit candidates live outside rolling transcript history. Their arguments
+are checkpointed before the staging executor runs. After restart they are inert
+historical records: old proposal IDs and revision tokens do not establish current
+applicability or whether an earlier proposal was applied. A human selects a live
+region, explicitly restages a fresh proposal, and reviews acceptance separately.
+See [historical candidates](../extensions/agent/EDIT-RECOVERY.md).
+
+Managers now reserve at most 64 session slots and 256 job slots by default.
+Existing overflow stays on disk with bounded inventory and inspection. Unknown
+outcomes are not automatically evicted. Explicit whole-history cleanup checks
+the exact inspected file fingerprint, writer lifetime and uncertainty
+acknowledgement. An unwritten initial reservation remains visible; a failed
+deletion sync retains its slot until deliberate exact retry confirms absence.
+See [session retention](../extensions/agent/RETENTION.md) and
+[managed jobs](managed-jobs.md). Durable submission receipts additionally survive
+transcript trimming, so draft recovery can distinguish accepted input from unsent
+text without matching transcript contents.
 
 Shutdown closes agent actors before closing the shared job manager. Opening or
 refreshing a view does not initialize storage or wait for provider/tool work on
