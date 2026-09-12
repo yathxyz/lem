@@ -116,6 +116,11 @@ Core source tests pass 23 groups, including shutdown races, failed checkpoints,
 lease ownership and uncooperative workers. A negative control with the old
 peer-context behavior fails the new next-key destination regression.
 
+The updated daemon also passes all 15 native terminal/SDL display checks on an
+isolated X display: two GUI frames, shared edits, independent Vi state and prompts,
+Unicode clipboard input, resize/mouse routing, client loss and daemon death. The
+two-client screenshot is retained with the acceptance log.
+
 One separate real OpenRouter check passed on the preceding configured package:
 one provider round, the requested `LEM_NATIVE_OK` reply, zero tool calls, and a
 durable completed turn. It used only a synthetic empty project. This verifies
