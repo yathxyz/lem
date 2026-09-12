@@ -34,3 +34,15 @@
   :perform (test-op (operation component)
              (declare (ignore operation))
              (symbol-call :rove :run component)))
+
+(defsystem "lem-agent/ui"
+  :description "Disposable native agent views and deliberate asynchronous input"
+  :depends-on ("lem-agent" "lem/core")
+  :components ((:file "ui")))
+
+(defsystem "lem-agent/ui/tests"
+  :depends-on ("lem-agent/ui" "lem-fake-interface" "rove")
+  :components ((:file "tests/ui"))
+  :perform (test-op (operation component)
+             (declare (ignore operation))
+             (symbol-call :rove :run component)))
