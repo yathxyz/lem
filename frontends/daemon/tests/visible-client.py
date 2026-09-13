@@ -26,6 +26,21 @@ def quoted(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
+def read_display_number(descriptor, seconds=10):
+    deadline = time.monotonic() + seconds
+    line = bytearray()
+    while b'\n' not in line:
+        remaining = deadline - time.monotonic()
+        assert remaining > 0 and select.select([descriptor], [], [], remaining)[0], \
+            'Xvfb display number handshake timed out'
+        chunk = os.read(descriptor, 100 - len(line))
+        assert chunk, 'Xvfb closed its display number pipe before the newline'
+        line.extend(chunk)
+        assert len(line) < 100, 'Xvfb display number exceeded its bound'
+    assert line.endswith(b'\n') and line[:-1].isdigit(), 'Invalid Xvfb display number'
+    return ':' + line[:-1].decode('ascii')
+
+
 def main():
     editor, client = os.environ['LEM_BIN'], os.environ['LEMCLIENT_BIN']
     xvfb, xdotool = (shutil.which(name) for name in ('Xvfb', 'xdotool'))
@@ -152,17 +167,28 @@ def main():
                 terminals.append(self)
             else:
                 self.process = start(args, name)
-                self.window = xdo('search', '--sync', '--all', '--pid', self.process.pid,
-                                  '--name', 'Lem client').splitlines()[0]
             wait(lambda: attached() == '1', name + ' did not attach')
             if files:
                 wait(lambda: evaluate(buffer_form(files[0], 't')) == 'T', name + ' did not visit')
+            if mode == '-c':
+                self.find_window()
+
+        def find_window(self):
+            # SDL's X11 backend can replace its initial window while creating
+            # the renderer. Discover only after attachment, and refresh before
+            # each action instead of retaining the first startup window ID.
+            assert self.process.poll() is None, 'SDL client exited before its window action'
+            windows = xdo('search', '--sync', '--onlyvisible', '--all',
+                          '--pid', self.process.pid, '--name', '^Lem client$').splitlines()
+            assert len(windows) == 1, 'Expected one visible window owned by the SDL client'
+            self.window = windows[0]
+            return self.window
 
         def keys(self, terminal, *graphical):
             if self.mode == '-t':
                 os.write(self.master, terminal)
             else:
-                xdo('windowfocus', '--sync', self.window)
+                xdo('windowfocus', '--sync', self.find_window())
                 xdo('key', '--clearmodifiers', *graphical)
 
         def insert(self, value):
@@ -191,8 +217,9 @@ def main():
         finally:
             os.close(writefd)
         try:
-            assert select.select([readfd], [], [], 10)[0], 'Xvfb did not start'
-            env['DISPLAY'] = ':' + os.read(readfd, 100).decode().strip()
+            # Xvfb may write the digits and newline separately. Closing after
+            # an arbitrary first read can make its final write fail with EPIPE.
+            env['DISPLAY'] = read_display_number(readfd)
         finally:
             os.close(readfd)
         daemon = start([editor, '--daemon=visible-edit'], 'daemon')
@@ -236,7 +263,7 @@ def main():
             if mode == '-c':
                 view = View(mode, 'c-window-close', [detach])
                 check(waiting(detach), 'SDL window close starts with an unfinished edit')
-                window_close(view.window)
+                window_close(view.find_window())
                 view.exit(1)
                 wait(lambda: not waiting(detach), 'window-closed request was not cancelled')
             view = View(mode, label + '-persistent')
@@ -247,7 +274,7 @@ def main():
             check(not waiting(nowait) and view.process.poll() is None,
                   mode + ' -n opens without edit mode and remains attached')
             if mode == '-c':
-                window_close(view.window)
+                window_close(view.find_window())
             else:
                 view.detach()
             view.exit(0)
