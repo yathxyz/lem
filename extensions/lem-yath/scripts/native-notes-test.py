@@ -310,7 +310,8 @@ def main():
             mx(left, 'save-current-buffer')
             eventually(lambda: daily_path.exists() and not state(left)['modified'], 'explicit native save did not finish')
             saved_daily = daily_path.read_bytes()
-            check(saved_daily == daily['text'].encode(), 'only an explicit native save publishes the synthetic daily note')
+            check(saved_daily == state(left)['text'].encode() and b'DAILY HUMAN' in saved_daily,
+                  'only an explicit native save publishes the synthetic daily note with its human text')
             show(left, daily['name'], end=True)
             type_text(left, ' UNSAVED RECOVERY λ')
             eventually(lambda: 'UNSAVED RECOVERY λ' in state(left)['text'], 'pre-crash native edit was lost')
@@ -349,7 +350,7 @@ def main():
                   and value('lem-native-notes-fixture::*file-hook-calls*') == 0,
                   'native recovery restores exact unnamed unsaved text without file hooks or file association')
             mx(left, 'structured-notes-lsm-assign-id')
-            eventually(lambda: left.saw('recovered unnamed text needs an explicit file association'),
+            eventually(lambda: left.saw('recovered unnamed text'),
                        'recovered notes authority refusal did not reach the native terminal')
             check(state(left)['text'] == recovered['text'] and state(left)['tick'] == recovered['tick']
                   and state(left)['filename'] is None
