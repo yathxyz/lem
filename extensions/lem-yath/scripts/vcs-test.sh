@@ -2642,16 +2642,18 @@ enter_prompt_value() {
 
 enter_completion_prompt_value() {
   local session=$1 value=$2 prompt=$3 index
+  lem_wait_for "$session" "$prompt" "$WAIT_TIMEOUT" >/dev/null ||
+    fail legit-completion-prompt "completion prompt was not ready: $prompt" \
+      "$session"
   for index in $(seq 1 80); do
     lem_keys "$session" BSpace
   done
   tmux_cmd send-keys -t "$session" -l -- "$value"
   sleep 0.5
+  # The configured completion Return accepts the candidate and submits its
+  # prompt. A stale screen during the ensuing Git command cannot justify a
+  # second Return: it would visit a row after Legit refreshes.
   send_keys "$session" Enter
-  sleep 0.25
-  if lem_wait_for "$session" "$prompt" 1 >/dev/null 2>&1; then
-    send_keys "$session" Enter
-  fi
 }
 
 enter_atomic_prompt_value() {
@@ -2806,6 +2808,15 @@ checkout_porcelain_branch_fixture() {
   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q "$branch" ||
     fail legit-branch-fixture-checkout \
       "fixture checkout of $branch failed" "$porcelain_session"
+}
+
+reset_porcelain_fixture() {
+  local revision=$1
+  wait_legit "$porcelain_session" porcelain ||
+    fail legit-reset-fixture-ready \
+      'native command did not finish before fixture reset' "$porcelain_session"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard "$revision" ||
+    fail legit-reset-fixture-reset 'fixture hard reset failed' "$porcelain_session"
 }
 
 fixture="$(lem-yath_lisp_string "$here/scripts/vcs-fixture.lisp")"
@@ -5572,7 +5583,7 @@ else
     "$porcelain_session"
 fi
 
-if prepare_porcelain_reset_fixture; then
+if wait_legit "$porcelain_session" porcelain && prepare_porcelain_reset_fixture; then
   pass legit-reset-fixture \
     'prepared isolated base/step revisions, a movable branch, and metacharacter paths'
 else
@@ -5647,6 +5658,9 @@ fi
 wait_until "$WAIT_TIMEOUT" porcelain_reset_clean_at "$reset_step_hash" ||
   fail legit-reset-soft-cleanup \
     'could not restore the clean step after soft reset' "$porcelain_session"
+wait_legit "$porcelain_session" porcelain ||
+  fail legit-reset-soft-cleanup \
+    'native hard reset did not finish before the keep fixture edit' "$porcelain_session"
 
 printf 'uncommitted keep value\n' \
   >"$LEM_YATH_VCS_PORCELAIN_ROOT/reset-keep.txt"
@@ -5666,13 +5680,12 @@ else
     'keep reset lost the dirty file or retained the wrong committed tree' \
     "$porcelain_session"
 fi
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
-  "$reset_step_hash"
-send_keys "$porcelain_session" g
+reset_porcelain_fixture "$reset_step_hash"
 
 printf 'staged index value\n' \
   >"$LEM_YATH_VCS_PORCELAIN_ROOT/reset-index.txt"
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- reset-index.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- reset-index.txt ||
+  fail legit-reset-index-setup 'could not stage the index fixture' "$porcelain_session"
 send_keys "$porcelain_session" g O
 if lem_wait_for "$porcelain_session" 'Reset' "$WAIT_TIMEOUT" >/dev/null; then
   send_keys "$porcelain_session" i
@@ -5689,13 +5702,12 @@ else
     'index-only reset moved HEAD or discarded the worktree edit' \
     "$porcelain_session"
 fi
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
-  "$reset_step_hash"
-send_keys "$porcelain_session" g
+reset_porcelain_fixture "$reset_step_hash"
 
 printf 'staged worktree value\n' \
   >"$LEM_YATH_VCS_PORCELAIN_ROOT/reset-worktree.txt"
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- reset-worktree.txt
+"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -- reset-worktree.txt ||
+  fail legit-reset-worktree-setup 'could not stage the worktree fixture' "$porcelain_session"
 printf 'unstaged worktree value\n' \
   >"$LEM_YATH_VCS_PORCELAIN_ROOT/reset-worktree.txt"
 send_keys "$porcelain_session" g O
@@ -5714,9 +5726,7 @@ else
     'worktree-only reset changed HEAD/index or retained the wrong file content' \
     "$porcelain_session"
 fi
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
-  "$reset_step_hash"
-send_keys "$porcelain_session" g
+reset_porcelain_fixture "$reset_step_hash"
 
 printf 'selected path dirty\n' \
   >"$LEM_YATH_VCS_PORCELAIN_ROOT/reset dir;safe/target file.txt"
@@ -5732,9 +5742,7 @@ if lem_wait_for "$porcelain_session" 'Checkout from revision:' \
 fi
 if lem_wait_for "$porcelain_session" 'Checkout file:' \
      "$WAIT_TIMEOUT" >/dev/null; then
-  # Select the unique path through the real completion view, then submit the
-  # resulting exact prompt value.  Completion Return and prompt Return are
-  # deliberately separate Lem commands.
+  # One native completion Return selects and submits the unique exact path.
   enter_completion_prompt_value "$porcelain_session" target 'Checkout file:'
 fi
 if wait_until "$WAIT_TIMEOUT" porcelain_reset_file_only; then
@@ -5745,8 +5753,7 @@ else
     'file checkout broadened its path scope or mishandled direct argv' \
     "$porcelain_session"
 fi
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
-  "$reset_step_hash"
+reset_porcelain_fixture "$reset_step_hash"
 send_keys "$porcelain_session" g
 
 send_keys "$porcelain_session" O
@@ -5761,7 +5768,8 @@ if lem_wait_for "$porcelain_session" 'Reset reset-moving to:' \
      "$WAIT_TIMEOUT" >/dev/null; then
   enter_prompt_value "$porcelain_session" "$reset_step_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_reset_other_branch; then
+if wait_until "$WAIT_TIMEOUT" porcelain_reset_other_branch &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-reset-branch-other \
     'O b moved a non-current branch through update-ref without touching HEAD'
 else
@@ -5827,8 +5835,7 @@ else
     "$porcelain_session"
 fi
 
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
-  "$reset_step_hash"
+reset_porcelain_fixture "$reset_step_hash"
 printf 'untracked survives reset\n' \
   >"$LEM_YATH_VCS_PORCELAIN_ROOT/reset-untracked.txt"
 send_keys "$porcelain_session" g O
@@ -5855,7 +5862,7 @@ else
     "$porcelain_session"
 fi
 
-if prepare_porcelain_merge_fixture; then
+if wait_legit "$porcelain_session" porcelain && prepare_porcelain_merge_fixture; then
   pass legit-merge-fixture \
     'prepared divergent plain, edit, squash, preview, and conflict branches'
 else
@@ -6332,7 +6339,7 @@ else
     "$porcelain_session"
 fi
 
-if prepare_porcelain_branch_fixture; then
+if wait_legit "$porcelain_session" porcelain && prepare_porcelain_branch_fixture; then
   pass legit-branch-fixture \
     'prepared local, remote, unmerged, current, and spin branch histories'
 else
@@ -6446,9 +6453,15 @@ else
     'orphan checkout retained a parent or lost its staged starting tree' \
     "$porcelain_session"
 fi
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -f branch-created
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
-  "$merge_main_hash"
+wait_legit "$porcelain_session" porcelain ||
+  fail legit-branch-orphan-cleanup \
+    'orphan command did not finish before fixture checkout' "$porcelain_session"
+if ! { "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -f branch-created &&
+       "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+         "$merge_main_hash"; }; then
+  fail legit-branch-orphan-cleanup \
+    'could not restore branch-created after orphan checkout' "$porcelain_session"
+fi
 send_keys "$porcelain_session" g
 
 send_keys "$porcelain_session" b
