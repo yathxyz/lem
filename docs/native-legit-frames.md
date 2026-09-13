@@ -60,7 +60,11 @@ passes all 14 assertions with its actual binaries and no product-source overlay.
 The focused source window suite passes 14 groups and the Legit suite passes 25,
 including dependent-popup cleanup after pane closure. The configured native Git
 rebase gate also passes all 27 assertions. The final broad configured VCS gate
-remains pending; these focused results do not establish its completion.
+passes 275 workflow checks and 377 static assertions at fixture revision
+`92679c6d6`, exercising real synthetic repositories. Its corrected observation
+and completion helpers do not change the tested runtime at `b44f88a68`.
+The [acceptance record](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/notes-daily/final-acceptance.json)
+retains exact source identities, passing logs, failed attempts and focused controls.
 
 ## Boundary
 

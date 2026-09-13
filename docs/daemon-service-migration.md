@@ -198,6 +198,7 @@ nix run .#daemon-test
 Configured client, agent, notes, project/shell/REPL, service and Git acceptance are
 recorded separately in the companion rollout document and retained validation
 logs. The rebuilt [Legit frame/rebase gates](native-legit-frames.md) pass their
-focused scenarios; the final broad configured VCS gate remains pending. This is
+focused scenarios; the final broad configured VCS gate also passes 275 workflow
+checks and 377 static assertions. This is
 not a clean full-suite claim: see the [core test baseline](core-test-baseline-2026-09-13.md).
 External Python test drivers do not change the Common Lisp runtime ownership.

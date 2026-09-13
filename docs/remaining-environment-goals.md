@@ -15,7 +15,7 @@ preserved. No deployment or default-editor cutover is part of these goals.
 | 2. Independent styled clients and text recovery | Complete. Terminal and SDL frames, client ownership, persistent shared buffers, private JSON checkpoints and standalone inspection. |
 | 3. Shared Lisp toolkit and failure recovery | Complete. Managed jobs, compilation, native Git lifecycle, proposals, bounded output/cancellation and interrupted records without replay. |
 | 4. Recoverable agent workspaces | Complete. Lisp agent loop/tools, durable decisions, drafts, historical candidates, exact submission receipts and explicit bounded storage cleanup. |
-| 5. Notes and daily workflows | Implementation and focused/configured native checks complete; final broad VCS gate is running. |
+| 5. Notes and daily workflows | Complete. Selective semantic core and explicit notes adapter; independent Legit panes and daily tools; nine configured gates pass, including the full VCS workflow. |
 | 6. Reviewable cutover | Final profile retained and actual binaries tested; final evidence/documentation preparation in progress. Live activation is excluded. |
 
 The tested runtime snapshot is `b44f88a68`. Subsequent documentation and VCS
@@ -24,7 +24,7 @@ the worktrees:
 
 - `../.recovery/2026-09-10-lem-integration/validation/toolkit/`
 - `../.recovery/2026-09-10-lem-integration/validation/agent-recovery/`
-- `../.recovery/2026-09-10-lem-integration/validation/notes-daily/`
+- [Notes and daily acceptance](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/notes-daily/final-acceptance.json)
 - `../.recovery/2026-09-10-lem-integration/validation/final-candidate/`
 
 ## Notes and daily workflow integration
@@ -52,6 +52,14 @@ agent (87), notes (36), daily tools (9), terminal/SDL (15), Git caller ownership
 (29), and private service (5) checks. Agent counts include repetitions across startups: 87 reported checks are
 62 distinct descriptions. Historical failing runs and source overlays remain
 labeled separately from rebuilt configured/actual-profile acceptance.
+
+The final broad VCS gate passes 275 workflow checks and 377 static assertions
+at fixture revision `92679c6d6`, using real synthetic repositories. Earlier runs
+exposed stale completion submissions, readiness observations and fixed-delay
+assumptions in the test driver; the corrected fixture submits actions once and
+waits for fresh observations. These fixture corrections do not change the tested
+runtime. Failed runs and focused controls are retained with their limits in the
+acceptance record; counts from separate gates are not a unique-test total.
 
 ## Reviewable cutover
 
