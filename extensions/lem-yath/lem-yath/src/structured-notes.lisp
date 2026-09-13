@@ -38,7 +38,7 @@
               *native-notes-status-buffer*
               (setf *native-notes-status-buffer*
                     (make-buffer (unique-buffer-name "*Notes workspace*") :enable-undo-p nil)))))
-    (with-inhibit-read-only ()
+    (let ((*inhibit-read-only* t))
       (erase-buffer buffer)
       (insert-string
        (buffer-point buffer)
