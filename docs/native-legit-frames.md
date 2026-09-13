@@ -42,9 +42,12 @@ Before the fix, the prepared configured profile disconnected during the second
 SDL client's Legit command. The first client's pane was outside the second
 frame but still live, and the old display code tried to delete it. A separate
 source negative control confirms that the original `delete-window` frees this
-foreign pane instead of refusing it. The changed source window and Legit suites
-pass, and the focused SDL scenario passes with an explicitly labeled source
-overlay. A rebuilt configured gate is still required for this commit.
+foreign pane instead of refusing it. The final rebuilt configured SDL gate now
+passes all 14 assertions with its actual binaries and no product-source overlay.
+The focused source window suite passes 14 groups and the Legit suite passes 24,
+including dependent-popup cleanup after pane closure. The configured native Git
+rebase gate also passes all 27 assertions. The final broad configured VCS gate
+remains pending; these focused results do not establish its completion.
 
 ## Boundary
 
