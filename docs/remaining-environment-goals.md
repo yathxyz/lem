@@ -18,7 +18,7 @@ preserved. No deployment or default-editor cutover is part of these goals.
 | 5. Notes and daily workflows | Implementation and focused/configured native checks complete; final broad VCS gate is running. |
 | 6. Reviewable cutover | Final profile retained and actual binaries tested; final evidence/documentation preparation in progress. Live activation is excluded. |
 
-The final tested source snapshot is `d941801c7`. Subsequent documentation commits
+The final tested source snapshot is `b44f88a68`. Subsequent documentation commits
 do not change that build identity. Validation is retained outside the worktrees:
 
 - `../.recovery/2026-09-10-lem-integration/validation/toolkit/`
@@ -40,22 +40,23 @@ calendar data was used during acceptance.
 Native acceptance exposed and fixed two concrete daily-use failures: Legit panes
 could delete another client's windows or leave a progress popup attached to a
 freed pane; asynchronous REPL prompts could leave the next expression outside
-the input area. Per-frame pane ownership and tail-following listener windows
+the input area. Reused Git collectors also needed a scoped read-only override,
+and remaining Git message/remote/merge callers needed exact context ownership. Per-frame pane ownership and tail-following listener windows
 now preserve peer navigation and the next native key destination.
 
 Configured gates pass notes (36 reported checks), independent SDL Legit (14),
 project/shell/REPL workflows (9), native Git (27), agent recovery (87), daemon (25),
 compilation (17), and proposals (12). The actual retained computer profile passes
-agent (87), notes (36), daily tools (9), terminal/SDL (15), and private service (5)
-checks. Agent counts include repetitions across startups: 87 reported checks are
+agent (87), notes (36), daily tools (9), terminal/SDL (15), Git caller ownership
+(29), and private service (5) checks. Agent counts include repetitions across startups: 87 reported checks are
 62 distinct descriptions. Historical failing runs and source overlays remain
 labeled separately from rebuilt configured/actual-profile acceptance.
 
 ## Reviewable cutover
 
 The retained candidate is
-`/nix/store/59xmq7z6m0jjmk5fdzprmk44jhk8pllf-lem-yath-profile`, rooted at
-`../.recovery/2026-09-10-lem-integration/validation/final-candidate/prepared-profile-v1`.
+`/nix/store/87wp1xjkfyv7y1ba6xx13wkahcldbph2-lem-yath-profile`, rooted at
+`../.recovery/2026-09-10-lem-integration/validation/final-candidate/prepared-profile-v2`.
 The shared Nix module prepares both headless and desktop homes. Both built service
 units pass verification, and the actual candidate passes private readiness,
 SIGKILL restart, interrupted-job recovery and deliberate shutdown checks. The

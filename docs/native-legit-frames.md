@@ -23,6 +23,19 @@ rebase. Unrelated popups and other frames remain untouched. Without that cleanup
 redisplay could ask a surviving popup to read its deleted parent's cursor and
 terminate the daemon.
 
+Collector rendering into reused pane buffers runs inside a scoped read-only
+override. The resulting view stays read-only, including after renderer failure.
+This prevents TODO/status refresh from clearing the pane and then raising a
+read-only error while rebuilding it.
+
+Configured Git message editors retain their exact originating context. Finish
+and abort cannot select a replacement or foreign pane; remote refresh retains
+the initiating pane role, and merge preview remains in its owning source pane.
+Fixed message-name collisions refuse a second editor before changing pending text
+or context. The actual rebuilt profile passes 29 focused caller checks using two
+terminal clients; successful Git commit mutations are simulated in that fixture,
+while the broad VCS gate exercises real synthetic Git repositories.
+
 ## Focused acceptance
 
 Run `scripts/legit-frame-test.py` with `LEM_BIN` and `LEMCLIENT_BIN` naming built
@@ -44,7 +57,7 @@ frame but still live, and the old display code tried to delete it. A separate
 source negative control confirms that the original `delete-window` frees this
 foreign pane instead of refusing it. The final rebuilt configured SDL gate now
 passes all 14 assertions with its actual binaries and no product-source overlay.
-The focused source window suite passes 14 groups and the Legit suite passes 24,
+The focused source window suite passes 14 groups and the Legit suite passes 25,
 including dependent-popup cleanup after pane closure. The configured native Git
 rebase gate also passes all 27 assertions. The final broad configured VCS gate
 remains pending; these focused results do not establish its completion.
