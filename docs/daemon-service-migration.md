@@ -177,9 +177,11 @@ to 64, jobs to 256, and drafts to 32; exhaustion requires deliberate cleanup.
 
 Shell/REPL execution stacks and undo history are not reconstructed after daemon
 death. The SDL protocol is a styled character grid without embedded images or
-rich widgets. Synchronous minibuffer prompts queue other clients' input. Approved
-process tools are not filesystem sandboxed, and broad CalDAV/mixed-notes adapters
-remain outside this candidate.
+rich widgets. Synchronous minibuffer prompts queue other clients' input. Generic
+typeout popups and `lem/peek-source` previews retain global display state; see the
+[client ownership boundary](native-legit-frames.md#boundary). Approved process
+tools are not filesystem sandboxed, and broad CalDAV/mixed-notes adapters remain
+outside this candidate.
 
 ## Verification
 

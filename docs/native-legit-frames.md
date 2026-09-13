@@ -65,7 +65,9 @@ remains pending; these focused results do not establish its completion.
 ## Boundary
 
 The generic typeout popup implementation in `src/typeout.lisp` still has global
-window state. Legit help and error popups use it. This change does not establish
-independent ownership for those generic popups; they need separate reproduction
-and acceptance. The queued refresh in this fixture exercises display ownership,
-not a new background Git polling service.
+window state. Legit help and error popups use it. The separate `lem/peek-source`
+implementation in `src/ext/peek-source.lisp` also shares window and buffer state;
+grep, xrefs/LSP and project source previews use it. This change does not establish
+independent ownership for those generic popups and previews; they need separate
+reproduction and acceptance. The queued refresh in this fixture exercises display
+ownership, not a new background Git polling service.

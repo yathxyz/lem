@@ -18,8 +18,9 @@ preserved. No deployment or default-editor cutover is part of these goals.
 | 5. Notes and daily workflows | Implementation and focused/configured native checks complete; final broad VCS gate is running. |
 | 6. Reviewable cutover | Final profile retained and actual binaries tested; final evidence/documentation preparation in progress. Live activation is excluded. |
 
-The final tested source snapshot is `b44f88a68`. Subsequent documentation commits
-do not change that build identity. Validation is retained outside the worktrees:
+The tested runtime snapshot is `b44f88a68`. Subsequent documentation and VCS
+fixture commits do not change its product code. Validation is retained outside
+the worktrees:
 
 - `../.recovery/2026-09-10-lem-integration/validation/toolkit/`
 - `../.recovery/2026-09-10-lem-integration/validation/agent-recovery/`
@@ -83,9 +84,10 @@ live service, editor default, user note or remote account has been changed.
   are never automatically replayed after a crash.
 - SDL renders a styled character grid. Embedded images/widgets are not provided
   by this protocol. Synchronous minibuffer prompts temporarily queue peer input.
-- Generic typeout help/error popups still have global display state. The focused
-  Legit acceptance establishes pane ownership; it does not establish independent
-  ownership for every generic popup.
+- Generic typeout help/error popups and `lem/peek-source` previews still have
+  global display state. Grep, xrefs/LSP and project source previews use the latter.
+  The focused Legit acceptance establishes ownership for its panes; independent
+  ownership of these generic popups and previews remains unverified.
 - Broad CalDAV integration, notes migration, Windows daemon support and full Emacs
   package parity remain outside this delivered candidate. Approved external
   process tools are not a filesystem sandbox.
