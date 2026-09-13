@@ -126,8 +126,14 @@ Keep replies concise and distinguish proposed work from completed effects.")
       (unwind-protect
            (when draft-store
              (lem-agent/drafts:close-store draft-store)
-             (lem-agent/drafts:close-store draft-store :wait t))
-        (when manager (lem-agent:close-manager manager :wait t)))))
+             (lem-agent/drafts:close-store draft-store :wait t)
+             (when (lem-agent/drafts:store-error draft-store)
+               (error "Draft checkpoint durability is uncertain")))
+        (when manager
+          (dolist (receipt (lem-agent:close-manager manager :wait t))
+            (multiple-value-bind (value done) (lem-agent:await-request receipt :timeout 0)
+              (unless (and done value)
+                (error "Agent shutdown checkpoint was not confirmed"))))))))
 
   (define-command lem-yath-agent-recovery-report () ()
     "Inspect startup recovery failures; malformed journals remain unchanged."

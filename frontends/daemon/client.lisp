@@ -48,6 +48,9 @@
                          (string= "hello" (protocol:field hello "type" "")))
               (error "Daemon did not complete protocol negotiation")))
           connection)
+      (bt2:timeout (condition)
+        (transport:close-local-connection local-connection)
+        (error condition))
       (error (condition)
         (transport:close-local-connection local-connection)
         (error condition)))))
@@ -64,6 +67,7 @@
                      (* seconds internal-time-units-per-second))))
     (loop
       (handler-case (return (connect-client server-name))
+        (bt2:timeout (condition) (error condition))
         (error (condition)
           (when (>= (get-internal-real-time) deadline)
             (error condition))
@@ -192,15 +196,32 @@
       (terpri)
       0)))
 
-(defun run-shutdown (connection force)
+(defun wait-for-shutdown (connection id)
+  (multiple-value-bind (value error) (wait-for-response connection id)
+    (when error (error "~a" error))
+    (unless (equal value "stopped")
+      (error "Daemon did not confirm completed shutdown: ~a" value)))
+  ;; A receipt proves exit hooks finished; EOF proves the listener released this
+  ;; connection. Neither an early acknowledgement nor EOF alone is success.
+  (loop :for message := (protocol:read-message (client-stream connection))
+        :while message
+        :when (and (equal "response" (protocol:field message "type"))
+                   (equal id (protocol:field message "id"))
+                   (equal "error" (protocol:field message "status")))
+          :do (error "~a" (response-error-message message)))
+  0)
+
+(defun run-shutdown (connection force &key (timeout 25))
   (let ((id (next-id)))
-    (client-send connection
-                 (protocol:make-object
-                  "version" protocol:+protocol-version+
-                  "type" "shutdown" "id" id "force" (and force t)))
-    (multiple-value-bind (value error) (wait-for-response connection id)
-      (declare (ignore value))
-      (if error (error "~a" error) 0))))
+    (handler-case
+        (bt2:with-timeout (timeout)
+          (client-send connection
+                       (protocol:make-object
+                        "version" protocol:+protocol-version+
+                        "type" "shutdown" "id" id "force" (and force t)))
+          (wait-for-shutdown connection id))
+      (bt2:timeout ()
+        (error "Daemon did not complete shutdown within ~a seconds" timeout)))))
 
 (defun ncurses-call (package name &rest arguments)
   (let ((symbol (find-symbol name package)))
@@ -490,7 +511,7 @@
   -c, --create-frame           attach a graphical client; FILEs wait for completion~%\
   -n, --no-wait                visit without an edit request; -t/-c stay attached~%\
   -e, --eval FORM              evaluate Common Lisp in the daemon~%\
-      --stop-server            stop the daemon if buffers are clean~%\
+      --stop-server            wait up to 25s for shutdown, if buffers are clean~%\
       --force                  allow --stop-server to discard edits~%\
   -s, --server-name NAME       select a named daemon~%\
       --wait-for-server SECS  retry connection failures during startup~%\
@@ -559,21 +580,28 @@ C-c C-k aborts. Closing before completion returns failure.~%"))
   (multiple-value-bind (mode files wait eval force server alternate startup-wait)
       (parse-client-arguments arguments)
     (when (eq mode :help) (print-help) (return-from run-client 0))
-    (let ((connection
-            (handler-case (connect-client-with-wait server startup-wait)
-              (error (condition)
-                (if alternate
-                    (return-from run-client (run-alternate-editor alternate files))
-                    (error "No Lem daemon named ~a is reachable: ~a"
-                           server condition))))))
-      (unwind-protect
-           (ecase mode
-             (:visit (run-visit connection files wait))
-             (:eval (run-eval connection eval))
-             (:stop (run-shutdown connection force))
-             (:gui (uiop:symbol-call :lem-daemon/sdl-client :run-graphical connection files wait))
-             (:tty (run-terminal connection files wait)))
-        (unless (eq mode :tty) (close-client connection))))))
+    (flet ((connect-and-run ()
+             (let ((connection
+                     (handler-case (connect-client-with-wait server startup-wait)
+                       (error (condition)
+                         (if alternate
+                             (return-from run-client (run-alternate-editor alternate files))
+                             (error "No Lem daemon named ~a is reachable: ~a"
+                                    server condition))))))
+               (unwind-protect
+                    (ecase mode
+                      (:visit (run-visit connection files wait))
+                      (:eval (run-eval connection eval))
+                      (:stop (run-shutdown connection force))
+                      (:gui (uiop:symbol-call :lem-daemon/sdl-client :run-graphical connection files wait))
+                      (:tty (run-terminal connection files wait)))
+                 (unless (eq mode :tty) (close-client connection))))))
+      (if (eq mode :stop)
+          (handler-case
+              (bt2:with-timeout ((+ startup-wait 25)) (connect-and-run))
+            (bt2:timeout ()
+              (error "Daemon connection/shutdown exceeded ~a seconds" (+ startup-wait 25))))
+          (connect-and-run)))))
 
 (defun main (&optional (arguments (uiop:command-line-arguments)))
   (handler-case

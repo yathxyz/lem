@@ -74,6 +74,35 @@ abort, early detach/window close, persistent and `-n` attachments, and daemon
 death. Only synthetic files are used; its private directory retains logs and a
 JSON result, and all test processes are stopped on exit.
 
+### Completed shutdown
+
+`lemclient --stop-server` refuses modified file buffers unless `--force` is
+provided. Force permits shutdown; it does not save over source files. In the
+configured daemon, final recovery checkpoints retain eligible unsaved text.
+
+The client waits for an explicit `stopped` response and then transport closure.
+An initial `pending` / `stopping` response, or EOF alone, cannot acknowledge
+completion. For a headless daemon, the final response follows exit hooks, global
+mode cleanup, and the editor thread's frame teardown. Cleanup failures return 2,
+including exposed final draft, agent, and managed-job journal failures. The
+configured host retains such failures across repeated stop requests until fresh
+configuration succeeds, so cleared manager globals cannot imply clean shutdown.
+
+Shutdown has a 25-second deadline. Connection and hello negotiation are also
+bounded, with `--wait-for-server SECONDS` added to the overall connection/shutdown
+budget. A timeout or failed cleanup returns an error; a supervising service may
+then enforce its own stop deadline. Successful receipt and EOF do not separately
+prove process exit; supervision observes the process itself. For an in-session
+listener, the receipt covers exit hooks and global mode cleanup, before later
+frame teardown. Ship the updated client and daemon together: older servers'
+`stopping` acknowledgments are deliberately rejected as incomplete.
+
+`frontends/daemon/tests/shutdown-client.py` takes `LEM_BIN` and `LEMCLIENT_BIN`
+and no arguments. It uses disposable configured daemons to check immediate final
+checkpoints, refusal, delayed hooks, persistence and frame-teardown failures,
+repeated failed stops, and native client behavior against incomplete protocol
+peers. It retains private logs and results without using installed services.
+
 ### In-session server
 
 A normal interactive Lem can accept native client requests without becoming a

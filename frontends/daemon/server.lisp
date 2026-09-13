@@ -15,6 +15,8 @@
 (defvar *daemon-connections* '())
 (defvar *daemon-requests* '())
 (defvar *daemon-lock* (bt2:make-lock :name "lem-daemon/state"))
+(defvar *defer-server-stop* nil)
+(defvar *daemon-shutdown-reply* nil)
 
 (define-condition stop-accept-loop (condition) ())
 (define-condition stop-connection-reader (condition) ())
@@ -528,6 +530,55 @@
 (defun bool-field (message name)
   (eq t (protocol:field message name)))
 
+(defun shutdown-on-editor (connection id force)
+  (let ((modified (modified-buffers)))
+    (when (and modified (not force))
+      (response-error connection id "modified-buffers"
+                      (format nil "Modified buffers exist: ~{~a~^, ~}"
+                              (mapcar #'buffer-name modified)))
+      (return-from shutdown-on-editor)))
+  (response connection id "status" "pending" "value" "stopping")
+  (let ((*defer-server-stop* t))
+    (handler-case
+        (handler-bind
+            ((lem-core::exit-editor
+               (lambda (condition)
+                 ;; EXIT-EDITOR signals only after every exit hook and global
+                 ;; mode cleanup. Bailout signals the same condition with a
+                 ;; failure report; never acknowledge that as a clean stop.
+                 ;; Return normally so the original exit signal reaches the
+                 ;; command loop and its frame teardown actually executes.
+                 (if *daemon-root-implementation*
+                     (setf *daemon-shutdown-reply*
+                           (list connection id (lem-core::exit-editor-report condition)
+                                 (bt2:current-thread)))
+                     (progn
+                       (if (lem-core::exit-editor-report condition)
+                           (response-error connection id "shutdown-failed"
+                                           "Editor exited with a failure report")
+                           (response-ok connection id "stopped"))
+                       (stop-daemon-transport))))))
+          (exit-editor))
+      (error (condition)
+        (response-error connection id "shutdown-failed" (princ-to-string condition))))))
+
+(defun finish-daemon-shutdown ()
+  "Publish a pending shutdown result only after the editor thread has joined."
+  (when *daemon-shutdown-reply*
+    (destructuring-bind (connection id report editor-thread) *daemon-shutdown-reply*
+      (setf *daemon-shutdown-reply* nil)
+      (handler-case
+          ;; The daemon owner already joined this exact thread before entering
+          ;; transport cleanup; read its result, including frame teardown errors.
+          (let ((result (bt2:join-thread editor-thread)))
+            (if (or report (typep result 'error))
+                (response-error connection id "shutdown-failed"
+                                (if (typep result 'error) (princ-to-string result)
+                                    "Editor exited with a failure report"))
+                (response-ok connection id "stopped")))
+        (error (condition)
+          (response-error connection id "shutdown-failed" (princ-to-string condition)))))))
+
 (defun handle-message (connection message)
   (unless (= protocol:+protocol-version+
              (or (protocol:field message "version") -1))
@@ -636,17 +687,7 @@
                (response-error connection id "not-found" "Request not found"))))
         ((string= type "shutdown")
          (let ((force (bool-field message "force")))
-           (send-event
-            (lambda ()
-              (let ((modified (modified-buffers)))
-                (if (and modified (not force))
-                    (response-error
-                     connection id "modified-buffers"
-                     (format nil "Modified buffers exist: ~{~a~^, ~}"
-                             (mapcar #'buffer-name modified)))
-                    (progn
-                      (response-ok connection id "stopping")
-                      (exit-editor))))))))
+           (send-event (lambda () (shutdown-on-editor connection id force)))))
         (t (response-error connection id "unknown-request"
                            (format nil "Unknown request type: ~a" type)))))))
 
@@ -762,6 +803,7 @@
                     backend *daemon-name* +connection-limit+)))
     (setf *daemon-listener* listener
           *daemon-endpoint* (transport:local-listener-endpoint listener)
+          *daemon-shutdown-reply* nil
           *daemon-running-p* t
           *daemon-accept-thread*
           (bt2:make-thread
@@ -778,6 +820,12 @@
     (configure-editor-environment)))
 
 (defun stop-daemon-transport ()
+  ;; A frame teardown hook may release its server after the shutdown handler's
+  ;; dynamic binding unwinds. The owner must still collect that thread's result.
+  (when (and *daemon-shutdown-reply*
+             (eq (fourth *daemon-shutdown-reply*) (bt2:current-thread)))
+    (return-from stop-daemon-transport))
+  (finish-daemon-shutdown)
   (setf *daemon-running-p* nil)
   (remove-hook (variable-value 'kill-buffer-hook :global t)
                'daemon-kill-buffer-hook)
@@ -806,7 +854,7 @@
          (lambda () (error 'stop-accept-loop)))))
     (ignore-errors (bt2:join-thread *daemon-accept-thread*)))
   (setf *daemon-listener* nil *daemon-endpoint* nil *daemon-accept-thread* nil
-        *daemon-connections* '() *daemon-requests* '()))
+        *daemon-connections* '() *daemon-requests* '() *daemon-shutdown-reply* nil))
 
 (defun start-server (&key (name "server"))
   "Start an in-session daemon listener and return its endpoint."
@@ -829,7 +877,9 @@
 (defun stop-server ()
   "Stop the in-session daemon listener without exiting the editor."
   (let ((endpoint *daemon-endpoint*))
-    (stop-daemon-transport)
+    ;; A shutdown request must retain its transport until all exit hooks and
+    ;; global modes finish, even if a configuration hook releases its listener.
+    (unless *defer-server-stop* (stop-daemon-transport))
     endpoint))
 
 (define-command daemon-server-start () ()
