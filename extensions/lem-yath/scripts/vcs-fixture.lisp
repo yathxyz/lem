@@ -742,6 +742,65 @@
   (equal (lem/buffer/internal::buffer-%directory *vcs-test-source-buffer*)
          *vcs-test-sentinel-directory*))
 
+(defvar *vcs-test-readiness-timer* nil)
+(defvar *vcs-test-readiness-last-request* nil)
+
+(defun vcs-test-report-readiness (request-file)
+  (when (probe-file request-file)
+    (let ((request
+            (with-open-file (stream request-file)
+              (when (<= (file-length stream) 128)
+                (read-line stream nil nil)))))
+      (when (and request (plusp (length request))
+                 (every (lambda (c) (or (digit-char-p c) (char= c #\-))) request)
+                 (not (equal request *vcs-test-readiness-last-request*)))
+        (setf *vcs-test-readiness-last-request* request)
+        (let* ((prompt (lem/prompt-window:current-prompt-window))
+               (active (lem/legit::legit-status-active-p))
+               (transient
+                 (and (lem/transient::transient-window-alive-p)
+                      (eq (current-frame)
+                          (lem-core::get-frame-of-window
+                           lem/transient::*transient-popup-window*)))))
+          (vcs-test-log
+           "READY-PROBE request=~a phase=~a active=~a prompt=~a transient=~a current=~a source-live=~a raw-exact=~a raw-sentinel=~a"
+           request *vcs-test-phase* (vcs-test-yes-no active)
+           (vcs-test-yes-no prompt) (vcs-test-yes-no transient)
+           (vcs-test-yes-no
+            (and active (member (current-window)
+                                (list (lem/legit::peek-window)
+                                      (lem/legit::source-window)))))
+           (vcs-test-yes-no (not (deleted-buffer-p *vcs-test-source-buffer*)))
+           (vcs-test-yes-no (vcs-test-source-raw-exact-p))
+           (vcs-test-yes-no (vcs-test-source-raw-sentinel-p))))))))
+
+(defun vcs-test-start-readiness-probe ()
+  ;; No injected key may accidentally submit a prompt or dismiss a raw
+  ;; read-key transient. Timer callbacks run on the editor event loop.
+  (when *vcs-test-readiness-timer* (stop-timer *vcs-test-readiness-timer*))
+  (setf *vcs-test-readiness-timer* nil
+        *vcs-test-readiness-last-request* nil)
+  (alexandria:when-let ((path (uiop:getenv "LEM_YATH_VCS_READY_REQUEST")))
+    (let ((implementation (implementation)) (frame (current-frame)) (timer nil))
+      (setf timer
+            (make-timer
+             (lambda ()
+               (when (and (eq timer *vcs-test-readiness-timer*)
+                          (eq frame (lem-core::get-frame implementation))
+                          (member frame (lem-core::all-frames)))
+                 ;; This callback only reads explicit frame/window objects;
+                 ;; it never edits or uses the caller's current-buffer binding.
+                 (unwind-protect
+                      (with-implementation implementation
+                        (vcs-test-report-readiness path))
+                   ;; Rearm only after this editor callback. A slow Git
+                   ;; command cannot accumulate repeating timer events.
+                   (when (eq timer *vcs-test-readiness-timer*)
+                     (start-timer timer 100)))))
+             :name "VCS fixture readiness"))
+      (setf *vcs-test-readiness-timer* timer)
+      (start-timer timer 100))))
+
 (defun vcs-test-gutter-operation (label buffer function)
   "Run FUNCTION and attach buffer-path context to any fixture failure."
   (handler-case
@@ -2151,6 +2210,8 @@
   "C-c v" 'lem-yath-test-vcs-rebase-state)
 (define-key lem/legit::*legit-commit-mode-keymap*
   "C-c v" 'lem-yath-test-vcs-reword-state)
+
+(vcs-test-start-readiness-probe)
 
 (vcs-test-log "READY phase=~a file=~a"
               *vcs-test-phase*

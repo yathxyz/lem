@@ -2141,6 +2141,14 @@ porcelain_push_settled() {
     wait_until "$WAIT_TIMEOUT" "$predicate"
 }
 
+porcelain_subtree_result() {
+  local prefix=$1 content=$2 subject=${3:-}
+  [ -f "$LEM_YATH_VCS_PORCELAIN_ROOT/$prefix/module.txt" ] &&
+    [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/$prefix/module.txt")" = "$content" ] &&
+    { [ -z "$subject" ] ||
+      [ "$("$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" log -1 --format=%s)" = "$subject" ]; }
+}
+
 pull_upstream_tip=
 pull_pushremote_tip=
 pull_elsewhere_tip=
@@ -2670,9 +2678,8 @@ enter_atomic_prompt_value() {
 
 submit_atomic_prompt_value() {
   local session=$1 value=$2
-  # A completion popup consumes the first Return and leaves the prompt active.
-  # Submit through one fixture command so a later Return cannot escape into the
-  # synchronous VCS action after the prompt has already closed.
+  # Exact literal submission deliberately bypasses candidate selection through
+  # one fixture command; completion-selection tests use the native Return.
   printf '%s' "$value" >"$LEM_YATH_VCS_PROMPT_INPUT"
   send_keys "$session" F4
   sleep 0.25
@@ -2680,22 +2687,20 @@ submit_atomic_prompt_value() {
 
 enter_atomic_completion_prompt_value() {
   local session=$1 value=$2 prompt=$3
-  # Clear with two settled editing events before sending the literal value.
-  # A second Enter accepts arbitrary input when completion first leaves the
-  # prompt active rather than choosing a displayed candidate.
+  lem_wait_for "$session" "$prompt" "$WAIT_TIMEOUT" >/dev/null ||
+    fail legit-completion-prompt "completion prompt was not ready: $prompt" "$session"
+  # Clear with two settled editing events, then select and submit once.
   send_keys "$session" C-a C-k
   sleep 0.5
   tmux_cmd send-keys -t "$session" -l -- "$value"
   sleep 0.5
   send_keys "$session" Enter
-  sleep 0.25
-  if lem_wait_for "$session" "$prompt" 1 >/dev/null 2>&1; then
-    send_keys "$session" Enter
-  fi
 }
 
 enter_path_prompt_value() {
   local session=$1 value=$2 prompt=$3
+  lem_wait_for "$session" "$prompt" "$WAIT_TIMEOUT" >/dev/null ||
+    fail legit-completion-prompt "path prompt was not ready: $prompt" "$session"
   # Directory completion can rewrite its buffer while a burst of Backspace
   # and literal key events is still queued.  Load the exact value into Lem's
   # kill ring, then exercise the editor's ordinary prompt yank path atomically.
@@ -2705,10 +2710,6 @@ enter_path_prompt_value() {
   send_keys "$session" C-y
   sleep 0.5
   send_keys "$session" Enter
-  sleep 0.25
-  if lem_wait_for "$session" "$prompt" 1 >/dev/null 2>&1; then
-    send_keys "$session" Enter
-  fi
 }
 
 enter_completion_prompt_value_until() {
@@ -2718,13 +2719,10 @@ enter_completion_prompt_value_until() {
   done
   tmux_cmd send-keys -t "$session" -l -- "$value"
   sleep 0.5
-  for index in 1 2 3; do
-    send_keys "$session" Enter
-    if lem_wait_for "$session" "$next_prompt" 2 >/dev/null 2>&1; then
-      return 0
-    fi
-  done
-  return 1
+  send_keys "$session" Enter
+  # Wait for the successor; extra Returns could submit its default value.
+  lem_wait_for "$session" "$next_prompt" "$WAIT_TIMEOUT" >/dev/null ||
+    fail legit-completion-next "next prompt was not reached: $next_prompt" "$session"
 }
 
 send_keys() {
@@ -2767,9 +2765,9 @@ wait_jj_dispatch() {
   while ((index < WAIT_TIMEOUT * 2)); do
     before=$(report_count "^DISPATCH phase=$phase ")
     lem_keys "$session" F3
-    wait_report_count "^DISPATCH phase=$phase " "$((before + 1))" 3 || true
-    latest=$(grep "^DISPATCH phase=$phase " "$LEM_YATH_VCS_REPORT" | tail -n 1)
-    if [[ "$latest" == DISPATCH\ phase="$phase"\ kind=jj\ * ]] &&
+    if wait_report_count "^DISPATCH phase=$phase " "$((before + 1))" 3 &&
+       latest=$(grep "^DISPATCH phase=$phase " "$LEM_YATH_VCS_REPORT" | tail -n 1) &&
+       [[ "$latest" == DISPATCH\ phase="$phase"\ kind=jj\ * ]] &&
        [[ "$latest" == *'content=yes '* ]] &&
        [[ "$latest" == *'programming=no utility-gutter=none '* ]] &&
        [[ "$latest" == *'raw-exact=yes raw-sentinel=yes '* ]]; then
@@ -2782,17 +2780,23 @@ wait_jj_dispatch() {
 }
 
 wait_legit() {
-  local session=$1 phase=$2 index=0 before latest
-  while ((index < WAIT_TIMEOUT * 2)); do
-    before=$(report_count "^LEGIT phase=$phase ")
-    lem_keys "$session" F4
-    wait_report_count "^LEGIT phase=$phase " "$((before + 1))" 3 || true
-    latest=$(grep "^LEGIT phase=$phase " "$LEM_YATH_VCS_REPORT" | tail -n 1)
-    if [[ "$latest" == LEGIT\ phase="$phase"\ active=yes\ source-live=yes\ raw-exact=yes\ raw-sentinel=yes\ * ]]; then
+  # Call after observing the action's prompt, transition, or Git result. A
+  # fresh reply observes the editor; it cannot prove an unread key has run,
+  # and managed rebase still needs its separate job/outcome predicates.
+  local session=$1 phase=$2 request_file="$root/ready-$1" nonce pattern latest
+  local deadline=$((SECONDS + WAIT_TIMEOUT))
+  while ((SECONDS < deadline)); do
+    vcs_ready_request=$(( ${vcs_ready_request:-0} + 1 ))
+    nonce="$BASHPID-$vcs_ready_request"
+    printf '%s\n' "$nonce" >"$request_file.tmp" &&
+      mv -- "$request_file.tmp" "$request_file" || return 1
+    pattern="^READY-PROBE request=$nonce phase=$phase "
+    if wait_report_count "$pattern" 1 3 &&
+       latest=$(latest_report "$pattern") &&
+       [[ "$latest" == "READY-PROBE request=$nonce phase=$phase active=yes prompt=no transient=no current=yes source-live=yes raw-exact=yes raw-sentinel=yes" ]]; then
       return 0
     fi
-    sleep 0.5
-    index=$((index + 1))
+    sleep 0.25
   done
   return 1
 }
@@ -2800,7 +2804,7 @@ wait_legit() {
 checkout_porcelain_branch_fixture() {
   local branch=$1
   # Ref changes can be visible before the native command's status refresh
-  # releases index.lock. A fresh editor report also drains any queued q.
+  # releases index.lock. Observe the resulting editor state before setup.
   wait_legit "$porcelain_session" porcelain ||
     fail legit-branch-fixture-ready \
       "native command did not finish before checkout of $branch" \
@@ -2825,6 +2829,7 @@ start_phase() {
   local phase=$1 file=$2 session=$3 ready_before original_path tmux_path
   ready_before=$(report_count "^READY phase=$phase ")
   export LEM_YATH_VCS_PHASE="$phase"
+  export LEM_YATH_VCS_READY_REQUEST="$root/ready-$session"
   export LEM_YATH_VCS_SENTINEL_DIRECTORY
   LEM_YATH_VCS_SENTINEL_DIRECTORY="$(dirname "$file")/raw directory;sentinel/"
   sessions+=("$session")
@@ -7221,8 +7226,8 @@ if lem_wait_for "$porcelain_session" 'Push push-current to:' \
   enter_completion_prompt_value "$porcelain_session" origin/push-elsewhere \
     'Push push-current to:'
 fi
-rm -f -- "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/hooks/pre-push"
 if porcelain_push_settled porcelain_push_elsewhere_complete; then
+  rm -f -- "$LEM_YATH_VCS_PORCELAIN_ROOT/.git/hooks/pre-push"
   pass legit-push-elsewhere \
     'p -h -u -t e bypassed the hook, set upstream, and followed its tag'
 else
@@ -7231,6 +7236,7 @@ else
     "$porcelain_session"
 fi
 
+push_dry_run_submitted=0
 send_keys "$porcelain_session" g p
 if lem_wait_for "$porcelain_session" '\[Push\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -7246,9 +7252,10 @@ if lem_wait_for "$porcelain_session" 'Push push-other-source to:' \
      "$WAIT_TIMEOUT" >/dev/null; then
   enter_completion_prompt_value "$porcelain_session" origin/push-dry-run \
     'Push push-other-source to:'
+  push_dry_run_submitted=1
 fi
 push_dry_run_finished=0
-if wait_legit "$porcelain_session" porcelain; then
+if [ "$push_dry_run_submitted" = 1 ] && wait_legit "$porcelain_session" porcelain; then
   push_dry_run_finished=1
 fi
 if [ "$push_dry_run_finished" = 1 ] &&
@@ -7406,13 +7413,8 @@ else
     "$porcelain_session"
 fi
 
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q main
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
-  "$merge_main_hash"
-send_keys "$porcelain_session" g
-
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
-  "$merge_main_hash"
+checkout_porcelain_branch_fixture main
+reset_porcelain_fixture "$merge_main_hash"
 send_keys "$porcelain_session" g m
 if lem_wait_for "$porcelain_session" '\[Merge\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -7467,7 +7469,7 @@ else
     "$porcelain_session"
 fi
 
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q merge-dissolve
+checkout_porcelain_branch_fixture merge-dissolve
 send_keys "$porcelain_session" g m
 if lem_wait_for "$porcelain_session" '\[Merge\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -7720,11 +7722,6 @@ if lem_wait_for "$porcelain_session" 'Move worktree to:' \
   # create the destination before Git observes it so move-to-container is real.
   mkdir -p "$LEM_YATH_VCS_WORKTREE_MOVE_CONTAINER"
   send_keys "$porcelain_session" Enter
-  sleep 0.25
-  if lem_wait_for "$porcelain_session" 'Move worktree to:' 1 \
-       >/dev/null 2>&1; then
-    send_keys "$porcelain_session" Enter
-  fi
 fi
 if wait_until "$WAIT_TIMEOUT" test -f \
      "$LEM_YATH_VCS_WORKTREE_MOVED/.git" &&
@@ -7753,11 +7750,14 @@ if lem_wait_for "$porcelain_session" 'Delete worktree:' \
   enter_completion_prompt_value "$porcelain_session" \
     container 'Delete worktree:'
 fi
+worktree_declined=0
 if lem_wait_for "$porcelain_session" 'despite uncommitted changes' \
      "$WAIT_TIMEOUT" >/dev/null; then
   send_keys "$porcelain_session" n
+  worktree_declined=1
 fi
-if [ -f "$LEM_YATH_VCS_WORKTREE_MOVED/untracked edge;safe.txt" ] &&
+if [ "$worktree_declined" = 1 ] && wait_legit "$porcelain_session" porcelain &&
+   [ -f "$LEM_YATH_VCS_WORKTREE_MOVED/untracked edge;safe.txt" ] &&
    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" worktree list \
      --porcelain | grep -Fqx \
        "worktree $LEM_YATH_VCS_WORKTREE_MOVED"; then
@@ -8144,7 +8144,8 @@ fi
 # The subtree commands require a clean index.  Record the preceding submodule
 # removal, then exercise every pinned import/export action against local bare
 # repositories whose paths contain both spaces and shell metacharacters.
-if "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -u &&
+if wait_legit "$porcelain_session" porcelain &&
+   "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" add -u &&
    GIT_AUTHOR_DATE='2001-01-10T00:00:00+0000' \
    GIT_COMMITTER_DATE='2001-01-10T00:00:00+0000' \
    "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" commit -qm \
@@ -8187,12 +8188,9 @@ if lem_wait_for "$porcelain_session" 'Ref:' \
      "$WAIT_TIMEOUT" >/dev/null; then
   enter_atomic_completion_prompt_value "$porcelain_session" main 'Ref:'
 fi
-if wait_until "$WAIT_TIMEOUT" test -f \
-     "$LEM_YATH_VCS_PORCELAIN_ROOT/$LEM_YATH_VCS_SUBTREE_PREFIX/module.txt" &&
-   [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/$LEM_YATH_VCS_SUBTREE_PREFIX/module.txt")" = \
-     'subtree version one' ] &&
-   [ "$($git_bin -C "$LEM_YATH_VCS_PORCELAIN_ROOT" log -1 --format=%s)" = \
-     'Import subtree; safe' ]; then
+if wait_until "$WAIT_TIMEOUT" porcelain_subtree_result \
+     "$LEM_YATH_VCS_SUBTREE_PREFIX" 'subtree version one' 'Import subtree; safe' &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-subtree-add \
     '" i -P -m -s a imported a squashed metacharacter-path subtree'
 else
@@ -8239,10 +8237,9 @@ if lem_wait_for "$porcelain_session" 'Ref:' \
      "$WAIT_TIMEOUT" >/dev/null; then
   enter_atomic_completion_prompt_value "$porcelain_session" main 'Ref:'
 fi
-if wait_until "$WAIT_TIMEOUT" sh -c \
-     "[ \"\$(cat '$LEM_YATH_VCS_PORCELAIN_ROOT/$LEM_YATH_VCS_SUBTREE_PREFIX/module.txt')\" = 'subtree version two' ]" &&
-   [ "$($git_bin -C "$LEM_YATH_VCS_PORCELAIN_ROOT" log -1 --format=%s)" = \
-     'Pull subtree; safe' ]; then
+if wait_until "$WAIT_TIMEOUT" porcelain_subtree_result \
+     "$LEM_YATH_VCS_SUBTREE_PREFIX" 'subtree version two' 'Pull subtree; safe' &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-subtree-pull \
     '" i -P -m -s f pulled the advanced remote subtree revision'
 else
@@ -8279,10 +8276,9 @@ if lem_wait_for "$porcelain_session" 'Commit:' \
      "$WAIT_TIMEOUT" >/dev/null; then
   enter_atomic_prompt_value "$porcelain_session" "$subtree_v2_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" test -f \
-     "$LEM_YATH_VCS_PORCELAIN_ROOT/$LEM_YATH_VCS_SUBTREE_COMMIT_PREFIX/module.txt" &&
-   [ "$(cat "$LEM_YATH_VCS_PORCELAIN_ROOT/$LEM_YATH_VCS_SUBTREE_COMMIT_PREFIX/module.txt")" = \
-     'subtree version two' ]; then
+if wait_until "$WAIT_TIMEOUT" porcelain_subtree_result \
+     "$LEM_YATH_VCS_SUBTREE_COMMIT_PREFIX" 'subtree version two' &&
+   wait_legit "$porcelain_session" porcelain; then
   pass legit-subtree-add-commit \
     '" i -P -m c imported an already fetched commit without squash'
 else
