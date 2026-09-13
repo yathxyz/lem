@@ -38,6 +38,11 @@ another root. A missing destination parent reports `:unavailable-parent`. Create
 | `structured-notes-lsm-capture` | Prompt for key and title. `i` uses `WORK/inbox.md`, `t` uses `WORK/todo.md`, `r` uses `WORK/readlist.md`, and `p` uses explicitly configured `PUBLIC/inbox.md`. |
 | `structured-notes-lsm-assign-id` | Assign or reuse the current LSM heading's persistent ID. |
 
+Native commands report expected workspace, document-format, and proposal refusals
+as ordinary editor messages while retaining the current view. Library callers
+still receive their typed conditions; unexpected implementation errors remain
+visible to the editor's error handler.
+
 These are explicit operator actions. Opening a file can run ordinary Lem file
 hooks. Existing live buffers supply their unsaved text. New buffers remain
 private until the semantic plan and its unsaved application succeed; failed

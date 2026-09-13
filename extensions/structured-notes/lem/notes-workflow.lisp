@@ -295,19 +295,35 @@
 (defun lem-notes-today ()
   (multiple-value-bind (second minute hour day month year) (decode-universal-time (lem-notes-now))
     (declare (ignore second minute hour)) (format nil "~4,'0d-~2,'0d-~2,'0d" year month day)))
+(defun call-with-notes-command-errors (function)
+  "Report expected operator refusals without opening the debugger."
+  (handler-case (funcall function)
+    (notes-adapter-error (condition)
+      (lem:editor-error "~a" (notes-adapter-error-message condition)))
+    (semantic-model-error (condition)
+      (lem:editor-error "~a" (semantic-model-error-message condition)))
+    (proposals:proposal-error (condition)
+      (lem:editor-error "Notes edit unavailable: ~a" (proposals:proposal-error-reason condition)))))
+
 (lem:define-command structured-notes-lsm-open-today () ()
   "Open today's LSM daily note, leaving changes unsaved."
-  (lem-open-lsm-daily-note (work-workspace) (lem-notes-today)))
+  (call-with-notes-command-errors
+   (lambda () (lem-open-lsm-daily-note (work-workspace) (lem-notes-today)))))
 (lem:define-command structured-notes-lsm-journal-entry () ()
   "Append an unsaved LSM journal entry."
-  (lem-append-lsm-journal-entry (work-workspace) (lem-notes-now)))
+  (call-with-notes-command-errors
+   (lambda () (lem-append-lsm-journal-entry (work-workspace) (lem-notes-now)))))
 (lem:define-command structured-notes-lsm-capture () ()
   "Capture explicitly into the configured LSM workspace, without saving."
-  (let* ((context (lem-current-notes-workspaces))
-         (key (lem:prompt-for-string "LSM capture key (i/t/r/p): "))
-         (title (lem:prompt-for-string "LSM capture title: ")))
-    (lem-capture-lsm-note (lem-notes-workspace-context-workspace context) key title (lem-notes-now)
-                          :public-workspace (lem-notes-workspace-context-public-workspace context))))
+  (call-with-notes-command-errors
+   (lambda ()
+     (let* ((context (lem-current-notes-workspaces))
+            (key (lem:prompt-for-string "LSM capture key (i/t/r/p): "))
+            (title (lem:prompt-for-string "LSM capture title: ")))
+       (lem-capture-lsm-note (lem-notes-workspace-context-workspace context) key title (lem-notes-now)
+                             :public-workspace (lem-notes-workspace-context-public-workspace context))))))
 (lem:define-command structured-notes-lsm-assign-id () ()
   "Assign or reuse the current LSM heading ID without saving."
-  (lem:message "LSM node ID: ~a" (lem-assign-current-lsm-node-id (lem:current-buffer) (generate-lsm-node-id))))
+  (call-with-notes-command-errors
+   (lambda ()
+     (lem:message "LSM node ID: ~a" (lem-assign-current-lsm-node-id (lem:current-buffer) (generate-lsm-node-id))))))

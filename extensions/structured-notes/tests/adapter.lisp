@@ -48,6 +48,23 @@
   (handler-case (progn (funcall function) nil)
     (adapter:notes-adapter-error (condition) (adapter:notes-adapter-error-code condition))))
 
+(deftest expected-native-refusals-stay-editor-errors
+  (with-notes (directory workspace public)
+    (declare (ignore directory))
+    (let ((adapter::*lem-notes-workspace-context* nil))
+      (ok (signals (adapter:structured-notes-lsm-open-today) 'lem:editor-error)))
+    (let ((buffer (lem:find-file-buffer (merge-pathnames "ordinary.md" (notes:notes-workspace-root workspace)))))
+      (lem:insert-string (lem:buffer-point buffer) "# Ordinary Markdown")
+      (lem:switch-to-buffer buffer)
+      (let ((text (lem:buffer-text buffer)) (tick (lem:buffer-modified-tick buffer)))
+        (ok (signals (adapter:structured-notes-lsm-assign-id) 'lem:editor-error))
+        (ok (eq buffer (lem:current-buffer)))
+        (ok (string= text (lem:buffer-text buffer)))
+        (ok (= tick (lem:buffer-modified-tick buffer)))))
+    (ok (signals (adapter::call-with-notes-command-errors (lambda () (error "unexpected fixture error")))
+                 'simple-error)
+        "unexpected implementation failures remain visible")))
+
 (deftest explicit-pinned-roots-and-safe-local-targets
   (with-notes (directory workspace public)
     (let ((pinned (adapter:lem-current-notes-workspaces)))
