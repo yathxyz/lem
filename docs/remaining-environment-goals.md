@@ -16,16 +16,16 @@ preserved. No deployment or default-editor cutover is part of these goals.
 | 3. Shared Lisp toolkit and failure recovery | Complete. Managed jobs, compilation, native Git lifecycle, proposals, bounded output/cancellation and interrupted records without replay. |
 | 4. Recoverable agent workspaces | Complete. Lisp agent loop/tools, durable decisions, drafts, historical candidates, exact submission receipts and explicit bounded storage cleanup. |
 | 5. Notes and daily workflows | Complete. Selective semantic core and explicit notes adapter; independent Legit panes and daily tools; nine configured gates pass, including the full VCS workflow. |
-| 6. Reviewable cutover | Final profile retained and actual binaries tested; final evidence/documentation preparation in progress. Live activation is excluded. |
+| 6. Reviewable cutover | Complete. Exact tested profile retained, both service units verified, installation/rollback helper checked, and activation/recovery instructions recorded. Live activation is excluded. |
 
 The tested runtime snapshot is `b44f88a68`. Subsequent documentation and VCS
 fixture commits do not change its product code. Validation is retained outside
 the worktrees:
 
-- `../.recovery/2026-09-10-lem-integration/validation/toolkit/`
-- `../.recovery/2026-09-10-lem-integration/validation/agent-recovery/`
+- [Shared toolkit evidence](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/toolkit/)
+- [Agent recovery evidence](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/agent-recovery/)
 - [Notes and daily acceptance](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/notes-daily/final-acceptance.json)
-- `../.recovery/2026-09-10-lem-integration/validation/final-candidate/`
+- [Final candidate evidence](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/final-candidate/final-acceptance.json)
 
 ## Notes and daily workflow integration
 
@@ -79,6 +79,11 @@ The current host uses NixOS-managed headless Home Manager; the standalone deskto
 activation is a different target. Complete activation packages and their unrelated
 configuration changes remain a deployment review step. No installed profile,
 live service, editor default, user note or remote account has been changed.
+
+Preservation checks compare original Lem heads, status and tracked patches, plus
+all 13 archived agent prototype files byte-for-byte. They also compare the original
+Nix checkout's HEAD/status and installed profile/service state; pre-existing
+untracked Nix file contents have no initial byte-hash baseline and were not compared.
 
 ## Boundaries that remain
 
