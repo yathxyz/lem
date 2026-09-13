@@ -1,11 +1,18 @@
 # Linux Lisp environment: delivery status and remaining boundaries
 
-The user authorized implementation through successive goals and parallel agents.
 The canonical editor checkout is `lem-integration`, branch
-`integration/linux-lisp-environment`; its companion is
-`~/proj/nix/computer-lem-integration`, branch `integration/lem-daemon`.
-Original worktrees, installed profiles/services, and user documents remain
-preserved. No deployment or default-editor cutover is part of these goals.
+`integration/linux-lisp-environment`. The user subsequently authorized complete
+deployment on `ex44`, reconciliation into the Nix repository's `master`, and
+default-editor cutover. Current deployment configuration and instructions live in
+[`~/proj/nix/computer`](/home/yanni/proj/nix/computer/docs/lem-daemon-rollout.md).
+Exact activation status, source pins, generations and live acceptance are recorded
+in `/home/yanni/proj/nix/.recovery/2026-09-13-lem-deployment/`.
+
+The six goals and retained candidate below document the earlier preparation
+milestone. At that milestone installed profiles/services and defaults were
+unchanged. `computer-lem-integration` is its historical preparation checkout;
+use the current Nix `master` for deployment. Original development worktrees and
+user documents remain preserved.
 
 ## Goals and evidence
 
@@ -18,8 +25,10 @@ preserved. No deployment or default-editor cutover is part of these goals.
 | 5. Notes and daily workflows | Complete. Selective semantic core and explicit notes adapter; independent Legit panes and daily tools; nine configured gates pass, including the full VCS workflow. |
 | 6. Reviewable cutover | Complete. Exact tested profile retained, both service units verified, installation/rollback helper checked, and activation/recovery instructions recorded. Live activation is excluded. |
 
-The tested runtime snapshot is `b44f88a68`. Subsequent documentation and VCS
-fixture commits do not change its product code. Validation is retained outside
+The preparation milestone tested runtime snapshot `b44f88a68`; its documentation
+and VCS fixture follow-ups did not change that product code. Deployment adds
+native visible-client edit completion and orderly shutdown fixes, with separate
+acceptance in the deployment record above. Earlier validation is retained outside
 the worktrees:
 
 - [Shared toolkit evidence](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/toolkit/)
@@ -61,7 +70,7 @@ waits for fresh observations. These fixture corrections do not change the tested
 runtime. Failed runs and focused controls are retained with their limits in the
 acceptance record; counts from separate gates are not a unique-test total.
 
-## Reviewable cutover
+## Earlier prepared cutover
 
 The retained candidate is
 `/nix/store/87wp1xjkfyv7y1ba6xx13wkahcldbph2-lem-yath-profile`, rooted at
@@ -72,15 +81,15 @@ SIGKILL restart, interrupted-job recovery and deliberate shutdown checks. The
 profile helper passes 14 disposable-profile checks including exact-output
 installation, rollback and failure preservation.
 
-Follow the companion checkout's
-[cutover instructions](/home/yanni/proj/nix/computer-lem-integration/docs/lem-daemon-rollout.md)
+Follow the current Nix checkout's
+[deployment instructions](/home/yanni/proj/nix/computer/docs/lem-daemon-rollout.md)
 for publishing/pinning, configuration ownership, activation, rollback and recovery.
 The current host uses NixOS-managed headless Home Manager; the standalone desktop
-activation is a different target. Complete activation packages and their unrelated
-configuration changes remain a deployment review step. No installed profile,
-live service, editor default, user note or remote account has been changed.
+activation is a different target. At the preparation milestone, complete activation
+packages and their unrelated changes remained a deployment review step; no installed
+profile, live service, editor default, user note or remote account had been changed.
 
-Preservation checks compare original Lem heads, status and tracked patches, plus
+The preparation preservation checks compare original Lem heads, status and tracked patches, plus
 all 13 archived agent prototype files byte-for-byte. They also compare the original
 Nix checkout's HEAD/status and installed profile/service state; pre-existing
 untracked Nix file contents have no initial byte-hash baseline and were not compared.
