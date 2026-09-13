@@ -193,10 +193,30 @@
         (ok (string= "OLD" (lem:buffer-text replacement)))
         (ok (null (proposal:proposal-source-buffer item)) "deleted sources are not retained or redirected by name")))))
 
+(deftest filename-reassociation-conflicts
+  (dolist (names '((nil "/tmp/proposal-other.txt")
+                   ("/tmp/proposal-original.txt" nil)
+                   ("/tmp/proposal-original.txt" "/tmp/proposal-other.txt")))
+    (with-source (buffer "OLD")
+      (when (first names) (setf (lem:buffer-filename buffer) (first names)))
+      (let ((item (capture buffer 0 3)) (tick (lem:buffer-modified-tick buffer)))
+        (proposal:stage-replacement item "NEW")
+        (if (second names)
+            (setf (lem:buffer-filename buffer) (second names))
+            ;; The public filename setter accepts only pathnames; model an
+            ;; explicit association removal without visiting or deleting files.
+            (setf (lem/buffer/internal::buffer-%filename buffer) nil))
+        (ok (= tick (lem:buffer-modified-tick buffer)) "file association can change without a text edit")
+        (ok (signals (proposal:apply-proposal item) 'proposal:proposal-conflict))
+        (ok (string= "OLD" (lem:buffer-text buffer)))
+        (multiple-value-bind (valid reason) (proposal:proposal-valid-p item)
+          (ok (not valid)) (ok (eq :source-file-changed reason)))))))
+
 (deftest failed-edit-rolls-back
   (with-source (buffer "before OLD after")
     (let ((item (capture buffer 7 10)))
       (proposal:stage-replacement item "NEW")
+      (lem:move-to-position (lem:buffer-point buffer) 9)
       (let ((hook (lambda (start end old-length)
                     (declare (ignore old-length))
                     (when (lem:point< start end) (error "simulated failing edit hook")))))
@@ -206,6 +226,7 @@
                (ok (signals (proposal:apply-proposal item) 'error)))
           (lem:remove-hook (lem:variable-value 'lem:after-change-functions :buffer buffer) hook)))
       (ok (string= "before OLD after" (lem:buffer-text buffer)) "an edit hook failure restores the exact source")
+      (ok (= 9 (lem:position-at-point (lem:buffer-point buffer))) "failed replacement preserves the original point")
       (ok (proposal:proposal-valid-p item))
       (proposal:apply-proposal item)
       (lem:buffer-undo (lem:buffer-point buffer))

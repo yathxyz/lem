@@ -98,6 +98,8 @@ Methods must not edit the source or signal errors.")
   (cond
     ((terminal-proposal-p proposal) (values nil :already-finished))
     ((not (source-live-p proposal)) (mark-conflict proposal :source-deleted))
+    ((not (equal (%proposal-filename proposal) (buffer-filename (%proposal-source proposal))))
+     (mark-conflict proposal :source-file-changed))
     ((/= (%proposal-observed-tick proposal)
          (buffer-modified-tick (%proposal-source proposal)))
      (mark-conflict proposal :unobserved-source-change))
@@ -236,6 +238,7 @@ Queued approvals must supply the revision and generation that the human reviewed
       (error 'proposal-error :proposal proposal :reason :source-read-only))
     (unless (string= (%proposal-original proposal) (%proposal-replacement proposal))
       (let ((boundary-enabled (lem/buffer/internal::buffer-enable-undo-boundary-p source))
+            (source-point (position-at-point (buffer-point source)))
             (group nil) (accepted nil))
         (unwind-protect
              (progn
@@ -257,6 +260,7 @@ Queued approvals must supply the revision and generation that the human reviewed
             (when (and group (buffer-change-group-active-p group))
               (let ((lem/buffer/internal::*inhibit-modification-hooks* t))
                 (buffer-cancel-change-group group)))
+            (move-to-position (buffer-point source) source-point)
             (setf (%proposal-state proposal) :pending
                   (%proposal-observed-tick proposal) (buffer-modified-tick source)))
           (unless boundary-enabled (buffer-disable-undo-boundary source)))))
