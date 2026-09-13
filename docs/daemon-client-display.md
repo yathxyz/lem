@@ -67,7 +67,8 @@ only its local window and connection.
 
 Private text recovery is integrated separately; see `daemon-recovery.md` for its
 checkpoint interval, independent inspector and restoration limits. The shared
-jobs toolkit and native agent harness remain following goals in the assessment.
+jobs toolkit and native Lisp agent harness are also integrated; see
+`managed-jobs.md` and `native-agent-integration.md` for their acceptance and limits.
 
 Run `nix build .#checks.x86_64-linux.native-client-display` to exercise actual
 terminal clients through PTYs and SDL clients under a private Xvfb display. The

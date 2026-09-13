@@ -151,10 +151,11 @@ The encoded record limit is 16 MiB. Nesting bounds are explicit integers from 1 
 64; numeric atoms are limited to 64 characters. Writes accept JSON data only:
 string-keyed hash tables, vectors/proper lists, strings, finite floats, bounded
 integers, and JSON boolean/null values. Cyclic/deep structures and arbitrary Lisp
-objects are rejected before encoding. Parsing uses Yason's defaults: hash objects,
-list arrays, T/NIL booleans and NIL null. Schemas should distinguish optional values
-explicitly when that representation matters. The recovery-specific wrappers retain
-their stricter buffer schema and depth bound.
+objects are rejected before encoding. Parsing explicitly returns hash objects,
+vector arrays, Yason boolean symbols, and NIL null, independently of ambient
+Yason defaults. False, null, and an empty array therefore remain distinct through
+recovery. Application schemas normalize their own typed fields when needed. The
+recovery-specific wrappers retain their stricter buffer schema and depth bound.
 
 The ancestor ownership check anchors trust at the owner of filesystem root `/`
 and the current UID. This equals root UID 0 on normal Linux, and also handles Nix
