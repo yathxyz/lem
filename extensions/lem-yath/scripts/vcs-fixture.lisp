@@ -762,6 +762,17 @@
                       (eq (current-frame)
                           (lem-core::get-frame-of-window
                            lem/transient::*transient-popup-window*)))))
+          (when (and active (not prompt) (not transient)
+                     (member (current-window)
+                             (list (lem/legit::peek-window)
+                                   (lem/legit::source-window)))
+                     (not (deleted-buffer-p *vcs-test-source-buffer*))
+                     (vcs-test-source-raw-exact-p)
+                     (vcs-test-source-raw-sentinel-p))
+            ;; The TODO assertion consumes this exact request's details. The
+            ;; combined keyboard reporter also changes bisect focus; do not
+            ;; invoke that command from an observational timer.
+            (vcs-test-report-legit-state request))
           (vcs-test-log
            "READY-PROBE request=~a phase=~a active=~a prompt=~a transient=~a current=~a source-live=~a raw-exact=~a raw-sentinel=~a"
            request *vcs-test-phase* (vcs-test-yes-no active)
@@ -1036,7 +1047,7 @@
 
 ;; Searches use temporary copies: moving BUFFER-START-POINT itself would change
 ;; the live buffer boundary and hide earlier rows from later fixture commands.
-(define-command lem-yath-test-vcs-legit-state () ()
+(defun vcs-test-report-legit-state (&optional request)
   (let* ((active (and (fboundp 'lem/legit::legit-status-active-p)
                       (lem/legit::legit-status-active-p)))
          (buffer (and active
@@ -1050,6 +1061,7 @@
     (vcs-test-log
      (concatenate
       'string
+      (if request (format nil "READY-DETAIL request=~a " request) "")
       "LEGIT phase=~a active=~a source-live=~a raw-exact=~a "
       "raw-sentinel=~a todos=~a todo-count=~a todo-properties=~a "
       "todo-hook=~d todo-bottom=~a current=~a")
@@ -1090,7 +1102,10 @@
            (let ((latest (search "Latest commits:" text))
                  (todos (search "Todos (17):" text)))
              (and latest todos (< latest todos)))))
-     (vcs-test-encode (buffer-name (current-buffer))))))
+     (vcs-test-encode (buffer-name (window-buffer (current-window)))))))
+
+(define-command lem-yath-test-vcs-legit-state () ()
+  (vcs-test-report-legit-state))
 
 (define-command lem-yath-test-vcs-todo-preview () ()
   (let* ((buffer (and (lem/legit::legit-status-active-p)

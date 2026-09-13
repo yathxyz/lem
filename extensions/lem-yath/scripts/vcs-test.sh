@@ -2794,11 +2794,19 @@ wait_legit() {
     if wait_report_count "$pattern" 1 3 &&
        latest=$(latest_report "$pattern") &&
        [[ "$latest" == "READY-PROBE request=$nonce phase=$phase active=yes prompt=no transient=no current=yes source-live=yes raw-exact=yes raw-sentinel=yes" ]]; then
+      vcs_ready_completed=$nonce
       return 0
     fi
     sleep 0.25
   done
   return 1
+}
+
+latest_ready_legit_report() {
+  local prefix="READY-DETAIL request=${vcs_ready_completed:-none} " report
+  report=$(latest_report "^${prefix}LEGIT phase=$1 ") || return 1
+  [[ -n "$report" ]] || return 1
+  printf '%s\n' "${report#"$prefix"}"
 }
 
 checkout_porcelain_branch_fixture() {
@@ -2969,7 +2977,7 @@ else
   fail smart-git-dispatch 'smart dispatch did not open Legit for Git-only' \
     "$git_session"
 fi
-legit_state=$(latest_report '^LEGIT phase=git ')
+legit_state=$(latest_ready_legit_report git)
 if [[ "$legit_state" == *'todos=yes todo-count=yes todo-properties=yes todo-hook=1 todo-bottom=yes '* ]]; then
   pass legit-todo-section 'Legit rendered the configured Magit-Todos keywords with actions'
 else
@@ -5440,8 +5448,9 @@ send_keys "$porcelain_session" Escape Space g G
 wait_legit "$porcelain_session" porcelain ||
   fail legit-bisect-focus 'could not refocus Legit after fixture creation' \
     "$porcelain_session"
+bisect_before=$(report_count '^BISECT ')
 send_keys "$porcelain_session" F4
-if wait_report_count '^BISECT ' 1 &&
+if wait_report_count '^BISECT ' "$((bisect_before + 1))" &&
    [[ $(latest_report '^BISECT ') == \
       'BISECT active=no status=yes diff=yes initial=yes actions=yes section=no terms=none no-checkout=no first-parent=no first-bad=no hook=1' ]]; then
   pass legit-bisect-dispatch \
@@ -5482,7 +5491,8 @@ if lem_wait_for "$porcelain_session" 'Good revision' \
      "$WAIT_TIMEOUT" >/dev/null; then
   enter_prompt_value "$porcelain_session" "$bisect_good_hash"
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_bisect_no_checkout; then
+if wait_until "$WAIT_TIMEOUT" porcelain_bisect_no_checkout &&
+   wait_legit "$porcelain_session" porcelain; then
   bisect_before=$(report_count '^BISECT ')
   send_keys "$porcelain_session" F4
 else
@@ -5557,7 +5567,8 @@ if lem_wait_for "$porcelain_session" 'Bisect shell command' \
     'while IFS= read -r line; do [ "$line" = "BUG introduced here" ] && exit 1; done < bisect-probe.txt; exit 0'
   send_keys "$porcelain_session" Enter
 fi
-if wait_until "$WAIT_TIMEOUT" porcelain_bisect_first_bad; then
+if wait_until "$WAIT_TIMEOUT" porcelain_bisect_first_bad &&
+   wait_legit "$porcelain_session" porcelain; then
   bisect_before=$(report_count '^BISECT ')
   send_keys "$porcelain_session" F4
 else
