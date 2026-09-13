@@ -357,7 +357,6 @@ source "$here/scripts/tui-driver.sh"
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-60}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-20}"
 KEY_DELAY="${KEY_DELAY:-0.25}"
-failed=0
 sessions=()
 
 cleanup() {
@@ -372,9 +371,12 @@ trap 'exit 130' INT TERM
 
 pass() { printf 'PASS  %-31s %s\n' "$1" "$2"; }
 fail() {
-  failed=1
   printf 'FAIL  %-31s %s\n' "$1" "$2"
   [ -n "${3:-}" ] && lem_capture "$3" 2>/dev/null || true
+  cat "$LEM_YATH_VCS_REPORT" 2>/dev/null || true
+  # Later workflows depend on this fixture's state; preserve the first failure.
+  echo 'VCS TEST FAILED'
+  exit 1
 }
 
 report_count() {
@@ -8395,10 +8397,5 @@ lem_stop "$porcelain_session"
 printf '\n'
 cat "$LEM_YATH_VCS_REPORT" 2>/dev/null || true
 
-if [ "$failed" = 0 ]; then
-  echo 'VCS TEST PASSED'
-  exit 0
-else
-  echo 'VCS TEST FAILED'
-  exit 1
-fi
+echo 'VCS TEST PASSED'
+exit 0
