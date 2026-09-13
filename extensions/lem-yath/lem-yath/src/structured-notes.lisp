@@ -53,6 +53,6 @@
       (buffer-start (buffer-point buffer)))
     (setf (buffer-read-only-p buffer) t)
     (buffer-mark-saved buffer)
-    (pop-to-buffer buffer)))
+    (switch-to-window (pop-to-buffer buffer))))
 
 (initialize-editor-feature 'configure-native-notes)

@@ -266,7 +266,7 @@
                      (slot-value buffer 'lem/buffer/internal::temporary) nil)
                (lem/buffer/internal::add-buffer buffer))
              (setf complete t)
-             (when switch-p (lem:pop-to-buffer buffer))
+             (when switch-p (lem:switch-to-window (lem:pop-to-buffer buffer)))
              buffer)
         (when (and created buffer (not complete))
           (unwind-protect (ignore-errors (lem:delete-buffer buffer))
