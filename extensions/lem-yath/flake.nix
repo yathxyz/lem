@@ -32,6 +32,7 @@
               "lem-agent/openrouter" "lem-agent/process-tools"
               "lem-agent/editor-tools" "lem-agent/ui"
               "lem-agent/edit-recovery" "lem-agent/retention-ui"
+              "lem-structured-notes/lem-notes-adapter"
             ];
             lispLibs = old.lispLibs ++ [ pkgs.sbcl.pkgs.ironclad ];
           });
@@ -621,6 +622,37 @@
             '';
           };
 
+          nativeNotesTest = pkgs.writeShellApplication {
+            name = "lem-yath-native-notes-test";
+            runtimeInputs = [ pkgs.python3 ];
+            text = ''
+              export LEM_BIN=${lemYath}/bin/lem
+              export LEMCLIENT_BIN=${lemClient}/bin/lemclient
+              exec python3 ${self}/scripts/native-notes-test.py
+            '';
+          };
+
+          nativeLegitFramesTest = pkgs.writeShellApplication {
+            name = "lem-yath-native-legit-frames-test";
+            runtimeInputs = with pkgs; [ python3 git xorg.xorgserver xdotool ];
+            text = ''
+              export LEM_BIN=${lemYath}/bin/lem
+              export LEMCLIENT_BIN=${lemClient}/bin/lemclient
+              exec python3 ${lem}/scripts/legit-frame-test.py
+            '';
+          };
+
+          nativeDailyToolsTest = pkgs.writeShellApplication {
+            name = "lem-yath-native-daily-tools-test";
+            runtimeInputs = with pkgs; [ python3 git ];
+            text = ''
+              export LEM_BIN=${lemYath}/bin/lem
+              export LEMCLIENT_BIN=${lemClient}/bin/lemclient
+              export LEM_TEST_BASH=${pkgs.bashInteractive}/bin/bash
+              exec python3 ${self}/scripts/native-daily-tools-test.py
+            '';
+          };
+
           managedCompilationTest = pkgs.writeShellApplication {
             name = "lem-yath-managed-compilation-test";
             runtimeInputs = [ pkgs.python3 ];
@@ -746,6 +778,9 @@
             startup-test = mkTestAppWithLem lemYath "lem-yath-startup-test" "startup-test.sh";
             daemon-test = mkApp "${daemonTest}/bin/lem-yath-daemon-test" "Test the configured native daemon lifecycle";
             native-agent-test = mkApp "${nativeAgentTest}/bin/lem-yath-native-agent-test" "Test native agent workflows and recovery with two terminal clients";
+            native-notes-test = mkApp "${nativeNotesTest}/bin/lem-yath-native-notes-test" "Test explicit notes workflows and recovery with native clients";
+            native-legit-frames-test = mkApp "${nativeLegitFramesTest}/bin/lem-yath-native-legit-frames-test" "Test Git pane ownership across two graphical clients";
+            native-daily-tools-test = mkApp "${nativeDailyToolsTest}/bin/lem-yath-native-daily-tools-test" "Test project visits, shells and persistent Lisp REPLs through native clients";
             buffer-proposal-test = mkApp "${bufferProposalTest}/bin/lem-yath-buffer-proposal-test" "Test revision-safe native buffer proposals";
             git-rebase-test = mkApp "${gitRebaseTest}/bin/lem-yath-git-rebase-test" "Test native Git rebase editor callbacks";
             completion-test = mkTestApp "lem-yath-completion-test" "completion-test.sh";
@@ -896,6 +931,15 @@
             native-agent = pkgs.runCommand "lem-yath-native-agent-check" { } ''
               ${nativeAgentTest}/bin/lem-yath-native-agent-test
               touch "$out"
+            '';
+            native-notes = pkgs.runCommand "lem-yath-native-notes-check" { } ''
+              ${nativeNotesTest}/bin/lem-yath-native-notes-test > "$out"
+            '';
+            native-legit-frames = pkgs.runCommand "lem-yath-native-legit-frames-check" { } ''
+              ${nativeLegitFramesTest}/bin/lem-yath-native-legit-frames-test > "$out"
+            '';
+            native-daily-tools = pkgs.runCommand "lem-yath-native-daily-tools-check" { } ''
+              ${nativeDailyToolsTest}/bin/lem-yath-native-daily-tools-test > "$out"
             '';
             git-rebase = pkgs.runCommand "lem-yath-git-rebase-check" { } ''
               ${gitRebaseTest}/bin/lem-yath-git-rebase-test
