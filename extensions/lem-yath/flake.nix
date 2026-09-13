@@ -933,13 +933,16 @@
               touch "$out"
             '';
             native-notes = pkgs.runCommand "lem-yath-native-notes-check" { } ''
-              ${nativeNotesTest}/bin/lem-yath-native-notes-test > "$out"
+              set -o pipefail
+              ${nativeNotesTest}/bin/lem-yath-native-notes-test | tee "$out"
             '';
             native-legit-frames = pkgs.runCommand "lem-yath-native-legit-frames-check" { } ''
-              ${nativeLegitFramesTest}/bin/lem-yath-native-legit-frames-test > "$out"
+              set -o pipefail
+              ${nativeLegitFramesTest}/bin/lem-yath-native-legit-frames-test | tee "$out"
             '';
             native-daily-tools = pkgs.runCommand "lem-yath-native-daily-tools-check" { } ''
-              ${nativeDailyToolsTest}/bin/lem-yath-native-daily-tools-test > "$out"
+              set -o pipefail
+              ${nativeDailyToolsTest}/bin/lem-yath-native-daily-tools-test | tee "$out"
             '';
             git-rebase = pkgs.runCommand "lem-yath-git-rebase-check" { } ''
               ${gitRebaseTest}/bin/lem-yath-git-rebase-test
