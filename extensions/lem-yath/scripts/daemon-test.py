@@ -208,9 +208,13 @@ def main():
                 check(evaluate("(lem:mode-active-p (lem:current-buffer) 'lem-yath::org-mode)")
                       == 'T', 'scratch starts in Org mode')
 
-                child_command = shlex.join([client, '--server-name', name])
-                check(evaluate('(string= (uiop:getenv "GIT_EDITOR") '
-                               + lisp_string(child_command) + ')') == 'T',
+                # A profile symlink and the configured store path may name the
+                # same client. Preserve the exact executable and argument check.
+                child_command = json.loads(evaluate('(uiop:getenv "GIT_EDITOR")'))
+                child_argv = shlex.split(child_command)
+                check(len(child_argv) == 3
+                      and child_argv[1:] == ['--server-name', name]
+                      and Path(child_argv[0]).resolve(strict=True) == Path(client).resolve(strict=True),
                       'child Git edits use the packaged native client and selected daemon')
 
                 exercise_client_redisplay(root / 'runtime' / 'lem' / f'{name}.sock')

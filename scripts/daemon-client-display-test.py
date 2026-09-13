@@ -115,7 +115,8 @@ with tempfile.TemporaryDirectory(prefix='lem-sdl-check-') as temporary:
         master, slave = pty.openpty()
         masters.append(master)
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, columns, 0, 0))
-        process = start(command + ['-t', str(document)], stdin=slave, stdout=slave, stderr=slave)
+        # These clients exercise display lifetime, not a waiting external edit.
+        process = start(command + ['-t', '-n', str(document)], stdin=slave, stdout=slave, stderr=slave)
         os.close(slave)
         threading.Thread(target=drain, args=(master,), daemon=True).start()
         return process, master
@@ -137,9 +138,21 @@ with tempfile.TemporaryDirectory(prefix='lem-sdl-check-') as temporary:
             server = start([xserver, '-displayfd', str(writefd), '-screen', '0', '1600x1000x24',
                             '-nolisten', 'tcp', '-noreset'], pass_fds=[writefd], stdout=xlog, stderr=xlog)
             os.close(writefd)
-            assert select.select([readfd], [], [], 10)[0], 'Xvfb did not start'
-            display = os.read(readfd, 100).decode().strip()
-            os.close(readfd)
+            # Xvfb may write the digits and final newline separately. Closing
+            # after a numeric prefix can make its readiness write fail.
+            display_bytes = bytearray()
+            deadline = time.monotonic() + 10
+            try:
+                while b'\n' not in display_bytes:
+                    remaining = deadline - time.monotonic()
+                    assert remaining > 0 and select.select([readfd], [], [], remaining)[0], 'Xvfb did not start'
+                    chunk = os.read(readfd, 32)
+                    assert chunk, 'Xvfb closed readiness before its complete display number'
+                    display_bytes.extend(chunk)
+                    assert len(display_bytes) <= 32, 'Oversized Xvfb readiness reply'
+            finally:
+                os.close(readfd)
+            display = display_bytes.decode().strip()
             assert display.isdigit(), display
             env['DISPLAY'] = ':' + display
             daemon = start([binaries['editor'], '--daemon=sdl-test'], stdout=dlog, stderr=dlog)
@@ -155,6 +168,7 @@ with tempfile.TemporaryDirectory(prefix='lem-sdl-check-') as temporary:
             tty2, fd2 = terminal_client(100)
             eventually(count, '2')
             assert evaluate(sizes) == '(80 100)'
+            assert evaluate('(null (lem-daemon:request-buffer-list))') == 'T'
             os.write(fd1, b'iFIRST\x1b')
             eventually('(not (null (search "FIRST" (lem:buffer-text (lem:get-buffer "shared.lisp")))))', 'T')
             tty1.kill()
@@ -171,7 +185,7 @@ with tempfile.TemporaryDirectory(prefix='lem-sdl-check-') as temporary:
             windows = []
             for index in range(2):
                 log = (root / f'gui-{index}.log').open('w')
-                process = start(command + ['-c', str(document)], stdout=log, stderr=log)
+                process = start(command + ['-c', '-n', str(document)], stdout=log, stderr=log)
                 gui.append(process)
                 eventually(count, str(index + 1))
                 windows.append(xdo('search', '--sync', '--all', '--pid', process.pid, '--name', 'Lem client').splitlines()[0])
@@ -343,7 +357,7 @@ with tempfile.TemporaryDirectory(prefix='lem-sdl-check-') as temporary:
             print('PASS: closing the final client preserves modified buffers in the daemon', flush=True)
 
             log = (root / 'gui-reconnect.log').open('w')
-            reconnected = start(command + ['-c', str(document)], stdout=log, stderr=log)
+            reconnected = start(command + ['-c', '-n', str(document)], stdout=log, stderr=log)
             eventually(count, '1')
             window = xdo('search', '--sync', '--all', '--pid', reconnected.pid, '--name', 'Lem client').splitlines()[0]
             close_window(window)
@@ -352,7 +366,7 @@ with tempfile.TemporaryDirectory(prefix='lem-sdl-check-') as temporary:
             print('PASS: graphical window closure releases only its frame', flush=True)
 
             log = (root / 'gui-malformed.log').open('w')
-            malformed = start(command + ['-c', str(document)], stdout=log, stderr=log)
+            malformed = start(command + ['-c', '-n', str(document)], stdout=log, stderr=log)
             eventually(count, '1')
             evaluate('(let ((c (find-if #\'lem-daemon::connection-implementation '
                      'lem-daemon::*daemon-connections*))) '
@@ -364,7 +378,7 @@ with tempfile.TemporaryDirectory(prefix='lem-sdl-check-') as temporary:
             print('PASS: a graphical decoding error exits without entering a debugger', flush=True)
 
             log = (root / 'gui-daemon-loss.log').open('w')
-            lost = start(command + ['-c', str(document)], stdout=log, stderr=log)
+            lost = start(command + ['-c', '-n', str(document)], stdout=log, stderr=log)
             eventually(count, '1')
             daemon.kill()
             daemon.wait(timeout=10)
