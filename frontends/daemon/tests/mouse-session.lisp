@@ -3,6 +3,13 @@
   (:local-nicknames (:core :lem-core)))
 (in-package :lem-daemon/tests/mouse-session)
 
+(defun call-with-fresh-tabs (function)
+  (let ((lem/frame-multiplexer::*virtual-frame-map* (make-hash-table))
+        (lem/frame-multiplexer::*recent-list* nil))
+    (assert (not (lem/frame-multiplexer::enabled-frame-multiplexer-p)))
+    (unwind-protect (call-with-two-frames function)
+      (lem/frame-multiplexer::disable-frame-multiplexer))))
+
 (defun call-with-two-frames (function)
   (lem:with-current-buffers ()
     (let ((core::*display-frame-map* (make-hash-table))
@@ -113,3 +120,43 @@
          (ok (and (null (core::frame-hover-overlay first-frame))
                   (null (core::frame-last-mouse-event first-frame)))
              "teardown releases hover and last-event references"))))))
+
+(deftest disabling-tabs-uses-the-header-owner
+  (call-with-fresh-tabs
+   (lambda (first second)
+     (let (header owner-frame)
+       (lem:with-implementation first
+         (lem/frame-multiplexer::enable-frame-multiplexer)
+         (setf owner-frame (lem:current-frame)
+               header (gethash first lem/frame-multiplexer::*virtual-frame-map*)))
+       (lem:with-implementation second
+         (let ((window (lem:current-window))
+               (buffer (lem:window-buffer (lem:current-window))))
+           (setf (lem:current-buffer) buffer)
+           (lem:character-offset (lem:current-point) 2)
+           (let ((position (lem:position-at-point (lem:current-point))))
+             (lem/frame-multiplexer::disable-frame-multiplexer)
+             (ok (core::window-deleted-p header) "the exact owner's tab header was freed")
+             (ok (not (find header (core::frame-header-windows owner-frame))))
+             (ok (and (eq second (lem:implementation))
+                      (eq window (lem:current-window)) (eq buffer (lem:current-buffer))
+                      (= position (lem:position-at-point (lem:current-point))))
+                 "another frame keeps its implementation, window, buffer and point")
+             (ok (zerop (hash-table-count lem/frame-multiplexer::*virtual-frame-map*))))))))))
+
+(deftest disabling-tabs-does-not-rebind-a-retired-owner
+  (call-with-fresh-tabs
+   (lambda (first second)
+     (lem:with-implementation first
+       (lem/frame-multiplexer::enable-frame-multiplexer)
+       (lem:teardown-frame (lem:current-frame))
+       (lem:unmap-frame first))
+     (lem:with-implementation second
+       (let ((peer-header (make-instance 'lem:header-window
+                                        :buffer (lem:make-buffer "peer-tab-header" :temporary t))))
+         (lem/frame-multiplexer::disable-frame-multiplexer)
+         (ok (not (core::window-deleted-p peer-header))
+             "a missing tab owner cannot delete the surviving frame's header")
+         (ok (find peer-header (core::frame-header-windows (lem:current-frame))))
+         (ok (zerop (hash-table-count lem/frame-multiplexer::*virtual-frame-map*)))
+         (lem:delete-window peer-header))))))

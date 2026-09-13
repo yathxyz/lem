@@ -332,9 +332,14 @@
 
 (defun frame-multiplexer-off ()
   (when (enabled-frame-multiplexer-p)
-    (maphash (lambda (k v)
-               (declare (ignore k))
-               (delete-window v))
+    (maphash (lambda (implementation header)
+               ;; Exit may originate in another native client. Retired owners
+               ;; no longer have backend views we may safely delete.
+               (let ((frame (get-frame implementation)))
+                 (when (and (member frame (all-frames))
+                            (find header (frame-header-windows frame)))
+                   (with-implementation implementation
+                     (delete-window header)))))
              *virtual-frame-map*)
     (clrhash *virtual-frame-map*)))
 
