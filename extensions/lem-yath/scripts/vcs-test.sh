@@ -401,6 +401,9 @@ wait_report_count() {
 
 wait_until() {
   local timeout=$1 index=0
+  # Polling Git state must not write optional index refreshes while Lem's
+  # command still owns a repository mutation. Mandatory Git locks remain on.
+  local -x GIT_OPTIONAL_LOCKS=0
   shift
   while ((index < timeout * 4)); do
     if "$@"; then
@@ -2790,6 +2793,19 @@ wait_legit() {
     index=$((index + 1))
   done
   return 1
+}
+
+checkout_porcelain_branch_fixture() {
+  local branch=$1
+  # Ref changes can be visible before the native command's status refresh
+  # releases index.lock. A fresh editor report also drains any queued q.
+  wait_legit "$porcelain_session" porcelain ||
+    fail legit-branch-fixture-ready \
+      "native command did not finish before checkout of $branch" \
+      "$porcelain_session"
+  "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q "$branch" ||
+    fail legit-branch-fixture-checkout \
+      "fixture checkout of $branch failed" "$porcelain_session"
 }
 
 fixture="$(lem-yath_lisp_string "$here/scripts/vcs-fixture.lisp")"
@@ -6750,8 +6766,7 @@ else
     "$porcelain_session"
 fi
 
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
-  branch-current-delete
+checkout_porcelain_branch_fixture branch-current-delete
 send_keys "$porcelain_session" g b
 if lem_wait_for "$porcelain_session" '\[Branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6776,8 +6791,7 @@ else
     "$porcelain_session"
 fi
 
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
-  branch-spinoff-region-source
+checkout_porcelain_branch_fixture branch-spinoff-region-source
 branch_region_prompted=0
 send_keys "$porcelain_session" g l l
 if lem_wait_for "$porcelain_session" 'branch-spinoff-region-two' \
@@ -6817,8 +6831,7 @@ else
 fi
 send_keys "$porcelain_session" q
 
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
-  branch-spinoff-source
+checkout_porcelain_branch_fixture branch-spinoff-source
 send_keys "$porcelain_session" g b
 if lem_wait_for "$porcelain_session" '\[Branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6837,8 +6850,7 @@ else
     "$porcelain_session"
 fi
 
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
-  branch-spinout-source
+checkout_porcelain_branch_fixture branch-spinout-source
 send_keys "$porcelain_session" g b
 if lem_wait_for "$porcelain_session" '\[Branch\]' \
      "$WAIT_TIMEOUT" >/dev/null; then
@@ -6857,8 +6869,7 @@ else
     "$porcelain_session"
 fi
 
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q \
-  branch-dirty-source
+checkout_porcelain_branch_fixture branch-dirty-source
 printf 'dirty worktree survives\n' \
   >>"$LEM_YATH_VCS_PORCELAIN_ROOT/branch-dirty.txt"
 send_keys "$porcelain_session" g b
@@ -6879,10 +6890,16 @@ else
     "$porcelain_session"
 fi
 
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -f main
-"$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
-  "$merge_main_hash"
+wait_legit "$porcelain_session" porcelain ||
+  fail legit-branch-fixture-ready \
+    'dirty spin-out did not finish before fixture reset' "$porcelain_session"
+if ! { "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard &&
+       "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" checkout -q -f main &&
+       "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" reset -q --hard \
+         "$merge_main_hash"; }; then
+  fail legit-branch-fixture-reset \
+    'fixture reset after dirty spin-out failed' "$porcelain_session"
+fi
 
 if "$git_bin" -C "$LEM_YATH_VCS_PORCELAIN_ROOT" push -q origin \
      "$merge_main_hash":refs/heads/primary-next &&
