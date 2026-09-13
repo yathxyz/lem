@@ -95,6 +95,7 @@
                (:file "roam-backlinks")
                (:file "org/publish")
                (:file "notes")
+               (:file "structured-notes" :if-feature (:and :sbcl :linux))
                (:file "org/download")
                (:file "org-capture")
                (:file "org/nodes-sync")

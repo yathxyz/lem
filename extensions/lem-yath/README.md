@@ -52,6 +52,7 @@ The configured editor uses the native Common Lisp daemon and client:
 ```sh
 lem --daemon
 lemclient -t                         # independent terminal frame
+lemclient -c                         # independent graphical frame
 lemclient +42:3 file.txt other.txt    # wait for editing to finish
 lemclient --no-wait file.txt
 lemclient --eval '(length (lem:buffer-list))'
@@ -70,10 +71,30 @@ packaged native client. It fills otherwise-unset `VISUAL` and `EDITOR`; parent
 shells keep their existing environment. Unreachable daemons produce a client
 error unless `--alternate-editor` was explicitly supplied.
 
-See [daemon/client behavior](../../docs/daemon-client.md) and
-[service integration](../../docs/daemon-service-migration.md). Graphical
-attachments and recovery of unsaved state after daemon death remain separate
-milestones. Runtime client routing requires neither tmux nor socat.
+See [daemon/client behavior](../../docs/daemon-client.md),
+[graphical clients](../../docs/daemon-client-display.md),
+[checkpoint recovery](../../docs/daemon-recovery.md), and
+[service integration](../../docs/daemon-service-migration.md).
+Runtime client routing requires neither tmux nor socat.
+
+## Explicit structured notes
+
+The configured Linux image includes a Lisp semantic notes library and an explicit
+LSM adapter alongside the existing Org workflows. `M-x lem-yath-notes-status`
+reports the startup-pinned work root and optional public root. The work root uses
+the existing `WORKDIR` setting (default `~/work`); public capture requires an
+explicit `PUBLIC_ORG_DIR`. Roots must already exist. Missing roots leave ordinary
+editing available and notes commands report that configuration is unavailable.
+Changing a client's directory or environment does not retarget these roots.
+
+Use `M-x structured-notes-lsm-open-today`,
+`structured-notes-lsm-journal-entry`, `structured-notes-lsm-capture`, or
+`structured-notes-lsm-assign-id`. These commands produce unsaved edits; use normal
+save after review. Create `roam/` and `roam/journal/` explicitly before their first
+use. Existing Org bindings and files retain their current behavior. No calendar
+transport or automatic note conversion is enabled. See the
+[adapter contract](../structured-notes/ADAPTER.md) for destinations, proposal
+review, undo, bounds, and recovery behavior.
 
 ## What's in the port
 
