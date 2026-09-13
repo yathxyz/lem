@@ -9,6 +9,7 @@
    :listener-start
    :change-input-start-point
    :refresh-prompt
+   :call-with-tail-following
    :clamp-cursor-to-input-area
    :clear-listener-using-mode
    :clear-listener
@@ -131,17 +132,37 @@
       (put-text-property s point :read-only t)
       (put-text-property s point :field t))))
 
+(defun call-with-tail-following (buffer function)
+  "Insert listener output without losing inactive windows' input positions.
+Only windows already at the buffer end follow appended output. Windows reading
+older output keep their own points; no frame or window is selected here."
+  (let ((followers
+          (loop :for frame :in (all-frames)
+                :append (remove-if-not
+                         (lambda (window) (end-buffer-p (window-point window)))
+                         (get-buffer-windows buffer :frame frame
+                                                  :include-floating-windows t)))))
+    (multiple-value-prog1 (funcall function)
+      (dolist (window followers)
+        (when (and (not (lem-core::window-deleted-p window))
+                   (eq buffer (window-buffer window)))
+          (buffer-end (window-point window)))))))
+
 (defun refresh-prompt (&optional (buffer (current-buffer)) (fresh-line t))
-  (let ((point (buffer-point buffer)))
-    (buffer-end point)
-    (when fresh-line
-      (unless (start-line-p point)
-        (insert-character point #\newline 1)
-        (buffer-end point)))
-    (write-prompt point)
-    (buffer-end point)
-    (buffer-undo-boundary buffer)
-    (change-input-start-point point)))
+  (call-with-tail-following
+   buffer
+   (lambda ()
+     ;; The buffer cursor may belong to a reader in another frame. Appending a
+     ;; prompt must not move that reader out of older output.
+     (with-point ((point (buffer-end-point buffer) :left-inserting))
+       (when fresh-line
+         (unless (start-line-p point)
+           (insert-character point #\newline 1)
+           (buffer-end point)))
+       (write-prompt point)
+       (buffer-end point)
+       (buffer-undo-boundary buffer)
+       (change-input-start-point point)))))
 
 (define-command listener-return () ()
   "Validate the current input and let the listener execute the expression."

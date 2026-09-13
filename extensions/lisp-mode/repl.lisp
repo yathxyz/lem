@@ -378,9 +378,12 @@
                (previous-single-property-change point :field))))
       (unless (eq (current-buffer) buffer)
         (see-repl-writing buffer))
-      (with-buffer-read-only buffer nil
-        (let ((*inhibit-read-only* t))
-          (funcall function point))))))
+      (lem/listener-mode:call-with-tail-following
+       buffer
+       (lambda ()
+         (with-buffer-read-only buffer nil
+           (let ((*inhibit-read-only* t))
+             (funcall function point))))))))
 
 (defmacro with-repl-point ((point) &body body)
   `(call-with-repl-point (lambda (,point) ,@body)))

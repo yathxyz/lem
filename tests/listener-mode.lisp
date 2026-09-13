@@ -20,7 +20,8 @@
 (defun setup-listener-buffer ()
   "Create a buffer with listener-mode and a simple prompt."
   (let ((buffer (make-buffer "listener-test")))
-    (setf (current-buffer) buffer)
+    (setf (current-buffer) (window-buffer (current-window)))
+    (switch-to-buffer buffer)
     (setf (variable-value 'listener-set-prompt-function :buffer buffer)
           (lambda (point)
             (insert-string point "> ")))
@@ -31,6 +32,86 @@
     (start-listener-mode)
     (refresh-prompt buffer)
     buffer))
+
+(deftest prompt-refresh-preserves-output-reader
+  (with-fake-interface ()
+    (with-current-buffers ()
+      (let ((buffer (setup-listener-buffer)))
+        (insert-string (current-point) (format nil "old result~%"))
+        (buffer-start (current-point))
+        (with-point ((reader (current-point)))
+          (refresh-prompt buffer)
+          (ok (point= reader (current-point)) "A reader is not pulled to the new prompt")
+          (ok (end-buffer-p (input-start-point buffer)))
+          (ok (string= (format nil "> old result~%> ") (buffer-text buffer))))))))
+
+(deftest repl-output-and-prompt-follow-independent-frame-tails
+  (with-current-buffers ()
+    (with-fake-interface ()
+      (let* ((buffer (make-buffer "*lisp-repl*"))
+             (origin (current-window))
+             (origin-implementation (implementation)))
+        (setf (current-buffer) (window-buffer origin))
+        (switch-to-buffer buffer)
+        (setf (variable-value 'listener-set-prompt-function :buffer buffer)
+              (lambda (point) (insert-string point "> ")))
+        (start-listener-mode)
+        (refresh-prompt buffer)
+        (insert-string (current-point) (format nil "(+ 20 22)~%"))
+        (lem/listener-mode:change-input-start-point (current-point))
+        ;; Save the origin's cursor as frame activation does. The output callback
+        ;; below runs with a different frame selected, while both show this REPL.
+        (move-point (lem-core::%window-point origin) (current-point))
+        (with-fake-interface ()
+          (setf (current-buffer) (window-buffer (current-window)))
+          (switch-to-buffer buffer)
+          (buffer-start (current-point))
+          (let ((reader-window (current-window)))
+            (with-point ((reader (current-point)))
+              (let ((lem-lisp-mode/internal::*repl-evaluating* t))
+                ;; Split output includes a separate newline event: without tail
+                ;; following, the inactive window is stranded before this newline.
+                (lem-lisp-mode/internal:write-string-to-repl "42")
+                (ok (end-buffer-p (window-point origin)))
+                (lem-lisp-mode/internal:write-string-to-repl (string #\newline)))
+              (refresh-prompt buffer)
+              (ok (end-buffer-p (window-point origin)))
+              (ok (point= reader (current-point)))
+              (ok (eq reader-window (current-window)) "Output does not select its origin")
+              (move-point (lem-core::%window-point reader-window) (current-point))
+              ;; Reactivate the initiating frame using its saved cursor, then
+              ;; submit real listener input rather than moving it to the tail.
+              (lem:with-implementation origin-implementation
+                (setf (current-buffer) buffer)
+                (move-point (current-point) (lem-core::%window-point origin))
+                (let (submitted)
+                  (setf (variable-value 'listener-check-input-function :buffer buffer)
+                        (constantly t)
+                        (variable-value 'listener-execute-function :buffer buffer)
+                        (lambda (point text) (declare (ignore point)) (setf submitted text)))
+                  (insert-string (current-point) "(+ 42 1)")
+                  (lem/listener-mode:listener-return)
+                  (ok (equal "(+ 42 1)" submitted)))
+                (ok (point= reader (window-point reader-window)))))))))))
+
+(deftest listener-tail-following-ignores-replaced-or-deleted-window
+  (with-current-buffers ()
+    (with-fake-interface ()
+      (let* ((buffer (setup-listener-buffer))
+             (other (make-buffer "listener-other"))
+             (floating (make-floating-window :buffer buffer :x 1 :y 1 :width 10 :height 5)))
+        (buffer-end (window-point floating))
+        (insert-string (buffer-point other) "other text")
+        (buffer-start (buffer-point other))
+        (lem/listener-mode:call-with-tail-following
+         buffer
+         (lambda ()
+           (switch-to-buffer other)
+           (delete-window floating)
+           (insert-string (buffer-end-point buffer) "new output")))
+        (ok (eq other (current-buffer)))
+        (ok (start-buffer-p (current-point)))
+        (ok (lem-core::window-deleted-p floating))))))
 
 (deftest clamp-cursor-to-input-area
   (with-fake-interface ()
