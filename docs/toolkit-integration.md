@@ -2,8 +2,8 @@
 
 Status: the prepared integration passes source process/recovery/proposal tests,
 configured compilation, daemon, proposal, startup, rewrite and native Git gates,
-and a private service crash/restart check. The broader VCS gate exposed a rebase
-view transition regression; its correction is under validation. The installed
+and a private service crash/restart check. The broader VCS gate passes after the
+rebase view transition correction described below. The installed
 editor and its running services have not been changed.
 
 The configured editor opens a named `lem-toolkit/jobs` manager during startup,
@@ -74,8 +74,9 @@ the worktree's retained result, including bounded failure diagnostics.
 
 Existing status and amend helpers remain upstream synchronous operations. This
 migration covers ownership of the interactive rebase process, rather than every
-Git operation. Legit's global display variables also need independent-frame
-acceptance before sustained daily use.
+Git operation. Legit's display state now belongs to its frame; see
+[native Git frame ownership](native-legit-frames.md) for the separate acceptance
+and remaining generic popup boundary.
 
 ## Buffer proposals
 
@@ -120,12 +121,11 @@ fixture also replaces the whole prompt instead of deleting a fixed character cou
 Archived logs include the earlier failures and subsequent correction evidence:
 [toolkit validation](/home/yanni/proj/lisp/.recovery/2026-09-10-lem-integration/validation/toolkit).
 
-The shared toolkit milestone is complete. The parallel native agent integration
-now has configured provider/tools/views, passing terminal/SDL and recovery gates,
-and one completed real OpenRouter round; it follows this frozen toolkit baseline
-into the canonical checkout. Durable edit-candidate and unsent-draft recovery
-remain subsequent work. Job records and retained output tails currently
-accumulate in the manager; an explicit retention policy is still needed before
-long-running daily operation. Original worktree heads, status, tracked patches
-and untracked prototype bytes were rechecked against the preservation archive
-after the final gate and still match. Installed profiles/services are unchanged.
+The shared toolkit milestone is complete. The native agent integration now has
+configured provider/tools/views, passing terminal/SDL and recovery gates, and one
+completed real OpenRouter round. Durable edit-candidate and unsent-draft recovery
+and bounded session/job admission with explicit inventory and cleanup are also
+integrated; see [native agent integration](native-agent-integration.md). Original
+worktree heads, status, tracked patches and untracked prototype bytes were
+rechecked against the preservation archive after acceptance and still match.
+Installed profiles/services are unchanged.

@@ -1,5 +1,12 @@
 # Notes and CalDAV adoption map
 
+This is the preserved assessment of the revisions below. The integration now
+contains the selected semantic library and explicit two-file notes adapter;
+see [the adopted boundary](../extensions/structured-notes/README.md) and
+[the adapter contract](../extensions/structured-notes/ADAPTER.md). Those documents
+record the focused tests and adaptations. The broader calendar and mixed Yath
+adapters described here remain unadopted.
+
 The preserved branch is useful, but importing its history or enabling its full
 adapter unchanged is the wrong integration boundary. Adopt its existing semantic
 model and source-preserving libraries in reviewable layers, keep the current Org
