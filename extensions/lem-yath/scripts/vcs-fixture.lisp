@@ -975,13 +975,15 @@
      (vcs-test-yes-no (vcs-test-source-raw-sentinel-p))
      (vcs-test-encode (buffer-name buffer)))))
 
+;; Searches use temporary copies: moving BUFFER-START-POINT itself would change
+;; the live buffer boundary and hide earlier rows from later fixture commands.
 (define-command lem-yath-test-vcs-legit-state () ()
   (let* ((active (and (fboundp 'lem/legit::legit-status-active-p)
                       (lem/legit::legit-status-active-p)))
          (buffer (and active
-                      (window-buffer lem/legit::*peek-window*)))
+                      (window-buffer (lem/legit::peek-window))))
          (text (and buffer (buffer-text buffer)))
-         (todo-point (and buffer (buffer-start-point buffer))))
+         (todo-point (and buffer (copy-point (buffer-start-point buffer) :temporary))))
     (when todo-point
       (unless (search-forward todo-point "nested/deeper/todos.org:1:")
         (setf todo-point nil))
@@ -1033,8 +1035,8 @@
 
 (define-command lem-yath-test-vcs-todo-preview () ()
   (let* ((buffer (and (lem/legit::legit-status-active-p)
-                      (window-buffer lem/legit::*peek-window*)))
-         (row (and buffer (buffer-start-point buffer))))
+                      (window-buffer (lem/legit::peek-window))))
+         (row (and buffer (copy-point (buffer-start-point buffer) :temporary))))
     (when row
       (unless (search-forward row "nested/deeper/todos.org:1:")
         (setf row nil))
@@ -1083,14 +1085,14 @@
    (legit-todo-buffer-sections buffer)))
 
 (defun vcs-test-todo-row-point (buffer text)
-  (let ((point (buffer-start-point buffer)))
+  (let ((point (copy-point (buffer-start-point buffer) :temporary)))
     (if (search-forward point text)
         (progn (line-start point) point)
         nil)))
 
 (define-command lem-yath-test-vcs-todo-sections () ()
   (let* ((buffer (and (lem/legit::legit-status-active-p)
-                      (window-buffer lem/legit::*peek-window*)))
+                      (window-buffer (lem/legit::peek-window))))
          (sections (and buffer (legit-todo-buffer-sections buffer)))
          (top (and buffer (vcs-test-todo-section buffer :worktree)))
          (branch (and buffer (vcs-test-todo-section buffer :branch)))
@@ -1135,16 +1137,16 @@
 
 (define-command lem-yath-test-vcs-position-todo-heading () ()
   (let* ((buffer (and (lem/legit::legit-status-active-p)
-                      (window-buffer lem/legit::*peek-window*)))
+                      (window-buffer (lem/legit::peek-window))))
          (section (and buffer (vcs-test-todo-section buffer :worktree))))
     (when section
-      (setf (current-window) lem/legit::*peek-window*)
+      (setf (current-window) (lem/legit::peek-window))
       (move-point (buffer-point buffer)
                   (legit-todo-section-heading section)))))
 
 (define-command lem-yath-test-vcs-todo-list-state () ()
   (let* ((active (lem/legit::legit-status-active-p))
-         (buffer (and active (window-buffer lem/legit::*peek-window*)))
+         (buffer (and active (window-buffer (lem/legit::peek-window))))
          (root (and buffer (legit-todo-list-root buffer)))
          (sections (and buffer (legit-todo-buffer-sections buffer)))
          (top
@@ -1178,7 +1180,7 @@
   "Report whether physical focus is outside a TODO section in Legit status."
   (let ((status-p
           (and (lem/legit::legit-status-active-p)
-               (eq (current-window) lem/legit::*peek-window*))))
+               (eq (current-window) (lem/legit::peek-window)))))
     (vcs-test-log
      "STATUS-CONTEXT focus=~a todo=~a"
      (vcs-test-yes-no status-p)
@@ -1189,8 +1191,8 @@
   "Position Legit's status row for FILENAME, optionally focusing its diff."
   (let* ((active (lem/legit::legit-status-active-p))
          (status-buffer
-           (and active (window-buffer lem/legit::*peek-window*)))
-         (row (and status-buffer (buffer-start-point status-buffer))))
+           (and active (window-buffer (lem/legit::peek-window))))
+         (row (and status-buffer (copy-point (buffer-start-point status-buffer) :temporary))))
     (when row
       (when section
         (unless (search-forward row section)
@@ -1200,20 +1202,20 @@
           (setf row nil)))
       (when row
         (line-start row)
-        (setf (current-window) lem/legit::*peek-window*)
+        (setf (current-window) (lem/legit::peek-window))
         (move-point (buffer-point status-buffer) row)
         (lem/legit::show-matched-line)))
     (let* ((diff-buffer
-             (and row (window-buffer lem/legit::*source-window*)))
+             (and row (window-buffer (lem/legit::source-window))))
            (diff-point
-             (and diff-buffer (buffer-start-point diff-buffer))))
+             (and diff-buffer (copy-point (buffer-start-point diff-buffer) :temporary))))
       (when diff-point
         (unless (search-forward diff-point "@@ ")
           (setf diff-point nil))
         (when diff-point
           (line-start diff-point)))
       (when (and focus-diff diff-point)
-        (setf (current-window) lem/legit::*source-window*)
+        (setf (current-window) (lem/legit::source-window))
         (move-point (buffer-point diff-buffer) diff-point))
       (vcs-test-log
        "PORCELAIN-POSITION file=~a row=~a diff=~a mode=~a focused=~a"
@@ -1226,7 +1228,7 @@
                  'lem/legit::legit-diff-mode)))
        (vcs-test-yes-no
         (and focus-diff
-             (eq (current-window) lem/legit::*source-window*)))))))
+             (eq (current-window) (lem/legit::source-window))))))))
 
 (define-command lem-yath-test-vcs-porcelain-diff () ()
   (vcs-test-position-legit-file "porcelain.txt" :focus-diff t))
@@ -1238,10 +1240,10 @@
 (define-command lem-yath-test-vcs-focus-legit () ()
   "Focus the live Legit status pane without toggling or rebuilding it."
   (when (lem/legit::legit-status-active-p)
-    (setf (current-window) lem/legit::*peek-window*)
+    (setf (current-window) (lem/legit::peek-window))
     (move-point
-     (buffer-point (window-buffer lem/legit::*peek-window*))
-     (buffer-start-point (window-buffer lem/legit::*peek-window*)))))
+     (buffer-point (window-buffer (lem/legit::peek-window)))
+     (buffer-start-point (window-buffer (lem/legit::peek-window))))))
 
 (defun vcs-test-position-legit-region (staged-p)
   "Focus the first replacement's removed row in an unstaged or staged diff."
@@ -1249,14 +1251,14 @@
    "porcelain.txt"
    :focus-diff t
    :section (and staged-p (format nil "~%Staged changes (")))
-  (let* ((diff-buffer (window-buffer lem/legit::*source-window*))
-         (point (and diff-buffer (buffer-start-point diff-buffer))))
+  (let* ((diff-buffer (window-buffer (lem/legit::source-window)))
+         (point (and diff-buffer (copy-point (buffer-start-point diff-buffer) :temporary))))
     (when point
       (unless (search-forward point "-porcelain-line-02")
         (setf point nil)))
     (when point
       (line-start point)
-      (setf (current-window) lem/legit::*source-window*)
+      (setf (current-window) (lem/legit::source-window))
       (move-point (buffer-point diff-buffer) point))
     (vcs-test-log
      "PORCELAIN-REGION staged=~a line=~a mode=~a focused=~a"
@@ -1267,7 +1269,7 @@
            (eq (buffer-major-mode diff-buffer)
                'lem/legit::legit-diff-mode)))
      (vcs-test-yes-no
-      (eq (current-window) lem/legit::*source-window*)))))
+      (eq (current-window) (lem/legit::source-window))))))
 
 (define-command lem-yath-test-vcs-porcelain-region () ()
   (vcs-test-position-legit-region nil))
@@ -1284,7 +1286,7 @@
 (define-command lem-yath-test-vcs-porcelain-commit () ()
   (let* ((active (lem/legit::legit-status-active-p))
          (status-buffer
-           (and active (window-buffer lem/legit::*peek-window*)))
+           (and active (window-buffer (lem/legit::peek-window))))
          (status-text (and status-buffer (buffer-text status-buffer)))
          (subject
            (and status-text
@@ -1294,7 +1296,7 @@
                            "porcelain commit reworded twice in Lem"
                            "porcelain commit reworded in Lem"
                            "porcelain commit from Lem"))))
-         (row (and status-buffer (buffer-start-point status-buffer))))
+         (row (and status-buffer (copy-point (buffer-start-point status-buffer) :temporary))))
     (when (and row subject)
       (unless (search-forward row subject)
         (setf row nil)))
@@ -1302,7 +1304,7 @@
       (setf row nil))
     (when row
       (line-start row)
-      (setf (current-window) lem/legit::*peek-window*)
+      (setf (current-window) (lem/legit::peek-window))
       (move-point (buffer-point status-buffer) row)
       (lem/legit::show-matched-line))
     (vcs-test-log
@@ -1388,7 +1390,7 @@
   "Report whether a history action retained its configured log and anchor."
   (let* ((buffer
            (if (lem/legit::legit-status-active-p)
-               (window-buffer lem/legit::*peek-window*)
+               (window-buffer (lem/legit::peek-window))
                (current-buffer)))
          (state (buffer-value buffer 'legit-log-state))
          (point (buffer-point buffer))
@@ -1396,8 +1398,8 @@
          (line (line-string point)))
     (vcs-test-log
      "LOG-ACTION log=~a status=~a state=~a hash=~a line=~a offset=~d"
-     (vcs-test-yes-no (string= (buffer-name buffer) "*legit-commits-log*"))
-     (vcs-test-yes-no (string= (buffer-name buffer) "*peek-legit*"))
+     (vcs-test-yes-no (eq :commits-log (buffer-value buffer 'lem/legit::legit-buffer-kind)))
+     (vcs-test-yes-no (eq :status (buffer-value buffer 'lem/legit::legit-buffer-kind)))
      (vcs-test-yes-no state)
      (vcs-test-yes-no hash)
      (vcs-test-encode line)
@@ -1406,7 +1408,7 @@
 (define-command lem-yath-test-vcs-cherry-position () ()
   (let* ((status-buffer
            (and (lem/legit::legit-status-active-p)
-                (window-buffer lem/legit::*peek-window*)))
+                (window-buffer (lem/legit::peek-window))))
          (status-text (and status-buffer (buffer-text status-buffer)))
          (filename
            (and status-text
@@ -1426,7 +1428,7 @@
     (let* ((active (legit-bisect-in-progress-p))
            (status-buffer
              (and (lem/legit::legit-status-active-p)
-                  (window-buffer lem/legit::*peek-window*)))
+                  (window-buffer (lem/legit::peek-window))))
            (status-text (and status-buffer (buffer-text status-buffer)))
            (options (make-legit-bisect-options))
            (initial-map (legit-bisect-popup-keymap options nil))
@@ -1448,7 +1450,7 @@
       ;; the already-open status pane.  Legit may refresh an existing peek
       ;; window without selecting it when invoked from another pane.
       (when status-buffer
-        (switch-to-window lem/legit::*peek-window*))
+        (switch-to-window (lem/legit::peek-window)))
       (vcs-test-log
        (concatenate
         'string
