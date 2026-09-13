@@ -4,6 +4,7 @@
                "lem-fake-interface"
                "lem-lisp-syntax"
                "lem-lisp-mode"
+               "lem-posix-shell-mode"
                "lem-legit"
                #+sbcl "lem-mcp-server"
                #+sbcl "lem-language-server"
