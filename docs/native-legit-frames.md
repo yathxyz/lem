@@ -17,6 +17,12 @@ Core `delete-window` rejects a live window outside the current frame before
 calling a backend. Attached windows are checked through their parent; repeated
 deletion of an already freed window remains harmless.
 
+Popups anchored to an owned pane are also closed before that pane is freed.
+This includes cursor-following progress messages created during interactive
+rebase. Unrelated popups and other frames remain untouched. Without that cleanup,
+redisplay could ask a surviving popup to read its deleted parent's cursor and
+terminate the daemon.
+
 ## Focused acceptance
 
 Run `scripts/legit-frame-test.py` with `LEM_BIN` and `LEMCLIENT_BIN` naming built
