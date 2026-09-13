@@ -30,13 +30,13 @@
 
 (defun legit-log-action-status-buffer-p ()
   (and (lem/legit::legit-status-active-p)
-       (eq (current-window) lem/legit::*peek-window*)
-       (string= (buffer-name (window-buffer lem/legit::*peek-window*))
-                "*peek-legit*")))
+       (eq (current-window) (lem/legit::peek-window))
+       (eq :status (buffer-value (window-buffer (lem/legit::peek-window))
+                                  'lem/legit::legit-buffer-kind))))
 
 (defun legit-log-action-status-directory ()
   (and (lem/legit::legit-status-active-p)
-       (buffer-directory (window-buffer lem/legit::*peek-window*))))
+       (buffer-directory (window-buffer (lem/legit::peek-window)))))
 
 (defun legit-log-action-interface-directory ()
   "Return the directory owned by the active Legit view or current buffer."

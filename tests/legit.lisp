@@ -12,32 +12,13 @@
 
 ;;; Helper functions and macros
 
-(defun call-with-legit-variables-unbound (function)
-  "Call FUNCTION with legit's special variables unbound."
-  (when (boundp 'lem/legit::*peek-window*)
-    (makunbound 'lem/legit::*peek-window*))
-  (when (boundp 'lem/legit::*source-window*)
-    (makunbound 'lem/legit::*source-window*))
-  (when (boundp 'lem/legit::*parent-window*)
-    (makunbound 'lem/legit::*parent-window*))
-  (funcall function))
-
-(defmacro with-legit-variables-unbound (&body body)
-  "Execute BODY with legit's special variables unbound."
-  `(call-with-legit-variables-unbound (lambda () ,@body)))
+(defmacro with-fresh-legit-context (&body body)
+  `(unwind-protect
+       (progn (assert (null (lem/legit::current-pane-context))) ,@body)
+     (cleanup-legit-windows)))
 
 (defun cleanup-legit-windows ()
-  "Clean up legit windows safely, switching away from them before deletion."
-  (when (and (boundp 'lem/legit::*parent-window*)
-             (not (lem:deleted-window-p lem/legit::*parent-window*)))
-    (setf (lem:current-window) lem/legit::*parent-window*))
-  (let ((lem/legit::*is-finalzing* t))
-    (when (and (boundp 'lem/legit::*peek-window*)
-               (not (lem:deleted-window-p lem/legit::*peek-window*)))
-      (lem:delete-window lem/legit::*peek-window*))
-    (when (and (boundp 'lem/legit::*source-window*)
-               (not (lem:deleted-window-p lem/legit::*source-window*)))
-      (lem:delete-window lem/legit::*source-window*))))
+  (lem/legit::finalize-peek-legit))
 
 (defun call-with-temp-git-repo (function)
   "Call FUNCTION in a temporary git repository."
@@ -70,17 +51,17 @@
 ;;; Tests for legit-status-active-p
 
 (deftest legit-status-active-p/unbound
-  (testing "returns nil when *peek-window* is unbound"
+  (testing "returns nil when the frame has no pane context"
     (with-current-buffers ()
       (with-fake-interface ()
-        (with-legit-variables-unbound
+        (with-fresh-legit-context
           (ok (not (lem/legit::legit-status-active-p))))))))
 
 (deftest legit-status-active-p/deleted-window
-  (testing "returns nil when *peek-window* is deleted"
+  (testing "returns nil when the status pane is deleted"
     (with-current-buffers ()
       (with-fake-interface ()
-        (with-legit-variables-unbound
+        (with-fresh-legit-context
           ;; Create a floating window and then delete it
           (let* ((buffer (lem:make-buffer "*test-peek*" :temporary t))
                  (window (make-instance 'lem:floating-window
@@ -88,23 +69,23 @@
                                         :x 0 :y 0
                                         :width 40 :height 20
                                         :use-modeline-p nil)))
-            (setf lem/legit::*peek-window* window)
+            (setf (lem/legit::pane-context-peek (lem/legit::current-pane-context t)) window)
             ;; Delete the window
             (lem:delete-window window)
             (ok (not (lem/legit::legit-status-active-p)))))))))
 
 (deftest legit-status-active-p/valid-window
-  (testing "returns t when *peek-window* is valid"
+  (testing "returns t when the status pane is valid"
     (with-current-buffers ()
       (with-fake-interface ()
-        (with-legit-variables-unbound
+        (with-fresh-legit-context
           (let* ((buffer (lem:make-buffer "*test-peek*" :temporary t))
                  (window (make-instance 'lem:floating-window
                                         :buffer buffer
                                         :x 0 :y 0
                                         :width 40 :height 20
                                         :use-modeline-p nil)))
-            (setf lem/legit::*peek-window* window)
+            (setf (lem/legit::pane-context-peek (lem/legit::current-pane-context t)) window)
             (ok (lem/legit::legit-status-active-p))
             ;; Cleanup
             (lem:delete-window window)))))))
@@ -112,10 +93,10 @@
 ;;; Tests for display function state management
 
 (deftest display/initial-open-sets-parent-window
-  (testing "initial display sets *parent-window* to current window"
+  (testing "initial display sets the owning parent window to current window"
     (with-current-buffers ()
       (with-fake-interface ()
-        (with-legit-variables-unbound
+        (with-fresh-legit-context
           (let ((original-window (lem:current-window))
                 (collector (make-instance 'lem/legit::collector
                                           :buffer (lem:make-buffer "*test-legit*" :temporary t))))
@@ -123,21 +104,21 @@
                  (progn
                    ;; Call display
                    (lem/legit::display collector)
-                   ;; Check that *parent-window* is set to original window
-                   (ok (eq original-window lem/legit::*parent-window*))
+                   ;; Check that the owning parent window is set to original window
+                   (ok (eq original-window (lem/legit::parent-window)))
                    ;; Check that new windows were created
-                   (ok (boundp 'lem/legit::*peek-window*))
-                   (ok (boundp 'lem/legit::*source-window*))
-                   (ok (not (lem:deleted-window-p lem/legit::*peek-window*)))
-                   (ok (not (lem:deleted-window-p lem/legit::*source-window*))))
+                   (ok (not (null (lem/legit::peek-window))))
+                   (ok (not (null (lem/legit::source-window))))
+                   (ok (not (lem:deleted-window-p (lem/legit::peek-window))))
+                   (ok (not (lem:deleted-window-p (lem/legit::source-window)))))
               ;; Cleanup - always run
               (cleanup-legit-windows))))))))
 
 (deftest display/refresh-preserves-parent-window
-  (testing "refresh preserves *parent-window*"
+  (testing "refresh preserves the owning parent window"
     (with-current-buffers ()
       (with-fake-interface ()
-        (with-legit-variables-unbound
+        (with-fresh-legit-context
           (let ((original-window (lem:current-window))
                 (collector (make-instance 'lem/legit::collector
                                           :buffer (lem:make-buffer "*test-legit*" :temporary t))))
@@ -145,21 +126,21 @@
                  (progn
                    ;; Initial display
                    (lem/legit::display collector)
-                   (ok (eq original-window lem/legit::*parent-window*))
-                   (let ((first-peek-window lem/legit::*peek-window*)
-                         (first-source-window lem/legit::*source-window*))
+                   (ok (eq original-window (lem/legit::parent-window)))
+                   (let ((first-peek-window (lem/legit::peek-window))
+                         (first-source-window (lem/legit::source-window)))
                      ;; Refresh (call display again)
                      (let ((collector2 (make-instance 'lem/legit::collector
                                                       :buffer (lem:make-buffer "*test-legit-2*" :temporary t))))
                        (lem/legit::display collector2)
-                       ;; *parent-window* should still be original window
-                       (ok (eq original-window lem/legit::*parent-window*))
+                       ;; the owning parent window should still be original window
+                       (ok (eq original-window (lem/legit::parent-window)))
                        ;; Old windows should be deleted
                        (ok (lem:deleted-window-p first-peek-window))
                        (ok (lem:deleted-window-p first-source-window))
                        ;; New windows should exist
-                       (ok (not (lem:deleted-window-p lem/legit::*peek-window*)))
-                       (ok (not (lem:deleted-window-p lem/legit::*source-window*))))))
+                       (ok (not (lem:deleted-window-p (lem/legit::peek-window))))
+                       (ok (not (lem:deleted-window-p (lem/legit::source-window)))))))
               ;; Cleanup - always run
               (cleanup-legit-windows))))))))
 
@@ -169,7 +150,7 @@
   (testing "legit-status opens window and cleanup closes it"
     (with-current-buffers ()
       (with-fake-interface ()
-        (with-legit-variables-unbound
+        (with-fresh-legit-context
           (with-temp-git-repo
             (unwind-protect
                  (progn
@@ -178,9 +159,8 @@
                    ;; Open with legit-status
                    (lem/legit:legit-status)
                    (ok (lem/legit::legit-status-active-p))
-                   ;; Close by cleaning up windows directly
-                   ;; (legit-quit uses async timer which doesn't work in test env)
-                   (cleanup-legit-windows)
+                   ;; Native close is synchronous and preserves the parent.
+                   (lem/legit:legit-quit)
                    (ok (not (lem/legit::legit-status-active-p))))
               ;; Cleanup - always run
               (cleanup-legit-windows))))))))
@@ -189,24 +169,94 @@
   (testing "legit-refresh keeps the legit window open"
     (with-current-buffers ()
       (with-fake-interface ()
-        (with-legit-variables-unbound
+        (with-fresh-legit-context
           (with-temp-git-repo
             (unwind-protect
                  (progn
                    ;; Open legit
                    (lem/legit:legit-status)
                    (ok (lem/legit::legit-status-active-p))
-                   (let ((original-parent lem/legit::*parent-window*))
+                   (let ((original-parent (lem/legit::parent-window)))
                      ;; Refresh
                      (lem/legit:legit-refresh)
                      ;; Should still be open
                      (ok (lem/legit::legit-status-active-p))
                      ;; Parent window should be preserved
-                     (ok (eq original-parent lem/legit::*parent-window*))))
+                     (ok (eq original-parent (lem/legit::parent-window)))))
               ;; Cleanup - always run
               (cleanup-legit-windows))))))))
 
 ;;; Tests for parse-github-url (lem/legit/utils package)
+
+(deftest display/independent-frames-and-exact-close
+  (with-current-buffers ()
+    (with-fake-interface ()
+      (let* ((left-implementation (implementation))
+             (left-parent (current-window))
+             (left-status (lem/legit::make-peek-legit-buffer)))
+        (insert-string (buffer-point left-status) "left status")
+        (lem/legit::display (make-instance 'lem/legit::collector :buffer left-status))
+        (let ((left-peek (lem/legit::peek-window))
+              (left-context (lem/legit::current-pane-context)))
+          (with-fake-interface ()
+            (let* ((right-implementation (implementation))
+                   (right-parent (current-window))
+                   (right-status (lem/legit::make-peek-legit-buffer)))
+              (insert-string (buffer-point right-status) "right status")
+              (lem/legit::display (make-instance 'lem/legit::collector :buffer right-status))
+              (let ((right-peek (lem/legit::peek-window))
+                    (right-source (lem/legit::source-window)))
+                (ok (not (eq left-status right-status)))
+                (ok (string= "left status" (buffer-text left-status)))
+                (ok (not (lem-core::window-deleted-p left-peek)))
+                (ok (eq right-parent (lem/legit::parent-window)))
+                (with-implementation left-implementation
+                  (setf (current-buffer) (window-buffer (current-window)))
+                  (ok (eq left-peek (current-window)))
+                  (lem/legit::display (make-instance 'lem/legit::collector :buffer left-status))
+                  (ok (eq left-parent (lem/legit::parent-window)))
+                  (lem/legit::%legit-quit)
+                  (ok (eq left-parent (current-window)))
+                  (ok (null (lem/legit::current-pane-context)))
+                  ;; A stale exact close cannot affect a replacement context.
+                  (lem/legit::display (make-instance 'lem/legit::collector :buffer left-status))
+                  (let ((replacement (lem/legit::peek-window)))
+                    (lem/legit::finalize-peek-legit left-context)
+                    (ok (eq replacement (lem/legit::peek-window))))
+                  (cleanup-legit-windows))
+                (with-implementation right-implementation
+                  (setf (current-buffer) (window-buffer (current-window)))
+                  (ok (eq right-peek (current-window)))
+                  (ok (not (lem-core::window-deleted-p right-source)))
+                  (ok (string= "right status" (buffer-text right-status)))
+                  ;; Direct pane deletion must not recursively free itself.
+                  (setf (current-window) right-parent)
+                  (delete-window right-peek)
+                  (ok (lem-core::window-deleted-p right-peek))
+                  (ok (lem-core::window-deleted-p right-source))
+                  (ok (null (lem/legit::current-pane-context))))))))))))
+
+(deftest display/detach-disposes-only-private-unseen-buffers
+  (with-current-buffers ()
+    (with-fake-interface ()
+      (let* ((owner (implementation)) (frame (current-frame))
+             (shared (make-buffer "shared file source"))
+             (status (lem/legit::make-peek-legit-buffer)))
+        (lem/legit::display (make-instance 'lem/legit::collector :buffer status))
+        (let* ((context (lem/legit::current-pane-context))
+               (source (lem/legit::source-window))
+               (private (mapcar #'cdr (lem/legit::pane-context-buffers context))))
+          (with-current-window source (switch-to-buffer shared))
+          (with-fake-interface ()
+            (switch-to-buffer shared)
+            (let ((survivor (current-window)))
+              (with-implementation owner (lem-core::teardown-frame frame))
+              (ok (lem/legit::pane-context-closed context))
+              (loop repeat 20 do (lem-core::receive-event 0))
+              (ok (every #'deleted-buffer-p private))
+              (ok (not (deleted-buffer-p shared)))
+              (ok (eq survivor (current-window)))
+              (ok (eq shared (window-buffer survivor))))))))))
 
 (deftest parse-github-url/ssh-with-git-suffix
   (testing "parses SSH URL with .git suffix"

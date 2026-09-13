@@ -144,7 +144,7 @@ Currently Git-only. Concretely, this calls Git with the -w option.")
 
 (defmethod execute :after ((mode legit-commits-log-mode) command argument)
   "After moving around the commit lines with n and p, show the commit diff on the right window."
-  (when (eq (current-window) *peek-window*)
+  (when (eq (current-window) (peek-window))
     (show-matched-line)))
 
 (defun pop-up-message (message)
@@ -164,7 +164,7 @@ Currently Git-only. Concretely, this calls Git with the -w option.")
   ;; Show a diff in the *legit-diff* buffer.
   ;; Share usage between showing file diff ("move" function)
   ;; and showing a commit.
-  (let ((buffer (make-buffer "*legit-diff*")))
+  (let ((buffer (pane-buffer :diff "*legit-diff*")))
     (setf (buffer-directory buffer)
           (uiop:getcwd))
     (setf (buffer-read-only-p buffer) nil)
@@ -657,8 +657,7 @@ Currently Git-only. Concretely, this calls Git with the -w option.")
 
 (defun legit-status-active-p ()
   "Return t if the legit status window is currently open."
-  (and (boundp '*peek-window*)
-       (not (deleted-window-p *peek-window*))))
+  (and (peek-window) (not (deleted-window-p (peek-window)))))
 
 (define-command legit-status () ()
   "Show changes, untracked files, stashes and latest commits in an interactive window.
@@ -856,14 +855,11 @@ If the legit window is already open, close it (toggle behavior)."
 
 (define-command legit-quit () ()
   "Quit"
-  (%legit-quit)
-  (ignore-errors
-   (delete-buffer (get-buffer "*legit-diff*"))
-   (delete-buffer (get-buffer "*legit-help*"))))
+  (%legit-quit))
 
 (define-command legit-help () ()
   "Show the important keybindings."
-  (with-pop-up-typeout-window (s (make-buffer "*legit-help*") :erase t)
+  (with-pop-up-typeout-window (s (pane-buffer :help "*legit-help*") :erase t)
     (format s "Lem's interface to git. Alt-x legit-status~a~&"
             (format nil " ~a" (or (lem/prompt-window:find-command-keybindings-in-keymap "legit-status")
                                   "")))
@@ -900,7 +896,7 @@ If the legit window is already open, close it (toggle behavior)."
 
 (define-command legit-logs-help () ()
   "Help for the commits log view."
-  (with-pop-up-typeout-window (s (make-buffer "*legit-help*") :erase t)
+  (with-pop-up-typeout-window (s (pane-buffer :help "*legit-help*") :erase t)
     (format s "In this commits log buffer, use:~&")
     (format s "~%")
     (format s "(f) forward page~&")

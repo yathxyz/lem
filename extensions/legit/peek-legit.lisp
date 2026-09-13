@@ -57,34 +57,104 @@ Notes:
    (count :initform 0
           :accessor collector-count)))
 
-(defvar *peek-window*)
-(defvar *source-window*)
-(defvar *parent-window*)
+(defstruct pane-context parent peek source buffers overlays finalizing closed)
+
+(defun current-pane-context (&optional create)
+  "The active frame owns its panes through window parameters, never globals."
+  (or (loop for window in (cons (current-window)
+                               (append (lem-core::frame-floating-windows (current-frame))
+                                       (window-list)))
+            for context = (window-parameter window 'legit-context)
+            when (and context (not (pane-context-closed context))) return context)
+      (when create
+        (let ((context (make-pane-context :parent (current-window))))
+          (setf (window-parameter (current-window) 'legit-context) context)
+          context))))
+
+(defun peek-window ()
+  (alexandria:when-let ((context (current-pane-context))) (pane-context-peek context)))
+(defun source-window ()
+  (alexandria:when-let ((context (current-pane-context))) (pane-context-source context)))
+(defun parent-window ()
+  (alexandria:when-let ((context (current-pane-context))) (pane-context-parent context)))
+
+(defun pane-buffer (kind name &key (temporary t) (enable-undo-p nil))
+  (let* ((context (current-pane-context t))
+         (entry (assoc kind (pane-context-buffers context)))
+         (buffer (cdr entry)))
+    (unless (and buffer (not (deleted-buffer-p buffer)))
+      (setf buffer (make-buffer (unique-buffer-name name) :temporary temporary
+                                :enable-undo-p enable-undo-p :directory (uiop:getcwd)))
+      (setf (buffer-value buffer 'legit-buffer-kind) kind)
+      (if entry (setf (cdr entry) buffer)
+          (push (cons kind buffer) (pane-context-buffers context))))
+    buffer))
+
+(defun dispose-pane-buffers (context)
+  ;; Exact objects only. A human may have deliberately opened one of these
+  ;; buffers in a surviving frame; that live view retains its buffer.
+  (dolist (entry (pane-context-buffers context))
+    (let ((buffer (cdr entry)))
+      (when (and (not (deleted-buffer-p buffer))
+                 (or (buffer-temporary-p buffer) (member buffer (buffer-list)))
+                 (not (loop for frame in (all-frames)
+                            thereis (find buffer (append (window-list frame)
+                                                        (lem-core::frame-floating-windows frame))
+                                          :key #'window-buffer))))
+        (delete-buffer buffer))))
+  (setf (pane-context-buffers context) nil))
+
+(defun retire-pane-context (context)
+  (unless (pane-context-closed context)
+    (setf (pane-context-closed context) t)
+    (finalize-highlight-overlays context)
+    ;; DELETE-WINDOW and frame teardown still own their backend cleanup.
+    ;; Buffer disposal happens later, under the then-active editor context.
+    (send-event (lambda () (dispose-pane-buffers context)))))
+
+(defun retire-frame-pane-contexts (frame)
+  (dolist (context (remove-duplicates
+                    (remove nil (mapcar (lambda (window) (window-parameter window 'legit-context))
+                                        (append (window-list frame)
+                                                (lem-core::frame-floating-windows frame))))))
+    (retire-pane-context context)))
+
+(add-hook *teardown-frame-hook* 'retire-frame-pane-contexts)
 
 (defclass peek-window (floating-window) ())
 (defclass source-window (floating-window) ())
 
 (defmethod lem-core::%delete-window :before ((window peek-window))
-  (finalize-peek-legit))
-
+  (finalize-peek-legit (window-parameter window 'legit-context) :deleting window))
 (defmethod lem-core::%delete-window :before ((window source-window))
-  (finalize-peek-legit))
+  (finalize-peek-legit (window-parameter window 'legit-context) :deleting window))
 
-(defmethod compute-window-list ((current-window peek-window))
-  (list *peek-window* *source-window*))
+(defmethod compute-window-list ((window peek-window))
+  (let ((context (window-parameter window 'legit-context)))
+    (list (pane-context-peek context) (pane-context-source context))))
+(defmethod compute-window-list ((window source-window))
+  (let ((context (window-parameter window 'legit-context)))
+    (list (pane-context-source context) (pane-context-peek context))))
 
-(defmethod compute-window-list ((current-window source-window))
-  (list *source-window* *peek-window*))
-
-(defvar *is-finalzing* nil)
-
-(defun finalize-peek-legit ()
-  (unless *is-finalzing*
-    (let ((*is-finalzing* t))
-      (finalize-highlight-overlays)
-      (setf (current-window) *parent-window*)
-      (delete-window *source-window*)
-      (delete-window *peek-window*))))
+(defun finalize-peek-legit (&optional (context (current-pane-context)) &key deleting)
+  (when (and context (not (or (pane-context-finalizing context) (pane-context-closed context))))
+    (setf (pane-context-finalizing context) t)
+    (unwind-protect
+         (progn
+           (finalize-highlight-overlays context)
+           (let ((parent (pane-context-parent context)))
+             (when (member (current-window) (list (pane-context-peek context) (pane-context-source context)))
+               (setf (current-window) parent))
+             (dolist (window (list (pane-context-source context) (pane-context-peek context)))
+               ;; The outer DELETE-WINDOW owns DELETING. Recursing into it
+               ;; would release its backend view and points twice.
+               (when (and window (not (eq window deleting))
+                          (not (lem-core::window-deleted-p window)))
+                 (delete-window window)))
+             (when (eq context (window-parameter parent 'legit-context))
+               (setf (window-parameter parent 'legit-context) nil)))
+           (retire-pane-context context))
+      (setf (pane-context-finalizing context) nil))))
 
 (defun set-move-function (start end move-function)
   (with-point ((end start))
@@ -183,10 +253,7 @@ Notes:
                                      :height height
                                      :use-border t))
          (source-window (make-instance 'source-window
-                                       :buffer (make-buffer "*source*"
-                                                            :temporary t
-                                                            :enable-undo-p nil
-                                                            :directory (uiop:getcwd))
+                                       :buffer (pane-buffer :source "*source*")
                                        :x (+ (window-x peek-window) (window-width peek-window) 2)
                                        :y (+ 1 y-margin)
                                        :width width
@@ -195,42 +262,29 @@ Notes:
     (list peek-window source-window)))
 
 (defun display (collector &key (minor-mode 'peek-legit-mode))
-  (let ((refreshing (and (boundp '*peek-window*)
-                         (not (deleted-window-p *peek-window*)))))
-    ;; Delete old windows, skipping finalize-peek-legit to avoid state corruption
-    (let ((*is-finalzing* t))
-      ;; Must switch away from peek/source window before deleting
-      (when refreshing
-        (setf (current-window) *parent-window*))
-      (when (boundp '*peek-window*)
-        (delete-window *peek-window*))
-      (when (boundp '*source-window*)
-        (delete-window *source-window*)))
-
-    (destructuring-bind (peek-window source-window)
+  (let ((context (current-pane-context t)))
+    (setf (pane-context-finalizing context) t)
+    (unwind-protect
+         (progn
+           (when (member (current-window) (list (pane-context-peek context) (pane-context-source context)))
+             (setf (current-window) (pane-context-parent context)))
+           (dolist (window (list (pane-context-peek context) (pane-context-source context)))
+             (when (and window (not (lem-core::window-deleted-p window))) (delete-window window))))
+      (setf (pane-context-finalizing context) nil))
+    (destructuring-bind (peek source)
         (make-two-side-by-side-windows (collector-buffer collector))
-
-      ;; Only set *parent-window* on initial open, not on refresh
-      (unless refreshing
-        (setf *parent-window* (current-window)))
-
-      (setf *peek-window* peek-window)
-      (setf *source-window* source-window)
-
-      (setf (current-window) peek-window)
-
+      (setf (pane-context-peek context) peek (pane-context-source context) source
+            (window-parameter peek 'legit-context) context
+            (window-parameter source 'legit-context) context
+            (current-window) peek)
       (funcall minor-mode t)
-
       (start-move-point (buffer-point (collector-buffer collector)))
       (show-matched-line))))
 
 (defun make-peek-legit-buffer (&key (name "*peek-legit*"))
-  "Get or create a buffer of name NAME. By default, use a `*peek-legit*' buffer.
-  This is where we will display legit information (status…)."
-  (let ((buffer (make-buffer name
-                             :temporary t
-                             :enable-undo-p t
-                             :directory (uiop:getcwd))))
+  (let ((buffer (pane-buffer (if (equal name "*peek-legit*") :status :commits-log)
+                             name :enable-undo-p t)))
+    (let ((*inhibit-read-only* t)) (erase-buffer buffer))
     (setf (variable-value 'line-wrap :buffer buffer) nil)
     buffer))
 
@@ -334,13 +388,13 @@ Notes:
   (t :background :base02))
 
 (defun get-matched-point ()
-  (alexandria:when-let* ((move (get-move-function (buffer-point (window-buffer *peek-window*))))
+  (alexandria:when-let* ((move (get-move-function (buffer-point (window-buffer (peek-window)))))
                          (point (funcall move)))
     point))
 
 (defun get-matched-file ()
   (alexandria:when-let* ((visit-file-function (get-visit-file-function
-                                               (buffer-point (window-buffer *peek-window*))))
+                                               (buffer-point (window-buffer (peek-window)))))
                          (file (funcall visit-file-function)))
     file))
 
@@ -348,7 +402,7 @@ Notes:
   (alexandria:when-let (point (get-matched-point))
     (let* ((point (copy-point point :temporary))
            (buffer (point-buffer point)))
-      (with-current-window *source-window*
+      (with-current-window (source-window)
         (switch-to-buffer buffer nil nil)
         (update-highlight-overlay point)
         (move-point (buffer-point buffer) point)
@@ -361,7 +415,7 @@ Notes:
   in order to show the file content on the right window.
 
   The method is to subclass for all legit modes."
-  (when (eq (current-window) *peek-window*)
+  (when (eq (current-window) (peek-window))
     (show-matched-line)))
 
 (defun highlight-matched-line (point)
@@ -410,7 +464,7 @@ Notes:
 
 (define-command peek-legit-stage-file () ()
   "Get the lambda function associated with the :stage-function marker, call it, ignore side effects and refresh legit status."
-  (alexandria:when-let* ((stage (get-stage-function (buffer-point (window-buffer *peek-window*))))
+  (alexandria:when-let* ((stage (get-stage-function (buffer-point (window-buffer (peek-window)))))
                          (point (funcall stage)))
     ;; Update the buffer, to see that a staged file goes to the staged section.
     ;; This calls git again and refreshes everything.
@@ -419,7 +473,7 @@ Notes:
 
 (define-command peek-legit-unstage-file () ()
   "Get the lambda function associated with the :unstage-function marker, call it, ignore side effects and refresh legit status."
-  (alexandria:when-let* ((unstage (get-unstage-function (buffer-point (window-buffer *peek-window*))))
+  (alexandria:when-let* ((unstage (get-unstage-function (buffer-point (window-buffer (peek-window)))))
                          (point (funcall unstage)))
     ;; Update the buffer, to see that a staged file goes to the staged section.
     ;; This calls git again and refreshes everything.
@@ -428,7 +482,7 @@ Notes:
 
 (define-command peek-legit-discard-file () ()
   "Discard the changes in this file. The file should not be stage."
-  (alexandria:when-let* ((fn (get-discard-file-function (buffer-point (window-buffer *peek-window*))))
+  (alexandria:when-let* ((fn (get-discard-file-function (buffer-point (window-buffer (peek-window)))))
                          (point (funcall fn)))
     ;; Update the buffer.
     ;; This calls git again and refreshes everything.
@@ -436,26 +490,15 @@ Notes:
     point))
 
 (defun %legit-quit ()
-  "Delete the two side windows."
-  (setf (current-window) *parent-window*)
-  (start-timer
-   (make-idle-timer (lambda ()
-                      (delete-window *peek-window*)
-                      (delete-window *source-window*)))
-   0))
-
-
-
-;;;
-(defvar *highlight-overlays* '())
+  "Close the current frame's panes before later commands can replace them."
+  (finalize-peek-legit))
 
 (defun set-highlight-overlay (point)
   (let ((overlay (make-line-overlay point (ensure-attribute 'match-line-attribute))))
-    (push overlay *highlight-overlays*)
-    (setf (buffer-value (point-buffer point) 'highlight-overlay) overlay)))
+    (push overlay (pane-context-overlays (current-pane-context)))))
 
 (defun get-highlight-overlay (point)
-  (buffer-value (point-buffer point) 'highlight-overlay))
+  (find (point-buffer point) (pane-context-overlays (current-pane-context)) :key #'overlay-buffer))
 
 (defun update-highlight-overlay (point)
   (let ((overlay (get-highlight-overlay point)))
@@ -465,8 +508,7 @@ Notes:
           (t
            (set-highlight-overlay point)))))
 
-(defun finalize-highlight-overlays ()
-  (dolist (overlay *highlight-overlays*)
-    (buffer-unbound (overlay-buffer overlay) 'highlight-overlay)
-    (delete-overlay overlay))
-  (setf *highlight-overlays* '()))
+(defun finalize-highlight-overlays (&optional (context (current-pane-context)))
+  (when context
+    (mapc #'delete-overlay (pane-context-overlays context))
+    (setf (pane-context-overlays context) nil)))

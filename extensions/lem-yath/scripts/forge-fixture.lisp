@@ -83,7 +83,7 @@
    *forge-test-root*
    (lambda () (lem-yath-legit-status)))
   (let* ((buffer (and (lem/legit::legit-status-active-p)
-                      (window-buffer lem/legit::*peek-window*)))
+                      (window-buffer (lem/legit::peek-window))))
          (text (and buffer (buffer-text buffer)))
          (row (and buffer (buffer-start-point buffer))))
     (when row

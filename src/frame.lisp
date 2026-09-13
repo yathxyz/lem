@@ -4,6 +4,9 @@
 (defvar *frames* '())
 (defvar *activate-frame-hook* '()
   "Restore mode state when a frame becomes the active editor context.")
+(defvar *teardown-frame-hook* '()
+  "Called on the editor thread with the exact frame after its views are freed.
+The frame is no longer active; callbacks must not use its backend views.")
 
 (defgeneric update-prompt-window (window)
   (:method (window)))
@@ -153,7 +156,8 @@ redraw-display関数でキャッシュを捨てて画面全体を再描画しま
   (setf (frame-last-mouse-event frame) nil
         (frame-dragged-separator frame) nil
         (frame-hover-overlay frame) nil)
-  (teardown-windows frame))
+  (teardown-windows frame)
+  (run-hooks *teardown-frame-hook* frame))
 
 (defun teardown-frames ()
   (maphash (lambda (k v)

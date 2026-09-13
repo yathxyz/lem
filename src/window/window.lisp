@@ -306,6 +306,13 @@ This is the content area in which the buffer is displayed, without any side marg
 
 (defun delete-window (window)
   (unless (window-deleted-p window)
+    ;; Backend views belong to the current frame's implementation. A stale
+    ;; extension reference must not free another client's view through it.
+    (let ((owner-window window))
+      (loop while (attached-window-p owner-window)
+            do (setf owner-window (attached-window-parent-window owner-window)))
+      (unless (window-in-frame-p owner-window (current-frame))
+        (editor-error "Cannot delete a window outside the current frame")))
     (alexandria:when-let (attached-window (window-attached-window window))
       (delete-window attached-window))
     (notify-frame-redisplay-required (current-frame))

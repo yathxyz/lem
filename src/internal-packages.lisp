@@ -286,6 +286,7 @@
    :*switch-to-buffer-hook*
    :*switch-to-window-hook*
    :*activate-frame-hook*
+   :*teardown-frame-hook*
    :*default-split-action*
    :window-parent
    :window-border

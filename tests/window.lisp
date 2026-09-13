@@ -14,6 +14,21 @@
                    (error (e) (princ-to-string e)))))
       (ok (not (lem-core::window-deleted-p (lem:current-window)))))))
 
+(deftest delete-window/rejects-foreign-frame-before-free
+  (lem:with-current-buffers ()
+    (with-fake-interface ()
+      (let* ((owner (lem:current-frame))
+             (window (lem:make-floating-window :buffer (lem:make-buffer "foreign pane")
+                                               :x 1 :y 1 :width 10 :height 5)))
+        (with-fake-interface ()
+          (ok (signals (lem:delete-window window) 'error))
+          (ok (not (lem-core::window-deleted-p window)))
+          (ok (find window (lem-core::frame-floating-windows owner))))
+        (lem:delete-window window)
+        (ok (lem-core::window-deleted-p window))
+        (with-fake-interface ()
+          (ok (lem:delete-window window) "Deleting an already freed window remains harmless"))))))
+
 (defun pop-attached-window (buffer)
   (let ((window (lem:pop-to-buffer buffer)))
     (lem:switch-to-window window)))
