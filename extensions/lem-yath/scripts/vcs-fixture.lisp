@@ -742,75 +742,94 @@
   (equal (lem/buffer/internal::buffer-%directory *vcs-test-source-buffer*)
          *vcs-test-sentinel-directory*))
 
-(defvar *vcs-test-readiness-timer* nil)
-(defvar *vcs-test-readiness-last-request* nil)
+(defstruct vcs-test-readiness-worker mailbox thread)
+(defvar *vcs-test-readiness-worker* nil)
 
-(defun vcs-test-report-readiness (request-file)
-  (when (probe-file request-file)
-    (let ((request
-            (with-open-file (stream request-file)
-              (when (<= (file-length stream) 128)
-                (read-line stream nil nil)))))
-      (when (and request (plusp (length request))
-                 (every (lambda (c) (or (digit-char-p c) (char= c #\-))) request)
-                 (not (equal request *vcs-test-readiness-last-request*)))
-        (setf *vcs-test-readiness-last-request* request)
-        (let* ((prompt (lem/prompt-window:current-prompt-window))
-               (active (lem/legit::legit-status-active-p))
-               (transient
-                 (and (lem/transient::transient-window-alive-p)
-                      (eq (current-frame)
-                          (lem-core::get-frame-of-window
-                           lem/transient::*transient-popup-window*)))))
-          (when (and active (not prompt) (not transient)
-                     (member (current-window)
-                             (list (lem/legit::peek-window)
-                                   (lem/legit::source-window)))
-                     (not (deleted-buffer-p *vcs-test-source-buffer*))
-                     (vcs-test-source-raw-exact-p)
-                     (vcs-test-source-raw-sentinel-p))
-            ;; The TODO assertion consumes this exact request's details. The
-            ;; combined keyboard reporter also changes bisect focus; do not
-            ;; invoke that command from an observational timer.
-            (vcs-test-report-legit-state request))
-          (vcs-test-log
-           "READY-PROBE request=~a phase=~a active=~a prompt=~a transient=~a current=~a source-live=~a raw-exact=~a raw-sentinel=~a"
-           request *vcs-test-phase* (vcs-test-yes-no active)
-           (vcs-test-yes-no prompt) (vcs-test-yes-no transient)
-           (vcs-test-yes-no
-            (and active (member (current-window)
-                                (list (lem/legit::peek-window)
-                                      (lem/legit::source-window)))))
-           (vcs-test-yes-no (not (deleted-buffer-p *vcs-test-source-buffer*)))
-           (vcs-test-yes-no (vcs-test-source-raw-exact-p))
-           (vcs-test-yes-no (vcs-test-source-raw-sentinel-p))))))))
+(defun vcs-test-readiness-request (path)
+  (handler-case
+      (when (probe-file path)
+        (with-open-file (stream path)
+          (when (<= (file-length stream) 128)
+            (let ((request (read-line stream nil nil)))
+              (when (and request (plusp (length request))
+                         (every (lambda (c)
+                                  (or (digit-char-p c) (char= c #\-)))
+                                request))
+                request)))))
+    (file-error () nil)))
+
+(defun vcs-test-report-readiness (request)
+  (let* ((prompt (lem/prompt-window:current-prompt-window))
+         (active (lem/legit::legit-status-active-p))
+         (transient
+           (and (lem/transient::transient-window-alive-p)
+                (eq (current-frame)
+                    (lem-core::get-frame-of-window
+                     lem/transient::*transient-popup-window*)))))
+    (when (and active (not prompt) (not transient)
+               (member (current-window)
+                       (list (lem/legit::peek-window)
+                             (lem/legit::source-window)))
+               (not (deleted-buffer-p *vcs-test-source-buffer*))
+               (vcs-test-source-raw-exact-p)
+               (vcs-test-source-raw-sentinel-p))
+      ;; The TODO assertion consumes this exact request's details. The
+      ;; combined keyboard reporter also changes bisect focus; do not
+      ;; invoke that command from an observational callback.
+      (vcs-test-report-legit-state request))
+    (vcs-test-log
+     "READY-PROBE request=~a phase=~a active=~a prompt=~a transient=~a current=~a source-live=~a raw-exact=~a raw-sentinel=~a"
+     request *vcs-test-phase* (vcs-test-yes-no active)
+     (vcs-test-yes-no prompt) (vcs-test-yes-no transient)
+     (vcs-test-yes-no
+      (and active (member (current-window)
+                          (list (lem/legit::peek-window)
+                                (lem/legit::source-window)))))
+     (vcs-test-yes-no (not (deleted-buffer-p *vcs-test-source-buffer*)))
+     (vcs-test-yes-no (vcs-test-source-raw-exact-p))
+     (vcs-test-yes-no (vcs-test-source-raw-sentinel-p)))))
+
+(defun vcs-test-stop-readiness-probe ()
+  (when *vcs-test-readiness-worker*
+    (lem-mailbox:send-message
+     (vcs-test-readiness-worker-mailbox *vcs-test-readiness-worker*) :stop)
+    (setf *vcs-test-readiness-worker* nil)))
 
 (defun vcs-test-start-readiness-probe ()
-  ;; No injected key may accidentally submit a prompt or dismiss a raw
-  ;; read-key transient. Timer callbacks run on the editor event loop.
-  (when *vcs-test-readiness-timer* (stop-timer *vcs-test-readiness-timer*))
-  (setf *vcs-test-readiness-timer* nil
-        *vcs-test-readiness-last-request* nil)
+  ;; The worker reads only the private request file. Unchanged requests must
+  ;; produce no editor events: periodic callbacks can starve idle deadlines.
+  (vcs-test-stop-readiness-probe)
   (alexandria:when-let ((path (uiop:getenv "LEM_YATH_VCS_READY_REQUEST")))
-    (let ((implementation (implementation)) (frame (current-frame)) (timer nil))
-      (setf timer
-            (make-timer
+    (let* ((implementation (implementation)) (frame (current-frame))
+           (mailbox (lem-mailbox:make-mailbox))
+           (owner (make-vcs-test-readiness-worker :mailbox mailbox)))
+      (setf *vcs-test-readiness-worker* owner
+            (vcs-test-readiness-worker-thread owner)
+            (bt2:make-thread
              (lambda ()
-               (when (and (eq timer *vcs-test-readiness-timer*)
-                          (eq frame (lem-core::get-frame implementation))
-                          (member frame (lem-core::all-frames)))
-                 ;; This callback only reads explicit frame/window objects;
-                 ;; it never edits or uses the caller's current-buffer binding.
-                 (unwind-protect
-                      (with-implementation implementation
-                        (vcs-test-report-readiness path))
-                   ;; Rearm only after this editor callback. A slow Git
-                   ;; command cannot accumulate repeating timer events.
-                   (when (eq timer *vcs-test-readiness-timer*)
-                     (start-timer timer 100)))))
-             :name "VCS fixture readiness"))
-      (setf *vcs-test-readiness-timer* timer)
-      (start-timer timer 100))))
+               (loop :with last-request := nil
+                     :until (eq :stop
+                                (lem-mailbox:receive-message mailbox :timeout 0.1))
+                     :do (let ((request (vcs-test-readiness-request path)))
+                           (when (and request (not (equal request last-request)))
+                             (setf last-request request)
+                             (send-event
+                              (lambda ()
+                                (let ((live
+                                        (and (eq owner *vcs-test-readiness-worker*)
+                                             (eq frame (lem-core::get-frame implementation))
+                                             (member frame (lem-core::all-frames)))))
+                                  (unwind-protect
+                                       (when live
+                                         (with-implementation implementation
+                                           (vcs-test-report-readiness request)))
+                                    (lem-mailbox:send-message
+                                     mailbox (if live :done :stop))))))
+                             ;; At most one callback is queued, even while Git
+                             ;; blocks the editor and request files change.
+                             (when (eq :stop (lem-mailbox:receive-message mailbox))
+                               (return))))))
+             :name "VCS fixture request observer")))))
 
 (defun vcs-test-gutter-operation (label buffer function)
   "Run FUNCTION and attach buffer-path context to any fixture failure."

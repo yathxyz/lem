@@ -2741,6 +2741,23 @@ press_report() {
   wait_report_count "$pattern" "$((before + 1))"
 }
 
+wait_debounce_report() {
+  local session=$1 expected=$2 before latest
+  local pattern='^DEBOUNCE phase=git ' deadline=$((SECONDS + WAIT_TIMEOUT))
+  while ((SECONDS < deadline)); do
+    before=$(report_count "$pattern")
+    lem_keys "$session" F12
+    if wait_report_count "$pattern" "$((before + 1))" 3 &&
+       latest=$(latest_report "$pattern") && [[ "$latest" == "$expected" ]]; then
+      return 0
+    fi
+    # Observe again only after giving the 300ms idle callback room to run.
+    # Never repeat the edit/undo or invoke a gutter refresh from this wait.
+    sleep 0.5
+  done
+  return 1
+}
+
 wait_rebase_view() {
   local session=$1 second=$2 subject=$3 before latest
   local deadline=$((SECONDS + WAIT_TIMEOUT))
@@ -3282,15 +3299,14 @@ else
 fi
 
 # Make a real normal/insert-mode edit on a previously clean tracked line, then
-# leave Lem idle beyond the 300ms production debounce.  The only path that can
-# install the new line-4 marker and clear the timer is the callback itself.
+# observe its exact result after the 300ms production debounce. Only the
+# callback can install the new line-4 marker and clear the timer.
 lem_keys "$git_session" i
 tmux_cmd send-keys -t "$git_session" -l -- X
 lem_keys "$git_session" Escape
 sleep 1
-if press_report "$git_session" F12 '^DEBOUNCE phase=git ' &&
-   [[ $(latest_report '^DEBOUNCE phase=git ') == \
-      'DEBOUNCE phase=git timer=no target=yes type=modified marker=~ changed=yes baseline=no source-text=no modified=yes' ]]; then
+if wait_debounce_report "$git_session" \
+   'DEBOUNCE phase=git timer=no target=yes type=modified marker=~ changed=yes baseline=no source-text=no modified=yes'; then
   pass gutter-debounce 'a real idle edit ran the callback, cleared its timer, and refreshed markers'
 else
   fail gutter-debounce 'the real idle edit did not complete its debounced refresh' \
@@ -3299,9 +3315,8 @@ fi
 
 lem_keys "$git_session" u
 sleep 1
-if press_report "$git_session" F12 '^DEBOUNCE phase=git ' &&
-   [[ $(latest_report '^DEBOUNCE phase=git ') == \
-      'DEBOUNCE phase=git timer=no target=no type=none marker=none changed=no baseline=yes source-text=yes modified=no' ]]; then
+if wait_debounce_report "$git_session" \
+   'DEBOUNCE phase=git timer=no target=no type=none marker=none changed=no baseline=yes source-text=yes modified=no'; then
   pass gutter-debounce-undo 'undo restored source text and the baseline gutter through the same callback'
 else
   fail gutter-debounce-undo 'undo did not restore the source and gutter baseline' \
