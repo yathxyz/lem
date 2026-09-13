@@ -22,6 +22,7 @@
   :components ((:module "tests"
                 :serial t
                 :components ((:file "protocol")
+                             (:file "client")
                              (:file "mouse-session")
                              #+sbcl (:file "integration")
                              #+sbcl (:file "backpressure"))))

@@ -73,6 +73,24 @@
   (let ((error (protocol:field message "error")))
     (and (hash-table-p error) (protocol:field error "code"))))
 
+(defun frame-close-status (edit-id)
+  "Closing an attached frame cannot finish an outstanding external edit."
+  (if edit-id 1 0))
+
+(defun frame-message-exit-status (message edit-id)
+  "Return an exit status only for closure or the exact waiting edit's result."
+  (cond
+    ((equal "close" (protocol:field message "type"))
+     (frame-close-status edit-id))
+    ((equal "response" (protocol:field message "type"))
+     (let ((ours (and edit-id (equal edit-id (protocol:field message "id")))))
+       (cond
+         ((equal "error" (protocol:field message "status"))
+          (if (and ours (equal "aborted" (response-error-code message)))
+              1
+              (error "~a" (response-error-message message))))
+         ((and ours (equal "ok" (protocol:field message "status"))) 0))))))
+
 (defun wait-for-response (connection id &key pending-callback)
   (loop :for message := (protocol:read-message (client-stream connection))
         :while message
@@ -274,7 +292,8 @@
     (ncurses-call :lem-ncurses/term "CALL-WITH-INPUT-RESIZE-LOCK"
                   (lambda () (render-screen-content message screen)))))
 
-(define-condition terminal-server-exit (condition) ())
+(define-condition terminal-server-exit (condition)
+  ((status :initarg :status :reader terminal-server-exit-status)))
 
 (define-condition terminal-server-error (error)
   ((message :initarg :message :reader terminal-server-error-message))
@@ -287,7 +306,7 @@
   (lock (bt2:make-lock :name "lemclient/terminal-control"))
   stopping-p reader-started-p)
 
-(defun terminal-reader-loop (connection main-thread render-lock control screen)
+(defun terminal-reader-loop (connection main-thread render-lock control screen &optional edit-id)
   (let ((reported-p nil))
     (labels ((fail (message)
                (setf reported-p t)
@@ -311,18 +330,16 @@
                            :do (cond
                                  ((string= "screen" (protocol:field message "type" ""))
                                   (render-screen message render-lock screen))
-                                 ((string= "close" (protocol:field message "type" ""))
-                                  (setf reported-p t)
-                                  (bt2:interrupt-thread
-                                   main-thread
-                                   (lambda ()
-                                     (unless (terminal-control-stopping-p control)
-                                       (signal 'terminal-server-exit))))
-                                  (return))
-                                 ((and (string= "response" (protocol:field message "type" ""))
-                                       (string= "error" (protocol:field message "status" "")))
-                                  (fail (response-error-message message))
-                                  (return)))))
+                                 (t
+                                  (let ((status (frame-message-exit-status message edit-id)))
+                                    (when status
+                                      (setf reported-p t)
+                                      (bt2:interrupt-thread
+                                       main-thread
+                                       (lambda ()
+                                         (unless (terminal-control-stopping-p control)
+                                           (signal 'terminal-server-exit :status status))))
+                                      (return)))))))
                  (error (condition) (fail (princ-to-string condition))))
             (bt2:with-lock-held ((terminal-control-lock control))
               (setf (terminal-control-reader-started-p control) nil))
@@ -391,10 +408,13 @@
                                  :lem-ncurses/term)))
         (setf (symbol-value pending) nil)))))
 
-(defun run-terminal (connection files)
+(defun run-terminal (connection files wait-p)
   (unless (find-package :lem-ncurses)
     (error "This lemclient was built without ncurses support"))
-  (let* ((resize-symbol (find-symbol "*RESIZE-HANDLER*" :lem-ncurses/term))
+  (let* ((entries (build-file-entries files))
+         (visit-id (and files (next-id)))
+         (edit-id (and wait-p visit-id))
+         (resize-symbol (find-symbol "*RESIZE-HANDLER*" :lem-ncurses/term))
          (old-resize-handler (and resize-symbol
                                   (boundp resize-symbol)
                                   (symbol-value resize-symbol)))
@@ -423,16 +443,15 @@
                        (bt2:make-thread
                         (lambda ()
                           (terminal-reader-loop connection main-thread
-                                                render-lock control screen))
+                                                render-lock control screen edit-id))
                         :name "lemclient screen reader"))
                  (when files
-                   (let ((visit-id (next-id)))
-                     (client-send connection
-                                  (protocol:make-object
-                                   "version" protocol:+protocol-version+
-                                   "type" "visit" "id" visit-id
-                                   "wait" "nowait"
-                                   "files" (build-file-entries files)))))
+                   (client-send connection
+                                (protocol:make-object
+                                 "version" protocol:+protocol-version+
+                                 "type" "visit" "id" visit-id
+                                 "wait" (if wait-p "wait" "nowait")
+                                 "files" entries)))
                  (let* ((handler-symbol
                           (find-symbol "*BRACKETED-PASTE-HANDLER*"
                                        :lem-ncurses/input))
@@ -449,7 +468,7 @@
                                  (ncurses-call :lem-ncurses/input "GET-EVENT"))))
                        (setf (symbol-value handler-symbol) old-handler
                              (symbol-value mouse-handler-symbol) old-mouse-handler)))))
-             (terminal-server-exit () 0)))
+             (terminal-server-exit (condition) (terminal-server-exit-status condition))))
       (stop-terminal-reader control reader)
       (ignore-errors
         (client-send connection
@@ -467,16 +486,19 @@
 
 (defun print-help ()
   (format t "Usage: lemclient [OPTIONS] [FILE ...]~%\
-  -t, --tty                    attach this terminal~%\
-  -c, --create-frame           attach a native graphical client~%\
-  -n, --no-wait                return after files are opened~%\
+  -t, --tty                    attach this terminal; FILEs wait for edit completion~%\
+  -c, --create-frame           attach a graphical client; FILEs wait for completion~%\
+  -n, --no-wait                visit without an edit request; -t/-c stay attached~%\
   -e, --eval FORM              evaluate Common Lisp in the daemon~%\
       --stop-server            stop the daemon if buffers are clean~%\
       --force                  allow --stop-server to discard edits~%\
   -s, --server-name NAME       select a named daemon~%\
       --wait-for-server SECS  retry connection failures during startup~%\
   -a, --alternate-editor CMD   run CMD only when no daemon is reachable~%\
-  -h, --help                   show this help~%"))
+  -h, --help                   show this help~%\
+With -t/-c and no FILEs, stay attached until the frame is closed.~%\
+For waiting edits: C-c C-c saves and finishes; C-x # finishes without saving;~%\
+C-c C-k aborts. Closing before completion returns failure.~%"))
 
 (defun parse-client-arguments (arguments)
   (let ((tty nil) (gui nil) (wait t) (eval nil) (stop nil) (force nil)
@@ -549,8 +571,8 @@
              (:visit (run-visit connection files wait))
              (:eval (run-eval connection eval))
              (:stop (run-shutdown connection force))
-             (:gui (uiop:symbol-call :lem-daemon/sdl-client :run-graphical connection files))
-             (:tty (run-terminal connection files)))
+             (:gui (uiop:symbol-call :lem-daemon/sdl-client :run-graphical connection files wait))
+             (:tty (run-terminal connection files wait)))
         (unless (eq mode :tty) (close-client connection))))))
 
 (defun main (&optional (arguments (uiop:command-line-arguments)))

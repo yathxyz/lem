@@ -29,8 +29,10 @@ make daemon-client
 ./lemclient README.md                 # wait until the edit is finished
 ./lemclient --no-wait README.md       # submit and return immediately
 ./lemclient +120:4 README.md          # line 120, column 4
-./lemclient -t README.md              # attach an independent terminal frame
-./lemclient -c README.md              # attach an independent SDL frame
+./lemclient -t README.md              # terminal edit; wait for completion
+./lemclient -c README.md              # SDL edit; wait for completion
+./lemclient -t                        # persistent terminal attachment
+./lemclient -c -n README.md           # open in persistent SDL, without an edit request
 ./lemclient --eval '(length (lem:buffer-list))'
 ./lemclient --stop-server
 ```
@@ -44,6 +46,33 @@ A blocking file request enables `daemon-edit-mode` in each requested buffer:
 - `C-x #` finishes without saving;
 - `C-c C-c` or `Z Z` saves and finishes;
 - `C-c C-k` or `Z Q` aborts the request without killing the daemon or buffer.
+
+With `-t FILE` or `-c FILE`, the client owns a visible frame and waits for every
+file in that request. Finishing the last file closes that client and returns 0.
+An abort or closing the frame before completion returns 1; connection and request
+errors return 2. A client or daemon crash cannot acknowledge an unfinished edit.
+Finishing without saving retains unsaved text in the daemon. The existing
+ordinary waiting-request buffer-kill behavior also counts as completion.
+
+Without files, `-t` and `-c` remain attached until the frame is closed. With `-n`,
+they open files without `daemon-edit-mode` and also remain attached until closed;
+closing returns 0 and says nothing about saving those files. Bare `lemclient -n
+FILE` instead returns immediately after the visit is acknowledged.
+
+For a terminal external editor, use `EDITOR='lemclient --wait-for-server 60 -t'`
+and the same command for Git's `core.editor` and `sequence.editor`. For an
+available graphical display, `VISUAL='lemclient --wait-for-server 60 -c'` opens a
+visible waiting editor. Do not add `-n` to external-editor defaults. A plain file
+request has no client frame of its own and does not activate an arbitrary
+existing client's frame, so bare `lemclient` is unsuitable for that default.
+
+`frontends/daemon/tests/visible-client.py` checks this contract against configured
+editor/client executables, using real PTY input and SDL keys on private Xvfb.
+Set `LEM_BIN`, `LEMCLIENT_BIN`, and `LEM_TEST_X11` (the `libX11.so.6` path), with
+Xvfb and xdotool on `PATH`. It exercises multi-file save/finish, unsaved finish,
+abort, early detach/window close, persistent and `-n` attachments, and daemon
+death. Only synthetic files are used; its private directory retains logs and a
+JSON result, and all test processes are stopped on exit.
 
 ### In-session server
 

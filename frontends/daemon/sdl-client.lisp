@@ -205,8 +205,10 @@
     (unwind-protect (cffi:foreign-string-to-lisp pointer :encoding :utf-8)
       (cffi:foreign-funcall "SDL_free" :pointer pointer :void))))
 
-(defun graphical-event-loop (connection files window renderer fonts)
-  (let* ((screen (make-graphical-screen))
+(defun graphical-event-loop (connection files wait-p window renderer fonts)
+  (let* ((entries (client::build-file-entries files))
+         (edit-id nil)
+         (screen (make-graphical-screen))
          (incoming (make-incoming))
          (cache (make-hash-table :test 'equal))
          (reader nil)
@@ -227,13 +229,14 @@
            (progn
              (resize "attach")
              (when files
-               (client::request connection "visit" "wait" "nowait"
-                                "files" (client::build-file-entries files)))
+               (let ((id (client::request connection "visit" "wait"
+                                          (if wait-p "wait" "nowait") "files" entries)))
+                 (when wait-p (setf edit-id id))))
              (setf reader (bt2:make-thread (lambda () (read-screens connection incoming))
                                           :name "lemclient/sdl-reader"))
              (sdl2:start-text-input)
              (sdl2:with-event-loop (:method :poll)
-               (:quit () t)
+               (:quit () (return-from graphical-event-loop (client::frame-close-status edit-id)))
                (:textinput (:text text)
                 (keyboard:handle-text-input (lem-sdl2/platform:get-platform) text))
                (:textediting (:text text)
@@ -268,7 +271,7 @@
                                  "files" (client::build-file-entries (list file))))
                (:windowevent (:event event)
                 (when (= event sdl2-ffi:+sdl-windowevent-close+)
-                  (return-from graphical-event-loop 0))
+                  (return-from graphical-event-loop (client::frame-close-status edit-id)))
                 (when (member event (list sdl2-ffi:+sdl-windowevent-resized+
                                          sdl2-ffi:+sdl-windowevent-size-changed+))
                   (resize "resize"))
@@ -279,11 +282,9 @@
                   (cond
                     ((equal "screen" (protocol:field message "type"))
                      (update-screen screen message) (setf dirty t))
-                    ((equal "close" (protocol:field message "type"))
-                     (return-from graphical-event-loop 0))
-                    ((and (equal "response" (protocol:field message "type"))
-                          (equal "error" (protocol:field message "status")))
-                     (error "~a" (client::response-error-message message)))))
+                    (t
+                     (let ((status (client::frame-message-exit-status message edit-id)))
+                       (when status (return-from graphical-event-loop status))))))
                 (when (and dirty (graphical-screen-rows screen))
                   (draw-screen screen renderer fonts cache)
                   (setf dirty nil))
@@ -295,7 +296,7 @@
         (clear-glyphs cache)))
     0))
 
-(defun call-with-graphical-window (connection files)
+(defun call-with-graphical-window (connection files wait-p)
   (when (uiop:getenvp "LEM_CLIENT_RESOURCES")
     (setf lem-sdl2/resource::*resource-directory*
           (uiop:ensure-directory-pathname (uiop:getenv "LEM_CLIENT_RESOURCES"))))
@@ -310,12 +311,12 @@
                                            :h (* 40 (font:font-char-height fonts))
                                            :flags '(:shown :resizable))
                     (sdl2:with-renderer (renderer window :flags '(:software))
-                      (graphical-event-loop connection files window renderer fonts))))
+                      (graphical-event-loop connection files wait-p window renderer fonts))))
              (lem-sdl2/icon-font:clear-icon-font-cache)
              (font:close-font fonts)))
       (sdl2-ttf:quit)))
 
-(defun run-graphical (connection files)
+(defun run-graphical (connection files wait-p)
   "Render a remote frame; never start an editor thread in this process."
   ;; A Linux client has one UI thread. Keep initialization, input, rendering,
   ;; teardown and CLI error handling on it, including display-open failures.
@@ -324,5 +325,5 @@
     (unless (zerop (sdl2:init* '(:video)))
       (error "Cannot initialize graphical display: ~a"
              (cffi:foreign-funcall "SDL_GetError" :string)))
-    (unwind-protect (call-with-graphical-window connection files)
+    (unwind-protect (call-with-graphical-window connection files wait-p)
       (sdl2:quit*))))
