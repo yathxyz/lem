@@ -87,3 +87,17 @@
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call :lem-structured-notes/tests :run-tests)))
+
+(asdf:defsystem "lem-structured-notes/lem-notes-adapter"
+  :description "Explicit unsaved notes commands with live revision provenance."
+  :depends-on ("lem-structured-notes" "lem/core" "lem-buffer-proposals")
+  :serial t
+  :pathname "lem/"
+  :components ((:file "package") (:file "notes-workflow"))
+  :in-order-to ((test-op (test-op "lem-structured-notes/lem-notes-adapter-tests"))))
+
+(asdf:defsystem "lem-structured-notes/lem-notes-adapter-tests"
+  :depends-on ("lem-structured-notes/lem-notes-adapter" "lem-fake-interface" "lem-daemon/recovery" "rove")
+  :components ((:file "tests/adapter"))
+  :perform (test-op (operation component)
+             (declare (ignore operation)) (uiop:symbol-call :rove :run component)))
