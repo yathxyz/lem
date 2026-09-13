@@ -155,8 +155,9 @@ encoded records to 16 MiB. Storage must satisfy private ownership/regular-file
 checks; records are private but unencrypted. There is no automatic text-record
 eviction. See [durable text recovery](daemon-recovery.md) for the complete contract.
 
-`recovery-list` and `recovery-restore` open checkpointed text in separate unsaved
-buffers without visited filenames, file hooks, or overwriting current files.
+Use `M-x recovery-list` to inspect checkpoint IDs and metadata, then
+`M-x recovery-restore` with an exact ID to open its text in a separate unsaved
+buffer without a visited filename, file hooks, or overwriting the current file.
 The independent inspector remains usable without a working editor:
 
 ```sh
