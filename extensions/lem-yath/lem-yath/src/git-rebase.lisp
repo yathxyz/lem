@@ -235,6 +235,27 @@
 
 (defvar *legit-amend-operation-key* 'lem-yath-legit-amend-operation)
 
+(defun legit-live-context-p (context)
+  "Whether CONTEXT still owns the current frame's live Legit panes."
+  (and context
+       (eq context (lem/legit::current-pane-context))
+       (lem/legit::legit-status-active-p)))
+
+(defun legit-select-context-pane (context &optional (role :peek))
+  (when (legit-live-context-p context)
+    (let ((window (ecase role
+                    (:peek (lem/legit::pane-context-peek context))
+                    (:source (lem/legit::pane-context-source context)))))
+      (when (and window (not (deleted-window-p window)))
+        (setf (current-window) window)))))
+
+(defun legit-refresh-context (context &optional (role :peek))
+  "Refresh this exact live context; never reopen a closed or replacement view."
+  (when (legit-live-context-p context)
+    (legit-select-context-pane context)
+    (lem/legit::show-legit-status)
+    (legit-select-context-pane context role)))
+
 (defvar *legit-commit-dispatch-keymap*
   (make-keymap :description "Commit"))
 
@@ -262,6 +283,7 @@
   (let ((buffer (make-buffer "*legit-amend*")))
     (setf (buffer-directory buffer) directory
           (buffer-read-only-p buffer) nil
+          (buffer-value buffer 'legit-message-context) (lem/legit::current-pane-context)
           (buffer-value buffer *legit-amend-operation-key*) :amend)
     (erase-buffer buffer)
     (insert-string
@@ -292,6 +314,7 @@
 (defun legit-amend-continue ()
   "Commit the current transient buffer as an amended HEAD."
   (let* ((buffer (current-buffer))
+         (context (buffer-value buffer 'legit-message-context))
          (message
            (lem/legit::clean-commit-message (buffer-text buffer))))
     (when (str:blankp message)
@@ -307,22 +330,20 @@
             (progn
               (buffer-unmark buffer)
               (kill-buffer buffer)
-              (when (lem/legit::legit-status-active-p)
-                (setf (current-window) lem/legit::*peek-window*))
-              (lem/legit::show-legit-status)
+              (legit-refresh-context context)
               (message "Amended HEAD."))
             (lem/legit::pop-up-message
              (legit-command-error-text output error-output)))))))
 
 (defun legit-amend-abort ()
   "Discard the current transient amend message after confirmation."
-  (when (or (not lem/legit::*prompt-to-abort-commit*)
-            (prompt-for-y-or-n-p "Abort amend?"))
-    (let ((buffer (current-buffer)))
+  (let* ((buffer (current-buffer))
+         (context (buffer-value buffer 'legit-message-context)))
+    (when (or (not lem/legit::*prompt-to-abort-commit*)
+              (prompt-for-y-or-n-p "Abort amend?"))
       (buffer-unmark buffer)
       (kill-buffer buffer)
-      (when (lem/legit::legit-status-active-p)
-        (setf (current-window) lem/legit::*peek-window*)))))
+      (legit-select-context-pane context))))
 
 (defun remove-legacy-legit-amend-binding (keymap)
   "Remove lem-yath's former A binding without erasing an upstream command."

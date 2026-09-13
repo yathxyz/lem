@@ -179,20 +179,22 @@
 
 (defun legit-merge-preview ()
   "Render Git's prospective merge tree without changing repository state."
-  (alexandria:when-let
-      ((head (legit-merge-read-head "Preview merge: ")))
-    (let* ((base
-             (str:trim
-              (legit-merge-checked-output
-               (list "merge-base" "HEAD" head))))
-           (preview
-             (legit-merge-checked-output
-              (list "merge-tree" base "HEAD" head))))
-      (lem/legit::show-diff preview)
-      ;; Focus the preview so Legit's status post-command hook does not
-      ;; immediately replace it with the commit under the status cursor.
-      (setf (current-window) lem/legit::*source-window*)
-      (message "Previewing merge without changing the repository."))))
+  (let ((context (lem/legit::current-pane-context)))
+    (alexandria:when-let
+        ((head (legit-merge-read-head "Preview merge: ")))
+      (let* ((base
+               (str:trim
+                (legit-merge-checked-output
+                 (list "merge-base" "HEAD" head))))
+             (preview
+               (legit-merge-checked-output
+                (list "merge-tree" base "HEAD" head))))
+        (when (legit-live-context-p context)
+          (lem/legit::show-diff preview)
+          ;; Focus only the initiating pane so the status hook cannot replace
+          ;; its preview, nor a closed context select a new or foreign pane.
+          (legit-select-context-pane context :source)
+          (message "Previewing merge without changing the repository."))))))
 
 (defun legit-merge-abort ()
   (unless (legit-merge-in-progress-p)

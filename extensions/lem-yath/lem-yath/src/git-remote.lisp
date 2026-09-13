@@ -38,14 +38,13 @@
 
 (defun legit-remote-refresh ()
   "Refresh Legit while retaining the pane from which the action was invoked."
-  (let ((window (or *legit-remote-dispatch-window* (current-window))))
-    (lem/legit::show-legit-status)
-    (cond
-      ((and window (not (deleted-window-p window)))
-       (setf (current-window) window))
-      ((and lem/legit::*peek-window*
-            (not (deleted-window-p lem/legit::*peek-window*)))
-       (setf (current-window) lem/legit::*peek-window*)))))
+  (let* ((window (or *legit-remote-dispatch-window* (current-window)))
+         (context (window-parameter window 'lem/legit::legit-context))
+         (role (if (typep window 'lem/legit::source-window) :source :peek)))
+    (when (legit-live-context-p context)
+      (legit-refresh-context context role)
+      (when (not (deleted-window-p window))
+        (setf (current-window) window)))))
 
 (defun legit-remote-run (arguments success-message)
   "Run Git ARGUMENTS, refresh Legit, and report the bounded result."

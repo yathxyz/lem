@@ -311,6 +311,7 @@
         (buffer (make-buffer "*legit-cherry-pick*")))
     (setf (buffer-directory buffer) directory
           (buffer-read-only-p buffer) nil
+          (buffer-value buffer 'legit-message-context) (lem/legit::current-pane-context)
           (buffer-value buffer *legit-cherry-operation-key*) :cherry-pick
           (buffer-value buffer *legit-cherry-gpg-key*) gpg-sign)
     (erase-buffer buffer)
@@ -504,6 +505,7 @@ the bounded message reader validates Git's prepared COMMIT_EDITMSG."
 (defun legit-cherry-message-continue ()
   "Commit the prepared message and advance the exact Git sequence."
   (let* ((buffer (current-buffer))
+         (context (buffer-value buffer 'legit-message-context))
          (message (lem/legit::clean-commit-message (buffer-text buffer)))
          (gpg-sign (buffer-value buffer *legit-cherry-gpg-key*)))
     (when (str:blankp message)
@@ -524,9 +526,7 @@ the bounded message reader validates Git's prepared COMMIT_EDITMSG."
             (progn
               (buffer-unmark buffer)
               (kill-buffer buffer)
-              (when (lem/legit::legit-status-active-p)
-                (setf (current-window) lem/legit::*peek-window*))
-              (lem/legit::show-legit-status)
+              (legit-refresh-context context)
               (if (legit-cherry-pick-in-progress-p)
                   (legit-cherry-active-continue)
                   (progn
@@ -537,13 +537,13 @@ the bounded message reader validates Git's prepared COMMIT_EDITMSG."
 
 (defun legit-cherry-message-abort ()
   "Close the message editor while retaining Git's stopped operation."
-  (when (or (not lem/legit::*prompt-to-abort-commit*)
-            (prompt-for-y-or-n-p "Close cherry-pick message? "))
-    (let ((buffer (current-buffer)))
+  (let* ((buffer (current-buffer))
+         (context (buffer-value buffer 'legit-message-context)))
+    (when (or (not lem/legit::*prompt-to-abort-commit*)
+              (prompt-for-y-or-n-p "Close cherry-pick message? "))
       (buffer-unmark buffer)
       (kill-buffer buffer)
-      (when (lem/legit::legit-status-active-p)
-        (setf (current-window) lem/legit::*peek-window*))
+      (legit-select-context-pane context)
       (message "Cherry-pick remains stopped; use A a to abort it."))))
 
 (defun legit-cherry-read-existing-branch (prompt &key exclude)

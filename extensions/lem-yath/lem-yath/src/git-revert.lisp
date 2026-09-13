@@ -111,6 +111,7 @@
         (buffer (make-buffer "*legit-revert*")))
     (setf (buffer-directory buffer) (uiop:getcwd)
           (buffer-read-only-p buffer) nil
+          (buffer-value buffer 'legit-message-context) (lem/legit::current-pane-context)
           (buffer-value buffer *legit-revert-operation-key*) :revert
           (buffer-value buffer *legit-revert-gpg-key*) gpg-sign)
     (erase-buffer buffer)
@@ -127,6 +128,7 @@
 (defun legit-revert-message-continue ()
   "Commit the prepared revert using the edited native buffer message."
   (let* ((buffer (current-buffer))
+         (context (buffer-value buffer 'legit-message-context))
          (message
            (lem/legit::clean-commit-message (buffer-text buffer)))
          (gpg-sign (buffer-value buffer *legit-revert-gpg-key*)))
@@ -147,22 +149,20 @@
             (progn
               (buffer-unmark buffer)
               (kill-buffer buffer)
-              (when (lem/legit::legit-status-active-p)
-                (setf (current-window) lem/legit::*peek-window*))
-              (lem/legit::show-legit-status)
+              (legit-refresh-context context)
               (message "Committed revert."))
             (lem/legit::pop-up-message
              (legit-command-error-text output error-output)))))))
 
 (defun legit-revert-message-abort ()
   "Discard the editor buffer while retaining Git's prepared index state."
-  (when (or (not lem/legit::*prompt-to-abort-commit*)
-            (prompt-for-y-or-n-p "Abort revert message? "))
-    (let ((buffer (current-buffer)))
+  (let* ((buffer (current-buffer))
+         (context (buffer-value buffer 'legit-message-context)))
+    (when (or (not lem/legit::*prompt-to-abort-commit*)
+              (prompt-for-y-or-n-p "Abort revert message? "))
       (buffer-unmark buffer)
       (kill-buffer buffer)
-      (when (lem/legit::legit-status-active-p)
-        (setf (current-window) lem/legit::*peek-window*)))))
+      (legit-select-context-pane context))))
 
 (defun legit-revert-run (arguments success-message &key edit-stop-p gpg-sign)
   "Run Git revert ARGUMENTS and preserve edit and conflict stops."
