@@ -232,7 +232,7 @@ def main():
             mx(left, 'structured-notes-lsm-open-today')
             eventually(lambda: state(left)['filename'] == str(daily_path), 'native today command did not open its note')
             daily = state(left)
-            check(daily['modified'] and 'profile: lsm/1' in daily['text'] and not daily_path.exists(),
+            check(daily['modified'] and 'profile: "lsm/1"' in daily['text'] and not daily_path.exists(),
                   'native today creates a canonical LSM buffer without writing a file')
             show(left, daily['name'], end=True)
             type_text(left, 'DAILY HUMAN λ')
