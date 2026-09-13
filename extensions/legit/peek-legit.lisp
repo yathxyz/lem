@@ -319,7 +319,10 @@ Notes:
                                         (otherwise (error "Unknown buffer name to display legit data: ~a" buffer))))))
          (point (buffer-point (collector-buffer *collector*))))
     (declare (ignorable point))
-    (funcall function *collector*)
+    ;; Frame-owned buffers survive refresh with their read-only flag intact.
+    ;; Only the collector renderer may replace this protected content.
+    (let ((*inhibit-read-only* t))
+      (funcall function *collector*))
     (when read-only
       (setf (buffer-read-only-p (collector-buffer *collector*)) t))
       (display *collector* :minor-mode minor-mode)))

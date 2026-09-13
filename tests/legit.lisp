@@ -146,6 +146,34 @@
 
 ;;; Integration tests with temporary git repository
 
+(deftest collector/refresh-reuses-read-only-buffer
+  (testing "collector refresh can replace its own protected content"
+    (with-current-buffers ()
+      (with-fake-interface ()
+        (with-fresh-legit-context
+          (lem/legit::with-collecting-sources
+              (collector :minor-mode 'lem/legit::peek-legit-mode)
+            (lem/legit::collector-insert "Before refresh"))
+          (let ((buffer (window-buffer (lem/legit::peek-window))))
+            (ok (buffer-read-only-p buffer))
+            (lem/legit::with-collecting-sources
+                (collector :minor-mode 'lem/legit::peek-legit-mode)
+              (ok (eq buffer (lem/legit::collector-buffer collector)))
+              (lem/legit::collector-insert "After refresh"))
+            (ok (equal (buffer-text buffer) (format nil "After refresh~%")))
+            (ok (buffer-read-only-p buffer))
+            (ok (signals (insert-string (buffer-point buffer) "human edit")
+                         'lem/buffer/errors:read-only-error))
+            (ok (signals
+                 (lem/legit::with-collecting-sources
+                     (collector :minor-mode 'lem/legit::peek-legit-mode)
+                   (lem/legit::collector-insert "Partial refresh")
+                   (error "renderer failure"))
+                 'simple-error))
+            (ok (buffer-read-only-p buffer))
+            (ok (signals (insert-string (buffer-point buffer) "human edit")
+                         'lem/buffer/errors:read-only-error))))))))
+
 (deftest legit-status/open-and-close
   (testing "legit-status opens window and cleanup closes it"
     (with-current-buffers ()
