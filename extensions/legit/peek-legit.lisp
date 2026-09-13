@@ -124,9 +124,20 @@ Notes:
 (defclass peek-window (floating-window) ())
 (defclass source-window (floating-window) ())
 
+(defun delete-pane-child-windows (parent)
+  ;; Cursor-following messages and menus retain their source window. Retire
+  ;; them before its view and private buffer points are released. Other panes,
+  ;; frames and messages anchored to the ordinary editing window remain live.
+  (dolist (window (copy-list (lem-core::frame-floating-windows (current-frame))))
+    (when (eq parent (window-parent window))
+      (delete-pane-child-windows window)
+      (delete-window window))))
+
 (defmethod lem-core::%delete-window :before ((window peek-window))
+  (delete-pane-child-windows window)
   (finalize-peek-legit (window-parameter window 'legit-context) :deleting window))
 (defmethod lem-core::%delete-window :before ((window source-window))
+  (delete-pane-child-windows window)
   (finalize-peek-legit (window-parameter window 'legit-context) :deleting window))
 
 (defmethod compute-window-list ((window peek-window))

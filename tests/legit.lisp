@@ -258,6 +258,52 @@
               (ok (eq survivor (current-window)))
               (ok (eq shared (window-buffer survivor))))))))))
 
+(deftest display/close-retires-dependent-popups
+  (with-current-buffers ()
+    (with-fake-interface ()
+      (let* ((parent (current-window))
+             (status (lem/legit::make-peek-legit-buffer)))
+        (lem/legit::display (make-instance 'lem/legit::collector :buffer status))
+        (let* ((peek (lem/legit::peek-window))
+               (source (lem/legit::source-window))
+               (popup (display-popup-message "pending Git callback" :timeout nil
+                                             :source-window peek :style '(:gravity :follow-cursor)))
+               (nested (display-popup-message "details" :timeout nil :source-window popup))
+               (source-popup (display-popup-message "source" :timeout nil :source-window source))
+               (unrelated (display-popup-message "editor" :timeout nil :source-window parent)))
+          (lem/legit::%legit-quit)
+          (ok (every #'lem-core::window-deleted-p (list popup nested source-popup)))
+          (ok (not (lem-core::window-deleted-p unrelated)))
+          (ok (eq parent (current-window)))
+          (loop repeat 20 do (lem-core::receive-event 0))
+          (ok (deleted-buffer-p status))
+          ;; A following-cursor popup must never compute a cursor from the
+          ;; deleted pane's now-freed buffer point during an idle redisplay.
+          (ok (not (signals (redraw-display :force t))))
+          (ok (not (deleted-buffer-p (window-buffer parent)))))))))
+
+(deftest display/refresh-retires-only-owner-popups
+  (with-current-buffers ()
+    (with-fake-interface ()
+      (let* ((left-implementation (implementation))
+             (left-status (lem/legit::make-peek-legit-buffer)))
+        (lem/legit::display (make-instance 'lem/legit::collector :buffer left-status))
+        (let ((left-popup (display-popup-message "left" :timeout nil
+                                                :source-window (lem/legit::peek-window))))
+          (with-fake-interface ()
+            (let ((right-status (lem/legit::make-peek-legit-buffer)))
+              (lem/legit::display (make-instance 'lem/legit::collector :buffer right-status))
+              (let ((right-popup (display-popup-message "right" :timeout nil
+                                                        :source-window (lem/legit::peek-window))))
+                (with-implementation left-implementation
+                  (setf (current-buffer) (window-buffer (current-window)))
+                  (lem/legit::display (make-instance 'lem/legit::collector :buffer left-status))
+                  (ok (lem-core::window-deleted-p left-popup))
+                  (ok (not (lem-core::window-deleted-p right-popup)))
+                  (ok (lem/legit::legit-status-active-p))
+                  (cleanup-legit-windows))
+                (cleanup-legit-windows)))))))))
+
 (deftest parse-github-url/ssh-with-git-suffix
   (testing "parses SSH URL with .git suffix"
     (multiple-value-bind (owner repo)
