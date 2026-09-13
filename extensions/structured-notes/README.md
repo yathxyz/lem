@@ -6,12 +6,13 @@ operations. Loading it installs no editor commands or keybindings and changes
 no notes defaults. It does not discover accounts, resolve DNS, dereference URI
 evidence, or perform HTTP requests.
 
-The only ASDF systems in this adoption are `lem-structured-notes` and
-`lem-structured-notes/tests`. The main system depends on Alexandria; ASDF/UIOP
+The semantic boundary consists of `lem-structured-notes` and
+`lem-structured-notes/tests`. The separate explicit editor adapter and its focused
+tests are documented in [ADAPTER.md](ADAPTER.md). The main system depends on Alexandria; ASDF/UIOP
 provides pathname support. Durable migration operations use SBCL's POSIX
 facilities on Linux. Those operations are explicit calls, not load-time work.
 Node ID generation uses `/dev/urandom` when requested. Workspace resolution
-accepts explicit roots; a future daemon adapter must pin those roots once.
+accepts explicit roots; the editor adapter pins those roots once at startup.
 
 ## Provenance and scope
 
@@ -47,8 +48,9 @@ metadata, not a claim that external data was refreshed during this adoption.
 Three existing URI cases are extracted into `tests/caldav-uri-test.lisp`.
 
 The remaining calendar systems, conformance ledgers, interoperability drivers,
-live notes adapters, and Yath adapters are excluded. This import makes no claim
-about broad CalDAV conformance or live daemon notes workflows.
+multi-file live-source adapters, and broad Yath adapters are excluded. This
+semantic import makes no claim about broad CalDAV conformance. Native daemon
+notes acceptance is a separate integration gate.
 
 ## Focused gate
 
@@ -80,6 +82,7 @@ export to have an implementation. It checks representative public types,
 generated accessors, scalar classifiers, and the constant separately, and
 rejects the excluded XML/HTTP/store entry points.
 
-Live buffer adoption remains separate: it needs the current proposal API's
-single undo unit and hook-safe rollback, buffer identity/revision captured at
-planning time, explicit workspace roots, and source/daemon acceptance tests.
+The explicit live buffer adapter uses the shared proposal API's single undo unit
+and hook-safe rollback, captures buffer identity/revision at planning time, and
+requires pinned workspace roots. Its [separate provenance](adapter-provenance.tsv)
+records adaptations to the two imported bridge files and the editor test boundary.
