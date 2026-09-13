@@ -117,3 +117,8 @@
   (let ((origin (lem-daemon/recovery:buffer-recovery-origin (lem:current-buffer))))
     (object "id" (getf origin :id) "filename" (getf origin :filename)
             "status" (symbol-name (getf origin :disk-status)))))
+
+(defun recovered-buffer-name (id)
+  (loop for buffer in (lem:buffer-list)
+        when (equal id (getf (lem-daemon/recovery:buffer-recovery-origin buffer) :id))
+          return (lem:buffer-name buffer)))

@@ -3,7 +3,7 @@
 
 LEM_BIN/LEMCLIENT_BIN must be configured binaries with notes already preloaded.
 Only native-notes-fixture.lisp is loaded. PTYs drive notes commands, captures,
-file prompts, typing, undo, save, checkpoints, and recovery. Administrative eval
+file and buffer prompts, typing, undo, save, checkpoints, and recovery. Administrative eval
 only installs deterministic test clocks, observes state, selects buffers/points,
 changes the temporary environment, and installs recovery file-hook guards.
 All notes and journals belong to a temporary tree. HOME is never changed.
@@ -118,18 +118,29 @@ def main():
         def state(terminal):
             return frame_value(terminal, '(lem-native-notes-fixture::state)')
 
+        def notes_status(terminal, label):
+            return (in_frame(terminal, '(eq (lem:current-buffer) '
+                             'lem-yath::*native-notes-status-buffer*)') == 'T'
+                    and state(terminal)['read_only']
+                    and state(terminal)['text'].startswith('Structured notes: ' + label + '\n')
+                    and terminal.saw('Structured notes: ' + label))
+
         def prompt(terminal):
             return json.loads(in_frame(terminal, '(lem-native-notes-fixture::prompt-label)'))
 
+        def prompt_active(terminal):
+            return in_frame(terminal, '(not (null (lem-core::frame-prompt-active-p '
+                            '(lem:current-frame))))') == 'T'
+
         def wait_prompt(terminal, prefix):
-            eventually(lambda: prompt(terminal).startswith(prefix),
+            eventually(lambda: prompt_active(terminal) and prompt(terminal).startswith(prefix),
                        'expected native prompt: ' + prefix)
 
         def mx(terminal, name):
             terminal.send(b'\x1bx')
             wait_prompt(terminal, 'Command:')
             terminal.send(name.encode() + b'\r')
-            eventually(lambda: not prompt(terminal), 'native command did not finish: ' + name)
+            eventually(lambda: not prompt_active(terminal), 'native command did not finish: ' + name)
 
         def prompted_mx(terminal, name, prefix):
             terminal.send(b'\x1bx')
@@ -156,6 +167,11 @@ def main():
             prompted_mx(terminal, 'find-file', 'Find File:')
             answer(terminal, str(path), clear=True)
             eventually(lambda: state(terminal)['filename'] == str(path), 'native file visit failed')
+
+        def select_buffer(terminal, name):
+            prompted_mx(terminal, 'select-buffer', 'Use Buffer:')
+            answer(terminal, name, clear=True)
+            eventually(lambda: state(terminal)['name'] == name, 'native buffer selection failed')
 
         def capture(terminal, key, title, path):
             prompted_mx(terminal, 'structured-notes-lsm-capture', 'LSM capture key (i/t/r/p):')
@@ -225,7 +241,7 @@ def main():
             check(len(routes) == 8 and all(row['command'] == expected_routes[row['keys']] for row in routes),
                   'existing normal and visual Org leader routes retain their original owners')
             mx(left, 'lem-yath-notes-status')
-            eventually(lambda: 'Structured notes: ready' in state(left)['text'] and left.saw('Structured notes: ready'),
+            eventually(lambda: notes_status(left, 'ready'),
                        'ready notes status did not reach the actual native terminal')
             check(True, 'native notes status displays configured readiness')
 
@@ -288,9 +304,11 @@ def main():
             visit(right, ordinary_path)
             ordinary = state(right)
             mx(right, 'structured-notes-lsm-assign-id')
-            eventually(lambda: right.saw('LSM provider requires an explicit lsm/1 profile'),
+            eventually(lambda: right.saw('requires a leading YAML frontmatter block'),
                        'ordinary Markdown refusal was not visible in the native client')
-            check(state(right)['text'] == ordinary['text'] and state(right)['tick'] == ordinary['tick'],
+            check(state(right)['identity'] == ordinary['identity']
+                  and state(right)['text'] == ordinary['text'] and state(right)['tick'] == ordinary['tick']
+                  and evaluate('(null (lem:get-buffer "*EDITOR ERROR*"))') == 'T',
                   'ordinary Markdown refuses LSM mutation without conversion')
             right.send(b' nrdt')
             eventually(lambda: state(right)['filename'] == str(org_path), 'the original native Org daily leader did not dispatch')
@@ -337,11 +355,16 @@ def main():
             evaluate('(lem-native-notes-fixture::guard-file-hooks)')
             left, right = attach(101), attach(119, alternate, client_env)
             mx(left, 'recovery-list')
+            select_buffer(left, '*Recovery*')
+            in_frame(left, '(lem-native-notes-fixture::point-at ' + quote(record['id']) + ')')
             eventually(lambda: record['id'] in state(left)['text'] and left.saw(record['id']),
                        'native recovery list did not present the exact checkpoint')
             check(True, 'native recovery-list presents the historical note for explicit selection')
             prompted_mx(left, 'recovery-restore', 'Recovery ID:')
             answer(left, record['id'])
+            recovered_name = value('(lem-native-notes-fixture::recovered-buffer-name ' + quote(record['id']) + ')')
+            assert recovered_name, 'native restore did not create a recoverable text buffer'
+            select_buffer(left, recovered_name)
             eventually(lambda: state(left)['text'] == recovery_text, 'native recovery restore did not reproduce checkpoint text')
             recovered = state(left)
             origin = frame_value(left, '(lem-native-notes-fixture::recovery-origin)')
@@ -373,8 +396,7 @@ def main():
             daemon, _ = start_daemon(ready=False)
             left = attach(125, alternate)
             mx(left, 'lem-yath-notes-status')
-            eventually(lambda: 'Structured notes: unavailable' in state(left)['text']
-                       and left.saw('Structured notes: unavailable'), 'degraded native notes status was not displayed')
+            eventually(lambda: notes_status(left, 'unavailable'), 'degraded native notes status was not displayed')
             check('Notes workspace setup unavailable' in state(left)['text'] and not missing.exists(),
                   'missing WORKDIR produces a visible unavailable notes status without creating a directory')
             in_frame(left, '(lem-native-notes-fixture::new-scratch)')
@@ -391,6 +413,13 @@ def main():
             stop_daemon(daemon)
             print(f'CONFIGURED NATIVE NOTES ACCEPTANCE PASSED: {checks} checks', flush=True)
         except BaseException:
+            try:
+                error_text = value('(let ((buffer (lem:get-buffer "*EDITOR ERROR*"))) '
+                                   '(when buffer (lem:buffer-text buffer)))')
+                if error_text:
+                    print('Editor error buffer:\n' + error_text[-8000:], flush=True)
+            except Exception:
+                pass  # A killed/unresponsive daemon must not prevent process cleanup.
             for path in logs:
                 print(path.name + ':\n' + path.read_text(errors='replace')[-8000:], flush=True)
             for terminal in terminals:
