@@ -4,6 +4,29 @@
                     (:transport :lem-daemon/transport)))
 (in-package :lem-daemon/tests/protocol)
 
+(deftest object-construction-preserves-fields
+  (dolist (count '(0 1 2 3 4 7 8 9 16 33 64))
+    (let* ((fields (loop :for index :below count
+                         :append (list (format nil "field-~d" index) index)))
+           (object (apply #'protocol:make-object fields)))
+      (ok (= count (hash-table-count object)))
+      (ok (loop :for index :below count
+                :always (eql index (gethash (format nil "field-~d" index) object))))))
+  (let* ((value (vector "漢字" nil 42))
+         (key (copy-seq "same"))
+         (fields (list key :old (copy-seq key) value "dangling"))
+         (object (apply #'protocol:make-object fields)))
+    (ok (= 2 (hash-table-count object)))
+    (ok (eq value (gethash "same" object))
+        "equal duplicate keys keep the last value without copying it")
+    (multiple-value-bind (value present) (gethash "dangling" object)
+      (ok (and present (null value)) "a trailing field name retains its NIL value"))
+    (ok (equal fields (list key :old key value "dangling"))
+        "construction does not change the caller's field list")
+    (setf (gethash "extra" object) t)
+    (ok (eq t (gethash "extra" object)) "objects remain extensible")
+    (ok (zerop (hash-table-count (protocol:make-object))) "objects are independent")))
+
 (deftest message-round-trip
   (let* ((message (protocol:make-object
                    "version" protocol:+protocol-version+
@@ -15,6 +38,15 @@
     (ok (= protocol:+protocol-version+ (protocol:field decoded "version")))
     (ok (string= "eval" (protocol:field decoded "type")))
     (ok (string= "(+ 20 22)" (protocol:field decoded "form")))))
+
+(deftest encoded-row-index-presence
+  (let ((row (lem-daemon::make-cell-row 2)))
+    (dolist (index '(nil 0 3))
+      (let ((object (lem-daemon::encode-screen-row row index)))
+        (ok (equal "  " (protocol:field object "text")))
+        (ok (zerop (length (protocol:field object "runs"))))
+        (multiple-value-bind (value present) (gethash "row" object)
+          (ok (and (eql value index) (eq present (not (null index))))))))))
 
 (deftest framed-message-round-trip
   (let ((path (merge-pathnames

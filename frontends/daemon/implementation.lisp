@@ -350,11 +350,11 @@ Only the representation is shared; character widths are always looked up live.")
             (min (max 0 cursor-y) (max 0 (1- height))))))
 
 (defun encode-screen-row (row &optional index)
-  (let ((object (protocol:make-object
-                 "text" (cell-row-string row)
-                 "runs" (encode-face-runs (cell-row-cells row) (cell-row-faces row)))))
-    (when index (setf (gethash "row" object) index))
-    object))
+  (let ((text (cell-row-string row))
+        (runs (encode-face-runs (cell-row-cells row) (cell-row-faces row))))
+    (if index
+        (protocol:make-object "text" text "runs" runs "row" index)
+        (protocol:make-object "text" text "runs" runs))))
 
 (defun terminal-escape-delay ()
   (let* ((package (find-package :lem-ncurses/config))
@@ -404,10 +404,9 @@ Only the representation is shared; character widths are always looked up live.")
                             "color" (wire-color
                                      (or (and cursor-attribute
                                               (attribute-background cursor-attribute))
-                                         (lem-if:get-foreground-color implementation)))))))
-          (if full-p
-              (setf (gethash "rows" message) (map 'vector #'encode-screen-row rows))
-              (setf (gethash "changes" message) changes))
+                                         (lem-if:get-foreground-color implementation))))
+                  (if full-p "rows" "changes")
+                  (if full-p (map 'vector #'encode-screen-row rows) changes))))
           (daemon-send connection message))))))
 
 (defmethod lem-if:invoke ((implementation daemon-implementation) function)

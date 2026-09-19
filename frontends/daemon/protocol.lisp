@@ -13,7 +13,8 @@
   (error 'protocol-error :message (apply #'format nil control arguments)))
 
 (defun make-object (&rest fields)
-  (let ((object (make-hash-table :test #'equal)))
+  "Construct a fresh EQUAL-keyed object from alternating names and values."
+  (let ((object (make-hash-table :test #'equal :size (ceiling (length fields) 2))))
     (loop :for (name value) :on fields :by #'cddr
           :do (setf (gethash name object) value))
     object))

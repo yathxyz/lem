@@ -3921,3 +3921,66 @@ empty redraws, zero width, shrink/grow, height changes and cleared views. Earlie
 encoded row objects remain unchanged. Production and protocol-test sources
 matched the built package byte for byte. Core/kernel sources, installed profiles
 and the previously documented core undo-model mismatch are unchanged.
+
+### Size protocol objects from their supplied fields (2026-09-19)
+
+The retained allocation profile above attributed 11.1% of samples to protocol
+object construction and 6.3% to hash-table growth. `make-object` now supplies an
+initial size derived from its alternating name/value arguments. Screen headers
+and indexed rows supply all their fields at construction instead of inserting
+the row payload/index afterward. Object freshness, EQUAL keys, last-value-wins
+duplicates, trailing names with NIL values and subsequent mutation remain
+unchanged, as do the protocol schema, limits and JSON field values.
+
+An isolated ABBA probe constructs 100,000 objects per case after 1,000 warmups
+and full GC, using prebuilt field lists and checking field-count checksums:
+
+| Distinct fields | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| ---: | ---: | ---: |
+| 0 | 4.821 → 5.527 | 17,318,848 → 17,335,168 |
+| 2 | 15.715 → 16.187 | 54,053,824 → 54,059,648 |
+| 3 | 17.267 → 18.411 | 57,647,680 → 57,652,928 |
+| 4 | 19.883 → 21.049 | 61,216,064 → 61,209,728 |
+| 6 | 24.442 → 26.036 | 68,886,784 → 68,885,376 |
+| 9 | 37.243 → 29.221 | 124,250,688 → 90,058,048 |
+| 16 | 67.141 → 42.977 | 264,999,040 → 134,577,344 |
+
+Nine-field objects use 27.5% less allocation and 21.5% less CPU; sixteen-field
+objects use 49.2%/36.0% less. Small objects retain SBCL's minimum-size allocation
+behavior and pay a small sizing cost, so this is not a universal constructor
+speedup. A private minimum-eight-slot experiment increased small-object storage
+and CPU and was rejected; a private inline declaration showed no useful
+allocation gain and is not part of the change. Final component artifacts:
+`/tmp/lem-protocol-sizing-component-{before,after}-{1,2}.log` and
+`/tmp/lem-protocol-sizing-component.lisp`.
+
+Packaged ABBA typing captures retain the private 10 MB plaintext fixture,
+600 measured plus 20 warmup keys and 25 ms pacing. Every client's text, final
+buffer, source/copy bytes and clean shutdown were verified, with no simultaneous
+builds or tests. Before:
+`/nix/store/sjrld5xjhj7lkclg8mcw12ni02404ab1-lem-yath/bin/lem`; after:
+`/nix/store/f0qf2hsr8fcq2v1c7ip66bmg37jzb55c-lem-yath/bin/lem`.
+
+| Clients | Mean process CPU before → after (ms) | Mean Lisp bytes before → after | All-client maxima, both runs before → after (ms) |
+| --- | ---: | ---: | --- |
+| 1 | 363.156 → 352.615 | 45,737,056 → 45,086,752 | 0.849 / 0.907 → 0.787 / 0.714 |
+| 4 | 867.049 → 874.917 | 116,934,688 → 115,381,728 | 12.414 / 12.865 → 2.360 / 12.106 |
+
+Allocation fell 1.4%/1.3%. Mean CPU changed -2.9%/+0.9%, with much larger
+variation between individual four-client captures. Single-client p95 was
+0.583/0.597 before versus 0.596/0.576 ms after; all-four p95 was 1.094/1.023
+versus 1.018/1.110 ms. Latency remains mixed and GC tails remain; no consistent
+worst-case improvement is claimed. Artifacts:
+`/tmp/lem-protocol-sizing-{1,4}-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-protocol-sizing-runs.py`. These are decoded protocol-screen endpoints,
+not physical presentation measurements.
+
+All five daemon test modules, the SDL client module and all 16 packaged native
+client/display checks pass: `/tmp/lem-protocol-sizing-{daemon,client,native}.log`.
+New assertions cover field counts across size boundaries, duplicate keys,
+value identity, trailing NIL values, unchanged input lists, extensibility and
+omitted versus zero/nonzero row indices. Existing full/delta reconstruction,
+retained wire snapshots, Unicode/styles, queue backpressure and client lifecycle
+checks remain enabled. Production and protocol-test sources matched the built
+package byte for byte. Core/kernel code and installed profiles are unchanged;
+the previously documented core undo-model mismatch remains open.
