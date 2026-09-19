@@ -39,7 +39,8 @@
 (defconstant +continuation-cell+ :continuation-cell)
 
 (defstruct (cell-row (:constructor %make-cell-row (cells faces)))
-  cells faces)
+  (cells #() :type simple-vector)
+  (faces #() :type simple-vector))
 
 (defun make-cell-row (width &optional face)
   (%make-cell-row (make-array width :initial-element " ")

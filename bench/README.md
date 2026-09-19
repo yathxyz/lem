@@ -2975,3 +2975,63 @@ rendering and physical presentation. Artifacts:
 Kernel sources, proof obligations, benchmark budgets and installed profiles are
 unchanged. The core suite was not rerun for this daemon-only change; its previously
 recorded undo-model mismatch remains separate.
+
+
+### Declare the compositor's actual array types (2026-09-19)
+
+After grid reuse, a fresh four-client allocation profile recorded 7,382 samples;
+mode predicates accounted for 20.8% of sampled allocation. A separate CPU profile
+(1,437 samples at 1 ms) showed a different priority: `overlay-cells` accounted for
+56.3% of sampled CPU, while `all-active-modes` accounted for only 1.4%. Generic
+array access and arithmetic dominated composition. These profiles included all
+daemon threads and the 600-key workload plus 20 warmups; they are attribution
+samples, not timing gates. Artifacts:
+`/tmp/lem-daemon-grid-{allocation,cpu}-profile.{lisp,txt,json,log}`.
+
+The two `cell-row` array slots now declare `simple-vector`, matching every
+constructor and caller in the repository. This lets the compiler specialize
+access and length operations. The compositor algorithm, width calculations,
+queue ownership, storage reuse and safety settings are unchanged. Disassembly of
+`overlay-cell`, `clear-cell-at` and `overlay-cells` shows ten calls to generic
+`VECTOR-HAIRY-DATA-VECTOR-*` helpers before, and none after; bounds-error paths
+remain. Artifacts: `/tmp/lem-cell-types-disassembly-{before,after}.{txt,json,log}`.
+
+All five daemon test modules and 16 packaged native-client checks pass, including
+the 3,150 differential placement cases, live width changes, queued snapshots,
+backpressure, mixed clients and resizing. Logs:
+`/tmp/lem-cell-types-{tests,native}.log`. The implementation source matched the
+tested base derivation byte for byte. Packages:
+
+- Before: `/nix/store/4m312faznms4x9pnndcsbg4d9jh37gqc-lem-yath/bin/lem`.
+- After: `/nix/store/7h14rdq9jr220gvy0bimbyjx8z5qa098-lem-yath/bin/lem`.
+- Tested base: `/nix/store/kr17icfhmcrbfdyyq79l61vxqkk0cpnp-sbcl-lem-ncurses-unstable/bin/lem`.
+
+Uninstrumented ABBA captures used one/four clients separately, 600 measured keys,
+20 warmup keys and 25 ms pacing, with no concurrent build/test/benchmark. Every
+client saw every edit; each final buffer matched its fixture. Counters include
+all 620 keys, idle time and boundary evals.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| 1 | 580.215 → 514.093 | 75,606,560 → 75,461,792 |
+| 4 | 1,580.173 → 1,291.266 | 220,744,992 → 220,793,376 |
+
+Mean CPU fell 11.4%/18.3% for one/four clients; allocation was effectively
+unchanged. Four-client GC CPU was also similar (18.937 → 18.772 ms).
+
+| Clients / endpoint | p50, both runs before → after (ms) | p95, both runs before → after (ms) | Maximum, both runs before → after (ms) |
+| --- | --- | --- | --- |
+| 1 / active | 0.554/0.585 → 0.562/0.554 | 0.740/0.852 → 0.813/0.783 | 4.168/1.469 → 1.168/3.776 |
+| 4 / active | 0.679/0.638 → 0.594/0.600 | 1.025/0.838 → 0.829/0.822 | 1.374/1.398 → 1.245/3.872 |
+| 4 / all peers | 1.390/1.329 → 1.120/1.137 | 1.850/1.723 → 1.592/1.587 | 2.452/5.031 → 1.938/4.334 |
+
+Four-client medians/p95 improved in these captures; single-client latency and
+maxima varied. Occasional multi-millisecond stalls remain, so this does not
+establish a universal tail-latency improvement. Measurements end at decoded
+protocol output, excluding native rendering and physical presentation.
+Artifacts: `/tmp/lem-cell-types-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+Core mode predicates were not changed. Kernel sources, proof obligations,
+benchmark budgets and installed profiles are unchanged. The core suite was not
+rerun for this daemon-only change; its previously recorded undo-model mismatch
+remains separate.
