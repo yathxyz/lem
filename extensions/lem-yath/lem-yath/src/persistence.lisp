@@ -38,6 +38,7 @@
   "Normalized state last applied to this process from shared storage.")
 (defvar *last-auto-revert-check-time* nil)
 (defvar *safe-auto-revert-timer* nil)
+(defvar *safe-auto-revert-scan* nil)
 (defvar *isearch-history-position* nil)
 (defvar *isearch-history-edit-string* "")
 (defvar *isearch-history-selected-string* nil)
@@ -56,6 +57,11 @@
     ("LEM-YATH" "LEM-YATH-WORKSPACE-SYMBOL")
     ("LEM-YATH" "LEM-YATH-WORKSPACE-SYMBOL-QUERY"))
   "Reviewed prompt histories safe to persist.  Unknown names default to private.")
+
+(defstruct auto-revert-scan
+  thread
+  (lock (bt2:make-lock :name "auto-revert scan cancellation"))
+  cancelled-p)
 
 (defun persistence-state-override ()
   (uiop:getenv "LEM_YATH_PERSISTENCE_STATE_FILE"))
@@ -1610,8 +1616,92 @@ the visited file byte-for-byte."
                          (buffer-name buffer) condition))
               :failed)))))
 
+(defun auto-revert-scan-cancelled (scan)
+  (bt2:with-lock-held ((auto-revert-scan-lock scan))
+    (auto-revert-scan-cancelled-p scan)))
+
+(defun finish-safe-auto-revert-scan (scan results)
+  ;; Only the editor thread owns the scan slot and accesses captured buffers.
+  (when (eq scan *safe-auto-revert-scan*)
+    (setf *safe-auto-revert-scan* nil)
+    (unless (auto-revert-scan-cancelled scan)
+      (dolist (result results)
+        (destructuring-bind ((buffer path baseline digest) . signature) result
+          (when (and (not (deleted-buffer-p buffer))
+                     (not (buffer-temporary-p buffer))
+                     (equal path (buffer-file-path-key buffer))
+                     (eq baseline (buffer-value buffer 'lem-yath-file-state-signature))
+                     (not (file-signatures-equal-p baseline signature)))
+            ;; A worker result is only a hint. Re-read on the editor thread so
+            ;; a late scan cannot reload stale content or report an old conflict.
+            (handler-case
+                (safe-auto-revert-check-buffer buffer :force-digest digest)
+              (error (condition)
+                (ignore-errors
+                  (message "External-change check failed for ~a: ~a"
+                           (buffer-name buffer) condition))))))))))
+
+(defun safe-auto-revert-poll ()
+  "Read periodic file signatures on one worker; recheck changes in the editor."
+  (when *safe-auto-revert-scan*
+    ;; Cancellation does not interrupt I/O. Retain ownership until its reader
+    ;; finishes, even across reloads, so slow storage cannot accumulate workers.
+    (if (and (auto-revert-scan-cancelled *safe-auto-revert-scan*)
+             (not (bt2:thread-alive-p
+                   (auto-revert-scan-thread *safe-auto-revert-scan*))))
+        (setf *safe-auto-revert-scan* nil)
+        (return-from safe-auto-revert-poll nil)))
+  (when (auto-revert-check-due-p)
+    (setf *last-auto-revert-check-time* (get-internal-real-time))
+    (safe-auto-revert-reconcile-watches)
+    (let ((tasks nil)
+          (digest-limit *safe-auto-revert-digest-limit*))
+      (dolist (buffer (buffer-list))
+        (unless (or (deleted-buffer-p buffer) (buffer-temporary-p buffer))
+          (handler-case
+              (let ((path (buffer-file-path-key buffer))
+                    (baseline (buffer-value buffer 'lem-yath-file-state-signature)))
+                (if (and path baseline
+                         (equal path (buffer-value buffer 'lem-yath-file-state-path)))
+                    (push (list buffer (copy-seq path) baseline
+                                (eq buffer (current-buffer))) tasks)
+                    ;; Non-file adapters and initial baseline establishment
+                    ;; access editor state and retain their synchronous path.
+                    (safe-auto-revert-check-buffer buffer)))
+            (error (condition)
+              (ignore-errors
+                (message "External-change check failed for ~a: ~a"
+                         (buffer-name buffer) condition))))))
+      (when tasks
+        (let ((scan (make-auto-revert-scan)))
+          (setf *safe-auto-revert-scan* scan)
+          (handler-case
+              (setf (auto-revert-scan-thread scan)
+                    (bt2:make-thread
+                     (lambda ()
+                       (let ((*safe-auto-revert-digest-limit* digest-limit)
+                             (results nil))
+                         (dolist (task (nreverse tasks))
+                           (when (auto-revert-scan-cancelled scan) (return))
+                           (push (cons task
+                                       (handler-case
+                                           (file-state-signature
+                                            (second task) :digest (fourth task))
+                                         (error () (list :unreadable))))
+                                 results))
+                         (send-event
+                          (lambda ()
+                            (finish-safe-auto-revert-scan scan (nreverse results))))))
+                     :name "lem-yath/auto-revert-scan"))
+            (error (condition)
+              (setf *safe-auto-revert-scan* nil)
+              (error condition))))))))
+
 (defun stop-safe-auto-revert-timer ()
   "Stop the periodic external-change timer owned by this configuration."
+  (when *safe-auto-revert-scan*
+    (bt2:with-lock-held ((auto-revert-scan-lock *safe-auto-revert-scan*))
+      (setf (auto-revert-scan-cancelled-p *safe-auto-revert-scan*) t)))
   (alexandria:when-let ((timer *safe-auto-revert-timer*))
     ;; Clear ownership first so an already queued callback becomes a no-op.
     (setf *safe-auto-revert-timer* nil)
@@ -1627,7 +1717,7 @@ the visited file byte-for-byte."
            (lambda ()
              (when (eq timer *safe-auto-revert-timer*)
                (handler-case
-                   (safe-auto-revert-check-all)
+                   (safe-auto-revert-poll)
                  (error (condition)
                    (ignore-errors
                      (message "Periodic external-change check failed: ~a"
@@ -1781,7 +1871,8 @@ the visited file byte-for-byte."
 ;; checker.  Remove/re-add every hook so hot reload remains exactly idempotent.
 (remove-hook *pre-command-hook* 'lem-core/commands/file::ask-revert-buffer)
 (remove-hook *pre-command-hook* 'safe-auto-revert-check-all)
-(add-hook *pre-command-hook* 'safe-auto-revert-check-all 5000)
+(remove-hook *pre-command-hook* 'safe-auto-revert-poll)
+(add-hook *pre-command-hook* 'safe-auto-revert-poll 5000)
 (start-file-notify-service #'safe-auto-revert-notification)
 (safe-auto-revert-reconcile-watches)
 (start-safe-auto-revert-timer)

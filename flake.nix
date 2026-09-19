@@ -670,6 +670,14 @@
                 export LEM_X11_LIBRARY="${pkgs.xorg.libX11}/lib/libX11.so.6"
                 python3 ${./scripts/daemon-client-display-test.py} | tee "$out/acceptance.log"
               '';
+              persistence-polling = pkgs.runCommand "lem-persistence-polling-check" {
+                nativeBuildInputs = [ pkgs.python3 ];
+              } ''
+                export LEM_BIN="${lemYath}/bin/lem"
+                export LEMCLIENT_BIN="${lemclient}/bin/lemclient"
+                export LEM_POLLING_FIXTURE="${./extensions/lem-yath/scripts/persistence-polling-fixture.lisp}"
+                python3 ${./scripts/daemon-persistence-polling-test.py} > "$out"
+              '';
             }
           );
 

@@ -299,7 +299,13 @@ review, undo, bounds, and recovery behavior.
 - prompt Linux filesystem-notification refresh of externally changed clean
   local files without requiring a keypress, with a bounded shared-directory
   watcher plus the configured five-second global safety scan; unsupported files
-  and non-file adapters rely on that scan. Directory refresh retains the exact
+  and non-file adapters rely on that scan. Periodic file reads run on one worker;
+  detected changes are rechecked on the editor thread before any reload. A key
+  arriving during the read remains a local edit and receives conflict protection.
+  Saves, explicit scans, notifications, and non-file adapters remain synchronous.
+  Reload/exit cancels pending scan results; an active read finishes without
+  touching buffers, and slow storage cannot accumulate polling workers.
+  Directory refresh retains the exact
   selected entry, cursor column, and surviving marks. Stale-save protection
   for dirty buffers, and private cross-process persistence for file positions,
   selected directory entries,

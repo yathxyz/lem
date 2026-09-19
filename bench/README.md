@@ -3783,3 +3783,71 @@ save races and concurrent persistence checks remain enabled and pass. Production
 source and both persistence test files matched the built package byte for byte.
 No core/kernel source or installed profile changed; the known core undo-model
 mismatch remains outside this checkpoint.
+
+### Move routine file polling off the editor thread (2026-09-19)
+
+The preceding hash optimization retained about 9 ms of synchronous work each
+five seconds on the 10 MB fixture. Routine pre-command/timer polling now captures
+tracked paths, baseline identities and digest policy on the editor thread, then
+reads file signatures on one worker. Results return through the editor event
+queue. A changed result is only a hint: the original synchronous checker re-reads
+the file before reporting a conflict or reloading. Saved/reloaded baselines,
+renamed paths, deleted/temporary buffers and cancelled scans invalidate old work.
+An unchanged result does not mutate editor state.
+
+There is at most one polling read in flight, including across configuration
+reloads. Cancellation rejects results and stops the next read; it does not
+interrupt an active I/O operation or wait for it on the editor thread. Ownership
+is retained until that reader finishes, preventing a slow filesystem from
+accumulating workers. Workers never modify buffers or write files. Saves, explicit
+forced scans, buffer-switch checks, notifications and non-file adapters retain
+their synchronous behavior and integrity checks. A key arriving during a poll
+is now processed immediately: if the disk changed, those local edits are
+preserved and a conflict is reported after the check, rather than reloading
+before the key. This timing behavior is documented in the configuration README.
+
+All 58 packaged persistence checks, 16 native display/client checks and 14 new
+polling checks pass. The new test deliberately blocks real worker reads while
+editing, saving, reloading, renaming, deleting, replacing the configuration and
+shutting down. It checks a same-metadata rewrite, fresh disk rechecks, stale
+baseline rejection, single-worker ownership, cancellation and resumed polling.
+Existing idle notification/polling fallback, dirty-buffer, stale-save, directory
+adapter and persistence merge tests remain enabled. A private negative control
+without baseline-identity rejection fails the newer-reload test as intended:
+`/tmp/lem-async-poll-negative.log`. Final checks:
+`/tmp/lem-async-poll-final-runtime.log` and Nix `persistence-polling` output.
+Production source, Lisp race fixture and Python runner matched the built sources.
+
+ABBA captures use the unchanged 600-key plus 20-warmup, 25 ms, private 10 MB
+plaintext workload. All peers, final text, source/copy bytes and clean shutdown
+were verified. No builds/tests ran concurrently. Packages:
+
+- Before: `/nix/store/75xj5brwy4lwzkv37l6aj9srpsz59rjq-lem-yath/bin/lem`.
+- After: `/nix/store/fi6mgpas22a5mv5f10wq5fmyzs93akzm-lem-yath/bin/lem`.
+
+| Clients | Mean process CPU before → after (ms) | Mean Lisp bytes before → after | All-client maxima, both runs before → after (ms) |
+| --- | ---: | ---: | --- |
+| 1 | 388.564 → 376.254 | 46,985,248 → 47,595,744 | 9.393 / 9.175 → 0.808 / 1.136 |
+| 4 | 948.712 → 927.137 | 124,861,984 → 125,592,160 | 9.219 / 17.569 → 2.086 / 12.621 |
+
+Both single-client controls had >5 ms updates at sample indices 176/372/568;
+neither candidate did. Both four-client controls had them at 173/366/559; the
+candidates had none at that cadence. A separate isolated tail remains: one
+four-client control also stalled at index 501, and one candidate at 499.
+Single-client p95 was 0.621/0.549 before versus 0.592/0.607 ms after; all-four p95
+was 1.082/1.040 versus 1.095/1.065 ms. The demonstrated improvement is removal
+of periodic polling stalls, not universally lower ordinary latency. Worker
+overhead increased allocation 1.3%/0.6%; mean CPU fell 3.2%/2.3%, within the
+variation seen between individual runs. Artifacts:
+`/tmp/lem-async-poll-{1,4}-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-async-poll-runs.py`.
+
+A separate instrumented four-client capture had one >2 ms update, at index 473:
+12.992 ms to all peers, with a 13 ms server receive-to-screen wall interval and
+25.225 ms process GC CPU accrued during that interval. GC CPU is not wall pause
+duration. This supports GC attribution for that instrumented tail; it does not
+prove the cause of each uninstrumented spike. Diagnostic overhead affects timing
+and allocation, so these results are not folded into ABBA comparisons. Artifacts:
+`/tmp/lem-async-poll-resources.{json,log}`. All timing endpoints remain decoded
+protocol screens, not physical keyboard-to-monitor latency. Installed profiles
+and core/kernel code are unchanged; the existing undo-model mismatch remains.
