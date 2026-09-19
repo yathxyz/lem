@@ -1852,11 +1852,11 @@ dispatch. The estimator's cost limit bounds the resulting decision tree's
 estimated execution cost, but does not bound the work spent analysing methods.
 The expensive estimate here ultimately selects cached dispatch anyway.
 
-`scripts/bench/cold-command-dispatch.lisp` reproduces this without Lem or Qlot:
+`scripts/bench/diagnostics/cold-command-dispatch.lisp` reproduces this without Lem or Qlot:
 
 ```sh
 sbcl --noinform --no-userinit --no-sysinit \
-  --script scripts/bench/cold-command-dispatch.lisp
+  --script scripts/bench/diagnostics/cold-command-dispatch.lisp
 ```
 
 It defines 1,200 command classes and checks multiple values, around/before/after
