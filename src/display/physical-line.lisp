@@ -186,7 +186,10 @@
 (defun object-height (drawing-object)
   (lem-if:object-height (implementation) drawing-object))
 
-(defun split-string-by-character-type (string)
+(declaim (inline map-character-type-runs))
+(defun map-character-type-runs (function string)
+  ;; Collect the final objects directly instead of allocating an intermediate
+  ;; list of (type . substring) pairs. Each run still owns a fresh substring.
   (loop :with pos := 0 :and items := '()
         :while (< pos (length string))
         :for type := (char-type (char string pos))
@@ -195,7 +198,8 @@
                   :while (and (< pos (length string))
                               (eq type (char-type (char string pos)))
                               (not (eq type :control)))
-                  :finally (push (cons type (subseq string start pos)) items))
+                  :finally (push (funcall function type (subseq string start pos))
+                                 items))
         :finally (return (nreverse items))))
 
 (defun make-line-end-object (string attribute type offset)
@@ -246,6 +250,20 @@
                       :string resolved-string :attribute resolved-attribute
                       :type type :within-cursor within-cursor)))))
 
+(defun create-text-drawing-objects (string attribute)
+  (cond ((alexandria:emptyp string)
+         (list (make-instance 'void-object)))
+        ((and attribute (attribute-image attribute))
+         (list (make-instance 'image-object
+                              :image (attribute-image attribute)
+                              :width (attribute-width attribute)
+                              :height (attribute-height attribute)
+                              :attribute attribute)))
+        (t
+         (map-character-type-runs
+          (lambda (type string) (make-object-with-type string attribute type))
+          string))))
+
 (defun create-drawing-object (item)
   (cond ((and *line-wrap* (typep item 'eol-cursor-item))
          (list (make-instance 'eol-cursor-object
@@ -257,29 +275,13 @@
         ((typep item 'extend-to-eol-item)
          (list (make-instance 'extend-to-eol-object :color (extend-to-eol-item-color item))))
         ((typep item 'line-end-item)
-         (let ((string (line-end-item-text item))
-               (attribute (line-end-item-attribute item)))
-           (loop :for (type . string) :in (split-string-by-character-type string)
-                 :unless (alexandria:emptyp string)
-                 :collect (make-line-end-object string
-                                                attribute
-                                                type
-                                                (line-end-item-offset item)))))
+         (let ((attribute (line-end-item-attribute item))
+               (offset (line-end-item-offset item)))
+           (map-character-type-runs
+            (lambda (type string) (make-line-end-object string attribute type offset))
+            (line-end-item-text item))))
         (t
-         (let ((string (item-string item))
-               (attribute (item-attribute item)))
-           (cond ((alexandria:emptyp string)
-                  (list (make-instance 'void-object)))
-                 ((and attribute (attribute-image attribute))
-                  (list (make-instance 'image-object
-                                       :image (attribute-image attribute)
-                                       :width (attribute-width attribute)
-                                       :height (attribute-height attribute)
-                                       :attribute attribute)))
-                 (t
-                  (loop :for (type . string) :in (split-string-by-character-type string)
-                        :unless (alexandria:emptyp string)
-                        :collect (make-object-with-type string attribute type))))))))
+         (create-text-drawing-objects (item-string item) (item-attribute item)))))
 
 (defun create-drawing-objects (logical-line)
   (multiple-value-bind (items line-end-item)
@@ -986,18 +988,12 @@ approximated per-char width as total/len) and rebuilt content-correctly."
         (right-objects '()))
     (modeline-apply window
                     (lambda (string attribute alignment)
-                      (case alignment
-                        ((:right)
-                         (alexandria:nconcf
-                          right-objects
-                          (create-drawing-object
-                           (make-string-with-attribute-item :string string
-                                                            :attribute attribute))))
-                        (otherwise
-                         (alexandria:nconcf left-objects
-                                            (create-drawing-object
-                                             (make-string-with-attribute-item :string string
-                                                                              :attribute attribute))))))
+                      (let ((objects (create-text-drawing-objects string attribute)))
+                        (case alignment
+                          ((:right)
+                           (alexandria:nconcf right-objects objects))
+                          (otherwise
+                           (alexandria:nconcf left-objects objects)))))
                     default-attribute)
     (values left-objects
             right-objects)))

@@ -4057,3 +4057,85 @@ warm startup 283.246 ms; in-image p95 histogram upper bounds for plain, bigfile,
 longline, scroll, truncate and wordwrap are respectively 1.024, 1.024, 2.048,
 1.024, 1.024 and 2.048 ms. Log: `/tmp/lem-point-compare-t3.log`. This is the
 base image, not the configured wrapper, consistent with prior T3 captures.
+
+### Construct drawing objects directly from character runs (2026-09-19)
+
+A fresh four-client 10 MB typing allocation profile of checkpoint `340002b2e`
+used the same 25-second timed profiler stop before final verification/save:
+`/tmp/lem-point-allocation-profile.{lisp,txt,json,log}`. It captured 5,431 samples;
+modeline construction accounted for 15.7%, drawing-object construction 8.9%,
+and character-run splitting 2.8% (inclusive shares, not additive). The previous
+`point<=` rest-list hotspot is absent. Profiler timing is diagnostic only.
+
+Drawing construction now maps directly over character runs, removing the
+intermediate list of `(type . substring)` pairs. Modeline construction calls
+the shared text constructor directly instead of allocating an item wrapper.
+The private mapper is inline so its callbacks can be compiled at the call site.
+Run strings remain fresh copies, control characters remain separate runs, and
+modeline functions, alignments and attributes are still evaluated every draw.
+No content/style cache, object reuse or compiler safety change was added.
+
+An isolated ABBA probe constructs 100,000 sets of drawing objects per case,
+after 1,000 warmups and full GC. Result-count checksums match between versions:
+
+| Case | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| Empty | 4.381 → 4.564 | 8,073,088 → 8,047,360 |
+| ASCII | 27.323 → 26.670 | 26,060,672 → 22,802,176 |
+| Mixed Unicode | 80.218 → 73.131 | 125,721,856 → 102,897,088 |
+| Controls | 58.570 → 55.429 | 128,938,560 → 109,553,088 |
+| Three-field modeline | 128.033 → 115.374 | 172,222,272 → 139,795,392 |
+
+The modeline case uses 18.8% less memory and 9.9% less CPU. Nonempty text cases
+allocate 12.5–18.2% less and use 2.4–8.8% less CPU. Empty-text CPU increases
+0.184 ms across 100,000 calls (4.2%); its allocation is essentially unchanged.
+Artifacts: `/tmp/lem-drawing-runs-component-{before,after}-{1,2}.log`,
+`/tmp/lem-drawing-runs-component.lisp` and the saved before/after definitions.
+
+Packaged ABBA typing retains the private 10 MB plaintext fixture, 600 measured
+plus 20 warmup keys and 25 ms pacing. Every client's text, final buffer,
+source/copy bytes and clean shutdown were verified. No tests or builds ran
+concurrently with benchmarks. Before:
+`/nix/store/311lvykwfsyzmsiwp5kkmaspl5bpl1c4-lem-yath/bin/lem`; after:
+`/nix/store/b0qk1zyxf8cm800g3ba986sfym6hqbms-lem-yath/bin/lem`.
+
+| Clients | Mean process CPU before → after (ms) | Mean Lisp bytes before → after | All-client maxima, both runs before → after (ms) |
+| --- | ---: | ---: | --- |
+| 1 | 373.718 → 405.132 | 45,071,264 → 44,220,256 | 1.002 / 0.692 → 0.959 / 0.815 |
+| 4 | 986.804 → 922.885 | 110,779,936 → 107,420,512 | 2.047 / 12.531 → 12.271 / 15.746 |
+
+Allocation falls 1.9%/3.0%; CPU changes +8.4%/-6.5%, with substantial variation
+between individual runs. Single-client p95 is 0.641/0.566 before versus
+0.696/0.597 ms after; all-four p95 is 1.259/1.182 versus 1.080/1.243 ms.
+These results support an allocation reduction, not a universal typing CPU or
+latency improvement. Artifacts:
+`/tmp/lem-drawing-runs-{1,4}-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-drawing-runs-runs.py`. Endpoints are decoded protocol screens, not
+physical presentation.
+
+New regressions compare 733 text and line-ending inputs against independent
+character grouping, including controls, CJK, braille, emoji, folders, icons,
+zero-width characters and combining text. They also check image dimensions,
+empty-image precedence, independent output strings, live modeline function
+calls, changed alignment and in-place attribute mutation. The core suite passes
+77/78 modules, with only the documented `kernel-undo-conformance` mismatch.
+All five daemon modules, SDL pixel tests and all 16 packaged native checks pass:
+`/tmp/lem-drawing-runs-{core-final,daemon,pixels,native}.log`. Production and new
+test sources matched the completed package's source byte for byte. Installed
+profiles and kernel code are unchanged.
+
+Longer four-client ABBA captures (1,800 measured plus 20 warmup keys) retain a
+smaller allocation reduction: 341,118,464 → 338,448,384 bytes (-0.8%). Mean CPU
+is 2808.111 → 2767.802 ms (-1.4%). All-client p95 is 1.189/1.236 before versus
+1.209/1.217 ms after; maxima are 13.245/18.175 versus 3.483/17.814 ms. Thus the
+longer runs also show no consistent tail-latency improvement. Artifacts:
+`/tmp/lem-drawing-runs-long-4-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-drawing-runs-long-runs.py`. The smaller sustained allocation benefit
+is reported separately rather than extrapolated from the short captures.
+
+The base ncurses T3 benchmark passes all budgets using `/nix/store/56sc08ijln48yvrvvh8c214m5sm6kd9n-sbcl-lem-ncurses-unstable/bin/lem`. Warm startup
+is 284.341 ms; in-image p95 histogram upper bounds for plain, bigfile, longline,
+scroll, truncate and wordwrap are 1.024, 1.024, 4.096, 1.024, 1.024 and 2.048 ms.
+The longline bound is higher than the preceding capture's 2.048 ms; no terminal
+latency improvement is claimed. Log: `/tmp/lem-drawing-runs-t3.log`. As with prior
+T3 captures, this uses the base image rather than the configured wrapper.
