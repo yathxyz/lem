@@ -330,6 +330,9 @@
           ];
 
           # The base derivation that other variants inherit from
+          # Saved executables otherwise report SBCL's home as ./, making ASDF
+          # recursively scan the launch directory for implementation libraries.
+          # Every executable wrapper must retain the matching SBCL home.
           lem-base = lisp.buildASDFSystem {
             pname = "lem-base";
             version = "unstable";
@@ -348,6 +351,7 @@
               mkdir -p $out/bin
               install lem $out/bin
               wrapProgram $out/bin/lem \
+                --set SBCL_HOME "${lisp}/lib/sbcl/" \
                 --prefix LD_LIBRARY_PATH : "$LD_LIBRARY_PATH" \
                 --prefix DYLD_LIBRARY_PATH : "$DYLD_LIBRARY_PATH"
               runHook postInstall
@@ -383,6 +387,7 @@
               mkdir -p $out/bin
               install lem $out/bin
               wrapProgram $out/bin/lem \
+                --set SBCL_HOME "${lisp}/lib/sbcl/" \
                 --prefix LD_LIBRARY_PATH : "$LD_LIBRARY_PATH:${tree-sitter-grammars.json}:${tree-sitter-grammars.markdown}:${tree-sitter-grammars.yaml}:${tree-sitter-grammars.nix}:${tree-sitter-grammars.python}:${tree-sitter-grammars.javascript}:${tree-sitter-grammars.typescript}:${tree-sitter-grammars.go}:${tree-sitter-grammars.perl}:${tree-sitter-grammars.clojure}" \
                 --prefix DYLD_LIBRARY_PATH : "$DYLD_LIBRARY_PATH"
               runHook postInstall
@@ -418,6 +423,7 @@
               mkdir -p $out/share/lem
               cp -r frontends/sdl2/resources $out/share/lem/
               wrapProgram $out/bin/lemclient \
+                --set SBCL_HOME "${lisp}/lib/sbcl/" \
                 --set LEM_CLIENT_RESOURCES "$out/share/lem/" \
                 --prefix LD_LIBRARY_PATH : "$LD_LIBRARY_PATH" \
                 --prefix DYLD_LIBRARY_PATH : "$DYLD_LIBRARY_PATH"
@@ -439,6 +445,8 @@
               runHook preInstall
               mkdir -p $out/bin
               install lem-recover $out/bin
+              wrapProgram $out/bin/lem-recover \
+                --set SBCL_HOME "${lisp}/lib/sbcl/"
               runHook postInstall
             '';
           });
@@ -475,6 +483,7 @@
               mkdir -p $out/bin
               install lem $out/bin
               wrapProgram $out/bin/lem \
+                --set SBCL_HOME "${lisp}/lib/sbcl/" \
                 --prefix LD_LIBRARY_PATH : "$LD_LIBRARY_PATH:${tree-sitter-grammars.json}:${tree-sitter-grammars.markdown}:${tree-sitter-grammars.yaml}:${tree-sitter-grammars.nix}:${tree-sitter-grammars.python}:${tree-sitter-grammars.javascript}:${tree-sitter-grammars.typescript}:${tree-sitter-grammars.go}:${tree-sitter-grammars.perl}:${tree-sitter-grammars.clojure}" \
                 --prefix DYLD_LIBRARY_PATH : "$DYLD_LIBRARY_PATH"
               runHook postInstall

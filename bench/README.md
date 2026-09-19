@@ -1354,3 +1354,25 @@ for a small buffer, 2.048 ms for a 10 MB file and scrolling, and 16.384 ms for a
 latencies. Warm startup was 2,142.646 ms, exceeding its 2,000 ms budget, so the
 overall run failed its gate. Results are in
 `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919114354.json`.
+
+### Follow-up: packaged startup and SBCL's library directory
+
+Tracing startup found over one million `readlink` calls. In the saved Nix
+executable, `(sb-int:sbcl-homedir-pathname)` returned `#P"./"`; ASDF's wrapping
+source registry consequently scanned the launch directory recursively. In
+this checkout that includes `.direnv/flake-inputs` and the Nixpkgs source tree.
+The cost depends on the directory from which the editor is launched.
+
+Nix executable wrappers now set `SBCL_HOME` to the matching SBCL installation.
+This corrects the implementation-library location without disabling the user's
+ASDF source registry. The base wrapper also covers webview; terminal, SDL,
+daemon-client and recovery executable wrappers receive the same setting.
+
+A rebuilt terminal executable measured 288.677 ms median warm startup (five
+runs), versus 2,142.646 ms before the fix in this checkout. All four keystroke
+p95 buckets remained unchanged, and the complete T3 run passed every budget:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919115118.json`.
+All 15 native-client display checks also passed with the rebuilt launchers.
+These measurements use isolated configuration and do not imply a change to
+the installed user profile. The syscall trace was diagnostic only; its large
+instrumentation overhead is excluded from the reported comparison.
