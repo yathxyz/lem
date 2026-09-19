@@ -8,12 +8,17 @@ screen; it excludes SDL/terminal rendering and physical input/presentation.
 CPU, Lisp allocation and GC CPU cover warmup plus measured keys and idle time.
 GC CPU is not a wall-clock pause measurement. All configuration, files and
 sockets are private; the daemon log and fixture remain under the printed path.
+--fixture copies a UTF-8/LF text file into the private plaintext buffer, prefixed
+with the screen marker. It saves that copy after timing and text verification so
+large modified buffers do not exceed recovery limits at shutdown. The source
+file is never written. Results are published only after clean daemon shutdown.
 --load optionally installs a Lisp experiment only in this disposable daemon.
 --resources adds per-input server counters for attribution. These cover receipt
 through screen construction, before encoding/queueing/writing; the added metadata,
 allocations and locks affect timing, so use separate uninstrumented comparisons.
 """
 import argparse
+import hashlib
 import json
 import os
 import select
@@ -32,6 +37,7 @@ parser.add_argument('--output', required=True)
 parser.add_argument('--warmup', type=int, default=20)
 parser.add_argument('--pace', type=float, default=0.025)
 parser.add_argument('--load')
+parser.add_argument('--fixture', help='UTF-8/LF text fixture to copy; always opened as .txt')
 parser.add_argument('--resources', action='store_true',
                     help='include instrumented server receive-to-screen counters')
 args = parser.parse_args()
@@ -43,6 +49,19 @@ if args.pace < 0:
     parser.error('--pace must be nonnegative')
 if args.load:
     args.load = str(Path(args.load).resolve(strict=True))
+if args.fixture:
+    args.fixture = str(Path(args.fixture).resolve(strict=True))
+    fixture_bytes = Path(args.fixture).read_bytes()
+    try:
+        fixture_text = fixture_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+        parser.error('--fixture must be UTF-8 text')
+    if '\r' in fixture_text:
+        parser.error('--fixture must use LF line endings (no CR characters)')
+else:
+    fixture_text = ''.join(f'Line {i}: repeatable editor text.\n' for i in range(1000))
+document_text = 'BENCH_TARGET\n' + fixture_text
+document_bytes = document_text.encode('utf-8')
 editor = os.environ['LEM_BIN']
 root = Path(tempfile.mkdtemp(prefix='lem-wire-bench-'))
 print('ARTIFACTS: ' + str(root), flush=True)
@@ -53,8 +72,7 @@ for key in ('HOME', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG
     directory.mkdir(mode=0o700)
     env[key] = str(directory)
 document = root / 'bench.txt'
-document.write_text('BENCH_TARGET\n' + ''.join(
-    f'Line {i}: repeatable editor text.\n' for i in range(1000)))
+document.write_bytes(document_bytes)
 peers = []
 rows = {}
 serial = 0
@@ -187,6 +205,12 @@ try:
     stop_resources = evaluate(peers[0], resources)
     assert evaluate(peers[0], '(string= (lem:buffer-text (lem:current-buffer)) '
                     '(uiop:read-file-string ' + quote(document) + '))') == 'T'
+    if args.fixture:
+        assert evaluate(peers[0], '(let ((buffer (lem:get-file-buffer '
+                        + quote(document) + '))) (assert (eq buffer (lem:current-buffer))) '
+                        '(lem:save-buffer buffer) (not (lem:buffer-modified-p buffer)))') == 'T'
+        assert document.read_bytes() == document_bytes
+        assert Path(args.fixture).read_bytes() == fixture_bytes
     start_counters = list(map(int, start_resources.strip('()').split()))
     stop_counters = list(map(int, stop_resources.strip('()').split()))
     assert start_counters[3] == stop_counters[3]
@@ -194,6 +218,10 @@ try:
     result = dict(
         editor=editor, clients=args.clients, root=str(root), samples=records,
         warmup=args.warmup, pace_seconds=args.pace, loaded_source=args.load,
+        fixture_source=args.fixture, fixture_bytes=len(document_bytes),
+        fixture_characters=len(document_text),
+        fixture_sha256=hashlib.sha256(document_bytes).hexdigest(),
+        private_fixture_saved=bool(args.fixture),
         server_resources=args.resources,
         resource_keys=args.count + args.warmup,
         process_cpu_ms=1000 * (stop_counters[0] - start_counters[0]) / units,
@@ -203,10 +231,11 @@ try:
         values = sorted(r[key] for r in records)
         result[key] = dict(p50=statistics.median(values),
                            p95=values[int(0.95 * (len(values) - 1))], maximum=max(values))
+    request(peers[0], 'shutdown', force=True)
+    assert process.wait(timeout=20) == 0, (root / 'daemon.log').read_text()
+    result['shutdown_exit_code'] = process.returncode
     Path(args.output).write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({k: v for k, v in result.items() if k != 'samples'}), flush=True)
-    request(peers[0], 'shutdown', force=True)
-    process.wait(timeout=20)
 finally:
     for peer in peers:
         peer.close()

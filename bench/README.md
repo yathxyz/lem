@@ -3671,3 +3671,50 @@ loop; that policy refusal is intentional, and no budget, workload size or timeou
 was relaxed. The base-image T3 gate remains the applicable preceding measurement.
 Core/kernel sources, proof obligations and installed profiles are unchanged;
 the previously documented core undo-model mismatch remains open.
+
+### Configured large-file typing probe (2026-09-19)
+
+`daemon-input.py --fixture PATH` now copies a UTF-8/LF fixture into its private
+`.txt` buffer, prefixed with the screen marker. The source is never written.
+After measured counters stop, the probe verifies the final text, saves only its
+private copy, checks both files byte for byte and requires clean shutdown before
+publishing results. The default 1,000-line workload is unchanged and does not
+perform this extra save. Results record copied-document size and SHA-256.
+This permits configured large-file measurements without weakening recovery limits
+or treating the existing configured T3 discard-on-exit refusal as a passing gate.
+
+Example, after generating `mixed-10m` with `bench/corpora/generate.lisp`:
+
+```sh
+LEM_BIN=/absolute/path/to/configured/lem \
+  python3 scripts/bench/e2e/daemon-input.py --clients 4 --count 600 \
+  --fixture /path/to/mixed-10m.txt --output /tmp/large-input.json
+```
+
+The editing location remains the initial marker line. These measurements exercise
+plaintext buffer size, not language-mode analysis or edits inside long lines.
+Loading, final text verification, saving and shutdown are outside the counters.
+The endpoint remains decoded protocol screens, not physical presentation.
+
+Small/large/large/small captures used the preceding configured package
+`/nix/store/qf6zqai0z49mgvy4jlc1zbd76cr62ld8-lem-yath/bin/lem`, 600 measured plus
+20 warmup keys and 25 ms pacing. Every capture verified all peers and final text,
+and exited with status zero. No builds or tests ran concurrently. Mean counters:
+
+| Clients | Buffer | Process CPU (ms) | Lisp bytes | All-client maxima, both runs (ms) |
+| --- | --- | ---: | ---: | --- |
+| 1 | 1,000 lines | 389.086 | 50,770,720 | 1.165 / 4.459 |
+| 1 | 10 MB | 781.325 | 895,352,928 | 117.438 / 122.520 |
+| 4 | 1,000 lines | 868.701 | 129,912,544 | 3.863 / 5.173 |
+| 4 | 10 MB | 1,317.474 | 972,998,816 | 126.334 / 124.369 |
+
+Large-file p95 remained 0.600/0.608 ms with one client and 1.252/1.135 ms for all
+four clients. Single-client pauses over 5 ms recurred about every five seconds,
+so p95 alone conceals this periodic cost. This checkpoint establishes the
+reproduction; it makes no optimization claim. The copied large fixture contains
+10,486,292 bytes / 10,443,047 characters, SHA-256
+`ded569e84498271f23fa8ba9684a6bc00fab355649489013925aca23747c67d3`.
+Artifacts: `/tmp/lem-wire-size-{1,4}-{small,large}-{1,2}.{json,log}` and runner
+`/tmp/lem-wire-large-runs.py`. A separate Unicode fixture with no trailing newline
+also passed exact-byte saving and shutdown: `/tmp/lem-wire-unicode-fixture.log`.
+Python compilation and `git diff --check` pass. No production sources changed.
