@@ -103,9 +103,9 @@
               (line-end-object-offset drawing-object-2))))
 
 (defmethod drawing-object-equal ((drawing-object-1 image-object) (drawing-object-2 image-object))
-  (and (eq (image-object-image drawing-object-1) (image-object-image drawing-object-1))
-       (equal (image-object-width drawing-object-1) (image-object-width drawing-object-1))
-       (equal (image-object-height drawing-object-1) (image-object-height drawing-object-1))))
+  (and (eq (image-object-image drawing-object-1) (image-object-image drawing-object-2))
+       (equal (image-object-width drawing-object-1) (image-object-width drawing-object-2))
+       (equal (image-object-height drawing-object-1) (image-object-height drawing-object-2))))
 
 
 (defgeneric drawing-object-mergable-p (drawing-object-1 drawing-object-2))
@@ -136,11 +136,6 @@
   (and (call-next-method)
        (equal (line-end-object-offset drawing-object-1)
               (line-end-object-offset drawing-object-2))))
-
-(defmethod drawing-object-mergable-p ((drawing-object-1 image-object) (drawing-object-2 image-object))
-  (and (eq (image-object-image drawing-object-1) (image-object-image drawing-object-1))
-       (equal (image-object-width drawing-object-1) (image-object-width drawing-object-1))
-       (equal (image-object-height drawing-object-1) (image-object-height drawing-object-1))))
 
 
 (defgeneric drawing-object-merge (drawing-object-1 drawing-object-2))
@@ -175,9 +170,6 @@
                     (text-object-string drawing-object-2)))
   (setf (drawing-object-width drawing-object-1) nil)
   (setf (text-object-surface drawing-object-1) nil)
-  drawing-object-1)
-
-(defmethod drawing-object-merge ((drawing-object-1 image-object) (drawing-object-2 image-object))
   drawing-object-1)
 
 
@@ -686,15 +678,20 @@ over the top-level spine and tolerant of improper (dotted) lists."
 
 (defun compute-line-fingerprint (logical-line scroll-start left-side-width right-side-width)
   "Compute a cheap fingerprint for a logical line's display state."
-  (mix-hashes
-   (logical-line-string logical-line)
-   (logical-line-attributes logical-line)
-   (logical-line-end-of-line-cursor-attribute logical-line)
-   (logical-line-extend-to-end logical-line)
-   (logical-line-line-end-overlay logical-line)
-   scroll-start
-   left-side-width
-   right-side-width))
+  (let ((left-content (logical-line-left-content logical-line)))
+    (mix-hashes
+     (logical-line-string logical-line)
+     (logical-line-attributes logical-line)
+     ;; Equal-width gutters can still change their text or styling. Hash the
+     ;; values, since a fresh CONTENT record is constructed on every redraw.
+     (and left-content (lem/buffer/line:content-string left-content))
+     (and left-content (lem/buffer/line:content-attributes left-content))
+     (logical-line-end-of-line-cursor-attribute logical-line)
+     (logical-line-extend-to-end logical-line)
+     (logical-line-line-end-overlay logical-line)
+     scroll-start
+     left-side-width
+     right-side-width)))
 
 (defun check-line-fingerprint (window y fingerprint)
   "Check if the fingerprint for line at Y matches. Returns cached height or NIL."

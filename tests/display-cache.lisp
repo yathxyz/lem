@@ -2,6 +2,24 @@
   (:use :cl :rove :lem-core))
 (in-package :lem-tests/display-cache)
 
+(deftest image-drawing-cache-identity-and-adjacency
+  ;; Exercise the real object comparison/reduction used by the drawing cache.
+  ;; Image handles stand in for backend surfaces; no renderer is needed here.
+  (flet ((image-object (image width height)
+           (make-instance 'lem-core/display:image-object
+                          :image image :width width :height height :attribute nil)))
+    (let ((original (image-object :first 8 16)))
+      (ok (lem-core::drawing-object-equal original (image-object :first 8 16)))
+      (dolist (other (list (image-object :second 8 16)
+                          (image-object :first 9 16)
+                          (image-object :first 8 17)))
+        (ng (lem-core::drawing-object-equal original other)))
+      ;; Even two identical images occupy separate spans in a row.
+      (dolist (other (list (image-object :first 8 16)
+                          (image-object :second 8 16)))
+        (ok (equal (list original other)
+                   (lem-core::reduce-objects (list original other))))))))
+
 
 (deftest test-mix-hashes
   ;; 1. The Commutativity Check (Does order matter?)
@@ -37,20 +55,38 @@
           '((0 1 color) (0 2 color) (0 3 color) (0 4 color) (0 5 color) (0 6 paredit-highlight)))
     
     ;; 1. Identity Check: Twin lines under twin scroll values must yield twin hashes
-    (ok (= (lem-core::compute-line-fingerprint line-a 10 5)
-           (lem-core::compute-line-fingerprint line-b 10 5)))
+    (ok (= (lem-core::compute-line-fingerprint line-a 10 5 0)
+           (lem-core::compute-line-fingerprint line-b 10 5 0)))
     
     ;; 2. Shallow Hash Fix Check: Verifies deep changes (like Paredit) are caught
-    (ok (not (= (lem-core::compute-line-fingerprint line-a 10 5)
-                (lem-core::compute-line-fingerprint line-c 10 5))))
+    (ok (not (= (lem-core::compute-line-fingerprint line-a 10 5 0)
+                (lem-core::compute-line-fingerprint line-c 10 5 0))))
     
     ;; 3. Parameter Commutativity Check: Swapping scroll-start and layout widths shifts the hash
-    (ok (not (= (lem-core::compute-line-fingerprint line-a 10 5)
-                (lem-core::compute-line-fingerprint line-a 5 10))))
+    (ok (not (= (lem-core::compute-line-fingerprint line-a 10 5 0)
+                (lem-core::compute-line-fingerprint line-a 5 10 0))))
     
     ;; 4. Parameter Cancellation Check: Matching coordinate variables don't zero out
-    (ok (not (= (lem-core::compute-line-fingerprint line-a 15 15)
-                (lem-core::compute-line-fingerprint line-a 30 30))))))
+    (ok (not (= (lem-core::compute-line-fingerprint line-a 15 15 0)
+                (lem-core::compute-line-fingerprint line-a 30 30 0))))
+
+    ;; Both margins affect the available layout width independently.
+    (ok (not (= (lem-core::compute-line-fingerprint line-a 0 5 0)
+                (lem-core::compute-line-fingerprint line-a 0 5 3))))))
+
+(deftest gutter-fingerprint-uses-content
+  (let ((line-a (lem-core::make-logical-line
+                 :string "body"
+                 :left-content (lem/buffer/line:make-content :string "12")))
+        (line-b (lem-core::make-logical-line
+                 :string "body"
+                 :left-content (lem/buffer/line:make-content :string "12"))))
+    (ok (= (lem-core::compute-line-fingerprint line-a 0 2 0)
+           (lem-core::compute-line-fingerprint line-b 0 2 0))
+        "fresh equal gutter records still allow cache hits")
+    (setf (lem/buffer/line:content-string (lem-core::logical-line-left-content line-b)) "13")
+    (ng (= (lem-core::compute-line-fingerprint line-a 0 2 0)
+           (lem-core::compute-line-fingerprint line-b 0 2 0)))))
 
 (deftest test-evict-line-fingerprints-from
   ;; When the tail of a window is blanked by clear-to-end-of-window (e.g. after
@@ -113,9 +149,9 @@
                 :end-of-line-cursor-attribute nil
                 :extend-to-end nil
                 :line-end-overlay nil))
-         (before (lem-core::compute-line-fingerprint line 0 0)))
+         (before (lem-core::compute-line-fingerprint line 0 0 0)))
     (set-attribute attribute :background "#00FF00")
-    (ok (not (= before (lem-core::compute-line-fingerprint line 0 0)))))
+    (ok (not (= before (lem-core::compute-line-fingerprint line 0 0 0)))))
 
   ;; Mutation referenced through the end-of-line cursor attribute.
   (let* ((cursor (make-attribute :background "#FFFFFF"))
@@ -125,6 +161,6 @@
                 :end-of-line-cursor-attribute cursor
                 :extend-to-end nil
                 :line-end-overlay nil))
-         (before (lem-core::compute-line-fingerprint line 0 0)))
+         (before (lem-core::compute-line-fingerprint line 0 0 0)))
     (set-attribute cursor :background "#000000")
-    (ok (not (= before (lem-core::compute-line-fingerprint line 0 0))))))
+    (ok (not (= before (lem-core::compute-line-fingerprint line 0 0 0))))))

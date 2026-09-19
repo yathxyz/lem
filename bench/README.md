@@ -1328,3 +1328,29 @@ same table order above were 3,413 / 1,863 / 152 / 310 / 360 / 829 / 8,505 ms.
 Its result file is
 `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919113615.json`.
 The exit-2 missing-baseline qualification still applies.
+
+### Follow-up: display-cache correctness
+
+Differential redraw tests reproduced stale equal-width gutter labels: the
+horizontal-scroll fingerprint omitted the gutter's contents. It now hashes
+the gutter text and attributes, allowing equal newly constructed gutter
+records to keep cache hits while changed labels invalidate them.
+
+Image drawing-object comparison also compared each field with itself, hiding
+changed images or dimensions. It now compares the two objects. Images are no
+longer merged: the old merge discarded the second adjacent image, even when
+the images differed. Regression tests cover identity, dimensions and adjacency.
+
+Three existing test fixtures were stale: fingerprint callers omitted the new
+right-margin argument, and the layout mock lacked the required character-width
+method. Updating those fixtures brings the full core suite to 72 of 75 passing
+suites. The remaining failures are kernel-undo-conformance, MCP integration
+and emergency-save. All 15 native-client display checks pass after these fixes.
+Image tests exercise comparison and reduction, not physical image rendering.
+
+The first T3 terminal run measured input-enqueue-to-core-paint p95 at 1.024 ms
+for a small buffer, 2.048 ms for a 10 MB file and scrolling, and 16.384 ms for a
+16 KB single line. These are histogram bucket values, not physical monitor
+latencies. Warm startup was 2,142.646 ms, exceeding its 2,000 ms budget, so the
+overall run failed its gate. Results are in
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919114354.json`.

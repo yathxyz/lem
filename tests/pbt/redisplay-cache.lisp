@@ -219,7 +219,7 @@ via create-logical-line inside do-logical-line)."
   (let ((result nil) (i 0))
     (lem-core::do-logical-line (logical-line window)
       (when (zerop i)
-        (setf result (lem-core::compute-line-fingerprint logical-line 0 0)))
+        (setf result (lem-core::compute-line-fingerprint logical-line 0 0 0)))
       (incf i))
     result))
 
@@ -272,6 +272,32 @@ via create-logical-line inside do-logical-line)."
         (render-pane cached nil)
         (render-pane fresh t)
         (ok (grids-equal-p) "recolour redraw yields identical frames")))))
+
+(deftest cache-soundness-gutter-content
+  (with-recording-interface ()
+    (let ((cached (make-pane "gutter-cached" 30 8 nil))
+          (fresh (make-pane "gutter-fresh" 30 8 nil))
+          (gutter "1"))
+      (dolist (pane (list cached fresh))
+        (let ((buffer (pane-buffer pane)))
+          (lem:insert-string (lem:buffer-point buffer) "alpha")
+          ;; Use the internal display hook to vary only the gutter, leaving
+          ;; buffer contents and redraw flags unchanged.
+          (setf (lem:variable-value 'lem-core::display-line-transform-function :buffer buffer)
+                (lambda (buffer point logical-line window)
+                  (declare (ignore buffer point window))
+                  (setf (lem-core::logical-line-left-content logical-line)
+                        (lem/buffer/line:make-content :string gutter :attributes nil))))))
+      (render-pane cached nil)
+      (render-pane fresh t)
+      (ok (equal (recording-frame-alist (pane-view cached))
+                 (recording-frame-alist (pane-view fresh))))
+      ;; Equal width and identical body text must not hide a changed gutter.
+      (setf gutter "2")
+      (render-pane cached nil)
+      (render-pane fresh t)
+      (ok (equal (recording-frame-alist (pane-view cached))
+                 (recording-frame-alist (pane-view fresh)))))))
 
 (deftest cache-soundness-stale-tail
   ;; The stale-tail hazard: a large deletion blanks the window's lower rows via

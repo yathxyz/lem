@@ -120,6 +120,9 @@
   ()
   (:default-initargs :name :layout-conformance-test))
 
+(defmethod lem-if:get-char-width ((implementation layout-test-interface))
+  1)
+
 ;; frontends/ncurses/drawing-object.lisp semantics: text objects measure
 ;; string-width, every other drawing object measures 0.
 (defmethod lem-if:object-width ((implementation layout-test-interface) object)
