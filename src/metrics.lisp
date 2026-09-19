@@ -313,6 +313,10 @@ NAME is the command symbol for :command and is ignored otherwise."
 ;;;; GC log (ring buffer + pause histogram) via *after-gc-hooks*
 ;;;; ------------------------------------------------------------------
 
+;; SBCL's *GC-RUN-TIME* reports process CPU time rather than elapsed time.
+;; The historical "pause" slots and serialized keys are CPU estimates, not
+;; measured elapsed stop-the-world pauses.
+
 (defstruct (gc-log (:constructor %make-gc-log))
   "Ring buffer of the last +gc-ring-size+ GCs plus a pause histogram.
 Written only from `sb-ext:*after-gc-hooks*', which SBCL runs serially

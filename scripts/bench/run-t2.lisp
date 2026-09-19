@@ -163,8 +163,9 @@ registration order)."
 (defun t2-measure-once (workload state)
   "Run WORKLOAD once on STATE after a full GC and return a metrics plist:
 wall-ms, consed (bytes), gc-count, gc-pause-ms, frames.  GC count is captured
-with a transient `*after-gc-hooks*' counter; pause total from the
-`sb-ext:*gc-run-time*' delta (internal-time-units = microseconds on SBCL)."
+with a transient `*after-gc-hooks*' counter. The legacy gc-pause-ms key holds
+GC process CPU time from `sb-ext:*gc-run-time*', not an elapsed wall pause
+(internal-time-units = microseconds on SBCL)."
   (sb-ext:gc :full t)
   (let ((gc-count 0))
     (flet ((count-gc () (incf gc-count)))

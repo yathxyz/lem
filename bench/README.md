@@ -1789,6 +1789,14 @@ path when measuring older saved executables, and a new output path per process:
 (lem-bench/pipeline-samples:start "/tmp/unique-capture.csv")
 ```
 
+For allocation/GC correlation, pass `:resources t` to `start`. This adds
+cumulative process CPU, GC CPU and allocation counters. The analyzer pairs
+command completion with the following redraw, groups redraw wall times by
+whether GC CPU increased, and lists the slowest redraws with their resource
+deltas. It reports unpaired redraws instead of inventing a baseline. Counters
+include other threads and recorder overhead; GC CPU time is **not** an elapsed
+wall pause and must not be subtracted from wall time as if it were one.
+
 The driver still opens its normal fixture and inserts its readiness marker.
 The CSV is written on normal exit, or by `lem-bench/pipeline-samples:stop`.
 Analyze one or more captures with:
@@ -2290,3 +2298,58 @@ Standard T3 passed every budget: startup 286.342 ms and plain / big-file /
 long-line / scroll / truncate / word-wrap p95 buckets of
 1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 2.048 ms. Results end in
 `t3-20260919151348.json` (`/tmp/lem-character-inline-t3.log`).
+
+### Correlate long redraws with GC and allocation (2026-09-19)
+
+The optional pipeline capture now accepts `:resources t`. In addition to stage
+wall durations it records cumulative process CPU time, GC CPU time and bytes
+consed in preallocated arrays. The analyzer validates monotonic counters and
+clock units, pairs command completion with redraw completion, reports unpaired
+redraws, and groups actual redraw wall times by whether GC CPU increased.
+Default captures retain the original two-column CSV and summary.
+
+SBCL 2.5.10's in-image documentation identifies `*gc-run-time*` as process CPU
+time reported by `get-internal-run-time` (`/tmp/lem-gc-clock-doc.log`). It is
+not elapsed stop-the-world time. Resource deltas include other threads and
+recorder overhead, so CPU time may exceed the measured wall duration. The
+older `gc-pause-ms` T2 field and the metrics GC "pause" fields are also CPU
+estimates despite their historical names; comments now make this distinction
+explicit. Their serialized names and historical measurement values are unchanged.
+
+Three captures used the `af253d47a` executable and the existing 200 KB wrapped
+line, with 140 paced key/paint samples each. The first two used a private
+prototype; the third loaded the updated repository diagnostic. Every
+capture was complete, with 140 paired redraws, no unpaired redraws, no dropped
+samples and no recorder replacement. Redraw wall times in milliseconds:
+
+| Capture | Redraws with GC | With-GC p50 / max | Redraws without GC | Without-GC p50 / max |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 15 | 13 / 30 | 125 | 8 / 12 |
+| 2 | 15 | 14 / 31 | 125 | 8 / 10 |
+| 3 | 15 | 12 / 39 | 125 | 8 / 10 |
+
+All redraws above 25 ms coincided with GC. In capture 3, the 39 ms redraw had
+44.995 ms of process CPU and 36.854 ms of GC CPU; these are not wall-pause
+measurements. Roughly 15.8 MB was allocated during each redraw interval
+(non-GC median 15,755,808 bytes in captures 2 and 3). This points toward
+allocation as the next investigation target; it does not attribute every byte
+to a particular function or establish that every possible stall is caused by GC.
+
+Artifacts: `/tmp/lem-tail-resources-{1,2,3}.{sh,log,kv,csv}` and prototype
+`/tmp/lem-pipeline-resources.lisp`. The executable remains
+`/nix/store/q5wvq3ks2jjc435gxqy3638p39pk1lma-sbcl-lem-ncurses-unstable/bin/lem`.
+All three private histogram gates passed. These instrumented captures are
+for attribution, not a before/after performance claim or physical-presentation
+measurement. No production timing, GC setting, benchmark budget or profile
+activation changed.
+
+The Lisp capture self-test passed with resource counters enabled, including
+normal sink chaining/restoration, overflow handling, replacement detection and
+`*read-eval* = nil` loading (`/tmp/lem-pipeline-resources-test.log`). Five Python
+unit tests cover the original format, clock-unit conversion, CPU time exceeding
+wall time, GC grouping, missing command baselines, malformed/decreasing counters,
+loss and sink replacement. Run them with:
+
+```sh
+python3 scripts/bench/e2e/analyze-pipeline-samples-test.py
+```
