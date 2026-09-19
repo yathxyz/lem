@@ -96,12 +96,12 @@ stem_point=''
 stem_view=''
 
 origin_restored() {
-  local text=$1 line
+  local text=$1 line point=${2:-$entry_point} view=${3:-$entry_view}
   line=$(last_report '^ORIGIN ')
-  [[ -n "$entry_point" && -n "$entry_view" &&
+  [[ -n "$point" && -n "$view" &&
      "$line" == *"line40=${text} "* &&
-     "$line" == *"point=${entry_point} "* &&
-     "$line" == *"view=${entry_view} "* &&
+     "$line" == *"point=${point} "* &&
+     "$line" == *"view=${view} "* &&
      "$line" == *'modified=yes '* &&
      "$line" == *'read-only=no '* &&
      "$line" == *'focus=origin' ]]
@@ -589,14 +589,20 @@ press_report F10 '^BOTTOM cleared=yes$' || fail prior-bottom-clear 'could not cl
 
 # Direct deletion cannot reuse the half-freed Vundo window.  The next
 # post-command cycle must recreate the displaced pane with the same UX state.
-if press_report F8 '^BOTTOM installed=yes$'; then
+if press_report F8 '^BOTTOM installed=yes$' && press_report F2 '^ORIGIN '; then
+  # Installing a pane can scroll the source to keep its cursor visible.
+  # Vundo must restore this entry view, not the earlier full-height view.
+  prior_bottom_record=$(last_report '^ORIGIN ')
+  prior_bottom_point=$(report_field point "$prior_bottom_record")
+  prior_bottom_view=$(report_field view "$prior_bottom_record")
   send_keys Space u n
   if press_report X '^DELETE-WINDOW ' &&
      grep -q '^DELETE-WINDOW error=none$' "$LEM_YATH_VUNDO_REPORT" &&
      press_report F9 '^BOTTOM live=' &&
      grep -q '^BOTTOM live=yes buffer=yes same-window=no height=5 point=4:12 view=2:3 cursor-hidden=yes hscroll=7 session=closed tree=none diff=none$' \
        "$LEM_YATH_VUNDO_REPORT" &&
-     press_report F2 '^ORIGIN ' && origin_restored AC; then
+     press_report F2 '^ORIGIN ' &&
+     origin_restored AC "$prior_bottom_point" "$prior_bottom_view"; then
     pass prior-bottom-direct-delete 'direct deletion recreated the prior pane after freeing Vundo'
   else
     fail prior-bottom-direct-delete 'direct deletion dropped or corrupted the prior pane'

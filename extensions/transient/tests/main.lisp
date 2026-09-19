@@ -3,6 +3,56 @@
 
 (in-package :lem/transient/tests)
 
+(deftest hiding-an-absent-transient-does-not-redraw
+  (lem:with-current-buffers ()
+    (lem-fake-interface:with-recording-interface ()
+      (lem:redraw-display)
+      ;; Isolate the popup's ownership state; count actual completed redraws.
+      (let ((lem/transient::*transient-popup-window* nil)
+            (lem/transient::*transient-previous-bottom-state* nil)
+            (lem/transient::*transient-shown-keymap* nil)
+            (lem/transient::*transient-delay-timer* nil)
+            (redraws 0))
+        (let ((lem:*after-redraw-display-hook* nil))
+          (lem:add-hook lem:*after-redraw-display-hook* (lambda () (incf redraws)))
+          (unwind-protect
+               (progn
+                 (lem/transient::hide-transient)
+                 (ok (zerop redraws) "an already absent menu does not redraw")
+                 (lem/transient::show-transient
+                  (lem/transient::parse-transient
+                   '((:key "a" :suffix 'lem:nop-command :description "test"))))
+                 (ok (lem:mode-active-p (lem:current-buffer) 'transient-mode))
+                 (setf redraws 0)
+                 (lem/transient::hide-transient)
+                 (ok (plusp redraws) "closing a visible menu still redraws")
+                 (ng (lem:frame-bottomside-window (lem:current-frame)))
+                 (ng (lem:mode-active-p (lem:current-buffer) 'transient-mode))
+                 (setf redraws 0)
+                 (lem/transient::hide-transient)
+                 (ok (zerop redraws) "repeated hiding stays idle")
+                 ;; Bind the timer manager explicitly so the pending timer is
+                 ;; isolated from any manager left by another test.
+                 (let ((lem/common/timer::*timer-manager*
+                         (make-instance 'lem/common/timer:timer-manager))
+                       (lem/transient::*transient-popup-delay* 60000))
+                   (lem/transient::show-transient-with-delay
+                    (lem/transient::parse-transient '((:key "b" :description "pending"))))
+                   (let ((timer lem/transient::*transient-delay-timer*))
+                     (ok timer)
+                     (lem/transient::hide-transient)
+                     (ok (loop :repeat 100
+                               :when (lem:timer-expired-p timer) :return t
+                               :do (sleep 0.01))
+                         "the canceled timer thread exits")
+                     (ng lem/transient::*transient-delay-timer*)
+                     (ok (zerop redraws) "canceling an unseen menu does not redraw")))
+                 ;; Even without an owned window, active mode state is visible.
+                 (transient-mode t)
+                 (lem/transient::hide-transient)
+                 (ok (plusp redraws) "clearing active mode state still redraws"))
+            (lem/transient::hide-transient)))))))
+
 (defun segments->string (segments)
   "flatten rendered segment lines to a plain string."
   (with-output-to-string (s)

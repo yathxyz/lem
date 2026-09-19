@@ -1445,5 +1445,51 @@ The experimental result file
 `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919120641.json`
 does not describe retained code and must not be used as a speedup claim for
 the current branch. The layout/viewport dependency needs to be resolved before
-this optimization can be reconsidered. Main retains the validated width
-inlining and unconditional transient redraw behavior.
+this optimization can be reconsidered. At that checkpoint, main retained the
+validated width inlining and unconditional transient redraw behavior.
+
+
+### Resolving the transient redraw dependency (2026-09-19)
+
+Tracing the original failure identified an independent bottom-pane lifecycle
+bug. Direct `delete-window` removed a bottom pane without clearing its frame
+owner or restoring the reserved height. Vundo cleared the owner in its deletion
+hook, but the main window stayed at height 47 instead of 50. Its restored view
+position 404 then moved to 428 when Vi adjusted scrolling to the stale height.
+Core now clears the bottom-pane owner and balances windows before deletion
+hooks run. `delete-bottomside-window` delegates to that common path, and no
+longer clears a replacement pane created by a deletion hook. Vundo no longer
+needs to detach the owner itself. New core regression cases failed before this
+fix and pass afterward, including replacement-pane ownership.
+
+With layout restoration explicit, `hide-transient` now redraws only when it
+had visible popup/mode state to remove. It still cancels pending delayed menus
+and performs ownership/mode cleanup on every call. This removes two full
+redraws per ordinary command, from keymap activation and post-command handling.
+Recording-frontend tests cover absent menus, closing visible menus, repeated
+hiding, delayed timer cancellation, and active mode state without a popup.
+
+The Vundo prior-bottom-pane fixture now snapshots the source point/view after
+installing that pane, immediately before opening Vundo. Its old assertion used
+a snapshot from before the layout change: opening a five-row pane can
+legitimately scroll the source to keep its cursor visible. The test still
+requires exact entry-point/view restoration and exact restoration of the
+borrowed pane's buffer, height, point, view, cursor visibility and horizontal
+scroll. All 83 Vundo checks and all 15 native client/display checks pass in the
+rebuilt runtime (`/tmp/lem-layout-validated.log`). The core suite remains 74/75,
+with only the previously documented kernel-undo model mismatch; transient unit
+tests pass. No verified kernel definition changed in this step.
+
+Standard T3 passed all budgets, with warm startup 287.058 ms and input-to-core-
+paint p95 buckets of 1.024 / 2.048 / 8.192 / 1.024 ms for plain / big-file /
+16 KB long-line / scroll. The preceding retained width-inlining build's
+long-line bucket was 16.384 ms. The new result is
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919121846.json`.
+
+The separate 200 KB stress scenario (120 keys at 100 ms intervals, plus 20 wall
+trend samples) improved from 131.072 to 32.768 ms at p95, with 140 recorded
+paints. Command p95 fell to 1.024 ms; redisplay p95 remains 32.768 ms. This still
+fails the 30 ms budget. Results: `/tmp/lem-layout-200k.log` and
+`/tmp/lem-layout-200k.kv`. These are quantized internal timing buckets, not
+physical keyboard-to-monitor latency. The cost of one full long-line redraw
+remains an open optimization target. No installed editor/profile was changed.

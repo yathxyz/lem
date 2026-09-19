@@ -1031,17 +1031,12 @@ clean marker is deliberately not an actual save."
 (defun vundo-tree-window-delete-hook ()
   (let ((session *vundo-session*))
     (when (and session (not (vundo-session-closing-p session)))
-      ;; DELETE-WINDOW runs this hook after removing the window but before
-      ;; freeing or marking it deleted.  Detach the side-window owner now and
-      ;; never ask cleanup to delete/restore the half-deleted object.
-      (when (eq (frame-bottomside-window (current-frame))
-                (vundo-session-tree-window session))
-        (setf (frame-bottomside-window (current-frame)) nil))
+      ;; Core has released the side-window owner and restored the layout,
+      ;; but has not yet freed the window. Never delete this object again.
       (when (vundo-live-buffer-p
              (vundo-session-previous-bottom-buffer session))
-        ;; The caller may be DELETE-BOTTOMSIDE-WINDOW, which clears the frame
-        ;; slot only after this hook returns.  Restore the displaced occupant
-        ;; from the next post-command hook, after the old window is fully free.
+        ;; Restore the displaced occupant from the next post-command hook,
+        ;; after the old window is fully free and rollback has finished.
         (setf *vundo-pending-bottom-restore* session))
       (vundo-close-session session :rollback t :restore-location t
                                   :bottom-window-being-deleted-p t))))

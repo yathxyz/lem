@@ -585,8 +585,10 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
 (defun hide-transient ()
   "Hide the transient window and restore any bottom pane it borrowed."
   (cancel-transient-delay-timer)
-  (let ((window *transient-popup-window*)
-        (previous *transient-previous-bottom-state*))
+  (let* ((window *transient-popup-window*)
+         (previous *transient-previous-bottom-state*)
+         (redraw-needed-p (or window previous *transient-shown-keymap*
+                              (mode-active-p (current-buffer) 'transient-mode))))
     ;; Clear ownership before window operations so their hooks cannot recurse
     ;; through stale transient state.
     (setf *transient-popup-window* nil
@@ -600,7 +602,10 @@ prefixes marked as :intermediate-p are flattened and shown with concatenated key
       (unless (and previous
                    (restore-transient-bottom-state window previous))
         (delete-bottomside-window)))
-    (redraw-display)))
+    ;; Keymap activation and the post-command hook both hide absent menus
+    ;; during ordinary typing. Only redraw when hiding changed visible state.
+    (when redraw-needed-p
+      (redraw-display))))
 
 (add-hook *post-command-hook* 'transient-post-command-update)
 (defun transient-post-command-update ()

@@ -100,6 +100,14 @@
 
 (defclass bottomside-window (side-window) ())
 
+(defmethod %delete-window :after ((window bottomside-window))
+  (let ((frame (current-frame)))
+    (when (eq window (frame-bottomside-window frame))
+      ;; Direct DELETE-WINDOW must release the reserved space too. Do this
+      ;; before deletion hooks restore points or create a replacement pane.
+      (setf (frame-bottomside-window frame) nil)
+      (balance-windows))))
+
 (defun make-bottomside-window (buffer &key (height 10))
   "create a bottom-side window displaying BUFFER with the given HEIGHT.
 
@@ -128,9 +136,7 @@ if a bottom-side window already exists, switch its buffer instead."
   "delete the bottom-side window."
   (let ((frame (current-frame)))
     (when (frame-bottomside-window frame)
-      (delete-window (frame-bottomside-window frame))
-      (setf (frame-bottomside-window frame) nil)
-      (balance-windows))))
+      (delete-window (frame-bottomside-window frame)))))
 
 (defun resize-bottomside-window (window height)
   "resize the bottom-side WINDOW to HEIGHT lines and reposition it."

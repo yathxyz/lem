@@ -7,6 +7,6 @@
   :in-order-to ((test-op (test-op "lem-transient/tests"))))
 
 (defsystem "lem-transient/tests"
-  :depends-on ("lem-transient" "rove")
+  :depends-on ("lem-transient" "lem-fake-interface" "rove")
   :components ((:file "tests/main"))
   :perform (test-op (op c) (symbol-call :rove '#:run c)))
