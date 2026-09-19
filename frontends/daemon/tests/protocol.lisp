@@ -164,6 +164,38 @@
       (lem-daemon::clear-cell-row target 2)
       (ok (equal snapshot (lem-daemon::cell-row-string source))))))
 
+(deftest character-cell-storage-preserves-placement-and-independence
+  (let ((failure nil))
+    (loop :for code :below (min 258 char-code-limit)
+          :for character := (code-char code)
+          :when character
+            :do (dolist (ambiguous-width '(1 2))
+                  (let ((lem/common/character/string-width-utils:*ambiguous-character-width*
+                          ambiguous-width)
+                        (expected (lem-daemon::make-cell-row 8))
+                        (actual (lem-daemon::make-cell-row 8))
+                        (text (format nil "a~cb" character)))
+                    (reference-overlay-text expected 0 text '("#FF0000" nil 1))
+                    (lem-daemon::overlay-text actual 0 text '("#FF0000" nil 1))
+                    (unless (equalp expected actual)
+                      (push (list code ambiguous-width) failure)))))
+    (ok (null failure) (format nil "byte and non-byte boundary placement: ~s" failure)))
+  (let ((first (lem-daemon::make-cell-row 4))
+        (second (lem-daemon::make-cell-row 4))
+        (input (copy-seq "aba")))
+    (lem-daemon::overlay-text first 0 input)
+    (lem-daemon::overlay-text second 0 input)
+    (setf (char input 0) #\x)
+    (lem-daemon::overlay-text first 1 "́")
+    (lem-daemon::overlay-text first 1 "z")
+    (ok (equal "áza " (lem-daemon::cell-row-string first)))
+    (ok (equal "aba " (lem-daemon::cell-row-string second))
+        "combining and overwriting one row leave independently rendered cells intact")
+    (lem-daemon::clear-cell-row second 0)
+    (lem-daemon::overlay-text second 0 "aba")
+    (ok (equal "aba " (lem-daemon::cell-row-string second))
+        "later rows still see the original character strings")))
+
 (deftest screen-storage-reuse-preserves-wire-snapshots
   (lem:with-current-buffers ()
     (let* ((yason:*parse-json-arrays-as-vectors* t)

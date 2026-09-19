@@ -2,6 +2,14 @@
 
 (defvar *daemon-root-implementation* nil)
 
+(defvar *byte-cell-strings*
+  (let ((strings (make-array (min 256 char-code-limit) :initial-element nil)))
+    (dotimes (code (length strings) strings)
+      (let ((character (code-char code)))
+        (when character (setf (svref strings code) (string character))))))
+  "Shared character strings for rows, whose edits replace rather than mutate cells.
+Only the representation is shared; character widths are always looked up live.")
+
 (defclass daemon-implementation (lem:implementation)
   ((connection :initarg :connection :initform nil
                :reader daemon-implementation-connection)
@@ -111,7 +119,11 @@
 
 (defun overlay-text (row column text &optional face)
   (loop :for character :across text
-        :unless (setf column (overlay-cell row column (string character)
+        :for code := (char-code character)
+        :for string := (if (< code 256)
+                           (svref *byte-cell-strings* code)
+                           (string character))
+        :unless (setf column (overlay-cell row column string
                                            (char-width character 0) face))
           :do (return))
   row)

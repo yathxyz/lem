@@ -3268,3 +3268,108 @@ scroll/truncate/wordwrap p95 histogram upper bounds were
 Result: `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919192253.json`.
 Kernel sources, proof obligations, budgets and installed profiles are unchanged.
 The known core undo-model mismatch remains unresolved.
+
+
+### Bounded character strings in daemon rows (2026-09-19)
+
+A fresh four-client allocation profile of `42f1360d6` collected 5,186 samples
+(about one 32 KiB allocation region per sample, all daemon threads). `STRING`
+below `OVERLAY-TEXT` accounted for about 7% of samples. Artifacts:
+`/tmp/lem-color-hex-allocation-profile.{lisp,txt,json,log}`.
+
+`overlay-text` now reuses a fixed table of one-character strings for character
+codes below 256. Other characters still allocate as before. Row edits already
+replace cell strings; combining marks create new strings. The table contains
+representations only: width/icon settings remain live, with no width cache or
+invalidation rules. The same path handles SDL wire-row decoding. This retains
+at most 256 small strings and one vector per process.
+
+The regression compares codes 0–257 under both ambiguous-width settings against
+the frozen placement algorithm (516 cases on SBCL), and checks independent rows,
+repeated characters, combining marks, overwrite/clear operations and mutable
+source text. Existing Unicode, wide-cell repair, live icon-width, retained-frame
+and wire-snapshot regressions remain enabled. All five daemon test modules,
+the SDL client module, the SDL pixel module and all 16 packaged native-client
+checks pass. Final logs: `/tmp/lem-cell-strings-v2-{daemon,client,pixels,native}.log`.
+Both modified Lisp files matched the tested base derivation byte for byte.
+
+- Before: `/nix/store/i51wiqkz21vi76mwm2kbjb6kq3qnglfa-lem-yath/bin/lem`.
+- After: `/nix/store/z5sh1r53qaq5c6lym2qy0j092m3g045j-lem-yath/bin/lem`.
+- Tested base: `/nix/store/ilwnbg1r58ymkqz9982l2c7x8vdhqikr-sbcl-lem-ncurses-unstable/bin/lem`.
+
+An initial prototype read the table length for every character. The final version
+uses the fixed cutoff directly. Unversioned `/tmp/lem-cell-strings-component-*`
+and `/tmp/lem-cell-strings-{1,4}-*` artifacts describe that prototype, not the
+final results below. Final component/input artifacts use the `v2` prefix.
+
+The final composition ABBA used 3,000 100×40 frames per case after 100 warmups,
+with the exact old `overlay-text` definition as the only baseline override.
+Checksums were 120,000 throughout. These component counters include fresh grid
+allocation, excluding core redisplay, encoding, transport and client rendering.
+
+| Fixture / operation | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| ascii / cursor | 175.425 → 173.363 | 222,042,048 → 221,934,976 |
+| ascii / row | 174.755 → 174.806 | 226,844,864 → 221,921,216 |
+| ascii / full | 344.195 → 323.479 | 418,916,352 → 221,921,664 |
+| unicode / cursor | 192.969 → 191.814 | 243,831,552 → 231,961,536 |
+| unicode / row | 196.120 → 193.168 | 246,656,832 → 232,020,736 |
+| unicode / full | 321.887 → 312.714 | 344,120,576 → 254,234,112 |
+| wide / cursor | 241.307 → 240.003 | 222,074,944 → 221,931,008 |
+| wide / row | 250.968 → 248.374 | 226,859,584 → 226,774,400 |
+| wide / full | 567.770 → 558.850 | 418,683,264 → 418,744,192 |
+
+Full ASCII rendering used 47.0% less allocation and 6.0% less CPU; mixed Unicode
+used 26.1% less allocation and 2.9% less CPU. Wide-only results were close to
+baseline (CPU 0.5–1.6% lower, allocation within 0.1%). Artifacts:
+`/tmp/lem-cell-strings-v2-component-{before,after}-{1,2}.log` and the baseline
+`/tmp/lem-cell-strings-before.lisp`.
+
+Configured-daemon typing ABBA used one/four clients separately, 600 measured
+keys, 20 warmup keys and 25 ms pacing. Every peer observed every edit and final
+buffers matched the fixtures. Counters cover all daemon threads, all 620 keys,
+idle time and boundary evals. Tests, builds and other benchmarks ran separately.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| 1 | 388.037 → 408.240 | 57,906,464 → 55,441,120 |
+| 4 | 1,007.041 → 1,013.857 | 156,717,472 → 147,410,976 |
+
+Typing allocation fell 4.3%/5.9%, but mean CPU rose 5.2%/0.7% for one/four
+clients. This does not establish a typing CPU or latency improvement.
+
+| Clients / endpoint | p50, both runs before → after (ms) | p95, both runs before → after (ms) | Maximum, both runs before → after (ms) |
+| --- | --- | --- | --- |
+| 1 / active | 0.467/0.396 → 0.486/0.387 | 0.716/0.591 → 0.774/0.641 | 3.579/3.675 → 4.531/4.107 |
+| 4 / active | 0.489/0.446 → 0.513/0.495 | 0.649/0.628 → 0.642/0.629 | 1.002/1.139 → 4.287/1.135 |
+| 4 / all | 0.951/0.925 → 0.966/0.944 | 1.216/1.171 → 1.180/1.159 | 3.768/1.540 → 4.619/4.349 |
+
+Single-client p95/maxima and four-client maxima worsened; four-client p95 was
+similar. These results end at decoded protocol output, excluding native
+rendering and physical presentation. Artifacts:
+`/tmp/lem-cell-strings-v2-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+A separate private-X11 SDL ABBA exercised 120 single-row or full-frame updates
+per run after the initial warmup frame. A private wrapper counted CPU/allocation
+inside `update-screen` (process-wide counters over each call), excluding drawing,
+JSON decoding and socket handling; its instrumentation adds overhead. The same
+old `overlay-text` override isolated the change. Results:
+
+| SDL update mode | Mean decoding CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| One row | 0.791 → 0.825 | 622,592 → 236,800 |
+| Full frame | 17.727 → 13.526 | 26,634,624 → 10,091,904 |
+
+Full-frame cell decoding used 23.7% less CPU and 62.1% less allocation; single-row
+allocation fell 62.0%, while CPU increased by 0.034 ms over all 120 updates.
+Socket-to-present medians/p95 remained 0/1 ms for row updates and 2/3 ms for full
+frames, at the harness's roughly 1 ms clock resolution. Full-frame maxima were
+4.001/3.000 ms before and 4.000/4.000 ms after. No physical monitor claim follows.
+Artifacts: `/tmp/lem-cell-strings-sdl-{row,full}-{before,after}-{1,2}.log`,
+`/tmp/lem-cell-strings-sdl.lisp` and `/tmp/lem-cell-strings-sdl.py`.
+
+This checkpoint trades a small fixed pool for reduced row allocation and faster
+full-frame SDL decoding; it is not a demonstrated general typing-latency win.
+Core/kernel sources, proof obligations, budgets and installed profiles are
+unchanged. The previously documented core undo-model mismatch remains unresolved;
+the core suite was not rerun for this daemon-only change.
