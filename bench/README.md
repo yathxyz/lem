@@ -1967,3 +1967,68 @@ long-line / scroll / truncate / word-wrap p95 buckets of
 1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms. Results end in
 `t3-20260919135555.json` (`/tmp/lem-bounded-t3.log`). The standalone Nix check
 was also verified after moving its source into `diagnostics/`.
+
+### Bounded counters in the ACL2 length shim (2026-09-19)
+
+A post-dispatch-fix CPU profile of the 200 KB word-wrap path collected 4,586
+samples. The certified wrapping kernel accounted for 40.8% inclusive time;
+`k-explode` accounted for 31.9%, including 6.3% self time in the shim's `len`
+and further time in its per-cell generic addition. The remaining major costs
+include prefix copying, width measurement and character classification.
+Artifacts: `/tmp/lem-current-render-profile.{lisp,sh,txt,log}`.
+
+The existing Common Lisp implementation of ACL2 `len` now counts batches of
+at most 1,024 cons cells using a bounded integer counter. Its accumulated
+total remains unrestricted, and it still returns the length of a dotted
+list's cons prefix, or zero for any atom. No book definition, kernel record,
+or shim translation rule changed. An alternating-order microbenchmark over
+200 traversals of a 200,000-element list took 81-84 ms with the old helper and
+29-31 ms with the new one (`/tmp/lem-len-micro.{lisp,log}`). This approximately
+2.7x component improvement does not describe the entire rendering pipeline.
+
+Matched filtered T2 long-line medians moved from 144.002 to 141.001 ms, with
+min/p90 ranges 142.001-147.001 and 140.001-144.001 ms. Their overlap warrants
+caution about the small whole-workload change. Files end in
+`t2-20260919140102.json` and `t2-20260919140203.json`.
+
+The rebuilt executable used for acceptance and paint timing is
+`/nix/store/wl69sdms0fvnpfavim98hd2ysms15f6x-sbcl-lem-ncurses-unstable/bin/lem`.
+Its derivation's source was checked against both edited files. Two comparisons
+used 140 paced keys/paint samples apiece, with the run order reversed in the
+second comparison. Captures had no overflow or recorder replacement. Values
+are milliseconds, ending at core paint rather than monitor presentation:
+
+| Run | Paint p50 | Paint p95 | Paint max |
+| --- | ---: | ---: | ---: |
+| Before 1 | 11 | 17 | 34 |
+| After 1 | 10 | 16.001 | 36.001 |
+| Before 2 | 11 | 16 | 25 |
+| After 2 | 10 | 15.001 | 33 |
+
+The median and p95 improvements repeat, at roughly the clock's one-millisecond
+resolution. Maximum latency did not improve. The conservative histogram gate
+fails in the first comparison and passes on both sides in the second; no
+budget changed. Artifacts: `/tmp/lem-len-built-{before,after}-{1,2}.{sh,log,kv,csv}`.
+
+New cases cover proper and dotted lists across batch boundaries, arbitrary
+atom tails, and 300,000-element prefixes. They pass alongside the existing
+300 KB render and kernel differential checks. Core remains 74/75 with the
+historical undo-model mismatch (`/tmp/lem-chunked-len-tests.log`). All 12 books
+certified, with zero skips/failures (`/tmp/lem-chunked-len-proofs.log`); the
+unchanged books' certification is separate from testing the hand-written shim.
+All 15 native display, 27 screen-line and 83 Vundo checks passed
+(`/tmp/lem-chunked-len-runtime.log`). No installed profile changed.
+
+Full T2 completed with medians of 1,901.010 / 1,177.007 / 139.001 / 143.001 /
+338.002 / 499.003 / 8,490.049 ms for big-file / isearch / lisp-edit / long-line /
+overlay-heavy / scroll / undo-storm. Frame counts match the previous runtime,
+and median differences range from -2.7% to +3.0%, within the harness noise
+band. Results end in `t2-20260919141011.json`
+(`/tmp/lem-chunked-len-full-t2.log`). Filtered and full T2 still exit 2 because
+the matching Nova baseline is absent; the results are comparative evidence,
+not a passing baseline gate.
+
+Standard T3 passed all budgets: warm startup 285.363 ms and plain / big-file /
+long-line / scroll / truncate / word-wrap p95 buckets of
+1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms. Results end in
+`t3-20260919141206.json` (`/tmp/lem-chunked-len-t3.log`).

@@ -200,6 +200,15 @@ test line is a-z only (the marker glyph never occurs as content)."
       (ok (equal '(1) selected-widths)))))
 
 (deftest layout-exec-twins-equal-naive-recursion
+  (testing "ACL2 length counts proper and dotted prefixes across batches"
+    (let ((len (find-symbol "LEN" "ACL2")))
+      (dolist (tail (list nil :tail 17 "not-a-list" #()))
+        (ok (zerop (funcall len tail)))
+        (dolist (count '(1 1023 1024 1025 2048 2049 300000))
+          (let ((prefix (make-list count :initial-element :element)))
+            (setf (cdr (last prefix)) tail)
+            (ok (= count (funcall len prefix))
+                (format nil "length ~D, final atom ~S" count tail)))))))
   (let ((*num-tests* 300))
     (for-all ((widths (gen-width-list))
               (n (gen-integer :min -2 :max 80))

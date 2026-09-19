@@ -192,11 +192,18 @@
 ;; overflows the control stack on the 200K-codepoint lines the VK-4 :paranoid
 ;; region checks feed it); semantics identical on every input.
 (defun acl2::len (x)
-  (let ((n 0))
-    (loop :while (consp x)
-          :do (setf x (cdr x))
-              (incf n))
-    n))
+  ;; Count bounded batches with native integer arithmetic. TOTAL stays
+  ;; unrestricted: neither long lists nor dotted tails change semantics.
+  (let ((total 0))
+    (loop
+      (let ((count 0))
+        (declare (type (integer 0 1024) count))
+        (loop :while (and (< count 1024) (consp x))
+              :do (setf x (cdr x))
+                  (incf count))
+        (incf total count)
+        (unless (consp x)
+          (return total))))))
 
 ;; true-listp: ACL2 axioms.lisp -- x is a nil-terminated (proper) list.
 (defun acl2::true-listp (x)
