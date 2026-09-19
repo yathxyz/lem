@@ -113,6 +113,24 @@
                     (return-from compare)))))))))
     (ok (null failure) (format nil "3150 composition cases; first mismatch: ~s" failure))))
 
+(deftest single-cell-overwrites-preserve-neighbor-glyphs
+  (let ((failure nil))
+    (block compare
+      (loop :for width :from 0 :to 8
+            :do (loop :for column :from -1 :to 9
+                      :do (dolist (text '("abcdef" "漢字abc" "a漢b字" "é漢x"))
+                            (let ((expected (lem-daemon::make-cell-row width))
+                                  (actual (lem-daemon::make-cell-row width)))
+                              (reference-overlay-text expected 0 text '("#FF0000" nil 1))
+                              (reference-overlay-text actual 0 text '("#FF0000" nil 1))
+                              (reference-overlay-text expected column "x" '(nil "#0000FF" 2))
+                              (lem-daemon::overlay-text actual column "x" '(nil "#0000FF" 2))
+                              (unless (equalp expected actual)
+                                (setf failure (list width column text))
+                                (return-from compare)))))))
+    (ok (null failure)
+        (format nil "396 boundary/face cases; first mismatch: ~s" failure))))
+
 (deftest cell-composition-uses-current-icon-width
   (let* ((lem/common/character/icon::*icon-code-table*
            (alexandria:copy-hash-table lem/common/character/icon::*icon-code-table*))

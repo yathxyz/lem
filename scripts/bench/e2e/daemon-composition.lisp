@@ -1,7 +1,7 @@
 ;;;; In nix develop, from the repository root:
 ;;;; sbcl --noinform --no-sysinit --no-userinit --non-interactive
 ;;;;   --load .qlot/setup.lisp --load scripts/bench/e2e/daemon-composition.lisp
-;;;; Optional LEM_OVERLAY_SOURCE loads baseline overlay-text/overlay-cells definitions.
+;;;; Optional LEM_OVERLAY_SOURCE loads baseline overlay function definitions.
 ;;;; Each fixture composes 3000 100x40 frames after 100 warmups. Row/full modes
 ;;;; also render one/all view rows before composition. CPU and Lisp allocation
 ;;;; include frame allocation; they exclude core redisplay, encoding, transport,
@@ -50,4 +50,5 @@
   (run-benchmark "unicode"
                  (format nil "漢字 é e~c x~c~c~c mixed text"
                          (code-char #x301) #\Tab #\Newline (code-char #xe001))
-                 mode))
+                 mode)
+  (run-benchmark "wide" (make-string 50 :initial-element #\漢) mode))

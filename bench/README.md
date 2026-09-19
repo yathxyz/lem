@@ -3035,3 +3035,84 @@ Core mode predicates were not changed. Kernel sources, proof obligations,
 benchmark budgets and installed profiles are unchanged. The core suite was not
 rerun for this daemon-only change; its previously recorded undo-model mismatch
 remains separate.
+
+
+### Replace ordinary cells without redundant clearing (2026-09-19)
+
+For a one-column write, `overlay-cell` now replaces the string and face directly
+when the old cell neither starts nor continues a wide glyph. Otherwise it uses
+the existing wide-glyph repair before writing. Zero-width combining behavior and
+clipping are unchanged. The wider-cell fallback computes its end column once,
+reusing it for bounds, both loops and the return value. Live character width
+lookup, face values and storage ownership are unchanged.
+
+A new differential regression covers 396 boundary/face cases, comparing writes
+into ASCII, wide and combining-text rows with the frozen reference algorithm.
+The existing 3,150 composition cases and live icon-width tests also pass.
+Removing the wide-head repair in a private negative control fails at width 2,
+column 0, over `漢字abc`, demonstrating that the test detects orphaned continuation
+cells. All five daemon test modules and 16 packaged native-client checks pass.
+Logs: `/tmp/lem-single-cell-v2-{tests,native,negative}.log`. The implementation and
+regression sources matched the tested base derivation byte for byte.
+
+An isolated ABBA comparison used `daemon-composition.lisp`: 100 warmups followed
+by 3,000 100-by-40 compositions per case. The before run loaded the exact committed
+`overlay-cell` definition from `df7df0dd8`; the after run used the final checkout.
+Other code and dependencies were identical. This includes fresh snapshot grid
+allocation and optional row rendering, but excludes core redisplay, encoding,
+transport and native presentation. A separate wide-only capture fills each row
+with 50 CJK characters, exercising the fallback without ordinary cells. This
+fixture is now also included in the checked-in composition benchmark.
+
+| Fixture | Work per composition | Mean CPU before → after (ms, 3,000 compositions) |
+| --- | --- | ---: |
+| ASCII | Compose only | 317.826 → 171.784 |
+| ASCII | Render one row, compose | 323.942 → 174.941 |
+| ASCII | Render all rows, compose | 564.819 → 339.863 |
+| Mixed Unicode | Compose only | 320.776 → 190.940 |
+| Mixed Unicode | Render one row, compose | 336.564 → 193.310 |
+| Mixed Unicode | Render all rows, compose | 487.169 → 319.111 |
+| Wide only | Compose only | 255.330 → 243.252 |
+| Wide only | Render one row, compose | 264.094 → 251.126 |
+| Wide only | Render all rows, compose | 598.298 → 565.793 |
+
+CPU fell 34.5–46.0% in ASCII/mixed cases and 4.7–5.4% in wide-only cases;
+allocation was effectively unchanged. Artifacts:
+`/tmp/lem-single-cell-{micro,wide}-v2-{before,after}-{1,2}.log`.
+
+Final packaged before/after executables:
+
+- Before: `/nix/store/7h14rdq9jr220gvy0bimbyjx8z5qa098-lem-yath/bin/lem`.
+- After: `/nix/store/imrpjf3qs8zndks1c3i6j3k1ih31gzhv-lem-yath/bin/lem`.
+- Tested base: `/nix/store/4jgszpxpsszwff11f5vlr4z53mk6rpyr-sbcl-lem-ncurses-unstable/bin/lem`.
+
+Uninstrumented packaged ABBA captures used one/four clients separately, 600
+measured keys, 20 warmup keys and 25 ms pacing. No test, build or other benchmark
+ran concurrently. Every peer observed every edit, and final buffers matched their
+fixtures. Resource counters include all 620 keys, idle time and boundary evals.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| 1 | 523.863 → 435.341 | 75,624,736 → 75,416,864 |
+| 4 | 1,279.318 → 1,016.270 | 220,968,416 → 220,861,088 |
+
+Mean CPU fell 16.9%/20.6% for one/four clients, with little allocation change.
+
+| Clients / endpoint | p50, both runs before → after (ms) | p95, both runs before → after (ms) | Maximum, both runs before → after (ms) |
+| --- | --- | --- | --- |
+| 1 / active | 0.561/0.564 → 0.468/0.522 | 0.740/0.814 → 0.619/0.729 | 1.047/4.325 → 1.149/3.626 |
+| 4 / active | 0.499/0.598 → 0.516/0.506 | 0.798/0.792 → 0.731/0.732 | 1.227/1.197 → 0.953/1.253 |
+| 4 / all peers | 1.043/1.166 → 0.950/0.936 | 1.564/1.563 → 1.265/1.255 | 5.313/5.029 → 4.887/3.985 |
+
+Single-client median/p95 improved in both runs; four-client active medians
+overlapped, while active/all-peer p95 and all-peer medians improved. Maxima remain
+variable and occasional multi-millisecond stalls persist. Measurements end at
+decoded protocol output, excluding native rendering and physical presentation.
+Artifacts: `/tmp/lem-single-cell-v2-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+Kernel sources, proof obligations, benchmark budgets and installed profiles are
+unchanged. The core suite was not rerun for this daemon-only change; its previously
+recorded undo-model mismatch remains separate.
+
+The expanded checked-in composition benchmark completed all nine fixtures with
+expected checksums: `/tmp/lem-single-cell-final-benchmark-smoke.log`.

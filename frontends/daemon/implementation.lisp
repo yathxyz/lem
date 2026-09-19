@@ -88,14 +88,26 @@
                    (loop-finish))
        column)
       ((minusp column) (+ column width))
-      ((<= (+ column width) (length cells))
-       (loop :for index :from column :below (+ column width)
-             :do (clear-cell-at row index))
-       (setf (aref cells column) string (aref faces column) face)
-       (loop :for index :from (1+ column) :below (+ column width)
-             :do (setf (aref cells index) +continuation-cell+
-                       (aref faces index) face))
-       (+ column width)))))
+      ((eql width 1)
+       (when (< column (length cells))
+         ;; Ordinary cells can be replaced directly. Repair only a wide glyph
+         ;; that starts here or whose continuation occupies this column.
+         (when (or (eq (aref cells column) +continuation-cell+)
+                   (and (< (1+ column) (length cells))
+                        (eq (aref cells (1+ column)) +continuation-cell+)))
+           (clear-cell-at row column))
+         (setf (aref cells column) string (aref faces column) face)
+         (1+ column)))
+      (t
+       (let ((end (+ column width)))
+         (when (<= end (length cells))
+           (loop :for index :from column :below end
+                 :do (clear-cell-at row index))
+           (setf (aref cells column) string (aref faces column) face)
+           (loop :for index :from (1+ column) :below end
+                 :do (setf (aref cells index) +continuation-cell+
+                           (aref faces index) face))
+           end))))))
 
 (defun overlay-text (row column text &optional face)
   (loop :for character :across text
