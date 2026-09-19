@@ -1836,3 +1836,46 @@ The long tail remains real: the second and third measured commands took
 cause has not yet been established. This capture identifies an early-command
 profiling target instead of treating the unchanged histogram bucket as proof
 that recent optimizations had no latency effect. No installed profile changed.
+
+### Cold command dispatch is an SBCL heuristic cost (2026-09-19)
+
+A CPU profile restricted to commands two and three attributed 78.4% of its
+171 samples to SBCL's discrimination-net analysis. Timing the cost estimator
+in a separate private editor identified `lem-core:execute`, with 1,163 methods:
+two calls took 71 and 66 ms. Other observed generic functions took at most
+1 ms. Artifacts: `/tmp/lem-early-profile.{lisp,sh,txt,log}` and
+`/tmp/lem-dispatch-cost.{lisp,sh,txt,log}`.
+
+In [SBCL 2.5.10's dispatcher](https://github.com/sbcl/sbcl/blob/sbcl-2.5.10/src/pcl/dfun.lisp),
+`use-dispatch-dfun-p` compares estimated generated-dispatch cost with cached
+dispatch. The estimator's cost limit bounds the resulting decision tree's
+estimated execution cost, but does not bound the work spent analysing methods.
+The expensive estimate here ultimately selects cached dispatch anyway.
+
+`scripts/bench/cold-command-dispatch.lisp` reproduces this without Lem or Qlot:
+
+```sh
+sbcl --noinform --no-userinit --no-sysinit \
+  --script scripts/bench/cold-command-dispatch.lisp
+```
+
+It defines 1,200 command classes and checks multiple values, around/before/after
+ordering, method replacement and removal, changed mode classes, next-method
+calls, and EQL specializers. Stock SBCL 2.5.10 took 74/89 ms for its first two
+calls; dispatch after method changes took 68-110 ms. Warm calls were below the
+clock resolution. All semantic assertions passed
+(`/tmp/lem-cold-dispatch-stock.log`).
+
+A private-process experiment bypassed the estimator for generic functions
+with more than 256 methods, leaving SBCL's existing cached dispatcher in use.
+Two 200 KB word-wrap captures recorded 140 command/paint samples each, no
+overflow or recorder replacement. Maximum command duration fell from 70-71 ms
+in the earlier current-build captures to 3 ms in both experimental runs.
+Input-to-core-paint p50/p95/max were 11/17/31.001 and 11/17/34 ms, versus
+11/17/80.001 and 11/19/81 ms before. This removes the early-command tail;
+it does not eliminate later redisplay outliers. Artifacts:
+`/tmp/lem-bounded-dispatch.lisp` and
+`/tmp/lem-bounded-dispatch-{1,2}.{sh,log,kv,csv}`.
+
+This is experimental evidence, not yet a rebuilt runtime result. No production
+Lem method definitions, installed profile, or benchmark budgets changed.
