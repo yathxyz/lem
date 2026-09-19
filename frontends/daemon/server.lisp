@@ -575,7 +575,17 @@
                 (response-error connection id "shutdown-failed"
                                 (if (typep result 'error) (princ-to-string result)
                                     "Editor exited with a failure report"))
-                (response-ok connection id "stopped")))
+                (progn
+                  (response-ok connection id "stopped")
+                  ;; Only a verified clean exit may close attached frames
+                  ;; normally. Keep final messages within the bounded queues.
+                  (dolist (client (bt2:with-lock-held (*daemon-lock*)
+                                    (copy-list *daemon-connections*)))
+                    (when (connection-implementation client)
+                      (daemon-send client
+                                   (protocol:make-object
+                                    "version" protocol:+protocol-version+
+                                    "type" "close" "reason" "server-shutdown")))))))
         (error (condition)
           (response-error connection id "shutdown-failed" (princ-to-string condition)))))))
 

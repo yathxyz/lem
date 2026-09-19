@@ -4199,4 +4199,46 @@ an SDL client remains attached reaches that client as unexpected EOF, causing
 an error exit. Evidence: `/tmp/lem-sdl-input-shutdown-client.log` and
 `/tmp/lem-sdl-input-smoke.log`. The validated probe explicitly closes its client
 through `lem-if:close-frontend` before stopping the daemon. The daemon-first
-shutdown behavior remains a separate open issue; it was not masked as success.
+shutdown failure was not masked as success; the following checkpoint fixes it.
+
+
+### Close attached clients after verified daemon shutdown (2026-09-19)
+
+The GUI input probe exposed an actual lifecycle defect: completed daemon
+shutdown sent the administrative success reply but closed attached clients'
+sockets without a normal frame-close message. Their readers consequently
+reported unexpected disconnects, including for ordinary non-waiting clients.
+
+After the existing editor-thread join verifies a clean exit, the daemon now
+queues a `close` message with reason `server-shutdown` for attached clients.
+The administrative response remains first on its own connection. Notifications
+use the existing bounded output queues and shared drain deadline; an
+unresponsive/full peer is still dropped instead of delaying every other peer.
+Failed exit reports or frame teardown do not publish normal closure. A close
+message still cannot complete an unfinished external edit: ordinary clients
+return 0, pending edits return 1, and unexpected disconnects remain errors.
+No change was made to input handling, recovery policy or durability checks.
+
+The new native regression fails against the preceding package at the ordinary
+SDL client's exit status: `/tmp/lem-shutdown-close-before-native.log`. The final
+package passes all 19 native display/lifecycle checks, including ordinary SDL
+and terminal closure, pending-edit failure, failed frame teardown and actual
+daemon death. Queue-level tests hold editor teardown behind a semaphore and
+exercise successful, reported-failure and teardown-error results, with both
+attached and unattached administrative connections and a full peer queue.
+All five daemon test modules pass, including bounded stopped-reader shutdown.
+
+All 27 packaged durability/shutdown checks and all 8 tab-ownership checks also
+pass. The latter now asserts that both the peer and live tab-owning terminal
+clients exit successfully. Existing checkpoint/journal/draft/job failure
+injection, delayed exit hooks, truthful receipts, deadlines and source-file
+preservation checks remain enabled. Artifacts:
+`/tmp/lem-shutdown-close-{daemon,native,durability,tabs}.log`.
+
+Validated binaries:
+`/nix/store/y6lhichhfg0y2zkhniill0j58qwmdv0s-lem-yath/bin/lem` and
+`/nix/store/71plfwmlgyp3sicd5d2rlql78dahc2y9-sbcl-lemclient-unstable/bin/lemclient`.
+Production, queue-regression and native-regression sources matched the completed
+package's source byte for byte; the updated tab test ran directly against those
+binaries. This is a shutdown correctness fix, with no typing-speed claim.
+Installed profiles are unchanged.

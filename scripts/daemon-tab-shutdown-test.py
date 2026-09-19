@@ -115,7 +115,7 @@ def main():
             evaluate('(load ' + quoted(result['overlay']) + ')')
             print('SOURCE OVERLAY PRECHECK: ' + result['overlay'], flush=True)
         left, left_process, left_symbol, _ = attach('left')
-        right, _, right_symbol, right_path = attach('right')
+        right, right_process, right_symbol, right_path = attach('right')
         enable_tabs(left, left_symbol)
         os.write(right, b'\x1a')  # Configured C-z deliberately enters Emacs editing state.
         eventually(frame_form(right_symbol, '(lem-yath::lem-yath-emacs-state-p)'))
@@ -145,7 +145,7 @@ def main():
         check(evaluate(frame_form(right_symbol, peer_current)) == 'T',
               'retired tab ownership is discarded without disturbing the surviving client')
 
-        third, _, third_symbol, _ = attach('third')
+        third, third_process, third_symbol, _ = attach('third')
         enable_tabs(third, third_symbol)
         os.write(right, b'M')
         eventually(frame_form(right_symbol, '(search "PEERKLM" (lem:buffer-text (lem:current-buffer)))'))
@@ -158,6 +158,8 @@ def main():
                                  text=True, capture_output=True, timeout=32)
         check(stopped.returncode == 0 and daemon.wait(timeout=5) == 0,
               'completed shutdown succeeds with a live tab owner and another client active')
+        check(right_process.wait(timeout=10) == 0 and third_process.wait(timeout=10) == 0,
+              'completed shutdown closes both the peer and tab-owning terminal clients cleanly')
         check(right_path.read_text() == 'synthetic-right\n',
               'shutdown leaves the synthetic source file unsaved')
         result['passed'] = True

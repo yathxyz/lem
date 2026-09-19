@@ -447,6 +447,40 @@ with tempfile.TemporaryDirectory(prefix='lem-sdl-check-') as temporary:
             eventually(count, '0')
             print('PASS: a graphical decoding error exits without entering a debugger', flush=True)
 
+            log = (root / 'gui-clean-shutdown.log').open('w')
+            clean_gui = start(command + ['-c', '-n', str(document)], stdout=log, stderr=log)
+            clean_tty, _ = terminal_client(90)
+            log = (root / 'gui-pending-shutdown.log').open('w')
+            pending_gui = start(command + ['-c', str(document)], stdout=log, stderr=log)
+            eventually(count, '3')
+            eventually('(count-if (lambda (request) '
+                       '(eq :visit (lem-daemon::daemon-request-kind request))) '
+                       'lem-daemon::*daemon-requests*)', '1')
+            stopped = subprocess.run(command + ['--stop-server', '--force'], cwd=root, env=env,
+                                     capture_output=True, text=True, timeout=30)
+            assert stopped.returncode == 0 and daemon.wait(timeout=10) == 0, stopped.stderr
+            assert clean_gui.wait(timeout=10) == 0
+            assert clean_tty.wait(timeout=10) == 0
+            print('PASS: completed daemon shutdown closes ordinary SDL and terminal clients cleanly', flush=True)
+            assert pending_gui.wait(timeout=10) == 1
+            print('PASS: daemon shutdown does not mark an unfinished external edit successful', flush=True)
+
+            daemon = start([binaries['editor'], '--daemon=sdl-test'], stdout=dlog, stderr=dlog)
+            assert evaluate('(lem-yath:boot-ok-p)') == 'T'
+            log = (root / 'gui-failed-shutdown.log').open('w')
+            failed_gui = start(command + ['-c', '-n', str(document)], stdout=log, stderr=log)
+            eventually(count, '1')
+            evaluate('(lem:add-hook lem:*teardown-frame-hook* (lambda (frame) '
+                     '(declare (ignore frame)) (error "injected graphical shutdown failure")))')
+            failed = subprocess.run(command + ['--stop-server', '--force'], cwd=root, env=env,
+                                    capture_output=True, text=True, timeout=30)
+            assert failed.returncode == 2 and daemon.wait(timeout=10) != 0
+            assert failed_gui.wait(timeout=10) == 2
+            assert 'Daemon disconnected' in (root / 'gui-failed-shutdown.log').read_text()
+            print('PASS: failed frame teardown remains an error for an attached SDL client', flush=True)
+
+            daemon = start([binaries['editor'], '--daemon=sdl-test'], stdout=dlog, stderr=dlog)
+            assert evaluate('(lem-yath:boot-ok-p)') == 'T'
             log = (root / 'gui-daemon-loss.log').open('w')
             lost = start(command + ['-c', '-n', str(document)], stdout=log, stderr=log)
             eventually(count, '1')

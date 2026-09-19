@@ -13,6 +13,86 @@
 (defmethod transport:close-local-connection ((connection test-transport))
   (setf (test-transport-closed-p connection) t))
 
+(deftest shutdown-close-follows-verified-editor-exit
+  (dolist (outcome '(:success :report :teardown-error))
+    (dolist (admin-attached '(nil t))
+      (flet ((connection (&optional attached)
+               (let ((connection (make-instance 'daemon::daemon-connection
+                                                :transport (make-instance 'test-transport)
+                                                :stream nil)))
+                 (when attached
+                   (setf (daemon::connection-implementation connection)
+                         (make-instance 'daemon:daemon-implementation)))
+                 connection))
+             (messages (connection)
+               (mapcar #'protocol:decode-message (daemon::connection-write-head connection))))
+        (let* ((admin (connection admin-attached))
+               (attached (connection t)) (detached (connection)) (stalled (connection t))
+               (gate (bt2:make-semaphore :count 0))
+               (entered (bt2:make-semaphore :count 0))
+               (editor nil) (finisher nil) (failure nil))
+          ;; One unresponsive peer must not prevent healthy peers from closing.
+          (dotimes (i daemon::+connection-output-message-limit+)
+            (daemon::daemon-send stalled (protocol:make-object "type" "test")))
+          (unwind-protect
+               (progn
+                 (setf editor
+                       (bt2:make-thread
+                        (lambda ()
+                          (bt2:wait-on-semaphore gate)
+                          (when (eq outcome :teardown-error)
+                            (make-condition 'simple-error :format-control "teardown failed")))))
+                 (setf finisher
+                       (bt2:make-thread
+                        (lambda ()
+                          (let ((lem-core::*in-the-editor* nil)
+                                (daemon::*daemon-connections* (list stalled attached detached admin))
+                                (daemon::*daemon-shutdown-reply*
+                                  (list admin "stop" (eq outcome :report) editor)))
+                            (bt2:signal-semaphore entered)
+                            (handler-case (daemon::finish-daemon-shutdown)
+                              (error (condition) (setf failure condition)))))))
+                 (ok (bt2:wait-on-semaphore entered :timeout 2))
+                 (sleep 0.02)
+                 (ok (and (zerop (daemon::connection-write-count admin))
+                          (zerop (daemon::connection-write-count attached)))
+                     "no success receipt or close while editor teardown is still running")
+                 (bt2:signal-semaphore gate)
+                 (bt2:join-thread finisher)
+                 (setf finisher nil)
+                 (ok (null failure))
+                 (let* ((admin-messages (messages admin))
+                        (reply (first admin-messages))
+                        (peer-messages (messages attached)))
+                   (ok (equal "response" (protocol:field reply "type")))
+                   (ok (equal "stop" (protocol:field reply "id")))
+                   (ok (null (messages detached)) "unattached peers get no frame-close message")
+                   (if (eq outcome :success)
+                       (progn
+                         (ok (equal "ok" (protocol:field reply "status")))
+                         (ok (equal "stopped" (protocol:field reply "value")))
+                         (ok (= (length admin-messages) (if admin-attached 2 1)))
+                         (when admin-attached
+                           (ok (equal "close" (protocol:field (second admin-messages) "type"))
+                               "the shutdown response precedes closure on the same connection"))
+                         (ok (= 1 (length peer-messages)))
+                         (let ((close (first peer-messages)))
+                           (ok (equal "close" (protocol:field close "type")))
+                           (ok (equal "server-shutdown" (protocol:field close "reason")))
+                           (ok (eql 0 (client::frame-message-exit-status close nil)))
+                           (ok (eql 1 (client::frame-message-exit-status close "unfinished-edit"))))
+                         (ok (daemon::connection-closed-p stalled)
+                             "a full output queue still closes without blocking healthy peers"))
+                       (progn
+                         (ok (equal "error" (protocol:field reply "status")))
+                         (ok (equal "shutdown-failed" (client::response-error-code reply)))
+                         (ok (= 1 (length admin-messages)))
+                         (ok (null peer-messages) "failed cleanup never publishes normal closure")
+                         (ng (daemon::connection-closed-p stalled))))))
+            (bt2:signal-semaphore gate)
+            (when finisher (bt2:join-thread finisher))
+            (when editor (bt2:join-thread editor))))))))
+
 (deftest output-queue-has-item-and-byte-limits
   (let ((lem-core::*in-the-editor* nil))
     (dolist (payload (list "small" (make-string 524288 :initial-element #\x)))
