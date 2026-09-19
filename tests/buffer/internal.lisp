@@ -14,6 +14,51 @@
         :while line
         :collect (lem/buffer/line:line-plist line)))
 
+(deftest point-nondecreasing-order
+  (let* ((buffer (lem:make-buffer "point-order" :temporary t))
+         (other (lem:make-buffer "point-order-other" :temporary t))
+         (points '()))
+    (unwind-protect
+         (progn
+           (lem:insert-string (lem:buffer-point buffer) (format nil "ab~%cd"))
+           (lem:with-point ((point (lem:buffer-start-point buffer)))
+             (dotimes (offset 6)
+               (push (lem:copy-point point :temporary) points)
+               (lem:character-offset point 1)))
+           (setf points (nreverse points))
+           ;; Numeric offsets independently specify order across columns and
+           ;; lines. Exercise fixed arguments and the remaining variadic tail.
+           (loop :for arity :from 1 :to 5
+                 :do (let ((checked 0) (correct t))
+                       (labels ((check-sequences (remaining offsets)
+                                  (if (zerop remaining)
+                                      (progn
+                                        (incf checked)
+                                        (unless (eq (apply #'<= offsets)
+                                                    (apply #'lem:point<=
+                                                           (mapcar (lambda (offset)
+                                                                     (nth offset points))
+                                                                   offsets)))
+                                          (setf correct nil)))
+                                      (dolist (offset '(0 1 3 5))
+                                        (check-sequences (1- remaining)
+                                                         (cons offset offsets))))))
+                         (check-sequences arity '()))
+                       (ok (and correct (= checked (expt 4 arity)))
+                           (format nil "all orderings of ~D points" arity))))
+           ;; A later buffer mismatch must signal even after an earlier pair
+           ;; is out of order; explicitly supplied NIL is not a missing arg.
+           (loop :for arity :from 2 :to 6
+                 :do (dotimes (index arity)
+                       (dolist (invalid (list nil (lem:buffer-point other)))
+                         (let ((arguments (loop :for i :below arity
+                                                :collect (nth (mod (- arity i) 6)
+                                                              points))))
+                           (setf (nth index arguments) invalid)
+                           (ok (signals (apply #'lem:point<= arguments) 'error)))))))
+      (lem:delete-buffer buffer)
+      (lem:delete-buffer other))))
+
 (deftest edit-modification-generation
   (let* ((buffer (lem:make-buffer "edit-generation" :temporary t :enable-undo-p nil))
          (point (lem:buffer-point buffer)))

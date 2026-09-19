@@ -183,13 +183,23 @@ If `point-kind` is `:temporary` this is unnecessary."
         :for point2 :in more-points
         :always (%point< point1 point2)))
 
-(defun point<= (point &rest more-points)
-  "Return T if argument points are in strictly non-decreasing order, NIL otherwise."
-  (assert (%always-same-buffer point more-points))
-  (loop :for point1 := point :then point2
-        :for point2 :in more-points
-        :always (or (%point< point1 point2)
-                    (%point= point1 point2))))
+(defun point<= (point &optional (second nil second-p) (third nil third-p)
+                       &rest more-points)
+  "Return T if argument points are in non-decreasing order, NIL otherwise."
+  ;; Redisplay commonly compares three points. Keep those arguments out of the
+  ;; rest list, but validate every buffer before short-circuiting comparisons.
+  (assert (let ((buffer (point-buffer point)))
+            (and (or (not second-p) (eq buffer (point-buffer second)))
+                 (or (not third-p) (eq buffer (point-buffer third)))
+                 (loop :for next :in more-points
+                       :always (eq buffer (point-buffer next))))))
+  (flet ((ordered-p (left right)
+           (or (%point< left right) (%point= left right))))
+    (and (or (not second-p) (ordered-p point second))
+         (or (not third-p) (ordered-p second third))
+         (loop :for left := third :then right
+               :for right :in more-points
+               :always (ordered-p left right)))))
 
 (defun point> (point &rest more-points)
   "Return T if its argument points are in strictly decreasing order, NIL otherwise."

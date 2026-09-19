@@ -3984,3 +3984,76 @@ retained wire snapshots, Unicode/styles, queue backpressure and client lifecycle
 checks remain enabled. Production and protocol-test sources matched the built
 package byte for byte. Core/kernel code and installed profiles are unchanged;
 the previously documented core undo-model mismatch remains open.
+
+### Avoid short point-comparison rest lists (2026-09-19)
+
+The retained four-client allocation profile at
+`/tmp/lem-polling-allocation-profile.txt` attributed 4.7% of its 6,491 samples to
+`point<=` under overlay membership checks, entirely through `LISTIFY-&REST`.
+That profile predates the preceding modeline and protocol changes; its percentage
+is a lead, not an estimate of the final build's allocation share.
+
+`point<=` now accepts its second and third points as optional arguments before
+its remaining rest list. Common two/three-point calls therefore avoid building
+that list. Arbitrary arity, equal positions, supplied NIL errors, and validation
+of every buffer before short-circuiting comparisons are retained. No point
+cache, object-lifetime declaration, compiler safety change or kernel change is
+involved. Other comparison functions are unchanged.
+
+An isolated ABBA probe makes one million calls per case, after 10,000 warmups
+and full GC, with prebuilt argument lists and an asserted result checksum:
+
+| Points | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| ---: | ---: | ---: |
+| 1 | 5.563 → 5.296 | 26,240 → 26,240 |
+| 2 | 25.035 → 20.557 | 16,050,432 → 26,240 |
+| 3 | 49.978 → 44.091 | 32,040,960 → 26,240 |
+| 4 | 61.043 → 57.268 | 48,048,128 → 16,043,264 |
+| 6 | 116.685 → 124.935 | 80,076,352 → 48,057,472 |
+
+The common two/three-point cases use 17.9%/11.8% less CPU and lose their per-call
+rest-list allocation. Six-point CPU is 7.1% higher on average (individual
+candidate runs 134.085 and 115.785 ms); longer calls are not a universal CPU win.
+Their allocation still falls by two cons cells per call. Artifacts:
+`/tmp/lem-point-compare-component-{before,after}-{1,2}.log`,
+`/tmp/lem-point-compare-component.lisp` and saved before/after definitions.
+
+Packaged ABBA typing uses the private 10 MB plaintext fixture, 600 measured plus
+20 warmup keys and 25 ms pacing. Every client's text, final buffer, source/copy
+bytes and clean shutdown were verified. No builds or tests ran concurrently
+with either benchmark. Before:
+`/nix/store/f0qf2hsr8fcq2v1c7ip66bmg37jzb55c-lem-yath/bin/lem`; after:
+`/nix/store/311lvykwfsyzmsiwp5kkmaspl5bpl1c4-lem-yath/bin/lem`.
+
+| Clients | Mean process CPU before → after (ms) | Mean Lisp bytes before → after | All-client maxima, both runs before → after (ms) |
+| --- | ---: | ---: | --- |
+| 1 | 404.112 → 383.421 | 46,649,824 → 45,105,568 | 0.982 / 0.922 → 0.895 / 0.840 |
+| 4 | 926.043 → 805.604 | 117,013,472 → 110,811,232 | 12.560 / 15.376 → 12.431 / 12.593 |
+
+Allocation fell 3.3%/5.3%; mean CPU fell 5.1%/13.0%, with substantial variation
+between individual runs (four-client controls 1022.888 and 829.198 ms).
+Single-client p95 was 0.639/0.612 before versus 0.616/0.580 ms after; all-four
+p95 was 1.117/1.031 versus 1.067/1.115 ms. Four-client latency remains mixed and
+roughly 12 ms tails remain; these measurements do not establish a general
+worst-case improvement. They end at decoded protocol screens, not physical
+presentation. Artifacts:
+`/tmp/lem-point-compare-{1,4}-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-point-compare-runs.py`.
+
+New regression coverage checks all 1,364 orderings of one through five points
+at four positions spanning two lines, plus 40 invalid-argument cases. Invalid
+buffers and explicitly supplied NIL are tested at every position of calls with
+two through six arguments, including after an earlier out-of-order pair. The
+core suite passes 77/78 modules; its sole failure remains the documented
+`kernel-undo-conformance` mismatch. All five daemon modules and all 16 packaged
+native client/display checks pass. Logs:
+`/tmp/lem-point-compare-core-final.log`, `/tmp/lem-point-compare-daemon.log`,
+`/tmp/lem-point-compare-native.log`. The production point source matched the
+completed package's source byte for byte. Installed profiles are unchanged.
+
+The base ncurses T3 benchmark also passes all budgets using
+`/nix/store/yg362m21v5jvlgq4vz62wxl1aicsfb49-sbcl-lem-ncurses-unstable/bin/lem`:
+warm startup 283.246 ms; in-image p95 histogram upper bounds for plain, bigfile,
+longline, scroll, truncate and wordwrap are respectively 1.024, 1.024, 2.048,
+1.024, 1.024 and 2.048 ms. Log: `/tmp/lem-point-compare-t3.log`. This is the
+base image, not the configured wrapper, consistent with prior T3 captures.
