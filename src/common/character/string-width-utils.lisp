@@ -72,7 +72,10 @@ terminal configured to render ambiguous-width characters as wide (CJK).")
                     (format nil "\\~D" i)))
     table))
 
+;; Classification runs per character; keep the lookup live when inlined.
+(declaim (inline control-char))
 (defun control-char (char)
+  "Return CHAR's current display replacement and its presence flag."
   (gethash char *char-replacement*))
 
 (defun wide-char-p (char)
@@ -96,7 +99,10 @@ the runtime icon table and *ambiguous-character-width*."
                            (lem/common/character/icon:icon-code-p code)
                            *ambiguous-character-width*))
 
+;; Let per-character loops specialize the default tab argument and width step.
+(declaim (inline char-width))
 (defun char-width (char width &key (tab-size +default-tab-size+))
+  "Return the display column after CHAR, starting at WIDTH."
   (declare (character char) (fixnum width))
   (%char-width-step (char-code char) width tab-size))
 

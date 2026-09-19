@@ -2223,3 +2223,70 @@ long-line / scroll / truncate / word-wrap p95 buckets of
 `t3-20260919150141.json` (`/tmp/lem-proper-length-t3.log`). The word-wrap bucket
 is lower than the prior run; this remains a conservative histogram boundary,
 not an exact percentile or a measured twofold speedup.
+
+### Inline the live character lookup and width wrapper (2026-09-19)
+
+The post-width profile (`/tmp/lem-post-width-profile.txt`) attributed 7.2% self
+time to `char-width` and 2.7% to `control-char`. Both wrappers now permit
+inlining into their callers: character classification can read the replacement
+table directly, and width loops can specialize the default tab argument and
+existing width-step body. The tables and dynamic width setting are still read
+at runtime; no cached classification or replacement table is introduced.
+
+Separate component experiments on `1b71ab9ae` ran 20 million ASCII character
+classifications or width steps. Classification took 123.000/122.001 ms before
+and 113.001/112.001 ms after; the width loop took 134.000/132.001 ms before and
+110.001/108.002 ms after. Artifacts:
+`/tmp/lem-control-inline-probe.{lisp,log}` and
+`/tmp/lem-width-inline-probe.{lisp,log}`. The classification probe also compared
+the old and recompiled functions across all 1,114,112 supported character
+codes, with identical results. These probes retain the initial compiled
+function binding, so reproducing their before/after labels requires the
+stated parent revision.
+
+The existing width vectors, property checks, dynamic icon-registration cases,
+tab settings and ambiguous-width cases pass. Core remains 74/75, with only the
+known undo-model mismatch (`/tmp/lem-character-inline-tests.log`). All 15 native
+display, 27 configured screen-line and 83 Vundo checks passed
+(`/tmp/lem-character-inline-runtime.log`). Kernel sources and the shim are
+unchanged; the proof runner verified that all 12 cached certificates remain
+current, with zero failures (`/tmp/lem-character-inline-proofs.log`).
+
+The rebuilt candidate is
+`/nix/store/q5wvq3ks2jjc435gxqy3638p39pk1lma-sbcl-lem-ncurses-unstable/bin/lem`.
+Its derivation source matches the edited width utility and the calling
+character-classification and physical-line sources. No installed profile changed.
+
+Matched before/after editor runs used the 200 KB word-wrap fixture and 140 paced
+key/paint samples per capture, reversing order in the second pair. Captures
+were complete, with no dropped samples or recorder replacement. Core-paint
+durations in milliseconds:
+
+| Run | p50 | p95 | Maximum |
+| --- | ---: | ---: | ---: |
+| Before 1 | 9 | 14 | 33 |
+| After 1 | 8 | 13 | 43 |
+| Before 2 | 9 | 14 | 37 |
+| After 2 | 8 | 13.001 | 35 |
+
+The median and p95 improvement repeats, at about the clock's one-millisecond
+resolution. Maximum latency does not improve consistently. All four
+conservative histogram gates passed. Artifacts:
+`/tmp/lem-character-inline-built-{before,after}-{1,2}.{sh,log,kv,csv}`.
+The saved executable grew from 33,354,088 to 33,531,360 bytes (177,272 bytes,
+about 0.53%); this is a measured image-size difference, not an allocation-per-key
+claim. These changes trade some compiled code size for lower call overhead.
+
+Full T2 completed with medians of 1,902.010 / 1,163.006 / 136.000 / 127.000 /
+341.003 / 482.002 / 8,314.048 ms for big-file / isearch / lisp-edit / long-line /
+overlay-heavy / scroll / undo-storm. Frame counts match the previous run, and
+median changes range from -3.2% to +1.5%, within the harness noise band.
+Results end in `t2-20260919151144.json`
+(`/tmp/lem-character-inline-full-t2.log`). The run completed and exited 2
+because the matching Nova baseline is absent; this is comparative evidence,
+not a passing baseline gate. No baseline or budget changed.
+
+Standard T3 passed every budget: startup 286.342 ms and plain / big-file /
+long-line / scroll / truncate / word-wrap p95 buckets of
+1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 2.048 ms. Results end in
+`t3-20260919151348.json` (`/tmp/lem-character-inline-t3.log`).
