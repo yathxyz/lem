@@ -179,6 +179,10 @@
 (declaim (inline acl2::natp acl2::k-control-code-p acl2::k-control-len
                  acl2::k-num-digits acl2::k-char-width))
 
+;; Layout folds coerce every width. Inlining keeps the non-negative integer
+;; result visible to the compiler without restricting it to fixnums.
+(declaim (inline acl2::k-nat))
+
 ;; natp: ACL2 axioms.lisp -- (natp x) = x is a non-negative integer.
 (defun acl2::natp (x)
   (and (integerp x) (<= 0 x)))

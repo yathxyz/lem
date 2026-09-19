@@ -184,6 +184,21 @@ test line is a-z only (the marker glyph never occurs as content)."
                                     (t :junk)))))
    :shrink (lambda (l) (lem-tests/pbt/harness::shrink-list l (constantly nil)))))
 
+(deftest layout-widths-preserve-unbounded-integers
+  (let* ((large (ash 1 80))
+         (widths (list large -3 3/2 nil :junk large 2)))
+    (ok (= (+ (* 2 large) 2) (funcall (ksym "K-SUM") widths)))
+    (ok (= large (funcall (ksym "K-SUM") (cons large :tail)))
+        "the sum retains ACL2's list-prefix semantics")
+    (dolist (junk (list nil :junk -1 (- large) 3/2 1.0d0))
+      (ok (zerop (funcall (ksym "K-NAT") junk))))
+    (ok (= large (funcall (ksym "K-NAT") large)))
+    (multiple-value-bind (codes selected-widths)
+        (funcall (ksym "K-CLIP-CHARS") '(97 98) (list large 1)
+                 0 large (1+ large))
+      (ok (equal '(98) codes))
+      (ok (equal '(1) selected-widths)))))
+
 (deftest layout-exec-twins-equal-naive-recursion
   (let ((*num-tests* 300))
     (for-all ((widths (gen-width-list))

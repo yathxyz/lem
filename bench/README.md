@@ -1722,3 +1722,44 @@ failure now explained directly in its output
 these bounded probes; a reference model matching the retained tree remains a
 verification gap. This step changes tests/documentation only, so no performance
 gain or new runtime-build validation is claimed.
+
+### Inline layout width coercion (2026-09-19)
+
+A fresh profile of the post-icon runtime collected 4,857 CPU samples on the
+200 KB ordinary-wrap path with 100 ms key spacing. `k-sum-acc` accounted for
+9.6% inclusive time and its per-width coercion helper `k-nat` for 3.5% self
+time (`/tmp/lem-post-icon-profile.{sh,lisp,txt}`). The Common Lisp shim now
+declares that small certified helper inline. This exposes its non-negative
+integer result to the compiler within summation and clipping folds, without
+restricting widths to fixnums or duplicating the definition.
+
+Matched filtered T2 long-line medians improved from 149.001 to 141.001 ms;
+the respective min/p90 ranges were 145.001-152.001 and 140.001-143.001 ms.
+Results end in `t2-20260919130452.json` and `t2-20260919130531.json`.
+New tests cover 80-bit widths, rational/negative/non-numeric values, improper
+list tails and clipping beyond fixnum columns. These and the existing random
+fold differentials and 300 KB render checks pass. The core suite remains
+74/75 with the documented historical undo-model failure
+(`/tmp/lem-nat-inline-tests.log`). All 15 rebuilt native display checks pass
+(`/tmp/lem-nat-inline-native.log`).
+
+All 12 books certified, with zero skips or failures
+(`/tmp/lem-nat-inline-proofs.log`). The all-workload T2 run completed with
+medians of 1,924.010 / 1,166.007 / 135.001 / 149.001 / 339.003 / 491.003 /
+8,499.050 ms for big-file / isearch / lisp-edit / long-line / overlay-heavy /
+scroll / undo-storm, in
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919130905.json`.
+T2 still exits 2 because the matching Nova baseline is absent; no baseline or
+budget changed.
+
+Standard T3 passes every budget: startup 286.941 ms; plain / big-file /
+long-line / scroll / truncate / word-wrap p95 buckets remain
+1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms, in
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919131011.json`.
+The matched 200 KB word-wrap pair at 100 ms key spacing records 140 paints per
+build and the same 32.768 ms p95 bucket
+(`/tmp/lem-nat-inline-200k-{before,after}.{sh,log,kv}`). This demonstrates a
+replay-computation improvement, not a further typing p95 bucket improvement.
+The histogram's coarse upper edge exceeds the 30 ms stress budget; raw stage
+samples would distinguish smaller latency changes within that bucket. No
+installed editor/profile changed.
