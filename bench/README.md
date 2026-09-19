@@ -3191,3 +3191,80 @@ scroll/truncate/wordwrap p95 histogram upper bounds were
 Result: `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919190650.json`.
 Kernel sources, proof obligations, benchmark budgets and installed profiles
 are unchanged. The previously documented undo-model mismatch remains unresolved.
+
+
+### Encode byte RGB colors directly (2026-09-19)
+
+A refreshed allocation profile after the mode-query change recorded 5,684
+samples; `color-to-hex-string` accounted for 11.7%. This uses SBCL allocation
+sampling across all daemon threads during configured four-client typing (600
+measured keys plus 20 warmups), not an exact byte census. Artifacts:
+`/tmp/lem-mode-query-allocation-profile.{lisp,txt,json,log}`.
+
+For three unsigned-byte RGB components, `color-to-hex-string` now fills a fresh
+seven-character base string directly. It keeps the original FORMAT expression
+for other values: color slots are unrestricted, so negative/out-of-range numbers,
+non-integers and other objects retain their previous formatting behavior. There
+is no cache; in-place color changes are immediately visible and old returned
+strings remain independent. The normal result remains a simple base string on
+the tested SBCL, matching the preceding implementation.
+
+New regressions compare 65,536 RGB triples against the old formatter, covering
+every pair of channel bytes. They also compare 1,080 combinations of byte and
+non-byte values, channel positions, print bases, print cases and radix settings,
+including error outcomes, and check result independence/color mutation.
+The core suite is 76/77, with only the known undo-model tick mismatch (equal
+text/points, production/model ticks 0/1). All five daemon modules and the SDL
+pixel regression module pass. Packaged checks pass all 16 native-client,
+27 screen-line, 83 Vundo and 36 cursor-state cases. Logs:
+`/tmp/lem-color-hex-{core,daemon,pixels,runtime}.log`. Modified source, test and
+ASDF registration matched the tested base derivation byte for byte. Packages:
+
+- Before: `/nix/store/h6vik6hdxh1q6bis73wh9n5ybv1jxi8x-lem-yath/bin/lem`.
+- After: `/nix/store/i51wiqkz21vi76mwm2kbjb6kq3qnglfa-lem-yath/bin/lem`.
+- Tested base: `/nix/store/49f4dzz8l9zmdyvciz6zysy6qfjjqjw4-sbcl-lem-ncurses-unstable/bin/lem`.
+
+A private configured-daemon ABBA component test made one million conversions
+per case after 10,000 warmups and full GC, asserting output/checksums. Counters
+include all daemon threads; small residual variation is not per-call allocation.
+
+| Color case | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| RGB bytes | 157.383 → 9.538 | 176,401,024 → 32,022,912 |
+| Out-of-range/float fallback | 184.117 → 180.695 | 160,160,448 → 160,175,680 |
+
+The byte case used 93.9% less CPU and 81.8% less allocation; the fallback was
+within run variation. These are conversion-only results, excluding rendering
+and input handling. Artifacts: `/tmp/lem-color-hex-micro.lisp` and
+`/tmp/lem-color-hex-micro-{before,after}-{1,2}.{txt,json,log}`.
+
+Uninstrumented typing ABBA captures used one/four clients separately, 600 measured
+keys, 20 warmup keys and 25 ms pacing, without concurrent tests/builds/benchmarks.
+Every peer observed every edit, and final buffers matched the fixtures. Counters
+cover all 620 keys, idle time and boundary evals.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| 1 | 403.002 → 396.702 | 61,978,528 → 57,837,216 |
+| 4 | 1,052.169 → 1,005.153 | 171,641,056 → 156,766,752 |
+
+Allocation fell 6.7%/8.7%, and mean CPU fell 1.6%/4.5% for one/four clients.
+
+| Clients / endpoint | p50, both runs before → after (ms) | p95, both runs before → after (ms) | Maximum, both runs before → after (ms) |
+| --- | --- | --- | --- |
+| 1 / active | 0.436/0.482 → 0.418/0.469 | 0.650/0.707 → 0.625/0.644 | 3.353/3.803 → 0.827/3.405 |
+| 4 / active | 0.494/0.551 → 0.498/0.511 | 0.663/0.761 → 0.693/0.758 | 4.523/1.567 → 1.067/1.231 |
+| 4 / all peers | 0.968/0.956 → 0.946/0.930 | 1.198/1.305 → 1.225/1.303 | 4.954/4.116 → 5.254/4.994 |
+
+Single-client latency improved slightly in these captures; four-client latency
+was mixed, with higher all-peer maxima in the candidate. This is not a consistent
+tail-latency improvement. Measurements end at decoded protocol output, excluding
+native rendering and physical presentation. Artifacts:
+`/tmp/lem-color-hex-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+T3 passed unchanged budgets: warm startup 286.906 ms; plain/bigfile/longline/
+scroll/truncate/wordwrap p95 histogram upper bounds were
+1.024/1.024/4.096/1.024/2.048/2.048 ms. Log: `/tmp/lem-color-hex-t3.log`.
+Result: `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919192253.json`.
+Kernel sources, proof obligations, budgets and installed profiles are unchanged.
+The known core undo-model mismatch remains unresolved.

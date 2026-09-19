@@ -24,7 +24,8 @@
                (:module "buffer"
                 :components ((:file "internal")))
                (:module "common"
-                :components ((:file "ring")
+                :components ((:file "color")
+                             (:file "ring")
                              (:file "killring")
                              (:file "history")
                              (:file "timer")))

@@ -912,7 +912,22 @@ re-parse strings instead of returning colors from the previous theme."
             (t (rgb (* v 255) (* p 255) (* q 255)))))))
 
 (defun color-to-hex-string (color)
-  (format nil "#~2,'0X~2,'0X~2,'0X"
-          (color-red color)
-          (color-green color)
-          (color-blue color)))
+  "Return a fresh hexadecimal string for COLOR's current RGB components."
+  (let ((red (color-red color))
+        (green (color-green color))
+        (blue (color-blue color)))
+    (if (and (typep red '(unsigned-byte 8))
+             (typep green '(unsigned-byte 8))
+             (typep blue '(unsigned-byte 8)))
+        (let ((string (make-string 7 :element-type 'base-char :initial-element #\#)))
+          (flet ((write-channel (value offset)
+                   (setf (schar string offset)
+                         (schar "0123456789ABCDEF" (ldb (byte 4 4) value))
+                         (schar string (1+ offset))
+                         (schar "0123456789ABCDEF" (ldb (byte 4 0) value)))))
+            (write-channel red 1)
+            (write-channel green 3)
+            (write-channel blue 5))
+          string)
+        ;; COLOR slots are unrestricted; preserve FORMAT's behavior outside RGB bytes.
+        (format nil "#~2,'0X~2,'0X~2,'0X" red green blue))))
