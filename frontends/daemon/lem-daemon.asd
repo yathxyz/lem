@@ -37,6 +37,14 @@
              (declare (ignore op))
              (symbol-call :rove :run c)))
 
+(defsystem "lem-daemon/sdl-render/tests"
+  :description "Isolated SDL pixel regressions; run with SDL_VIDEODRIVER=dummy"
+  :depends-on ("lem-daemon/sdl-client" "rove")
+  :components ((:module "tests" :components ((:file "sdl-render"))))
+  :perform (test-op (op c)
+             (declare (ignore op))
+             (symbol-call :rove :run c)))
+
 (defsystem "lem-daemon/recovery-store"
   :description "Private durable text records, usable without an editor or user init"
   :depends-on ("yason" "ironclad" "babel")

@@ -2609,3 +2609,63 @@ plain/bigfile/longline/scroll/truncate/wordwrap p95 histogram upper bounds of
 1.024/1.024/4.096/1.024/2.048/2.048 ms. Result:
 `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919162535.json`;
 log: `/tmp/lem-idle-spin-t3.log`. No installed editor profile was activated.
+
+### Retain SDL pixels between sparse screen updates (2026-09-19)
+
+The client still repainted every cell for cursor-only updates. A short CPU
+profile (144 samples; attribution only) put most samples in drawing, including
+glyph lookups and SDL copy/fill calls (`/tmp/lem-sdl-repaint-profile.{lisp,txt}`).
+The client now retains one window-sized texture and repaints changed rows plus
+the old/new cursor rows. Decoded rows are replaced, so identity detects changes.
+Resize, font metrics, defaults, row count and renderer resets invalidate reuse.
+Every presentation still clears and completely repaints the window backbuffer,
+as required by [SDL_RenderPresent](https://wiki.libsdl.org/SDL2/SDL_RenderPresent);
+retention uses a separate [render target](https://wiki.libsdl.org/SDL2/SDL_SetRenderTarget).
+Unavailable target storage falls back to full repaint and retries on resize/reset.
+The extra pixel storage is one 32-bit window image (about 3 MB in this fixture).
+
+An initial version increased full-update repaint CPU by roughly one third.
+The final version paints directly when at least half the rows change, marking
+the texture stale; the next sparse update rebuilds it before reuse. This avoids
+paying for both a full repaint and a texture copy on dense updates.
+
+Final ABBA comparisons used 120 updates after warmup, the real client event
+loop, a private socket peer and a software renderer. CPU/bytes below are the
+average of two runs per version, summed over those 120 drawing calls. The
+socket-to-present p95 columns list both runs. Baseline source was extracted
+from `b3d498dfe:frontends/daemon/sdl-client.lisp`; both versions used the same
+current Lisp environment. Resource counters include concurrent process threads
+and recorder overhead; allocation counts Lisp bytes, not SDL/native storage.
+
+| Backend / update | Draw CPU before → after (ms) | Lisp bytes before → after | Socket-to-present p95 before → after (ms) |
+| --- | ---: | ---: | --- |
+| Dummy / cursor | 134.664 → 28.205 | 23,796,608 → 703,040 | 2/3 → 2/2 |
+| Dummy / one row | 145.191 → 30.279 | 25,864,256 → 805,696 | 3/2.999 → 2/2 |
+| Dummy / full | 148.156 → 148.510 | 25,913,216 → 26,583,936 | 3/3 → 3/3.001 |
+| Private X11 / cursor | 178.151 → 28.151 | 23,838,336 → 755,200 | 2/2 → 1/1 |
+
+Sparse repaint CPU fell about 79–84% and Lisp allocation about 97%. Full-update
+CPU stayed within baseline variation, with about 2.6% more Lisp allocation for
+cache bookkeeping. Timing resolution is approximately 1 ms; zero samples mean
+below that resolution. These endpoints are SDL presentation calls, not physical
+keyboard-to-monitor measurements. Artifacts:
+`/tmp/lem-sdl-adaptive-{cursor,row,full,x11}-{before,after}-{1,2}.log` and
+`/tmp/lem-sdl-retained-resources.lisp`.
+
+Pixel comparisons against full repaint pass on dummy and private X11 displays:
+Unicode/styles, cursor movement/shape/removal, shorter/empty/replaced rows,
+themes, row-count changes, resize, reset, allocation failure, and dense-to-sparse
+recovery. Unchanged valid frames issue no glyph draws. The benchmark's pixel
+capture now runs before presentation, and window repaints cannot acknowledge an
+older screen while an update is in flight. Both fixture captures match SHA-256
+`0be3e7682a118983994adc6e6bdb43ab23a0ed9f4dc4a6809b9bae5fb37c165e`.
+
+Run pixel tests with `SDL_VIDEODRIVER=dummy scripts/run-tests.sh lem-daemon/sdl-render/tests`
+in `nix develop`. The presentation benchmark now accepts `LEM_SDL_UPDATE_MODE`
+values `cursor`, `row`, and `full`; use `LEM_SDL_PIXELS` separately because
+readback adds measurement overhead. Graphical queue/reader tests pass, as do all
+15 packaged native-client checks. Logs: `/tmp/lem-sdl-adaptive-{pixels,native}.log`,
+`/tmp/lem-sdl-adaptive-x11-pixels.log`, `/tmp/lem-sdl-retained-client-tests.log`.
+The checked package is `/nix/store/ba46fwnphcjjng0l8qhvv15z9h2hk1g8-sbcl-lemclient-unstable/bin/lemclient`;
+its client source and ASDF definition matched the checkout. No core/kernel
+source, proof obligation, benchmark budget or installed profile changed.

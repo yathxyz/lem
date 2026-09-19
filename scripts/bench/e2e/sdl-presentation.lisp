@@ -3,6 +3,9 @@
 ;;;;   --no-sysinit --no-userinit --non-interactive --load .qlot/setup.lisp
 ;;;;   --load scripts/bench/e2e/sdl-presentation.lisp
 ;;;; Optional LEM_SDL_SOURCE loads an older sdl-client.lisp for A/B measurement.
+;;;; LEM_SDL_UPDATE_MODE selects cursor (default), row, or full updates.
+;;;; LEM_SDL_PIXELS captures a frame before presentation; readback adds timing
+;;;; overhead, so use it for pixel comparisons rather than performance runs.
 ;;;; Measures local socket write -> SDL_RenderPresent return, not monitor latency.
 (if (uiop:getenv "LEM_SDL_SOURCE")
     (progn
@@ -38,16 +41,41 @@
         (write-sequence bytes stream)))))
 
 
+(defun benchmark-row (width counter &optional index)
+  "Styled fixture row; COUNTER changes visible text in row/full update modes."
+  (let ((row (protocol:make-object
+              "text" (subseq (concatenate 'string
+                                          (if counter
+                                              (format nil "(defun example (x) (+ x 1)) ; ~3,'0d 漢 é" counter)
+                                              "(defun example (x) (+ x 1)) ; 漢 é")
+                                          (make-string width :initial-element #\Space))
+                              0 (- width 1))
+              "runs" #(#(0 "(defun" "#FF0000" "#0000FF" 1)
+                       #(7 "example" "#00FF00" "#000000" 4)
+                       #(15 "x" "#FFFF00" "#000000" 2)))))
+    (when index (setf (gethash "row" row) index))
+    row))
+
+(defun expected-frame-p (screen x)
+  ;; Window events may repaint an older screen while a socket update is in
+  ;; flight. Only acknowledge a frame carrying that update's cursor position.
+  (let ((cursor (gui::graphical-screen-cursor screen)))
+    (and cursor (eql x (protocol:field cursor "x")))))
+
 (defun run-benchmark ()
   "Exercise the real graphical client with an isolated local socket peer."
-  (let* ((old-runtime (uiop:getenv "XDG_RUNTIME_DIR"))
+  (let* ((mode (or (uiop:getenv "LEM_SDL_UPDATE_MODE") "cursor"))
+         (old-runtime (uiop:getenv "XDG_RUNTIME_DIR"))
          (root (merge-pathnames (format nil "lem-sdl-bench-~d/" (sb-posix:getpid))
                                (uiop:temporary-directory)))
          (backend (transport:require-local-backend))
          (listener nil) (local nil) (peer nil) (producer nil)
          (presented (bt2:make-semaphore :count 0))
          (original-draw (symbol-function 'gui::draw-screen))
+         (original-present (symbol-function 'sdl2:render-present))
+         (drawing-screen nil) (sent-x nil)
          (sent-at nil) (samples '()) (producer-error nil))
+    (assert (member mode '("cursor" "row" "full") :test #'equal))
     (unwind-protect
          (progn
            (setf (uiop:getenv "XDG_RUNTIME_DIR") (namestring root)
@@ -56,14 +84,21 @@
                  peer (transport:accept-local-connection listener))
            (setf (symbol-function 'gui::draw-screen)
                  (lambda (&rest arguments)
-                   (apply original-draw arguments)
-                   (when sent-at
+                   (setf drawing-screen (first arguments))
+                   (unwind-protect (apply original-draw arguments)
+                     (setf drawing-screen nil))
+                   (when (and sent-at (expected-frame-p (first arguments) sent-x))
                      (push (* 1000d0 (/ (- (get-internal-real-time) sent-at)
                                        internal-time-units-per-second)) samples)
                      (setf sent-at nil)
-                     (when (and (= 2 (length samples)) (uiop:getenv "LEM_SDL_PIXELS"))
-                       (save-pixels (second arguments) (uiop:getenv "LEM_SDL_PIXELS")))
                      (bt2:signal-semaphore presented))))
+           (when (uiop:getenv "LEM_SDL_PIXELS")
+             (setf (symbol-function 'sdl2:render-present)
+                   (lambda (renderer)
+                     (when (and sent-at drawing-screen (= 1 (length samples))
+                                (expected-frame-p drawing-screen sent-x))
+                       (save-pixels renderer (uiop:getenv "LEM_SDL_PIXELS")))
+                     (funcall original-present renderer))))
            (setf producer
                  (bt2:make-thread
                   (lambda ()
@@ -77,23 +112,18 @@
                             (sleep (/ (1+ (mod (* i 7) 9)) 1000d0))
                             (let ((message
                                     (protocol:make-object
-                                     "type" "screen" "full" (zerop i)
+                                     "type" "screen" "full" (or (zerop i) (equal mode "full"))
                                      "foreground" "#FFFFFF" "background" "#000000"
                                      "cursor" (protocol:make-object "x" (mod i width) "y" 0
                                                                     "shape" "box" "color" "#FFFFFF"))))
-                              (if (zerop i)
-                                  (setf (gethash "rows" message)
-                                        (make-array height :initial-element
-                                                    (protocol:make-object
-                                                     "text" (subseq (concatenate 'string
-                                                                                "(defun example (x) (+ x 1)) ; 漢 é"
-                                                                                (make-string width :initial-element #\Space))
-                                                                    0 (- width 1))
-                                                     "runs" #(#(0 "(defun" "#FF0000" "#0000FF" 1)
-                                                              #(7 "example" "#00FF00" "#000000" 4)
-                                                              #(15 "x" "#FFFF00" "#000000" 2)))))
-                                  (setf (gethash "changes" message) #()))
-                              (setf sent-at (get-internal-real-time))
+                              (cond ((or (zerop i) (equal mode "full"))
+                                     (setf (gethash "rows" message)
+                                           (make-array height :initial-element
+                                                       (benchmark-row width (unless (equal mode "cursor") i)))))
+                                    ((equal mode "row")
+                                     (setf (gethash "changes" message) (vector (benchmark-row width i 0))))
+                                    (t (setf (gethash "changes" message) #())))
+                              (setf sent-x (mod i width) sent-at (get-internal-real-time))
                               (protocol:write-message message stream)
                               (unless (bt2:wait-on-semaphore presented :timeout 5)
                                 (error "Screen update did not wake the SDL client"))))
@@ -117,7 +147,8 @@
              (format t "~&SDL socket-to-present ms: n=~d median=~,3f p95=~,3f max=~,3f~%"
                      n (nth (floor n 2) ordered) (nth (floor (* n .95)) ordered)
                      (car (last ordered)))))
-      (setf (symbol-function 'gui::draw-screen) original-draw)
+      (setf (symbol-function 'gui::draw-screen) original-draw
+            (symbol-function 'sdl2:render-present) original-present)
       (when producer (bt2:join-thread producer))
       (when local (transport:close-local-connection local))
       (when peer (transport:close-local-connection peer))

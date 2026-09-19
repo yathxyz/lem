@@ -90,15 +90,17 @@
       (sdl2:with-rects ((rectangle x y width height))
         (sdl2:render-copy renderer texture :dest-rect rectangle)))))
 
-(defun draw-screen (screen renderer fonts cache)
-  (when (> (hash-table-count cache) 2048) (clear-glyphs cache))
-  (set-color renderer (graphical-screen-background screen))
-  (sdl2:render-clear renderer)
+(defun draw-screen-rows (screen renderer fonts cache &optional dirty)
+  "Paint all rows, or only DIRTY rows after clearing their previous pixels."
   (let ((cw (font:font-char-width fonts)) (ch (font:font-char-height fonts))
         (cursor (graphical-screen-cursor screen)))
     (loop :for row :across (graphical-screen-rows screen)
           :for y :from 0
-          :do (loop :for text :across (lem-daemon::cell-row-cells row)
+          :when (or (null dirty) (= 1 (aref dirty y)))
+            :do (when dirty
+                  (fill-rectangle renderer (graphical-screen-background screen)
+                                  0 (* y ch) (nth-value 0 (sdl2:get-renderer-output-size renderer)) ch))
+                (loop :for text :across (lem-daemon::cell-row-cells row)
                     :for face :across (lem-daemon::cell-row-faces row)
                     :for x :from 0
                     :when (stringp text)
@@ -127,8 +129,94 @@
                                                  (* x cw) (* y ch) 2 ch))
                                 ((equal "underline" (protocol:field cursor "shape"))
                                  (fill-rectangle renderer (protocol:field cursor "color")
-                                                 (* x cw) (+ (* y ch) ch -2) width 2))))))))
-  (sdl2:render-present renderer))
+                                                 (* x cw) (+ (* y ch) ch -2) width 2)))))))))
+
+;; UPDATE-SCREEN replaces decoded rows rather than mutating them. Retain their
+;; identities with a private render target; the window backbuffer is still
+;; cleared and completely repainted on every presentation.
+(defstruct frame-cache
+  texture rows foreground background cursor fonts width height
+  cell-width cell-height attempted-p valid-p)
+
+(defun clear-frame-cache (frame)
+  (when (frame-cache-texture frame)
+    (sdl2:destroy-texture (frame-cache-texture frame)))
+  (setf (frame-cache-texture frame) nil
+        (frame-cache-rows frame) nil
+        (frame-cache-attempted-p frame) nil
+        (frame-cache-valid-p frame) nil))
+
+(defun draw-screen (screen renderer fonts cache &optional frame)
+  (when (> (hash-table-count cache) 2048) (clear-glyphs cache))
+  (multiple-value-bind (width height) (sdl2:get-renderer-output-size renderer)
+    (when (and frame (or (/= width (or (frame-cache-width frame) 0))
+                        (/= height (or (frame-cache-height frame) 0))))
+      (clear-frame-cache frame)
+      (setf (frame-cache-width frame) width (frame-cache-height frame) height))
+    (when (and frame (not (frame-cache-attempted-p frame)))
+      (setf (frame-cache-attempted-p frame) t)
+      (when (plusp (cffi:foreign-funcall "SDL_RenderTargetSupported"
+                                       :pointer (autowrap:ptr renderer) :int))
+        ;; Unsupported or unavailable target storage keeps the complete repaint
+        ;; path. Retry only after resize/reset, not on every typed character.
+        (handler-case
+            (setf (frame-cache-texture frame)
+                  (sdl2:create-texture renderer :argb8888 :target width height))
+          (sdl2::sdl-error () nil))))
+    (let* ((texture (and frame (frame-cache-texture frame)))
+           (rows (graphical-screen-rows screen))
+           (cursor (graphical-screen-cursor screen))
+           (description (when cursor
+                          (mapcar (lambda (key) (protocol:field cursor key))
+                                  '("x" "y" "shape" "color"))))
+           (full (or (null texture) (null (frame-cache-rows frame))
+                     (/= (length rows) (length (frame-cache-rows frame)))
+                     (not (eq fonts (frame-cache-fonts frame)))
+                     (not (eql (font:font-char-width fonts) (frame-cache-cell-width frame)))
+                     (not (eql (font:font-char-height fonts) (frame-cache-cell-height frame)))
+                     (not (equal (graphical-screen-foreground screen) (frame-cache-foreground frame)))
+                     (not (equal (graphical-screen-background screen) (frame-cache-background frame)))))
+           (dirty (unless full (make-array (length rows) :element-type 'bit :initial-element 0)))
+           (use-target nil))
+      (unless full
+        (loop :for row :across rows :for old :across (frame-cache-rows frame) :for y :from 0
+              :unless (eq row old) :do (setf (aref dirty y) 1))
+        (unless (equal description (frame-cache-cursor frame))
+          (dolist (cursor (list description (frame-cache-cursor frame)))
+            (when (and cursor (<= 0 (second cursor)) (< (second cursor) (length rows)))
+              (setf (aref dirty (second cursor)) 1)))))
+      ;; A mostly changed screen costs less to paint directly than to rebuild
+      ;; and copy a target. Keep the last presented row snapshot, but mark the
+      ;; texture stale so the next sparse update rebuilds it once before reuse.
+      (setf use-target
+            (and texture
+                 (not (and (frame-cache-rows frame)
+                           (or full (>= (* 2 (count 1 dirty)) (length rows)))))))
+      (when (and use-target (not (frame-cache-valid-p frame)))
+        (setf full t dirty nil))
+      (when frame (setf (frame-cache-valid-p frame) nil))
+      (unwind-protect
+           (progn
+             (when use-target (sdl2:set-render-target renderer texture))
+             (when (or full (not use-target))
+               (set-color renderer (graphical-screen-background screen))
+               (sdl2:render-clear renderer))
+             (draw-screen-rows screen renderer fonts cache (and use-target dirty)))
+        (when use-target (sdl2:set-render-target renderer (cffi:null-pointer))))
+      (when texture
+        (setf (frame-cache-rows frame) (copy-seq rows)
+              (frame-cache-cursor frame) description
+              (frame-cache-fonts frame) fonts
+              (frame-cache-cell-width frame) (font:font-char-width fonts)
+              (frame-cache-cell-height frame) (font:font-char-height fonts)
+              (frame-cache-foreground frame) (graphical-screen-foreground screen)
+              (frame-cache-background frame) (graphical-screen-background screen)
+              (frame-cache-valid-p frame) use-target))
+      (when use-target
+        (set-color renderer (graphical-screen-background screen))
+        (sdl2:render-clear renderer)
+        (sdl2:render-copy renderer texture))
+      (sdl2:render-present renderer))))
 
 (defstruct incoming
   (lock (bt2:make-lock :name "lemclient/sdl-incoming"))
@@ -228,6 +316,7 @@ Notify outside the lock so the consumer can immediately drain the queue."
                                 (setf (event :user :code) -1)
                                 (sdl2:push-event event)))))
          (cache (make-hash-table :test 'equal))
+         (frame (make-frame-cache))
          (reader nil)
          (dirty nil)
          (width 0) (height 0)
@@ -237,7 +326,12 @@ Notify outside the lock so the consumer can immediately drain the queue."
              (if (lem:match-key key :ctrl t :sym "V")
                  (client::send-input connection (list :paste (clipboard-text)))
                  (client::send-input connection key)))))
-    (labels ((resize (type)
+    (labels ((reset-renderer ()
+               (clear-frame-cache frame)
+               (clear-glyphs cache)
+               (when (graphical-screen-rows screen)
+                 (draw-screen screen renderer fonts cache frame)))
+             (resize (type)
                (multiple-value-bind (w h) (grid-size window fonts)
                  (unless (and (= w width) (= h height))
                    (setf width w height h)
@@ -287,6 +381,8 @@ Notify outside the lock so the consumer can immediately drain the queue."
                (:dropfile (:file file)
                 (client::request connection "visit" "wait" "nowait"
                                  "files" (client::build-file-entries (list file))))
+               (:render-targets-reset () (reset-renderer))
+               (:render-device-reset () (reset-renderer))
                (:windowevent (:event event)
                 (when (= event sdl2-ffi:+sdl-windowevent-close+)
                   (return-from graphical-event-loop (client::frame-close-status edit-id)))
@@ -294,7 +390,7 @@ Notify outside the lock so the consumer can immediately drain the queue."
                                          sdl2-ffi:+sdl-windowevent-size-changed+))
                   (resize "resize"))
                 (when (graphical-screen-rows screen)
-                  (draw-screen screen renderer fonts cache)))
+                  (draw-screen screen renderer fonts cache frame)))
                (:lemclient-screen-ready ()
                 (dolist (message (take-messages incoming))
                   (when (typep message 'error) (error message))
@@ -305,12 +401,13 @@ Notify outside the lock so the consumer can immediately drain the queue."
                      (let ((status (client::frame-message-exit-status message edit-id)))
                        (when status (return-from graphical-event-loop status))))))
                 (when (and dirty (graphical-screen-rows screen))
-                  (draw-screen screen renderer fonts cache)
+                  (draw-screen screen renderer fonts cache frame)
                   (setf dirty nil)))))
         (stop-screen-reader incoming reader)
         (ignore-errors (client::request connection "detach"))
         (client::close-client connection)
         (sdl2:stop-text-input)
+        (clear-frame-cache frame)
         (clear-glyphs cache)))
     0))
 
