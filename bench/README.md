@@ -1376,3 +1376,11 @@ All 15 native-client display checks also passed with the rebuilt launchers.
 These measurements use isolated configuration and do not imply a change to
 the installed user profile. The syscall trace was diagnostic only; its large
 instrumentation overhead is excluded from the reported comparison.
+
+Two more baseline failures were outdated fixtures. Emergency checkpoint tests
+now enable checkpoint mode and verify that disabling it prevents legacy
+checkpoint writes. The MCP CRUD test now checks that deletion refuses unsaved
+changes and preserves the text, then checks deletion of a clean buffer. The
+full core suite now passes 74 of 75 suites. The remaining
+`kernel-undo-conformance` failure predates this performance work; the certified
+linear undo model and current production undo behavior still need reconciliation.

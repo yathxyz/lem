@@ -115,7 +115,15 @@
       (ok (search "Beautiful" (lem:buffer-text buf))
           "Insert operation modified buffer"))
 
-    ;; Delete buffer
+    ;; Modified buffers must survive a deletion request.
+    (let ((result (mcp-tool-call "buffer_delete"
+                    '(("buffer_name" . "test-crud.txt")))))
+      (ok (result-is-error-p result) "Deletion refuses unsaved changes")
+      (ok (search "Beautiful" (lem:buffer-text (lem:get-buffer "test-crud.txt")))
+          "Refused deletion preserves edited content"))
+
+    ;; Model the clean state after saving; the fixture is an in-memory buffer.
+    (lem:buffer-unmark (lem:get-buffer "test-crud.txt"))
     (let ((result (mcp-tool-call "buffer_delete"
                     '(("buffer_name" . "test-crud.txt")))))
       (ok (not (result-is-error-p result)) "Buffer deletion succeeds"))

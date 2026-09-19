@@ -52,6 +52,11 @@
            (progn
              ;; Modify only buffer-a; buffer-b stays clean.
              (lem:insert-string (lem:buffer-end-point buffer-a) "-EDIT")
+             (lem/checkpoint:checkpoint-mode nil)
+             (lem/emergency-save:emergency-checkpoint)
+             (ok (not (probe-file (lem/checkpoint:checkpoint-filename path-a)))
+                 "disabled checkpoint mode does not write legacy checkpoints")
+             (lem/checkpoint:checkpoint-mode t)
              (lem/emergency-save:emergency-checkpoint)
              (let ((checkpoint-a (lem/checkpoint:checkpoint-filename path-a))
                    (checkpoint-b (lem/checkpoint:checkpoint-filename path-b)))
@@ -65,6 +70,7 @@
                    "the buffer stays modified after the emergency checkpoint")
                (ok (not (probe-file checkpoint-b))
                    "an unmodified buffer is not checkpointed")))
+        (lem/checkpoint:checkpoint-mode nil)
         (lem:delete-buffer buffer-a)
         (lem:delete-buffer buffer-b)
         (uiop:delete-file-if-exists path-a)
