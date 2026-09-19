@@ -14,6 +14,36 @@
         :while line
         :collect (lem/buffer/line:line-plist line)))
 
+(deftest edit-modification-generation
+  (let* ((buffer (lem:make-buffer "edit-generation" :temporary t :enable-undo-p nil))
+         (point (lem:buffer-point buffer)))
+    (unwind-protect
+         (progn
+           (lem:insert-string point (format nil "one~%two~%three"))
+           ;; Interior edits leave the end point's line and column unchanged.
+           (dolist (line '(1 2 3))
+             (lem:move-to-line point line)
+             (let ((tick (lem:buffer-modified-tick buffer)))
+               (lem:insert-string point "x")
+               (ok (= (1+ tick) (lem:buffer-modified-tick buffer)))
+               (lem:character-offset point -1)
+               (lem:delete-character point 1)
+               (ok (= (+ tick 2) (lem:buffer-modified-tick buffer)))))
+           (lem:buffer-start point)
+           (let ((tick (lem:buffer-modified-tick buffer)))
+             (lem:insert-character point #\Newline)
+             (lem:character-offset point -1)
+             (lem:delete-character point 1)
+             (ok (= (+ tick 2) (lem:buffer-modified-tick buffer))))
+           (lem:buffer-end point)
+           (let ((tick (lem:buffer-modified-tick buffer)))
+             (lem:insert-string point "")
+             (lem:delete-character point 0)
+             (lem:delete-character point 1)
+             (ok (= tick (lem:buffer-modified-tick buffer))
+                 "empty edits and deletion past EOF do not dirty the buffer")))
+      (lem:delete-buffer buffer))))
+
 (deftest insert-newline-test
   ;; Arrange
   (let* ((buffer (lem:make-buffer "test" :temporary t))
