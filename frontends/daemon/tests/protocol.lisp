@@ -113,6 +113,24 @@
                     (return-from compare)))))))))
     (ok (null failure) (format nil "3150 composition cases; first mismatch: ~s" failure))))
 
+(deftest cell-composition-accepts-general-strings
+  (dolist (text (list (make-array 5 :element-type 'character :initial-contents "axxxx"
+                                  :adjustable t :fill-pointer 1)
+                     (make-array 1 :element-type 'character
+                                   :displaced-to (copy-seq "α漢x") :displaced-index-offset 1)
+                     (make-array 5 :element-type 'character :initial-contents "éxxx"
+                                  :adjustable t :fill-pointer 2)))
+    (let ((source (lem-daemon::make-cell-row 1))
+          (expected (lem-daemon::make-cell-row 6))
+          (actual (lem-daemon::make-cell-row 6))
+          (face '("#FF0000" "#0000FF" 3)))
+      (setf (aref (lem-daemon::cell-row-cells source) 0) text
+            (aref (lem-daemon::cell-row-faces source) 0) face)
+      (reference-overlay-text expected 1 text face)
+      (lem-daemon::overlay-cells actual 1 source)
+      (ok (equalp expected actual)
+          "composition respects fill pointers and displaced string storage"))))
+
 (deftest single-cell-overwrites-preserve-neighbor-glyphs
   (let ((failure nil))
     (block compare

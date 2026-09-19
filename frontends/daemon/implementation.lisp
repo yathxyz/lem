@@ -83,6 +83,8 @@ Only the representation is shared; character widths are always looked up live.")
               :do (setf (aref cells index) " " (aref faces index) nil)))))
   row)
 
+;; Let character loops specialize placement with their known width/string types.
+(declaim (inline overlay-cell))
 (defun overlay-cell (row column string width face)
   "Place one character, returning the next column or NIL at the right edge."
   (let ((cells (cell-row-cells row))
@@ -132,7 +134,7 @@ Only the representation is shared; character widths are always looked up live.")
   (loop :for cell :across (cell-row-cells source)
         :for face :across (cell-row-faces source)
         :unless (eq cell +continuation-cell+)
-          :do (if (= 1 (length cell))
+          :do (if (= 1 (length (the string cell)))
                   ;; Row edits replace strings rather than mutating them. Reuse
                   ;; single-character cells, but consult the live width settings.
                   (let ((width (char-width (char cell 0) 0)))

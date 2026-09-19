@@ -3373,3 +3373,126 @@ full-frame SDL decoding; it is not a demonstrated general typing-latency win.
 Core/kernel sources, proof obligations, budgets and installed profiles are
 unchanged. The previously documented core undo-model mismatch remains unresolved;
 the core suite was not rerun for this daemon-only change.
+
+
+### Compiler specialization of daemon cell placement (2026-09-19)
+
+A four-client CPU profile of the `34789a39d` production code collected 971
+samples at 1 ms. `overlay-cells` accounted for 33.2% of samples including callees,
+with `overlay-cell` at 11.6%; generic `LENGTH` accounted for 4.7% across the process.
+Artifacts: `/tmp/lem-cell-pool-cpu-profile.{lisp,txt,json,log}`. An earlier private
+experiment hoisted the character-pool variable out of the loop; it did not
+improve component CPU and was discarded without a source change. Its artifacts
+are `/tmp/lem-cell-pool-{current,local}-{1,2}.log` and corresponding `.lisp` files.
+
+The retained change declares the private `overlay-cell` helper inline and tells
+the compiler that a non-continuation cell is a string when computing its length.
+Placement algorithms, live character widths, clipping and storage remain the
+same. It does not restrict cells to simple strings or lower compiler safety.
+New regression cases cover adjustable strings with fill pointers and displaced
+Unicode storage, alongside the existing 3,150 placement cases, 396 overwrite
+boundaries, byte-pool independence, live icon changes and wire/pixel snapshots.
+
+Disassembly of `overlay-text` and `overlay-cells` shows the two helper calls and
+the latter's generic `LENGTH` call removed. Caller code grows from 900/1,094 bytes
+to 2,058/2,273 bytes (2,337 bytes total increase). Bounds-error paths remain.
+Artifacts: `/tmp/lem-cell-inline-disassemble-{before,after}.{txt,log}` and
+`/tmp/lem-cell-inline-disassemble.lisp`.
+
+All five daemon modules, the SDL client module, the SDL pixel module and all 16
+packaged native-client integration checks pass. Logs:
+`/tmp/lem-cell-inline-{daemon,client,pixels,native}.log`. Both changed Lisp files
+matched the tested base derivation byte for byte. Packages:
+
+- Before: `/nix/store/z5sh1r53qaq5c6lym2qy0j092m3g045j-lem-yath/bin/lem`.
+- After: `/nix/store/md47x0nl63jfx3kd5vbxl8262jl7r0ih-lem-yath/bin/lem`.
+- Tested base: `/nix/store/dw5y3x9rp4wkvd0cwclwhxixnlc8i0zi-sbcl-lem-ncurses-unstable/bin/lem`.
+
+Composition ABBA used 3,000 100×40 frames per fixture after 100 warmups; all
+checksums were 120,000. Before/after definitions of the three overlay functions
+were loaded into separate processes, explicitly controlling the inline
+proclamation. This includes fresh composition-grid allocation, excluding core
+redisplay, protocol encoding, transport and client rendering.
+
+| Fixture / operation | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| ascii / cursor | 173.216 → 139.386 | 221,965,440 → 221,999,040 |
+| ascii / row | 177.906 → 143.178 | 221,984,576 → 221,957,376 |
+| ascii / full | 321.117 → 281.306 | 221,956,160 → 221,954,944 |
+| unicode / cursor | 190.230 → 162.589 | 231,953,536 → 232,036,352 |
+| unicode / row | 195.029 → 167.118 | 232,089,536 → 232,060,480 |
+| unicode / full | 305.137 → 278.531 | 254,255,104 → 254,303,296 |
+| wide / cursor | 238.931 → 224.812 | 221,949,760 → 221,956,032 |
+| wide / row | 247.609 → 228.934 | 226,835,712 → 226,782,208 |
+| wide / full | 554.555 → 534.929 | 418,435,392 → 418,475,264 |
+
+CPU fell 12.4–19.5% for ASCII, 8.7–14.5% for mixed Unicode and 3.5–7.5% for
+wide-only rows. Allocation stayed within 0.04% of baseline. Artifacts:
+`/tmp/lem-cell-inline-{before,after}-{1,2}.log`, with function overrides in
+`/tmp/lem-cell-inline-{before,after}.lisp`.
+
+Uninstrumented configured-daemon ABBA used one/four clients separately, 600
+measured keys, 20 warmups and 25 ms pacing. Every peer observed every edit;
+final buffers matched the fixtures. Counters cover all threads, all 620 keys,
+idle time and boundary evals. Builds, tests and other benchmarks ran separately.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| 1 | 372.616 → 350.927 | 55,364,832 → 55,365,280 |
+| 4 | 934.909 → 891.176 | 147,394,016 → 147,484,384 |
+
+Mean CPU fell 5.8%/4.7% for one/four clients; allocation stayed within 0.1%.
+Individual runs varied appreciably, so these means are not a universal speedup.
+
+| Clients / endpoint | p50, both runs before → after (ms) | p95, both runs before → after (ms) | Maximum, both runs before → after (ms) |
+| --- | --- | --- | --- |
+| 1 / active | 0.380/0.446 → 0.407/0.331 | 0.605/0.622 → 0.614/0.565 | 4.100/1.262 → 4.292/1.115 |
+| 4 / active | 0.380/0.452 → 0.379/0.396 | 0.508/0.608 → 0.537/0.600 | 4.473/1.075 → 0.999/4.252 |
+| 4 / all | 0.765/0.954 → 0.800/0.826 | 1.076/1.129 → 1.032/1.100 | 4.804/1.539 → 4.663/4.560 |
+
+Latency remains mixed: four-peer p95 fell in both runs, but the second run's
+maximum worsened. Measurements end at decoded protocol output, excluding native
+rendering and physical presentation. Artifacts:
+`/tmp/lem-cell-inline-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+Private-X11 SDL ABBA used 120 row/full updates after an initial warmup frame,
+with the existing socket-to-present harness and a private `update-screen`
+resource wrapper. The wrapper measures process-wide counters during each call,
+so reader/producer-thread work can enter or leave its measurement intervals.
+
+| SDL update mode | Mean update CPU before → after (ms) | Mean Lisp bytes counted before → after |
+| --- | ---: | ---: |
+| One row | 0.818 → 0.784 | 98,304 → 275,968 |
+| Full frame | 15.110 → 12.533 | 9,668,352 → 10,107,648 |
+
+The lower CPU coincided with increased counted allocation, which warranted an
+isolated check rather than treating the counters as per-call allocation. Row
+socket-to-present median/p95 stayed 0/1 ms; full-frame median stayed 2 ms and p95
+was 2.001/3.000 ms before versus 3.000/3.000 ms after. Full-frame maxima rose from
+3/3 ms to 3/4 ms. The clock has roughly 1 ms resolution, and these results do not
+establish a presentation-latency improvement. Artifacts:
+`/tmp/lem-cell-inline-sdl-{row,full}-{before,after}-{1,2}.log`,
+`/tmp/lem-cell-inline-sdl.{py,lisp}`.
+
+A separate decoding-only ABBA performed 120,000 `decode-row` calls per case after
+1,000 warmups and full GC, without transport, a producer or rendering. It reused
+the same mixed-Unicode SDL fixture with styled runs enabled/disabled. Each run's
+checksum was 11,880,000 cells (the fixture is 99 columns). The first private
+harness attempt incorrectly assumed 100 columns; its assertion failed before
+measurement reporting, and was corrected to use the fixture's actual width.
+
+| Decoded row | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| Unstyled | 251.539 → 234.856 | 234,078,336 → 233,654,784 |
+| Styled | 286.670 → 275.371 | 290,699,136 → 290,275,968 |
+
+CPU fell 6.6%/3.9%, and allocation stayed within 0.2%. The increase seen inside
+the concurrent socket harness was not reproduced here. These component numbers
+exclude JSON decoding, drawing and physical presentation. Artifacts:
+`/tmp/lem-cell-inline-decode-{before,after}-{1,2}.log`,
+`/tmp/lem-cell-inline-decode.{lisp,py}`.
+
+The checkpoint reduces measured composition/decoding CPU, with mixed input and
+presentation latency. Core/kernel sources, proof obligations, budgets and
+installed profiles remain unchanged. The core suite was not rerun for this
+daemon-only change; the previously documented undo-model mismatch remains open.
