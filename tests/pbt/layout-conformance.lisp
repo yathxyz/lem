@@ -154,6 +154,30 @@
         :collect (- (lem:string-width string :end (1+ i))
                     (lem:string-width string :end i))))
 
+(deftest text-width-decomposition
+  ;; Exercise the adapter's pixel scale and non-cell-aligned fallback too;
+  ;; the random kernel differential below uses ncurses' unit cell scale.
+  (let ((lem:*ambiguous-character-width* 1))
+    (dolist (case '((() 7 nil)
+                    ((97 98 99) 0 (0 0 0))
+                    ((97 98 99) 3 (1 1 1))
+                    ((97 #x4e2d 98) 4 (1 2 1))
+                    ((97 #x4e2d 98) 12 (3 6 3))
+                    ((97 #x4e2d 98) 7 (2 2 3))
+                    ((97 #x301 98) 10 (5 0 5))
+                    ((#x301 #x300) 5 (2 3))
+                    ((97 9 98) 18 (2 14 2))
+                    ((97 10 98 98) 4 (2 -2 2 2))
+                    ((97 98 10) 5 (1 1 3))))
+      (destructuring-bind (codes width expected) case
+        (ok (equal expected
+                   (lem-core::text-object-char-widths
+                    (map 'string #'code-char codes) width))))))
+  (dolist (ambiguous-width '(1 2))
+    (let ((lem:*ambiguous-character-width* ambiguous-width))
+      (ok (equal (if (= ambiguous-width 1) '(3 3) '(2 4))
+                 (lem-core::text-object-char-widths "aΩ" 6))))))
+
 (defun random-run (rng pool min-len max-len)
   (loop :repeat (rng-range rng min-len max-len)
         :collect (rng-element rng pool)))
@@ -280,6 +304,45 @@ the wrap-line-character letter object, and no unwrapped row did)."
 ;;; ------------------------------------------------------------------
 ;;; 1b. Clip differential
 ;;; ------------------------------------------------------------------
+
+(deftest word-wrap-prefix-matches-full-line
+  (for-all ((text (gen-string :max-length 200))
+            (width (gen-integer :min 0 :max 40))
+            (tab-size (gen-integer :min 1 :max 12))
+            (ambiguous-width (gen-integer :min 1 :max 2)))
+    (let* ((lem:*ambiguous-character-width* ambiguous-width)
+           ;; Include word separators and a split across kernel text records.
+           (text (concatenate 'string "ab " (string #\Tab) text " cd"))
+           (split (floor (length text) 2))
+           (objects (list (ktext (map 'list #'char-code (subseq text 0 split)) nil nil)
+                          (kopaque 0 (make-instance 'lem-core/display:void-object))
+                          (ktext (map 'list #'char-code (subseq text split)) nil nil)))
+           (prefix (lem-core::kernel-word-wrappable-string objects width tab-size)))
+      (equal (multiple-value-list
+              (lem-core::wrapping-line-break-index
+               text width :tab-size tab-size :word-boundary-p t))
+             (multiple-value-list
+              (lem-core::wrapping-line-break-index
+               prefix width :tab-size tab-size :word-boundary-p t))))))
+
+(deftest word-wrap-prefix-bounds-and-rejection
+  (let* ((text (make-string 10000 :initial-element #\a))
+         (objects (list (ktext (map 'list #'char-code text) nil nil))))
+    (ok (= 11 (length (lem-core::kernel-word-wrappable-string objects 10 8)))
+        "materialize only through the first overflowing character")
+    (dolist (unsupported
+             (list (ktext '(97) nil
+                          (lem-core::make-line-end-object "a" nil :latin 0))
+                   (kopaque 1 (make-instance 'lem-core/display:image-object
+                                            :image :test :width 1 :height 1))))
+      (ng (lem-core::kernel-word-wrappable-string
+           (append objects (list unsupported)) 10 8)
+          "unsupported objects beyond the visible prefix still disable word wrapping")))
+  (let ((objects (list (ktext (list 97 #x301 32 98) nil nil))))
+    (ok (string= (map 'string #'code-char '(97 #x301 32))
+                 (lem-core::kernel-word-wrappable-string objects 1 8)))
+    (ok (= 4 (length (lem-core::kernel-word-wrappable-string objects 10 8)))
+        "a run that fits is retained in full")))
 
 (deftest clip-differential
   (ensure-kernel-loaded)

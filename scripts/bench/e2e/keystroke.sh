@@ -6,6 +6,9 @@
 #   (b) bigfile    inserts into the 10 MB mixed-10m corpus file   budget p95 < 30ms
 #   (c) longline   inserts into a 16 KB single line               budget p95 < 30ms
 #   (d) scroll     next-line held down through the 10 MB file     budget p95 < 30ms
+# Plus the fork's configured long-line display paths at the same 16 KB size:
+#   (e) truncate   horizontal truncation (programming default)   budget p95 < 30ms
+#   (f) wordwrap   wrapping at word boundaries (wrapped views)   budget p95 < 30ms
 #
 # The 16 KB single line is DEVIATED from PF-7's "200 KB line".  HISTORICAL: a
 # single text object >= ~24 000 chars used to stack-overflow redisplay (the P2
@@ -41,6 +44,8 @@ E2E_PLAIN_EVAL='(let ((b (lem:make-buffer "*e2e*"))) (lem:switch-to-buffer b) (l
 # For file scenarios: apply-args opens the file first, then this eval inserts a
 # marker at point (top of the opened buffer) so readiness is detectable.
 E2E_FILE_EVAL='(lem:insert-string (lem:current-point) "'"$E2E_READY_MARKER"'")'
+E2E_TRUNCATE_EVAL='(progn (setf (lem:variable-value (quote lem:line-wrap) :buffer (lem:current-buffer)) nil) '"$E2E_FILE_EVAL"')'
+E2E_WORD_WRAP_EVAL='(progn (setf (lem:variable-value (quote lem:line-wrap) :buffer (lem:current-buffer)) t (lem:variable-value (quote lem:line-wrap-at-word-boundary) :buffer (lem:current-buffer)) t) '"$E2E_FILE_EVAL"')'
 
 # Generate the corpora this script needs INTO THE SANDBOX (reusing the committed
 # deterministic generator), and derive the 16 KB single line.
@@ -200,6 +205,8 @@ e2e_keystroke_run() {
   _e2e_scenario bigfile  "$E2E_BUDGET_PATH_MS"  literal "a"    "$E2E_FILE_EVAL" "$E2E_BIGFILE" || return 1
   _e2e_scenario longline "$E2E_BUDGET_PATH_MS"  literal "a"    "$E2E_FILE_EVAL" "$E2E_LONGLINE" || return 1
   _e2e_scenario scroll   "$E2E_BUDGET_PATH_MS"  named   "Down" "$E2E_FILE_EVAL" "$E2E_BIGFILE" || return 1
+  _e2e_scenario truncate "$E2E_BUDGET_PATH_MS"  literal "a"    "$E2E_TRUNCATE_EVAL" "$E2E_LONGLINE" || return 1
+  _e2e_scenario wordwrap "$E2E_BUDGET_PATH_MS"  literal "a"    "$E2E_WORD_WRAP_EVAL" "$E2E_LONGLINE" || return 1
 }
 
 # --- standalone entry -------------------------------------------------------

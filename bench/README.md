@@ -1546,3 +1546,51 @@ for big-file / isearch / lisp-edit / long-line / overlay-heavy / scroll / undo-s
 Results: `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919122921.json`.
 T1/T2 still exit 2 after writing results because no matching Nova baseline is
 committed; this is not a passing regression gate. No baseline or budget changed.
+
+### Single-pass character widths and bounded word-wrap scans (2026-09-19)
+
+The display adapter now collects character-width deltas and their total in one
+pass, reusing the resulting list for pixel scaling or the non-cell-aligned
+fallback. Matched filtered T2 long-line medians improved from 174.001 to
+167.001 ms (results ending `t2-20260919123114.json` and
+`t2-20260919123231.json`). Explicit cases cover tabs, combining marks, CJK,
+ambiguous widths, pixel scaling, zero widths and newline resets.
+
+The word-wrap adapter previously reconstructed the entire remaining logical
+line for each physical row. It now materializes only through the first
+character exceeding the row width, which preserves the hard-boundary lookup.
+It still checks all object metadata, including unsupported objects beyond the
+prefix, and leaves the full drawing records intact. Random differential tests
+compare full-string and prefix boundary results; direct cases cover bounded
+allocation, combining marks, fitting runs and unsupported trailing objects.
+No verified kernel definition changed.
+
+The fork configures horizontal truncation by default and word-boundary wrapping
+when wrapping is enabled. The original T3 used bare Lem's ordinary wrapping.
+Two additional 16 KB scenarios now exercise the configured display settings;
+they do not load the entire user profile. The separate configured screen-line
+check does, and all 27 checks pass. All 15 native display checks also pass;
+the core suite remains 74/75 with only the documented pre-existing undo-model
+mismatch (`/tmp/lem-word-prefix-check.log`, `/tmp/lem-word-prefix-tests.log`).
+
+Matched 200 KB word-wrap stress runs improved from a 262.144 to a 32.768 ms
+input-to-core-paint p95 bucket. Each sent 120 keys at 100 ms intervals plus
+20 wall-trend samples; recorded paints increased from 133 to 140 because the
+old path coalesced some updates. This still misses the 30 ms budget. Logs and
+metrics are `/tmp/lem-word-wrap-200k-before.{log,kv}` and
+`/tmp/lem-word-wrap-200k-after.{log,kv}`. These are quantized internal timings,
+not physical keyboard-to-monitor latency. The matched 16 KB word-wrap p95
+improved from 16.384 to 4.096 ms.
+
+Expanded standard T3 passes all budgets: warm startup 286.134 ms; plain /
+big-file / long-line / scroll / truncate / word-wrap p95 buckets are
+1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms. Results:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919123821.json`.
+The final full T2 completed all workloads and canaries, with medians of
+1,955.006 / 1,165.003 / 132.000 / 166.000 / 326.000 / 508.000 / 8,335.026 ms
+for big-file / isearch / lisp-edit / long-line / overlay-heavy / scroll /
+undo-storm. Results:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919123941.json`.
+T2 still exits 2 because the Nova baseline is absent, not because a workload
+failed; this is not a passing regression gate. No baseline, budget or installed
+editor/profile changed.

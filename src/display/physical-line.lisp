@@ -318,17 +318,25 @@ width is spread uniformly with the remainder on the last char, keeping the sum
     (cond ((zerop len) nil)
           ((zerop width) (make-list len :initial-element 0))
           (t
-           (let ((column-width (string-width string)))
+           ;; Keep the deltas from the same pass that measures the run.
+           ;; Calling STRING-WIDTH first classified every character twice.
+           (multiple-value-bind (widths column-width)
+               (loop :with column fixnum := 0
+                     :for character :across string
+                     :for next := (char-width character column)
+                     :collect (- next column) :into widths
+                     :do (setf column next)
+                     :finally (return (values widths column)))
              (if (and (plusp column-width) (zerop (mod width column-width)))
-                 (loop :with cell := (floor width column-width)
-                       :with column := 0
-                       :for character :across string
-                       :collect (let ((next (char-width character column)))
-                                  (prog1 (* cell (- next column))
-                                    (setf column next))))
+                 (let ((cell (floor width column-width)))
+                   (if (= cell 1)
+                       widths
+                       (map-into widths (lambda (delta) (* cell delta)) widths)))
                  (multiple-value-bind (quotient remainder) (floor width len)
-                   (append (make-list (1- len) :initial-element quotient)
-                           (list (+ quotient remainder))))))))))
+                   (loop :for tail :on widths
+                         :do (setf (car tail)
+                                   (if (cdr tail) quotient (+ quotient remainder))))
+                   widths)))))))
 
 (defun kernel-display-object (object)
   "Kernel record for a drawing OBJECT; the object itself rides in the tag."
@@ -384,48 +392,51 @@ now fixed; see tests/pbt/layout-conformance.lisp.)"
                                  :within-cursor (text-object-within-cursor-p object))))))
       (third kernel-object)))
 
-(defun kernel-word-wrappable-string (kernel-objects)
-  "Return the displayed text in KERNEL-OBJECTS when it maps to characters."
-  (block invalid
-    (with-output-to-string (stream)
-      (dolist (kernel-object kernel-objects)
-        (ecase (first kernel-object)
-          (:text
-           (destructuring-bind (codes widths object) (rest kernel-object)
-             (declare (ignore widths))
-             (when (typep object 'line-end-object)
-               (return-from invalid nil))
-             (dolist (code codes)
-               (write-char (code-char code) stream))))
-          (:opaque
-           (let ((object (third kernel-object)))
-             (unless (typep object '(or void-object
-                                        eol-cursor-object
-                                        extend-to-eol-object))
-               (return-from invalid nil)))))))))
+(defun kernel-word-wrappable-string (kernel-objects width tab-size)
+  "Return the character prefix needed to choose a word boundary at WIDTH.
+Include the first character exceeding WIDTH so WIDE-INDEX still detects the
+hard boundary. Reject unsupported objects anywhere, including past the prefix."
+  (dolist (kernel-object kernel-objects)
+    (unless (ecase (first kernel-object)
+              (:text (not (typep (fourth kernel-object) 'line-end-object)))
+              (:opaque (typep (third kernel-object)
+                             '(or void-object eol-cursor-object extend-to-eol-object))))
+      (return-from kernel-word-wrappable-string nil)))
+  (with-output-to-string (stream)
+    (block prefix
+      (let ((column 0))
+        (dolist (kernel-object kernel-objects)
+          (when (eq (first kernel-object) :text)
+            (dolist (code (second kernel-object))
+              (let ((character (code-char code)))
+                (write-char character stream)
+                (setf column (char-width character column :tab-size tab-size))
+                (when (< width column)
+                  (return-from prefix))))))))))
 
 (defun kernel-word-boundary-view-width (kernel-objects view-width buffer)
   "Reduce VIEW-WIDTH to the preferred complete-word row boundary."
   (unless (variable-value 'line-wrap-at-word-boundary :default buffer)
     (return-from kernel-word-boundary-view-width view-width))
   (let* ((character-width (lem-if:get-char-width (implementation)))
-         (view-columns (floor view-width character-width)))
+         (view-columns (floor view-width character-width))
+         (tab-size (variable-value 'tab-width :default buffer)))
     (when (<= view-columns 1)
       (return-from kernel-word-boundary-view-width view-width))
     (alexandria:when-let
-        ((string (kernel-word-wrappable-string kernel-objects)))
+        ((string (kernel-word-wrappable-string kernel-objects
+                                               (1- view-columns) tab-size)))
       (multiple-value-bind (boundary word-boundary-p)
           (wrapping-line-break-index
            string
            (1- view-columns)
-           :tab-size (variable-value 'tab-width :default buffer)
+           :tab-size tab-size
            :word-boundary-p t)
         (when (and boundary word-boundary-p)
           (let* ((content-columns
                    (string-width string
                                  :end boundary
-                                 :tab-size (variable-value 'tab-width
-                                                           :default buffer)))
+                                 :tab-size tab-size))
                  (word-view-width
                    (* (1+ content-columns) character-width)))
             (min view-width word-view-width)))))))
