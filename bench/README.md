@@ -1685,3 +1685,40 @@ records 140 paints per build; both remain in the 32.768 ms p95 bucket and
 miss the 30 ms target (`/tmp/lem-icon-inline-200k-{before,after}.{sh,log,kv}`).
 The measured width/replay improvement does not establish a further typing
 p95 bucket improvement.
+
+### Undo-model scope audit (2026-09-19)
+
+The remaining core failure is not only a signed-counter mismatch. A live
+operation-by-operation probe against `8d787843d` compared the current buffer
+with the certified historical linear session (`/tmp/lem-undo-audit.{lisp,log}`):
+
+- Empty insertion and deletion at EOF preserve current content, points and
+  generation; the model increments its tick despite no content change.
+- Insert `abc`, boundary, undo, redo preserves matching content and points,
+  but production generations are 1/2/3 while model ticks are 1/0/1.
+- Insert `a`, boundary, insert `b`, boundary, undo, insert `c`, boundary, undo
+  leaves `a` in production but an empty string in the model. Updating only the
+  counter comparison cannot reconcile their command grouping.
+- Insert `abc`, boundary, insert `x` at offset 1 with undo inhibited, boundary,
+  undo is refused by production because the retained deletion no longer
+  matches the live payload. The old model attempts replay instead.
+
+`verified/README.md` now identifies the linear model's original commit
+`aef520028` and the subsequent retained-tree integration `1b4a46892`.
+Historical zero-divergence and false-clean findings are explicitly historical;
+certification of that book does not certify the current undo tree. No theorem,
+production integrity check, or differential assertion was changed or removed.
+The differential runner now reports the operation, content/point equality and
+both tick values at its first mismatch, including in shrunk failures.
+
+New core regression cases pin clean/saved identity on sibling branches,
+monotonic generations through undo/redo and explicit branch moves, unchanged
+history for no-op edits, and preservation of text, point, generation and
+history on an inconsistent inhibited-route refusal. Prefix/suffix inhibited
+insertions still undo and redo successfully, and retain their dirty status.
+These checks pass. The full suite remains 74/75, with the historical model
+failure now explained directly in its output
+(`/tmp/lem-undo-audit-final-tests.log`). No new production defect was found in
+these bounded probes; a reference model matching the retained tree remains a
+verification gap. This step changes tests/documentation only, so no performance
+gain or new runtime-build validation is claimed.

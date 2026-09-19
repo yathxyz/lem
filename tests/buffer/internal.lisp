@@ -181,6 +181,88 @@ qrstuvwxyz"
 
     (check-corruption buffer)))
 
+(deftest retained-undo-clean-identity-and-generation
+  (let* ((buffer (lem:make-buffer "undo-clean-identity" :temporary t :enable-undo-p t))
+         (point (lem:buffer-point buffer)))
+    (unwind-protect
+         (progn
+           (lem:insert-string point "A")
+           (lem:buffer-undo-boundary buffer)
+           (let ((tick (lem:buffer-modified-tick buffer)))
+             (lem:buffer-mark-saved buffer)
+             (ok (= tick (lem:buffer-modified-tick buffer)))
+             (ng (lem:buffer-modified-p buffer))
+             (let* ((saved (lem:buffer-undo-tree-snapshot buffer))
+                    (saved-id (getf saved :current)))
+               (lem:insert-string point "")
+               (lem:delete-character point 1)
+               (lem:buffer-undo-boundary buffer)
+               (ok (= tick (lem:buffer-modified-tick buffer)))
+               (ok (equal saved (lem:buffer-undo-tree-snapshot buffer))
+                   "no-op edits preserve both saved identity and history")
+               (lem:buffer-undo point)
+               (ok (string= "" (lem:buffer-text buffer)))
+               (ok (= (1+ tick) (lem:buffer-modified-tick buffer)))
+               (ok (lem:buffer-modified-p buffer))
+               (lem:insert-string point "B")
+               (lem:buffer-undo-boundary buffer)
+               (ok (= (+ tick 2) (lem:buffer-modified-tick buffer)))
+               (ok (lem:buffer-modified-p buffer)
+                   "a sibling of the saved state must never appear clean")
+               (lem:buffer-undo point)
+               (ok (string= "" (lem:buffer-text buffer)))
+               (lem:buffer-redo point)
+               (ok (string= "B" (lem:buffer-text buffer)))
+               (ok (= (+ tick 4) (lem:buffer-modified-tick buffer)))
+               (let ((branch (lem:buffer-undo-tree-snapshot buffer)))
+                 (ok (= 3 (getf branch :node-count))
+                     "both children of the root remain retained")
+                 (ok (= saved-id (getf branch :last-saved)))
+                 (lem:buffer-undo-tree-move point saved-id (getf branch :generation)))
+               (ok (string= "A" (lem:buffer-text buffer)))
+               (ok (= (+ tick 6) (lem:buffer-modified-tick buffer)))
+               (ng (lem:buffer-modified-p buffer)
+                   "returning to the saved node restores clean identity"))))
+      (lem:delete-buffer buffer))))
+
+(deftest inhibited-edit-undo-route-integrity
+  ;; A prefix/suffix can be carried through undo. An insertion inside the
+  ;; retained payload cannot be silently deleted along with that payload.
+  (dolist (offset '(0 1 3))
+    (let* ((buffer (lem:make-buffer "inhibited-undo-route" :temporary t :enable-undo-p t))
+           (point (lem:buffer-point buffer)))
+      (unwind-protect
+           (progn
+             (lem:insert-string point "abc")
+             (lem:buffer-undo-boundary buffer)
+             (lem:buffer-mark-saved buffer)
+             (lem:buffer-start point)
+             (lem:character-offset point offset)
+             (lem:with-inhibit-undo () (lem:insert-string point "x"))
+             (lem:buffer-undo-boundary buffer)
+             (let ((text (lem:buffer-text buffer))
+                   (position (lem:position-at-point point))
+                   (tick (lem:buffer-modified-tick buffer))
+                   (snapshot (lem:buffer-undo-tree-snapshot buffer)))
+               (if (= offset 1)
+                   (progn
+                     (ok (signals (lem:buffer-undo point) 'lem/buffer/errors:editor-error))
+                     (ok (string= text (lem:buffer-text buffer)))
+                     (ok (= position (lem:position-at-point point)))
+                     (ok (= tick (lem:buffer-modified-tick buffer)))
+                     (ok (equal snapshot (lem:buffer-undo-tree-snapshot buffer))
+                         "refusal preserves history before any replay"))
+                   (progn
+                     (ok (lem:buffer-undo point))
+                     (ok (string= "x" (lem:buffer-text buffer)))
+                     (ok (= (1+ tick) (lem:buffer-modified-tick buffer)))
+                     (ok (lem:buffer-redo point))
+                     (ok (string= text (lem:buffer-text buffer)))))
+               (ok (lem:buffer-modified-p buffer)
+                   "an untracked edit remains dirty across history moves"))
+             (check-corruption buffer))
+        (lem:delete-buffer buffer)))))
+
 (deftest |`buffer-end-point` points to the end of the buffer|
   ;; Arrange
   (let* ((buffer (lem:make-buffer "test" :temporary t))

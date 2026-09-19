@@ -1,5 +1,11 @@
 ;;;; tests/pbt/kernel-undo-conformance.lisp -- SPEC-VK VK-3 differential acceptance.
 ;;;;
+;;;; This historical linear model predates the retained undo tree. Its tick,
+;;;; branch-boundary and inhibited-replay contracts differ from current Lem;
+;;;; see verified/README.md's VK-3 scope note. Keep the full comparisons active
+;;;; to expose that verification gap until a current model replaces this one.
+;;;; The original model description follows.
+;;;;
 ;;;; Runs random interleavings of edits / undo-group / redo-group / boundaries /
 ;;;; inhibited edits against BOTH a live production buffer (buffer-undo,
 ;;;; buffer-redo, buffer-undo-boundary, with-inhibit-undo, insert-string/point,
@@ -286,10 +292,18 @@ mismatch detection is in the after-step comparison)."
                                   :right-inserting))
          (state (make-state buffer (k-mk-session (k-empty-buffer) nil nil) scratch)))
     (unwind-protect
-         (and (funcall consistent-fn state)
-              (loop :for op :in script
-                    :always (progn (run-op state op)
-                                   (funcall consistent-fn state))))
+         (flet ((check-state (op)
+                  (unless (funcall consistent-fn state)
+                    (error "Undo model diverged after ~S: content-equal=~S, ~
+                            points-equal=~S, production/model ticks=~D/~D"
+                           op (content-equal-p state) (points-equal-p state)
+                           (lem:buffer-modified-tick buffer)
+                           (buffer-tick (session-buffer (state-session state)))))
+                  t))
+           (check-state :initial)
+           (loop :for op :in script
+                 :always (progn (run-op state op)
+                                (check-state op))))
       (ignore-errors (lem:delete-point scratch))
       (loop :for (id . point) :in (state-extras state)
             :do (ignore-errors (lem:delete-point point)))

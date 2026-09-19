@@ -125,11 +125,46 @@ every step. No divergence found; production is the spec.
 whitelist is unchanged; `arithmetic/top-with-meta` is included `local`ly so
 nothing from it is exec-reachable.
 
-## VK-3 — undo/redo kernel + tick semantics
+## VK-3 — historical linear undo model and current verification gap
 
-`undo.lisp` models production's undo machinery (`src/buffer/internal/undo.lisp`,
-`src/buffer/internal/edit.lisp`) as pure data on top of the VK-1 model and VK-2
-edit primitives:
+**Current scope (2026-09-19): the certified `undo.lisp` book does not model the
+fork's retained undo tree.** It describes the earlier linear implementation
+tested in `aef520028`; `1b4a46892` subsequently integrated a different undo
+implementation. Certification proves the book's own obligations, not
+equivalence to that current implementation. The historical differential test
+still runs and fails; it has not been disabled or relaxed. The zero-divergence
+results and production descriptions below are historical results from VK-3,
+not current acceptance claims.
+
+A live comparison on `8d787843d` identifies distinct contract differences:
+
+| Operation | Current retained tree | Historical model |
+| --- | --- | --- |
+| Empty insertion or deletion at EOF | Leaves modification generation and history unchanged | Increments the tick |
+| Insert `abc`, boundary, undo, redo | Tick advances 1, 2, 3 | Tick changes 1, 0, 1 |
+| Undo a newly created sibling branch | Returns to that branch's parent | Can combine the edit with an older stack group |
+| Inhibited insertion inside a retained insertion's payload, then undo | Rejects the inconsistent deletion before changing live text | Attempts replay with transformed positions |
+
+Current dirty state uses retained clean-node identity plus pending/untracked
+edits, independently of the monotonic modification generation. The historical
+false-clean reproducer therefore does not establish a current save-safety bug.
+Current inhibited edits transform retained positions, but replay also validates
+exact payload text and the return route before changing the buffer. A prefix or
+suffix insertion can survive undo; an insertion inside a retained deletion
+span can cause a safe refusal. These differences require a new reference model,
+not removal of tick or content assertions from the old differential test.
+
+`tests/buffer/internal.lisp` pins generation, saved sibling identity, no-op
+history preservation, explicit branch return, and unchanged text/point/history
+on an inconsistent inhibited-route refusal. The configured Vundo fixture also
+covers save hooks, stale references, bounded retention and replay failures.
+These are executable regression checks; they do not replace a certified model
+of the retained tree. See the undo-model audit in `bench/README.md` for evidence.
+
+### Historical model (VK-3)
+
+`undo.lisp` represents the earlier undo machinery as pure data on top of the
+VK-1 model and VK-2 edit primitives:
 
 - **Edit record** `(kind position payload)` mirroring the production `edit`
   struct, with an **absolute 1-based position** (`position-at-point` algebra)
@@ -212,7 +247,7 @@ histories, undo reverses the recording order exactly and no undo ever goes
 out of range (pinned by the strict differential suite, 1500 scripts, zero
 divergences).
 
-### Differential acceptance
+### Historical differential acceptance
 
 `tests/pbt/kernel-undo-conformance.lisp` runs random interleavings through BOTH
 a live production buffer (`buffer-undo` / `buffer-redo` / `buffer-undo-boundary`
