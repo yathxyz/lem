@@ -2837,3 +2837,71 @@ scroll/truncate/wordwrap p95 histogram upper bounds of
 `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919180539.json`;
 log: `/tmp/lem-peer-force-t3.log`. Kernel sources, proof obligations and installed
 profiles were unchanged.
+
+
+### Attribute daemon typing tails to resource activity (2026-09-19)
+
+`daemon-input.py --resources` now loads a private diagnostic that attaches the
+input ID and receive/screen resource counters to active-client screen messages.
+The driver validates the ID and nondecreasing counters for every measured input.
+The Lisp wrappers are installed only in the disposable daemon, not in production
+builds. They can be removed with `lem-bench/daemon-input-resources:stop`.
+For example, with `LEM_BIN` pointing at the configured package:
+
+```sh
+python3 scripts/bench/e2e/daemon-input.py --clients 4 --count 600 \
+  --resources --output /tmp/daemon-input-resources.json
+```
+
+Each sample's `server` object contains `received-*` and `screen-*` counters for
+`wall`, `cpu`, `gc-cpu` and `consed`. Convert time differences using
+`units-per-second`; allocation differences are bytes. The endpoint is entry to
+`daemon-send`, before encoding, queueing and socket writing. CPU, GC and allocation
+are process-wide, so other daemon threads contribute. GC CPU is not a wall pause;
+SBCL wall counters also have coarser resolution than Python's wire timer. These
+counters cannot attribute stalls outside their endpoints. Instrumentation itself
+adds metadata, allocations and locking: use plain runs for speed comparisons.
+
+Four-client ABBA captures used the preceding section's before/after packages,
+600 measured keys, 20 warmup keys and 25 ms pacing. Every peer saw every edit and
+all final buffers matched the fixture. No build, test or second benchmark ran
+concurrently. The instrumented captures showed:
+
+| Package/run | Active maximum (ms) | Inputs with GC between receive and screen | Active maximum without GC in that interval (ms) |
+| --- | ---: | ---: | ---: |
+| Before 1 | 1.162 | 0 | 1.162 |
+| Before 2 | 2.673 | 1 | 1.251 |
+| After 1 | 4.207 | 2 | 1.284 |
+| After 2 | 4.825 | 1 | 1.269 |
+
+All three candidate inputs above 2 ms coincided with GC in the measured interval:
+wire latencies 4.207/2.750/4.825 ms and GC CPU deltas 9.578/4.829/9.973 ms.
+The baseline's 2.673 ms input also coincided with GC (4.746 ms CPU).
+This supports GC timing as an explanation for occasional active-client tails;
+it does not prove the cause of individual stalls in the earlier plain captures.
+Artifacts: `/tmp/lem-tail-resources-{before,after}-{1,2}.{json,log}`.
+
+A separate uninstrumented ABBA repeated the same workload:
+
+| Metric | Before, both runs | After, both runs |
+| --- | --- | --- |
+| Active p95 (ms) | 0.872 / 0.822 | 0.816 / 0.843 |
+| Active maximum (ms) | 1.155 / 2.478 | 1.388 / 4.752 |
+| All-client p95 (ms) | 2.180 / 2.121 | 1.717 / 1.703 |
+| All-client maximum (ms) | 3.945 / 4.015 | 4.887 / 5.447 |
+| Mean process CPU (ms, 620 keys plus idle/boundary evals) | 2,291.078 | 1,624.537 |
+| Mean Lisp allocation (bytes) | 971,488,224 | 572,121,440 |
+
+CPU fell 29.1% and allocation 41.1%, consistent with the earlier cache result.
+All-peer p95 improved; active-client p95 was similar and maxima remained variable.
+No universal tail-latency improvement is claimed. Artifacts:
+`/tmp/lem-tail-plain-{before,after}-{1,2}.{json,log}`.
+
+A separate private-daemon smoke check verifies wrapper installation, rejection of
+nested start, exact function restoration, repeated stop and restart, followed by
+20 successful real input updates and final-buffer equality:
+`/tmp/lem-tail-resource-check.{lisp,json,log}`. The diagnostic captures also check
+input-ID association and resource monotonicity. This checkpoint changes only
+benchmark instrumentation and documentation; production sources, proof
+obligations, budgets and installed profiles are unchanged. The previously
+recorded core undo-model mismatch remains unresolved.

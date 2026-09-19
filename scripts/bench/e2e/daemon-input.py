@@ -9,6 +9,9 @@ CPU, Lisp allocation and GC CPU cover warmup plus measured keys and idle time.
 GC CPU is not a wall-clock pause measurement. All configuration, files and
 sockets are private; the daemon log and fixture remain under the printed path.
 --load optionally installs a Lisp experiment only in this disposable daemon.
+--resources adds per-input server counters for attribution. These cover receipt
+through screen construction, before encoding/queueing/writing; the added metadata,
+allocations and locks affect timing, so use separate uninstrumented comparisons.
 """
 import argparse
 import json
@@ -29,6 +32,8 @@ parser.add_argument('--output', required=True)
 parser.add_argument('--warmup', type=int, default=20)
 parser.add_argument('--pace', type=float, default=0.025)
 parser.add_argument('--load')
+parser.add_argument('--resources', action='store_true',
+                    help='include instrumented server receive-to-screen counters')
 args = parser.parse_args()
 if not 1 <= args.clients <= 16:
     parser.error('--clients must be between 1 and 16')
@@ -135,6 +140,10 @@ try:
                  '(lem-vi-mode/commands:vi-insert) (lem:redraw-display :force t))')
     if args.load:
         evaluate(peers[0], '(load ' + quote(args.load) + ')')
+    if args.resources:
+        resource_source = Path(__file__).with_name('daemon-input-resources.lisp').resolve()
+        evaluate(peers[0], '(load ' + quote(resource_source) + ')')
+        evaluate(peers[0], '(lem-bench/daemon-input-resources:start)')
     time.sleep(0.1)
     while list(poll(0)):
         pass
@@ -146,6 +155,7 @@ try:
         inserted = index % 2 == 0
         ident, start = send(peers[0], 'input', sym='x' if inserted else 'Backspace')
         reached = {}
+        server_resources = None
         accepted = False
         deadline = time.monotonic() + 10
         while len(reached) < len(peers) or not accepted:
@@ -160,8 +170,19 @@ try:
                     line = next((r for r in rows[peer] if 'BENCH_TARGET' in r), '')
                     if line and ('xBENCH_TARGET' in line) == inserted:
                         reached[peer] = (now - start) / 1000000.0
+                        if args.resources and peer is peers[0]:
+                            server_resources = msg['benchmark']
+                            assert server_resources['input-id'] == ident
+                            assert server_resources['units-per-second'] > 0
+                            for counter in ('wall', 'cpu', 'gc-cpu', 'consed'):
+                                assert (server_resources['screen-' + counter]
+                                        >= server_resources['received-' + counter])
         if index >= args.warmup:
-            records.append(dict(active_ms=reached[peers[0]], all_ms=max(reached.values())))
+            record = dict(active_ms=reached[peers[0]], all_ms=max(reached.values()))
+            if args.resources:
+                assert server_resources is not None
+                record['server'] = server_resources
+            records.append(record)
         time.sleep(args.pace)
     stop_resources = evaluate(peers[0], resources)
     assert evaluate(peers[0], '(string= (lem:buffer-text (lem:current-buffer)) '
@@ -173,6 +194,7 @@ try:
     result = dict(
         editor=editor, clients=args.clients, root=str(root), samples=records,
         warmup=args.warmup, pace_seconds=args.pace, loaded_source=args.load,
+        server_resources=args.resources,
         resource_keys=args.count + args.warmup,
         process_cpu_ms=1000 * (stop_counters[0] - start_counters[0]) / units,
         lisp_bytes=stop_counters[1] - start_counters[1],
