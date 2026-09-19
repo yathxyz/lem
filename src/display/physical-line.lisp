@@ -2,6 +2,10 @@
 
 (defvar *line-wrap* nil)
 
+;; One immutable (length width widths) entry, at most 262144 conses (~4 MiB
+;; on 64-bit SBCL). Readers retain a snapshot; replacement never mutates it.
+(defvar *uniform-text-width-cache* nil)
+
 (defun window-view-width (window)
   (lem-if:view-width (implementation) (window-view window)))
 
@@ -306,37 +310,96 @@
 ;;; and clip correctness (k-clip-width-bound, k-clip-keeps-fully-visible).
 ;;; Differential pin: tests/pbt/layout-conformance.lisp.
 
+(defun cached-uniform-text-widths (length width)
+  "Read-only width list for a large uniform run. Reuse nearby lengths without
+mutating previously returned lists; cap tail traversal at 1024 cells."
+  (let* ((entry *uniform-text-width-cache*)
+         (old-length (first entry))
+         (old-width (second entry))
+         (old-list (third entry)))
+    (if (and entry (eql width old-width) (<= (abs (- length old-length)) 1024))
+        (if (= length old-length)
+            old-list
+            (let ((widths (if (< length old-length)
+                              (nthcdr (- old-length length) old-list)
+                              (loop :repeat (- length old-length)
+                                    :do (push width old-list)
+                                    :finally (return old-list)))))
+              (setf *uniform-text-width-cache* (list length width widths))
+              widths))
+        (let ((widths (make-list length :initial-element width)))
+          (setf *uniform-text-width-cache* (list length width widths))
+          widths))))
+
+(defun uniform-text-column-width (string)
+  "Return the first character delta, scanned columns and uniform prefix length.
+Read live character settings on every call, including icon registrations."
+  (loop :with column fixnum := 0
+        :with uniform := nil
+        :for character :across string
+        :for index :from 0
+        :for next := (char-width character column)
+        :for delta := (- next column)
+        :do (if uniform
+                (unless (= delta uniform) (return (values uniform column index)))
+                (setf uniform delta))
+            (setf column next)
+        :finally (return (values uniform column (length string)))))
+
 (defun text-object-char-widths (string width)
   "Per-char width decomposition of a text object, in the units of WIDTH
-\(= object-width).  Frontends measure text cell-aligned -- ncurses object-width
+\(= object-width). Frontends measure text cell-aligned -- ncurses object-width
 is string-width, SDL2 text-cell-width is string-width x display cell width --
-so each char contributes its string-width delta times the cell scale.  For the
+so each char contributes its string-width delta times the cell scale. For the
 degenerate non-cell-aligned SDL2 specials (folder/emoji fixed advances) the
 width is spread uniformly with the remainder on the last char, keeping the sum
-\(the kernel's placement-relevant quantity) exact."
-  (let ((len (length string)))
-    (cond ((zerop len) nil)
-          ((zerop width) (make-list len :initial-element 0))
-          (t
-           ;; Keep the deltas from the same pass that measures the run.
-           ;; Calling STRING-WIDTH first classified every character twice.
-           (multiple-value-bind (widths column-width)
-               (loop :with column fixnum := 0
-                     :for character :across string
-                     :for next := (char-width character column)
-                     :collect (- next column) :into widths
-                     :do (setf column next)
-                     :finally (return (values widths column)))
-             (if (and (plusp column-width) (zerop (mod width column-width)))
-                 (let ((cell (floor width column-width)))
-                   (if (= cell 1)
-                       widths
-                       (map-into widths (lambda (delta) (* cell delta)) widths)))
-                 (multiple-value-bind (quotient remainder) (floor width len)
-                   (loop :for tail :on widths
-                         :do (setf (car tail)
-                                   (if (cdr tail) quotient (+ quotient remainder))))
-                   widths)))))))
+\(the kernel's placement-relevant quantity) exact. Returned lists are read-only."
+  (let* ((len (length string))
+         ;; Bound retained storage and avoid cache work for small runs. Never
+         ;; retain source strings, drawing objects or attributes.
+         (cacheable (<= 1024 len 262144))
+         (uniform nil)
+         (scan-column 0)
+         (scan-start 0))
+    (when (zerop len)
+      (return-from text-object-char-widths nil))
+    (when (zerop width)
+      (return-from text-object-char-widths
+        (if cacheable (cached-uniform-text-widths len 0) (make-list len :initial-element 0))))
+    (when cacheable
+      (multiple-value-setq (uniform scan-column scan-start)
+        (uniform-text-column-width string))
+      (when (= scan-start len)
+        (cond ((and (plusp scan-column) (zerop (mod width scan-column)))
+               (return-from text-object-char-widths
+                 (cached-uniform-text-widths len (* uniform (floor width scan-column)))))
+              ((zerop (mod width len))
+               (return-from text-object-char-widths
+                 (cached-uniform-text-widths len (floor width len)))))))
+    ;; Resume at the first mismatch instead of classifying a long uniform
+    ;; prefix again. This fallback owns its fresh list, so scaling may mutate
+    ;; it without changing any cached or previously returned widths.
+    (multiple-value-bind (widths column-width)
+        (loop :with column fixnum := scan-column
+              :for index :from scan-start :below len
+              :for next := (char-width (char string index) column)
+              :collect (- next column) :into widths
+              :do (setf column next)
+              :finally (return (values (if (zerop scan-start)
+                                           widths
+                                           (nconc (make-list scan-start :initial-element uniform)
+                                                  widths))
+                                       column)))
+      (if (and (plusp column-width) (zerop (mod width column-width)))
+          (let ((cell (floor width column-width)))
+            (if (= cell 1)
+                widths
+                (map-into widths (lambda (delta) (* cell delta)) widths)))
+          (multiple-value-bind (quotient remainder) (floor width len)
+            (loop :for tail :on widths
+                  :do (setf (car tail)
+                            (if (cdr tail) quotient (+ quotient remainder))))
+            widths)))))
 
 (defun kernel-display-object (object)
   "Kernel record for a drawing OBJECT; the object itself rides in the tag."

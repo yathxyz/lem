@@ -178,6 +178,58 @@
       (ok (equal (if (= ambiguous-width 1) '(3 3) '(2 4))
                  (lem-core::text-object-char-widths "aΩ" 6))))))
 
+
+(deftest large-text-width-reuse
+  ;; Internal access checks the adapter's bounded cache without retaining state
+  ;; across tests. The kernel only reads these lists, including after splitting.
+  (let* ((lem-core::*uniform-text-width-cache* nil)
+         (source (make-string 1024 :initial-element #\a))
+         (saved (lem-core::text-object-char-widths source 1024))
+         (snapshot (copy-list saved)))
+    (dolist (size '(1025 1023 2048 4096 1024))
+      (ok (equal (make-list size :initial-element 1)
+                 (lem-core::text-object-char-widths
+                  (make-string size :initial-element #\a) size)))
+      (ok (equal snapshot saved) "growing, shrinking and eviction preserve retained lists"))
+    (dolist (case '((#\a 3072 3) (#\a 0 0) (#\a -1024 -1)
+                    (#\中 2048 2) (#\́ 0 0) (#\́ 1024 1)))
+      (destructuring-bind (character width delta) case
+        (ok (equal (make-list 1024 :initial-element delta)
+                   (lem-core::text-object-char-widths
+                    (make-string 1024 :initial-element character) width)))))
+    (ok (equal (append (make-list 1023 :initial-element 1) '(2))
+               (lem-core::text-object-char-widths source 1025))
+        "non-cell-aligned widths retain the remainder on the last character")
+    (let ((mixed (concatenate 'string (make-string 1023 :initial-element #\a) "中")))
+      (ok (equal (append (make-list 1023 :initial-element 3) '(6))
+                 (lem-core::text-object-char-widths mixed 3075))
+          "a late nonuniform width retains its exact scaled contribution"))
+    (let ((mixed (make-string 1024)))
+      (dotimes (i 1024) (setf (char mixed i) (if (evenp i) #\a #\Ω)))
+      (dolist (ambiguous '(1 2 1))
+        (let ((lem:*ambiguous-character-width* ambiguous))
+          (ok (equal (loop :repeat 512 :append (if (= ambiguous 1) '(3 3) '(2 4)))
+                     (lem-core::text-object-char-widths mixed 3072))
+              "live ambiguous-width changes override a previously uniform run")))
+      ;; A private icon table changes classification without altering global
+      ;; registrations; returning to the original table must restore widths.
+      (let ((lem/common/character/icon::*icon-code-table* (make-hash-table)))
+        (dotimes (i 1024) (setf (char mixed i) (if (evenp i) #\a #\b)))
+        (dolist (icon-p '(nil t nil))
+          (if icon-p
+              (setf (gethash (char-code #\a) lem/common/character/icon::*icon-code-table*) t)
+              (remhash (char-code #\a) lem/common/character/icon::*icon-code-table*))
+          (ok (equal (loop :repeat 512 :append (if icon-p '(4 2) '(3 3)))
+                     (lem-core::text-object-char-widths mixed 3072))
+              "live icon changes are reclassified before cache reuse"))))
+    (dolist (size '(262144 262145))
+      (let ((result (lem-core::text-object-char-widths
+                     (make-string size :initial-element #\a) size)))
+        (ok (and (= size (length result)) (every (lambda (x) (= 1 x)) result)))))
+    (ok (= 262144 (first lem-core::*uniform-text-width-cache*))
+        "over-limit runs do not expand the retained cache")
+    (ok (equal snapshot saved))))
+
 (defun random-run (rng pool min-len max-len)
   (loop :repeat (rng-range rng min-len max-len)
         :collect (rng-element rng pool)))

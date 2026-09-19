@@ -2427,3 +2427,109 @@ plain/bigfile/longline/scroll/truncate/wordwrap p95 histogram upper bounds of
 `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919155516.json`;
 log: `/tmp/lem-idle-redraw-t3.log`. These are core input-to-redisplay measurements,
 not physical-display timing. No installed editor profile was activated.
+
+### Reuse immutable widths for large uniform text runs (2026-09-19)
+
+The post-idle-redraw profile still attributed substantial allocation to
+`kernel-display-object`'s per-character code and width lists. The adapter now
+reuses a single immutable width list for uniform runs of 1024 through 262144
+characters. It scans current character widths before reuse, so live icon,
+ambiguous-width and tab settings remain authoritative. Nearby lengths share
+list tails or prepend cells without modifying any returned list; a length
+change larger than 1024 rebuilds the entry, bounding tail traversal. The cache
+retains at most 262144 conses (roughly 4 MiB on 64-bit SBCL), stores no source
+strings or drawing objects, and publishes complete immutable entries. The
+kernel remains pure and unchanged.
+
+Small and over-limit runs keep the uncached path. Mixed runs retain the
+original decomposition, including exact pixel scaling and last-character
+remainder. When the uniform scan finds a mismatch, fallback resumes there and
+constructs the already-scanned prefix from its known delta; it does not
+reclassify that prefix. This avoids a second long classification pass for mixed
+Unicode runs. The fallback owns its fresh list, so its scaling cannot mutate
+cached widths. The wrapping algorithm and kernel records are unchanged.
+
+A private prototype matched the previous implementation in 588 comparisons
+covering cache-size boundaries, Unicode, ambiguous widths, negative/zero/scaled
+widths, and non-cell-aligned totals, while retaining old lists unchanged
+(`/tmp/lem-uniform-width-cache-check-core.log`). The final source passed the same
+comparison against the pre-change source function after the fallback revision
+(`/tmp/lem-uniform-width-revised-check.log`). Its ABBA typing comparison
+used the same baseline binary for both variants and loaded the prototype only
+in candidate processes. Allocation across the captured interval fell from
+4.716/4.716 GB to 3.806/3.806 GB; input-to-redisplay p95 changed from 15/14 ms to
+12/12 ms. These prototype results motivated a packaged-build comparison below;
+they are not a substitute for it. Artifacts:
+`/tmp/lem-uniform-width-built-{before,after}-{1,2}.{csv,sh,log,kv}` and
+`/tmp/lem-uniform-width-results.json`.
+
+Regression coverage checks unchanged retained lists across growth, shrinkage,
+eviction and width changes, live icon and ambiguous-width changes, late mixed
+widths, scaling/remainders, and the cache's upper bound. The full core suite
+remains 74/75 with only the existing undo-model mismatch. The existing 300000
+character full-render test passes outside the cache range; an additional run
+at 220000 characters passes inside it, comparing wrapped rows to the certified
+kernel and horizontally scrolled rows to exact substrings with the cursor in
+the middle and at the end. Logs:
+`/tmp/lem-uniform-width-revised-{tests,check}.log`. All 12 ACL2 certificates remain
+current (cached; no kernel source changed), in
+`/tmp/lem-uniform-width-proofs.log`.
+
+The focused final-source comparison performed 50 decompositions of a 200000
+character run in ABBA order. Uniform ASCII took 105/98 ms before and 90/90 ms
+after; uniform Greek took 167/165 ms before and 149/147 ms after. Each uniform
+case's measured allocation fell from about 160 MB to 16 KB after warming the
+cache. A Greek run with one Chinese character at its end took 167/164 ms before
+and 178/176 ms after, with approximately unchanged allocation; an early
+mismatch took 164/164 ms before and 166/169 ms after. Thus the fallback avoids a
+second character-classification pass but is not free: the late-mismatch case
+still costs about 0.2–0.3 ms more per decomposition in this component test.
+Timing includes traversing each returned list for its length, and is not an
+editor latency claim. The live adapter generally receives type-grouped runs,
+but mixed widths within one type are possible and were deliberately measured.
+Artifacts: `/tmp/lem-uniform-width-component.{lisp,log}`.
+
+The final packaged ABBA comparison used the same 200 KB word-wrapped typing
+case, 140 paced keys per run, and resource capture on both versions. Baseline:
+`/nix/store/3yv384p78937dajxh8kr8pxz5axygs6l-sbcl-lem-ncurses-unstable/bin/lem`.
+Final candidate:
+`/nix/store/3mmzch6avcci3y1vf8cg9w18k24mk26s-sbcl-lem-ncurses-unstable/bin/lem`.
+The candidate's adapter and regression-test source matched the checkout byte
+for byte. All four captures had 140 paired redraws, zero unpaired redraws, no
+sample loss and no recorder replacement.
+
+| Run | Captured allocation (bytes) | Process CPU (ms) | GC CPU (ms) | Keystroke p50 / p95 / max (ms) |
+| --- | ---: | ---: | ---: | --- |
+| Before 1 | 4,715,944,320 | 2645.349 | 260.193 | 8 / 15 / 35 |
+| After 1 | 3,805,575,424 | 2547.986 | 190.839 | 8 / 11 / 37 |
+| After 2 | 3,805,977,088 | 2560.462 | 180.079 | 8 / 11.001 / 34 |
+| Before 2 | 4,716,068,608 | 2639.824 | 269.271 | 8 / 14.001 / 38 |
+
+Across each complete captured interval, average allocation fell 19.3%, process
+CPU 3.3%, and GC CPU 29.9%. These cumulative counters include idle work,
+shutdown input, recorder overhead and other process threads. GC CPU is not a
+wall-clock pause. The median stayed at 8 ms; p95 improved in both candidate
+runs, while the maximum did not consistently improve. Fifteen command redraws
+coincided with GC in each baseline run versus nine in each candidate run. The
+measurements end at core redisplay, not physical presentation. Artifacts:
+`/tmp/lem-uniform-width-revised-{before,after}-{1,2}.{csv,sh,log,kv}` and
+`/tmp/lem-uniform-width-revised-results.json`.
+
+The final rebuild passed all 15 native display, 27 configured screen-line and
+83 Vundo checks (`/tmp/lem-uniform-width-revised-runtime.log`). The full T2
+replay completed with medians of 1934.010/1177.006/135.001/126.001/335.002/
+487.004/8527.041 ms for big-file/isearch/lisp-edit/long-line/overlay-heavy/
+scroll/undo-storm. Long-line allocation was 111,754,784 bytes per workload.
+These are unpaired trend results, not a speedup claim; the harness exited 2
+because the Nova baseline remains absent. No baseline or budget was changed.
+Result: `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919161353.json`;
+log: `/tmp/lem-uniform-width-revised-t2.log`.
+
+Final T3 passed unchanged budgets: warm startup 284.468 ms and
+plain/bigfile/longline/scroll/truncate/wordwrap p95 histogram upper bounds of
+1.024/1.024/4.096/1.024/2.048/2.048 ms. Result:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919161504.json`;
+log: `/tmp/lem-uniform-width-revised-t3.log`. No installed editor profile was
+activated. The bounded cache leaves codepoint-list construction and repeated
+layout splits as remaining allocation targets; it does not eliminate long-line
+GC-related stalls.

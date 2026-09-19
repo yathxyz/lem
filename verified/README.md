@@ -996,6 +996,15 @@ Invalid/zero counts and atomic inputs return immediately; dotted lists retain
 the accumulator fallback. No shim construct, primitive or export is added.
 Tests cover batch boundaries, dotted tails and totals beyond fixnum range.
 
+**Immutable adapter widths (2026-09-19).** The CLOS adapter may share width
+lists between large uniform text runs. It checks current character deltas
+before reuse, bounds retained list length, and never mutates published lists.
+The kernel only reads these lists; its record contents, executable functions
+and proof obligations are unchanged. Mixed-width decomposition and scaling
+fallbacks retain their previous behavior. Adapter regressions cover retained
+list immutability, size limits, and live icon/ambiguous-width changes; full
+render checks compare cached-size runs to the same certified layout oracle.
+
 **Bounded overflow decisions (2026-09-19).** `k-wrap-row` uses
 `k-text-overflows-p` to stop summing a text run once its non-negative widths
 reach the remaining row width. `k-sum-reaches-acc-is-full-sum` proves this
