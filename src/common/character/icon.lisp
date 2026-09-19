@@ -26,7 +26,10 @@
 (defun register-icon-ext (ext name)
   (setf (gethash ext *icon-ext-table*) name))
 
+;; Width and drawing classification query this for every character.
+(declaim (inline icon-code-p))
 (defun icon-code-p (code)
+  "Return true when CODE currently names a registered icon."
   (not (null (gethash code *icon-code-table*))))
 
 (defun icon-string (name)

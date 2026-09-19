@@ -1649,3 +1649,39 @@ A subsequent matched pair explicitly set `E2E_PACE=0.1`: both builds recorded
 and T2 costs do not demonstrate a further typing p95 bucket improvement. The
 200 KB stress still misses the 30 ms target; remaining full-line scans and
 list construction remain optimization targets.
+
+### Inline live icon classification (2026-09-19)
+
+The recent 200 KB display profile attributed 10.1% inclusive CPU samples to
+`icon-code-p`, which is called by width and drawing-type classification for
+every character. This small function is now declared inline so callers can
+specialize its hash lookup and avoid an out-of-line call. The registry is
+still read on every lookup; no cache or fixed icon-range assumption was added.
+Public registration and dynamically bound registries retain their behavior.
+
+Matched filtered T1 medians in microseconds per string-width call improved
+from 30.500 / 45.501 / 48.500 / 737.500 to
+24.500 / 40.001 / 44.000 / 662.525 for ASCII / CJK / emoji / mixed text.
+All entries still allocate zero bytes. These are the existing longer T1
+windows, with five measured repetitions after warm-up, in results ending
+`t1-20260919125327.json` and `t1-20260919125354.json`.
+Matched filtered T2 long-line medians improved from 155.000 to 146.001 ms,
+in results ending `t2-20260919125335.json` and `t2-20260919125403.json`.
+T1/T2 still exit 2 because the matching Nova baseline is absent; neither
+baselines nor budgets changed.
+
+The core suite remains 74/75 with only the existing undo-model mismatch;
+the dynamic ASCII-icon, ambiguous-width and Unicode cases pass. All 15 native
+client/display checks pass in the rebuilt runtime
+(`/tmp/lem-icon-inline-tests.log`, `/tmp/lem-icon-inline-native.log`). No
+verified definition, shim or installed editor/profile changed.
+
+Standard T3 passes every budget: startup 285.518 ms; plain / big-file /
+long-line / scroll / truncate / word-wrap p95 buckets remain
+1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms. Results:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919125602.json`.
+The matched 200 KB word-wrap pair explicitly uses 100 ms key spacing and
+records 140 paints per build; both remain in the 32.768 ms p95 bucket and
+miss the 30 ms target (`/tmp/lem-icon-inline-200k-{before,after}.{sh,log,kv}`).
+The measured width/replay improvement does not establish a further typing
+p95 bucket improvement.
