@@ -318,6 +318,16 @@
 ;;; is non-nil), REST the objects deferred to the next row.  TOTAL is the
 ;;; running row width (production total-width; callers start at 0).
 
+(local
+ (defthm two-conses-iff-length-exceeds-one
+   (equal (and (consp codes) (consp (cdr codes)))
+          (< 1 (len codes)))))
+
+(local
+ (defthm len-positive-when-consp
+   (implies (consp codes) (< 0 (len codes)))
+   :rule-classes :linear))
+
 (defun k-wrap-row (objects view-width total)
   (declare (xargs :measure (k-objs-msr objects)))
   (if (atom objects)
@@ -325,7 +335,9 @@
       (let ((obj (car objects)))
         (if (and (k-text-p obj)
                  (<= view-width (+ total (k-obj-width obj))))
-            (if (< 1 (len (k-obj-codes obj)))
+            ;; Splittability needs only two conses, not a full run-length scan.
+            (if (and (consp (k-obj-codes obj))
+                     (consp (cdr (k-obj-codes obj))))
                 ;; overflow, still splittable: halve and re-try
                 (k-wrap-row (append (k-explode obj) (cdr objects))
                             view-width total)

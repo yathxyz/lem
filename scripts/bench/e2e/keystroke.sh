@@ -122,7 +122,7 @@ _e2e_emit_stage() {
 _e2e_scenario() {
   local scn="$1" budget_ms="$2" mode="$3" key="$4"; shift 4
   local session="ks-$scn"
-  echo "== keystroke scenario: $scn (drive ${E2E_KEYS} keys, mode=$mode key='$key') ==" >&2
+  echo "== keystroke scenario: $scn (drive ${E2E_KEYS} keys, pace=${E2E_PACE}s, mode=$mode key='$key') ==" >&2
   lem_start "$session" "$@"
   if ! lem_wait_for "$session" "$E2E_READY_MARKER" 20; then
     echo "$scn: readiness sentinel never appeared" >&2

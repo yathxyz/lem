@@ -1594,3 +1594,58 @@ undo-storm. Results:
 T2 still exits 2 because the Nova baseline is absent, not because a workload
 failed; this is not a passing regression gate. No baseline, budget or installed
 editor/profile changed.
+
+### Constant-time split eligibility (2026-09-19)
+
+A fresh 200 KB ordinary-wrap profile collected 4,002 CPU samples; `acl2::len`
+accounted for 11.2% self time (`/tmp/lem-current-wrap-profile.txt`). Before
+halving an overflowing text run, `k-wrap-row` counted the complete code list
+just to test whether it contained at least two characters. It now checks the
+first two cons cells. The separate length calculation needed to choose the
+halving point remains unchanged.
+
+The local theorem `two-conses-iff-length-exceeds-one` proves the condition
+equivalent, including improper lists and atoms. A local positive-length lemma
+supplies the arithmetic fact needed by the existing termination argument.
+The layout book certified independently (`/tmp/lem-split-layout-proof.log`);
+the final all-book pass certified the other 11 and skipped that current layout
+certificate, with zero failures (`/tmp/lem-split-final-proofs.log`). Existing
+content, width, blocking and termination obligations remain intact.
+
+An isolated comparison loads the previous `k-wrap-row` under a distinct name
+and compares it with the new function in the same SBCL process. Both produce
+identical 50-row output for a 200,000-character ASCII run at width 200. After
+10 warm-up frames per function, five alternating before/after windows of 100
+frames each measured medians of 6.890 -> 5.930 ms/frame, about 14% less kernel
+wrapping time. Ranges were 6.790-6.980 and 5.840-6.040 ms respectively;
+allocation stayed at approximately 14.92 MB/frame. This isolates wrapping,
+not the full input-to-paint pipeline (`/tmp/lem-split-probe.{lisp,log}`).
+
+The core suite remains 74/75 with the existing undo-model mismatch. All 15
+native display and 27 configured screen-line checks pass
+(`/tmp/lem-split-tests.log`, `/tmp/lem-split-check.log`). The checked runtime
+contains the final executable definition; the later positive-length lemma is
+proof-only. No installed editor or profile changed.
+
+Matched filtered T2 long-line medians improved from 166.000 to 156.001 ms
+(results ending `t2-20260919124350.json` and `t2-20260919124944.json`). T2
+still exits 2 because no matching Nova baseline is committed; no baseline or
+budget changed. Standard T3 passes all six typing scenarios: warm startup
+285.594 ms; plain / big-file / long-line / scroll / truncate / word-wrap p95
+buckets remain 1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms. Results:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919124951.json`.
+
+The 200 KB word-wrap stress comparison at the harness's default 25 ms key
+spacing recorded the same 65.536 ms input-to-core-paint p95 bucket before and
+after, both while validation ran and after it finished. The latter runs
+recorded 130/133 paints (`/tmp/lem-split-idle-200k-{before,after}.{log,kv}`).
+That cadence is faster than the 100 ms spacing used by the previous stress
+investigation, so those buckets cannot establish a regression against its
+32.768 ms result. Scenario logs now print key spacing alongside key count.
+
+A subsequent matched pair explicitly set `E2E_PACE=0.1`: both builds recorded
+140 paints and the same 32.768 ms p95 bucket
+(`/tmp/lem-split-paced-200k-{before,after}.{sh,log,kv}`). Thus the lower kernel
+and T2 costs do not demonstrate a further typing p95 bucket improvement. The
+200 KB stress still misses the 30 ms target; remaining full-line scans and
+list construction remain optimization targets.
