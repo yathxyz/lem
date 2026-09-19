@@ -2,8 +2,8 @@
   (:use :cl :rove :lem))
 (in-package :lem-tests/input)
 
-;; Script the clock across an exact deadline without sleeping or replacing the
-;; real timer scheduler/event queue. Internal access isolates those subsystems.
+;; Script the clock across an exact deadline without changing the real timer
+;; scheduler/event queue. Internal access isolates those subsystems.
 (defclass input-test-timer-manager (lem/common/timer:timer-manager)
   ((times :initarg :times :accessor input-test-times)))
 
@@ -12,10 +12,10 @@
     (error "Input test consumed its scripted timer clock"))
   (pop (input-test-times manager)))
 
-(defun set-input-test-redraw (function)
+(defun set-input-test-function (symbol function)
   #+sbcl (sb-ext:with-unlocked-packages (:lem-core)
-           (setf (symbol-function 'redraw-display) function))
-  #-sbcl (setf (symbol-function 'redraw-display) function))
+           (setf (symbol-function symbol) function))
+  #-sbcl (setf (symbol-function symbol) function))
 
 (deftest idle-polls-redraw-only-after-callbacks
   (dolist (repeat '(nil t))
@@ -31,22 +31,62 @@
            (redraws nil)
            (original-redraw (symbol-function 'redraw-display))
            (timer (lem/common/timer:make-idle-timer
-                   (lambda () (incf callbacks) nil) :name "input redraw test")))
+                   (lambda () (incf callbacks) (send-event key) nil) :name "input redraw test")))
       (unwind-protect
            (progn
              ;; Count the real input loop's redraw requests without a frontend.
-             (set-input-test-redraw
+             (set-input-test-function 'redraw-display
               (lambda (&key force)
                 (declare (ignore force))
                 (push callbacks redraws)))
              (lem/common/timer:start-timer timer 10 :repeat repeat)
-             (send-event key)
              (ok (eq key (lem-core::read-event-internal)))
              (ok (= 1 callbacks))
              (ok (equal '(1) redraws)
                  "the empty deadline poll does not redraw; the NIL-returning callback does")
              (ok (eql (not repeat) (lem/common/timer:timer-expired-p timer))))
-        (set-input-test-redraw original-redraw)))))
+        (set-input-test-function 'redraw-display original-redraw)))))
+
+(deftest input-waits-through-idle-deadline
+  ;; Before expiry, queued input takes precedence and no timer polling occurs.
+  ;; Once overdue, callbacks still run before the queued key, as before.
+  (dolist (case '((9 0.002 0) (10 0.001 0) (11 nil 1)))
+    (destructuring-bind (now timeout expected-callbacks) case
+      (let* ((lem/common/timer::*timer-manager*
+               (make-instance 'input-test-timer-manager :times (list 0 now now now)))
+             (lem/common/timer::*idle-timer-list* nil)
+             (lem/common/timer::*processed-idle-timer-list* nil)
+             (lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+             (lem-core::*routed-input-session* nil)
+             (lem-core::*deferred-routed-input-events* nil)
+             (key (make-key :sym "x"))
+             (callbacks 0)
+             (redraws 0)
+             (timeouts nil)
+             (original-receive (symbol-function 'lem-core::receive-event))
+             (original-redraw (symbol-function 'redraw-display))
+             (timer (lem/common/timer:make-idle-timer
+                     (lambda () (incf callbacks) nil) :name "input deadline test")))
+        (unwind-protect
+             (progn
+               (set-input-test-function
+                'lem-core::receive-event
+                (lambda (timeout)
+                  (push timeout timeouts)
+                  (funcall original-receive timeout)))
+               (set-input-test-function
+                'redraw-display
+                (lambda (&key force) (declare (ignore force)) (incf redraws)))
+               (lem/common/timer:start-timer timer 10)
+               (send-event key)
+               (ok (eq key (lem-core::read-event-internal)))
+               (ok (equal (list timeout) timeouts)
+                   "the wait includes the strict expiry tick and wakes for queued input")
+               (ok (= expected-callbacks callbacks redraws))
+               (ok (eql (plusp expected-callbacks)
+                        (lem/common/timer:timer-expired-p timer))))
+          (set-input-test-function 'lem-core::receive-event original-receive)
+          (set-input-test-function 'redraw-display original-redraw))))))
 
 (deftest keys-equal-p-test
   (ok (lem-core::keys-equal-p (make-key :sym "x") (make-key :sym "x")))

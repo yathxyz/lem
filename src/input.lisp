@@ -61,16 +61,17 @@ Examples:
                        (let ((event (receive-event nil)))
                          (when (accept-event-p event)
                            (return-from read-event-internal event)))))
-                    ((<= ms 0)
-                     ;; A zero deadline can precede actual expiry by one clock
-                     ;; tick. Do not rebuild the display when no callback ran.
+                    ((minusp ms)
                      (when (handler-bind ((timer-error
                                             (lambda (err)
                                               (show-message (princ-to-string err)))))
                              (update-idle-timers))
                        (redraw-display)))
                     (t
-                     (let ((event (receive-event (float (/ ms 1000)))))
+                     ;; Timers expire strictly after their integer-ms deadline.
+                     ;; Include the next tick instead of polling at equality;
+                     ;; queued input wakes this wait immediately.
+                     (let ((event (receive-event (float (/ (1+ ms) 1000)))))
                        (when (accept-event-p event)
                          (return event))))))))
 

@@ -2533,3 +2533,79 @@ log: `/tmp/lem-uniform-width-revised-t3.log`. No installed editor profile was
 activated. The bounded cache leaves codepoint-list construction and repeated
 layout splits as remaining allocation targets; it does not eliminate long-line
 GC-related stalls.
+
+### Wait through strict idle-timer deadlines (2026-09-19)
+
+After removing empty-poll redraws, the input loop still repeatedly called
+`update-idle-timers` when the next deadline equaled the integer millisecond
+clock. The scheduler's expiry condition is strictly `< deadline now`, so no
+callback could run on that tick. A private observer of 140 paced keys counted
+383820 empty updates and 144 updates with work; the callbacks were show-paren
+(142) and scheduled syntax scan (2). The candidate observer counted zero empty
+updates and the same 144 active updates and callback counts. These counts are
+instrumented observations, not CPU or latency measurements. Artifacts:
+`/tmp/lem-idle-spin-observed-{before,after}.{lisp,sh,txt,log,kv}`.
+
+The input loop now dispatches overdue timers when the remaining delay is
+negative and waits for `(1+ delay)` milliseconds otherwise, reaching the first
+integer tick eligible for strict expiry. The wait uses the existing event
+queue: queued input wakes it immediately. Input available before expiry is
+accepted first; already-overdue callbacks retain their existing priority.
+The timer scheduler, repetition rules and certified timer model are unchanged.
+Timed waiting replaces polling; actual wake time still depends on clock
+quantization and OS scheduling.
+
+A deterministic test covers input one tick before the deadline, exactly at
+it, and after expiry. It checks the queue timeout, accepted key, callback and
+redraw counts, and expiry state using the real timer scheduler and queue.
+The previous input loop fails the new assertions; the candidate passes. The
+existing one-shot/repeating NIL-callback test now enqueues its key from the
+callback, so it still exercises an empty deadline followed by real work rather
+than preempting that work with a ready key. Logs:
+`/tmp/lem-idle-spin-{before-regression,focused}.log`.
+
+The packaged comparison used ABBA order separately for plain scratch-buffer
+input (25 ms pacing) and the 200 KB word-wrapped line (100 ms pacing), with 140
+keys and resource recording in every run. Baseline:
+`/nix/store/3mmzch6avcci3y1vf8cg9w18k24mk26s-sbcl-lem-ncurses-unstable/bin/lem`.
+Candidate:
+`/nix/store/nn3zpap4kk6bidbrsmp3r9prqkhln63i-sbcl-lem-ncurses-unstable/bin/lem`.
+The candidate derivation's input-loop and timer sources matched the checkout
+byte for byte. All eight captures contained 140 paired redraws, no unpaired
+redraws, no dropped samples and no recorder replacement.
+
+| Case/run | Process CPU (ms) | Captured allocation (bytes) | Keystroke p50 / p95 / max (ms) |
+| --- | ---: | ---: | --- |
+| Plain before 1 | 109.410 | 5,996,560 | 0 / 1 / 3 |
+| Plain after 1 | 51.478 | 5,996,560 | 0 / 1 / 4 |
+| Plain after 2 | 55.858 | 5,996,560 | 0 / 1 / 3 |
+| Plain before 2 | 106.159 | 5,996,560 | 0 / 1 / 3 |
+| Long before 1 | 2526.965 | 3,805,963,776 | 8 / 11 / 35 |
+| Long after 1 | 2484.821 | 3,805,520,384 | 8 / 11 / 35 |
+| Long after 2 | 2491.505 | 3,806,030,976 | 8 / 11 / 40 |
+| Long before 2 | 2565.192 | 3,806,103,680 | 8 / 11 / 36 |
+
+Average process CPU fell 50.2% in the plain case (107.785 to 53.668 ms across
+the captured interval) and 2.3% in the long-line case (2546.079 to 2488.163 ms).
+The absolute savings were similar, about 54–58 ms per 140-key capture. Resource
+deltas include between-key idle work, matched shutdown input, recording
+overhead and other process threads. Allocation and median/p95 latency were
+essentially unchanged; maximum latency did not improve consistently. Recorded
+zero durations in the plain case reflect the approximately millisecond clock
+resolution. There was no GC in the plain captures; nine command redraws
+coincided with GC in each long-line capture. This is an efficiency improvement,
+not evidence of a visible latency reduction or physical-display timing.
+Artifacts: `/tmp/lem-idle-spin-{plain,long}-{before,after}-{1,2}.{csv,sh,log,kv}`
+and `/tmp/lem-idle-spin-results.json`.
+
+Validation passed all 15 native display, 27 configured screen-line and 83 Vundo
+checks. The full core suite remains 74/75 with only the known undo-model
+mismatch. All 12 ACL2 certificates remain current (cached; zero failures).
+Logs: `/tmp/lem-idle-spin-{runtime,tests,proofs}.log`. T2's direct replay bypasses
+this input-wait path, so it was not rerun for this change.
+
+T3 passed unchanged budgets: warm startup 286.258 ms and
+plain/bigfile/longline/scroll/truncate/wordwrap p95 histogram upper bounds of
+1.024/1.024/4.096/1.024/2.048/2.048 ms. Result:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919162535.json`;
+log: `/tmp/lem-idle-spin-t3.log`. No installed editor profile was activated.
