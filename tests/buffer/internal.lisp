@@ -122,6 +122,28 @@ qrstuvwxyz"
                  NIL)
                (collect-line-plist buffer)))))
 
+(deftest exact-buffer-text-comparison
+  ;; Exercise undo's integrity predicate directly, including equal-length
+  ;; corruption and line boundaries that a length check alone cannot detect.
+  (let* ((buffer (lem:make-buffer "text-comparison" :temporary t :enable-undo-p nil))
+         (point (lem:buffer-point buffer)))
+    (unwind-protect
+         (dolist (text (list "" "abc" "漢字😀" (format nil "~%")
+                             (format nil "a~%~%漢字😀~%end~%")))
+           (lem:erase-buffer buffer)
+           (lem:insert-string point text)
+           (ok (lem/buffer/internal::buffer-text-equal-p buffer text))
+           (ng (lem/buffer/internal::buffer-text-equal-p
+                buffer (concatenate 'string text "x")))
+           (unless (zerop (length text))
+             (ng (lem/buffer/internal::buffer-text-equal-p
+                  buffer (subseq text 0 (1- (length text))))))
+           (dotimes (i (length text))
+             (let ((changed (copy-seq text)))
+               (setf (char changed i) #\?)
+               (ng (lem/buffer/internal::buffer-text-equal-p buffer changed)))))
+      (lem:delete-buffer buffer))))
+
 (deftest undo-redo
   (let* ((buffer (lem:make-buffer "test" :temporary t))
          (point (lem:buffer-point buffer)))

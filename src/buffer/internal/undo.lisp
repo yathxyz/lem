@@ -723,13 +723,23 @@
   "Compare BUFFER with TEXT without allocating a second buffer-sized string."
   (and (= (length text)
           (1- (position-at-point (buffer-end-point buffer))))
-       (with-point ((cursor (buffer-start-point buffer)))
-         (loop :for expected :across text
-               :for actual := (character-at cursor)
-               :unless (and actual (char= actual expected))
-                 :do (return nil)
-               :do (character-offset cursor 1)
-               :finally (return t)))))
+       (loop :with offset := 0
+             :with size := (length text)
+             :for line := (point-line (buffer-start-point buffer))
+               :then (line:line-next line)
+             :while line
+             :for string := (line:line-string line)
+             :for end := (+ offset (length string))
+             :do (unless (and (<= end size)
+                              (string= string text :start2 offset :end2 end))
+                   (return nil))
+                 (setf offset end)
+                 (when (line:line-next line)
+                   (unless (and (< offset size)
+                                (char= #\Newline (char text offset)))
+                     (return nil))
+                   (incf offset))
+             :finally (return (= offset size)))))
 
 (defun apply-undo-route (point up down)
   (let ((*undo-tree-replaying-p* (point-buffer point)))

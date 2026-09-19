@@ -1226,3 +1226,18 @@ undo and redo. Explicit tests cover undo-disabled edits, inhibited undo,
 erase/reinsert, and raw renderer replacements of different lengths. They pass,
 as do all 15 native-client runtime checks. The full core suite still has the
 same six previously recorded failures; no additional suite failed.
+
+### Follow-up: exact undo text verification
+
+Undo's exact text comparison now compares each line with the corresponding
+string slice and explicitly verifies intervening newlines. It still checks
+the complete text and length, including replay-hook mutations, without moving
+a temporary point once per character. No undo integrity check was removed.
+
+`scripts/bench/e2e/undo-text.lisp` measures 20 comparisons and 20 undo/redo
+pairs on a 10,000-line (500 KB) buffer per trial, with one warmup and three
+measured trials. On the same machine, median exact comparison dropped from
+26.400 to 0.200 ms; a complete undo/redo pair dropped from 111.051 to 5.450 ms.
+Each trial asserts the final buffer text. Additional tests reject shorter,
+longer, and equal-length changed strings, including altered newline boundaries,
+empty lines and Unicode. The full core suite has the same six known failures.
