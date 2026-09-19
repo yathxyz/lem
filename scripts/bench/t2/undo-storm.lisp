@@ -4,8 +4,8 @@
 ;;;; deterministic seed, moving positions) with undo enabled, then a FULL undo
 ;;;; back to the starting text and a FULL redo forward again -- the SPEC-PERF
 ;;;; PF-5 undo-storm row.  This stresses the edit-history record path, the
-;;;; inverse-edit apply path, and (crucially) `recompute-undo-position-offset',
-;;;; which walks the whole edit history per undo/redo group.
+;;;; inverse-edit apply path, exact replay verification, and retained tree
+;;;; validation on every undo/redo group.
 ;;;;
 ;;;; CORRECTNESS CANARY (SPEC-PERF PF-5: "Assert final buffer text equals
 ;;;; post-edit text ... outside the timed window").  The assert is done ONCE in
@@ -19,9 +19,11 @@
 ;;;; Replayability: SETUP seeds the buffer with undo DISABLED (so the seed is
 ;;;; never on the undo stack) then enables undo; "start" = the seeded base.  RUN
 ;;;; is net-zero: 5k edits -> full undo (-> base) -> full redo (-> post-edit) ->
-;;;; a final full undo (-> base).  It therefore ends exactly where it began
-;;;; (base), so all three timed reps + the warm-up replay from an identical
-;;;; state.  The trailing undo is the only addition beyond the spec's
+;;;; a final full undo (-> base). Each RUN clears the previous replay's retained
+;;;; branches before editing: undo restores text but no longer discards those
+;;;; branches. Without this reset, each sample adds 5000 nodes and measures a
+;;;; larger history than the previous one. All samples start from base text
+;;;; with empty history. The trailing undo is the only addition beyond the spec's
 ;;;; "edits, undo, redo" session, and exists solely for replay hygiene.
 
 (in-package :cl-user)
@@ -86,6 +88,7 @@ equal -> full undo back to base.  Returns the buffer at the base text."
     buffer))
 
 (defun bench-t2-undo-storm-run (buffer)
+  (lem:clear-buffer-edit-history buffer)
   (lem:switch-to-buffer buffer)
   (let ((point (lem:buffer-point buffer)))
     (bench-t2-render)

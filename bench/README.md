@@ -1262,3 +1262,37 @@ would require a different validation design, not simply bypassing checks.
 All 83 real-terminal Vundo checks and all 15 native-client display checks pass
 with the final core changes. The full core run retains the same six known
 failures. No installed editor or mutable Nix profile was changed.
+
+### Follow-up: complete T2 replay and fixture correction
+
+The unmodified replay fixture retained another 5,000 undo nodes after each
+sample: returning to the base text does not discard retained branches. Its
+three undo-storm samples took 21.7 / 29.1 / 36.0 seconds, so they did not measure
+an identical starting state. The workload now clears its private buffer's
+history at the beginning of each run, including that reset in the timed work.
+This is a benchmark correction, not an editor speedup; older undo-storm results
+must not be compared as if the fixture had stayed unchanged.
+
+The corrected full T2 run completed setup canaries, one warmup, and all three
+interleaved measured runs. Final medians on Nova:
+
+| Workload | Median ms/workload |
+| --- | ---: |
+| big-file | 3,422 |
+| isearch | 1,879 |
+| lisp-edit | 294 |
+| long-line | 316 |
+| overlay-heavy | 361 |
+| scroll | 832 |
+| undo-storm | 8,601 |
+
+Undo-storm's measured range is now 8,595–8,633 ms. Results are recorded in
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919112521.json`.
+The runner exits 2 because no matching Nova baseline exists, after writing
+all results; this is a completed measurement, not a passing regression gate.
+No committed baseline was replaced.
+
+Vundo validation also exposed missing native-agent certificate configuration
+in the Nix test environment. Checks now receive the launcher's curl and CA
+bundle settings. The fixture reports the original configuration error, and
+the shell driver exits after a boot failure instead of cascading through tests.
