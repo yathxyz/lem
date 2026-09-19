@@ -1877,5 +1877,93 @@ it does not eliminate later redisplay outliers. Artifacts:
 `/tmp/lem-bounded-dispatch.lisp` and
 `/tmp/lem-bounded-dispatch-{1,2}.{sh,log,kv,csv}`.
 
-This is experimental evidence, not yet a rebuilt runtime result. No production
-Lem method definitions, installed profile, or benchmark budgets changed.
+At this checkpoint this was experimental evidence, not a rebuilt runtime
+result. No production Lem methods, installed profile, or budgets had changed.
+
+### Rebuilt runtime removes cold command stalls (2026-09-19)
+
+The Nix build now applies `patches/sbcl-bounded-dispatch-cost.patch` to SBCL
+and uses that compiler throughout the ASDF dependency graph and development
+shell. The compiler is also available as `.#sbcl-lem`. Generic functions with
+more than 256 methods bypass the discrimination-net cost estimate and use
+SBCL's ordinary cached dispatch. Smaller functions keep the existing heuristic.
+This favors bounded setup work for large method sets; it is not a claim that
+cached dispatch is the fastest steady-state strategy for every possible large
+generic function. Lem's command methods, precedence, advice, and extension API
+are unchanged. The patch applies to Nix builds, not arbitrary system SBCLs.
+
+The compiler's full upstream check phase completed successfully in 6m25s,
+with its declared expected failures and 47 platform/feature skips
+(`/tmp/lem-bounded-sbcl-build.log`). The standalone dispatch check passed on
+the rebuilt compiler: cold dispatch was 2 ms, and the method replacement,
+changed mode, EQL-specializer and method-removal cases were 0-1 ms. These
+durations retain the clock's millisecond-scale resolution. Run the check with:
+
+```sh
+nix build .#checks.x86_64-linux.cold-command-dispatch
+```
+
+The core suite ran with the patched SBCL and remained 74/75, with only the
+documented undo-model mismatch (`/tmp/lem-bounded-core-tests.log`). Rebuilt
+frontend checks passed: 15 native display, 27 configured screen-line, and
+83 Vundo checks, including live reload and rollback refusal
+(`/tmp/lem-bounded-runtime-checks.log`).
+
+Two sequential before/after pairs used the previous `97f2593f9` executable
+and the rebuilt runtime, with no private SBCL replacement or profiler hook.
+The diagnostic sample collector remained enabled on both sides. Each 200 KB
+word-wrap capture contains 140 commands and paints, 100 ms key spacing, no
+overflow, and no recorder replacement. All values below are milliseconds:
+
+| Run | Command max | Input-to-core-paint p50 | Input-to-core-paint p95 | Input-to-core-paint max |
+| --- | ---: | ---: | ---: | ---: |
+| Before 1 | 73 | 11 | 27 | 84 |
+| After 1 | 2 | 11 | 17 | 30 |
+| Before 2 | 67 | 11 | 17 | 82 |
+| After 2 | 2 | 11 | 17 | 32 |
+
+Commands two and three took 67/73 and 67/67 ms before, versus 1/1 ms in
+both rebuilt runs. Redisplay p95 remained 16 ms throughout. This isolates
+the improvement to the cold-command tail; remaining later redisplay outliers
+still reach roughly 30 ms. These are core-paint durations, not physical
+monitor presentation. The stress histogram still reports the conservative
+32.768 ms p95 bucket and fails its unchanged 30 ms gate.
+Artifacts: `/tmp/lem-sbcl-runtime-{before,after}-{1,2}.{sh,log,kv,csv}`.
+The rebuilt executable is
+`/nix/store/m7gcp7cvn78qqmmkks1rz8w36q5nszna-sbcl-lem-ncurses-unstable/bin/lem`.
+No installed editor/profile was changed.
+
+Matched T1/T2 runs used the same working tree and dependency environment, with
+stock versus patched SBCL selected explicitly. T1 normal insert/delete and
+newline medians stayed at 4/4.8 us/op; plain/long-line redisplay stayed at
+228.571/2,250 us/op. Long-line newline insertion rose 5.5%; remaining medians
+were unchanged or lower within the harness noise band. T1 files end in
+`t1-20260919135347.json` (stock) and `t1-20260919135405.json` (patched).
+The earlier T1 file ending `20260919135125` is excluded: its automatic sibling
+discovery loaded the standalone reproducer. The probe now resides in the
+`diagnostics/` subdirectory so it remains opt-in.
+
+T2 medians in ms/workload, with identical frame counts on both sides:
+
+| Workload | Stock SBCL | Patched SBCL |
+| --- | ---: | ---: |
+| big-file | 1938.012 | 1920.011 |
+| isearch | 1183.007 | 1157.007 |
+| lisp-edit | 140.001 | 135.001 |
+| long-line | 146.002 | 147.001 |
+| overlay-heavy | 347.002 | 336.002 |
+| scroll | 498.003 | 491.002 |
+| undo-storm | 8460.050 | 8547.050 |
+
+These differences range from -3.6% to +1.0%; they show no substantial
+steady-state regression in these workloads, not a general throughput speedup.
+T2 files end in `t2-20260919135125.json` and `t2-20260919135405.json`.
+Both T1/T2 runs completed their entries and exited 2 because the matching Nova
+baselines are absent. No baseline or budget was changed. Logs:
+`/tmp/lem-bounded-{bench-before,t1-before,bench-after}.log`.
+
+Standard T3 passed every budget: warm startup 285.096 ms and plain / big-file /
+long-line / scroll / truncate / word-wrap p95 buckets of
+1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms. Results end in
+`t3-20260919135555.json` (`/tmp/lem-bounded-t3.log`). The standalone Nix check
+was also verified after moving its source into `diagnostics/`.

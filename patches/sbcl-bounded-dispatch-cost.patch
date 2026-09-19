@@ -1,0 +1,24 @@
+Keep discrimination-net cost estimation bounded for large generic functions.
+
+Lem's EXECUTE has over 1,100 methods. SBCL 2.5.10 spends roughly 70 ms per
+estimate, twice on early keystrokes, before selecting cached dispatch anyway.
+The existing cost limit bounds estimated dispatch cost, not analysis work.
+For more than 256 methods, choose SBCL's ordinary cached dispatch directly.
+This changes a strategy heuristic, not method applicability or combination;
+method/class changes and EQL specializers keep their existing cache handling.
+
+--- a/src/pcl/dfun.lisp
++++ b/src/pcl/dfun.lisp
+@@ -609,6 +609,12 @@
+   (when (eq **boot-state** 'complete)
+     (unless (or caching-p
+                 (gf-requires-emf-keyword-checks gf)
++                ;; Avoid lengthy analysis on a cold call or after a method
++                ;; change. The cost estimator's LIMIT does not bound how
++                ;; much work it does before finding a discriminating test.
++                ;; NTHCDR bounds this guard's own traversal as well.
++                (nthcdr 256 (generic-function-methods gf))
++
+                 ;; DISPATCH-DFUN-COST will error if it encounters a
+                 ;; method with a non-standard specializer.
+                 (gf-has-method-with-nonstandard-specializer-p gf))

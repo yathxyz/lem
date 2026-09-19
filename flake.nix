@@ -28,7 +28,22 @@
         { pkgs, system, ... }:
         let
           # --- Setup & Helpers ---
-          lisp = pkgs.sbcl;
+          # Keep command dispatch responsive when extensions add many methods.
+          # Rewrap the patched compiler so ASDF builders and dependencies use it too.
+          lisp = pkgs.wrapLisp {
+            pkg =
+              (pkgs.sbcl.override {
+                bootstrapLisp = "${pkgs.sbcl}/bin/sbcl --disable-debugger --no-userinit --no-sysinit";
+              }).overrideAttrs
+                (old: {
+                  patches = (old.patches or [ ]) ++ [ ./patches/sbcl-bounded-dispatch-cost.patch ];
+                });
+            faslExt = "fasl";
+            flags = [
+              "--dynamic-space-size"
+              "3000"
+            ];
+          };
 
           # Helper to generate the Lisp build script used by all variants
           mkBuildScript =
@@ -579,6 +594,7 @@
 
           packages = {
             inherit lem-ncurses lemclient lem-sdl2 lem-webview;
+            sbcl-lem = lisp;
             default = lem-ncurses;
           }
           // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
@@ -634,6 +650,15 @@
                 export LEMCLIENT_BIN="${lemclient}/bin/lemclient"
                 python3 ${./scripts/daemon-terminal-failure-test.py} > "$out"
               '';
+              cold-command-dispatch =
+                pkgs.runCommand "lem-cold-command-dispatch-check"
+                  {
+                    nativeBuildInputs = [ lisp ];
+                  }
+                  ''
+                    sbcl --noinform --no-userinit --no-sysinit \
+                      --script ${./scripts/bench/diagnostics/cold-command-dispatch.lisp} > "$out"
+                  '';
               native-client-display = pkgs.runCommand "lem-native-client-display-check" {
                 nativeBuildInputs = with pkgs; [ python3 xorg.xorgserver xdotool xclip imagemagick ];
               } ''
@@ -653,7 +678,7 @@
               with pkgs;
               [
                 # Lisp development
-                sbcl
+                lisp
                 sbclPackages.qlot-cli
 
                 # Build tools
