@@ -1049,6 +1049,10 @@ approximated per-char width as total/len) and rebuilt content-correctly."
 
 (defun clear-cache-if-screen-modified (window force)
   (when (or force (window-need-to-redraw-p window))
+    ;; Attributes can be shared across frames and mutated in place. A dirty
+    ;; window's explicit cache invalidation must reach peer redraw hooks too.
+    (when *in-redraw-display*
+      (setf *after-redraw-display-force* t))
     (setf (drawing-cache window) '())
     (clear-line-fingerprint-cache window)))
 

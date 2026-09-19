@@ -42,6 +42,10 @@ Used to prevent recursive `redraw-display` calls.")
   "Run after a frame finishes redisplay, outside its recursive redraw guard.
 Frontends can use this to refresh other frames after asynchronous buffer edits.")
 
+(defvar *after-redraw-display-force* nil
+  "Whether the completed frame forced rendering or invalidated a window cache.
+After-redraw hooks can forward this to peers that may share mutable attributes.")
+
 (defgeneric window-redraw (window force)
   (:method (window force)
     (redraw-buffer (implementation) (window-buffer window) window force)
@@ -60,40 +64,41 @@ Frontends can use this to refresh other frames after asynchronous buffer edits."
   (when *in-redraw-display*
     (log:warn "redraw-display is called recursively")
     (return-from redraw-display))
-  (prog1
-      (let ((*in-redraw-display* t)
-            (redraw-after-modifying-floating-window
-              (and (not (no-force-needed-p (implementation)))
-                   (redraw-after-modifying-floating-window (implementation)))))
-        (labels ((redraw-window-list (force)
-                   (dolist (window (window-list))
-                     (unless (eq window (current-window))
-                       (window-redraw window force)))
-                   (redraw-current-window (current-window) force))
-                 (redraw-header-windows (force)
-                   (let ((force (or force (not (null (frame-floating-windows (current-frame)))))))
-                     (dolist (window (frame-header-windows (current-frame)))
-                       (window-redraw window force))))
-                 (redraw-floating-windows ()
-                   (dolist (window (frame-floating-windows (current-frame)))
-                     (window-redraw window redraw-after-modifying-floating-window)))
-                 (redraw-all-windows ()
-                   (redraw-header-windows force)
-                   (redraw-window-list
-                    (if redraw-after-modifying-floating-window
-                        (or (frame-require-redisplay-windows (current-frame))
-                            ;; floating-windowが変更されたら、その下のウィンドウは再描画する必要がある
-                            (frame-modified-floating-windows (current-frame))
-                            force)
-                        force))
-                   (redraw-floating-windows)
-                   (lem-if:update-display (implementation))))
-          (without-interrupts
-            (lem-if:will-update-display (implementation))
-            (update-floating-prompt-window (current-frame))
-            (when (frame-modified-header-windows (current-frame))
-              (adjust-all-window-size))
-            (redraw-all-windows)
-            (notify-frame-redraw-finished (current-frame)))))
-    (note-redisplay-done)
-    (run-hooks *after-redraw-display-hook*)))
+  (let ((*after-redraw-display-force* force))
+    (prog1
+        (let ((*in-redraw-display* t)
+              (redraw-after-modifying-floating-window
+                (and (not (no-force-needed-p (implementation)))
+                     (redraw-after-modifying-floating-window (implementation)))))
+          (labels ((redraw-window-list (force)
+                     (dolist (window (window-list))
+                       (unless (eq window (current-window))
+                         (window-redraw window force)))
+                     (redraw-current-window (current-window) force))
+                   (redraw-header-windows (force)
+                     (let ((force (or force (not (null (frame-floating-windows (current-frame)))))))
+                       (dolist (window (frame-header-windows (current-frame)))
+                         (window-redraw window force))))
+                   (redraw-floating-windows ()
+                     (dolist (window (frame-floating-windows (current-frame)))
+                       (window-redraw window redraw-after-modifying-floating-window)))
+                   (redraw-all-windows ()
+                     (redraw-header-windows force)
+                     (redraw-window-list
+                      (if redraw-after-modifying-floating-window
+                          (or (frame-require-redisplay-windows (current-frame))
+                              ;; floating-windowが変更されたら、その下のウィンドウは再描画する必要がある
+                              (frame-modified-floating-windows (current-frame))
+                              force)
+                          force))
+                     (redraw-floating-windows)
+                     (lem-if:update-display (implementation))))
+            (without-interrupts
+              (lem-if:will-update-display (implementation))
+              (update-floating-prompt-window (current-frame))
+              (when (frame-modified-header-windows (current-frame))
+                (adjust-all-window-size))
+              (redraw-all-windows)
+              (notify-frame-redraw-finished (current-frame)))))
+      (note-redisplay-done)
+      (run-hooks *after-redraw-display-hook*))))

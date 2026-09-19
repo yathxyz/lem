@@ -2781,3 +2781,59 @@ It still requires status zero and a final steady box cursor. The revised test
 also passes against the preceding package (`/tmp/lem-cursor-baseline-supervised.log`).
 Core/kernel sources, proof obligations, benchmark budgets and installed profiles
 were unchanged; the previously documented undo-model mismatch remains separate.
+
+### Reuse peer rows while forwarding display invalidation (2026-09-19)
+
+After removing redundant cursor invalidation, forced redraws of every daemon
+peer remained a substantial cost. Ordinary peer updates now use their existing
+row caches. The after-redraw hook receives `*after-redraw-display-force*`, scoped
+to the completed frame, and forwards it to peers. This value includes explicit
+force and dirty-window cache invalidation, preserving recoloring of attributes
+shared across frames. Hook arity, session routing and output backpressure are
+unchanged; direct `redraw-other-sessions` calls still default to forced repaint.
+
+Forwarding only the explicit `:force` argument was insufficient. The drawing
+object cache retains attribute references, so recoloring in place requires its
+existing dirty-window invalidation. A new shared-overlay regression fails both
+peer-color comparisons without forwarding that invalidation, and passes with it.
+Tests also cover unchanged rows, shared edits at different frame widths,
+Unicode/face/cursor equality against full repaint, explicit force, local peer
+invalidation, nested hooks, suppressed force and restoration after hook errors.
+Logs: `/tmp/lem-peer-invalidation-tests.log`, `/tmp/lem-peer-negative-check.log`.
+
+Final ABBA captures used `daemon-input.py` with 20 warmup keys, 200 measured keys,
+and 25 ms pacing. Resource counters include all 220 keys, idle time and boundary
+evals. All clients observed every resulting edit, and each final buffer matched
+the original file. No build or test ran concurrently. Packages:
+
+- Before: `/nix/store/qs8sy9hjy4sgxdg9h314y3wdx5h120qz-lem-yath/bin/lem`.
+- After: `/nix/store/ardnn7l3z4l4s9sfg6plkr9ah29pzrmy-lem-yath/bin/lem`.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after | All-client p50, both runs before → after (ms) | All-client p95, both runs before → after (ms) |
+| --- | ---: | ---: | --- | --- |
+| 1 | 220.454 → 220.020 | 59,335,616 → 59,548,224 | 0.644/0.483 → 0.477/0.663 | 0.821/0.835 → 0.855/0.743 |
+| 4 | 806.636 → 577.436 | 345,847,744 → 204,161,344 | 1.956/1.895 → 1.309/1.422 | 2.084/2.064 → 1.712/1.724 |
+
+Four-client CPU fell 28.4% and allocation 41.0%. Updating every peer became
+faster, but the active client's p95 was slightly higher: 0.769/0.779 ms before
+versus 0.845/0.828 ms after. Its maxima were 1.058/1.055 ms before versus
+4.026/4.824 ms after. All-client maxima were 4.173/5.348 versus 4.703/5.565 ms.
+These captures do not attribute individual stalls; this is a multi-client
+resource/refresh improvement, not a universal tail-latency improvement.
+Single-client behavior was within run variation, with 0.36% more allocation.
+Timings end at decoded screen messages, excluding native rendering and physical
+presentation. Artifacts: `/tmp/lem-peer-force-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+Validation passed all five daemon test modules, 16 native-client checks,
+27 screen-line checks, 83 Vundo checks and 36 cursor-state checks. The full core
+suite remains 74/75, with only the known undo-model mismatch. Logs:
+`/tmp/lem-peer-force-{runtime,core-tests}.log`. All five modified Lisp source
+files matched the tested base derivation byte for byte. Its executable is
+`/nix/store/2mfrqwvav01iim8rsm5vn9pdn8dxh33v-sbcl-lem-ncurses-unstable/bin/lem`.
+
+T3 passed unchanged budgets: warm startup 286.851 ms and plain/bigfile/longline/
+scroll/truncate/wordwrap p95 histogram upper bounds of
+1.024/1.024/4.096/1.024/1.024/4.096 ms. Result:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919180539.json`;
+log: `/tmp/lem-peer-force-t3.log`. Kernel sources, proof obligations and installed
+profiles were unchanged.

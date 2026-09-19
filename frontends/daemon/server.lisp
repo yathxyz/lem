@@ -406,7 +406,7 @@
 
 (defvar *redrawing-daemon-sessions* nil)
 
-(defun redraw-other-sessions (active)
+(defun redraw-other-sessions (active &key (force t))
   (when *redrawing-daemon-sessions* (return-from redraw-other-sessions))
   (let ((*redrawing-daemon-sessions* t)
         (restore (if (get-frame active)
@@ -419,14 +419,14 @@
              (when (and implementation (not (eq implementation active))
                         (get-frame implementation))
                (activate-implementation implementation)
-               (redraw-display :force t))))
+               (redraw-display :force force))))
       (activate-implementation restore))))
 
 (defun redraw-daemon-sessions-after-display ()
   (let ((implementation (implementation)))
     (when (and *daemon-running-p*
                (typep implementation 'daemon-implementation))
-      (redraw-other-sessions implementation))))
+      (redraw-other-sessions implementation :force *after-redraw-display-force*))))
 
 (defun call-with-client-implementation (target function)
   ;; Asynchronous display requests must switch buffer/point together with the

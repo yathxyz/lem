@@ -358,6 +358,7 @@
    :covered-with-floating-window-p
    :redraw-display
    :*after-redraw-display-hook*
+   :*after-redraw-display-force*
    :clear-screens-of-window-list
    :switch-to-window
    :window-set-pos
