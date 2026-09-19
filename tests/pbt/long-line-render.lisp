@@ -200,6 +200,19 @@ test line is a-z only (the marker glyph never occurs as content)."
       (ok (equal '(1) selected-widths)))))
 
 (deftest layout-exec-twins-equal-naive-recursion
+  (testing "overflow decisions preserve complete sums and floating-point rounding"
+    (ok (not (funcall (ksym "K-TEXT-OVERFLOWS-P")
+                      (make-list *line-length* :initial-element 0) 1 0))
+        "a 300 KB zero-width scan exhausts the list without a stack overflow")
+    (let ((large (ash 1 80)))
+      (dolist (widths (list nil :tail '(0 0) '(1 1) '(nil -1 3/2 :junk 2)
+                           (list large 1 large) (cons large :tail)))
+        (dolist (view (list -1 0 1 2 3/2 large (1+ large) 1.0d16
+                           (+ 1.0d16 2.0d0)))
+          (dolist (total (list -1 0 1 1/2 large 1.0d16))
+            (ok (eql (<= view (+ total (naive-k-sum widths)))
+                     (funcall (ksym "K-TEXT-OVERFLOWS-P") widths view total))
+                (format nil "widths ~S, view ~S, total ~S" widths view total)))))))
   (testing "prefix copies clamp counts, preserve leaves, and retain dotted inputs"
     (let* ((leaf (list :payload))
            (input (list leaf :b :c))
@@ -233,6 +246,8 @@ test line is a-z only (the marker glyph never occurs as content)."
       (let ((codes (loop :for i :from 0 :below (length widths) :collect i)))
         (and (equal (funcall (ksym "K-SUM") widths)
                     (naive-k-sum widths))
+             (eql (<= span (+ start-x (naive-k-sum widths)))
+                  (funcall (ksym "K-TEXT-OVERFLOWS-P") widths span start-x))
              (equal (funcall (ksym "K-FIRSTN") n widths)
                     (naive-k-firstn n widths))
              (multiple-value-bind (kc kw)

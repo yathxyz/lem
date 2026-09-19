@@ -985,6 +985,18 @@ invalid counts in `k-firstn`, dotted lists, shallow-copy identity, unchanged
 input structure, and the existing 300 KB full-render cases. Runtime measurement
 and certification evidence are recorded in `bench/README.md`.
 
+**Bounded overflow decisions (2026-09-19).** `k-wrap-row` uses
+`k-text-overflows-p` to stop summing a text run once its non-negative widths
+reach the remaining row width. `k-sum-reaches-acc-is-full-sum` proves this
+partial scan equivalent to comparing the complete sum, including zero and
+coerced junk widths. The accumulator remains an arbitrary-precision natural;
+rational bounds do not cause per-character ratio subtraction. The wrapper's
+equality theorem preserves the existing row proofs unchanged. Common Lisp
+floating-point bounds retain the original full-sum arithmetic order, since
+rearrangement could change rounding. No shim primitive or public export is
+added. Regression tests compare against complete sums, alongside the existing
+layout differential tests and 300 KB render cases.
+
 **Differential/PBT acceptance:** `tests/pbt/layout-conformance.lisp` — random
 drawing-object lists (narrow/wide/emoji runs, mixed-width Greek+CJK runs,
 single tabs, control characters, zero-width combining runs, zero-width opaque

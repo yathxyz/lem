@@ -220,6 +220,34 @@
   (natp (k-obj-width obj))
   :rule-classes :type-prescription)
 
+;; An overflow decision needs only enough widths to reach LIMIT. Keep the
+;; accumulator integral even when LIMIT is rational, avoiding ratio arithmetic
+;; at each character. Width coercion is identical to K-SUM.
+(defun k-sum-reaches-acc (widths limit acc)
+  (declare (xargs :guard (and (rationalp limit) (natp acc))))
+  (cond ((<= limit acc) t)
+        ((atom widths) nil)
+        (t (k-sum-reaches-acc (cdr widths) limit
+                              (+ acc (k-nat (car widths)))))))
+
+(defthm k-sum-reaches-acc-is-full-sum
+  (implies (and (rationalp limit) (natp acc))
+           (equal (k-sum-reaches-acc widths limit acc)
+                  (<= limit (+ acc (k-sum widths)))))
+  :hints (("Goal" :induct (k-sum-reaches-acc widths limit acc))))
+
+(defun k-text-overflows-p (widths view-width total)
+  (declare (xargs :guard (and (rationalp view-width) (rationalp total))))
+  ;; CL callers can also supply floats. Preserve their original arithmetic
+  ;; order rather than moving TOTAL across the comparison and rounding again.
+  (if (and (rationalp view-width) (rationalp total))
+      (k-sum-reaches-acc widths (- view-width total) 0)
+      (<= view-width (+ total (k-sum widths)))))
+
+(defthm k-text-overflows-p-is-full-sum
+  (equal (k-text-overflows-p widths view-width total)
+         (<= view-width (+ total (k-sum widths)))))
+
 ;;; ===========================================================================
 ;;; Halving (production explode-object)
 ;;; ===========================================================================
@@ -346,7 +374,7 @@
       (mv nil nil)
       (let ((obj (car objects)))
         (if (and (k-text-p obj)
-                 (<= view-width (+ total (k-obj-width obj))))
+                 (k-text-overflows-p (k-obj-widths obj) view-width total))
             ;; Splittability needs only two conses, not a full run-length scan.
             (if (and (consp (k-obj-codes obj))
                      (consp (cdr (k-obj-codes obj))))

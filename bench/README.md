@@ -2091,3 +2091,61 @@ Standard T3 passed all budgets: startup 286.447 ms and plain / big-file /
 long-line / scroll / truncate / word-wrap p95 buckets of
 1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms, in
 `t3-20260919143233.json` (`/tmp/lem-take-prefix-t3.log`).
+
+### Stop width scans once overflow is certain (2026-09-19)
+
+`k-wrap-row` used to sum an entire text run just to decide whether it reached
+or exceeded the row boundary. It now uses `k-text-overflows-p`: a tail-recursive
+scan stops when its natural-valued accumulator reaches the remaining width.
+The equality theorems in `verified/layout.lisp` prove that this decision is the
+same as comparing the complete sum; the existing layout theorems are unchanged.
+Integer and rational bounds take the new path, while Common Lisp floats retain
+the original arithmetic order to preserve rounding. No shim primitive, public
+export, input budget, or rendering behavior changes.
+
+Rebuilt before/after editors used the same 200 KB word-wrap fixture and
+140 paced key/paint samples, with the order reversed in the second pair.
+All captures were complete, without overflow or recorder replacement.
+Core-paint durations in milliseconds:
+
+| Run | p50 | p95 | Maximum |
+| --- | ---: | ---: | ---: |
+| Before 1 | 10 | 15 | 22 |
+| After 1 | 9 | 15 | 38 |
+| Before 2 | 10 | 16 | 39 |
+| After 2 | 10 | 14.001 | 28 |
+
+The scan does less work on overflowing runs, but these captures do not establish
+a repeatable median or maximum latency improvement. All four conservative
+histogram gates passed; no budget changed. Artifacts:
+`/tmp/lem-width-stop-built-{before,after}-{1,2}.{sh,log,kv,csv}`.
+The candidate executable is
+`/nix/store/2gpkjncl1iiq9vnl12hkmwyvssc16p7r-sbcl-lem-ncurses-unstable/bin/lem`;
+its derivation source matches the edited layout book and unchanged shim.
+
+All 12 books have current certificates: layout certified directly in
+`/tmp/lem-width-stop-proof.log`, then the runner certified the other 11 and
+reused that fresh layout certificate, with zero failures
+(`/tmp/lem-width-stop-proofs.log`). The core suite remains 74/75, with only the
+documented undo-model mismatch (`/tmp/lem-width-stop-tests.log`). New checks
+cover large integers, ratios, floating-point rounding, dotted and junk width
+lists, random full-sum comparisons, and a 300,000-entry zero-width scan that
+must exhaust its input without a stack overflow. The existing 300 KB full
+render tests also pass. All 15 native display, 27 configured screen-line and
+83 Vundo checks passed (`/tmp/lem-width-stop-runtime.log`). No installed profile
+changed.
+
+Full T2 completed with medians of 1,870.011 / 1,138.007 / 135.001 / 132.000 /
+326.001 / 471.004 / 7,932.047 ms for big-file / isearch / lisp-edit / long-line /
+overlay-heavy / scroll / undo-storm. Frame counts match the prior run, and
+median differences range from approximately 0% to -7.7%, inside the harness
+noise band. The long-line result is down from 142.001 ms, but unrelated
+workloads also became faster, so that comparison alone does not establish the
+optimization's gain. Results end in `t2-20260919144549.json`
+(`/tmp/lem-width-stop-full-t2.log`). The run exited 2 because the matching Nova
+baseline is absent; these are comparative results, not a passing baseline gate.
+
+Standard T3 passed every budget: startup 286.032 ms and plain / big-file /
+long-line / scroll / truncate / word-wrap p95 buckets of
+1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms. Results end in
+`t3-20260919144730.json` (`/tmp/lem-width-stop-t3.log`).
