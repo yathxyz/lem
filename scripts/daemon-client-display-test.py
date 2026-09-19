@@ -13,6 +13,7 @@ from pathlib import Path
 import pty
 import select
 import shutil
+import socket
 import struct
 import subprocess
 import tempfile
@@ -181,6 +182,75 @@ with tempfile.TemporaryDirectory(prefix='lem-sdl-check-') as temporary:
             assert tty2.wait(timeout=10) == 0
             eventually(count, '0')
             print('PASS: two terminal frames share edits and survive peer failure', flush=True)
+
+            # A daemon cursor is transmitted separately from cached text rows.
+            # Exercise the configured state hook on a real attached frame.
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+                peer.settimeout(10)
+                peer.connect(str(root / 'XDG_RUNTIME_DIR' / 'lem' / 'sdl-test.sock'))
+
+                def read_exact(length):
+                    data = b''
+                    while len(data) < length:
+                        chunk = peer.recv(length - len(data))
+                        assert chunk, 'cursor fixture transport closed'
+                        data += chunk
+                    return data
+
+                def receive_message():
+                    length, = struct.unpack('!I', read_exact(4))
+                    assert length <= 1024 * 1024
+                    return json.loads(read_exact(length))
+
+                def send_message(kind, **fields):
+                    data = json.dumps(dict(version=2, type=kind, id='cursor-check',
+                                           **fields)).encode()
+                    peer.sendall(struct.pack('!I', len(data)) + data)
+
+                def cursor_request(kind, **fields):
+                    send_message(kind, **fields)
+                    screen = None
+                    while True:
+                        reply = receive_message()
+                        if reply['type'] == 'screen':
+                            screen = reply
+                        elif reply['type'] == 'response':
+                            assert reply['status'] == 'ok', reply
+                            return reply.get('value'), screen
+
+                send_message('hello')
+                assert receive_message()['type'] == 'hello'
+                cursor_request('attach', width=100, height=40)
+                cursor_request('eval', form=
+                    '(progn (lem:switch-to-buffer (lem:make-buffer "*cursor-wire*")) '
+                    '(lem:insert-string (lem:current-point) "CURSORWIRE") '
+                    '(lem:buffer-start (lem:current-point)))')
+                states = [
+                    ("'lem-vi-mode/states:normal", 'box', '#FF0000'),
+                    ("'lem-vi-mode/states:insert", 'bar', '#00FF00'),
+                    ('lem-yath::*lem-yath-emacs-state*', 'box', '#00FFFF'),
+                    ("'lem-vi-mode/states:insert", 'bar', '#00FF00'),
+                ]
+                for state, shape, color in states:
+                    value, screen = cursor_request('eval', form=
+                        '(progn (lem:redraw-display :force t) '
+                        '(setf (lem-vi-mode/core:current-state) ' + state + ') '
+                        '(prog1 (not (lem-core::window-need-to-redraw-p (lem:current-window))) '
+                        '(lem:redraw-display)))')
+                    assert value['primary'] == 'T', 'cursor state invalidated daemon text rows'
+                    assert screen['cursor']['shape'] == shape, screen['cursor']
+                    assert screen['cursor']['color'] == color, screen['cursor']
+                value, screen = cursor_request('eval', form=
+                    "(progn (lem:set-attribute 'lem:cursor :bold t :underline t) "
+                    '(lem:redraw-display :force t) '
+                    "(setf (lem-vi-mode/core:current-state) 'lem-vi-mode/states:insert) "
+                    '(prog1 (lem-core::window-need-to-redraw-p (lem:current-window)) '
+                    '(lem:redraw-display)))')
+                assert value['primary'] == 'T', 'cleared cursor text styles need a repaint'
+                cursor_request('detach')
+            eventually(count, '0')
+            print('PASS: daemon cursor state updates preserve text caches and publish color/shape', flush=True)
+
             gui = []
             windows = []
             for index in range(2):

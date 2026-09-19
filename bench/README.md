@@ -2724,3 +2724,60 @@ and `/nix/store/qdrzlkb6vyjdq7nhvxaz217r1dfk7y11-sbcl-lemclient-unstable/bin/lem
 Their derivation inputs matched the modified daemon implementation and protocol
 tests byte for byte. The previously documented core undo-model mismatch is
 outside this change; the core suite was not rerun for this daemon-only edit.
+
+### Avoid daemon text invalidation for cursor background changes (2026-09-19)
+
+A private multi-client typing probe found that every daemon frame restoration
+called the configured Vi cursor hook, which marked the entire focused window
+dirty. A trace through `need-to-redraw` identified that hook; an experiment that
+only removed forced peer redraws still encountered dirty windows on every visit.
+The workaround exists for standalone ncurses, whose cursor cell caches its color.
+Daemon clients instead receive cursor color and shape separately in every screen
+message, and server text cells exclude the primary cursor background.
+
+The configured hook now avoids daemon text invalidation for background-only
+cursor updates. It still invalidates when Vi clears custom bold, underline or
+reverse text styling, and standalone frontends retain the original behavior.
+No new cache or change to peer redraw scheduling was introduced.
+
+`scripts/bench/e2e/daemon-input.py` starts a private configured daemon and one or
+four protocol clients on a shared 1,000-line buffer. Each capture alternates
+insertion and Backspace, checks the resulting text on every peer, and verifies
+that the final buffer equals the original file. There are 20 warmup keys and
+200 latency samples, with 25 ms sleeps between completed updates. Timings run
+from socket write to decoding the matching screen, excluding terminal/SDL
+rendering and physical keyboard/monitor latency. Resource counters cover all
+220 keys, intervening idle work and boundary eval requests; GC time is CPU time.
+All eight captures completed, and no builds/tests ran during measurement.
+
+ABBA runs used these configured packages:
+
+- Before: `/nix/store/089nq54j3micf84s4qh7fgcbf72dklhl-lem-yath/bin/lem`.
+- After: `/nix/store/qs8sy9hjy4sgxdg9h314y3wdx5h120qz-lem-yath/bin/lem`.
+
+| Clients | Mean process CPU before → after (ms) | Mean Lisp bytes before → after | Active p50, both runs before → after (ms) | Active p95, both runs before → after (ms) |
+| --- | ---: | ---: | --- | --- |
+| 1 | 234.034 → 228.859 | 59,733,440 → 59,556,992 | 0.642/0.675 → 0.644/0.633 | 0.885/0.916 → 0.953/0.826 |
+| 4 | 865.552 → 827.897 | 394,609,216 → 346,404,800 | 0.887/0.908 → 0.692/0.680 | 1.204/1.101 → 0.943/0.883 |
+
+With four clients, allocation fell 12.2% and CPU 4.4%. Active-client median
+latency improved by about 0.2 ms. Time to update every client had p95 values
+2.495/2.399 ms before and 2.181/2.126 ms after. Maximum latency did not improve:
+all-client maxima were 4.004/2.936 ms before and 5.428/3.991 ms after. Single-client
+latency showed no consistent improvement. Artifacts:
+`/tmp/lem-daemon-cursor-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+All 16 packaged native-client checks pass, including a new real-connection
+check that normal/insert/Emacs cursor changes preserve text caches while sending
+the correct color and shape, and that clearing custom cursor text styling still
+invalidates the window. The complete standalone cursor/state suite also passes,
+including themes, reloads, buffer-local states, raw terminal shape/color and
+clean exit. Log: `/tmp/lem-daemon-cursor-final-runtime.log`. The candidate's
+configured cursor source matched the checkout byte for byte.
+
+The cursor test's exit check was checkpointed separately: it now records the
+direct child wait status, avoiding missing tmux pane status observed in Nix runs.
+It still requires status zero and a final steady box cursor. The revised test
+also passes against the preceding package (`/tmp/lem-cursor-baseline-supervised.log`).
+Core/kernel sources, proof obligations, benchmark budgets and installed profiles
+were unchanged; the previously documented undo-model mismatch remains separate.

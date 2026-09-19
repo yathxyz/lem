@@ -51,15 +51,23 @@
 
 (defmethod lem-vi-mode/core:state-changed-hook :after
     ((state lem-vi-mode/core:vi-state))
-  ;; Ncurses caches the rendered cursor cell.  A state change updates the
-  ;; shared cursor attribute, but a stationary cursor otherwise keeps the old
-  ;; cell color until some unrelated edit invalidates the window.  Mark only
-  ;; the focused window dirty; the ordinary post-command redraw then paints
-  ;; the new state color after UPDATE-CURSOR-STYLES has run.
+  ;; Standalone ncurses caches the rendered cursor cell and needs a repaint
+  ;; after UPDATE-CURSOR-STYLES. Daemon clients receive color/shape separately
+  ;; on every screen update; their text cells omit the primary cursor's
+  ;; background. Avoid invalidating text rows on every daemon frame restore.
   (declare (ignore state))
-  (alexandria:when-let* ((frame (current-frame))
+  (unless #+(and sbcl linux)
+          (and (typep (implementation) 'lem-daemon:daemon-implementation)
+               ;; UPDATE-CURSOR-STYLES also clears these text attributes. Such
+               ;; a customization still needs its cached glyphs repainted.
+               (let ((cursor (ensure-attribute 'cursor)))
+                 (not (or (attribute-reverse cursor)
+                          (attribute-bold cursor)
+                          (attribute-underline cursor)))))
+          #-(and sbcl linux) nil
+    (alexandria:when-let* ((frame (current-frame))
                          (window (frame-current-window frame)))
-    (lem-core::need-to-redraw window)))
+      (lem-core::need-to-redraw window))))
 
 (defun lem-yath-sync-vi-state-before-buffer-switch (buffer)
   "Select BUFFER's Vi state after upstream initializes a new buffer."
