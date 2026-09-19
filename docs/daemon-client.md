@@ -77,8 +77,14 @@ JSON result, and all test processes are stopped on exit.
 ### Completed shutdown
 
 `lemclient --stop-server` refuses modified file buffers unless `--force` is
-provided. Force permits shutdown; it does not save over source files. In the
-configured daemon, final recovery checkpoints retain eligible unsaved text.
+provided. Force bypasses that modified-buffer prompt; it does not save over
+source files or bypass recovery and journal durability checks. In the configured
+daemon, final recovery checkpoints retain eligible unsaved text.
+
+Eligible buffers above the recovery text limit are refused before exit hooks
+stop services. The diagnostic names the buffer and limit; save or reduce the
+buffer, then retry. The listener, recovery timer and managers remain available
+after this size refusal. Saved, unmodified buffers need no new checkpoint.
 
 The client waits for an explicit `stopped` response and then transport closure.
 An initial `pending` / `stopping` response, or EOF alone, cannot acknowledge

@@ -3611,3 +3611,63 @@ behavior was relaxed. Artifacts:
 Kernel sources and proof obligations are unchanged, as are installed profiles.
 The known core undo-model gap and the newly observed configured T3 shutdown
 failure remain open; this checkpoint does not claim the complete suite is green.
+
+
+### Recoverable oversized-buffer shutdown refusal (2026-09-19)
+
+Retained terminal diagnostics resolved the configured T3 large-file stop failure
+from the preceding checkpoint. It was not a ten-second cleanup delay: the final
+recovery checkpoint rejected the modified `mixed-10m.txt` corpus against the
+2 Mi-character text limit. `stop-configured-daemon-server` then ran its guaranteed
+cleanup and raised the failure, leaving the interactive editor open with managers
+cleared and a sticky shutdown error. The harness continued sending `y` into the
+backtrace buffer. Artifacts: `/tmp/lem-configured-exit-diagnostic.{sh,log}`,
+`/tmp/lem-configured-exit-{before,after}.txt`,
+`/tmp/lem-configured-exit-debug.log`.
+
+The existing shutdown contract intentionally reports real checkpoint/journal
+failures and remembers failed cleanup after globals are cleared. That contract
+and all storage limits remain intact. A new `check-checkpoint-limits` query checks
+eligible buffer sizes without copying text, allocating recovery IDs or writing
+records. The configured editor registers it after buffer-lock checks and before
+service teardown. Known oversized buffers now produce a normal editor diagnostic
+before any of those cleanup hooks run. Saving or reducing the buffer permits a
+retry; `--force` still does not bypass recovery or journal guarantees.
+
+Tests cover the exact limit, oversized modified text, excluded/read-only/clean
+buffers, and absence of recovery side effects. The configured shutdown regression
+records service identities and a cleanup-hook sentinel, attempts a forced stop,
+checks that services and the source file remain intact, saves the oversized file,
+and proves the next stop succeeds without reinitializing services. The old build
+fails the new service-preservation check as expected:
+`/tmp/lem-checkpoint-preflight-negative.log`.
+
+Validation:
+
+- Recovery unit suite passes, including the existing atomic-storage and failure
+  cases: `/tmp/lem-checkpoint-preflight-unit.log`.
+- All 27 native shutdown checks pass, including the unchanged checkpoint, draft,
+  core-journal, job-journal, frame-teardown and incomplete-peer failure tests:
+  `/tmp/lem-checkpoint-preflight-shutdown.log`,
+  `/tmp/lem-shutdown-client-wt79cr1h/result.json`.
+- All 16 packaged native display/integration checks pass:
+  `/tmp/lem-checkpoint-preflight-native.log`.
+- A real ncurses probe edits the 10 MB corpus, observes the early size diagnostic,
+  saves via `C-x C-s`, and exits cleanly on retry. Artifacts:
+  `/tmp/lem-checkpoint-preflight-tui.{sh,log}`,
+  `/tmp/lem-checkpoint-preflight-refusal.txt`,
+  `/tmp/lem-checkpoint-preflight-saved.txt`.
+
+The tested recovery source, unit test, shutdown client test and configured daemon
+source matched the built packages byte for byte:
+
+- Configured: `/nix/store/qf6zqai0z49mgvy4jlc1zbd76cr62ld8-lem-yath/bin/lem`.
+- Base: `/nix/store/yh767h0pg53v2w47l3r89dpsq070csij-sbcl-lem-ncurses-unstable/bin/lem`.
+- Client: `/nix/store/hjfk4gwb4f31yz9qnxvpk84g7rswfdg4-sbcl-lemclient-unstable/bin/lemclient`.
+
+This is a shutdown correctness fix, with no claimed typing speedup. Standard
+configured T3 still cannot discard an oversized unsaved corpus through its `y`
+loop; that policy refusal is intentional, and no budget, workload size or timeout
+was relaxed. The base-image T3 gate remains the applicable preceding measurement.
+Core/kernel sources, proof obligations and installed profiles are unchanged;
+the previously documented core undo-model mismatch remains open.

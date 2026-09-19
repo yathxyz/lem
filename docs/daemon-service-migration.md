@@ -145,6 +145,8 @@ Record the actual ownership and generation again immediately before deployment.
 explicit forced stop bypasses that check. Orderly exit attempts a final text
 checkpoint, drains draft snapshots/submissions while core actors remain open,
 then stops the agent actors and job manager. A final checkpoint failure is logged.
+Known oversized buffers are refused before teardown; save or reduce them before
+retrying. `--force` bypasses the modified-buffer prompt, not recovery limits.
 `systemctl --user stop/restart lem` terminates the process and does not present a
 save prompt or guarantee that orderly checkpoint/drain sequence.
 

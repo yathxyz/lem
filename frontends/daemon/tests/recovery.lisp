@@ -266,6 +266,31 @@
                      "editing copies leaves the original checkpoint available")))
           (dolist (buffer buffers) (lem:delete-buffer buffer)))))))
 
+(deftest checkpoint-size-preflight
+  (lem:with-current-buffers ()
+    (with-recovery-directory (directory)
+      (let ((buffer (lem:make-buffer "size preflight")))
+        (unwind-protect
+             (progn
+               (lem:insert-string (lem:buffer-point buffer)
+                                  (make-string store:+maximum-text-length+ :initial-element #\x))
+               (ok (recovery:check-checkpoint-limits) "the exact size limit is allowed")
+               (lem:insert-string (lem:buffer-point buffer) "x")
+               (ok (signals (recovery:check-checkpoint-limits) 'lem/buffer/errors:editor-error)
+                   "an oversized modified buffer fails before shutdown")
+               (ok (null (lem:buffer-value buffer 'recovery::recovery-id)))
+               (ok (not (probe-file directory)) "preflight does not create recovery storage")
+               (setf (lem:buffer-value buffer 'recovery::recovery-exclude) t)
+               (ok (recovery:check-checkpoint-limits) "excluded buffers remain excluded")
+               (setf (lem:buffer-value buffer 'recovery::recovery-exclude) nil
+                     (lem:buffer-read-only-p buffer) t)
+               (ok (recovery:check-checkpoint-limits) "read-only buffers need no checkpoint")
+               (setf (lem:buffer-read-only-p buffer) nil)
+               (lem:buffer-unmark buffer)
+               (ok (recovery:check-checkpoint-limits) "unmodified oversized buffers are allowed"))
+          (setf (lem:buffer-read-only-p buffer) nil)
+          (lem:delete-buffer buffer))))))
+
 (deftest checkpoint-failure-does-not-block-other-buffers
   (with-test-frame ()
     (with-recovery-directory (directory)

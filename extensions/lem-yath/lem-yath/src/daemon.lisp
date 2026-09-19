@@ -61,4 +61,7 @@
       (error condition))))
 
 (add-hook *exit-editor-hook* 'stop-configured-daemon-server)
+;; Reject known oversized buffers after lock checks but before persistence,
+;; agent and listener teardown, so the editor remains usable for correction.
+(add-hook *exit-editor-hook* 'lem-daemon/recovery:check-checkpoint-limits 99999)
 (initialize-editor-feature 'configure-daemon-server)

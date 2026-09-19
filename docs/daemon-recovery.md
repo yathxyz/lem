@@ -17,6 +17,10 @@ filesystem durability. It does not change or delete older checkpoint files.
 The integration's configured Nix editor includes recovery and enables a five-second
 idle checkpoint interval under its actual daemon name. A deliberate editor exit
 also attempts a final checkpoint; failures are written to the error log.
+Known oversized buffers are rejected before shutdown hooks stop services. Save
+or reduce the named buffer and retry; the recovery limit remains enforced.
+This early size check performs no record writes and does not replace the final
+checkpoint or its storage-error handling.
 For other builds, include `lem-daemon/recovery`. On the editor thread, after the
 configuration has initialized, call:
 
@@ -60,7 +64,8 @@ unmodified, read-only, and temporary buffers produce no new checkpoint. The inte
 `lem-daemon/recovery::recovery-exclude` buffer value excludes a generated buffer
 such as the recovery listing.
 
-Lisp callers can use `checkpoint-now`, `list-checkpoints`, `restore-checkpoint`, and
+Lisp callers can use `check-checkpoint-limits` for the early size check and
+`checkpoint-now`, `list-checkpoints`, `restore-checkpoint`, and
 `discard-checkpoint` without UI prompts. Buffer-facing operations must run on the
 editor thread. `disable` stops scheduling and waits for a pending writer; it retains
 existing records. The deployed profile remains unchanged until the integration is installed.

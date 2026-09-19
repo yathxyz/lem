@@ -1,7 +1,8 @@
 (defpackage :lem-daemon/recovery
   (:use :cl :lem)
   (:local-nicknames (:store :lem-daemon/recovery-store))
-  (:export :enable :disable :checkpoint-now :list-checkpoints :restore-checkpoint
+  (:export :enable :disable :checkpoint-now :check-checkpoint-limits
+           :list-checkpoints :restore-checkpoint
            :discard-checkpoint :buffer-recovery-origin :*last-error*
            :recovery-list :recovery-restore :recovery-checkpoint :recovery-discard))
 (in-package :lem-daemon/recovery)
@@ -29,12 +30,28 @@
     (setf (buffer-value buffer 'file-baseline)
           (store:file-baseline (buffer-filename buffer)))))
 
+(defun checkpoint-buffer-p (buffer)
+  (and (buffer-modified-p buffer)
+       (not (buffer-temporary-p buffer))
+       (not (buffer-read-only-p buffer))
+       (not (buffer-value buffer 'recovery-exclude))))
+
+(defun oversized-buffer-p (buffer)
+  (> (1- (position-at-point (buffer-end-point buffer))) store:+maximum-text-length+))
+
+(defun check-checkpoint-limits ()
+  "Check eligible buffer sizes without copying text or writing records.
+Call before exit hooks tear down services. Storage errors still require the
+final checkpoint itself; this check only rejects known size-limit failures."
+  (dolist (buffer (buffer-list))
+    (when (and (checkpoint-buffer-p buffer) (oversized-buffer-p buffer))
+      (editor-error "Recovery cannot checkpoint ~a (limit ~d characters). Save or reduce the buffer before exiting."
+                    (buffer-name buffer) store:+maximum-text-length+)))
+  t)
+
 (defun snapshot-buffer (buffer)
-  (when (and (buffer-modified-p buffer)
-             (not (buffer-temporary-p buffer))
-             (not (buffer-read-only-p buffer))
-             (not (buffer-value buffer 'recovery-exclude)))
-    (when (> (1- (position-at-point (buffer-end-point buffer))) store:+maximum-text-length+)
+  (when (checkpoint-buffer-p buffer)
+    (when (oversized-buffer-p buffer)
       (error "Recovery skipped oversized buffer ~a (limit ~d characters)"
              (buffer-name buffer) store:+maximum-text-length+))
     (let* ((id (or (buffer-value buffer 'recovery-id)

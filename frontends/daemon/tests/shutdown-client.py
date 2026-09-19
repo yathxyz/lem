@@ -126,6 +126,40 @@ def main():
               'completed shutdown durably checkpoints exact immediate unsaved text')
         check(unsaved_file.read_text() == 'disk original\n', 'shutdown checkpoints do not save over source files')
 
+        name = 'oversized-preflight'
+        daemon = start_daemon(name)
+        large_file = root / 'oversized.txt'
+        large_file.write_text('original\n')
+        limit = int(evaluate(name, 'lem-daemon/recovery-store:+maximum-text-length+'))
+        services = ('(list lem-yath::*native-agent-manager* '
+                    'lem-yath::*native-agent-draft-store* lem-toolkit/jobs:*default-manager* '
+                    'lem-daemon/recovery::*timer*)')
+        evaluate(name, '(progn (defparameter lem-user::*preflight-services* ' + services + ') '
+                 '(defparameter lem-user::*preflight-cleanup-ran* nil) '
+                 '(lem:add-hook lem:*exit-editor-hook* '
+                 '(lambda () (setf lem-user::*preflight-cleanup-ran* t)) 90000) '
+                 '(defparameter lem-user::*oversized-buffer* '
+                 '(lem:find-file-buffer ' + quoted(large_file) + ')) '
+                 '(lem:insert-string (lem:buffer-end-point lem-user::*oversized-buffer*) '
+                 '(make-string lem-daemon/recovery-store:+maximum-text-length+ :initial-element #\\x)))')
+        refused = cli(name, '--stop-server', '--force', success=False)
+        check(refused.returncode == 2 and daemon.poll() is None,
+              'oversized text refuses even forced orderly shutdown')
+        check(evaluate(name, '(and (not lem-user::*preflight-cleanup-ran*) '
+                       '(null lem-yath::*configured-shutdown-error*) '
+                       '(every #\'eq lem-user::*preflight-services* ' + services + ') '
+                       '(lem-toolkit/jobs:job-manager-ready-p lem-toolkit/jobs:*default-manager*) '
+                       '(lem-daemon:daemon-running-p))') == 'T'
+              and large_file.read_text() == 'original\n',
+              'size preflight preserves services, listener and source file before cleanup')
+        evaluate(name, '(lem:save-buffer lem-user::*oversized-buffer*)')
+        check(large_file.stat().st_size == limit + len('original\n')
+              and evaluate(name, '(not (lem:buffer-modified-p lem-user::*oversized-buffer*))') == 'T',
+              'the refused session can save its oversized buffer')
+        cli(name, '--stop-server', '--force')
+        check(daemon.wait(timeout=15) == 0,
+              'shutdown succeeds after correcting the oversized buffer without restarting services')
+
         for kind in ('checkpoint', 'draft', 'core', 'jobs', 'teardown'):
             name = 'failure-' + kind
             daemon = start_daemon(name)
