@@ -2032,3 +2032,62 @@ Standard T3 passed all budgets: warm startup 285.363 ms and plain / big-file /
 long-line / scroll / truncate / word-wrap p95 buckets of
 1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms. Results end in
 `t3-20260919141206.json` (`/tmp/lem-chunked-len-t3.log`).
+
+### Avoid the second prefix allocation while splitting runs (2026-09-19)
+
+`k-firstn` previously built a reversed accumulator and then copied it again.
+ACL2 8.6's native `take` copies directly. The kernel now uses that primitive
+for natural counts and proper lists, clamping the count to avoid NIL padding;
+other inputs retain the existing accumulator. Its logical definition and
+guard `t` remain intact. The new `k-firstn-is-clamped-take` equality theorem is
+enabled only for guard verification. The shim adds the guarded `take` primitive
+following ACL2's native implementation; the trust boundary is documented in
+`verified/README.md`.
+
+On `1e7371252`, an isolated before/after experiment over 50 splits of a
+200,000-element run reduced allocation from about 320.2 MB to 160.1 MB.
+Elapsed times were 120.001/105.001 ms before and 86.000/93.001 ms after
+(`/tmp/lem-prefix-micro.{lisp,log}`, using `/tmp/lem-take-prefix.lisp`).
+This is a component experiment, not an editor-wide speedup.
+
+Filtered T2 long-line replay recorded 129.001 ms (min/p90 129.000-131.001)
+and 126,050,976 allocated bytes, in `t2-20260919142104.json`. The subsequent
+full T2 run gives a more conservative result: long-line median 142.001 ms
+versus the prior 143.001 ms, while allocation fell from 171,244,064 to
+126,229,408 bytes (about 26%). The full run's other medians were
+1,939.012 / 1,177.008 / 135.002 / 340.002 / 500.003 / 8,595.052 ms for big-file /
+isearch / lisp-edit / overlay-heavy / scroll / undo-storm. All frame counts
+match; median changes range from -2.9% to +2.0%, within the noise band.
+Results end in `t2-20260919143030.json`. Both runs completed and exited 2
+because the matching Nova baseline is absent. No baseline or budget changed.
+
+Rebuilt before/after editor comparisons used the same 200 KB word-wrap fixture
+and 140 key/paint samples per run, with the order reversed in the second pair.
+Captures were complete, without overflow or recorder replacement. Milliseconds:
+
+| Run | Core-paint p50 | Core-paint p95 | Core-paint max |
+| --- | ---: | ---: | ---: |
+| Before 1 | 11 | 16 | 35 |
+| After 1 | 11 | 16.001 | 42 |
+| Before 2 | 11 | 18 | 34.001 |
+| After 2 | 11 | 16 | 25 |
+
+There is no repeatable median or maximum improvement in these captures. The
+allocation saving is established; an end-to-end latency speedup is not.
+Artifacts: `/tmp/lem-take-built-{before,after}-{1,2}.{sh,log,kv,csv}`.
+The checked candidate executable is
+`/nix/store/lpsc291csakpxc36y99wvwsgmcacik1r-sbcl-lem-ncurses-unstable/bin/lem`;
+its derivation source matches the edited shim, layout book and regression test.
+
+All 12 books certified, with zero skips or failures
+(`/tmp/lem-take-prefix-proofs.log`). Tests cover padding versus clamping,
+invalid and 80-bit counts, dotted lists, fresh prefixes, preserved leaf identity,
+unchanged input lists, and 300 KB full rendering. Core remains 74/75 with the
+documented undo-model mismatch (`/tmp/lem-take-prefix-tests.log`). All 15 native
+display, 27 screen-line and 83 Vundo checks passed
+(`/tmp/lem-take-prefix-runtime.log`). No installed profile changed.
+
+Standard T3 passed all budgets: startup 286.447 ms and plain / big-file /
+long-line / scroll / truncate / word-wrap p95 buckets of
+1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms, in
+`t3-20260919143233.json` (`/tmp/lem-take-prefix-t3.log`).

@@ -968,6 +968,23 @@ line renders clean in every wrap/cursor config. Regression pin:
 mid/end) asserted against the certified kernel as content oracle, plus an
 exec-twin = naive-recursion equality PBT over random width lists.
 
+**Prefix-copy optimization (2026-09-19).** `k-firstn` retains its original
+`:logic` definition and guard `t`. Its `:exec` branch uses ACL2's native `take`
+when the count is natural and the input is a proper list; the count is clamped
+to `len` because `take` otherwise pads with NIL. All other inputs retain the
+accumulator path. `k-firstn-is-clamped-take` proves the equality and is enabled
+only for guard verification, leaving the existing layout proof theory intact.
+This avoids the accumulator's second prefix allocation on normal display runs.
+
+This change adds **`take` to the shim whitelist**, without adding a translation
+construct or a public kernel export. The implementation follows the guarded
+native prefix copy in ACL2 8.6 `axioms.lisp`; a general integer counter handles
+counts beyond fixnum range. The caller's certified branch establishes the
+primitive's guards. Tests cover NIL padding in the primitive, clamping and
+invalid counts in `k-firstn`, dotted lists, shallow-copy identity, unchanged
+input structure, and the existing 300 KB full-render cases. Runtime measurement
+and certification evidence are recorded in `bench/README.md`.
+
 **Differential/PBT acceptance:** `tests/pbt/layout-conformance.lisp` — random
 drawing-object lists (narrow/wide/emoji runs, mixed-width Greek+CJK runs,
 single tabs, control characters, zero-width combining runs, zero-width opaque

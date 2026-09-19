@@ -4,9 +4,9 @@
 ;;;; recursions on the render path -- `k-sum' (object width), `k-firstn'
 ;;;; (explode halving) and `k-clip-chars' (per-char clip scan) -- recursed
 ;;;; non-tail with depth = line length.  They are now mbe :exec tail-recursive
-;;;; accumulator twins (proved equal to the :logic recursion at ACL2 guard
-;;;; verification; the shim runs the :exec branch exactly as guard-verified
-;;;; ACL2 execution does).
+;;;; accumulators or a guarded native prefix copy (proved equal to the :logic
+;;;; recursion at ACL2 guard verification; the shim runs the :exec branch
+;;;; exactly as guard-verified ACL2 execution does).
 ;;;;
 ;;;; Two pins:
 ;;;;   1. A 300k-char single line renders through the FULL production path
@@ -200,6 +200,22 @@ test line is a-z only (the marker glyph never occurs as content)."
       (ok (equal '(1) selected-widths)))))
 
 (deftest layout-exec-twins-equal-naive-recursion
+  (testing "prefix copies clamp counts, preserve leaves, and retain dotted inputs"
+    (let* ((leaf (list :payload))
+           (input (list leaf :b :c))
+           (prefix (funcall (ksym "K-FIRSTN") (ash 1 80) input)))
+      (ok (equal input prefix))
+      (ok (not (eq input prefix)) "a complete prefix is still a fresh list")
+      (ok (eq leaf (first prefix)) "leaf identity survives the shallow copy")
+      (ok (equal '(a b nil nil nil) (funcall (ksym "TAKE") 5 '(a b)))
+          "the primitive pads, while K-FIRSTN clamps")
+      (dolist (n (list nil :bad -1 3/2 1.0d0 0 1 2 3 8 (ash 1 80)))
+        (dolist (tail '(nil :dotted))
+          (let ((items (list* :a :b :c tail)))
+            (ok (equal (naive-k-firstn n items)
+                       (funcall (ksym "K-FIRSTN") n items)))
+            (ok (equal (list* :a :b :c tail) items)
+                "copying does not alter the input list"))))))
   (testing "ACL2 length counts proper and dotted prefixes across batches"
     (let ((len (find-symbol "LEN" "ACL2")))
       (dolist (tail (list nil :tail 17 "not-a-list" #()))

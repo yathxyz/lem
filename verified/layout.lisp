@@ -83,8 +83,8 @@
 ;;;;
 ;;;; EXEC PATH (functions the adapter/tests call): `k-text', `k-opaque',
 ;;;;   `k-wrap-row', `k-wrap', `k-clip', `k-scroll-adjust' and their callees.
-;;;;   These use only CL homonyms + the shim whitelist (natp, len, true-listp);
-;;;;   no new whitelist entry is needed.  The proof-only helper `k-obj-pos'
+;;;;   These use CL homonyms + the shim whitelist (natp, len, true-listp, take).
+;;;;   TAKE uses ACL2's guarded native prefix-copy behavior. The helper `k-obj-pos'
 ;;;;   uses zp (as width.lisp's k-take does): it loads in-image but is never
 ;;;;   called there -- calling it would fail loudly, which is the shim's
 ;;;;   intended enforcement.
@@ -99,9 +99,10 @@
 ;;;;   `k-clip-chars' (per-char clip scan) -- are therefore defined with
 ;;;;   ACL2's `mbe': the :logic body is the original recursion (every theorem
 ;;;;   and the definitional axiom are unchanged), the :exec body a
-;;;;   tail-recursive accumulator twin proved EQUAL at guard verification and
-;;;;   run by certified execution (and, via the shim's mbe expansion, by the
-;;;;   image -- SBCL's compiling load eliminates the tail calls).  The other
+;;;;   stack-safe implementation proved EQUAL at guard verification and run
+;;;;   by certified execution. K-FIRSTN uses native TAKE on proper lists and
+;;;;   its accumulator otherwise; K-SUM and K-CLIP-CHARS use accumulators.
+;;;;   The shim preserves these choices, and SBCL eliminates tail calls. The other
 ;;;;   recursions on the path are not line-length-deep: `k-wrap-row's explode
 ;;;;   retry and `k-clip's skip-before-range branch are genuine tail calls,
 ;;;;   their cons-building branches recurse once per PLACED/KEPT object (bounded
@@ -238,7 +239,11 @@
   (mbe :logic (if (or (not (natp n)) (equal n 0) (atom l))
                   nil
                   (cons (car l) (k-firstn (- n 1) (cdr l))))
-       :exec (k-firstn-acc n l nil)))
+       :exec (if (and (natp n) (true-listp l))
+                 ;; TAKE's native prefix copy avoids building and reversing
+                 ;; an accumulator. Clamp N because TAKE otherwise pads NILs.
+                 (take (min n (len l)) l)
+                 (k-firstn-acc n l nil))))
 
 (defthm k-firstn-acc-removal
   (implies (true-listp acc)
@@ -246,7 +251,14 @@
                   (revappend acc (k-firstn n l))))
   :hints (("Goal" :induct (k-firstn-acc n l acc))))
 
-(verify-guards k-firstn)
+(defthmd k-firstn-is-clamped-take
+  (implies (natp n)
+           (equal (k-firstn n l)
+                  (take (min n (len l)) l)))
+  :hints (("Goal" :induct (k-firstn n l))))
+
+(verify-guards k-firstn
+  :hints (("Goal" :in-theory (enable k-firstn-is-clamped-take))))
 
 ;; explode-object: split the run at (floor len 2); both halves inherit the tag
 ;; (production: same attribute, char-type of the first char -- recorded in the

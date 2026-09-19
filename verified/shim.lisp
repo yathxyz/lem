@@ -71,7 +71,7 @@
 ;;;;   this whitelist fails LOUDLY at load time (undefined function) -- that is
 ;;;;   the intended enforcement. Current entries (used by buffer-model.lisp and
 ;;;;   buffer-edit.lisp):
-;;;;     natp, len, true-listp  (see the ACL2 base-function whitelist section).
+;;;;     natp, len, true-listp, take (see the ACL2 base-function whitelist section).
 ;;;;
 ;;;; NOT reinterpreted (deliberately): ACL2's own `defun` for the applicative
 ;;;;   subset IS just CL `defun`; we rely on that. Do not add a `defun` macro.
@@ -210,6 +210,15 @@
   (if (consp x)
       (acl2::true-listp (cdr x))
       (null x)))
+
+;; take: ACL2 8.6 axioms.lisp, TAKE. On guarded inputs (natural N, proper L),
+;; return N elements, padding with NIL past the end. Mirror its native prefix
+;; copy; the unrestricted counter also preserves counts beyond fixnum range.
+;; K-FIRSTN checks these guards and clamps N to avoid padding its result.
+(defun acl2::take (n l)
+  (if (<= n most-positive-fixnum)
+      (loop :for i fixnum :from 0 :below n :collect (pop l))
+      (loop :repeat n :collect (pop l))))
 
 ;;; ---- :lem/kernel re-export surface --------------------------------------
 ;;; The in-image callable surface of the certified kernel. Each name is an
