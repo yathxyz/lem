@@ -3718,3 +3718,68 @@ Artifacts: `/tmp/lem-wire-size-{1,4}-{small,large}-{1,2}.{json,log}` and runner
 `/tmp/lem-wire-large-runs.py`. A separate Unicode fixture with no trailing newline
 also passed exact-byte saving and shutdown: `/tmp/lem-wire-unicode-fixture.log`.
 Python compilation and `git diff --check` pass. No production sources changed.
+
+### Avoid per-byte boxing in external-change hashes (2026-09-19)
+
+The large-file reproduction above exposed periodic work in the configured
+external-change checker. Its masked 64-bit FNV accumulator shared state across
+the chunk reader, byte loop and EOF handling. SBCL compiled the multiplication
+as machine arithmetic, then boxed the result into a Lisp integer inside the byte
+loop. A 10 MB read consequently allocated roughly 210 MB. Repeated checks on the
+editor thread caused the five-second typing stalls.
+
+`bounded-stream-content-digest` now uses a typed accumulator local to each byte
+loop and transfers its result to the outer state once per chunk. Disassembly
+places integer boxing after the loop. No compiler safety setting, hash algorithm,
+chunk size, digest limit, polling interval, descriptor stability check or conflict
+handling changed. File contents are still checked, including same-metadata
+rewrites; neither dirty buffers nor notification-driven full digests are skipped.
+
+The initial allocation profile reached its 50,000-sample cap, with 96.7% of
+samples through unsigned-bignum allocation and 96.8% through file-state signatures.
+It includes post-measurement verification/save work and must not be interpreted
+as an exact typing-only attribution. Artifacts:
+`/tmp/lem-wire-large-profile.{lisp,txt,json,log}`. Merely declaring the outer hash
+type, even with a local speed preference, did not remove per-byte boxing; those
+experiments are not part of the change.
+
+An isolated ABBA probe hashes the original deterministic 10 MB corpus 20 times
+after two warmups and full GC, checking each result against the independently
+computed Python FNV value `4e7cf6b0bf4796f7`. Mean CPU fell from 1,337.230 to
+174.352 ms (87.0%); allocation fell from 4,200,879,680 to 1,777,728 bytes (99.96%).
+The stream buffer and one boxed result per chunk remain. Artifacts:
+`/tmp/lem-digest-component-final-{before,after}-{1,2}.log`,
+`/tmp/lem-digest-component.lisp`, `/tmp/lem-digest-{before,after}.lisp`.
+
+Packaged ABBA typing captures used 600 measured keys plus 20 warmups, 25 ms
+pacing and the same copied 10 MB fixture. Each capture verified every client's
+text, the complete final buffer, unchanged source and saved private copy, then
+exited cleanly. No builds/tests ran during measurement. Packages:
+
+- Before: `/nix/store/qf6zqai0z49mgvy4jlc1zbd76cr62ld8-lem-yath/bin/lem`.
+- After: `/nix/store/75xj5brwy4lwzkv37l6aj9srpsz59rjq-lem-yath/bin/lem`.
+
+| Clients | Mean process CPU before → after (ms) | Mean Lisp bytes before → after | All-client maxima, both runs before → after (ms) |
+| --- | ---: | ---: | --- |
+| 1 | 901.563 → 471.955 | 894,961,760 → 47,005,408 | 135.290 / 125.101 → 9.780 / 9.842 |
+| 4 | 1,441.078 → 959.097 | 972,775,328 → 124,754,720 | 124.522 / 120.248 → 17.594 / 9.445 |
+
+That is 47.7%/33.4% less CPU and 94.7%/87.2% less allocation for one/four clients.
+Single-client p95 was 0.882/0.780 before versus 0.892/0.853 ms after. Four-client
+all-peer p95 was 1.477/1.366 versus 1.478/1.086 ms. Typical latency is mixed;
+the demonstrated improvement is the periodic large-file stall. These are decoded
+protocol-screen endpoints, not physical presentation. Full-file reads/hashing
+still run synchronously, leaving a measurable periodic delay. Artifacts:
+`/tmp/lem-digest-{1,4}-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-digest-runs.py`.
+
+Validation: all 58 packaged persistence checks and 16 native display/client
+checks pass (`/tmp/lem-digest-runtime.log`). The new digest regression compares
+104 cases with an arbitrary-precision reference, covering all byte values,
+empty streams, partial/exact/multiple chunks, bounded reads, nonzero starting
+positions, EOF flags and final stream positions. Existing same-timestamp rewrites,
+large stale-save guards, notification/polling fallback, dirty-buffer preservation,
+save races and concurrent persistence checks remain enabled and pass. Production
+source and both persistence test files matched the built package byte for byte.
+No core/kernel source or installed profile changed; the known core undo-model
+mismatch remains outside this checkpoint.

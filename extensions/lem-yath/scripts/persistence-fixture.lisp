@@ -125,6 +125,40 @@
            record-buffer-place
            restore-buffer-place)))
 
+(defun persistence-test-content-digest ()
+  ;; An arbitrary-precision reference checks the masked machine-word loop,
+  ;; including partial chunks, exact EOF, lookahead and nonzero stream starts.
+  (let ((path (persistence-test-path "digest.bin"))
+        (cases 0))
+    (labels ((reference (bytes start count)
+               (reduce (lambda (hash byte)
+                         (mod (* (logxor hash byte) #x100000001b3)
+                              (expt 2 64)))
+                       bytes :start start :end (+ start count)
+                       :initial-value #xcbf29ce484222325)))
+      (assert (= (reference #(104 101 108 108 111) 0 5)
+                 #xa430d84680aabd0b))
+      (dolist (size '(0 1 255 256 65535 65536 65537 131073))
+        (let ((bytes (make-array size :element-type '(unsigned-byte 8))))
+          (dotimes (index size)
+            (setf (aref bytes index) (mod (+ (* index 197) 101) 256)))
+          (with-open-file (out path :direction :output :if-exists :supersede
+                                   :element-type '(unsigned-byte 8))
+            (write-sequence bytes out))
+          (dolist (start (remove-duplicates (list 0 (min 13 size))))
+            (dolist (limit (remove-duplicates
+                           (list 0 1 255 65535 65536 65537 size (1+ size))))
+              (with-open-file (in path :element-type '(unsigned-byte 8))
+                (file-position in start)
+                (multiple-value-bind (hash complete)
+                    (bounded-stream-content-digest in limit)
+                  (assert (= hash (reference bytes start (min limit (- size start)))))
+                  (assert (eq complete (<= (- size start) limit)))
+                  (assert (= (file-position in) (min size (+ start limit 1))))
+                  (incf cases)))))))
+      (delete-file path)
+      (persistence-test-log "DIGEST status=ok cases=~d" cases))))
+
 (define-command lem-yath-test-persistence-reload-and-record-hooks () ()
   (load *persistence-test-source*)
   (load *persistence-test-source*)
@@ -780,6 +814,7 @@
   (add-hook *exit-editor-hook* 'persistence-test-after-exit-snapshot -10000))
 
 (when (string= *persistence-test-phase* "auto")
+  (persistence-test-content-digest)
   (setf *persistence-test-background-buffer*
         (find-file-buffer
          (persistence-test-path "auto/background.txt"))))

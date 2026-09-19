@@ -1168,11 +1168,16 @@ processes without discarding independent concurrent additions."
                    (read-sequence buffer stream
                                   :end (min (length buffer) remaining))
                    0)))
-        (dotimes (index count)
-          (setf hash
-                (logand #xffffffffffffffff
-                        (* (logxor hash (aref buffer index))
-                           #x100000001b3))))
+        ;; Keep the byte loop accumulator unboxed; only export it once per
+        ;; chunk. Sharing the outer state boxes nearly every byte on SBCL.
+        (setf hash
+              (let ((chunk-hash hash))
+                (declare (type (unsigned-byte 64) chunk-hash))
+                (dotimes (index count chunk-hash)
+                  (setf chunk-hash
+                        (logand #xffffffffffffffff
+                                (* (logxor chunk-hash (aref buffer index))
+                                   #x100000001b3))))))
         (incf total count)
         (cond
           ((< count (min (length buffer) remaining))

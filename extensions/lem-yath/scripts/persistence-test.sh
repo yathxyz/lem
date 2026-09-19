@@ -207,6 +207,12 @@ else
   fail auto-boot 'the auto-revert fixture did not initialize' "$auto_session"
 fi
 
+if grep -Eq '^DIGEST status=ok cases=[1-9][0-9]*$' "$LEM_YATH_PERSISTENCE_TEST_REPORT"; then
+  pass content-digest 'hash, EOF and stream position match the integer reference'
+else
+  fail content-digest 'the binary digest boundary checks did not pass' "$auto_session"
+fi
+
 if press_and_wait "$auto_session" F9 '^HOOK ' &&
    grep -Eq \
      '^HOOK dangerous=0 safe=1 timer=yes api=yes notify=yes paths=[2-9][0-9]* directories=[1-9][0-9]* threads=1$' \
