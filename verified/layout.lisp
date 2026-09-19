@@ -252,6 +252,46 @@
 ;;; Halving (production explode-object)
 ;;; ===========================================================================
 
+;; Count a bounded chunk and return its remaining tail. The certified type
+;; bound gives native counter arithmetic in both ACL2 and the plain CL image.
+(defun k-length-chunk (l count)
+  (declare (type (integer 0 1024) count)
+           (xargs :measure (len l)))
+  (if (and (consp l) (< count 1024))
+      (k-length-chunk (cdr l) (+ count 1))
+      (mv count l)))
+(defthm k-length-chunk-count-natural
+  (implies (natp count)
+           (natp (car (k-length-chunk l count))))
+  :rule-classes :type-prescription)
+(defthm k-length-chunk-preserves-length
+  (implies (natp count)
+           (equal (len (mv-nth 1 (k-length-chunk l count)))
+                  (- (+ count (len l)) (car (k-length-chunk l count))))))
+(defthm k-length-chunk-preserves-properness
+  (equal (true-listp (mv-nth 1 (k-length-chunk l count)))
+         (true-listp l)))
+(defthm k-length-chunk-shrinks
+  (implies (and (consp l) (natp count) (< count 1024))
+           (< (len (mv-nth 1 (k-length-chunk l count))) (len l)))
+  :rule-classes :linear)
+;; Return the proper-list length plus ACC, or NIL for a dotted/atomic tail.
+;; Only the inner counter is bounded; total lengths remain arbitrary integers.
+(defun k-proper-length-acc (l acc)
+  (declare (xargs :guard (natp acc) :measure (len l)
+                  :hints (("Goal" :in-theory (disable k-length-chunk)
+                           :use ((:instance k-length-chunk-shrinks (count 0)))))))
+  (if (consp l)
+      (mv-let (count tail) (k-length-chunk l 0)
+        (k-proper-length-acc tail (+ acc count)))
+      (if (null l) acc nil)))
+(defthm k-proper-length-acc-correct
+  (implies (natp acc)
+           (equal (k-proper-length-acc l acc)
+                  (if (true-listp l) (+ acc (len l)) nil)))
+  :hints (("Goal" :induct (k-proper-length-acc l acc)
+           :in-theory (disable k-length-chunk))))
+
 ;; Tail-recursive accumulator twin of k-firstn (the :exec body below).
 ;; k-explode calls k-firstn with half the object's codes/widths, so a non-tail
 ;; recursion is line-length-deep on the wrap path (OPT-1; STACK SAFETY note).
@@ -267,11 +307,14 @@
   (mbe :logic (if (or (not (natp n)) (equal n 0) (atom l))
                   nil
                   (cons (car l) (k-firstn (- n 1) (cdr l))))
-       :exec (if (and (natp n) (true-listp l))
-                 ;; TAKE's native prefix copy avoids building and reversing
-                 ;; an accumulator. Clamp N because TAKE otherwise pads NILs.
-                 (take (min n (len l)) l)
-                 (k-firstn-acc n l nil))))
+       :exec (if (or (not (natp n)) (equal n 0) (atom l))
+                 nil
+                 (let ((size (k-proper-length-acc l 0)))
+                   ;; Check properness and length together. Clamp N because
+                   ;; TAKE otherwise pads NILs; dotted inputs keep the fallback.
+                   (if size
+                       (take (min n size) l)
+                       (k-firstn-acc n l nil))))))
 
 (defthm k-firstn-acc-removal
   (implies (true-listp acc)

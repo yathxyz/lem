@@ -2149,3 +2149,77 @@ Standard T3 passed every budget: startup 286.032 ms and plain / big-file /
 long-line / scroll / truncate / word-wrap p95 buckets of
 1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 4.096 ms. Results end in
 `t3-20260919144730.json` (`/tmp/lem-width-stop-t3.log`).
+
+### Combine properness and length checks during prefix copies (2026-09-19)
+
+A fresh profile of `e656fc021` on the 200 KB word-wrap typing fixture collected
+3,968 samples. `len` accounted for 10.5% self time and `true-listp` for 7.9%:
+prefix copying checked properness and then traversed the same list again to
+clamp the requested count. Artifacts: `/tmp/lem-post-width-profile.{lisp,sh,log,txt}`.
+These are profiler samples, not uninstrumented latency measurements.
+
+A private prototype compared both scans against a combined traversal over
+100 splits of a 200,000-element run. The original took 158.001/160.001 ms;
+a simple generic counter took 181.001/185.000 ms; a bounded-batch counter took
+128.001/127.001 ms. Allocation was unchanged at about 320.1 MB.
+`/tmp/lem-proper-length-probe.{lisp,log}` captures the experiment on
+`e656fc021`; rerunning that script after this change would no longer give the
+same original binding. This component result motivated the implementation,
+not an editor-wide speedup claim.
+
+`k-firstn` now obtains properness and length together through
+`k-proper-length-acc`. Its inner `k-length-chunk` counter is guarded to
+0..1,024, enabling native integer arithmetic, while the total remains
+arbitrary precision. The helpers are defined and proved in the layout book;
+no shim construct, primitive or public export is added. The original logical
+prefix definition and guard `t` remain intact, including the dotted-list
+fallback. Invalid/zero counts and atomic inputs return without scanning.
+
+Layout certified directly in `/tmp/lem-proper-length-layout-proof.log`.
+The full runner certified the other 11 books and reused that fresh certificate,
+with zero failures (`/tmp/lem-proper-length-proofs.log`). Core remains 74/75,
+with only the documented undo-model mismatch (`/tmp/lem-proper-length-tests.log`).
+New checks cover proper and dotted lists at batch boundaries through 300,000
+entries, arbitrary atom tails, and an 80-bit starting total, alongside the
+existing prefix equivalence and full rendering tests. All 15 native display,
+27 configured screen-line and 83 Vundo checks passed
+(`/tmp/lem-proper-length-runtime.log`).
+
+The tested candidate executable is
+`/nix/store/3f4hw6j98myskx83h1frzmqv1fn5yign-sbcl-lem-ncurses-unstable/bin/lem`.
+Its derivation source matches the edited layout book, unchanged shim and
+regression test byte for byte. No installed profile changed.
+
+Rebuilt before/after comparisons used 140 paced key/paint samples per run on
+the same 200 KB word-wrap fixture, reversing the order in the second pair.
+All captures were complete, with no dropped samples or recorder replacement.
+Core-paint durations in milliseconds:
+
+| Run | p50 | p95 | Maximum |
+| --- | ---: | ---: | ---: |
+| Before 1 | 9 | 14 | 35 |
+| After 1 | 9 | 15 | 26.001 |
+| Before 2 | 9 | 14 | 34 |
+| After 2 | 9 | 13 | 27.001 |
+
+Median latency is unchanged at the clock's one-millisecond resolution, and p95
+moves in opposite directions. Maximum latency is lower in both comparisons,
+but these few runs do not establish a general tail-latency guarantee. All four
+conservative histogram gates passed. Artifacts:
+`/tmp/lem-proper-length-built-{before,after}-{1,2}.{sh,log,kv,csv}`.
+
+Full T2 completed with medians of 1,911.010 / 1,176.007 / 134.001 / 129.002 /
+344.002 / 498.004 / 8,312.044 ms for big-file / isearch / lisp-edit / long-line /
+overlay-heavy / scroll / undo-storm. All frame counts match the prior run.
+Long-line replay decreased from 132.000 ms; changes across all workloads span
+-2.3% to +5.7%, inside the harness noise band. Results end in
+`t2-20260919150001.json` (`/tmp/lem-proper-length-full-t2.log`). The completed
+run exited 2 because the matching Nova baseline is absent; this is comparative
+evidence, not a passing baseline gate. No baseline or budget changed.
+
+Standard T3 passed every budget: startup 285.366 ms and plain / big-file /
+long-line / scroll / truncate / word-wrap p95 buckets of
+1.024 / 1.024 / 4.096 / 1.024 / 2.048 / 2.048 ms. Results end in
+`t3-20260919150141.json` (`/tmp/lem-proper-length-t3.log`). The word-wrap bucket
+is lower than the prior run; this remains a conservative histogram boundary,
+not an exact percentile or a measured twofold speedup.

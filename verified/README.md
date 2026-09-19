@@ -985,6 +985,17 @@ invalid counts in `k-firstn`, dotted lists, shallow-copy identity, unchanged
 input structure, and the existing 300 KB full-render cases. Runtime measurement
 and certification evidence are recorded in `bench/README.md`.
 
+**Combined prefix eligibility scan (2026-09-19).** `k-firstn` now obtains
+properness and length together through `k-proper-length-acc`, avoiding separate
+`true-listp` and `len` traversals. `k-length-chunk` counts at most 1,024 cells
+with a guarded bounded counter; the outer total remains arbitrary precision.
+Both helpers live in the certified book and execute unchanged through the shim.
+Their length, properness, termination and guard proofs establish the same
+clamped `take` branch, preserving `k-firstn`'s logical definition and guard `t`.
+Invalid/zero counts and atomic inputs return immediately; dotted lists retain
+the accumulator fallback. No shim construct, primitive or export is added.
+Tests cover batch boundaries, dotted tails and totals beyond fixnum range.
+
 **Bounded overflow decisions (2026-09-19).** `k-wrap-row` uses
 `k-text-overflows-p` to stop summing a text run once its non-negative widths
 reach the remaining row width. `k-sum-reaches-acc-is-full-sum` proves this
