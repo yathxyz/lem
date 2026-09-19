@@ -87,6 +87,7 @@
                (:file "buffer-list-test")
                (:file "keymap")
                (:file "mode")
+               (:file "visible-lines")
                (:file "popup-window")
                (:file "prompt")
                (:file "cursors")

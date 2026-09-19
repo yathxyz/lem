@@ -3496,3 +3496,118 @@ The checkpoint reduces measured composition/decoding CPU, with mixed input and
 presentation latency. Core/kernel sources, proof obligations, budgets and
 installed profiles remain unchanged. The core suite was not rerun for this
 daemon-only change; the previously documented undo-model mismatch remains open.
+
+
+### Visible-line traversal without folding (2026-09-19)
+
+A fresh allocation profile of `62989222c` collected 4,925 samples, about one
+32 KiB allocation region per sample across all threads. `copy-point` accounted
+for 13.8% of sampled allocation, with 11.9% under `move-to-next-visible-line`.
+This operation made a temporary point for every displayed logical line even
+when no visibility predicate was installed. Artifacts:
+`/tmp/lem-cell-inline-alloc-profile.{lisp,txt,json,log}`.
+
+Forward/backward visible-line movement now delegates to transactional
+`line-offset` when the buffer's effective `line-hidden-function` is NIL. An
+explicit zero-step branch preserves the current column. A non-NIL predicate
+continues through the previous candidate-point traversal, including fresh
+predicate lookup per visited line. There is no cached visibility state; local
+and global editor-variable resolution remains the existing `:default` lookup.
+
+A new regression compares against the old traversal across 13,860 cases:
+NIL plus all 32 hidden-line masks, three point kinds, five starting lines,
+two columns, seven step counts and both directions. It checks return identity,
+position, column and point kind, including failed moves at both boundaries.
+Additional cases exercise predicate installation/removal between calls, removal
+during traversal, predicate errors without partial movement, and invalid counts.
+The full core suite is 77/78, with only the known undo-model mismatch (equal
+content/points, production/model ticks 0/1). All five daemon modules pass.
+Logs: `/tmp/lem-visible-lines-{core,daemon}.log`.
+
+- Before: `/nix/store/md47x0nl63jfx3kd5vbxl8262jl7r0ih-lem-yath/bin/lem`.
+- Candidate: `/nix/store/iw507h4ymakfca3pzzanq2ss8abrw17v-lem-yath/bin/lem`.
+- Tested base: `/nix/store/jy5a2asb5l6xzjr60vyz360a2d5rbwik-sbcl-lem-ncurses-unstable/bin/lem`.
+
+Production source and ASDF registration matched this base byte for byte. The
+local tests initially needed a missing parenthesis and quoted Rove condition
+symbols fixed. The build snapshot predates only the condition-symbol quoting
+fix; the final tests passed against the identical production source locally.
+
+Packaged checks passed all 16 native integration, 27 screen-line, 61 Avy and 12
+Org cases, including folding, navigation, structural edits and edge cases.
+Log: `/tmp/lem-visible-lines-runtime.log`.
+
+An isolated traversal ABBA used a 101-line buffer, 1,000 warmup pairs and full
+GC before each case. One-step cases made 100,000 forward/backward pairs;
+40-step cases made 10,000 pairs. The folded cases hid even-numbered lines using
+a live predicate. Return values, final line and column were asserted. Counters
+include the Lisp process and exclude redisplay, input handling and presentation.
+
+| Traversal case | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| plain-one | 29.989 → 12.340 | 19,524,224 → 35,200 |
+| plain-forty | 49.262 → 4.118 | 1,975,168 → 19,456 |
+| folded-one | 44.407 → 51.311 | 19,491,072 → 19,506,816 |
+| folded-forty | 108.656 → 111.406 | 1,975,168 → 1,987,456 |
+
+Without folding, CPU fell 58.9%/91.6% for one/40-step movement, and allocation fell
+99.8%/99.0%. With the trivial even-line predicate, CPU rose 15.5%/2.5%; the extra
+check costs about 35 ns per one-step move in this component test. Folding-path
+allocation stayed within 0.7%. This is an explicit tradeoff for avoiding temporary
+points in the common no-predicate path, not a claim that every traversal is faster.
+Artifacts: `/tmp/lem-visible-lines-component-{before,after}-{1,2}.log`,
+`/tmp/lem-visible-lines-component.{lisp,py}`, and exact old traversal definitions
+in `/tmp/lem-visible-lines-before.lisp`.
+
+Configured-daemon typing ABBA used one/four clients separately, 600 measured
+keys, 20 warmups and 25 ms pacing. Every peer observed every edit and final buffers
+matched the fixtures. Counters cover all threads, all 620 keys, idle time and
+boundary evals. No tests, builds or other benchmarks ran concurrently.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| 1 | 411.917 → 381.831 | 55,274,912 → 50,715,616 |
+| 4 | 911.009 → 896.514 | 147,540,576 → 129,525,536 |
+
+Allocation fell 8.2%/12.2%, while mean CPU fell 7.3%/1.6%. Individual CPU runs
+varied substantially, so the allocation reduction is clearer evidence than the
+small aggregate CPU change, especially with four clients.
+
+| Clients / endpoint | p50, both runs before → after (ms) | p95, both runs before → after (ms) | Maximum, both runs before → after (ms) |
+| --- | --- | --- | --- |
+| 1 / active | 0.397/0.559 → 0.416/0.381 | 0.612/0.833 → 0.684/0.610 | 4.155/4.142 → 4.344/0.879 |
+| 4 / active | 0.510/0.463 → 0.533/0.380 | 0.770/0.692 → 0.829/0.659 | 1.073/1.040 → 4.697/1.033 |
+| 4 / all | 0.843/0.900 → 0.942/0.690 | 1.251/1.179 → 1.299/1.119 | 3.969/4.675 → 4.995/1.503 |
+
+Latency was mixed: the first candidate runs generally worsened, while the second
+improved. The reduced allocation does not establish fewer input-latency spikes.
+These measurements end at decoded protocol output, excluding native rendering
+and physical presentation. Artifacts:
+`/tmp/lem-visible-lines-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+The standard T3 gate passed against the candidate **base image**: warm startup
+284.707 ms; plain/bigfile/longline/scroll/truncate/wordwrap p95 histogram upper
+bounds were 1.024/1.024/4.096/1.024/2.048/2.048 ms, with unchanged budgets.
+Log: `/tmp/lem-visible-lines-t3-after-base.log`.
+Result: `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919201615.json`.
+
+The first T3 invocation instead used the configured wrapper, which forces its
+immutable init file despite the harness's sandbox. It passed startup/plain but
+failed to exit the large-file scenario within the harness's 10-second stop
+window, producing no metrics dump for that scenario. The preceding configured
+build reproduced the same failure, so this is not introduced by the traversal
+change. Small-file diagnostic captures showed both builds accepting the normal
+modified-buffer quit prompt. The large-file shutdown/harness interaction remains
+unresolved; configured T3 is **not** a passing gate. No timeout, budget or quit
+behavior was relaxed. Artifacts:
+
+- Candidate configured attempt: `/tmp/lem-visible-lines-t3.log`, result
+  `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919201224.json`.
+- Preceding configured control: `/tmp/lem-visible-lines-t3-before-configured.log`,
+  result `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919201536.json`.
+- Small-file diagnostic: `/tmp/lem-visible-lines-exit-probe.sh`,
+  `/tmp/lem-visible-lines-exit-{before,after}.log` and corresponding pane captures.
+
+Kernel sources and proof obligations are unchanged, as are installed profiles.
+The known core undo-model gap and the newly observed configured T3 shutdown
+failure remain open; this checkpoint does not claim the complete suite is green.

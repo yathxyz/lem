@@ -13,6 +13,11 @@
 (defun move-to-next-visible-line (point &optional (n 1))
   "Move POINT forward by N non-hidden logical lines."
   (check-type n (integer 0 *))
+  ;; Ordinary movement already leaves POINT unchanged when the destination
+  ;; does not exist. Avoid a temporary point when there is no folding to skip.
+  (unless (variable-value 'line-hidden-function :default point)
+    (return-from move-to-next-visible-line
+      (if (zerop n) point (line-offset point n))))
   (with-point ((candidate point))
     (dotimes (_ n)
       (loop
@@ -25,6 +30,9 @@
 (defun move-to-previous-visible-line (point &optional (n 1))
   "Move POINT backward by N non-hidden logical lines."
   (check-type n (integer 0 *))
+  (unless (variable-value 'line-hidden-function :default point)
+    (return-from move-to-previous-visible-line
+      (if (zerop n) point (line-offset point (- n)))))
   (with-point ((candidate point))
     (dotimes (_ n)
       (loop
