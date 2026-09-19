@@ -47,9 +47,9 @@ raw motion volume.")
   "Load the lisp syntax table and the lisp-mode tmlanguage grammar once (guarded
 so repeated workload setups -- and the scroll workload -- do not reload them),
 and return `make-tmlanguage-lisp'."
-  (unless (find-symbol "*SYNTAX-TABLE*" :lem-lisp-syntax.syntax-table)
+  (unless (find-package :lem-lisp-syntax.syntax-table)
     (load (merge-pathnames "extensions/lisp-syntax/syntax-table.lisp" (bench-repo-root))))
-  (unless (find-symbol "MAKE-TMLANGUAGE-LISP" :lem-lisp-mode/grammar)
+  (unless (find-package :lem-lisp-mode/grammar)
     (load (merge-pathnames "extensions/lisp-mode/grammar.lisp" (bench-repo-root))))
   (values (symbol-value (find-symbol "*SYNTAX-TABLE*" :lem-lisp-syntax.syntax-table))
           (find-symbol "MAKE-TMLANGUAGE-LISP" :lem-lisp-mode/grammar)))

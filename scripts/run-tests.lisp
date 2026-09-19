@@ -12,10 +12,17 @@
 
 ;; Qlot prepends a searcher bound to its original checkout. Prefer this
 ;; checkout when borrowing its installed dependencies from another worktree.
+;; Package-inferred systems must still resolve before the ordinary registry;
+;; otherwise fresh dependency loads fail on systems such as rove/main.
 (setf asdf:*system-definition-search-functions*
-      (cons 'asdf/system-registry:sysdef-source-registry-search
-            (remove 'asdf/system-registry:sysdef-source-registry-search
-                    asdf:*system-definition-search-functions*)))
+      (list* 'asdf/package-inferred-system:sysdef-package-inferred-system-search
+             'asdf/system-registry:sysdef-source-registry-search
+             (remove-if
+              (lambda (searcher)
+                (member searcher
+                        '(asdf/package-inferred-system:sysdef-package-inferred-system-search
+                          asdf/system-registry:sysdef-source-registry-search)))
+              asdf:*system-definition-search-functions*)))
 
 (defun assert-test-source (system)
   (let ((source (asdf:system-source-directory system)))

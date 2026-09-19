@@ -1121,3 +1121,88 @@ the spec.
   **UPDATE 2026-07-19: the cliff is FIXED** (OPT-1 bug fix, *Bug fixes* ledger
   table); the soak workload is unchanged (it was shaped around realism, and the
   avoidance note is now historical rather than load-bearing).
+
+## 2026-09-19: typing latency audit
+
+Compared worktree changes with `377d94cf3` on Nova (Ryzen 9 9950X3D),
+Nix 2.34.8 and SBCL 2.5.10, using the locked Nix shell and Qlot dependencies.
+No installed editor profile or running editor was changed.
+
+Three avoidable costs were fixed:
+
+- Each insertion/deletion scanned the whole buffer twice just to detect a
+  content change. The mutation scope now compares the source line length and
+  line count, preserving detection on exceptional exits and ignoring empty edits.
+- Edits calculated an absolute undo position even with undo disabled or during
+  replay. Skipping unused positions removes quadratic line-by-line file loading.
+- The daemon SDL client slept 10 ms between polls. It now waits for input and
+  explicit screen/error notifications, coalescing pending messages. Rendering
+  skips cell backgrounds already painted by the initial clear, after resolving
+  inverse video and cursor colors.
+
+### Measurements
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| Load 10,000 lines (500 KB), median | 2,129 ms | 49 ms |
+| Insert/delete pair, undo enabled, boundaries after each edit, buffer start | 0.300 ms | 0.005 ms |
+| Same pair, buffer end | 0.600 ms | 0.315 ms |
+| SDL socket-to-presentation, styled 100×40 Unicode screen, median | 8 ms | 2 ms |
+| SDL socket-to-presentation, p95 | 12 ms | 2.001 ms |
+
+The edit benchmark discards one warmup, then takes the median of three runs;
+edit samples contain 200 pairs. SDL uses 120 updates after the initial frame,
+a private socket peer, the real graphical event loop, and SDL's dummy video
+backend/software renderer. Times end after `SDL_RenderPresent` returns; these
+are not physical keyboard-to-monitor measurements. Scheduling outliers remain
+(the final SDL run's maximum was 27 ms). Before/after rendered pixel dumps were
+identical, including colored backgrounds, inverse video, underlining, and Unicode:
+SHA-256 `0be3e7682a118983994adc6e6bdb43ab23a0ed9f4dc4a6809b9bae5fb37c165e`.
+
+Reproduce after `nix develop`, `qlot install`, and
+`./scripts/prepare-dependencies.sh`:
+
+```sh
+sbcl --dynamic-space-size 4GiB --noinform --no-sysinit --no-userinit --non-interactive \
+  --load .qlot/setup.lisp --load scripts/bench/e2e/edit-latency.lisp
+SDL_VIDEODRIVER=dummy sbcl --noinform --no-sysinit --no-userinit --non-interactive \
+  --load .qlot/setup.lisp --load scripts/bench/e2e/sdl-presentation.lisp
+```
+
+For A/B runs, export `LEM_EDIT_SOURCE` or `LEM_SDL_SOURCE` pointing to the old
+`buffer-insert.lisp` or `sdl-client.lisp` extracted with `git show`. Optional
+`LEM_SDL_PIXELS` writes the second rendered frame as raw ARGB8888 pixels for
+comparison. Internal package access in these harnesses deliberately exercises
+and instruments the production client and edit implementation.
+
+### Validation and remaining findings
+
+- Cold test loading exposed a search-order bug for package-inferred dependencies
+  (`rove/main`, `jsonrpc/main`); the runner now preserves that resolver's priority.
+  The T2 Lisp fixture also called `find-symbol` on packages before loading them;
+  its package-existence guards were corrected.
+- Graphical-client tests pass, including FIFO batching, wakeups on reader errors,
+  queue overflow reporting, and reader cancellation. Core edit-generation tests
+  and the baseline/paranoid/conformance edit-engine fuzz suites pass.
+- `nix build .#checks.x86_64-linux.native-client-display` passes with the final
+  core and SDL changes. Its 15 runtime checks cover shared terminal/SDL editing,
+  Vi and prompt ownership, Unicode paste, resizing, crashes, and disconnects.
+  The Xvfb screenshot was also inspected; this does not establish physical
+  display latency or update the installed profile.
+- The full core run passes 69 of 75 suites. The same six suites fail with the
+  original edit implementation: kernel-undo-conformance, layout-conformance,
+  redisplay-cache, MCP integration, emergency-save, and display-cache. This is
+  not a clean full-suite result; those failures need separate investigation.
+- Six T2 workloads completed with bounded diagnostic setup/execution: big-file,
+  isearch, Lisp editing, long lines, overlays, and scrolling. Their respective
+  medians were 3,322 / 1,815 / 327 / 303 / 349 / 790 ms per workload. No matching
+  Nova baseline was available; no existing baseline was replaced.
+- Absolute positions for retained undo edits still walk preceding lines, so
+  typing near the end of a large file remains slower. Undo also validates tree
+  structure and copies/simulates complete buffer contents; its integrity checks
+  were preserved. The 5,000-edit undo-storm workload exceeded a 30-second
+  per-execution diagnostic limit inside `validate-undo-tree` during undo;
+  no complete result or passing full T2 suite is claimed.
+- This audit covers the shared edit path and native client presentation. The
+  user's precise frontend/configuration and physical input-to-display latency
+  have not been established.
