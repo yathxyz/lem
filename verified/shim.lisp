@@ -172,6 +172,13 @@
 ;;; fresh symbol in the ACL2 package (none of these names exist in CL, so no
 ;;; shadowing is needed) matching its ACL2 axiomatic semantics.
 
+;; Keep the small width functions visible to the CL compiler at their call
+;; sites. The string bridge's character/fixnum types can then specialize the
+;; arithmetic without duplicating or changing the certified definitions.
+;; The large Unicode decision trees deliberately remain out of line.
+(declaim (inline acl2::natp acl2::k-control-code-p acl2::k-control-len
+                 acl2::k-num-digits acl2::k-char-width))
+
 ;; natp: ACL2 axioms.lisp -- (natp x) = x is a non-negative integer.
 (defun acl2::natp (x)
   (and (integerp x) (<= 0 x)))

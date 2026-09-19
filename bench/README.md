@@ -1384,3 +1384,46 @@ changes and preserves the text, then checks deletion of a clean buffer. The
 full core suite now passes 74 of 75 suites. The remaining
 `kernel-undo-conformance` failure predates this performance work; the certified
 linear undo model and current production undo behavior still need reconciliation.
+
+### Follow-up: inline the small verified width functions
+
+A T2 long-line CPU profile attributed about 40% of samples inclusively to
+`string-width`, with substantial per-character call and generic-arithmetic
+overhead. The Common Lisp shim now requests inlining for `natp` and the four
+small width/control helpers. Callers' existing character/fixnum declarations
+can specialize their arithmetic. The certified definitions are unchanged;
+the large Unicode decision trees stay out of line.
+
+The kernel's ASDF system now tracks the source files read indirectly by its
+loader. A fresh-image check confirmed that touching `verified/width.lisp`
+recompiled the cached `string-width-utils` caller. Kernel books still use their
+existing load-once behavior within an already-running image.
+
+Matched filtered T2 long-line runs measured 316 ms before and 215 ms after a
+fresh source build, with 172 frames in both workloads. Allocation remained
+about 172 MB. The standard T3 long-line p95 stayed in the same 16.384 ms
+histogram bucket, so this is a replay CPU improvement, not a demonstrated
+improvement in that end-to-end p95 metric. All standard T3 budgets passed:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919115533.json`.
+
+All 12 ACL2 books certified successfully with ACL2 8.6 and the required
+community books built from the flake's pinned Nixpkgs. All 15 native-client
+checks passed, and the full core suite retained only the previously recorded
+undo-model conformance failure. No proof definition or safety setting changed.
+
+A separate 200,000-byte single-line experiment used the T3 scenario driver
+with the full `long-line-200k.txt` corpus, 120 keys paced 100 ms apart, and 20
+wall-clock trend samples. Its input-to-core-paint p95 was 131.072 ms (138
+recorded paints), exceeding the 30 ms budget. This larger workload is not
+comparable to the standard 16 KB trend. A separate instrumented run collected
+12,469 CPU samples, about 98% inclusively in `redraw-display`: multiple redraws
+occur through command reading, hooks, timers and the command loop. Text
+insertion itself accounted for less than 1%. Redundant rendering remains an
+open performance target; histogram command time includes some of those redraws.
+
+The complete interleaved T2 run after inlining finished with medians of 2,691 /
+1,487 / 148 / 231 / 340 / 657 / 8,479 ms for big-file / isearch / lisp-edit /
+long-line / overlay-heavy / scroll / undo-storm respectively. Results are in
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919115930.json`.
+As before, the runner exited 2 after writing all results because the matching
+Nova baseline is absent; no committed baseline or gate was changed.
