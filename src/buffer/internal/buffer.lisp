@@ -2,6 +2,9 @@
 
 (defparameter +primordial-buffer-name+ "*tmp*")
 
+(defstruct position-cache
+  tick generation line linum offset)
+
 (defclass buffer ()
   ((name
     :initarg :name
@@ -77,6 +80,10 @@
     :initform 1
     :accessor buffer-nlines
     :type (integer 1 *))
+   (%position-cache
+    :initform nil
+    :accessor buffer-%position-cache
+    :documentation "One line's zero-based start offset, guarded by edit and line generations.")
    (edit-history
     :initform (make-array 0 :adjustable t :fill-pointer 0)
     :accessor buffer-edit-history)

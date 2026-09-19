@@ -8,6 +8,7 @@
            :line-next
            :line-string
            :set-line-string
+           :line-structure-generation
            :line-plist
            :line-syntax-context
            :line-points
@@ -39,6 +40,15 @@
            :delete-region
            :merge-with-next-line))
 (in-package :lem/buffer/line)
+
+(defvar *line-structure-generation* 0
+  "Conservative invalidation across buffers: raw lines have no buffer owner.
+Normal edits can retain a known unaffected prefix after advancing this value.")
+
+(defun line-structure-generation ()
+  "Return a generation invalidated by line length or linkage changes.
+This includes renderer writes that bypass buffer edit bookkeeping."
+  *line-structure-generation*)
 
 (defstruct content
   string
@@ -78,6 +88,10 @@ call it from code that participates in normal editing.")
     :initform nil
     :accessor line-points)))
 
+(defmethod set-line-string :before (string (line line))
+  (unless (= (length string) (length (line-string line)))
+    (incf *line-structure-generation*)))
+
 (defmethod print-object ((object line) stream)
   (print-unreadable-object (object stream :identity t :type t)
     (format stream "string: ~S, plist: ~S"
@@ -89,6 +103,8 @@ call it from code that participates in normal editing.")
                              :next next
                              :previous previous
                              :string string)))
+    (when (or previous next)
+      (incf *line-structure-generation*))
     (when next
       (setf (line-previous next) line))
     (when previous
@@ -99,6 +115,7 @@ call it from code that participates in normal editing.")
   (make-line nil nil ""))
 
 (defun line-free (line)
+  (incf *line-structure-generation*)
   (when (line-previous line)
     (setf (line-next (line-previous line))
           (line-next line)))

@@ -91,6 +91,12 @@ counterexample."
   "Map raw integer RAW to a valid 1-based buffer position in [1, size+1]."
   (1+ (mod raw (1+ (buffer-char-count buffer)))))
 
+(defun point-position-correct-p (point)
+  "Compare position lookup with an independent traversal of the actual text."
+  (= (lem:position-at-point point)
+     (1+ (length (lem:points-to-string
+                  (lem:buffer-start-point (lem:point-buffer point)) point)))))
+
 (defun run-edit-script (script)
   "Run edit SCRIPT against a fresh temporary buffer, asserting the buffer stays
 structurally well-formed after every step. Return T when it does, NIL on the
@@ -136,7 +142,10 @@ genuine structural corruption, not a rejected edit."
                ;; A user-facing rejection (e.g. read-only) is not corruption; the
                ;; invariant check below still runs on the unchanged buffer.
                (lem/buffer/errors:editor-error () nil))
-             (when (buffer-corrupt-p buffer)
+             (when (or (buffer-corrupt-p buffer)
+                       (not (every #'point-position-correct-p
+                                   (list* point (lem:buffer-start-point buffer)
+                                          (lem:buffer-end-point buffer) extra))))
                (return-from done nil))))
       (dolist (p extra)
         (ignore-errors (lem:delete-point p)))

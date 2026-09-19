@@ -44,6 +44,49 @@
                  "empty edits and deletion past EOF do not dirty the buffer")))
       (lem:delete-buffer buffer))))
 
+(deftest positions-after-unrecorded-edits
+  (let* ((buffer (lem:make-buffer "position-cache" :temporary t :enable-undo-p nil))
+         (point (lem:buffer-point buffer)))
+    (unwind-protect
+         (flet ((check-positions ()
+                  (lem:with-point ((p (lem:buffer-start-point buffer)))
+                    (loop :for expected :from 1
+                          :do (ok (= expected (lem:position-at-point p)))
+                          :while (lem:character-offset p 1)))))
+           (lem:insert-string point (format nil "abc~%漢字~%end"))
+           ;; Cache a later line, then edit before it without undo recording
+           ;; first looking up (and thereby moving the cache to) the source.
+           (lem:position-at-point (lem:buffer-end-point buffer))
+           (lem:buffer-start point)
+           (lem:insert-string point (format nil "prefix~%"))
+           (check-positions)
+           (lem:buffer-start point)
+           (lem:with-inhibit-undo () (lem:delete-character point 9))
+           (check-positions)
+           (lem:erase-buffer buffer)
+           (check-positions)
+           (lem:insert-string point (format nil "fresh~%text"))
+           (check-positions))
+      (lem:delete-buffer buffer))))
+
+(deftest positions-after-renderer-writes
+  (dolist (undo-p '(nil t))
+    (let* ((buffer (lem:make-buffer "renderer-position-cache" :temporary t
+                                                           :enable-undo-p undo-p))
+           (point (lem:buffer-point buffer)))
+      (unwind-protect
+           (progn
+             (lem:insert-string point (format nil "abc~%漢字~%end"))
+             (let ((tick (lem:buffer-modified-tick buffer))
+                   (first-line (lem/buffer/internal:point-line (lem:buffer-start-point buffer))))
+               (dolist (text '("longer replacement" "" "短"))
+                 (lem:position-at-point (lem:buffer-end-point buffer))
+                 (lem/buffer/line:set-line-string text first-line)
+                 (ok (= tick (lem:buffer-modified-tick buffer)))
+                 (ok (= (lem:position-at-point (lem:buffer-end-point buffer))
+                        (1+ (length (lem:buffer-text buffer))))))))
+        (lem:delete-buffer buffer)))))
+
 (deftest insert-newline-test
   ;; Arrange
   (let* ((buffer (lem:make-buffer "test" :temporary t))

@@ -381,10 +381,37 @@ short to reach COLUMN, add spaces/tabs to get there."
 
 (defun position-at-point (point)
   "Return the offset of 'point' from the beginning of the buffer."
-  (let ((offset (point-charpos point)))
-    (do ((line (line:line-previous (point-line point)) (line:line-previous line)))
-        ((null line) (1+ offset))
-      (incf offset (1+ (line:line-length line))))))
+  (let* ((buffer (point-buffer point))
+         (tick (buffer-modified-tick buffer))
+         (generation (line:line-structure-generation))
+         (target (point-linum point))
+         (cache (or (buffer-%position-cache buffer)
+                    (setf (buffer-%position-cache buffer) (make-position-cache))))
+         (nearby-p (and (eql tick (position-cache-tick cache))
+                        (eql generation (position-cache-generation cache))
+                        (< (abs (- target (position-cache-linum cache)))
+                           (1- target))))
+         (line (if nearby-p (position-cache-line cache)
+                   (point-line (buffer-start-point buffer))))
+         (linum (if nearby-p (position-cache-linum cache) 1))
+         (offset (if nearby-p (position-cache-offset cache) 0)))
+    (loop :while (< linum target)
+          :do (incf offset (1+ (line:line-length line)))
+              (setf line (line:line-next line))
+              (incf linum))
+    (loop :while (> linum target)
+          :do (setf line (line:line-previous line))
+              (decf offset (1+ (line:line-length line)))
+              (decf linum))
+    ;; Publish the tick last: an asynchronous abort between slot writes must
+    ;; leave an invalid cache rather than a partially updated valid anchor.
+    (setf (position-cache-tick cache) nil
+          (position-cache-generation cache) generation
+          (position-cache-line cache) line
+          (position-cache-linum cache) linum
+          (position-cache-offset cache) offset
+          (position-cache-tick cache) tick)
+    (+ 1 offset (point-charpos point))))
 
 (defun move-to-position (point position)
   "Move 'point' to the offset of 'position' from the beginning of the buffer and return its position.

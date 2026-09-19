@@ -1206,3 +1206,23 @@ and instruments the production client and edit implementation.
 - This audit covers the shared edit path and native client presentation. The
   user's precise frontend/configuration and physical input-to-display latency
   have not been established.
+
+### Follow-up: cached absolute positions
+
+On `main`, absolute position queries now reuse a nearby line's start offset.
+An insertion/deletion on that line preserves its prefix, so repeated typing
+does not traverse the preceding lines again. Buffer edit ticks and a low-level
+line generation invalidate other anchors, including renderer writes through
+`set-line-string` that bypass normal edit bookkeeping. The line generation is
+conservative across buffers; edits in another buffer can cause a fresh scan.
+
+The same 10,000-line benchmark measured 51 ms to load and 0.005 / 0.010 ms
+per insert/delete pair at the start/end respectively (previous end: 0.315 ms).
+These tiny samples have millisecond timer granularity; the useful result is
+the removal of repeated whole-prefix traversal, not sub-microsecond precision.
+
+Independent text traversal checks every tracked point after generated edits,
+undo and redo. Explicit tests cover undo-disabled edits, inhibited undo,
+erase/reinsert, and raw renderer replacements of different lengths. They pass,
+as do all 15 native-client runtime checks. The full core suite still has the
+same six previously recorded failures; no additional suite failed.

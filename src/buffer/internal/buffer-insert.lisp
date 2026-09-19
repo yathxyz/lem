@@ -57,12 +57,25 @@ diverges from the full kernel's answer on the full buffer model."))
       ;; line's length can change. Avoid traversing the entire buffer twice.
       (let* ((line (point-line point))
              (line-length (line:line-length line))
-             (nlines (buffer-nlines buffer)))
+             (nlines (buffer-nlines buffer))
+             (cache (buffer-%position-cache buffer))
+             (retain-cache-p
+               (and cache
+                    (eql (position-cache-tick cache) (buffer-modified-tick buffer))
+                    (eql (position-cache-generation cache)
+                         (line:line-structure-generation))
+                    (eq (position-cache-line cache) line))))
         (unwind-protect
              (funcall function)
           (unless (and (= nlines (buffer-nlines buffer))
                        (= line-length (line:line-length line)))
-            (buffer-modify buffer)))))))
+            (buffer-modify buffer)
+            ;; Insert/delete preserves the source line and everything before
+            ;; it, including its line number and start offset. Other anchors
+            ;; remain invalidated by BUFFER-MODIFY's content tick.
+            (when retain-cache-p
+              (setf (position-cache-generation cache) (line:line-structure-generation)
+                    (position-cache-tick cache) (buffer-modified-tick buffer)))))))))
 
 (defmacro with-modify-buffer ((point n) &body body)
   `(call-with-modify-buffer ,point ,n (lambda () ,@body)))
