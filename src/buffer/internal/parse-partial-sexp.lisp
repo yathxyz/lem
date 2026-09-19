@@ -149,6 +149,27 @@
 (defmacro syntax-ppss-cache (buffer)
   `(variable-value 'syntax-ppss-cache :buffer ,buffer))
 
+(defun parse-with-ppss-checkpoints (from to state tail)
+  "Parse to TO, adding sparse line-start checkpoints ahead of cached TAIL.
+Backward queries can then resume nearby instead of reparsing the whole prefix."
+  (with-point ((cursor from) (boundary from))
+    (loop
+      (unless (and (line-offset boundary 64 0) (point< boundary to))
+        (move-point boundary to))
+      (setf state (parse-partial-sexp cursor boundary
+                                      (and state (copy-pps-state state))))
+      ;; A delimiter or escape can straddle TO: the parser may stop before it
+      ;; or consume past it. Such a state cannot be resumed at TO. Line-comment
+      ;; state is constant through the rest of its line, even if the parser
+      ;; leaves CURSOR at the comment start instead of advancing it to TO.
+      (when (or (point= cursor boundary)
+                (and (eq :line-comment (pps-state-type state))
+                     (same-line-p cursor boundary)
+                     (point<= cursor boundary)))
+        (push (cons (copy-point boundary :temporary) state) tail))
+      (when (point= boundary to)
+        (return (values state tail))))))
+
 (flet ((cache-point (cache) (car cache))
        (cache-state (cache) (cdr cache)))
   (defun syntax-ppss (point)
@@ -158,9 +179,9 @@
       (do ((rest cache-list (cdr rest))
            (prev nil rest))
           ((null rest)
-           (setf state (parse-partial-sexp (copy-point (buffer-start-point buffer) :temporary)
-                                           point))
-           (let ((new-rest (list (cons (copy-point point :temporary) state))))
+           (multiple-value-bind (new-state new-rest)
+               (parse-with-ppss-checkpoints (buffer-start-point buffer) point nil nil)
+             (setf state new-state)
              (if prev
                  (setf (cdr prev) new-rest)
                  (setf cache-list new-rest))))
@@ -168,11 +189,10 @@
                (setf state (cache-state (car rest)))
                (return))
               ((point> point (cache-point (car rest)))
-               (setf state (parse-partial-sexp (copy-point (cache-point (car rest)) :temporary)
-                                               point
-                                               (copy-pps-state (cache-state (car rest)))))
-               (let ((new-rest (cons (cons (copy-point point :temporary) state)
-                                     rest)))
+               (multiple-value-bind (new-state new-rest)
+                   (parse-with-ppss-checkpoints (cache-point (car rest)) point
+                                                (cache-state (car rest)) rest)
+                 (setf state new-state)
                  (if prev
                      (setf (cdr prev) new-rest)
                      (setf cache-list new-rest))

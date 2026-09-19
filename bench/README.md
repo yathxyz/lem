@@ -1296,3 +1296,35 @@ Vundo validation also exposed missing native-agent certificate configuration
 in the Nix test environment. Checks now receive the launcher's curl and CA
 bundle settings. The fixture reports the original configuration error, and
 the shell driver exits after a boot failure instead of cascading through tests.
+
+### Follow-up: sparse syntax checkpoints and cache correctness
+
+The Lisp-editing CPU profile attributed about 54% of sampled time to syntax
+parsing requested by backward form movement. Descending queries before the
+earliest cached position repeatedly reparsed the entire buffer prefix. Parsing
+now records a checkpoint every 64 lines, so later queries can resume nearby.
+
+Differential tests also reproduced an existing cache bug in the original
+parser: a query inside a multi-character delimiter or escape could cache a
+state that could not resume at that position. For example, querying between
+`|` and `#` in a block-comment closer could leave the next query inside the
+comment after it had ended. Only resumable positions are now cached; line
+comments retain their valid constant state through the rest of the line.
+
+Matched filtered T2 Lisp-editing runs measured 280 ms with the original parser
+and 147 ms with safe checkpoints (72 frames in each workload). Allocation was
+439 MB and 421 MB respectively. These workloads include structural movement,
+indentation, scanning, rendering and undo; they are not single-keystroke times.
+The original parser was loaded from `d3d50ec7e` for the otherwise identical A/B
+run. No baseline band was regenerated.
+
+Fresh parses agree with cached results through multiline strings, escaped
+quotes, nested comments, Unicode, edits before/after checkpoints, and undo.
+All 21 real-terminal structural-editing checks and 15 native-client checks
+pass. The full core suite retains its same six previously recorded failures.
+
+The final complete T2 run also finished all seven workloads. Medians in the
+same table order above were 3,413 / 1,863 / 152 / 310 / 360 / 829 / 8,505 ms.
+Its result file is
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919113615.json`.
+The exit-2 missing-baseline qualification still applies.
