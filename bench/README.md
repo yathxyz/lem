@@ -4139,3 +4139,64 @@ scroll, truncate and wordwrap are 1.024, 1.024, 4.096, 1.024, 1.024 and 2.048 ms
 The longline bound is higher than the preceding capture's 2.048 ms; no terminal
 latency improvement is claimed. Log: `/tmp/lem-drawing-runs-t3.log`. As with prior
 T3 captures, this uses the base image rather than the configured wrapper.
+
+### Synthetic X11 input through the daemon to SDL presentation (2026-09-19)
+
+`scripts/bench/e2e/sdl-input.py` complements the socket-only probes. It creates
+a private Xvfb display, configuration, daemon and source-loaded SDL client,
+then submits alternating XTest x/Backspace keys to the focused client. The
+client uses the production SDL event loop and key translation. Its private
+hooks acknowledge only a matching marker row after `SDL_RenderPresent` returns.
+Sequence checks reject missing, duplicated or unexpected key input. Example:
+
+```sh
+LEM_BIN=/absolute/path/to/configured/lem nix develop --command \
+  python3 scripts/bench/e2e/sdl-input.py --count 600 \
+  --fixture /path/to/utf8-lf.txt --output /tmp/new-sdl-result.json
+```
+
+Outputs must be new files. Fixture text is copied into a private `.txt` file
+with a marker prefix; final text, saved bytes and original fixture bytes must
+match before clean client/daemon exits and result publication. The development
+shell now supplies Python, Xvfb, xdotool and loadable X11/XTest libraries.
+
+Two endpoints are reported: Python's key-submission-to-acknowledgement interval
+includes X11/SDL event delivery and ack transport; the client-local interval
+starts at `send-input` entry and ends immediately after presentation returns,
+using SDL's high-resolution counter. These are software endpoints on Xvfb,
+not physical keyboard-to-monitor measurements. The client loads this checkout
+through Qlot and performs full GC before opening its window; it is not a saved
+client image. Its source revision and SDL source hash are recorded.
+
+Current baseline: daemon
+`/nix/store/b0qk1zyxf8cm800g3ba986sfym6hqbms-lem-yath/bin/lem`, client source
+`4238d833d`; 600 measured plus 20 warmup keys, 25 ms pacing, one 100×40 client.
+The default fixture is 33,903 bytes; the large fixture is 10,486,292 bytes.
+Both edit the short marker line, not long-line text or language analysis.
+
+| Fixture / repeat | Submission→ack median / p95 / max (ms) | Client send→present median / p95 / max (ms) | Daemon / instrumented client CPU (ms) |
+| --- | --- | --- | --- |
+| Small / 1 | 1.267 / 1.869 / 5.238 | 1.109 / 1.569 / 5.018 | 420.619 / 594.159 |
+| Small / 2 | 1.210 / 1.738 / 4.930 | 1.065 / 1.498 / 4.799 | 416.641 / 593.179 |
+| Large / 1 | 1.125 / 1.652 / 3.058 | 0.981 / 1.421 / 2.862 | 416.460 / 554.380 |
+| Large / 2 | 1.044 / 1.372 / 2.648 | 0.912 / 1.211 / 2.510 | 380.101 / 530.519 |
+
+Client counters include setup after the initial fixture frame, warmup, idle and
+ack instrumentation; daemon counters span evaluations before warmup and after
+the final pacing interval. GC CPU is not pause duration. Instrumented client
+CPU exceeds daemon CPU here, motivating client profiling; this is a baseline,
+not an optimization comparison. Captures: `/tmp/lem-sdl-input-{small,large}-{1,2}.{json,log}`.
+
+Smoke checks preserve Unicode and a missing trailing newline. A private wrong-key
+probe fails on `a` instead of `x` and publishes no JSON; invalid count, NaN pacing
+and existing output files are rejected before startup. Logs:
+`/tmp/lem-sdl-input-{smoke-final,unicode,negative}.log`. Python compilation passes.
+Nix formatting differences remain identical to HEAD's existing 85 changed lines;
+no unrelated formatting was applied. No editor production code or profile changed.
+
+The first smoke run also exposed a lifecycle issue: normal daemon shutdown while
+an SDL client remains attached reaches that client as unexpected EOF, causing
+an error exit. Evidence: `/tmp/lem-sdl-input-shutdown-client.log` and
+`/tmp/lem-sdl-input-smoke.log`. The validated probe explicitly closes its client
+through `lem-if:close-frontend` before stopping the daemon. The daemon-first
+shutdown behavior remains a separate open issue; it was not masked as success.

@@ -731,9 +731,13 @@
                 nixfmt-rfc-style
 
                 # Development tools
+                python3
                 direnv
               ]
               ++ lib.optionals stdenv.isLinux [
+                # Isolated graphical input benchmarks
+                xorg.xorgserver
+                xdotool
                 # Linux-specific dependencies for webview frontend
                 webkitgtk_4_1
                 gtk3
@@ -761,6 +765,8 @@
                 pkgs.tree-sitter-grammars.tree-sitter-clojure
               ]
               ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+                pkgs.xorg.libX11
+                pkgs.xorg.libXtst
                 pkgs.webkitgtk_4_1
                 pkgs.gtk3
               ]
