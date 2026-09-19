@@ -1427,3 +1427,23 @@ long-line / overlay-heavy / scroll / undo-storm respectively. Results are in
 `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919115930.json`.
 As before, the runner exited 2 after writing all results because the matching
 Nova baseline is absent; no committed baseline or gate was changed.
+
+### Open investigation: transient redraws and viewport restoration
+
+The 200 KB profile identified two full redraws during ordinary input from
+`hide-transient`, even when no transient menu exists: one through keymap
+activation and one through the post-command hook. An experimental conditional
+redraw reduced the standard T3 16 KB long-line p95 bucket from 16.384 to
+4.096 ms, but **the experiment was reverted**. Vundo's direct-window-delete
+and related rollback cases then restored the text and point but changed the
+saved viewport (one reproduction changed its absolute view position from
+404 to 428). Retaining redraws for an active bottom pane, or for the core's
+frame-redisplay flag, did not resolve the failures. The original redraw
+behavior passed the Vundo checks in a matched build.
+
+The experimental result file
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919120641.json`
+does not describe retained code and must not be used as a speedup claim for
+the current branch. The layout/viewport dependency needs to be resolved before
+this optimization can be reconsidered. Main retains the validated width
+inlining and unconditional transient redraw behavior.
