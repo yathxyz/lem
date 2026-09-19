@@ -3851,3 +3851,73 @@ and allocation, so these results are not folded into ABBA comparisons. Artifacts
 `/tmp/lem-async-poll-resources.{json,log}`. All timing endpoints remain decoded
 protocol screens, not physical keyboard-to-monitor latency. Installed profiles
 and core/kernel code are unchanged; the existing undo-model mismatch remains.
+
+### Reuse daemon modeline cell storage (2026-09-19)
+
+A fresh four-client allocation profile of the current 10 MB typing path collected
+6,491 samples. `render-line-on-modeline` accounted for 13.8% inclusively and
+`make-cell-row` for 9.1%; redraw/modeline construction and protocol encoding now
+dominate rather than file hashing. The profiler stopped after 25 seconds of a
+1,200-key diagnostic run, before final buffer verification/save/shutdown. Its
+timer/report writing affects timing, so this capture is attribution only:
+`/tmp/lem-polling-allocation-profile.{lisp,txt,json,log}`.
+
+The daemon modeline renderer now reuses its view's existing cell row when the
+width matches, filling both arrays before rendering. A width change allocates
+new storage. Modeline expressions, faces, colors and character widths are still
+evaluated on every draw; no content cache was introduced. The initial prototype
+used the partial-row clearing helper and reduced allocation but increased
+component CPU. The retained version uses full-array `fill`, as screen-grid reuse
+already does. Unversioned component captures are that rejected clearing variant;
+the final captures are explicitly `v2` below.
+
+The isolated ABBA benchmark renders 100,000 100-column modelines after 1,000
+warmups and full GC, preserving the resulting text. Mean CPU/allocation:
+
+| Modeline | CPU before → after (ms) | Lisp bytes before → after |
+| --- | ---: | ---: |
+| Empty, styled padding | 26.016 → 12.596 | 194,744,832 → 11,532,288 |
+| ASCII text and right segment | 114.145 → 94.016 | 205,925,824 → 24,358,400 |
+| CJK/combining text and right segment | 107.356 → 86.721 | 236,371,200 → 53,160,320 |
+
+That is 18–52% less component CPU and 78–94% less allocation. Artifacts:
+`/tmp/lem-modeline-reuse-component-v2-{before,after}-{1,2}.log` and
+`/tmp/lem-modeline-reuse-component.lisp`. This excludes core modeline evaluation,
+frame composition, encoding, transport and presentation.
+
+Packaged ABBA typing captures retained the 600 measured plus 20 warmup keys,
+25 ms pacing and private 10 MB fixture. Every peer, final buffer text, source and
+saved-copy bytes, and clean shutdown were verified. No builds/tests ran during
+measurement. Before package:
+`/nix/store/fi6mgpas22a5mv5f10wq5fmyzs93akzm-lem-yath/bin/lem`; after:
+`/nix/store/sjrld5xjhj7lkclg8mcw12ni02404ab1-lem-yath/bin/lem`.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after | All-client maxima, both runs before → after (ms) |
+| --- | ---: | ---: | --- |
+| 1 | 409.785 → 405.349 | 47,612,576 → 45,726,560 | 0.972 / 1.083 → 1.018 / 0.887 |
+| 4 | 1,016.784 → 971.930 | 125,343,136 → 116,966,240 | 2.390 / 12.835 → 17.551 / 13.239 |
+
+Allocation fell 4.0%/6.7%; mean CPU fell 1.1%/4.4%, with substantial variation
+between individual captures. Single-client p95 was 0.756/0.586 before versus
+0.684/0.580 ms after; all-four p95 was 1.113/1.073 versus 1.153/1.112 ms. The
+four-client short-run tail was worse, so a longer ABBA comparison followed.
+
+With 1,800 measured keys and four clients, mean allocation was
+398,115,392 → 362,712,128 bytes (8.9% lower), mean CPU 2,921.374 → 2,555.248 ms,
+and mean process GC CPU 33.285 → 32.777 ms. Individual CPU captures varied widely.
+All-peer p95 was 1.083/1.072 before versus 1.069/1.065 ms after, while maxima
+were 13.164/6.448 versus 12.465/15.157 ms. The isolated >3 ms event occurred at
+sample 499 in both controls and 535 in both candidates. These results support
+an allocation improvement, not elimination or consistent reduction of GC tails.
+Artifacts: `/tmp/lem-modeline-reuse-v2-{1,4}-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-modeline-reuse-v2-long-4-{before,after}-{1,2}.{json,log}`. Endpoints are
+decoded protocol screens, not physical keyboard-to-monitor latency.
+
+All five daemon test modules and all 16 packaged native display/client checks
+pass: `/tmp/lem-modeline-reuse-v2-{daemon,native}.log`. The new 134-assertion
+regression compares fresh/reused rows across Unicode, wide continuations,
+combining characters, overlapping left/right segments, live attribute changes,
+empty redraws, zero width, shrink/grow, height changes and cleared views. Earlier
+encoded row objects remain unchanged. Production and protocol-test sources
+matched the built package byte for byte. Core/kernel sources, installed profiles
+and the previously documented core undo-model mismatch are unchanged.

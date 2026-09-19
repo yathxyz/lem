@@ -303,6 +303,53 @@
             (lem:teardown-frame frame)
             (lem:unmap-frame implementation)))))))
 
+(deftest modeline-storage-reuse-clears-text-and-faces
+  (let* ((implementation (make-instance 'lem-daemon:daemon-implementation))
+         (view (lem-daemon::make-daemon-view :width 12 :height 1))
+         (attribute (lem:make-attribute :foreground "white" :background "blue"))
+         (accent (lem:make-attribute :foreground "red" :bold t))
+         (snapshots nil))
+    (labels ((objects (text face)
+               (when text
+                 (list (make-instance 'lem-core/display:text-object
+                                      :string text :attribute face))))
+             (render-and-check (width height left right base)
+               (lem-if:set-view-size implementation view width height)
+               (let* ((previous (gethash height (lem-daemon::daemon-view-grid view)))
+                      (fresh (lem-daemon::make-daemon-view :width width :height height)))
+                 (lem-if:render-line-on-modeline implementation view left right base 1)
+                 (lem-if:render-line-on-modeline implementation fresh left right base 1)
+                 (let* ((row (gethash height (lem-daemon::daemon-view-grid view)))
+                        (reference (gethash height (lem-daemon::daemon-view-grid fresh)))
+                        (encoded (lem-daemon::encode-screen-row row)))
+                   (ok (equalp row reference)
+                       "reused text, continuation cells and faces match a fresh modeline")
+                   (when previous
+                     (ok (eq (eq row previous)
+                             (= width (length (lem-daemon::cell-row-cells previous))))
+                         "only storage with the current width is reused"))
+                   (push (cons encoded (protocol:encode-message encoded)) snapshots)))))
+      (dolist (width '(12 12 2 2 0 0 8 8 12))
+        (render-and-check width 1 (objects "漢é long" accent)
+                          (objects "右側" nil) attribute)
+        (lem:set-attribute-background attribute "green")
+        (render-and-check width 1 (objects "x" nil) nil attribute)
+        (render-and-check width 1 nil nil nil)
+        (ok (every #'null (lem-daemon::cell-row-faces
+                           (gethash 1 (lem-daemon::daemon-view-grid view))))
+            "an unstyled empty redraw removes prior modeline faces")
+        (ok (every (lambda (cell) (equal cell " "))
+                   (lem-daemon::cell-row-cells
+                    (gethash 1 (lem-daemon::daemon-view-grid view))))
+            "an empty redraw removes prior text and wide continuations")
+        (render-and-check width 2 (objects "left overlaps right" nil)
+                          (objects "é漢" accent) attribute)
+        (lem-if:clear implementation view)
+        (render-and-check width 2 nil (objects "z" nil) nil))
+      (dolist (snapshot snapshots)
+        (ok (equalp (cdr snapshot) (protocol:encode-message (car snapshot)))
+            "later modeline redraws do not mutate previously encoded row objects")))))
+
 (deftest daemon-theme-interface
   (let ((implementation (make-instance 'lem-daemon:daemon-implementation)))
     (ng (lem/common/color:light-color-p

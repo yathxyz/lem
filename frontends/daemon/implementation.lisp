@@ -290,7 +290,12 @@ Only the representation is shared; character widths are always looked up live.")
          (base-face (drawing-face default-attribute))
          (right-width (loop :for object :in right-objects
                             :sum (drawing-object-width object)))
-         (cells (make-cell-row width base-face)))
+         (cells (or (alexandria:when-let
+                        ((row (gethash (daemon-view-height view) (daemon-view-grid view))))
+                      (and (= width (length (cell-row-cells row))) row))
+                    (make-cell-row width))))
+    (fill (cell-row-cells cells) " ")
+    (fill (cell-row-faces cells) base-face)
     (loop :with column := 0
           :for object :in left-objects
           :do (render-object-into-row cells column object base-face)
