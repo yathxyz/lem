@@ -117,7 +117,18 @@
                   (list (current-global-mode)))))
 
 (defun mode-active-p (buffer mode)
-  (not (null (find mode (all-active-modes buffer) :key #'mode-identifier-name))))
+  "Return whether MODE identifies an active mode, without building a mode list."
+  (flet ((check-mode (active)
+           (let ((object (ensure-mode-object active)))
+             (when (eql mode (mode-identifier-name object))
+               (return-from mode-active-p (not (null object)))))))
+    (dolist (active (buffer-minor-modes buffer))
+      (check-mode active))
+    (check-mode (buffer-major-mode buffer))
+    (dolist (active (active-global-minor-modes))
+      (check-mode active))
+    (check-mode (current-global-mode)))
+  nil)
 
 (defun change-buffer-mode (buffer mode &rest args)
   (save-excursion

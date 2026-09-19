@@ -85,6 +85,7 @@
                (:file "long-line-scan")
                (:file "buffer-list-test")
                (:file "keymap")
+               (:file "mode")
                (:file "popup-window")
                (:file "prompt")
                (:file "cursors")

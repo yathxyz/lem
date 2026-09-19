@@ -3116,3 +3116,78 @@ recorded undo-model mismatch remains separate.
 
 The expanded checked-in composition benchmark completed all nine fixtures with
 expected checksums: `/tmp/lem-single-cell-final-benchmark-smoke.log`.
+
+
+### Query active modes without constructing a mode list (2026-09-19)
+
+The earlier allocation profile attributed 20.8% of samples to `mode-active-p`,
+which built `all-active-modes` solely to answer a boolean query. The predicate
+now walks the existing local-minor, major, global-minor and global sources in
+that order. It still resolves registration names through `ensure-mode-object`
+and compares identifiers with EQL through `mode-identifier-name`; it returns
+strict T/NIL. There is no cache. `all-active-modes` itself is unchanged.
+
+A new core regression compares against the previous query for 384 combinations
+of symbol/object storage and queries, checks identifier visitation order, and
+exercises re-registration, removal and dynamically rebound global modes. Alias
+registration names deliberately differ from identifiers, preventing a shortcut
+that merely tests list membership. Object-valued modes retain their identity
+when registration changes. The core suite is 75/76; only the known undo-model
+tick mismatch fails (matching text and points, production/model ticks 0/1).
+Log: `/tmp/lem-mode-query-core.log`.
+
+All five daemon test modules pass. Packaged checks pass all 16 native-client,
+27 screen-line, 83 Vundo and 36 cursor-state cases. Logs:
+`/tmp/lem-mode-query-{daemon,runtime}.log`. The modified core source, test source
+and ASDF test registration matched the tested base derivation byte for byte.
+Packages:
+
+- Before: `/nix/store/imrpjf3qs8zndks1c3i6j3k1ih31gzhv-lem-yath/bin/lem`.
+- After: `/nix/store/h6vik6hdxh1q6bis73wh9n5ybv1jxi8x-lem-yath/bin/lem`.
+- Tested base: `/nix/store/sji9dikc3nqx5b79wf6r6lc0i8hl8c7l-sbcl-lem-ncurses-unstable/bin/lem`.
+
+A private configured-daemon ABBA component test performed one million queries
+per case after 10,000 warmups and full GC. Hit counts were asserted. Counters
+are process-wide, including other daemon threads, so small residual allocation
+is not an exact per-query census. It excludes command handling and rendering.
+
+| Query | Mean CPU before → after (ms) | Mean Lisp bytes before → after |
+| --- | ---: | ---: |
+| Active major | 94.555 → 62.657 | 208,062,144 → 22,848 |
+| Active global | 160.899 → 145.314 | 208,043,136 → 0 |
+| Missing identifier | 160.452 → 122.389 | 208,095,424 → 11,392 |
+
+Artifacts: `/tmp/lem-mode-query-micro.lisp` and
+`/tmp/lem-mode-query-micro-{before,after}-{1,2}.{txt,json,log}`.
+
+Uninstrumented typing ABBA captures used one/four clients separately, 600 measured
+keys, 20 warmup keys and 25 ms pacing. No build, test or other benchmark ran
+concurrently. Every client observed every edit and final buffers matched the
+fixtures. Counters cover all 620 keys, idle time and boundary evals.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after | Mean GC CPU before → after (ms) |
+| --- | ---: | ---: | ---: |
+| 1 | 498.090 → 495.393 | 75,438,496 → 61,782,496 | 8.899 → 9.473 |
+| 4 | 1,078.574 → 1,057.033 | 220,744,608 → 171,347,808 | 16.713 → 9.870 |
+
+Allocation fell 18.1%/22.4% for one/four clients. Mean CPU fell only 0.5%/2.0%.
+GC CPU is a process-wide CPU measure, not a wall-clock pause.
+
+| Clients / endpoint | p50, both runs before → after (ms) | p95, both runs before → after (ms) | Maximum, both runs before → after (ms) |
+| --- | --- | --- | --- |
+| 1 / active | 0.577/0.572 → 0.573/0.573 | 0.847/0.838 → 0.840/0.860 | 1.124/1.295 → 4.126/3.997 |
+| 4 / active | 0.555/0.606 → 0.561/0.603 | 0.847/0.856 → 0.811/0.823 | 3.581/3.695 → 1.172/1.247 |
+| 4 / all peers | 0.956/1.003 → 0.965/0.994 | 1.441/1.450 → 1.358/1.430 | 4.111/4.245 → 1.625/1.679 |
+
+This is an allocation reduction, not a consistent latency improvement. The
+single-client maxima worsened in these captures while four-client maxima
+improved; these plain captures do not attribute individual stalls. Protocol
+measurements exclude native rendering and physical presentation. Artifacts:
+`/tmp/lem-mode-query-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+T3 passed unchanged budgets: warm startup 286.811 ms; plain/bigfile/longline/
+scroll/truncate/wordwrap p95 histogram upper bounds were
+1.024/1.024/4.096/2.048/2.048/2.048 ms. Log: `/tmp/lem-mode-query-t3.log`.
+Result: `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919190650.json`.
+Kernel sources, proof obligations, benchmark budgets and installed profiles
+are unchanged. The previously documented undo-model mismatch remains unresolved.
