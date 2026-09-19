@@ -13,6 +13,8 @@ export LEM_YATH_CURSOR_STATE_SOURCE="${LEM_YATH_SOURCE:-$here/lem-yath}/src/curs
 session="lem-yath-cursor-state-$id"
 raw="$root/raw"
 source_file="$root/cursor-source.txt"
+exit_file="$root/exit-status"
+runner="$root/run-lem.sh"
 parser="$here/scripts/cursor-state-raw.py"
 export LEM_YATH_CURSOR_RAW="$raw"
 export LEM_YATH_CURSOR_PARSER="$parser"
@@ -216,7 +218,12 @@ tmux_cmd set-option -t "$session" remain-on-exit on
 tmux_cmd pipe-pane -O -t "$session" \
   'python3 "$LEM_YATH_CURSOR_PARSER" capture "$LEM_YATH_CURSOR_RAW"'
 printf -v command '%q ' "$LEM_BIN" --eval "$form" "$source_file"
-lem_keys "$session" -l "exec $command"
+# Record the direct child's wait status. A closed PTY can make tmux report a
+# dead pane before (or without) publishing pane_dead_status in sandbox runs.
+printf 'set +e\n%s\nstatus=$?\nprintf "%%s\\n" "$status" > %q\nexit "$status"\n' \
+  "$command" "$exit_file" > "$runner"
+printf -v command 'exec bash %q' "$runner"
+lem_keys "$session" -l "$command"
 lem_keys "$session" Enter
 
 if ! wait_screen 'NORMAL' "$BOOT_TIMEOUT" ||
@@ -413,22 +420,17 @@ if [[ $(tmux_cmd display-message -p -t "$session" '#{pane_dead}' 2>/dev/null) !=
   die exit-restore 'Lem did not exit cleanly'
 fi
 exit_status=""
-exit_signal=""
 i=0
 while ((i < WAIT_TIMEOUT * 4)); do
-  exit_status=$(tmux_cmd display-message -p -t "$session" '#{pane_dead_status}')
-  exit_signal=$(tmux_cmd display-message -p -t "$session" '#{pane_dead_signal}')
-  if [[ -n $exit_status || -n $exit_signal ]]; then
+  if [[ -s $exit_file ]]; then
+    read -r exit_status < "$exit_file"
     break
   fi
   sleep 0.25
   i=$((i + 1))
 done
-if [[ -n $exit_signal ]]; then
-  die exit-restore "Lem exited from signal $exit_signal"
-fi
 if [[ -z $exit_status ]]; then
-  die exit-restore 'tmux did not publish Lem exit metadata'
+  die exit-restore 'Lem did not return a child exit status'
 fi
 if [[ $exit_status != 0 ]]; then
   die exit-restore "Lem exited with status $exit_status"
