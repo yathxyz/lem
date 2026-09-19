@@ -1,0 +1,39 @@
+;; Run after loading lem/core; this exercises the real recorder hook without
+;; starting a frontend. Temporary files belong only to this self-test.
+(let ((*read-eval* nil))
+  (load (merge-pathnames "scripts/bench/e2e/pipeline-samples.lisp"
+                        (asdf:system-source-directory :lem))))
+
+(uiop:with-temporary-file (:pathname path :stream stream)
+  (close stream)
+  (delete-file path)
+  (let* ((seen '())
+         (original (lambda (&rest args) (push args seen)))
+         (lem-core::*pipeline-recorder* original))
+    (unwind-protect
+         (progn
+           (lem-bench/pipeline-samples:start path :capacity 2)
+           (let ((sink lem-core::*pipeline-recorder*))
+             (funcall sink :queue-wait 0 nil)
+             (funcall sink :keystroke 17001 nil)
+             (funcall sink :keystroke 20001 nil))
+           (lem-bench/pipeline-samples:stop)
+           (assert (eq original lem-core::*pipeline-recorder*))
+           (assert (= 3 (length seen)))
+           (let ((csv (uiop:read-file-string path)))
+             (assert (search "# recorded,2" csv))
+             (assert (search "# dropped,1" csv))
+             (assert (search "# recorder-replaced,nil" csv))
+             (assert (search "queue-wait,0" csv))
+             (assert (search "keystroke,17001" csv))
+             (assert (not (search "20001" csv))))
+           (delete-file path)
+           (lem-bench/pipeline-samples:start path)
+           (let ((replacement (constantly nil)))
+             (lem-core:set-pipeline-recorder replacement)
+             (lem-bench/pipeline-samples:stop)
+             (assert (eq replacement lem-core::*pipeline-recorder*))
+             (assert (search "# recorder-replaced,t" (uiop:read-file-string path)))))
+      (lem-bench/pipeline-samples:stop))))
+
+(format t "Pipeline sample capture self-test passed.~%")

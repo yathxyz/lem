@@ -1763,3 +1763,76 @@ replay-computation improvement, not a further typing p95 bucket improvement.
 The histogram's coarse upper edge exceeds the 30 ms stress budget; raw stage
 samples would distinguish smaller latency changes within that bucket. No
 installed editor/profile changed.
+
+### Raw pipeline samples and hidden latency improvements (2026-09-19)
+
+The standard log2 histogram reports a 32.768 ms upper edge for every duration
+in its roughly 16-33 ms bucket. It cannot distinguish improvements inside that
+bucket, and an upper edge above a budget does not establish that the actual
+percentile exceeds it. The existing budget gate remains unchanged.
+
+`scripts/bench/e2e/pipeline-samples.lisp` is an optional diagnostic for private
+benchmark editors. It chains the existing metrics sink, stores stage durations
+in bounded preallocated arrays, and writes a CSV only when stopped or on exit.
+It reports overflow and recorder replacement; the companion
+`analyze-pipeline-samples.py` rejects incomplete captures and computes nearest-
+rank percentiles from individual durations. Durations retain the pipeline
+clock's own resolution; microsecond units do not guarantee microsecond
+resolution. They end at core redisplay, before physical presentation.
+
+To use it, place separate forms like these in an initialization script loaded
+by the private tmux driver's eval form. Use the current checkout's absolute
+path when measuring older saved executables, and a new output path per process:
+
+```lisp
+(load "/absolute/checkout/scripts/bench/e2e/pipeline-samples.lisp")
+(lem-bench/pipeline-samples:start "/tmp/unique-capture.csv")
+```
+
+The driver still opens its normal fixture and inserts its readiness marker.
+The CSV is written on normal exit, or by `lem-bench/pipeline-samples:stop`.
+Analyze one or more captures with:
+
+```sh
+python3 scripts/bench/e2e/analyze-pipeline-samples.py /tmp/unique-capture.csv
+```
+
+The recorder self-test exercises chaining, overflow accounting, restoration,
+backend replacement, and loading with `*read-eval*` disabled (as in the editor):
+
+```sh
+nix develop --command sbcl --noinform --disable-debugger \
+  --load .qlot/setup.lisp --eval '(ql:quickload :lem/core :silent t)' \
+  --script scripts/bench/e2e/pipeline-samples-test.lisp
+```
+
+This self-test passed. Analyzer checks also confirmed nearest-rank results and
+rejection of dropped samples, replaced sinks, inconsistent counts and unknown
+stages. No normal runtime file, proof definition or default recorder changed.
+
+Two before/after pairs compared the `0d68f80ad` runtime (bounded word-wrap
+prefixes already present) with `97f2593f9` (subsequent split-eligibility, icon
+and numeric-coercion optimizations). Both used a 200 KB word-wrapped line,
+120 keys at 100 ms spacing plus 20 wall-trend samples. Every capture had 140
+paint samples, no overflow, and no recorder replacement. Measurements in ms:
+
+| Run | Input-to-core-paint p50 | Input-to-core-paint p95 | Redisplay p95 | Input-to-core-paint max |
+| --- | ---: | ---: | ---: | ---: |
+| Before 1 | 13 | 20 | 18 | 112.001 |
+| After 1 | 11 | 17 | 16 | 80.001 |
+| Before 2 | 13 | 25 | 18 | 88.001 |
+| After 2 | 11 | 19 | 16 | 81 |
+
+All four standard histogram p95 values were still 32.768 ms. The raw p95
+values are below 30 ms in these runs, although the conservative histogram gate
+continues to fail. This makes the cumulative rendering improvement visible;
+it does not attribute the whole change to the most recent optimization.
+Artifacts: `/tmp/lem-raw-{before,after}-{1,2}.{sh,log,kv,csv}` and
+`/tmp/lem-raw-comparison.json`.
+
+The long tail remains real: the second and third measured commands took
+64-84 ms across these runs. In the current build they account for two early
+74-81 ms input-to-paint samples; later redisplay outliers also occur. Their
+cause has not yet been established. This capture identifies an early-command
+profiling target instead of treating the unchanged histogram bucket as proof
+that recent optimizations had no latency effect. No installed profile changed.
