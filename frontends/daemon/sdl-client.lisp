@@ -42,10 +42,13 @@
     (sdl2:set-render-draw-color renderer (lem:color-red color)
                                 (lem:color-green color) (lem:color-blue color) 255)))
 
-(defun fill-rectangle (renderer color x y width height)
+(defun fill-rectangle (renderer rectangle color x y width height)
   (set-color renderer color)
-  (sdl2:with-rects ((rectangle x y width height))
-    (sdl2:render-fill-rect renderer rectangle)))
+  (setf (sdl2:rect-x rectangle) x
+        (sdl2:rect-y rectangle) y
+        (sdl2:rect-width rectangle) width
+        (sdl2:rect-height rectangle) height)
+  (sdl2:render-fill-rect renderer rectangle))
 
 (defun glyph-font (fonts text bold)
   (let* ((character (char text 0))
@@ -70,7 +73,7 @@
   (maphash (lambda (key texture) (declare (ignore key)) (sdl2:destroy-texture texture)) cache)
   (clrhash cache))
 
-(defun draw-glyph (renderer cache fonts text foreground bold x y width height)
+(defun draw-glyph (renderer rectangle cache fonts text foreground bold x y width height)
   (unless (every (lambda (c) (char= c #\Space)) text)
     (let* ((key (list text foreground bold))
            (texture
@@ -87,49 +90,57 @@
                         (setf (gethash key cache)
                               (sdl2:create-texture-from-surface renderer surface))
                      (sdl2:free-surface surface))))))
-      (sdl2:with-rects ((rectangle x y width height))
-        (sdl2:render-copy renderer texture :dest-rect rectangle)))))
+      (setf (sdl2:rect-x rectangle) x
+            (sdl2:rect-y rectangle) y
+            (sdl2:rect-width rectangle) width
+            (sdl2:rect-height rectangle) height)
+      (sdl2:render-copy renderer texture :dest-rect rectangle))))
 
 (defun draw-screen-rows (screen renderer fonts cache &optional dirty)
   "Paint all rows, or only DIRTY rows after clearing their previous pixels."
-  (let ((cw (font:font-char-width fonts)) (ch (font:font-char-height fonts))
-        (cursor (graphical-screen-cursor screen)))
-    (loop :for row :across (graphical-screen-rows screen)
-          :for y :from 0
-          :when (or (null dirty) (= 1 (aref dirty y)))
-            :do (when dirty
-                  (fill-rectangle renderer (graphical-screen-background screen)
-                                  0 (* y ch) (nth-value 0 (sdl2:get-renderer-output-size renderer)) ch))
-                (loop :for text :across (lem-daemon::cell-row-cells row)
-                    :for face :across (lem-daemon::cell-row-faces row)
-                    :for x :from 0
-                    :when (stringp text)
-                      :do (let* ((flags (or (third face) 0))
-                                 (fg (or (first face) (graphical-screen-foreground screen)))
-                                 (bg (or (second face) (graphical-screen-background screen)))
-                                 (width (* cw (lem:string-width text)))
-                                 (cursor-p (and cursor (= x (protocol:field cursor "x"))
-                                                (= y (protocol:field cursor "y")))))
-                            (when (logtest 4 flags) (rotatef fg bg))
-                            (when (and cursor-p (equal "box" (protocol:field cursor "shape")))
-                              (setf fg (graphical-screen-background screen)
-                                    bg (protocol:field cursor "color")))
-                            ;; RENDER-CLEAR already painted the default background.
-                            ;; Resolve inverse video and the box cursor first.
-                            (unless (equal bg (graphical-screen-background screen))
-                              (fill-rectangle renderer bg (* x cw) (* y ch) width ch))
-                            (draw-glyph renderer cache fonts text fg (logtest 1 flags)
-                                        (* x cw) (* y ch) width ch)
-                            (when (logtest 2 flags)
-                              (fill-rectangle renderer fg (* x cw) (+ (* y ch) ch -2) width 1))
-                            (when cursor-p
-                              (cond
-                                ((equal "bar" (protocol:field cursor "shape"))
-                                 (fill-rectangle renderer (protocol:field cursor "color")
-                                                 (* x cw) (* y ch) 2 ch))
-                                ((equal "underline" (protocol:field cursor "shape"))
-                                 (fill-rectangle renderer (protocol:field cursor "color")
-                                                 (* x cw) (+ (* y ch) ch -2) width 2)))))))))
+  (when (and dirty (not (find 1 dirty)))
+    (return-from draw-screen-rows))
+  ;; SDL consumes each rectangle during its call. Reuse one per paint pass;
+  ;; WITH-RECTS still frees it if a fill, glyph or cursor operation signals.
+  (sdl2:with-rects (rectangle)
+    (let ((cw (font:font-char-width fonts)) (ch (font:font-char-height fonts))
+          (cursor (graphical-screen-cursor screen)))
+      (loop :for row :across (graphical-screen-rows screen)
+            :for y :from 0
+            :when (or (null dirty) (= 1 (aref dirty y)))
+              :do (when dirty
+                    (fill-rectangle renderer rectangle (graphical-screen-background screen)
+                                    0 (* y ch) (nth-value 0 (sdl2:get-renderer-output-size renderer)) ch))
+                  (loop :for text :across (lem-daemon::cell-row-cells row)
+                      :for face :across (lem-daemon::cell-row-faces row)
+                      :for x :from 0
+                      :when (stringp text)
+                        :do (let* ((flags (or (third face) 0))
+                                   (fg (or (first face) (graphical-screen-foreground screen)))
+                                   (bg (or (second face) (graphical-screen-background screen)))
+                                   (width (* cw (lem:string-width text)))
+                                   (cursor-p (and cursor (= x (protocol:field cursor "x"))
+                                                  (= y (protocol:field cursor "y")))))
+                              (when (logtest 4 flags) (rotatef fg bg))
+                              (when (and cursor-p (equal "box" (protocol:field cursor "shape")))
+                                (setf fg (graphical-screen-background screen)
+                                      bg (protocol:field cursor "color")))
+                              ;; RENDER-CLEAR already painted the default background.
+                              ;; Resolve inverse video and the box cursor first.
+                              (unless (equal bg (graphical-screen-background screen))
+                                (fill-rectangle renderer rectangle bg (* x cw) (* y ch) width ch))
+                              (draw-glyph renderer rectangle cache fonts text fg (logtest 1 flags)
+                                          (* x cw) (* y ch) width ch)
+                              (when (logtest 2 flags)
+                                (fill-rectangle renderer rectangle fg (* x cw) (+ (* y ch) ch -2) width 1))
+                              (when cursor-p
+                                (cond
+                                  ((equal "bar" (protocol:field cursor "shape"))
+                                   (fill-rectangle renderer rectangle (protocol:field cursor "color")
+                                                   (* x cw) (* y ch) 2 ch))
+                                  ((equal "underline" (protocol:field cursor "shape"))
+                                   (fill-rectangle renderer rectangle (protocol:field cursor "color")
+                                                   (* x cw) (+ (* y ch) ch -2) width 2))))))))))
 
 ;; UPDATE-SCREEN replaces decoded rows rather than mutating them. Retain their
 ;; identities with a private render target; the window backbuffer is still

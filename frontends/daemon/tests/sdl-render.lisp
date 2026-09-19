@@ -37,6 +37,71 @@
                                   #(15 "x" "#FFFF00" "#000000" 2))))))
     message))
 
+(defun exercise-rectangle-reuse (renderer fonts)
+  (let ((cache (make-hash-table :test 'equal)))
+    (unwind-protect
+         (sdl2:with-rects (rectangle)
+           (flet ((clear ()
+                    (gui::set-color renderer "#102030")
+                    (sdl2:render-clear renderer)))
+             ;; Change every coordinate, include clipping and zero extents, and
+             ;; shrink after a large rectangle to detect stale geometry.
+             (loop :for (x y width height) :in '((0 0 300 150) (31 23 7 3)
+                                                (-4 -3 10 9) (350 170 40 30)
+                                                (10 20 0 9) (21 12 8 0))
+                   :do (clear)
+                       (gui::fill-rectangle renderer rectangle "#A0B0C0" x y width height)
+                       (let ((actual (read-pixels renderer)))
+                         (clear)
+                         (gui::set-color renderer "#A0B0C0")
+                         (sdl2:with-rects ((fresh x y width height))
+                           (sdl2:render-fill-rect renderer fresh))
+                         (ok (equalp actual (read-pixels renderer))
+                             "reused fill geometry matches a fresh rectangle")))
+             (loop :for (text bold x y width height)
+                     :in '(("W" nil 20 30 60 50) ("i" t 2 4 9 17)
+                           ("漢" nil -5 7 30 24) ("é" t 350 170 15 22)
+                           (" " nil 0 0 300 150) ("x" nil 32 17 8 16))
+                   :do (clear)
+                       (gui::draw-glyph renderer rectangle cache fonts text "#FFFFFF" bold
+                                        x y width height)
+                       (let ((actual (read-pixels renderer))
+                             (texture (gethash (list text "#FFFFFF" bold) cache)))
+                         (clear)
+                         ;; The reference uses the same glyph texture but gives
+                         ;; SDL a fresh rectangle, independent of the helpers.
+                         (when texture
+                           (sdl2:with-rects ((fresh x y width height))
+                             (sdl2:render-copy renderer texture :dest-rect fresh)))
+                         (ok (equalp actual (read-pixels renderer))
+                             "reused glyph geometry matches a fresh rectangle")))))
+      (gui::clear-glyphs cache))))
+
+(defun exercise-rectangle-cleanup (renderer fonts)
+  (let ((screen (gui::make-graphical-screen))
+        (cache (make-hash-table :test 'equal))
+        (original-free (symbol-function 'sdl2:free-rect))
+        (original-fill (symbol-function 'sdl2:render-fill-rect))
+        (freed 0))
+    (gui::update-screen screen (screen-message :full t :height 1))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'sdl2:free-rect)
+                 (lambda (rectangle) (incf freed) (funcall original-free rectangle))
+                 (symbol-function 'sdl2:render-fill-rect)
+                 (lambda (&rest arguments)
+                   (declare (ignore arguments))
+                   (error 'sdl2::sdl-error :string "injected rectangle fill failure")))
+           (ok (signals (gui::draw-screen-rows screen renderer fonts cache #*1)
+                        'sdl2::sdl-error)
+               "painting still propagates SDL errors")
+           (ok (= 1 freed) "a failed paint pass frees its rectangle")
+           (gui::draw-screen-rows screen renderer fonts cache #*0)
+           (ok (= 1 freed) "an unchanged frame needs no rectangle"))
+      (setf (symbol-function 'sdl2:free-rect) original-free
+            (symbol-function 'sdl2:render-fill-rect) original-fill)
+      (gui::clear-glyphs cache))))
+
 (defun exercise-renderer (window renderer fonts)
   (let ((screen (gui::make-graphical-screen)) (frame (gui::make-frame-cache))
         (reference-cache (make-hash-table :test 'equal))
@@ -128,7 +193,9 @@
            (setf (symbol-function 'gui::graphical-event-loop)
                  (lambda (connection files wait-p window renderer fonts)
                    (declare (ignore connection files wait-p))
-                   (exercise-renderer window renderer fonts)))
+                   (exercise-renderer window renderer fonts)
+                   (exercise-rectangle-reuse renderer fonts)
+                   (exercise-rectangle-cleanup renderer fonts)))
            ;; Use the production single-thread entry point so assertion state
            ;; and SDL initialization/rendering/teardown stay on this test thread.
            (gui:run-graphical nil nil nil))

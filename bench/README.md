@@ -4242,3 +4242,71 @@ Production, queue-regression and native-regression sources matched the completed
 package's source byte for byte; the updated tab test ran directly against those
 binaries. This is a shutdown correctness fix, with no typing-speed claim.
 Installed profiles are unchanged.
+
+
+### Reuse SDL rectangles within each paint pass (2026-09-19)
+
+A fresh full GUI-input profile (600 edits plus 20 warmup events on the 10 MB
+fixture) attributed 20.9% of sampled client allocation to `SDL2:MAKE-RECT`,
+with 5.7% of CPU samples inclusive in that function. Allocation and CPU were
+separate diagnostic runs; inclusive percentages are not additive. Artifacts:
+`/tmp/lem-sdl-profile-{alloc,cpu}.{txt,json,log}`.
+
+`draw-screen-rows` now owns one rectangle for its paint pass and explicitly
+passes it to the private fill/glyph helpers. Each operation overwrites all four
+geometry fields before the same checked SDL call. The existing `with-rects`
+unwind cleanup still frees it on failure. An all-zero dirty mask returns before
+allocation. There is no persistent rectangle, additional cache or raw FFI path.
+
+A same-process ABBA software-renderer comparison loaded complete before/after
+SDL source files, warmed glyphs, and performed a full GC before each measured
+phase. The 40-row styled Unicode screen moved its box cursor between columns;
+sparse runs used the retained target and full runs repainted directly. Means:
+
+| Rendering workload | CPU before → after | Lisp bytes before → after |
+| --- | ---: | ---: |
+| 3,000 sparse presentations | 558.652 → 539.652 ms (−3.4%) | 17,627,712 → 6,136,128 (−65.2%) |
+| 400 full presentations | 396.145 → 282.594 ms (−28.7%) | 79,528,896 → 19,596,736 (−75.4%) |
+
+This component measurement excludes event input, socket decoding and daemon
+editing. Script and log: `/tmp/lem-sdl-rect-component.{lisp,log}`.
+
+The full GUI-input probe also ran ABBA, 600 edits plus 20 warmup per run, 25 ms
+pacing, the same 10 MB fixture and fixed daemon binary
+`/nix/store/y6lhichhfg0y2zkhniill0j58qwmdv0s-lem-yath/bin/lem`.
+Only the disposable source-loaded client's SDL implementation was overlaid.
+Each JSON records the actual overlay path and SHA256; the before file matches
+`a3605ca96`, and the after file matches the candidate production source.
+Mean client allocation fell 48,276,032 → 38,802,560 bytes (−19.6%). Client CPU
+was 557.286 → 543.401 ms (−2.5%); unchanged daemon CPU averaged
+419.592 → 419.554 ms, with substantial variation between individual runs.
+GC CPU did not improve (4.256 → 4.349 ms); it is not a wall-pause measurement.
+
+| GUI-input run | Submission/ack median / p95 / max (ms) | Client send/present median / p95 / max (ms) |
+| --- | --- | --- |
+| Before 1 | 1.054 / 1.440 / 2.522 | 0.926 / 1.265 / 2.376 |
+| After 1 | 1.270 / 1.892 / 3.241 | 1.099 / 1.622 / 2.998 |
+| After 2 | 0.978 / 1.300 / 2.939 | 0.854 / 1.146 / 2.798 |
+| Before 2 | 1.222 / 1.667 / 2.538 | 1.062 / 1.438 / 2.401 |
+
+The end-to-end latency result is mixed, not a consistent typing-speed win.
+These are Xvfb software presentations, not physical monitor latency. Counters
+include setup after initial presentation, warmup, idle time and probe hooks.
+Every run checked the complete buffer, saved bytes, unchanged fixture and clean
+client/daemon exits. Artifacts: `/tmp/lem-sdl-rect-{before,after}-{1,2}.{json,log}`;
+probe copies `/tmp/lem-sdl-rect{.py,-client.lisp,-runs.py}`.
+
+The SDL pixel suite passes retained/full repaint comparisons and new independent
+fresh-rectangle references for clipped/zero-sized fills, shrinking geometry,
+ASCII/CJK/combining/bold glyphs and spaces. Injected SDL fill failure still
+propagates and frees its rectangle; unchanged frames allocate none.
+Log: `/tmp/lem-sdl-rect-pixels.log`.
+
+The packaged build passes all 19 native display/lifecycle checks, including
+keyboard input, Unicode clipboard paste, resize, multiple clients, crashes and
+shutdown behavior. Validated binaries:
+`/nix/store/iyxzw0s1iyl460yccsyib2g5gg5dhk9q-lem-yath/bin/lem` and
+`/nix/store/76fpj0hjabk14l9zfm332fl7s52d5n2g-sbcl-lemclient-unstable/bin/lemclient`.
+Production and pixel-test files match the completed build's source byte for
+byte. Build outputs and acceptance log:
+`/tmp/lem-sdl-rect-{build.paths,native.log}`. Installed profiles are unchanged.
