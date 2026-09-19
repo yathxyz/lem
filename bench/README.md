@@ -2353,3 +2353,77 @@ loss and sink replacement. Run them with:
 ```sh
 python3 scripts/bench/e2e/analyze-pipeline-samples-test.py
 ```
+
+### Avoid redraws after empty idle-timer polls (2026-09-19)
+
+An allocation profile of the current 200 KB wrapped-line typing case reached
+its 50,000-sample cap (approximately 32 KB allocation regions). In that sampled
+portion, layout splitting accounted for about 50% of allocation samples and
+conversion to kernel records about 45%. More significantly, roughly 65% of
+samples were under `read-event-internal`'s idle redraw path. This is an
+allocation attribution profile, not a complete latency capture or an exact
+byte census (`/tmp/lem-render-allocation-profile.{lisp,sh,log,txt}`).
+
+The input loop unconditionally redrew after `update-idle-timers`, even when
+that function returned NIL because no callback ran. A zero remaining deadline
+enters the polling branch, while the scheduler's strict expiry predicate can
+still reject that tick. The next poll then runs the real callback and redraws
+again. A private observer recorded 131 empty updates and 144 updates with work
+for 140 typed keys; the callbacks were the show-paren timer (142) and scheduled
+syntax scan (2), in `/tmp/lem-idle-work-probe.{lisp,sh,log,txt}`.
+
+The input loop now uses the scheduler's existing work-performed result to
+request redraw only when a callback ran. Timer deadlines, callback dispatch,
+repetition and the certified timer model are unchanged. Callbacks that return
+NIL still cause redraw: the scheduler reports whether callbacks ran, not what
+they returned.
+
+A deterministic test scripts the clock through an exact deadline and expiry,
+using the real timer scheduler and event queue with a counted redraw sink.
+It covers both one-shot and repeating timers and a NIL-returning callback.
+The old input function fails both empty-poll assertions; the candidate passes
+all checks (`/tmp/lem-idle-redraw-regression-{before,after}.log`). The function
+replacement used for the old-code check is private to that test process.
+
+The paired packaged-runtime comparison used ABBA order, explicit word-boundary
+wrapping of the 200 KB line, 140 paced keys per run, and resource capture in both
+versions. The production baseline was
+`/nix/store/q5wvq3ks2jjc435gxqy3638p39pk1lma-sbcl-lem-ncurses-unstable/bin/lem`;
+the candidate was
+`/nix/store/3yv384p78937dajxh8kr8pxz5axygs6l-sbcl-lem-ncurses-unstable/bin/lem`.
+The candidate derivation's input and timer sources and regression test matched
+the checkout byte for byte. Every run completed with 140 paired redraws, no
+unpaired redraws, no dropped samples and no recorder replacement.
+
+| Run | Captured allocation (bytes) | Process CPU (ms) | GC CPU (ms) | Keystroke p50 / p95 / max (ms) |
+| --- | ---: | ---: | ---: | --- |
+| Before 1 | 6,797,039,456 | 3824.638 | 394.884 | 9 / 13 / 30 |
+| After 1 | 4,715,499,008 | 2577.376 | 240.405 | 8 / 14 / 32 |
+| After 2 | 4,715,835,904 | 2598.666 | 236.173 | 8 / 15 / 34 |
+| Before 2 | 6,813,361,920 | 3703.929 | 383.584 | 8 / 13 / 30 |
+
+Allocation and CPU are differences between the first and last cumulative
+counters in each complete capture. They include idle work between keys,
+recorder overhead, other process threads and matched shutdown input; they are
+not per-redraw allocation or physical presentation latency. Averaging the two
+runs per version gives 30.7% less allocation and 31.2% less process CPU. GC CPU
+fell 38.8%, but it is not wall-clock pause time. Keystroke median and tails did
+not consistently improve; p95 and maximum were slightly higher in both
+candidate runs. This change avoids redundant work without making the remaining
+large redraws cheap. Raw captures, scripts and logs are
+`/tmp/lem-idle-redraw-built-{before,after}-{1,2}.{csv,sh,log,kv}`; the extracted
+results are `/tmp/lem-idle-redraw-results.json`.
+
+Validation passed all 15 native display, 27 configured screen-line and 83 Vundo
+checks. The full core suite remains 74/75, with only the previously documented
+undo-model mismatch. All 12 ACL2 certificates are current (12 cached skips,
+zero failures); this patch changes neither timer scheduling nor kernel source.
+Logs: `/tmp/lem-idle-redraw-{runtime,tests,proofs}.log`. T2's direct replay does
+not exercise this input polling path, so it was not rerun for this patch.
+
+The standard T3 run passed unchanged budgets: warm startup 283.806 ms and
+plain/bigfile/longline/scroll/truncate/wordwrap p95 histogram upper bounds of
+1.024/1.024/4.096/1.024/2.048/2.048 ms. Result:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919155516.json`;
+log: `/tmp/lem-idle-redraw-t3.log`. These are core input-to-redisplay measurements,
+not physical-display timing. No installed editor profile was activated.

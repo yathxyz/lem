@@ -2,6 +2,52 @@
   (:use :cl :rove :lem))
 (in-package :lem-tests/input)
 
+;; Script the clock across an exact deadline without sleeping or replacing the
+;; real timer scheduler/event queue. Internal access isolates those subsystems.
+(defclass input-test-timer-manager (lem/common/timer:timer-manager)
+  ((times :initarg :times :accessor input-test-times)))
+
+(defmethod lem/common/timer::get-microsecond-time ((manager input-test-timer-manager))
+  (unless (input-test-times manager)
+    (error "Input test consumed its scripted timer clock"))
+  (pop (input-test-times manager)))
+
+(defun set-input-test-redraw (function)
+  #+sbcl (sb-ext:with-unlocked-packages (:lem-core)
+           (setf (symbol-function 'redraw-display) function))
+  #-sbcl (setf (symbol-function 'redraw-display) function))
+
+(deftest idle-polls-redraw-only-after-callbacks
+  (dolist (repeat '(nil t))
+    (let* ((lem/common/timer::*timer-manager*
+             (make-instance 'input-test-timer-manager :times (list 0 10 10 10 11 11 11)))
+           (lem/common/timer::*idle-timer-list* nil)
+           (lem/common/timer::*processed-idle-timer-list* nil)
+           (lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+           (lem-core::*routed-input-session* nil)
+           (lem-core::*deferred-routed-input-events* nil)
+           (key (make-key :sym "x"))
+           (callbacks 0)
+           (redraws nil)
+           (original-redraw (symbol-function 'redraw-display))
+           (timer (lem/common/timer:make-idle-timer
+                   (lambda () (incf callbacks) nil) :name "input redraw test")))
+      (unwind-protect
+           (progn
+             ;; Count the real input loop's redraw requests without a frontend.
+             (set-input-test-redraw
+              (lambda (&key force)
+                (declare (ignore force))
+                (push callbacks redraws)))
+             (lem/common/timer:start-timer timer 10 :repeat repeat)
+             (send-event key)
+             (ok (eq key (lem-core::read-event-internal)))
+             (ok (= 1 callbacks))
+             (ok (equal '(1) redraws)
+                 "the empty deadline poll does not redraw; the NIL-returning callback does")
+             (ok (eql (not repeat) (lem/common/timer:timer-expired-p timer))))
+        (set-input-test-redraw original-redraw)))))
+
 (deftest keys-equal-p-test
   (ok (lem-core::keys-equal-p (make-key :sym "x") (make-key :sym "x")))
   (ok (lem-core::keys-equal-p (make-key :ctrl t :sym "c") (make-key :ctrl t :sym "c")))
