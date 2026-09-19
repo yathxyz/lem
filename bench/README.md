@@ -2905,3 +2905,73 @@ input-ID association and resource monotonicity. This checkpoint changes only
 benchmark instrumentation and documentation; production sources, proof
 obligations, budgets and installed profiles are unchanged. The previously
 recorded core undo-model mismatch remains unresolved.
+
+
+### Reuse private daemon composition grids (2026-09-19)
+
+An allocation profile of configured four-client typing (600 measured keys plus
+20 warmup keys) recorded 18,847 samples, without reaching the sample cap.
+`implementation-screen` accounted for 61.4% of samples, predominantly allocating
+fresh cell/face arrays. This was SBCL `sb-sprof` allocation mode, all threads,
+one approximately 32 KB allocation region per sample. It attributes sampled
+allocation, not exact byte counts or latency. Artifacts:
+`/tmp/lem-daemon-input-allocation-profile.{lisp,txt,json,log}`.
+
+Each daemon implementation now alternates two private composition grids. Before
+composing, it clears every cell and face in the spare grid. The previous grid
+remains intact for full/delta selection and row comparison; output writers own
+encoded octets, never these arrays. Size changes allocate correctly sized
+storage. The default `implementation-screen` call still returns a fresh snapshot;
+only the display update path supplies reusable storage. Composition, live glyph
+width lookup, face capture, repaint decisions and queue/backpressure limits are
+unchanged. This retains one additional grid per client (about 64 KiB of cell/face
+array payload at 100 by 40, plus headers), in exchange for less transient garbage.
+
+A new regression reconstructs the actual queued full/delta messages and compares
+them with fresh composition across Unicode/combining text, face changes, stale
+rows, empty frames, clipping after view movement, both resize dimensions and a
+forced full snapshot reset. It checks cursor coordinates, independent alternating
+grids and immutable queued bytes after reuse. All 39 assertions pass. Removing
+face clearing in a private negative control produces six failures, including
+stale wire styles. Logs: `/tmp/lem-screen-reuse-regression-vectors.log` and
+`/tmp/lem-screen-reuse-negative.log`.
+
+All five daemon test modules pass, including backpressure and shutdown behavior.
+The packaged native-client check passes all 16 checks, including mixed SDL/terminal
+clients, Unicode paste, resizing, mode/prompt routing and peer failure:
+`/tmp/lem-screen-reuse-native.log`. The modified implementation and regression
+source matched the tested base derivation byte for byte. Packages:
+
+- Before: `/nix/store/ardnn7l3z4l4s9sfg6plkr9ah29pzrmy-lem-yath/bin/lem`.
+- After: `/nix/store/4m312faznms4x9pnndcsbg4d9jh37gqc-lem-yath/bin/lem`.
+- Tested base: `/nix/store/bj6ar7cyxdv21vdzx1c9d4siqk7g27pg-sbcl-lem-ncurses-unstable/bin/lem`.
+
+Uninstrumented ABBA comparisons used 600 measured keys, 20 warmup keys and 25 ms
+pacing, separately for one and four clients. Every peer observed every edit and
+all final buffers matched their fixtures. No test, build or other benchmark ran
+concurrently. Resource counters cover all 620 keys, idle time and boundary evals.
+
+| Clients | Mean CPU before → after (ms) | Mean Lisp bytes before → after | Mean GC CPU before → after (ms) |
+| --- | ---: | ---: | ---: |
+| 1 | 643.326 → 629.351 | 162,434,464 → 75,600,544 | 9.140 → 8.509 |
+| 4 | 1,588.101 → 1,531.617 | 571,925,152 → 220,678,496 | 27.678 → 16.615 |
+
+Allocation fell 53.5%/61.4% with one/four clients. Mean CPU fell 2.2%/3.6%,
+a much smaller difference than allocation; four-client GC CPU fell about 40%.
+GC CPU remains a process-wide CPU measure, not a wall-clock pause.
+
+| Clients / endpoint | p95, both runs before → after (ms) | Maximum, both runs before → after (ms) |
+| --- | --- | --- |
+| 1 / active | 1.019/0.946 → 0.994/0.928 | 3.799/1.464 → 3.642/1.386 |
+| 4 / active | 0.988/0.941 → 1.019/0.854 | 2.596/1.239 → 4.680/1.191 |
+| 4 / all peers | 1.821/1.820 → 1.854/1.727 | 5.773/4.936 → 5.351/4.453 |
+
+Latency varied between runs and occasional multi-millisecond stalls remain.
+This is primarily an allocation reduction, not evidence of a consistent typing
+latency improvement. The endpoint is decoded protocol output, excluding native
+rendering and physical presentation. Artifacts:
+`/tmp/lem-screen-reuse-{1,4}-{before,after}-{1,2}.{json,log}`.
+
+Kernel sources, proof obligations, benchmark budgets and installed profiles are
+unchanged. The core suite was not rerun for this daemon-only change; its previously
+recorded undo-model mismatch remains separate.

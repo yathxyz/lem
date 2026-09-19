@@ -15,6 +15,7 @@
                  :accessor daemon-implementation-cursor-shape)
    (previous-screen :initform nil
                     :accessor daemon-implementation-previous-screen)
+   (spare-screen :initform nil :accessor daemon-implementation-spare-screen)
    (previous-screen-width :initform nil
                           :accessor daemon-implementation-previous-screen-width))
   (:default-initargs
@@ -281,14 +282,22 @@
            (frame-floating-windows frame))
    :test #'eq))
 
-(defun implementation-screen (implementation)
+(defun implementation-screen (implementation &optional rows)
+  "Compose a frame, optionally clearing and reusing private ROWS storage."
   (let* ((width (daemon-implementation-width implementation))
          (height (daemon-implementation-height implementation))
-         (rows (make-array height))
+         (rows (if (and rows (= height (length rows)))
+                   rows
+                   (make-array height :initial-element nil)))
          (cursor-x 0)
          (cursor-y 0))
     (dotimes (row height)
-      (setf (aref rows row) (make-cell-row width)))
+      (let ((cells (aref rows row)))
+        (if (and cells (= width (length (cell-row-cells cells))))
+            (progn
+              (fill (cell-row-cells cells) " ")
+              (fill (cell-row-faces cells) nil))
+            (setf (aref rows row) (make-cell-row width)))))
     (alexandria:when-let ((frame (get-frame implementation)))
       (dolist (window (frame-windows frame))
         (let* ((view (window-view window))
@@ -324,7 +333,10 @@
   (alexandria:when-let ((connection
                          (daemon-implementation-connection implementation)))
     (multiple-value-bind (rows cursor-x cursor-y)
-        (implementation-screen implementation)
+        ;; Keep the previous frame intact until diffing/encoding has finished.
+        ;; The writer owns encoded octets, never these mutable composition grids.
+        (implementation-screen implementation
+                               (shiftf (daemon-implementation-spare-screen implementation) nil))
       (let* ((previous (daemon-implementation-previous-screen implementation))
              (full-p (or (null previous)
                          (/= (or (daemon-implementation-previous-screen-width
@@ -340,7 +352,8 @@
                        (push (encode-screen-row (aref rows row) row)
                              changed)))
                    (coerce (nreverse changed) 'vector)))))
-        (setf (daemon-implementation-previous-screen implementation) rows
+        (setf (daemon-implementation-spare-screen implementation) previous
+              (daemon-implementation-previous-screen implementation) rows
               (daemon-implementation-previous-screen-width implementation)
               (daemon-implementation-width implementation))
         (let* ((cursor-attribute (ensure-attribute 'cursor nil))

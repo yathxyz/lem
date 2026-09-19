@@ -146,6 +146,95 @@
       (lem-daemon::clear-cell-row target 2)
       (ok (equal snapshot (lem-daemon::cell-row-string source))))))
 
+(deftest screen-storage-reuse-preserves-wire-snapshots
+  (lem:with-current-buffers ()
+    (let* ((yason:*parse-json-arrays-as-vectors* t)
+           (lem-core::*display-frame-map* (make-hash-table))
+           (lem-core::*frames* nil)
+           ;; No writer: retain the encoded queue to detect later mutation.
+           (connection (make-instance 'lem-daemon::daemon-connection))
+           (implementation (make-instance 'lem-daemon:daemon-implementation
+                                          :connection connection :width 12 :height 5))
+           (wire-rows nil))
+      (lem:with-implementation implementation
+        (let ((frame (lem:make-frame nil)))
+          (unwind-protect
+               (progn
+                 (lem:map-frame implementation frame)
+                 (lem:setup-frame frame (lem:make-buffer "screen-reuse"))
+                 (let ((view (lem:window-view (lem:current-window))))
+                   (labels ((put-row (y text face)
+                              (let ((row (lem-daemon::make-cell-row 12)))
+                                (lem-daemon::overlay-text row 0 text face)
+                                (setf (gethash y (lem-daemon::daemon-view-grid view)) row)))
+                            (check-frame ()
+                              (multiple-value-bind (expected x y)
+                                  (lem-daemon::implementation-screen implementation)
+                                (lem-if:update-display implementation)
+                                (let ((message
+                                        (protocol:decode-message
+                                         (car (lem-daemon::connection-write-tail connection)))))
+                                  (if (protocol:field message "full")
+                                      (setf wire-rows (protocol:field message "rows"))
+                                      (loop :for change :across (protocol:field message "changes")
+                                            :do (setf (aref wire-rows (protocol:field change "row"))
+                                                      change)))
+                                  (ok (= (length expected) (length wire-rows)))
+                                  (ok (loop :for row :across expected
+                                            :for wire :across wire-rows
+                                            :for reference := (lem-daemon::encode-screen-row row)
+                                            :always (and (equal (protocol:field reference "text")
+                                                                (protocol:field wire "text"))
+                                                         (equalp (protocol:field reference "runs")
+                                                                 (protocol:field wire "runs"))))
+                                      "queued full/delta frames reconstruct a fresh composition")
+                                  (let ((cursor (protocol:field message "cursor")))
+                                    (ok (and (= x (protocol:field cursor "x"))
+                                             (= y (protocol:field cursor "y")))))
+                                (ok (equalp expected
+                                            (lem-daemon::daemon-implementation-previous-screen
+                                             implementation)))))))
+                     (lem-if:clear implementation view)
+                     (put-row 0 "漢é wide" '("#FF0000" "#000000" 1))
+                     (put-row 3 "stale" '(nil "#123456" 4))
+                     (setf (lem-daemon::daemon-view-cursor view) '(2 . 0))
+                     (check-frame)
+                     (let* ((first-grid (lem-daemon::daemon-implementation-previous-screen
+                                         implementation))
+                            (first-bytes (car (lem-daemon::connection-write-head connection)))
+                            (snapshot (copy-seq first-bytes)))
+                       (put-row 0 "x" '("#00FF00" nil 2))
+                       (check-frame)
+                       (ng (eq first-grid
+                               (lem-daemon::daemon-implementation-previous-screen implementation))
+                           "successive frames use independent grids")
+                       (lem-if:clear implementation view)
+                       (put-row 1 "́漢" nil)
+                       (check-frame)
+                       (ok (eq first-grid
+                               (lem-daemon::daemon-implementation-previous-screen implementation))
+                           "the third frame reuses the first grid after diffing")
+                       (lem-if:set-view-pos implementation view -2 2)
+                       (check-frame)
+                       ;; An empty frame must remove old text, continuations and faces.
+                       (lem-if:clear implementation view)
+                       (check-frame)
+                       ;; Exercise both dimensions and a forced full snapshot reset.
+                       (setf (lem-daemon::daemon-implementation-width implementation) 7
+                             (lem-daemon::daemon-implementation-height implementation) 3)
+                       (put-row 0 "漢漢漢漢" '(nil "#0000FF" 0))
+                       (check-frame)
+                       (setf (lem-daemon::daemon-implementation-width implementation) 16
+                             (lem-daemon::daemon-implementation-height implementation) 8)
+                       (check-frame)
+                       (setf (lem-daemon::daemon-implementation-previous-screen implementation) nil)
+                       (check-frame)
+                       (check-frame)
+                       (ok (equalp snapshot first-bytes)
+                           "reusing grids never changes already queued encoded messages")))))
+            (lem:teardown-frame frame)
+            (lem:unmap-frame implementation)))))))
+
 (deftest daemon-theme-interface
   (let ((implementation (make-instance 'lem-daemon:daemon-implementation)))
     (ng (lem/common/color:light-color-p
