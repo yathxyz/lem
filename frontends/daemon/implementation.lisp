@@ -73,38 +73,48 @@
               :do (setf (aref cells index) " " (aref faces index) nil)))))
   row)
 
-(defun overlay-text (row column text &optional face)
+(defun overlay-cell (row column string width face)
+  "Place one character, returning the next column or NIL at the right edge."
   (let ((cells (cell-row-cells row))
         (faces (cell-row-faces row)))
-    (loop :with column := column
-          :for character :across text
-          :for string := (string character)
-          :for width := (string-width string)
-          :do (cond
-                ((zerop width)
-                 (loop :for index :downfrom (1- column) :to 0
-                       :when (and (< index (length cells)) (stringp (aref cells index)))
-                         :do (setf (aref cells index)
-                                   (concatenate 'string (aref cells index) string))
-                             (loop-finish)))
-                ((minusp column) (incf column width))
-                ((<= (+ column width) (length cells))
-                 (loop :for index :from column :below (+ column width)
-                       :do (clear-cell-at row index))
-                 (setf (aref cells column) string (aref faces column) face)
-                 (loop :for index :from (1+ column) :below (+ column width)
-                       :do (setf (aref cells index) +continuation-cell+
-                                 (aref faces index) face))
-                 (incf column width))
-                (t (return)))))
+    (cond
+      ((zerop width)
+       (loop :for index :downfrom (1- column) :to 0
+             :when (and (< index (length cells)) (stringp (aref cells index)))
+               :do (setf (aref cells index)
+                         (concatenate 'string (aref cells index) string))
+                   (loop-finish))
+       column)
+      ((minusp column) (+ column width))
+      ((<= (+ column width) (length cells))
+       (loop :for index :from column :below (+ column width)
+             :do (clear-cell-at row index))
+       (setf (aref cells column) string (aref faces column) face)
+       (loop :for index :from (1+ column) :below (+ column width)
+             :do (setf (aref cells index) +continuation-cell+
+                       (aref faces index) face))
+       (+ column width)))))
+
+(defun overlay-text (row column text &optional face)
+  (loop :for character :across text
+        :unless (setf column (overlay-cell row column (string character)
+                                           (char-width character 0) face))
+          :do (return))
   row)
 
 (defun overlay-cells (target column source)
   (loop :for cell :across (cell-row-cells source)
         :for face :across (cell-row-faces source)
         :unless (eq cell +continuation-cell+)
-          :do (overlay-text target column cell face)
-              (incf column (string-width cell)))
+          :do (if (= 1 (length cell))
+                  ;; Row edits replace strings rather than mutating them. Reuse
+                  ;; single-character cells, but consult the live width settings.
+                  (let ((width (char-width (char cell 0) 0)))
+                    (overlay-cell target column cell width face)
+                    (incf column width))
+                  (progn
+                    (overlay-text target column cell face)
+                    (incf column (string-width cell)))))
   target)
 
 (defun cell-row-string (row)

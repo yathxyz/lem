@@ -2669,3 +2669,58 @@ readback adds measurement overhead. Graphical queue/reader tests pass, as do all
 The checked package is `/nix/store/ba46fwnphcjjng0l8qhvv15z9h2hk1g8-sbcl-lemclient-unstable/bin/lemclient`;
 its client source and ASDF definition matched the checkout. No core/kernel
 source, proof obligation, benchmark budget or installed profile changed.
+
+### Reuse single-character cells during daemon composition (2026-09-19)
+
+The daemon's `implementation-screen` reconstructed every cell via `overlay-text`,
+even though view rows already contained display cells. This allocated another
+single-character string and measured its width twice for most occupied cells,
+including spaces. The compositor now reuses single-character cell strings and
+measures their current width once. A shared placement function preserves wide
+cell cleanup, clipping and combining-character attachment. Multi-character
+cells retain the original character-by-character path. Row edits replace strings;
+composed screen arrays remain independent snapshots. Widths are recomputed from
+live icon and ambiguous-width settings rather than trusted from old continuations.
+
+`scripts/bench/e2e/daemon-composition.lisp` exercises the real frame compositor
+on a 100×40 view, with ASCII and Unicode/control/combining text plus blank padding.
+Each case composes 3,000 frames after 100 warmups. Cursor mode does not rerender
+view rows; row/full modes call the daemon's `render-line` on one/all rows first.
+The fixture measures server rendering/composition, including fresh screen arrays,
+but excludes core redisplay, diff comparison, encoding, transport and client
+presentation. It is not an end-to-end input-latency benchmark.
+
+ABBA comparisons used the same patched SBCL environment. Baseline definitions
+of `overlay-text` and `overlay-cells` were extracted from
+`818f1e89c:frontends/daemon/implementation.lisp` to `/tmp/lem-overlay-before.lisp`
+and loaded with `LEM_OVERLAY_SOURCE`. CPU and Lisp bytes below are means of two
+runs, summed over 3,000 compositions. No builds or tests ran concurrently.
+
+| Text / rerender | CPU before → after (ms) | Lisp bytes before → after |
+| --- | ---: | ---: |
+| ASCII / none | 797.442 → 460.836 | 612,764,288 → 219,480,192 |
+| Unicode / none | 769.915 → 476.145 | 588,057,472 → 241,709,184 |
+| ASCII / one row | 803.244 → 473.493 | 618,642,688 → 224,696,320 |
+| Unicode / one row | 778.034 → 481.847 | 590,298,496 → 244,579,840 |
+| ASCII / all rows | 1155.431 → 790.870 | 805,724,928 → 415,931,392 |
+| Unicode / all rows | 1005.140 → 699.250 | 686,332,160 → 342,010,240 |
+
+CPU fell 38–42% for unchanged/one-row frames and 30–32% for full rerenders;
+allocation fell 48–64%. The absolute saving is about 0.10–0.12 ms per frame in
+these fixtures, so this does not explain a large perceived input delay by itself.
+Artifacts: `/tmp/lem-composition-final-{before,after}-{1,2}.log`.
+
+All five daemon test modules pass, including 3,150 differential composition
+cases against the frozen placement algorithm, live icon-width changes, snapshot
+independence under later edits, session isolation and stopped-reader backpressure.
+Log: `/tmp/lem-composition-tests.log`. No core/kernel source, proof obligation,
+benchmark budget or installed profile changed.
+
+The graphical client unit tests and all 15 packaged native-client checks also
+pass (`/tmp/lem-composition-sdl-tests.log`, `/tmp/lem-composition-native.log`).
+The tested packages are
+`/nix/store/600jwp8x7gr6cxm9aksdrmcqw3xm2gq0-sbcl-lem-ncurses-unstable/bin/lem`
+and `/nix/store/qdrzlkb6vyjdq7nhvxaz217r1dfk7y11-sbcl-lemclient-unstable/bin/lemclient`.
+Their derivation inputs matched the modified daemon implementation and protocol
+tests byte for byte. The previously documented core undo-model mismatch is
+outside this change; the core suite was not rerun for this daemon-only edit.

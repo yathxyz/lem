@@ -51,6 +51,101 @@
           "overwriting a wide-character continuation repairs the row")
       (ok (string= " ab   " text)))))
 
+;; Frozen placement algorithm from 818f1e89c: exercise the optimized compositor
+;; against an independent path, including width changes after creating a row.
+(defun reference-overlay-text (row column text &optional face)
+  (let ((cells (lem-daemon::cell-row-cells row))
+        (faces (lem-daemon::cell-row-faces row)))
+    (loop :with column := column
+          :for character :across text
+          :for string := (string character)
+          :for width := (lem:string-width string)
+          :do (cond
+                ((zerop width)
+                 (loop :for index :downfrom (1- column) :to 0
+                       :when (and (< index (length cells)) (stringp (aref cells index)))
+                         :do (setf (aref cells index)
+                                   (concatenate 'string (aref cells index) string))
+                             (loop-finish)))
+                ((minusp column) (incf column width))
+                ((<= (+ column width) (length cells))
+                 (loop :for index :from column :below (+ column width)
+                       :do (lem-daemon::clear-cell-at row index))
+                 (setf (aref cells column) string (aref faces column) face)
+                 (loop :for index :from (1+ column) :below (+ column width)
+                       :do (setf (aref cells index) lem-daemon::+continuation-cell+
+                                 (aref faces index) face))
+                 (incf column width))
+                (t (return)))))
+  row)
+
+(deftest cell-composition-matches-character-placement
+  (let ((failure nil)
+        (texts (list "" "abcdef" "漢字x" "α·é" "éx" "́x"
+                     (format nil "x~c~c~c" #\Tab #\Newline (code-char 1))
+                     (string (code-char #xe001))
+                     (format nil "a~cb" (code-char #x1f4c1))))
+        (face '("#ABCDEF" "#123456" 3)))
+    (block compare
+      (dolist (source-width '(0 1 2 5 12))
+        (dolist (target-width '(0 1 2 5 12))
+          (dolist (column '(-4 -1 0 1 4 12 15))
+            (dolist (text texts)
+              (dolist (ambiguous-width '(1 2))
+                (let* ((source (lem-daemon::make-cell-row source-width face))
+                       (expected (lem-daemon::make-cell-row target-width))
+                       (actual (lem-daemon::make-cell-row target-width)))
+                  (let ((lem/common/character/string-width-utils:*ambiguous-character-width* 1))
+                    (reference-overlay-text source 0 text face))
+                  (reference-overlay-text expected 0 "漢字abcdef" face)
+                  (reference-overlay-text actual 0 "漢字abcdef" face)
+                  (let ((lem/common/character/string-width-utils:*ambiguous-character-width*
+                          ambiguous-width))
+                    (loop :with x := column
+                          :for cell :across (lem-daemon::cell-row-cells source)
+                          :for style :across (lem-daemon::cell-row-faces source)
+                          :unless (eq cell lem-daemon::+continuation-cell+)
+                            :do (reference-overlay-text expected x cell style)
+                                (incf x (lem:string-width cell)))
+                    (lem-daemon::overlay-cells actual column source))
+                  (unless (equalp expected actual)
+                    (setf failure (list source-width target-width column text ambiguous-width))
+                    (return-from compare)))))))))
+    (ok (null failure) (format nil "3150 composition cases; first mismatch: ~s" failure))))
+
+(deftest cell-composition-uses-current-icon-width
+  (let* ((lem/common/character/icon::*icon-code-table*
+           (alexandria:copy-hash-table lem/common/character/icon::*icon-code-table*))
+         (source (lem-daemon::make-cell-row 4))
+         (target (lem-daemon::make-cell-row 6)))
+    (remhash (char-code #\x) lem/common/character/icon::*icon-code-table*)
+    (lem-daemon::overlay-text source 0 "xy")
+    (setf (gethash (char-code #\x) lem/common/character/icon::*icon-code-table*) t)
+    (lem-daemon::overlay-cells target 0 source)
+    (ok (eq lem-daemon::+continuation-cell+
+            (aref (lem-daemon::cell-row-cells target) 1)))
+    (ok (equal "y" (aref (lem-daemon::cell-row-cells target) 2)))
+    (remhash (char-code #\x) lem/common/character/icon::*icon-code-table*)
+    (lem-daemon::overlay-cells target 0 source)
+    (ok (equal "y" (aref (lem-daemon::cell-row-cells target) 1)))))
+
+(deftest composed-row-survives-later-edits
+  (let ((source (lem-daemon::make-cell-row 8))
+        (target (lem-daemon::make-cell-row 8)))
+    (lem-daemon::overlay-text source 0 "a漢b" '("#FF0000" nil 1))
+    (lem-daemon::overlay-cells target 0 source)
+    (let ((snapshot (lem-daemon::cell-row-string target))
+          (faces (copy-seq (lem-daemon::cell-row-faces target))))
+      (lem-daemon::overlay-text source 1 "xy")
+      (lem-daemon::overlay-text source 1 "́")
+      (lem-daemon::clear-cell-row source 4)
+      (ok (equal snapshot (lem-daemon::cell-row-string target)))
+      (ok (equalp faces (lem-daemon::cell-row-faces target))))
+    (let ((snapshot (lem-daemon::cell-row-string source)))
+      (lem-daemon::overlay-text target 1 "́")
+      (lem-daemon::clear-cell-row target 2)
+      (ok (equal snapshot (lem-daemon::cell-row-string source))))))
+
 (deftest daemon-theme-interface
   (let ((implementation (make-instance 'lem-daemon:daemon-implementation)))
     (ng (lem/common/color:light-color-p
