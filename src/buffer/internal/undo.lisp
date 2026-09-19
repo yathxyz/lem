@@ -545,13 +545,15 @@
 
 (defun validate-undo-tree (buffer)
   (ensure-buffer-undo-tree buffer)
-  (let ((table (buffer-%undo-tree-table buffer))
-        (root (buffer-%undo-tree-root buffer))
-        (seen (make-hash-table :test #'eq))
-        (count 0)
-        (edit-count 0)
-        (payload 0)
-        (stack nil))
+  (let* ((table (buffer-%undo-tree-table buffer))
+         (root (buffer-%undo-tree-root buffer))
+         ;; Every reachable node must already belong to TABLE. Reserve enough
+         ;; space for them instead of repeatedly growing on every undo/redo.
+         (seen (make-hash-table :test #'eq :size (hash-table-count table)))
+         (count 0)
+         (edit-count 0)
+         (payload 0)
+         (stack nil))
     (unless (and (typep root 'undo-tree-node)
                  (null (undo-tree-node-parent root)))
       (editor-error "Malformed undo tree root"))
@@ -642,6 +644,14 @@
     (nreverse result)))
 
 (defun undo-route (current destination)
+  ;; Callers validate the whole tree first. Ordinary undo/redo and their
+  ;; return routes cross one edge; no ancestor lists or sets are needed.
+  (cond ((eq current destination)
+         (return-from undo-route (values nil nil)))
+        ((eq destination (undo-tree-node-parent current))
+         (return-from undo-route (values (list current) nil)))
+        ((eq current (undo-tree-node-parent destination))
+         (return-from undo-route (values nil (list destination)))))
   (let* ((current-chain (node-ancestors current))
          (destination-chain (node-ancestors destination))
          (current-set (make-hash-table :test #'eq))

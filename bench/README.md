@@ -1241,3 +1241,24 @@ measured trials. On the same machine, median exact comparison dropped from
 Each trial asserts the final buffer text. Additional tests reject shorter,
 longer, and equal-length changed strings, including altered newline boundaries,
 empty lines and Unicode. The full core suite has the same six known failures.
+
+### Follow-up: retained undo route allocation
+
+The validator now sizes its temporary visited-node table from the owned tree.
+After full validation, ordinary one-edge undo/redo routes avoid constructing
+complete ancestor lists and hash tables. General branch navigation still uses
+the existing route finder. A corruption regression confirms that even a bad
+parent link outside that one-edge route is rejected before changing text.
+
+A diagnostic using the T2 generator's 5,000 mixed edits, followed by full undo
+and redo with exact text assertions, was sampled with SBCL's CPU profiler at
+2 ms intervals. Undo/redo took 5.075 / 5.014 seconds before these two changes
+and 2.735 / 2.767 seconds after; allocation fell from 13.88 / 13.96 GB to
+1.50 / 1.54 GB. These are individual profiled executions, not a benchmark band.
+The final profile attributes about 79% of inclusive sampled time to full tree
+validation. That remains linear in retained history per move; removing it
+would require a different validation design, not simply bypassing checks.
+
+All 83 real-terminal Vundo checks and all 15 native-client display checks pass
+with the final core changes. The full core run retains the same six known
+failures. No installed editor or mutable Nix profile was changed.

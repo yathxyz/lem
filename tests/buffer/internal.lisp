@@ -144,6 +144,29 @@ qrstuvwxyz"
                (ng (lem/buffer/internal::buffer-text-equal-p buffer changed)))))
       (lem:delete-buffer buffer))))
 
+(deftest undo-adjacent-route-still-validates-tree
+  ;; Deliberately corrupt an internal parent link outside the one-edge route.
+  ;; The ordinary undo API must reject it before applying any edit.
+  (let* ((buffer (lem:make-buffer "undo-route-validation" :temporary t))
+         (point (lem:buffer-point buffer)))
+    (unwind-protect
+         (progn
+           (lem:insert-string point "abc")
+           (lem:buffer-undo-boundary buffer)
+           (lem:insert-string point "x")
+           (lem:buffer-undo-boundary buffer)
+           (let ((root (lem/buffer/internal::buffer-%undo-tree-root buffer))
+                 (current (lem/buffer/internal::buffer-%undo-tree-current buffer))
+                 (tick (lem:buffer-modified-tick buffer)))
+             (unwind-protect
+                  (progn
+                    (setf (lem/buffer/internal::undo-tree-node-parent root) current)
+                    (ok (signals (lem:buffer-undo point) 'lem/buffer/errors:editor-error))
+                    (ok (string= "abcx" (lem:buffer-text buffer)))
+                    (ok (= tick (lem:buffer-modified-tick buffer))))
+               (setf (lem/buffer/internal::undo-tree-node-parent root) nil))))
+      (lem:delete-buffer buffer))))
+
 (deftest undo-redo
   (let* ((buffer (lem:make-buffer "test" :temporary t))
          (point (lem:buffer-point buffer)))
