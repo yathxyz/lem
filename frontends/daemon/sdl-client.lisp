@@ -112,7 +112,10 @@
                             (when (and cursor-p (equal "box" (protocol:field cursor "shape")))
                               (setf fg (graphical-screen-background screen)
                                     bg (protocol:field cursor "color")))
-                            (fill-rectangle renderer bg (* x cw) (* y ch) width ch)
+                            ;; RENDER-CLEAR already painted the default background.
+                            ;; Resolve inverse video and the box cursor first.
+                            (unless (equal bg (graphical-screen-background screen))
+                              (fill-rectangle renderer bg (* x cw) (* y ch) width ch))
                             (draw-glyph renderer cache fonts text fg (logtest 1 flags)
                                         (* x cw) (* y ch) width ch)
                             (when (logtest 2 flags)
@@ -129,37 +132,43 @@
 
 (defstruct incoming
   (lock (bt2:make-lock :name "lemclient/sdl-incoming"))
-  messages (count 0) stopping-p reader-started-p)
+  messages (count 0) stopping-p reader-started-p notify)
 
 (define-condition stop-screen-reader (condition) ())
 
-(defun read-screens (connection incoming)
-  (labels ((enqueue (message)
-             (bt2:with-lock-held ((incoming-lock incoming))
-               (unless (incoming-stopping-p incoming)
-                 (when (>= (incoming-count incoming) 256)
-                   (error "Graphical client cannot keep up with daemon output"))
-                 (push message (incoming-messages incoming))
-                 (incf (incoming-count incoming))))))
-    (handler-case
-        (unwind-protect
-             (handler-case
-                 (progn
-                   (bt2:with-lock-held ((incoming-lock incoming))
-                     (when (incoming-stopping-p incoming) (return-from read-screens))
-                     ;; Publish readiness only after the stop handler is installed.
-                     (setf (incoming-reader-started-p incoming) t))
-                   (loop :for message := (protocol:read-message (client::client-stream connection))
-                         :do (unless message (error "Daemon disconnected before closing this client"))
-                             (enqueue message)
-                         :until (equal "close" (protocol:field message "type"))))
-               (error (condition)
-                 (bt2:with-lock-held ((incoming-lock incoming))
-                   (unless (incoming-stopping-p incoming)
-                     (push condition (incoming-messages incoming))))))
+(defun enqueue-screen-message (incoming message)
+  "Queue a screen message or reader error and wake the UI on an empty queue.
+Notify outside the lock so the consumer can immediately drain the queue."
+  (let ((notify
           (bt2:with-lock-held ((incoming-lock incoming))
-            (setf (incoming-reader-started-p incoming) nil)))
-      (stop-screen-reader () nil))))
+            (unless (incoming-stopping-p incoming)
+              (when (and (>= (incoming-count incoming) 256)
+                         (not (typep message 'error)))
+                (error "Graphical client cannot keep up with daemon output"))
+              (prog1 (and (null (incoming-messages incoming))
+                          (incoming-notify incoming))
+                (push message (incoming-messages incoming))
+                (incf (incoming-count incoming)))))))
+    (when notify (funcall notify))))
+
+(defun read-screens (connection incoming)
+  (handler-case
+      (unwind-protect
+           (handler-case
+               (progn
+                 (bt2:with-lock-held ((incoming-lock incoming))
+                   (when (incoming-stopping-p incoming) (return-from read-screens))
+                   ;; Publish readiness only after the stop handler is installed.
+                   (setf (incoming-reader-started-p incoming) t))
+                 (loop :for message := (protocol:read-message (client::client-stream connection))
+                       :do (unless message (error "Daemon disconnected before closing this client"))
+                           (enqueue-screen-message incoming message)
+                       :until (equal "close" (protocol:field message "type"))))
+             (error (condition)
+               (enqueue-screen-message incoming condition)))
+        (bt2:with-lock-held ((incoming-lock incoming))
+          (setf (incoming-reader-started-p incoming) nil)))
+    (stop-screen-reader () nil)))
 
 (defun stop-screen-reader (incoming reader)
   (let ((started-p
@@ -209,7 +218,15 @@
   (let* ((entries (client::build-file-entries files))
          (edit-id nil)
          (screen (make-graphical-screen))
-         (incoming (make-incoming))
+         ;; This client owns its SDL loop. A payload-free user event wakes it
+         ;; for network output, including disconnects, without periodic polling.
+         (incoming (make-incoming
+                    :notify (lambda ()
+                              (sdl2:with-sdl-event (event :lemclient-screen-ready)
+                                ;; No Lisp payload: avoid sharing cl-sdl2's
+                                ;; user-data hash table with the reader thread.
+                                (setf (event :user :code) -1)
+                                (sdl2:push-event event)))))
          (cache (make-hash-table :test 'equal))
          (reader nil)
          (dirty nil)
@@ -227,6 +244,7 @@
                    (client::request connection type "width" w "height" h)))))
       (unwind-protect
            (progn
+             (sdl2:register-user-event-type :lemclient-screen-ready)
              (resize "attach")
              (when files
                (let ((id (client::request connection "visit" "wait"
@@ -235,7 +253,7 @@
              (setf reader (bt2:make-thread (lambda () (read-screens connection incoming))
                                           :name "lemclient/sdl-reader"))
              (sdl2:start-text-input)
-             (sdl2:with-event-loop (:method :poll)
+             (sdl2:with-event-loop (:method :wait)
                (:quit () (return-from graphical-event-loop (client::frame-close-status edit-id)))
                (:textinput (:text text)
                 (keyboard:handle-text-input (lem-sdl2/platform:get-platform) text))
@@ -275,8 +293,9 @@
                 (when (member event (list sdl2-ffi:+sdl-windowevent-resized+
                                          sdl2-ffi:+sdl-windowevent-size-changed+))
                   (resize "resize"))
-                (setf dirty t))
-               (:idle ()
+                (when (graphical-screen-rows screen)
+                  (draw-screen screen renderer fonts cache)))
+               (:lemclient-screen-ready ()
                 (dolist (message (take-messages incoming))
                   (when (typep message 'error) (error message))
                   (cond
@@ -287,8 +306,7 @@
                        (when status (return-from graphical-event-loop status))))))
                 (when (and dirty (graphical-screen-rows screen))
                   (draw-screen screen renderer fonts cache)
-                  (setf dirty nil))
-                (sleep 0.01))))
+                  (setf dirty nil)))))
         (stop-screen-reader incoming reader)
         (ignore-errors (client::request connection "detach"))
         (client::close-client connection)

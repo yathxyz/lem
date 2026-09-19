@@ -7,6 +7,40 @@
 (defun wire-round-trip (message)
   (protocol:decode-message (protocol:encode-message message)))
 
+(deftest incoming-wakes-once-per-batch
+  (let* ((notifications 0)
+         (incoming (gui::make-incoming :notify (lambda () (incf notifications)))))
+    (gui::enqueue-screen-message incoming :first)
+    (gui::enqueue-screen-message incoming :second)
+    (ok (= 1 notifications) "pending messages share one wakeup")
+    (ok (equal '(:first :second) (gui::take-messages incoming))
+        "draining preserves wire order")
+    (let ((failure (make-condition 'simple-error)))
+      (gui::enqueue-screen-message incoming failure)
+      (ok (= 2 notifications) "a reader error wakes an idle consumer")
+      (ok (eq failure (first (gui::take-messages incoming)))))
+    ;; A synchronous drain also proves notification runs outside the lock.
+    (setf (gui::incoming-notify incoming)
+          (lambda () (gui::take-messages incoming)))
+    (gui::enqueue-screen-message incoming :third)
+    (ok (null (gui::take-messages incoming)))
+    (gui::stop-screen-reader incoming nil)
+    (gui::enqueue-screen-message incoming :after-stop)
+    (ok (null (gui::take-messages incoming)) "shutdown suppresses new messages")))
+
+(deftest incoming-overflow-remains-visible
+  (let ((incoming (gui::make-incoming)))
+    (dotimes (i 256) (gui::enqueue-screen-message incoming i))
+    (ok (handler-case
+            (progn (gui::enqueue-screen-message incoming :overflow) nil)
+          (error (condition)
+            (gui::enqueue-screen-message incoming condition)
+            t)))
+    (let ((messages (gui::take-messages incoming)))
+      (ok (= 257 (length messages)))
+      (ok (typep (car (last messages)) 'error)
+          "backpressure errors are delivered even when the queue is full"))))
+
 (deftest graphical-screen-wire-format
   (let* ((screen (gui::make-graphical-screen))
          (row (lem-daemon::make-cell-row 8))
