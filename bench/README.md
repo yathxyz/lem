@@ -1493,3 +1493,56 @@ fails the 30 ms budget. Results: `/tmp/lem-layout-200k.log` and
 `/tmp/lem-layout-200k.kv`. These are quantized internal timing buckets, not
 physical keyboard-to-monitor latency. The cost of one full long-line redraw
 remains an open optimization target. No installed editor/profile was changed.
+
+
+### Printable ASCII width fast path (2026-09-19)
+
+After removing idle transient redraws, a new 200 KB typing profile collected
+7,405 samples. `text-object-char-widths` accounted for 30.5% inclusive time;
+Unicode width classification still ran for every printable ASCII character.
+The verified `k-char-width` now handles codes 32-126 before those table walks,
+while preserving two-cell advances for dynamically registered ASCII icons.
+`printable-ascii-width-classification` proves the range is outside all three
+Unicode tables and the control range; `k-char-width-ascii-fast-path-equivalence`
+proves equality to the complete original branch order. The fast path lives in
+the certified source, not in a separate unchecked shell implementation.
+
+All 12 books certified (`/tmp/lem-ascii-proofs.log`), including both new
+obligations. The core suite is still 74/75 with the known undo-model mismatch;
+new tests cover every printable ASCII code at multiple columns and both
+ambiguous-width settings, registered ASCII icons, `wide-index` behavior,
+and the adjacent control codes. All 15 native display checks passed in the
+rebuilt runtime (`/tmp/lem-ascii-native.log`).
+
+Matched filtered T2 long-line runs improved from 219.001 to 172.000 ms, with
+result files ending `t2-20260919122355.json` and `t2-20260919122603.json`.
+The short T1 windows were too sensitive to timer granularity: an apparent
+emoji regression was one clock tick. A longer matched probe used five timed
+repetitions after a discarded warm-up, 5,000 width calls per 4,000-character
+ASCII/CJK/emoji string and 500 per mixed corpus. Medians in microseconds per
+call were ASCII 51.6 -> 30.2, CJK 44.8 -> 45.2, emoji 49.4 -> 49.8, and mixed
+848.006 -> 730.006 (`/tmp/lem-width-long-before.csv` and
+`/tmp/lem-width-long-after.csv`). CJK and emoji differences were below 1%, unlike the short run's apparent
+regression.
+
+The committed T1 width entries now use 2,000/80 iterations instead of 180/12
+so their timed windows stay above 10 ms after these improvements. This changes
+measurement duration, not workload text or units; no baseline was regenerated.
+The longer standard T1 medians were 29.000 / 43.501 / 46.001 / 700.000 us for
+ASCII / CJK / emoji / mixed, recorded in
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t1-20260919122914.json`.
+
+Standard T3 again passed every budget: warm startup 287.083 ms; plain / big-file
+/ 16 KB long-line / scroll p95 buckets 1.024 / 1.024 / 8.192 / 1.024 ms, in
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t3-20260919122803.json`.
+The separate 200 KB stress p95 remains in the 32.768 ms bucket and still misses
+the 30 ms budget (`/tmp/lem-ascii-200k.log`, `/tmp/lem-ascii-200k.kv`). Thus this
+step reduces measured rendering work but does not demonstrate a further
+input-to-paint p95 bucket improvement. Repeated width scans and construction
+of full-line kernel lists remain targets; installed profiles are unchanged.
+
+The final full T2 replay completed all workloads and canaries. Medians were 2,192.015 / 1,213.007 / 139.001 / 186.001 / 339.001 / 571.004 / 8,350.052 ms
+for big-file / isearch / lisp-edit / long-line / overlay-heavy / scroll / undo-storm respectively.
+Results: `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t2-20260919122921.json`.
+T1/T2 still exit 2 after writing results because no matching Nova baseline is
+committed; this is not a passing regression gate. No baseline or budget changed.

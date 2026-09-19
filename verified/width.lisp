@@ -129,8 +129,22 @@
 ;;; k-char-width -- the per-codepoint width step (EXEC entry)
 ;;; ===========================================================================
 
+;; Printable ASCII cannot reach any Unicode-width or control branch. Prove
+;; this against the generated tables so the fast path below retains their
+;; semantics even when the Unicode data is regenerated.
+(defthm printable-ascii-width-classification
+  (implies (and (<= 32 code) (<= code 126))
+           (and (not (k-control-code-p code))
+                (not (k-zero-code-p code))
+                (not (k-wide-code-p code))
+                (not (k-ambiguous-code-p code))))
+  :hints (("Goal" :in-theory (enable k-zero-code-p k-wide-code-p
+                                    k-ambiguous-code-p))))
+
 (defun k-char-width (code col tab-size icon-p amb-width)
-  (cond ((equal code 9)                                  ; TAB
+  (cond ((and (<= 32 code) (<= code 126))                ; printable ASCII
+         (+ col (if icon-p 2 1)))
+        ((equal code 9)                                  ; TAB
          (+ (* (floor col tab-size) tab-size) tab-size))
         ((equal code 10) 0)                              ; NEWLINE
         ((k-control-code-p code)                         ; control -> ^X / \N
@@ -142,6 +156,20 @@
          (+ col 2))
         ((k-ambiguous-code-p code) (+ col amb-width))    ; ambiguous
         (t (+ col 1))))                                  ; narrow
+
+;; Pin equivalence to the original branch order, including dynamic icons.
+;; This is a proof obligation only, not a second executable implementation.
+(defthm k-char-width-ascii-fast-path-equivalence
+  (equal (k-char-width code col tab-size icon-p amb-width)
+         (cond ((equal code 9)
+                (+ (* (floor col tab-size) tab-size) tab-size))
+               ((equal code 10) 0)
+               ((k-control-code-p code) (+ col (k-control-len code)))
+               ((k-zero-code-p code) col)
+               ((or (equal code 9660) icon-p (k-wide-code-p code)) (+ col 2))
+               ((k-ambiguous-code-p code) (+ col amb-width))
+               (t (+ col 1))))
+  :rule-classes nil)
 
 ;;; ===========================================================================
 ;;; k-string-width / k-wide-index (EXEC entries)

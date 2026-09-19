@@ -26,8 +26,8 @@
 ;;;; ------------------------------------------------------------------
 
 (defparameter *bench-width-length* 4000
-  "Character length of the ascii/cjk/emoji width strings.  A 4000-codepoint
-fold costs ~0.1 ms/op, so a few hundred iterations clear the >= 10 ms window.")
+  "Character length of the ascii/cjk/emoji width strings. Use enough iterations
+to keep the faster ASCII fold well above the >= 10 ms measurement window.")
 
 (defparameter *bench-width-ascii-pool*
   (coerce (loop :for c :from 32 :to 126 :collect c) 'vector)
@@ -74,9 +74,10 @@ the call is not elided."
 ;;;; ------------------------------------------------------------------
 
 (defparameter *bench-width-inner*
-  '((:ascii . 180) (:cjk . 180) (:emoji . 180) (:mixed . 12))
-  "Iteration counts: the 4000-char classes ~0.1 ms/op, the ~49 KB mixed corpus
-~1.4 ms/op.")
+  '((:ascii . 2000) (:cjk . 2000) (:emoji . 2000) (:mixed . 80))
+  "Iteration counts keeping each timed window around 60-100 ms on Nova.
+The old 180/12 counts fell below 10 ms after width optimizations, making a
+single timer tick look like a substantial regression.")
 
 (dolist (spec *bench-width-inner*)
   (destructuring-bind (class . inner) spec

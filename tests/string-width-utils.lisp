@@ -394,6 +394,24 @@
   (testing "newline"
     (ok (eql 0 (char-width #\newline 0)))))
 
+(deftest printable-ascii-width-and-icons
+  ;; Isolate the registry so public REGISTER-ICON cannot alter other tests.
+  (let ((lem/common/character/icon::*icon-code-table* (make-hash-table :test 'eql))
+        (lem/common/character/icon::*icon-name-table* (make-hash-table :test 'equal)))
+    (dolist (ambiguous-width '(1 2))
+      (let ((*ambiguous-character-width* ambiguous-width))
+        (ok (loop :for code :from 32 :to 126
+                  :always (loop :for column :in '(0 5 100)
+                                :always (= (1+ column)
+                                           (char-width (code-char code) column)))))))
+    (lem/common/character/icon:register-icon "ascii-test" (char-code #\A))
+    (ok (= 7 (char-width #\A 5)) "registered ASCII icons remain two cells wide")
+    (ok (= 4 (string-width " A!")))
+    (ok (= 1 (wide-index " A!" 2)))
+    ;; The characters immediately outside the fast range retain control width.
+    (ok (= 2 (char-width (code-char 31) 0)))
+    (ok (= 2 (char-width (code-char 127) 0)))))
+
 (deftest string-width
   (ok (eql 0 (string-width nil)))
   (ok (eql 0 (string-width "")))
