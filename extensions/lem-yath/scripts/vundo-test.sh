@@ -170,6 +170,7 @@ if wait_vundo_boot; then
   pass boot 'configured Lem loaded the vundo fixture'
 else
   fail boot 'fixture did not become ready'
+  exit 1
 fi
 
 if invoke_mx lem-yath-test-vundo-static '^SUMMARY STATIC ' &&

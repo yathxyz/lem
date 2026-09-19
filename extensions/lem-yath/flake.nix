@@ -710,6 +710,8 @@
                 export LEM_YATH_CHECK_ID=nix-${name}
                 export LEM_YATH_LEM_SOURCE=${lemPatchedSrc}
                 export LEM_YATH_SOURCE=${self}/lem-yath
+                export LEM_AGENT_CURL=${lib.getExe pkgs.curl}
+                export LEM_AGENT_CA_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
                 export LEM_YATH_RUNTIME_PATH="${lib.makeBinPath defaultRuntimeInputs}"
                 export TZDIR=${pkgs.tzdata}/share/zoneinfo
                 export LEM_YATH_ASPELL_PROGRAM=${lib.getExe' aspellRuntime "aspell"}

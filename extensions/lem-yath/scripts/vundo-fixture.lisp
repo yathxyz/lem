@@ -1,5 +1,9 @@
 (in-package :lem-yath)
 
+(when lem-user::*lem-yath-boot-error*
+  (error "Cannot run vundo tests: configuration failed to load: ~A"
+         lem-user::*lem-yath-boot-error*))
+
 (defvar *vundo-test-report* (uiop:getenv "LEM_YATH_VUNDO_REPORT"))
 (defvar *vundo-test-source* (uiop:getenv "LEM_YATH_VUNDO_SOURCE"))
 (defvar *vundo-test-origin-buffer* nil)
