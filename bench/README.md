@@ -6920,3 +6920,119 @@ Python/client Lisp snapshots. ABBA roots: `/tmp/lem-sdl-input-1bqe8k4n`,
 `/tmp/lem-sdl-input-kfts53q_`. Caller trace:
 `/tmp/lem-sdl-input-pf2zg1fj/redraw-callers.txt`.
 Image: `/nix/store/vqb7941y3h5gbfpinc835k1khi2mvj76-lem-yath-profile/bin/lem`.
+
+### Skip idle redraws when paren scanning changes no overlays (2026-09-20)
+
+Checkpoint `283a1a788` adds an opt-in `:redraw-on-result-p` idle-timer policy.
+Default timers still request redraw even when their callbacks return NIL.
+`update-idle-timers` preserves its existing primary value (whether callbacks
+ran) and returns the redraw request as a second value. All expired callbacks
+still execute, and timer deadlines, repeat bookkeeping and error handling are
+unchanged. The input loop uses the redraw request.
+
+The matching-parenthesis timer opts in. It still scans at its existing 1 ms
+idle deadline and still visits both the cursor and mouse position. It requests
+redraw whenever old highlights were removed or new ones created. Only a scan
+that changes neither skips redisplay; existing highlights are not cached or
+compared across edits.
+
+Validation passed 67 focused assertions for default/opt-in timer results,
+all-callback execution, deadline behavior, input-loop redraw requests and real
+paren overlays. Overlay tests cover appearance, removal, mouse hover, moving
+off a match, disabled scanning and unchanged source text/cursor. Five further
+assertions cover repeat-timer double firing and 60 randomized model schedules
+(seed `2651102596262437754`). All 44 packaged indentation/Org/native display
+checks passed. Eight assertions in the actual packaged daemon, without
+redefining production functions, verify its live timer policy and highlight
+creation/removal/no-op behavior; the private daemon exited cleanly.
+
+The packaged source was compared byte for byte with the checkout, including
+all changed core files, tests and the ASDF registration. Candidate:
+`/nix/store/ri9aiqbi8cj7g7v8filzx3bgzic6db07-lem-yath/bin/lem`, resolving to
+`/nix/store/ks2kl0hl8k35b4i88zk2qfg7dci1b9rw-lem/bin/lem`.
+Baseline is the published `add9448e7` image:
+`/nix/store/vqb7941y3h5gbfpinc835k1khi2mvj76-lem-yath-profile/bin/lem`.
+Both use configuration source
+`/nix/store/alkigfhipwqdckdl7hp6gkm3361jd50m-lem-yath`.
+
+Eight uninstrumented input runs used ABBA for each fixture, with 600 measured
+and 20 warmup events, 25 ms pacing, software X11 and CPUs 0–3. The standard
+probe and source-loaded client were identical between groups; only the
+packaged daemon changed. All exact saved-text, cursor, active-mode, renderer,
+source/probe and clean-exit gates passed, including live string-context checks.
+Means of two runs per variant:
+
+| Workload | Daemon CPU before → after (ms) | Daemon allocation before → after (bytes) | Client send-to-present median before → after (ms) | p95 before → after (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Multiline string | 518.783 → 370.146 | 103,354,896 → 69,022,160 | 0.832666 → 0.826184 | 1.080918 → 1.070719 |
+| Ordinary Lisp | 658.565 → 466.857 | 212,273,232 → 124,098,576 | 0.961411 → 0.955274 | 1.245317 → 1.199917 |
+
+Daemon CPU fell 28.7%/29.1%, with separated ranges, and allocation fell
+33.2%/41.5%. Median latency fell less than 1%, with overlapping ranges; p95
+also overlaps. Client CPU/allocation differences are small and mostly overlap.
+This establishes a reduction in daemon work, not a reliable input-latency gain.
+The second string candidate had a 102.047 ms client send-to-present outlier
+(measured sample 536, insertion); submission acknowledgement was 102.264 ms.
+Its neighbors were 1.176 and 0.959 ms. Other string maxima were
+2.546/2.044 ms before and 2.508 ms in the first candidate. The outlier remains
+part of the results and requires separate follow-up below.
+
+A private counter run against the actual candidate, without redefining its
+point comparator, confirmed 40 redraws and 1,560 logical lines for 20 measured
+plus 20 warmup events, versus 80 redraws and 3,120 lines in the earlier short
+baseline. All 40 screen messages and 80 changed rows still arrive. Its exact
+text, source hashes and clean exits were verified. Root:
+`/tmp/lem-sdl-input-v8g9otjk`; artifacts
+`/tmp/lem-idle-redraw-work{.py,-after.json,-after.log}` and its instrumented
+Python/client Lisp snapshots.
+
+Validation artifacts: `/tmp/lem-idle-redraw-tests.{lisp,log}`,
+`/tmp/lem-idle-redraw-model-tests.{lisp,log}`,
+`/tmp/lem-idle-redraw-build.{paths,log}`,
+`/tmp/lem-idle-redraw-package-proof.{py,json,log}`,
+`/tmp/lem-idle-redraw-baseline-proof.json`,
+`/tmp/lem-idle-redraw-packaged-check.{lisp,py,log}`, and
+`/tmp/lem-idle-redraw-packaged-fhp0l_tj`.
+Full-input artifacts: `/tmp/lem-idle-redraw-input.{py,log}`,
+`/tmp/lem-idle-redraw-results.{py,log}`, and
+`/tmp/lem-idle-redraw-{string,deep}-{before,after}-{1,2}.{json,log}`.
+String roots in ABBA order: `/tmp/lem-sdl-input-1jh6xsd6`,
+`/tmp/lem-sdl-input-478tpips`, `/tmp/lem-sdl-input-2m7eoqoh`,
+`/tmp/lem-sdl-input-kjrqqyrv`. Ordinary roots:
+`/tmp/lem-sdl-input-xp0g3ik1`, `/tmp/lem-sdl-input-0bz45lpr`,
+`/tmp/lem-sdl-input-k4p42q_4`, `/tmp/lem-sdl-input-zgd2xv76`.
+
+Four additional string runs used ABBA with 1,200 measured plus 20 warmup events
+and retained each acknowledgement's existing client CPU/allocation/GC counters
+in Python. The Lisp client and timing endpoints were unchanged. All four
+integrity and diagnostic-provenance checks passed. Means:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Daemon CPU (ms) | 1,027.731 | 734.483 |
+| Daemon allocation (bytes) | 209,758,720 | 140,119,936 |
+| Client send-to-present median (ms) | 0.827859 | 0.831809 |
+| Client send-to-present p95 (ms) | 1.079996 | 1.137980 |
+
+CPU fell 28.5% and allocation 33.2%, again with separated ranges. Median
+latency ranges overlap. Both candidate p95 values (1.146726/1.129234 ms)
+exceeded both baselines (1.073990/1.086002 ms): +5.4%, or 0.058 ms, in this
+repeat. This is recorded as a mixed latency result, not discarded. Maxima were
+5.310/5.171 ms before and 5.449/5.269 ms after; the 102 ms event did not recur
+in these 4,800 additional measurements. Each run had two intervals in which
+the client GC counter increased. Their event latencies ranged 0.793–2.243 ms;
+these are event timings, not GC wall-pause measurements. The original outlier
+lacks per-event GC counters, so this does not establish its cause or fix it.
+No physical-display measurement was made.
+
+The change is retained for the repeated substantial reduction in daemon CPU
+and allocation while maintaining callback and highlight behavior. The broader
+input-latency goal remains open; neither these results nor the non-recurrence
+of the isolated stall establishes a tail-latency improvement.
+
+Follow-up artifacts: `/tmp/lem-idle-redraw-tail{.py,-runs.py,-runs.log}`,
+`/tmp/lem-idle-redraw-tail-results.{py,log}`, and
+`/tmp/lem-idle-redraw-tail-{before,after}-{1,2}.{json,log}` with instrumented
+Python snapshots. Roots in ABBA order: `/tmp/lem-sdl-input-rfydom5z`,
+`/tmp/lem-sdl-input-5ralujhi`, `/tmp/lem-sdl-input-e7yfbabg`,
+`/tmp/lem-sdl-input-vb41omzt`.
