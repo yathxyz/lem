@@ -34,11 +34,14 @@
 (defun point-line-indentation (point)
   "Return visual indentation and whether POINT's line is blank."
   (let ((column 0)
-        (tab-width (variable-value 'tab-width :default point)))
+        (tab-width nil))
     (loop :for character :across (line-string point)
           :do (case character
                 (#\Space (incf column))
-                (#\Tab (incf column (- tab-width (mod column tab-width))))
+                (#\Tab
+                 (unless tab-width
+                   (setf tab-width (variable-value 'tab-width :default point)))
+                 (incf column (- tab-width (mod column tab-width))))
                 (otherwise
                  (return (values column (eql character #\Newline)))))
           :finally (return (values column t)))))

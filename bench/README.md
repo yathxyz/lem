@@ -5879,3 +5879,90 @@ The remaining neighbor scan still visits every blank line after an edit.
 `point-line-indentation` also reads tab width on every visited line, including
 empty lines and lines containing only spaces. Deferring that read until the
 first tab is a further candidate; it has not been implemented or measured here.
+
+
+### Defer indentation tab-width lookup until a tab occurs (2026-09-20)
+
+`point-line-indentation` initializes its local width only when it encounters the
+first leading tab. Empty lines, space-only indentation and unindented text no
+longer read a buffer variable whose value they do not use. Tabs retain the same
+arithmetic and one width lookup per helper call. The blank-context cache still
+checks the effective width so live width changes invalidate its stored context.
+
+All 3,590 original point-walker differential cases pass, preserving indentation,
+blank detection, point position, source text and modified tick. The configured
+package passed all 15 indentation-guide, nine Org display and 19 native
+display/lifecycle checks.
+
+Two same-process component ABBA probes compiled both function bodies with the
+same policy and used CPUs 0–3, 100 warmup sweeps and full GC before each phase.
+Each phase made 100,000 sweeps of 39 lines (3.9 million calls):
+
+- Real Lisp lines from line 6,514: mean CPU 262.459 → 140.307 ms (−46.5%).
+- A tab-heavy fixture cycling 0/1/2/4/8/16 leading tabs: 264.751 → 254.577 ms
+  (−3.8%). Both candidate phases were below both baseline phases.
+
+Every indentation/blank result and source/tick check matched. These are helper
+CPU results, not editor-wide speedups; their small allocation counters varied
+with process overhead and do not support an allocation claim. Artifacts:
+`/tmp/lem-indent-width-{before,after}.lisp`,
+`/tmp/lem-indent-width-component.{lisp,py,log}`,
+`/tmp/lem-indent-width-tabs-component.{lisp,py,log}`,
+`/tmp/lem-indent-width-check.{py,log}`. Roots: ordinary component
+`/tmp/lem-indent-width-2tuhup3_`, tab-heavy `/tmp/lem-indent-width-xm13rkoa`,
+regression check `/tmp/lem-indent-width-9i2c0w5j`.
+
+Baseline configured editor is the `616897867` range-cache build
+`/nix/store/x9qjc0kvavx5h3slfsr2n298q4a85z2m-lem-yath/bin/lem`. Candidate:
+`/nix/store/5721vzwxbdj08jyq4yvdmcm1mycm6i55-lem-yath/bin/lem`, configuration
+source `/nix/store/nwjmwhiv16frdbm82rgp6vf0wmn1j4js-lem-yath`.
+Package/source/fixture/probe bytes are checked in
+`/tmp/lem-indent-width-package-proof.json`; build artifacts:
+`/tmp/lem-indent-width-build.{log,paths}`.
+
+An additional 36 comparisons cover widths 0, −2, 3/2, 4.0, NIL and a nonnumeric
+keyword across empty, space-only, unindented, trailing-tab and leading-tab lines.
+Both functions return the same values or condition types; invalid widths have
+not been normalized or silently accepted. Successful artifacts:
+`/tmp/lem-indent-width-values-r2.{lisp,py,log}`, root
+`/tmp/lem-indent-width-40kp3dq_`. The first auxiliary harness attempt placed its
+report inside the line loop and failed on the second file creation; it was
+corrected before the 36-case result and supplied no performance evidence.
+
+Complete X11/software input comparisons used the unchanged long-blank fixture
+at line 1 and 524,731-byte Lisp fixture at line 6,514. Each workload ran
+before/after/after/before, 600 measured inputs plus 20 warmups, 25 ms pacing,
+CPUs 0–3. All eight runs verified executable, modes, renderer, source/probe
+hashes, line/column, whole-buffer/save/original-source integrity and clean exits.
+Means of two runs, including means of their percentiles:
+
+| Measurement | Long blank run before → after | Ordinary deep Lisp before → after |
+| --- | ---: | ---: |
+| Daemon CPU (ms) | 1,089.669 → 889.069 | 765.966 → 750.223 |
+| Daemon allocated bytes | 233,781,216 → 233,679,840 | 236,825,248 → 236,988,384 |
+| Client CPU (ms) | 225.613 → 227.097 | 262.696 → 253.739 |
+| Client allocated bytes | 25,606,912 → 25,575,040 | 36,852,288 → 36,749,440 |
+| Client send-to-present median (ms) | 1.710 → 1.386 | 1.114 → 1.092 |
+| Client send-to-present p95 (ms) | 2.740 → 2.017 | 1.571 → 1.489 |
+| Submission-to-ack median (ms) | 1.834 → 1.516 | 1.282 → 1.260 |
+| Submission-to-ack p95 (ms) | 3.042 → 2.255 | 1.877 → 1.777 |
+
+Long-blank daemon CPU fell 18.4% and median client send-to-present time fell
+18.9%, with both candidate runs below both baselines. CPU before was
+1,085.676/1,093.662 ms, after 899.556/878.582 ms; medians before 1.697/1.723 ms,
+after 1.383/1.389 ms. The mean p95 fell 26.4%, but candidate tails varied
+(2.492/1.541 ms versus baseline 2.743/2.738 ms), so that percentage is not a
+stable tail guarantee. Allocation remained essentially flat.
+
+Ordinary Lisp means improved modestly (daemon CPU −2.1%, median −2.0%,
+p95 −5.2%), but CPU and latency ranges overlap. These runs do not establish a
+precise general typing speedup. The small lazy lookup is retained for its
+verified long-run benefit, unchanged results and absence of a clear normal
+workload regression.
+
+Artifacts: `/tmp/lem-indent-width-{input,results}.{py,log}`,
+`/tmp/lem-indent-width-{long,deep}-{before,after}-{1,2}.{json,log}`. Long-run
+roots in ABBA order: `/tmp/lem-sdl-input-q8g9mf5g`, `/tmp/lem-sdl-input-xqtkaoa_`,
+`/tmp/lem-sdl-input-u_321ab_`, `/tmp/lem-sdl-input-48d5azbm`. Deep Lisp roots:
+`/tmp/lem-sdl-input-tquydh8k`, `/tmp/lem-sdl-input-3y3lzpjd`,
+`/tmp/lem-sdl-input-cwtqt3kc`, `/tmp/lem-sdl-input-idhcpolw`.
