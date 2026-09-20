@@ -5154,3 +5154,69 @@ marker-prefixed document is 524,744 bytes with SHA-256
 Artifacts: `/tmp/lem-language-{text,lisp}-{1,2}.{json,log}` and
 `/tmp/lem-language-input.{py,log}`. GC CPU is not a pause measurement, and the
 presentation endpoint excludes GPU completion and physical monitor latency.
+
+
+### Skip idle debugger-gutter filesystem work (2026-09-20)
+
+The configured Lisp-mode workload revealed a redraw cost hidden by `.txt`
+benchmarks: `dap-gutter-content` canonicalized the current filename twice for
+every visible line even when no debugger session or source breakpoint existed.
+Its post-command attachment hook also resolved the path with an empty
+breakpoint table. The new early exits preserve an active stopped-line marker;
+when a marker can exist, the gutter reuses one canonical path for both stopped
+location and breakpoint lookup. No path cache or invalidation policy is added.
+
+A warmed SB-SPROF CPU capture of 2,400 inputs collected 3,925 samples and placed
+1,343 (34.2%, including callees) in `dap-gutter-content`. `truename` accounted
+for 814 samples (20.7%). The profile is diagnostic evidence only: after all
+inputs and text/save checks, its client failed to exit within 20 seconds, so
+no benchmark JSON was published. Its shutdown timeout remains unexplained;
+this change does not claim to fix it. Artifacts:
+`/tmp/lem-language-server-profile.py`,
+`/tmp/lem-language-server-cpu-instrumented.py`,
+`/tmp/lem-language-server-cpu.log`, and
+`/tmp/lem-sdl-input-vuo_kypn/server-profile.txt`.
+
+Ten focused checks cover idle and running sessions without markers, no-op
+attachment, stopped locations without breakpoints, pending/verified markers,
+stopped-line priority, other lines, and removal of the last breakpoint.
+Seven path-lookup-count assertions fail before the change; all ten pass after.
+Logs: `/tmp/lem-dap-gutter-before-r2.log` and
+`/tmp/lem-dap-gutter-after-r2.log`. The latter loaded only the changed functions
+into a disposable configured daemon; reloading the entire source is rejected
+by the mode registry because its definitions belong to the packaged path.
+
+Packaged validation passes all 140 DAP checks, including the new gutter checks
+and real debugpy, Delve, GDB and LLDB sessions, plus all 19 native display and
+lifecycle checks. Built configured daemon:
+`/nix/store/pf06f7g9fq8yalp601savg48hgdb9nb3-lem-yath/bin/lem`;
+client: `/nix/store/bnhz1k3cn08niz31bz8g18dnv0c0bkwc-sbcl-lemclient-unstable/bin/lemclient`.
+Both the production DAP source and regression fixture match
+`/nix/store/4svy7i2xkmhj1zig1lp3fs0vgjkjssrs-lem-yath` byte-for-byte.
+Build/check logs: `/tmp/lem-dap-gutter-build.{paths,log}`. The installed editor
+profile and running user sessions were not changed.
+
+The complete-input ABBA compared the preceding `9e5a54632` daemon with this
+candidate, using the same `5488e7334` client/probes, prepared 524 KB Lisp fixture,
+software/X11, 600 measured inputs, 20 warmups and 25 ms pacing. All active modes
+and highlighting settings matched. Means of two runs per version:
+
+| Metric | Before | Idle-gutter fix |
+| --- | ---: | ---: |
+| Daemon process CPU | 1,080.100 ms | 730.298 ms (−32.4%) |
+| Daemon Lisp allocation | 332,979,608 bytes | 162,383,696 bytes (−51.2%) |
+| Daemon GC CPU | 19.553 ms | 15.172 ms |
+| Client process CPU | 268.961 ms | 262.288 ms |
+| Client Lisp allocation | 25,599,040 bytes | 25,369,216 bytes |
+| X11 submission-to-ack median / p95 | 1.538 / 2.082 ms | 1.280 / 1.691 ms |
+| Client send-to-present median / p95 | 1.404 / 1.868 ms | 1.143 / 1.492 ms |
+
+Both candidate runs used less daemon CPU and allocation and had lower medians
+than either baseline run. The client CPU ranges and p95 ranges overlap; mean
+per-run maxima stayed roughly flat, so there is no general worst-case latency
+claim. All four full text/save/fixture checks, clean exits and source/probe
+hash checks passed. These software presentation endpoints do not measure GPU
+completion or physical monitor latency. Artifacts:
+`/tmp/lem-dap-gutter-{before,after}-{1,2}.{json,log}`,
+`/tmp/lem-dap-gutter-input.{py,log}`, and
+`/tmp/lem-dap-gutter-results.{py,log}`.

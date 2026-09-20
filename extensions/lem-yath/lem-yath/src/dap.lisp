@@ -250,6 +250,8 @@
     (copy-point point :left-inserting)))
 
 (defun dap-attach-breakpoints-to-buffer (buffer)
+  (when (zerop (hash-table-count *dap-breakpoints*))
+    (return-from dap-attach-breakpoints-to-buffer))
   (alexandria:when-let ((path (dap-buffer-path buffer)))
     (dolist (breakpoint (gethash path *dap-breakpoints*))
       (unless (dap-breakpoint-point breakpoint)
@@ -1922,15 +1924,16 @@ declared length splits an encoded character."
     (dap-redraw)
     (message "Removed all Dape breakpoints")))
 
-(defun dap-gutter-breakpoint (buffer line)
-  (alexandria:when-let ((path (dap-buffer-path buffer)))
-    (dap-breakpoint-at path line)))
-
 (defun dap-make-gutter-content (string attribute)
   (lem/buffer/line:make-content
    :string string :attributes `((0 ,(length string) ,attribute))))
 
 (defun dap-gutter-content (buffer point)
+  ;; Programming modes draw this gutter even when the debugger is unused.
+  ;; Avoid resolving a filesystem path for every visible line in that case.
+  (when (and (zerop (hash-table-count *dap-breakpoints*))
+             (not (and *dap-session* (dap-session-stopped-path *dap-session*))))
+    (return-from dap-gutter-content))
   (let* ((line (line-number-at-point point))
          (path (dap-buffer-path buffer))
          (session *dap-session*))
@@ -1939,7 +1942,7 @@ declared length splits an encoded character."
             (equal path (dap-session-stopped-path session))
             (eql line (dap-session-stopped-line session)))
        (dap-make-gutter-content "▶" 'dap-stopped-gutter-attribute))
-      ((alexandria:when-let ((breakpoint (dap-gutter-breakpoint buffer line)))
+      ((alexandria:when-let ((breakpoint (and path (dap-breakpoint-at path line))))
          (if (dap-breakpoint-verified-p breakpoint)
              (dap-make-gutter-content "●" 'dap-breakpoint-attribute)
              (dap-make-gutter-content "○"
