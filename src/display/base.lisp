@@ -64,6 +64,7 @@ After-redraw hooks can forward this to peers that may share mutable attributes."
   (when *in-redraw-display*
     (log:warn "redraw-display is called recursively")
     (return-from redraw-display))
+  (setf *deferred-redraw* nil)
   (let ((*after-redraw-display-force* force))
     (prog1
         (let ((*in-redraw-display* t)

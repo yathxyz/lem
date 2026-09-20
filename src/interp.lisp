@@ -70,10 +70,9 @@
 
 (defun command-loop-body ()
   (flet ((redraw ()
-           (when (= 0 (event-queue-length))
-             (without-interrupts
-               (handler-bind ((error #'bailout))
-                 (redraw-display)))))
+           (without-interrupts
+             (handler-bind ((error #'bailout))
+               (redraw-display))))
 
          (read-command-and-call ()
            (let ((cmd (with-idle-timers ()
@@ -96,29 +95,31 @@
            (stop-record-key) ; TODO: define handler
            ))
 
-    (redraw)
+    (let ((*deferred-redraw* #'redraw))
+      (when (zerop (event-queue-length))
+        (redraw))
 
-    (handler-case
-        (handler-bind ((editor-abort
-                         #'editor-abort-handler)
-                       (editor-condition
-                         #'editor-condition-handler))
-          (let ((*this-command-keys* nil)
-                (outer-input-session *routed-input-session*))
-            (unwind-protect
-                 (read-command-and-call)
-              ;; Recursive command loops share a synchronous prompt/completion
-              ;; stack. Its caller keeps ownership until it returns or aborts.
-              (unless outer-input-session
-                (finish-routed-input-session)))))
-      (editor-condition (c)
-        (restart-case (error c)
-          (lem-restart:message ()
-            (let ((message (princ-to-string c)))
-              (unless (equal "" message)
-                (message "~A" message))))
-          (lem-restart:call-function (fn)
-            (funcall fn)))))))
+      (handler-case
+          (handler-bind ((editor-abort
+                           #'editor-abort-handler)
+                         (editor-condition
+                           #'editor-condition-handler))
+            (let ((*this-command-keys* nil)
+                  (outer-input-session *routed-input-session*))
+              (unwind-protect
+                   (read-command-and-call)
+                ;; Recursive command loops share a synchronous prompt/completion
+                ;; stack. Its caller keeps ownership until it returns or aborts.
+                (unless outer-input-session
+                  (finish-routed-input-session)))))
+        (editor-condition (c)
+          (restart-case (error c)
+            (lem-restart:message ()
+              (let ((message (princ-to-string c)))
+                (unless (equal "" message)
+                  (message "~A" message))))
+            (lem-restart:call-function (fn)
+              (funcall fn))))))))
 
 (defvar *toplevel-command-loop-p* t)
 

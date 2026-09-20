@@ -2,6 +2,10 @@
 
 (defvar *editor-event-queue* (make-concurrent-queue))
 
+(defvar *deferred-redraw* nil
+  "Redisplay deferred by the current command loop while input is queued.
+Run it before waiting on an empty queue, even if only callbacks were queued.")
+
 (defstruct (routed-input-event
              (:constructor make-routed-input-event (session prepare event)))
   session prepare event)
@@ -34,9 +38,15 @@
               (if (and (null *routed-input-session*)
                        *deferred-routed-input-events*)
                   (pop *deferred-routed-input-events*)
-                  (dequeue *editor-event-queue*
-                           :timeout timeout
-                           :timeout-value :timeout))))
+                  (progn
+                    (when (and *deferred-redraw* (zerop (event-queue-length)))
+                      (let ((redraw *deferred-redraw*))
+                        ;; Clear before calling: redisplay may read input itself.
+                        (setf *deferred-redraw* nil)
+                        (funcall redraw)))
+                    (dequeue *editor-event-queue*
+                             :timeout timeout
+                             :timeout-value :timeout)))))
           (deferred-p nil)
           (routed-callback-p nil)
           (previous-session *routed-input-session*))

@@ -17,6 +17,98 @@
            (setf (symbol-function symbol) function))
   #-sbcl (setf (symbol-function symbol) function))
 
+(deftest command-loop-drains-callbacks-before-waiting-to-redraw
+  ;; A callback in front of an empty queue must not leave the preceding
+  ;; command's display waiting for an unrelated idle timer. Queued input
+  ;; still takes precedence. Run the real command loop with telemetry off.
+  (dolist (queued-key-p '(nil t))
+    (let* ((lem/common/timer::*timer-manager*
+             (make-instance 'lem/common/timer:timer-manager))
+           (lem/common/timer::*idle-timer-list* nil)
+           (lem/common/timer::*processed-idle-timer-list* nil)
+           (lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+           (lem-core::*routed-input-session* nil)
+           (lem-core::*deferred-routed-input-events* nil)
+           (lem-core::*pipeline-recorder* nil)
+           (key (make-key :sym "x"))
+           (events nil)
+           (originals (mapcar (lambda (symbol) (cons symbol (symbol-function symbol)))
+                              '(lem-core::read-command lem-core::call-command
+                                lem-core::message redraw-display))))
+      (unwind-protect
+           (progn
+             (send-event (lambda () (push :callback events)))
+             (when queued-key-p (send-event key))
+             (set-input-test-function 'redraw-display
+               (lambda (&key force)
+                 (declare (ignore force))
+                 (push :redraw events)
+                 ;; Deliver the next key only after pending output is drawn.
+                 (send-event key)))
+             (set-input-test-function 'lem-core::read-command
+               (lambda ()
+                 (let ((event (lem-core::receive-event 0)))
+                   (ok (eq key event) "pending redisplay runs before an empty-queue wait")
+                   (when event 'self-insert))))
+             (set-input-test-function 'lem-core::message
+               (lambda (&rest arguments) (declare (ignore arguments))))
+             (set-input-test-function 'lem-core::call-command
+               (lambda (&rest arguments)
+                 (declare (ignore arguments))
+                 (push :command events)))
+             (lem-core::command-loop-body)
+             (ok (equal (reverse events)
+                        (if queued-key-p '(:callback :command)
+                            '(:callback :redraw :command)))
+                 "callbacks do not strand output, while queued keys still coalesce"))
+        (dolist (entry originals)
+          (set-input-test-function (car entry) (cdr entry)))))))
+
+(deftest deferred-redraw-is-consumed-before-recursive-input
+  (let* ((lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+         (lem-core::*routed-input-session* nil)
+         (lem-core::*deferred-routed-input-events* nil)
+         (key (make-key :sym "x"))
+         (redraws 0)
+         (lem-core::*deferred-redraw*
+           (lambda ()
+             (incf redraws)
+             (ok (null (lem-core::receive-event 0))
+                 "an input read during redisplay does not invoke redisplay recursively")
+             (send-event key))))
+    (send-event (lambda () (send-event (lambda () nil))))
+    (ok (eq key (lem-core::receive-event 0)))
+    (ok (null (lem-core::receive-event 0)))
+    (ok (= 1 redraws) "chained callbacks consume the pending redraw exactly once")))
+
+(deftest deferred-redraw-does-not-preempt-ready-routed-input
+  (let* ((lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+         (lem-core::*routed-input-session* nil)
+         (session (list :session))
+         (key (make-key :sym "x"))
+         (prepared nil)
+         (redraws 0)
+         (lem-core::*deferred-redraw* (lambda () (incf redraws)))
+         (lem-core::*deferred-routed-input-events*
+           (list (lem-core::make-routed-input-event
+                  session (lambda () (setf prepared t)) key))))
+    (ok (eq key (lem-core::receive-event 0)))
+    (ok prepared)
+    (ok (eq session lem-core::*routed-input-session*))
+    (ok (zerop redraws) "a deferred peer's ready key still participates in coalescing")))
+
+(deftest explicit-redisplay-fulfills-deferred-redraw
+  (lem-fake-interface:with-fake-interface ()
+    (let* ((lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+           (lem-core::*routed-input-session* nil)
+           (lem-core::*deferred-routed-input-events* nil)
+           (redraws 0)
+           (lem-core::*deferred-redraw* (lambda () (incf redraws))))
+      (redraw-display)
+      (ok (null lem-core::*deferred-redraw*))
+      (ok (null (lem-core::receive-event 0)))
+      (ok (zerop redraws) "an explicit redraw prevents redundant deferred work"))))
+
 (deftest idle-polls-redraw-only-after-callbacks
   (dolist (repeat '(nil t))
     (let* ((lem/common/timer::*timer-manager*
