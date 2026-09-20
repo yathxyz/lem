@@ -5699,3 +5699,70 @@ Artifacts: `/tmp/lem-indent-scan-{input,results}.{py,log}` and
 `/tmp/lem-indent-scan-{before,after}-{1,2}.{json,log}`. Private roots in order:
 `/tmp/lem-sdl-input-_wj39dpg`, `/tmp/lem-sdl-input-5_wghvj9`,
 `/tmp/lem-sdl-input-h5pcmtno`, `/tmp/lem-sdl-input-5s4e8igl`.
+
+
+### Follow-up probes and blank-context invalidation (2026-09-20)
+
+Two private same-process ABBA probes did not justify production changes:
+
+- Coercing the programming-mode exclusion descriptors from character strings to
+  base strings preserved all eight mode classifications, but mean predicate CPU
+  rose from 273.862 to 278.566 ms. The existing dynamic package/symbol/class
+  lookups remain unchanged. Artifacts:
+  `/tmp/lem-mode-names-component.{lisp,py,log}`, root
+  `/tmp/lem-mode-names-um449lrp`.
+- Skipping the syntax-cache setter when its head list stayed identical preserved
+  all 39 parsed states in a deep-viewport component with invalidation between
+  iterations. Mean CPU was 1,114.484 → 1,102.144 ms, an inconclusive 1.1% change
+  with overlapping run ranges. The probe deliberately kept hook registration.
+  It was not adopted or promoted to an editor latency claim. Artifacts:
+  `/tmp/lem-ppss-write-{before,after}.lisp`,
+  `/tmp/lem-ppss-write-component.{lisp,py,log}`, root
+  `/tmp/lem-ppss-write-z8jo35ys`.
+
+Blank-line indentation context had a separate correctness defect: its cache key
+only tracked text changes, so a live tab-width change could leave guides at the
+old depth. The production cache now includes the effective buffer tab width.
+It still stores one value per text position; the range-cache prototypes below
+are not part of this fix. The cache shape check also discards the previous
+representation after reloading code into a running editor.
+
+The new regression fixture compares 1,715 blank-context queries with uncached
+neighbor scans. It covers empty/all-blank buffers, spaces/tabs, beginning/end
+runs, separate runs, a 128-line run, all point columns, five tab widths, and
+insertions at the beginning/middle/end followed by undo. Queries preserve text,
+modified tick and point position. A separate same-tick sequence changes width
+1 → 2 → 4 → 8 → 16 → 2 next to a tab-indented line: the previous editor reports
+`BLANK-TAB-WIDTH correct=no`, while the fixed implementation reports `yes`.
+Artifacts: `/tmp/lem-blank-runs-before-check.log`,
+`/tmp/lem-blank-width-check.{py,log}`, and
+`/tmp/lem-blank-width-fix.lisp`.
+
+The performance lead is the old cache's per-line position collection and hash
+entry creation across entire blank runs, even when only a small viewport is
+visible. A private interval prototype reduced this work but needs further
+validation: a linear range list has unbounded lookup cost across many runs;
+64-line hash buckets regressed a scattered-run component by about 25%.
+Eight-line buckets bound each lookup to at most four distinct blank runs. Their
+10,000-blank-line component used 256.550 → 169.185 ms CPU and
+277,958,464 → 38,259,584 allocated bytes, but scattered-run CPU was still higher
+than the original cache (which lacked the necessary tab-width validation).
+The next comparison must keep that correctness fix on both sides and verify
+complete GUI input on both long blank runs and an ordinary Lisp viewport.
+No range-cache optimization or editor speedup is claimed from these probes.
+
+Prototype artifacts: `/tmp/lem-blank-runs-before-no-width.lisp`,
+`/tmp/lem-blank-runs-{linear,bucket64,bucket8}.lisp`,
+`/tmp/lem-blank-runs-component.{lisp,py}`,
+`/tmp/lem-blank-runs-bucket8-component.log`,
+`/tmp/lem-blank-scattered-component.{lisp,py}`,
+`/tmp/lem-blank-scattered-bucket8-component.log`.
+The long-blank Lisp fixture is `/tmp/lem-lisp-blank-runs.lisp`; it has not yet
+passed the GUI probe's normal save/format integrity check.
+
+The tab-width fix passed the configured Nix build and all 15 indentation-guide,
+nine Org display and 19 native display/lifecycle checks. Its configured editor is
+`/nix/store/7h3rf58ab9b11fkd517lfr8r18vq7s0z-lem-yath/bin/lem`.
+Build artifacts: `/tmp/lem-blank-width-build.{log,paths}` and
+`/tmp/lem-blank-width-package-proof.json` (exact configuration/fixture/core/probe
+byte checks). This is a correctness checkpoint, not a measured latency gain.

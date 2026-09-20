@@ -103,6 +103,13 @@ else
   fail line-indentation 'visual indentation, blank detection or source/point state differed'
 fi
 
+if wait_report '^BLANK-RUNS cases=[1-9][0-9]* correct=yes unchanged=yes$' &&
+   wait_report '^BLANK-TAB-WIDTH correct=yes unchanged=yes$'; then
+  pass blank-run-cache 'blank context survives edits and undo and follows live tab-width changes'
+else
+  fail blank-run-cache 'cached blank context differed or failed to follow tab width'
+fi
+
 if wait_report '^SMALL-LIMITS unchanged=yes queries=0$' &&
    wait_report '^DEEP-LIMITS correct=yes unchanged=yes$'; then
   pass string-limit-boundary 'shallow indentation avoids parsing; deeper string limits and source state stay intact'

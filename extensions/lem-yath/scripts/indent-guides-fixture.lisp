@@ -108,6 +108,83 @@
               "LINE-INDENTATION cases=~d correct=yes unchanged=yes" cases))
         (delete-buffer buffer)))))
 
+(defun indent-guides-test-blank-runs ()
+  (let ((buffer (make-buffer "indentation-blank-runs-test" :temporary t))
+        (cases 0))
+    (labels ((reference (point)
+               (flet ((neighbor (direction)
+                        (with-point ((scan point))
+                          (loop :while (line-offset scan direction)
+                                :do (multiple-value-bind (indentation blank-p)
+                                        (point-line-indentation scan)
+                                      (unless blank-p (return indentation)))
+                                :finally (return 0)))))
+                 (max (neighbor -1) (neighbor 1))))
+             (check ()
+               (let ((text (buffer-text buffer))
+                     (tick (buffer-modified-tick buffer)))
+                 (with-point ((point (buffer-start-point buffer)))
+                   (loop
+                     (when (nth-value 1 (point-line-indentation point))
+                       (dotimes (column (1+ (length (line-string point))))
+                         (line-offset point 0 column)
+                         (let ((position (position-at-point point)))
+                           (assert (= (reference point)
+                                      (blank-line-context-indentation point)))
+                           (assert (= position (position-at-point point)))
+                           (incf cases))))
+                     (unless (line-offset point 1 0) (return))))
+                 (assert (= tick (buffer-modified-tick buffer)))
+                 (assert (string= text (buffer-text buffer))))))
+      (unwind-protect
+           (progn
+             (dolist (text (list "" (format nil "~%~%") "  "
+                                 (format nil "~c~%  ~%" #\Tab)
+                                 (format nil "  left~%~%~%        right~%~%next~%~c~%" #\Tab)
+                                 (format nil "~%~%~ccode~% ~%~c ~%    end~%~%" #\Tab #\Tab)
+                                 (concatenate 'string (format nil "  left~%")
+                                              (make-string 128 :initial-element #\Newline)
+                                              "        right")))
+               (erase-buffer buffer)
+               (insert-string (buffer-point buffer) text)
+               (clear-buffer-edit-history buffer)
+               (dolist (width '(1 2 4 8 16))
+                 (setf (variable-value 'tab-width :buffer buffer) width
+                       (buffer-value buffer 'lem-yath-indent-guide-context-cache) nil)
+                 (check))
+               ;; Cached spans must be recomputed after edits at either end,
+               ;; in the middle (splitting a run), and after undo restores text.
+               (dolist (where '(:start :middle :end))
+                 (with-point ((edit (buffer-start-point buffer)))
+                   (case where
+                     (:middle (move-to-line edit
+                                            (max 1 (floor (line-number-at-point
+                                                           (buffer-end-point buffer)) 2))))
+                     (:end (buffer-end edit)))
+                   (insert-string edit (format nil "          inserted~%"))
+                   (buffer-undo-boundary buffer)
+                   (check)
+                   (buffer-undo edit)
+                   (check)
+                   (assert (string= text (buffer-text buffer))))))
+             (indent-guides-test-log
+              "BLANK-RUNS cases=~d correct=yes unchanged=yes" cases)
+             ;; Tab width is part of blank context even when text/tick stay fixed.
+             (erase-buffer buffer)
+             (insert-string (buffer-point buffer) (format nil "~ccode~%~%" #\Tab))
+             (with-point ((point (buffer-end-point buffer)))
+               (let ((correct t)
+                     (tick (buffer-modified-tick buffer)))
+                 (dolist (width '(1 2 4 8 16 2))
+                   (setf (variable-value 'tab-width :buffer buffer) width)
+                   (unless (= width (blank-line-context-indentation point))
+                     (setf correct nil)))
+                 (indent-guides-test-log
+                  "BLANK-TAB-WIDTH correct=~a unchanged=~a"
+                  (if correct "yes" "no")
+                  (if (= tick (buffer-modified-tick buffer)) "yes" "no")))))
+        (delete-buffer buffer)))))
+
 (defun indent-guides-test-string-limits (buffer)
   (let ((original (symbol-function 'in-string-p))
         (queries 0)
@@ -261,6 +338,7 @@
   (setf *indent-guides-test-original-text* (buffer-text buffer)
         (variable-value 'lem/language-mode:indent-size :buffer buffer) 4)
   (indent-guides-test-line-indentation)
+  (indent-guides-test-blank-runs)
   (indent-guides-test-string-limits buffer)
   (indent-guides-test-record-code)
   (move-point (current-point) (buffer-start-point buffer))

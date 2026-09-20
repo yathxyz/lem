@@ -45,12 +45,14 @@
 
 (defun indent-guide-context-cache (buffer)
   (let* ((tick (buffer-modified-tick buffer))
+         (tab-width (variable-value 'tab-width :default buffer))
          (cache (buffer-value buffer 'lem-yath-indent-guide-context-cache)))
-    (if (and (consp cache) (= tick (car cache)))
-        (cdr cache)
+    (if (and (consp cache) (consp (cdr cache))
+             (= tick (car cache)) (eql tab-width (cadr cache)))
+        (cddr cache)
         (let ((values (make-hash-table :test 'eql)))
           (setf (buffer-value buffer 'lem-yath-indent-guide-context-cache)
-                (cons tick values))
+                (list* tick tab-width values))
           values))))
 
 (defun nearby-nonblank-indentation (point direction)
