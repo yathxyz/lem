@@ -6862,3 +6862,61 @@ baseline package byte for byte, SHA:
 `ca0bccceb3f70c134bf6ad47477e7eb5252d2c22b46f4c15d2bb27bdd0ebb31d`.
 The next investigation should measure work across the complete input/display
 path before making further claims from individual function timings.
+
+### Count complete redraw work before further comparator tuning (2026-09-20)
+
+Four private ABBA diagnostic runs used the same `add9448e7` packaged image,
+loading the original and rejected `point<=` definitions identically before
+selecting one. The ordinary Lisp fixture, 600 measured plus 20 warmup events,
+25 ms pacing, software X11 and CPUs 0–3 were unchanged. Private wrappers count
+completed redraws, logical-line creation, accepted screen messages and their
+rows, client decoding, painting and presentation. These wrappers perturb
+execution; their timings are diagnostic, not a new uninstrumented speed claim.
+
+All four runs passed the original exact-text, cursor, mode, renderer, source
+provenance and clean-exit checks, plus diagnostic-source hashes. Every run had
+exactly the same work:
+
+| Daemon operation | Count over the resource window |
+| --- | ---: |
+| Completed redraws | 1,243 |
+| Logical lines composed | 48,477 (39 per redraw) |
+| Accepted screen messages | 620 |
+| Full screen messages | 0 |
+| Encoded changed rows | 1,240 |
+
+Every transition between measured client acknowledgements received one screen
+message, drew and presented once, and decoded and painted two rows. The client
+window also includes its initial setup frame: initial-to-final deltas were 621
+updates/draws/presents, 1,241 decoded rows and 1,280 painted rows. This rules out
+extra redraw/message/row counts as the explanation for the earlier comparator
+regression in these diagnostic runs. It does not rule out scheduling, runtime
+layout or host effects. Instrumented daemon CPU means were 682.283 → 659.055 ms
+(−3.4%), with overlapping ranges, reversing the earlier uninstrumented result;
+median and p95 also overlap. The comparator remains reverted.
+
+A separate 20-event plus 20-warmup trace recorded the first six redraw callers.
+They alternate between `command-loop-body` and `read-event-internal`. The latter
+has only `"show paren timer"` in its processed idle-timer list. That timer runs
+after 1 ms and causes a complete redraw even when it creates/removes no matching
+parenthesis overlays. The short trace had 80 redraws and 40 screen messages.
+This identifies an independent avoidable redraw candidate, not a proven cause
+of the comparator timing difference.
+
+The existing pipeline recorder captured zero stages: routed daemon keys bypass
+its timestamped-event producer. Empty captures are not treated as timing data.
+The first smoke attempt also failed before input measurement on an SBCL package
+lock; private function replacement was moved into each owning package's dynamic
+context. Package locks remain enabled. The corrected smoke and all four full
+runs exited cleanly; the failed attempt is excluded.
+
+Artifacts: `/tmp/lem-work-counts{,-trace}.py`,
+`/tmp/lem-work-counts{,-trace}-server.lisp`,
+`/tmp/lem-work-counts-runs.{py,log}`,
+`/tmp/lem-work-counts-results.{py,log}`,
+`/tmp/lem-work-counts-{before,after}-{1,2}.{json,log}` and their instrumented
+Python/client Lisp snapshots. ABBA roots: `/tmp/lem-sdl-input-1bqe8k4n`,
+`/tmp/lem-sdl-input-172u0hpi`, `/tmp/lem-sdl-input-yvtowrqf`,
+`/tmp/lem-sdl-input-kfts53q_`. Caller trace:
+`/tmp/lem-sdl-input-pf2zg1fj/redraw-callers.txt`.
+Image: `/nix/store/vqb7941y3h5gbfpinc835k1khi2mvj76-lem-yath-profile/bin/lem`.
