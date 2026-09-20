@@ -163,6 +163,14 @@
                 (t (return)))))
   row)
 
+(defun reference-overlay-cells (target column source)
+  (loop :for cell :across (lem-daemon::cell-row-cells source)
+        :for face :across (lem-daemon::cell-row-faces source)
+        :unless (eq cell lem-daemon::+continuation-cell+)
+          :do (reference-overlay-text target column cell face)
+              (incf column (lem:string-width cell)))
+  target)
+
 (deftest cell-composition-matches-character-placement
   (let ((failure nil)
         (texts (list "" "abcdef" "漢字x" "α·é" "éx" "́x"
@@ -185,17 +193,86 @@
                   (reference-overlay-text actual 0 "漢字abcdef" face)
                   (let ((lem/common/character/string-width-utils:*ambiguous-character-width*
                           ambiguous-width))
-                    (loop :with x := column
-                          :for cell :across (lem-daemon::cell-row-cells source)
-                          :for style :across (lem-daemon::cell-row-faces source)
-                          :unless (eq cell lem-daemon::+continuation-cell+)
-                            :do (reference-overlay-text expected x cell style)
-                                (incf x (lem:string-width cell)))
+                    (reference-overlay-cells expected column source)
                     (lem-daemon::overlay-cells actual column source))
                   (unless (equalp expected actual)
                     (setf failure (list source-width target-width column text ambiguous-width))
                     (return-from compare)))))))))
     (ok (null failure) (format nil "3150 composition cases; first mismatch: ~s" failure))))
+
+(deftest cell-runs-preserve-clipping-faces-and-live-widths
+  (let ((failure nil)
+        (cases 0)
+        (lem/common/character/icon::*icon-code-table*
+          (alexandria:copy-hash-table lem/common/character/icon::*icon-code-table*)))
+    (block compare
+      (dolist (source-width '(2 5 10 16))
+        (dolist (target-width '(1 2 5 12))
+          (dolist (column '(-6 -1 0 1 4 11 16))
+            (dolist (text '("" "      " "xxxxxx" "  漢   字  " "aa bbb c" "é  x"))
+              (dolist (wide-character '(nil #\Space #\x))
+                (remhash (char-code #\Space) lem/common/character/icon::*icon-code-table*)
+                (remhash (char-code #\x) lem/common/character/icon::*icon-code-table*)
+                (let ((source (lem-daemon::make-cell-row source-width))
+                      (expected (lem-daemon::make-cell-row target-width))
+                      (actual (lem-daemon::make-cell-row target-width)))
+                  (lem-daemon::overlay-text source 0 text)
+                  (dotimes (index source-width)
+                    (setf (svref (lem-daemon::cell-row-faces source) index)
+                          (if (evenp index) '("#FF0000" nil 1) '(nil "#0000FF" 2))))
+                  (reference-overlay-text expected 0 "漢字a漢字b漢" '("#00FF00" nil 0))
+                  (reference-overlay-text actual 0 "漢字a漢字b漢" '("#00FF00" nil 0))
+                  (when wide-character
+                    (setf (gethash (char-code wide-character)
+                                   lem/common/character/icon::*icon-code-table*) t))
+                  (reference-overlay-cells expected column source)
+                  (lem-daemon::overlay-cells actual column source)
+                  (incf cases)
+                  (unless (equalp expected actual)
+                    (setf failure (list source-width target-width column text wide-character))
+                    (return-from compare)))))))))
+    (ok (null failure)
+        (format nil "~d repeated-cell boundary/face/width cases; first mismatch: ~s"
+                cases failure))))
+
+(deftest cell-runs-preserve-overlapping-storage
+  (flet ((source-for (row sharing)
+           (ecase sharing
+             (:row row)
+             (:both (lem-daemon::copy-cell-row row))
+             (:cells (lem-daemon::%make-cell-row
+                      (lem-daemon::cell-row-cells row)
+                      (copy-seq (lem-daemon::cell-row-faces row))))
+             (:faces (lem-daemon::%make-cell-row
+                      (copy-seq (lem-daemon::cell-row-cells row))
+                      (lem-daemon::cell-row-faces row))))))
+    (dolist (sharing '(:row :both :cells :faces))
+      (dolist (column '(-2 0 1 4 12))
+        (let ((expected (lem-daemon::make-cell-row 12))
+              (actual (lem-daemon::make-cell-row 12)))
+          (dolist (row (list expected actual))
+            (lem-daemon::overlay-text row 0 "aaaa    xxxx")
+            (dotimes (index 12)
+              (setf (svref (lem-daemon::cell-row-faces row) index)
+                    (if (evenp index) '("#FF0000" nil 1) '(nil "#0000FF" 2)))))
+          (reference-overlay-cells expected column (source-for expected sharing))
+          (lem-daemon::overlay-cells actual column (source-for actual sharing))
+          (ok (equalp expected actual)
+              (format nil "~s shared storage at column ~d" sharing column)))))))
+
+(deftest cell-runs-stop-at-the-shorter-source-array
+  (dolist (face-count '(0 3 6 8))
+    (let ((source (lem-daemon::%make-cell-row
+                   (make-array 6 :initial-element " ")
+                   (make-array face-count :initial-element '("#FF0000" nil 1))))
+          (expected (lem-daemon::make-cell-row 12))
+          (actual (lem-daemon::make-cell-row 12)))
+      (reference-overlay-text expected 0 "漢字a漢字b漢")
+      (reference-overlay-text actual 0 "漢字a漢字b漢")
+      (reference-overlay-cells expected 1 source)
+      (lem-daemon::overlay-cells actual 1 source)
+      (ok (equalp expected actual)
+          (format nil "six source cells and ~d faces" face-count)))))
 
 (deftest cell-composition-accepts-general-strings
   (dolist (text (list (make-array 5 :element-type 'character :initial-contents "axxxx"
