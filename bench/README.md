@@ -2618,9 +2618,10 @@ glyph lookups and SDL copy/fill calls (`/tmp/lem-sdl-repaint-profile.{lisp,txt}`
 The client now retains one window-sized texture and repaints changed rows plus
 the old/new cursor rows. Decoded rows are replaced, so identity detects changes.
 Resize, font metrics, defaults, row count and renderer resets invalidate reuse.
-Every presentation still clears and completely repaints the window backbuffer,
-as required by [SDL_RenderPresent](https://wiki.libsdl.org/SDL2/SDL_RenderPresent);
-retention uses a separate [render target](https://wiki.libsdl.org/SDL2/SDL_SetRenderTarget).
+At this checkpoint, every presentation cleared and completely repainted the
+window backbuffer, whose previous contents cannot be relied on after
+[SDL_RenderPresent](https://wiki.libsdl.org/SDL2/SDL_RenderPresent). Retention
+uses a separate [render target](https://wiki.libsdl.org/SDL2/SDL_SetRenderTarget).
 Unavailable target storage falls back to full repaint and retries on resize/reset.
 The extra pixel storage is one 32-bit window image (about 3 MB in this fixture).
 
@@ -4766,3 +4767,119 @@ pixel-test sources match the checkout byte-for-byte. Configured package:
 `/nix/store/g8fx3k52p0rdy241zpq6lpgvz257086d-sbcl-lemclient-unstable`. Logs:
 `/tmp/lem-glyph-key-build.paths`, `/tmp/lem-glyph-key-native.log`.
 No installed profile was activated.
+
+
+### Locate the remaining client cost with Lisp and native profiles (2026-09-20)
+
+Profiles at `ca01a9b39` used the complete private X11/software input path and
+10 MB fixture. After an initial pass showed cold dispatch/compiler activity,
+refined probes started after 20 warmup inputs. Allocation profiling recorded
+2,284 regions over 1,200 measured inputs at 5 ms pacing: protocol decoding was
+on 62.1% of sampled allocation stacks, Yason string parsing on 35.0%, and screen
+drawing on 3.0%. These are sampled regions, not exact byte attribution. The
+CPU profile recorded 1,438 samples over 2,400 inputs at 2 ms pacing, but 72.9%
+was unresolved by the Lisp report. Allocation alone was therefore insufficient
+to identify the main CPU bottleneck.
+
+Linux perf 6.18 was fetched from the locked Nixpkgs (`p.perf`, 2.9 MiB download)
+without changing the development shell or system configuration. User-space
+hardware counters are permitted with the host's existing `perf_event_paranoid=2`;
+no privilege elevation was needed. A disposable client exported its SBCL perfmap,
+then enabled a `cycles:u` capture after warmup using perf's control-pipe
+acknowledgement. The clean 2,400-input capture had no lost samples:
+
+| Native profile attribution | Share of sampled user-space cycles |
+| --- | ---: |
+| SDL3 library | 73.89% |
+| `SDL_FillSurfaceRect4SSE` | 44.91% |
+| `Blit8888to8888PixelSwizzleAVX2` | 25.07% |
+| `Blit8888to8888PixelAlphaSwizzleAVX2` | 1.10% |
+
+The function rows are included in the SDL3 total. This shifts the immediate CPU
+priority to full-window clearing/copying, while JSON remains the main allocation
+candidate. Kernel time, compositor work and physical scanout are outside this
+capture. Profiling setup and instrumentation alter timings and allocations;
+none of these profiled JSON results are used as latency or speedup benchmarks.
+Both warm Lisp profiles and the final native capture passed the full document,
+save, fixture and clean-exit checks.
+
+Artifacts: `/tmp/lem-current-client-warm-{alloc,cpu}.{lisp,json,log}`,
+`/tmp/lem-current-client-warm-{alloc,cpu}-report.txt`,
+`/tmp/lem-current-client-native-r2.{lisp,json,log,perf.data}` and
+`/tmp/lem-current-client-native-r2-{dso,symbols}.txt`. The initial native capture
+was excluded because the probe rejected cleanup: perf 6.18 acknowledges with
+`ack\n\0`, and UIOP reports the requested SIGINT exit as 130. The corrected
+probe consumes all five acknowledgement bytes and accepts the expected status;
+other failures remain errors. Evidence of that initial rejection remains in
+`/tmp/lem-current-client-native.log` and its client artifact root.
+
+
+### Remove the redundant clear before a complete cached-frame copy (2026-09-20)
+
+The native profile above identified a full-window clear immediately followed
+by a full-window copy from the retained texture. That clear is now omitted on
+the cached path. The target is initialized completely before use, and SDL2
+texture creation gives it `SDL_BLENDMODE_NONE`; the copy therefore overwrites
+every window pixel. A runtime check returned blend mode 0, and the pinned
+[SDL2 compatibility implementation](https://github.com/libsdl-org/sdl2-compat/blob/release-2.32.58/src/sdl2_compat.c)
+explicitly sets this mode in `SDL_CreateTexture`. This differs from SDL3's
+alpha-texture default; the client uses the SDL2 API. Diagnostic:
+`/tmp/lem-frame-texture-info.{lisp,log}`.
+
+SDL recommends clearing before each frame, even when overwriting it. This
+optimization relies on the narrower complete-copy invariant and still treats
+the old backbuffer as undefined. Direct/fallback repaint and target initialization
+retain their clears. The pixel regression now poisons the window backbuffer
+with an unrelated color before every candidate repaint, including unchanged
+frames, to prove that every output pixel is reconstructed. Software and actual
+OpenGL suites pass, including Unicode, styles, cursors, resize/reset, dense/sparse
+transitions and target failure. The SDL client suite also passes. Logs:
+`/tmp/lem-frame-clear-{client,software-pixels,gpu-pixels}.log`.
+
+The warmed, same-process offscreen component ABBA used the same glyph-cache,
+batching and floating-point fixes on both sides. Sparse updates use the retained
+target; full updates use direct repaint. Means:
+
+| Workload | Process CPU, before → after | Elapsed, before → after |
+| --- | ---: | ---: |
+| Software, 3,000 sparse updates | 961.739 → 652.856 ms (−32.1%) | 963.499 → 651.499 ms |
+| Software, 400 full repaints | 302.548 → 301.449 ms | 303.000 → 302.000 ms |
+| OpenGL, 3,000 sparse updates | 129.139 → 123.920 ms | 217.000 → 215.500 ms |
+| OpenGL, 400 full repaints | 595.847 → 608.842 ms | 339.000 → 343.999 ms |
+
+The direct full-repaint path is unchanged; its variation is not attributed to
+this edit. Allocation was effectively unchanged. OpenGL measurements end at
+`SDL_RenderPresent` return and do not establish GPU-completion performance.
+Artifacts: `/tmp/lem-frame-clear-{before,after}.lisp` and
+`/tmp/lem-frame-clear-component.{lisp,log}`.
+
+
+The complete software/X11 input ABBA then used the same configured daemon,
+10 MB UTF-8 fixture, 600 measured inputs, 20 warmups and 25 ms pacing. Means of
+the two runs per source:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Client process CPU | 474.278 ms | 308.909 ms (−34.9%) |
+| Client Lisp allocation | 29,695,680 bytes | 29,623,040 bytes |
+| X11 submission-to-ack median / p95 | 0.961 / 1.320 ms | 0.832 / 1.219 ms |
+| Client send-to-present median / p95 | 0.827 / 1.140 ms | 0.704 / 1.021 ms |
+
+Both candidate medians were below both baseline medians. The average
+send-to-present median fell 14.9% and the submission-to-ack median 13.4%.
+Individual p95 values overlapped, and the candidate's worst sample was not
+lower than the baseline's worst sample; this is not an all-tail-latencies claim.
+Daemon CPU was essentially unchanged (384.583 → 381.875 ms), as was allocation.
+The timing endpoints still exclude physical monitor scanout and GPU completion.
+All four runs passed full text/save/fixture comparisons and clean client/daemon
+exits. Selected source paths/hashes and probe hashes were verified. Artifacts:
+`/tmp/lem-frame-clear-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-frame-clear-input.{py,log}`.
+
+
+All 19 packaged native display/lifecycle checks pass. The built production SDL
+and strengthened pixel-test sources match the checkout byte-for-byte.
+Configured package: `/nix/store/4sqyk13qg9v1sbk1c1zq752di11z1mqk-lem-yath`;
+native client: `/nix/store/ylp6rb43xhivmxbq324sgalnza9vdcza-sbcl-lemclient-unstable`.
+Evidence: `/tmp/lem-frame-clear-build.paths`, `/tmp/lem-frame-clear-native.log`.
+The installed editor profile remains unchanged.

@@ -158,6 +158,10 @@
                     ;; NIL frame cache always performs the full reference repaint.
                     (gui::draw-screen screen renderer fonts reference-cache)
                     (let ((expected pixels))
+                      ;; Presentation may discard the backbuffer. Poison it so
+                      ;; a retained frame must overwrite all pixels itself.
+                      (gui::set-color renderer "#7F135A")
+                      (sdl2:render-clear renderer)
                       (setf glyphs 0)
                       (gui::draw-screen screen renderer fonts candidate-cache frame)
                       (ok (equalp expected pixels) label)

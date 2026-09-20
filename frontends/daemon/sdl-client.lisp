@@ -147,7 +147,7 @@
 
 ;; UPDATE-SCREEN replaces decoded rows rather than mutating them. Retain their
 ;; identities with a private render target; the window backbuffer is still
-;; cleared and completely repainted on every presentation.
+;; completely overwritten on every presentation.
 (defstruct frame-cache
   texture rows foreground background cursor fonts width height
   cell-width cell-height attempted-p valid-p)
@@ -227,8 +227,8 @@
               (frame-cache-background frame) (graphical-screen-background screen)
               (frame-cache-valid-p frame) use-target))
       (when use-target
-        (set-color renderer (graphical-screen-background screen))
-        (sdl2:render-clear renderer)
+        ;; The initialized, non-blending target covers the entire window.
+        ;; Copying it overwrites every pixel, including an undefined backbuffer.
         (sdl2:render-copy renderer texture))
       (sdl2:render-present renderer))))
 
