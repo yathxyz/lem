@@ -6088,3 +6088,106 @@ that construction/parsing, but has not been implemented or measured here.
 The profile's 11.2% line-number around-method share includes other gutter
 providers and programming-mode classification; it must not be presented as
 time spent solely formatting numbers.
+
+### Exact line-number formatting without a per-row control string (2026-09-20)
+
+Both core line numbers and the configured programming gutter previously built
+`" ~5D "`-style controls for each displayed row, then passed the new string to
+`format`. The shared `lem/line-numbers:format-line-number` now uses the constant
+control `" ~vD "` with a numeric width. Custom string and function controls
+still go directly to `format`; relative numbers, custom current-line markers,
+attributes, filename gating, and gutter composition keep their existing paths.
+No persistent cache or invalidation mechanism was introduced.
+
+The default width now uses integer comparisons instead of floating-point
+`log`. An isolated arithmetic probe found 12 overestimates just below decimal
+powers, starting at 9,999,999 lines (7 digits reported as 8). It tested the
+fixnum cases around 10^1 through 10^18. The new formatter also avoids printing
+the control's width with `~A`, which made the generated control depend on
+`*print-base*` and `*print-radix*`.
+
+The focused core tests passed 97 assertions across three tests: exact widths
+around decimal powers through 10^25, live line-count growth/shrinkage, string
+and function controls, arbitrary printing bases, relative numbers and active
+attributes. Configured UI coverage adds three relative-row checks and a live
+custom formatter check. Its first run caught a wrong test expectation: `~D`
+prints a noninteger marker such as `"->"` without padding. The assertion was
+corrected to preserve that existing behavior; production code did not change.
+The initial standalone runner also needed its Rove invocation and buffer
+fixture constructor corrected before the successful run. Those failed test
+harness runs are not used as performance evidence.
+
+A same-process ABBA prototype component rendered 39 ordinary Lisp rows 10,000
+times per phase with strings and attributes compared, unchanged source text
+and modification tick checked, full GC between phases, and CPUs 0–3. Mean CPU
+was 166.572 → 69.969 ms (−58.0%); allocation was 200,042,880 → 75,122,368 bytes
+(−62.4%). This measures the formatter component, not complete input latency.
+Both candidate phases were below both baseline phases. The prototype inlined
+the integer width loop inside its formatter; the production helper declares
+that same loop inline. Artifacts: `/tmp/lem-number-format-digits.{lisp,log}`,
+`/tmp/lem-number-format-component.{lisp,py,log}`, and
+`/tmp/lem-number-format-tests{,-r2,-r3}.log`. Probe roots:
+`/tmp/lem-number-format-cv64gq_g` and `/tmp/lem-number-format-s4s2appg`.
+
+Production implementation and regression tests are checkpointed in
+`b15375540`. The Nix build passed 15 indentation, 9 Org, 19 native-client,
+and 48 interactive UI checks plus 36 UI static assertions. The first UI
+build failed only the marker-padding expectation above; the corrected second
+build passed completely. Logs:
+`/tmp/lem-number-format-build{,-r2}.log`, with outputs in
+`/tmp/lem-number-format-build.paths`.
+
+The verified candidate editor is
+`/nix/store/6gvr7amddfm24nks7jmmyyafff28sx5r-lem-yath/bin/lem`, resolving to
+`/nix/store/pmkmjp4a5pv0lw8mqw48dhax41k2lk97-lem/bin/lem`.
+`/tmp/lem-number-format-package-proof.{py,json}` verifies the installed core,
+configuration, fixtures, and input probe byte-for-byte against this checkout.
+Core line-number source SHA-256:
+`6d65d4d7c3130c5950d569120be624be374bacc7dc6fdb7414137814033185d1`;
+configured UI source:
+`e76ccc082f35f01a1ac0ae142ec5422b210c44a50f0750b527d6597c35a33bd2`.
+The baseline is `47eb803bf`, packaged as
+`/nix/store/d3f6rgqx5z82dw3cc15frb32vi373r93-lem-yath/bin/lem`.
+
+Full GUI comparisons used ABBA order separately for the 10,000-blank-line
+fixture and the formatted 525 KB Lisp fixture at line 6514. Each run used
+600 measured events plus 20 warmups, 25 ms pacing, software X11 rendering,
+and CPUs 0–3. All eight runs passed exact editor/configuration/mode/renderer
+provenance, unchanged client/probe hashes, target marker and byte offset,
+whole-text reconstruction, saved-document equality, original-source equality,
+and clean daemon/client exit checks. Values below are means of the two runs
+per variant, including means of each run's latency percentile:
+
+| Measure | Long blanks: before → after | Ordinary Lisp: before → after |
+| --- | --- | --- |
+| Daemon CPU (ms) | 763.688 → 725.928 | 776.153 → 751.367 |
+| Daemon allocated bytes | 233,526,048 → 220,388,448 | 236,589,216 → 219,791,904 |
+| Client CPU (ms) | 254.312 → 248.196 | 270.590 → 271.678 |
+| Client allocated bytes | 25,773,184 → 25,296,384 | 37,448,576 → 36,538,176 |
+| Client send-to-present median (ms) | 1.096 → 1.087 | 1.120 → 1.094 |
+| Client send-to-present p95 (ms) | 2.248 → 2.219 | 1.840 → 1.813 |
+| Submission-to-ack median (ms) | 1.232 → 1.222 | 1.291 → 1.260 |
+| Submission-to-ack p95 (ms) | 2.577 → 2.554 | 2.204 → 2.182 |
+
+Daemon CPU means fell 4.9% on long blanks and 3.2% on ordinary Lisp; both
+candidate runs were below both baselines in each workload. Allocation fell
+5.6% and 7.1%, respectively. Client CPU ranges overlap (means −2.4% and +0.4%);
+combined daemon/client CPU means fell on both workloads. GC CPU time was
+essentially unchanged and does not establish a reduction in GC pauses.
+
+Ordinary Lisp's median client send-to-present time fell 2.3%, with both
+candidate medians below both baselines (1.0944/1.0945 ms versus
+1.1235/1.1170 ms). Long-blank medians overlapped (mean −0.8%). The p95 means
+fell only 1.3% and 1.5%, and ordinary-code p95 ranges overlap. Maximum latencies
+varied in both directions; no tail guarantee or physical-monitor latency
+claim follows. This is a modest full-input improvement alongside a repeatable
+allocation reduction and the width-correctness fixes, rather than the 58%
+speedup seen in the isolated formatter component.
+
+Artifacts: `/tmp/lem-number-format-{input,results}.{py,log}` and
+`/tmp/lem-number-format-{long,deep}-{before,after}-{1,2}.{json,log}`.
+Long-blank roots in ABBA order: `/tmp/lem-sdl-input-d3zchd8e`,
+`/tmp/lem-sdl-input-uc647d5x`, `/tmp/lem-sdl-input-vr5yi5gv`,
+`/tmp/lem-sdl-input-g5o11fgr`. Ordinary roots:
+`/tmp/lem-sdl-input-hi1gmtiq`, `/tmp/lem-sdl-input-1f9_unno`,
+`/tmp/lem-sdl-input-yzfg3yle`, `/tmp/lem-sdl-input-ifv9nlsx`.
