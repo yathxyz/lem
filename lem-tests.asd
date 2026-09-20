@@ -119,6 +119,7 @@
                (:file "listener-mode")
                (:file "interface")
                (:file "display-cache")
+               (:file "display-attributes")
                (:file "line-numbers")
                (:file "verified-shim"))
   :perform (test-op (o c)
