@@ -5766,3 +5766,41 @@ nine Org display and 19 native display/lifecycle checks. Its configured editor i
 Build artifacts: `/tmp/lem-blank-width-build.{log,paths}` and
 `/tmp/lem-blank-width-package-proof.json` (exact configuration/fixture/core/probe
 byte checks). This is a correctness checkpoint, not a measured latency gain.
+
+The follow-up component comparison now uses the production tab-width fix in
+both implementations. Each run is same-process ABBA on CPUs 0–3, with full GC
+between phases, result assertions and source-text preservation. It still does
+not measure full input latency. Means of two phases:
+
+| Component workload | CPU before → after (ms) | Allocation before → after (bytes) |
+| --- | ---: | ---: |
+| 10 blank lines, 10,000 iterations | 27.114 → 22.321 | 10,753,728 → 6,759,872 |
+| 10,000 blank lines, 250 iterations | 257.019 → 169.907 | 277,797,952 → 38,310,272 |
+| 39 separate runs, 2,000 iterations | 33.953 → 33.199 | 24,060,928 → 21,505,984 |
+| 2,000 separate runs, 50 iterations | 42.397 → 40.484 | 33,516,488 → 28,830,080 |
+
+Both candidate phases use less CPU than both baseline phases in all four
+workloads. The 10,000-line case queries only 39 visible blank lines per iteration;
+the scattered cases query every listed run. Context caches are reset between
+iterations. The candidate stores one range per contiguous blank run and indexes
+it in eight-line buckets, bounding the candidate list to at most four runs per
+bucket. It still scans to find both neighboring nonblank lines after an edit.
+These results justify full GUI comparison; the prototype remains uncommitted
+outside `/tmp`, and production still uses the per-position hash cache.
+Exact compared definitions: `/tmp/lem-blank-fixed-{before,after}.lisp`. Drivers,
+fixtures and logs: `/tmp/lem-blank-fixed-component.{lisp,py,log}` and
+`/tmp/lem-blank-fixed-scattered-component.{lisp,py,log}`. Private roots:
+`/tmp/lem-blank-fixed-w9qzmo74`, `/tmp/lem-blank-fixed-lrkw5xie`.
+
+The new Lisp fixture also passed a real X11/software GUI smoke run on the fixed
+production editor: 20 measured inputs plus two warmups at 25 ms pacing, CPUs 0–3,
+LISP-MODE with highlighting and the configured editing modes. Whole-buffer,
+save, original-source, probe/source hash and clean-exit checks passed. Source is
+10,077 bytes (10,000 blank lines inside a nested form), SHA-256
+`60248419aaef83f8f0f7879958a4c2314f9eda9a56831b9eab8772f76e2a1f16`;
+marker-containing document SHA-256
+`c2f629aa618f9925e54e734b6c8993ee976edb9380e3fd084bc5c905435ebc3f`.
+Root `/tmp/lem-sdl-input-jinvctnc`; artifacts:
+`/tmp/lem-blank-fixture-smoke.{py,json,log}` and
+`/tmp/lem-blank-fixture-smoke-driver.log`. The short smoke timings are not used
+as performance evidence.
