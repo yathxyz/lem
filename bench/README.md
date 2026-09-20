@@ -4954,3 +4954,67 @@ final software and OpenGL tests pass against the retained production behavior.
 Logs: `/tmp/lem-frame-format-final-{software,gpu}-pixels-r2.log`. Existing packaged
 checks above still describe that production implementation; no new package or
 installed-profile activation is claimed for this rejected experiment.
+
+
+### Suppress unchanged daemon screen messages (2026-09-20)
+
+A private X11 input capture at `3064910bd` found that each of 40 typed inputs
+(20 warmups and 20 measured inputs) was followed by a second screen message
+with no changed rows or display metadata. Sending these still incurred JSON
+encoding/decoding, queue traffic, and potentially another full-window copy.
+
+Each daemon implementation now retains the display properties of its last
+accepted screen message: foreground/background, mouse mode, terminal escape
+delay, cursor coordinates, shape and color. An update is omitted only when
+its existing row diff is empty and all those properties match. Forced redraws
+still send a message, and initial frames, dimension changes and snapshot resets
+retain full-frame behavior. State is private to each client and is advanced
+only after its message is accepted by the existing bounded output queue.
+No wire format, acknowledgement, input handling or queue limit changed.
+
+With the packaged candidate, the same capture fell from 83 to 43 screen
+messages (including setup), with zero redundant empty updates. Removing those
+40 duplicates from the baseline makes its remaining decoded messages **exactly
+equal** to the candidate's sequence. Framed screen bytes fell from 47,392 to
+39,792. Capture instrumentation is excluded from performance claims. Both runs
+passed complete document/save/fixture and clean-exit checks; source/probe hashes
+were verified. Artifacts: `/tmp/lem-screen-wire-sample{,-after}.{lisp,json,jsonl,log}`.
+
+The uninstrumented complete-input ABBA used the same source-loaded client,
+software/X11 renderer, 10 MB UTF-8 fixture, 600 measured inputs, 20 warmups and
+25 ms pacing. Only the packaged daemon changed. Means of two runs per package:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Client process CPU | 271.629 ms | 208.466 ms (−23.3%) |
+| Client Lisp allocation | 29,038,400 bytes | 24,751,040 bytes (−14.8%) |
+| Daemon process CPU | 342.423 ms | 323.630 ms (−5.5%) |
+| Daemon Lisp allocation | 44,170,448 bytes | 41,802,320 bytes (−5.4%) |
+| X11 submission-to-ack median / p95 | 0.760 / 1.086 ms | 0.741 / 1.117 ms |
+| Client send-to-present median / p95 | 0.654 / 0.945 ms | 0.638 / 0.961 ms |
+
+Both candidate client CPU measurements were below both baseline measurements.
+Latency median ranges overlap, and mean p95 increased slightly despite a lower
+mean median and worst sample. This is an efficiency result, not a general
+latency improvement claim. GPU completion and physical monitor scanout remain
+outside the timing endpoints. All four full text/save/fixture comparisons,
+clean exits and client-source/probe hashes passed verification. Artifacts:
+`/tmp/lem-screen-dedup-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-screen-dedup-input.{py,log}`.
+
+Regression coverage exercises repeated unchanged redraws across grid reuse,
+individual metadata changes, cursor-only updates, text/style and style-only
+edits, independent client snapshots, forced redraws, both resize dimensions,
+and snapshot reset. The daemon suite passes, including its integration and
+backpressure checks. The final test uses the background-only attribute setter
+so cleanup preserves the cursor's other style flags. Final suite log:
+`/tmp/lem-screen-dedup-daemon-r2.log`.
+
+All 19 packaged native display/lifecycle checks pass. Packaged production
+implementation and SDL sources match the checkout byte-for-byte. The only
+subsequent protocol-test adjustment was the background-only setter above;
+production behavior is identical to the measured package. Configured package:
+`/nix/store/43nrpq32ksq88ammff5rg8ixjfbma7i7-lem-yath`;
+client: `/nix/store/iw017gpbsmkhd4cvw2q2085b8k30j6j0-sbcl-lemclient-unstable`.
+Evidence: `/tmp/lem-screen-dedup-build.paths`, `/tmp/lem-screen-dedup-native.log`.
+The installed editor profile remains unchanged.

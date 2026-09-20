@@ -24,6 +24,7 @@ Only the representation is shared; character widths are always looked up live.")
    (previous-screen :initform nil
                     :accessor daemon-implementation-previous-screen)
    (spare-screen :initform nil :accessor daemon-implementation-spare-screen)
+   (previous-screen-state :initform nil :accessor daemon-implementation-previous-screen-state)
    (previous-screen-width :initform nil
                           :accessor daemon-implementation-previous-screen-width))
   (:default-initargs
@@ -389,25 +390,36 @@ Only the representation is shared; character widths are always looked up live.")
               (daemon-implementation-previous-screen-width implementation)
               (daemon-implementation-width implementation))
         (let* ((cursor-attribute (ensure-attribute 'cursor nil))
-               (message
-                 (protocol:make-object
-                  "version" protocol:+protocol-version+
-                  "type" "screen" "full" (and full-p t)
-                  "foreground" (wire-color (lem-if:get-foreground-color implementation))
-                  "background" (wire-color (lem-if:get-background-color implementation))
-                  "mouse" (and (variable-value 'lem:mouse-mode :global) t)
-                  "escape-delay" (terminal-escape-delay)
-                  "cursor" (protocol:make-object
-                            "x" cursor-x "y" cursor-y
-                            "shape" (string-downcase
-                                     (daemon-implementation-cursor-shape implementation))
-                            "color" (wire-color
-                                     (or (and cursor-attribute
-                                              (attribute-background cursor-attribute))
-                                         (lem-if:get-foreground-color implementation))))
-                  (if full-p "rows" "changes")
-                  (if full-p (map 'vector #'encode-screen-row rows) changes))))
-          (daemon-send connection message))))))
+               (foreground (wire-color (lem-if:get-foreground-color implementation)))
+               (background (wire-color (lem-if:get-background-color implementation)))
+               (mouse (and (variable-value 'lem:mouse-mode :global) t))
+               (escape-delay (terminal-escape-delay))
+               (shape (daemon-implementation-cursor-shape implementation))
+               (color (wire-color
+                       (or (and cursor-attribute (attribute-background cursor-attribute))
+                           (lem-if:get-foreground-color implementation))))
+               (state (list foreground background mouse escape-delay
+                            cursor-x cursor-y shape color)))
+          ;; Idle/command-loop redraws can repeat the frame just sent. Preserve
+          ;; explicit redraws and every display property, including cursor-only
+          ;; changes, without serializing and repainting an unchanged screen.
+          (unless (and (not full-p) (zerop (length changes))
+                       (not *after-redraw-display-force*)
+                       (equal state (daemon-implementation-previous-screen-state implementation)))
+            (let ((message
+                    (protocol:make-object
+                     "version" protocol:+protocol-version+
+                     "type" "screen" "full" (and full-p t)
+                     "foreground" foreground "background" background
+                     "mouse" mouse "escape-delay" escape-delay
+                     "cursor" (protocol:make-object
+                               "x" cursor-x "y" cursor-y
+                               "shape" (string-downcase shape) "color" color)
+                     (if full-p "rows" "changes")
+                     (if full-p (map 'vector #'encode-screen-row rows) changes))))
+              (when (daemon-send connection message)
+                (setf (daemon-implementation-previous-screen-state implementation) state)
+                message))))))))
 
 (defmethod lem-if:invoke ((implementation daemon-implementation) function)
   (declare (ignore implementation))
