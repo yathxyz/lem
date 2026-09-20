@@ -4473,3 +4473,68 @@ and installed profiles are unchanged pending that comparison.
 API references: [SDL renderer creation](https://wiki.libsdl.org/SDL2/SDL_CreateRenderer),
 [renderer flags](https://wiki.libsdl.org/SDL2/SDL_RendererFlags), and
 [the pinned compatibility implementation](https://github.com/libsdl-org/sdl2-compat/blob/release-2.32.58/src/sdl2_compat.c).
+
+
+### Measure native SDL event input on an offscreen GPU (2026-09-20)
+
+`scripts/bench/e2e/sdl-input.py` now supports `--input-method sdl` alongside the
+existing default `x11` mode. The new Linux/SBCL mode writes `x`/Backspace commands
+to a private pipe. A disposable client thread constructs native key-down,
+text-input and key-up events using SDL3's C headers and queues them in the SDL3
+runtime underlying SDL2-compat. Lem's existing SDL2 event loop handles them,
+including its normal keyboard translation, socket round trip, editing and
+rendering. This mode requires SDL2-compat/SDL3; it verifies that SDL3 video is
+already initialized before injection. The development shell supplies `sdl3`
+headers; production packages and editor behavior are unchanged.
+
+The new `--renderer software|opengl` option sets the renderer hint and asserts
+that the actual renderer name matches. Both modes record actual video/renderer
+identity, flags, GL device/version where applicable, selected graphics
+environment, and hashes of all three probe source files. A silent software
+fallback cannot be reported as a requested OpenGL run. Example with the matched
+Mesa package from the preceding investigation:
+
+```sh
+LEM_BIN=/nix/store/60b6xqgcigg766yvz1cmdx6ls61lxld5-lem-yath/bin/lem \
+EGL_PLATFORM=surfaceless \
+__EGL_VENDOR_LIBRARY_FILENAMES=/nix/store/72h0721w18pc8103hqsi2iaywji795hq-mesa-25.2.6/share/glvnd/egl_vendor.d/50_mesa.json \
+nix develop --command python3 scripts/bench/e2e/sdl-input.py \
+  --input-method sdl --renderer opengl --count 600 \
+  --fixture /tmp/lem-wire-large-corpora/mixed-10m.txt --output /tmp/new-gpu-input.json
+```
+
+The outer interval now means pipe submission through presentation acknowledgement
+in SDL mode, and retains X11 submission in X11 mode. The inner interval still
+starts at client `send-input` entry and ends just after `SDL_RenderPresent`.
+The offscreen mode excludes OS/X11 delivery, GPU completion and monitor scanout;
+[SDL event injection](https://wiki.libsdl.org/SDL2/SDL_PushEvent) also does not
+update physical device state. This is a comparison of the application input
+path, not physical keyboard latency. Resource counters include the injector
+thread, pipe handling, warmup, idle time and instrumentation on both renderers.
+The existing full-buffer, saved-byte, unchanged-fixture and clean-exit checks
+still gate result publication.
+
+Two pinned dependency behaviors required explicit handling in the probe. First,
+sdl2-compat 2.32.58's `Event2to3` returns null for a pushed `SDL_TEXTINPUT`; its
+`SDL_PushEvent` then passes that to SDL3 3.2.26, which dereferences it. The failed
+initial probe produced a native memory fault and no result JSON. Second, CFFI's
+SBCL `%foreign-symbol-pointer` ignores its library argument, resolving SDL2's
+same-named function even when SDL3 was requested. Native `dlopen`/`dlsym` now
+selects the SDL3 ABI explicitly; the C helper itself has no SDL symbol imports.
+The helper stays loaded until process exit because queued text points to its
+static string. The injector is joined before window/SDL teardown; a finite FD
+wait bounds cleanup if the GUI fails while Python awaits an acknowledgement.
+These changes are confined to the benchmark, not dependency or editor patches.
+
+The standalone native-event check confirms distinct SDL2/SDL3 function pointers
+and receives `KEYDOWN, TEXTINPUT, KEYUP` through SDL2's queue. Full smoke runs
+pass on software/offscreen, actual AMD OpenGL/offscreen, and software/X11.
+A deliberately invalid pipe byte (`a`, 97) reaches the reader assertion, exits
+with an error and publishes no JSON. The final GPU and X11 result hashes match
+the checked-in probe sources. Python compilation and strict C compilation
+(`-Wall -Wextra -Werror`) pass. Artifacts:
+`/tmp/lem-sdl-inject-native-check.{lisp,log}`,
+`/tmp/lem-sdl-event-smoke-software-v5.{json,log}`,
+`/tmp/lem-sdl-event-smoke-{gpu,x11}.{json,log}`, and
+`/tmp/lem-sdl-event-smoke-negative.log`. Initial failure evidence remains in
+`/tmp/lem-sdl-event-smoke-software{,-v4}.log` and their recorded client roots.

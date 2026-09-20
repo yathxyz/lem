@@ -701,6 +701,8 @@
                 SDL2
                 SDL2_ttf
                 SDL2_image
+                # Native offscreen input probe for the SDL2-compat runtime.
+                sdl3
 
                 # SSL/TLS support
                 openssl

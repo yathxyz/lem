@@ -1,11 +1,13 @@
-"""Synthetic X11 key submission -> matching SDL presentation acknowledgement.
+"""Synthetic X11 or pipe/SDL input -> matching SDL presentation acknowledgement.
 
 Run inside nix develop with LEM_BIN pointing to a configured daemon package.
 The client loads this checkout through Qlot. Xvfb, HOME, configuration, socket
 and document are private. No real desktop or source fixture is written.
 Client-local timing starts at send-input entry and ends immediately after
 SDL_RenderPresent returns. Submission timing also includes X11/SDL event
-handling and acknowledgement transport. Neither endpoint is monitor latency.
+handling and acknowledgement transport. The sdl input method uses a private
+pipe and native SDL3 events on an offscreen SDL2-compat renderer, excluding X11 delivery.
+Neither endpoint measures GPU completion or physical monitor latency.
 Client counters span initial fixture presentation through the last measured
 presentation, including setup, warmup and instrumentation. Server counters span
 resource evaluations before warmup and after the final pacing interval. GC CPU
@@ -20,6 +22,7 @@ import math
 import os
 from pathlib import Path
 import select
+import shlex
 import shutil
 import socket
 import statistics
@@ -34,6 +37,8 @@ parser.add_argument('--warmup', type=int, default=20)
 parser.add_argument('--pace', type=float, default=0.025)
 parser.add_argument('--fixture', type=Path)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--input-method', choices=('x11', 'sdl'), default='x11')
+parser.add_argument('--renderer', choices=('software', 'opengl'))
 args = parser.parse_args()
 if args.count <= 0 or args.count % 2 or args.warmup < 0 or args.warmup % 2 or not math.isfinite(args.pace) or args.pace < 0:
     parser.error('count must be positive/even, warmup nonnegative/even, pace nonnegative')
@@ -54,22 +59,28 @@ editor = str(Path(os.environ['LEM_BIN']).absolute())
 editor_resolved = str(Path(editor).resolve(strict=True))
 revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
 source_sha256 = hashlib.sha256((repo / 'frontends/daemon/sdl-client.lisp').read_bytes()).hexdigest()
-for command in ('sbcl', 'Xvfb', 'xdotool'):
+for command in ('sbcl',) + (('Xvfb', 'xdotool') if args.input_method == 'x11' else ('pkg-config',)):
     assert shutil.which(command), f'{command} is required; use nix develop'
-xlib = ctypes.CDLL(os.environ.get('LEM_X11_LIBRARY') or ctypes.util.find_library('X11'))
-xtest = ctypes.CDLL(os.environ.get('LEM_XTEST_LIBRARY') or ctypes.util.find_library('Xtst'))
-xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
-xlib.XOpenDisplay.restype = ctypes.c_void_p
-xlib.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-xlib.XKeysymToKeycode.restype = ctypes.c_ubyte
-xlib.XFlush.argtypes = [ctypes.c_void_p]
-xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
-xtest.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
-xtest.XTestFakeKeyEvent.restype = ctypes.c_int
+if args.input_method == 'x11':
+    xlib = ctypes.CDLL(os.environ.get('LEM_X11_LIBRARY') or ctypes.util.find_library('X11'))
+    xtest = ctypes.CDLL(os.environ.get('LEM_XTEST_LIBRARY') or ctypes.util.find_library('Xtst'))
+    xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    xlib.XOpenDisplay.restype = ctypes.c_void_p
+    xlib.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    xlib.XKeysymToKeycode.restype = ctypes.c_ubyte
+    xlib.XFlush.argtypes = [ctypes.c_void_p]
+    xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    xtest.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+    xtest.XTestFakeKeyEvent.restype = ctypes.c_int
 root = Path(tempfile.mkdtemp(prefix='lem-sdl-input-', dir='/tmp'))
 print('ARTIFACTS: ' + str(root), flush=True)
-env = dict(os.environ, TERM='xterm-256color', SDL_VIDEODRIVER='x11',
+env = dict(os.environ, TERM='xterm-256color',
+           SDL_VIDEODRIVER='x11' if args.input_method == 'x11' else 'offscreen',
            LEM_YATH_OPENROUTER_MODEL_REFRESH='0', LEM_YATH_CODEX_MODEL_REFRESH='0')
+if args.renderer:
+    env['SDL_RENDER_DRIVER'] = args.renderer
+for key in ('LEM_SDL_INPUT_FD', 'LEM_SDL_INPUT_LIBRARY'):
+    env.pop(key, None)
 for key in ('HOME', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME',
             'XDG_STATE_HOME', 'XDG_DATA_HOME', 'LEM_HOME'):
     directory = root / key
@@ -143,16 +154,27 @@ def evaluate(form, gui=False):
 resources = ('(list (get-internal-run-time) (sb-ext:get-bytes-consed) '
              'sb-ext:*gc-run-time* internal-time-units-per-second)')
 try:
-    readfd, writefd = os.pipe()
-    descriptors.extend((readfd, writefd))
-    xserver = start(['Xvfb', '-displayfd', str(writefd), '-screen', '0',
-                     '1600x1000x24', '-nolisten', 'tcp', '-noreset'],
-                    'xserver', pass_fds=(writefd,))
-    os.close(writefd)
-    descriptors.remove(writefd)
-    number = line(readfd, bytearray(), 10).decode()
-    assert number.isdigit()
-    env['DISPLAY'] = ':' + number
+    if args.input_method == 'x11':
+        readfd, writefd = os.pipe()
+        descriptors.extend((readfd, writefd))
+        xserver = start(['Xvfb', '-displayfd', str(writefd), '-screen', '0',
+                         '1600x1000x24', '-nolisten', 'tcp', '-noreset'],
+                        'xserver', pass_fds=(writefd,))
+        os.close(writefd)
+        descriptors.remove(writefd)
+        number = line(readfd, bytearray(), 10).decode()
+        assert number.isdigit()
+        env['DISPLAY'] = ':' + number
+    else:
+        helper = root / 'sdl-input-events.so'
+        flags = shlex.split(subprocess.check_output(['pkg-config', '--cflags', 'sdl3'], text=True))
+        subprocess.run(shlex.split(os.environ.get('CC', 'cc')) +
+                       ['-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
+                        str(Path(__file__).with_name('sdl-input-events.c')), '-o', str(helper)] + flags,
+                       check=True, env=env)
+        inputfd, commandfd = os.pipe()
+        descriptors.extend((inputfd, commandfd))
+        env.update(LEM_SDL_INPUT_FD=str(inputfd), LEM_SDL_INPUT_LIBRARY=str(helper))
     daemon = start([editor, '--daemon=sdl-input-bench'], 'daemon')
     endpoint = root / 'XDG_RUNTIME_DIR/lem/sdl-input-bench.sock'
     deadline = time.monotonic() + 30
@@ -172,31 +194,40 @@ try:
     client = start(['sbcl', '--noinform', '--no-sysinit', '--no-userinit',
                     '--load', str(repo / '.qlot/setup.lisp'), '--script',
                     str(Path(__file__).with_name('sdl-input-client.lisp'))],
-                   'client', pass_fds=(writefd,))
+                   'client', pass_fds=(writefd,) + ((inputfd,) if args.input_method == 'sdl' else ()))
     os.close(writefd)
     descriptors.remove(writefd)
+    if args.input_method == 'sdl':
+        os.close(inputfd)
+        descriptors.remove(inputfd)
     initial = json.loads(line(ackfd, ack_buffer, 120))
     assert initial['sequence'] == 0 and not initial['inserted']
+    if args.renderer:
+        assert initial['renderer']['name'] == args.renderer, initial['renderer']
     assert evaluate('(progn (assert (eq (lem:current-buffer) (lem:get-file-buffer '
                     + quote(document) + '))) (lem:buffer-start (lem:current-point)) '
                     '(lem-vi-mode/commands:vi-insert) (lem:redraw-display :force t) t)', gui=True) == 'T'
-    windows = subprocess.check_output(['xdotool', 'search', '--name', '^Lem client$'],
-                                      env=env, text=True, timeout=10).split()
-    assert len(windows) == 1
-    subprocess.run(['xdotool', 'windowfocus', '--sync', windows[0]], env=env, check=True, timeout=10)
-    display = xlib.XOpenDisplay(env['DISPLAY'].encode())
-    assert display
-    keycodes = [xlib.XKeysymToKeycode(display, symbol) for symbol in (ord('x'), 0xff08)]
-    assert all(keycodes)
+    if args.input_method == 'x11':
+        windows = subprocess.check_output(['xdotool', 'search', '--name', '^Lem client$'],
+                                          env=env, text=True, timeout=10).split()
+        assert len(windows) == 1
+        subprocess.run(['xdotool', 'windowfocus', '--sync', windows[0]], env=env, check=True, timeout=10)
+        display = xlib.XOpenDisplay(env['DISPLAY'].encode())
+        assert display
+        keycodes = [xlib.XKeysymToKeycode(display, symbol) for symbol in (ord('x'), 0xff08)]
+        assert all(keycodes)
     time.sleep(0.2)
     start_resources = evaluate(resources, gui=True)
     records = []
     for index in range(args.count + args.warmup):
         submitted = time.perf_counter_ns()
-        keycode = keycodes[index % 2]
-        assert xtest.XTestFakeKeyEvent(display, keycode, 1, 0)
-        assert xtest.XTestFakeKeyEvent(display, keycode, 0, 0)
-        xlib.XFlush(display)
+        if args.input_method == 'x11':
+            keycode = keycodes[index % 2]
+            assert xtest.XTestFakeKeyEvent(display, keycode, 1, 0)
+            assert xtest.XTestFakeKeyEvent(display, keycode, 0, 0)
+            xlib.XFlush(display)
+        else:
+            assert os.write(commandfd, b'x' if index % 2 == 0 else b'\b') == 1
         reply = json.loads(line(ackfd, ack_buffer, 10))
         acknowledged = time.perf_counter_ns()
         assert reply['sequence'] == index + 1
@@ -213,7 +244,15 @@ try:
     assert document.read_bytes() == document_bytes
     if fixture:
         assert fixture.read_bytes() == original
-    result = dict(editor=editor, editor_resolved=editor_resolved, client_source=str(repo),
+    result = dict(input_method=args.input_method,
+                  native_event_api='SDL3 through SDL2-compat' if args.input_method == 'sdl' else None,
+                  renderer_requested=args.renderer,
+                  renderer=initial['renderer'],
+                  graphics_environment={key: env.get(key) for key in
+                                        ('SDL_RENDER_DRIVER', 'EGL_PLATFORM', '__EGL_VENDOR_LIBRARY_FILENAMES')},
+                  probe_sha256={name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                                for name in ('sdl-input.py', 'sdl-input-client.lisp', 'sdl-input-events.c')},
+                  editor=editor, editor_resolved=editor_resolved, client_source=str(repo),
                   client_revision=revision, client_sdl_sha256=source_sha256,
                   client_runtime="source-loaded SBCL after full GC", root=str(root), samples=records,
                   warmup=args.warmup, pace_seconds=args.pace, fixture_source=str(fixture) if fixture else None,
@@ -229,6 +268,9 @@ try:
     for name in ('submission_ack_ms', 'client_send_to_present_ms'):
         values = sorted(record[name] for record in records)
         result[name] = dict(p50=statistics.median(values), p95=values[int(.95*(len(values)-1))], maximum=max(values))
+    if args.input_method == 'sdl':
+        os.close(commandfd)
+        descriptors.remove(commandfd)
     assert evaluate('(lem-if:close-frontend (lem:implementation))', gui=True) == 'T'
     assert client.wait(timeout=20) == 0, f'Client exit failed; inspect {root}'
     request('shutdown', force=True)
