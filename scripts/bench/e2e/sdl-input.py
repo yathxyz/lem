@@ -39,6 +39,8 @@ parser.add_argument('--fixture', type=Path)
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--input-method', choices=('x11', 'sdl'), default='x11')
 parser.add_argument('--renderer', choices=('software', 'opengl'))
+parser.add_argument('--client-sdl-source', type=Path,
+                    help='Load an alternate client SDL source file for a controlled comparison')
 args = parser.parse_args()
 if args.count <= 0 or args.count % 2 or args.warmup < 0 or args.warmup % 2 or not math.isfinite(args.pace) or args.pace < 0:
     parser.error('count must be positive/even, warmup nonnegative/even, pace nonnegative')
@@ -58,7 +60,8 @@ document_bytes = b'BENCH_TARGET\n' + original
 editor = str(Path(os.environ['LEM_BIN']).absolute())
 editor_resolved = str(Path(editor).resolve(strict=True))
 revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
-source_sha256 = hashlib.sha256((repo / 'frontends/daemon/sdl-client.lisp').read_bytes()).hexdigest()
+client_source = (args.client_sdl_source or repo / 'frontends/daemon/sdl-client.lisp').resolve(strict=True)
+source_sha256 = hashlib.sha256(client_source.read_bytes()).hexdigest()
 for command in ('sbcl',) + (('Xvfb', 'xdotool') if args.input_method == 'x11' else ('pkg-config',)):
     assert shutil.which(command), f'{command} is required; use nix develop'
 if args.input_method == 'x11':
@@ -81,6 +84,9 @@ if args.renderer:
     env['SDL_RENDER_DRIVER'] = args.renderer
 for key in ('LEM_SDL_INPUT_FD', 'LEM_SDL_INPUT_LIBRARY'):
     env.pop(key, None)
+env.pop('LEM_SDL_SOURCE', None)
+if args.client_sdl_source:
+    env['LEM_SDL_SOURCE'] = str(client_source)
 for key in ('HOME', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME',
             'XDG_STATE_HOME', 'XDG_DATA_HOME', 'LEM_HOME'):
     directory = root / key
@@ -244,6 +250,7 @@ try:
     assert document.read_bytes() == document_bytes
     if fixture:
         assert fixture.read_bytes() == original
+    assert hashlib.sha256(client_source.read_bytes()).hexdigest() == source_sha256
     result = dict(input_method=args.input_method,
                   native_event_api='SDL3 through SDL2-compat' if args.input_method == 'sdl' else None,
                   renderer_requested=args.renderer,
@@ -254,7 +261,7 @@ try:
                   probe_sha256={name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                                 for name in ('sdl-input.py', 'sdl-input-client.lisp', 'sdl-input-events.c')},
                   editor=editor, editor_resolved=editor_resolved, client_source=str(repo),
-                  client_revision=revision, client_sdl_sha256=source_sha256,
+                  client_revision=revision, client_sdl_source=str(client_source), client_sdl_sha256=source_sha256,
                   client_runtime="source-loaded SBCL after full GC", root=str(root), samples=records,
                   warmup=args.warmup, pace_seconds=args.pace, fixture_source=str(fixture) if fixture else None,
                   fixture_bytes=len(document_bytes), fixture_sha256=hashlib.sha256(document_bytes).hexdigest())

@@ -1,6 +1,7 @@
 (defpackage :lem-daemon/tests/sdl-render
   (:use :cl :rove)
   (:local-nicknames (:gui :lem-daemon/sdl-client)
+                    (:font :lem-sdl2/font)
                     (:protocol :lem-daemon/protocol)))
 (in-package :lem-daemon/tests/sdl-render)
 
@@ -75,6 +76,31 @@
                              (sdl2:render-copy renderer texture :dest-rect fresh)))
                          (ok (equalp actual (read-pixels renderer))
                              "reused glyph geometry matches a fresh rectangle")))))
+      (gui::clear-glyphs cache))))
+
+(defun exercise-glyph-key-lifetime (renderer fonts)
+  (let ((cache (make-hash-table :test 'equal))
+        (keys '(("x" "#FFFFFF" nil) ("x" "#FFFFFF" t) ("x" "#FF0000" nil)
+                ("y" "#FFFFFF" nil) ("漢" "#FFFFFF" nil) ("é" "#FFFFFF" nil))))
+    (unwind-protect
+         (sdl2:with-rects (rectangle)
+           (flet ((paint (key)
+                    (destructuring-bind (text foreground bold) key
+                      (gui::draw-glyph renderer rectangle cache fonts text foreground bold
+                                       0 0 (* (lem:string-width text) (font:font-char-width fonts))
+                                       (font:font-char-height fonts)))))
+             (dolist (key keys) (paint key))
+             (let ((textures (mapcar (lambda (key) (gethash key cache)) keys)))
+               (ok (every #'identity textures) "each glyph/style has a cached texture")
+               (dotimes (i 3)
+                 ;; Unwind every lookup's stack frame, reuse it for other keys,
+                 ;; and collect before consulting the long-lived cache again.
+                 (dolist (key (reverse keys)) (paint key))
+                 #+sbcl (sb-ext:gc :full t)
+                 (ok (every (lambda (key texture) (eq texture (gethash key cache))) keys textures)
+                     "stored keys survive later lookups and garbage collection")
+                 (ok (= (length keys) (hash-table-count cache))
+                     "cache hits keep the original entries")))))
       (gui::clear-glyphs cache))))
 
 (defun exercise-rectangle-cleanup (renderer fonts)
@@ -201,6 +227,7 @@
                    (declare (ignore connection files wait-p))
                    (exercise-renderer window renderer fonts)
                    (exercise-rectangle-reuse renderer fonts)
+                   (exercise-glyph-key-lifetime renderer fonts)
                    (exercise-rectangle-cleanup renderer fonts)))
            ;; Use the production single-thread entry point so assertion state
            ;; and SDL initialization/rendering/teardown stay on this test thread.

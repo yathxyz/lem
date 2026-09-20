@@ -3,6 +3,8 @@
 (ql:quickload :lem-daemon/sdl-client :silent t)
 (assert (equal (truename (uiop:getenv "LEM_SDL_REPO"))
                (truename (asdf:system-source-directory :lem))))
+(when (uiop:getenv "LEM_SDL_SOURCE")
+  (load (uiop:getenv "LEM_SDL_SOURCE") :verbose nil :print nil))
 (defpackage :lem-bench/sdl-input
   (:use :cl)
   (:local-nicknames (:gui :lem-daemon/sdl-client)

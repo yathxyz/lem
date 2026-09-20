@@ -87,9 +87,12 @@
                              (lem:color-blue color) 255))))
                    (trivial-garbage:cancel-finalization surface)
                    (unwind-protect
-                        (setf (gethash key cache)
+                        ;; The lookup key has dynamic extent; only its copy
+                        ;; may outlive this call in the texture cache.
+                        (setf (gethash (copy-list key) cache)
                               (sdl2:create-texture-from-surface renderer surface))
                      (sdl2:free-surface surface))))))
+      (declare (dynamic-extent key))
       (setf (sdl2:rect-x rectangle) x
             (sdl2:rect-y rectangle) y
             (sdl2:rect-width rectangle) width

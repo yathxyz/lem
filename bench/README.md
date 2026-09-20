@@ -4692,3 +4692,77 @@ SDL and both SDL test files match the checkout byte-for-byte. Configured package
 Logs: `/tmp/lem-native-float-{software,gpu}-pixels.log`,
 `/tmp/lem-native-float-build.paths`, `/tmp/lem-native-float-native.log`.
 No installed profile was activated.
+
+
+### Avoid allocating glyph lookup keys on cache hits (2026-09-20)
+
+`draw-glyph` built a fresh three-cons key `(text foreground bold)` for every
+non-space glyph, even when its texture was already cached. The temporary key
+now has declared dynamic extent, which SBCL places on the stack. A cache miss
+stores a `copy-list` of that key, preserving its lifetime in the texture cache.
+The cache format, equality test, limits, glyph/style distinctions and surface
+cleanup are unchanged. No global scratch key or additional cache is introduced.
+
+A same-process ABBA changed only the renderer source, separately for software
+and actual OpenGL on the matched offscreen Mesa runtime. Glyphs were warmed and
+a full GC preceded each phase. Sparse updates used the retained frame cache;
+full repaints used the direct path without a retained frame cache. Mean results:
+
+| Workload | Lisp bytes, before → after | Process CPU, before → after |
+| --- | ---: | ---: |
+| Software, 3,000 sparse updates | 6,202,496 → 2,305,984 (−62.8%) | 805.008 → 803.533 ms |
+| Software, 400 full repaints | 19,602,624 → 101,504 (−99.5%) | 302.360 → 302.435 ms |
+| OpenGL, 3,000 sparse updates | 6,105,792 → 2,323,968 (−61.9%) | 144.362 → 133.014 ms |
+| OpenGL, 400 full repaints | 19,598,656 → 103,552 (−99.5%) | 633.483 → 635.973 ms |
+
+This is predominantly an allocation improvement. Software CPU and full-repaint
+CPU are effectively unchanged; OpenGL sparse-update CPU fell about 7.9% in this
+component workload. These figures do not measure typing or monitor latency.
+Artifacts: `/tmp/lem-glyph-key-{before,after}.lisp` and
+`/tmp/lem-glyph-key-component.{lisp,log}`. Both variants retain the preceding
+batching and floating-point fixes.
+
+The pixel suite now additionally verifies that six glyph/style keys remain
+retrievable with their original texture identities after repeated later
+lookups and full garbage collections. This exercises the persistent-key
+lifetime independently of the temporary lookup objects. The full software and
+OpenGL pixel suites pass, as does the SDL client suite. Logs:
+`/tmp/lem-glyph-key-{client,software-pixels,gpu-pixels}.log`.
+
+For reproducible full-input comparisons, `sdl-input.py` now accepts
+`--client-sdl-source /path/to/sdl-client.lisp`. The disposable client loads that
+file after normal system loading; the daemon package remains explicit through
+`LEM_BIN`. Results record the selected source path and its hash, and reject a
+source file changed during the run. Inherited `LEM_SDL_SOURCE` is cleared unless
+the CLI option selects an override. Normal runs continue loading the checkout.
+This avoids ad hoc edits to the probe for each before/after comparison.
+
+
+The full X11 input ABBA used the same configured daemon, software renderer,
+batching default, 10 MB UTF-8 fixture, 600 measured inputs, 20 warmups and 25 ms
+pacing. Means of the two runs per source:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Client process CPU | 434.763 ms | 432.182 ms (−0.6%) |
+| Client Lisp allocation | 31,563,392 bytes | 29,440,064 bytes (−6.7%) |
+| Client GC CPU | 4.241 ms | 4.161 ms |
+| X11 submission-to-ack median / p95 | 0.887 / 1.169 ms | 0.875 / 1.121 ms |
+| Client send-to-present median / p95 | 0.782 / 1.011 ms | 0.768 / 0.968 ms |
+
+The individual median ranges overlap; maximum latency did not improve. The
+supported full-path result is reduced client allocation, with essentially
+unchanged CPU, rather than a general typing-latency claim. Daemon allocation
+was effectively unchanged (44,168,016 → 44,164,432 bytes). Each run passed
+full-buffer, saved-byte, unchanged-fixture and clean daemon/client exit checks.
+Selected source paths/hashes, all probe hashes and sample counts were verified.
+Artifacts: `/tmp/lem-glyph-key-{before,after}-{1,2}.{json,log}`, driven by
+`/tmp/lem-glyph-key-input.{py,log}`.
+
+
+All 19 packaged native display/lifecycle checks pass. Built production SDL and
+pixel-test sources match the checkout byte-for-byte. Configured package:
+`/nix/store/zpzni4jv3aj7w9nkpsz7bpr3vnqgw8nx-lem-yath`; native client:
+`/nix/store/g8fx3k52p0rdy241zpq6lpgvz257086d-sbcl-lemclient-unstable`. Logs:
+`/tmp/lem-glyph-key-build.paths`, `/tmp/lem-glyph-key-native.log`.
+No installed profile was activated.
