@@ -52,3 +52,8 @@
                          (code-char #x301) #\Tab #\Newline (code-char #xe001))
                  mode)
   (run-benchmark "wide" (make-string 50 :initial-element #\漢) mode))
+
+(dolist (mode '(:cursor :row :full))
+  (run-benchmark "dense-ascii"
+                 (format nil "~{~a~}" (make-list 10 :initial-element "abcdefghij"))
+                 mode))

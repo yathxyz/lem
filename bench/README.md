@@ -5429,3 +5429,107 @@ affinity run roots: `xttav4ab`, `73p4mvam`, `ee_iv_3h`, `7vbd2mzs` (each prefixe
 `/tmp/lem-sdl-input-`). Focused roots:
 `/tmp/lem-indent-copy-o97fdt4d`, `/tmp/lem-indent-copy-t53ovde3`; successful component
 root: `/tmp/lem-indent-copy-component-me4k6ui7`.
+
+
+### Batch trailing blank cells during daemon composition (2026-09-20)
+
+`overlay-cells` previously placed every blank padding cell separately. It now
+finds a trailing run of shared one-character space strings and copies its cell
+and face vectors together, after checking that the live space width is one.
+Occupied cells retain the character-placement path. Only the clipped run's
+edges need wide-glyph repair; interior cells are overwritten completely. Source
+and destination sharing either cell or face storage keep forward placement.
+There is no retained width cache. The suffix index only decreases from a vector
+length to zero and is declared a fixnum.
+
+Regression checkpoint `3c1fb825a` adds 2,016 differential cases covering repeated
+cells, negative/right-edge clipping, independently varying faces and changing
+space/x icon widths after source-row construction. It also adds 20 shared-storage
+cases and four unequal cell/face-vector length cases, using the existing frozen
+character-placement oracle. Both the old implementation and final candidate pass
+all five daemon test modules. SDL client and pixel modules plus all 19 packaged
+native display/lifecycle checks pass for the final candidate. Tested base source,
+regression file and benchmark script matched the checkout byte for byte.
+
+The component ABBA used 3,000 100-by-40 frame compositions after 100 warmups per
+case, with full GC before timing, on CPUs 0–3. Both function versions were loaded
+under the same compiler policy. The checked-in benchmark now includes fully
+occupied alternating ASCII rows with no repeated cells, which exposed a cost in
+the initial generic run-detection design. Final mean CPU milliseconds:
+
+| Fixture | No rerender, before → after | One row, before → after | All rows, before → after |
+| --- | ---: | ---: | ---: |
+| ascii | 138.955 → 90.535 | 143.149 → 93.448 | 278.909 → 231.635 |
+| unicode | 167.606 → 94.590 | 165.356 → 97.784 | 281.352 → 212.875 |
+| wide | 220.221 → 225.117 | 232.048 → 232.154 | 545.955 → 537.480 |
+| dense-ascii | 138.779 → 139.055 | 144.195 → 144.721 | 377.918 → 379.646 |
+
+Padded ASCII/Unicode composition improved about 35–44% with no/one-row rerender
+and 17–24% with full rerender. Wide rows ranged from 1.6% lower to 2.2% higher CPU;
+dense ASCII was within 0.5%. Allocation was broadly unchanged. These counters
+include fresh frame-grid allocation but exclude core redisplay, encoding,
+transport and client presentation. Every checksum was 120,000. No builds,
+tests or other benchmarks ran concurrently.
+
+The first candidate detected runs at every occupied cell; its dense-ASCII
+composition regressed about 8%, so it was replaced by suffix-only detection. An
+untyped suffix prototype also regressed wide-row CPU. The final variant uses
+an explicitly bounded fixnum suffix index and an explicit zero loop start;
+only its final measurements above support the retained implementation.
+
+
+The full X11/software ABBA used the formatted 524 KB Lisp fixture, 600 measured
+inputs plus 20 warmups per run, 25 ms pacing, and CPUs 0–3 for the private benchmark
+and descendants. Inputs alternate x/backspace on the first line; language mode,
+highlighting and configured editing hooks remain enabled. It does not exercise
+deep-file editing or an interactive language-server workload. Means of the two
+runs (including means of per-run percentiles):
+
+| Measurement | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Daemon CPU (ms) | 538.012 | 504.337 | -6.26% |
+| Daemon allocated bytes | 117,252,944 | 117,210,512 | -0.04% |
+| Client CPU (ms) | 229.071 | 225.097 | -1.73% |
+| Client allocated bytes | 25,372,672 | 25,182,144 | -0.75% |
+| Client send-to-present median (ms) | 0.835 | 0.809 | -3.06% |
+| Client send-to-present p95 (ms) | 1.122 | 1.002 | -10.68% |
+| Submission-to-ack median (ms) | 0.949 | 0.926 | -2.41% |
+| Submission-to-ack p95 (ms) | 1.261 | 1.131 | -10.30% |
+
+Both candidate daemon CPU values (508.922/499.751 ms) were below both baseline
+values (540.673/535.350 ms). Both candidate median and p95 values also improved
+over both baselines. This is a measured improvement for this synthetic input
+path, not a physical-monitor latency claim. Allocation was essentially flat;
+GC CPU is not a measured pause. All four runs passed complete text/save/source
+fixture integrity, mode/renderer/probe/source hash checks and clean client/daemon
+exits. No installed editor or user session was changed.
+
+Baseline configured editor:
+`/nix/store/iki8wg9zj1c5wd25xzmzwh9mxsnv6s2j-lem-yath/bin/lem`.
+Its implementation source was compared with the committed pre-change file.
+Final configured editor:
+`/nix/store/jyplyd0wz66al9my1kdllsnkhwiscg88-lem-yath/bin/lem`, resolved to
+`/nix/store/6qgzls8xalsgzjdjh0ss9pnj36b02p1b-lem/bin/lem`.
+Tested base: `/nix/store/6hp8jrmpmjgfhsig66rzlbyk0jljw9h0-sbcl-lem-ncurses-unstable`.
+Source: `/nix/store/hg15gkmc75v17v5f1pi4chqkd6cz821n-iq4nlqm9dl47dy0n6cgz3szjfccj2mp7-source-patched`.
+
+Artifacts:
+- Final component definitions: `/tmp/lem-cell-runs-before.lisp` and
+  `/tmp/lem-cell-padding-after.lisp`; component driver/fixture:
+  `/tmp/lem-cell-padding-typed-component.py`, `/tmp/lem-cell-padding-component.lisp`.
+  Final logs: `/tmp/lem-cell-padding-typed-component-{before,after}-{1,2}.log`,
+  aggregate `/tmp/lem-cell-padding-typed-component.log` and
+  `/tmp/lem-cell-padding-typed-component-results.log`.
+- Earlier generic-run and untyped-suffix prototypes:
+  `/tmp/lem-cell-runs-after.lisp`, `/tmp/lem-cell-padding-untyped.lisp`,
+  `/tmp/lem-cell-runs-component.log`, `/tmp/lem-cell-runs-dense.log`,
+  `/tmp/lem-cell-padding-component.log`. These are not the retained results.
+- Validation: `/tmp/lem-cell-runs-baseline-tests-r2.log`,
+  `/tmp/lem-cell-padding-{daemon,client,pixels}-tests.log`,
+  `/tmp/lem-cell-padding-build.{paths,log}` and
+  `/tmp/lem-cell-padding-package-proof.json`.
+- Full input: `/tmp/lem-cell-padding-{before,after}-{1,2}.{json,log}`,
+  runner/verifier `/tmp/lem-cell-padding-{input,results}.{py,log}`.
+  Roots in ABBA order: `/tmp/lem-sdl-input-ej121hd6`,
+  `/tmp/lem-sdl-input-c1n3uxcv`, `/tmp/lem-sdl-input-c6pum53m`,
+  `/tmp/lem-sdl-input-j08la476`.
