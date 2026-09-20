@@ -6191,3 +6191,119 @@ Long-blank roots in ABBA order: `/tmp/lem-sdl-input-d3zchd8e`,
 `/tmp/lem-sdl-input-g5o11fgr`. Ordinary roots:
 `/tmp/lem-sdl-input-hi1gmtiq`, `/tmp/lem-sdl-input-1f9_unno`,
 `/tmp/lem-sdl-input-yzfg3yle`, `/tmp/lem-sdl-input-ifv9nlsx`.
+
+### Bound sparse-checkpoint traversal by the actual syntax query (2026-09-20)
+
+A fresh profile of the exact line-number-formatting package (`b15375540`,
+documentation checkpoint `e8acf9d48`) used 2,400 measured deep-Lisp events plus
+20 warmups at 5 ms pacing, CPUs 0–3, and software X11 rendering. All source,
+mode, renderer, target-offset, saved-text, and clean-exit gates passed. The
+profile collected 2,275 CPU samples at 1 ms intervals. Inclusive counts include
+1,147 (50.4%) in logical-line construction, 729 (32.0%) in the indentation
+transform, 338 (14.9%) in `syntax-ppss`, 267 (11.7%) in
+`parse-with-ppss-checkpoints`, 254 (11.2%) in `parse-partial-sexp`, and 300
+(13.2%) in programming-mode classification. These shares overlap. `line-offset`
+itself accounted for just 13 samples (0.6%); the checkpoint change below does
+not claim to remove the whole parsing cost. Profile timings are not speedup
+measurements.
+
+Profile artifacts: `/tmp/lem-current-profile-number-format-deep.{json,log}`,
+`/tmp/lem-current-profile-number-format-deep-instrumented.py`,
+`/tmp/lem-current-profile-number-format-proof.{py,log}`, and
+`/tmp/lem-sdl-input-b7hduiog/server-profile.txt`. The instrumented probe SHA is
+`7c3547f157c23ea913506fefa48b7ecb40d5e1a8e9752d02d44db8ff418f84c7`.
+The optional shutdown-diagnostic client retains the production SDL source as
+an exact prefix; this run exited normally without a shutdown timeout.
+
+`parse-with-ppss-checkpoints` previously tried advancing its temporary boundary
+64 lines for every query, including a target only one line ahead, and then
+moved it back to that target. The new distance guard skips that unused
+lookahead when the target is closer than 64 lines. An exactly 64-line target
+still follows the original path, preserving an intermediate checkpoint at
+column zero when the requested column is nonzero. Checkpoint spacing, parser
+states, cache invalidation, and point ownership are unchanged.
+
+Same-process ABBA components query 39 visible rows 2,000 times per phase,
+invalidating only the cache suffix at the start of each simulated edit. Both
+variants are compiled under the same policy, with full GC between phases and
+CPUs 0–3. The reported final states and source text match:
+
+| Component | CPU before → after (ms) | Allocated bytes before → after |
+| --- | --- | --- |
+| Ordinary Lisp at line 6514 | 1,115.406 → 1,084.372 | 44,234,624 → 43,035,200 |
+| Long blank fixture at line 1 | 77.574 → 56.380 | 38,982,976 → 37,718,528 |
+
+Both candidate phases were below both baselines: CPU −2.8% on ordinary code
+and −27.3% on blank lines. This is a helper/cache workload, not a complete
+keystroke speedup. The first ordinary component run failed its clean-shutdown
+gate on an unused-local-function compiler warning from the prototype harness.
+Removing that unnecessary compiler wrapper produced the clean second run
+above; the failed run is excluded. Corrected artifacts:
+`/tmp/lem-ppss-bound-{before,after}.lisp`,
+`/tmp/lem-ppss-bound-component.{lisp,py}`, `/tmp/lem-ppss-bound-component-r2.log`,
+and `/tmp/lem-ppss-bound-long-component.{lisp,py,log}`. Private roots:
+`/tmp/lem-ppss-bound-0fjg985d` and `/tmp/lem-ppss-bound-otgnitk0`.
+
+The 66 focused parser assertions passed before and after the change, including
+fresh-parse comparisons across strings, nested comments, escaped delimiters,
+Unicode, edits and undo. The new 12 boundary cases contribute 48 assertions
+covering exact checkpoint positions and order, preserved cache tails,
+nonzero start/target columns, EOF, and unchanged caller points. The packaged
+build passed all 43 indentation, Org, and native-client checks. Logs:
+`/tmp/lem-ppss-bound-tests-{before,after}.log` and
+`/tmp/lem-ppss-bound-build.{log,paths}`.
+
+Implementation and tests are committed as `c65b99685`. The candidate editor is
+`/nix/store/rl4pyljnvaj3852czshcd312l47sqnij-lem-yath/bin/lem`, resolving to
+`/nix/store/4j16n5hhq3byb7q3qkzld9kkkr8bnzlk-lem/bin/lem`.
+`/tmp/lem-ppss-bound-package-proof.{py,json}` verifies installed source bytes;
+the configuration store path is identical to the baseline. Parser source SHA:
+`cf9fd8bf48859fcea3b515ebd1bc1fcd35d1f55960ea8965f05a29adc0df5a1d`.
+The baseline is the prior verified
+`/nix/store/6gvr7amddfm24nks7jmmyyafff28sx5r-lem-yath/bin/lem` package.
+
+The full GUI comparison used the same two fixtures in ABBA order, 600 measured
+events plus 20 warmups per run, 25 ms pacing, CPUs 0–3, and software X11
+rendering. All eight runs passed exact executable/configuration/mode/renderer
+provenance, client/probe hashes, marker location, source reconstruction,
+whole-text equality, saved-document checks, and clean daemon/client exits.
+The table gives means of two runs per variant, including means of each run's
+reported latency percentile:
+
+| Measure | Long blanks: before → after | Ordinary Lisp: before → after |
+| --- | --- | --- |
+| Daemon CPU (ms) | 668.511 → 657.481 | 758.457 → 734.271 |
+| Daemon allocated bytes | 219,910,432 → 220,000,544 | 219,956,000 → 219,996,192 |
+| Client CPU (ms) | 226.002 → 221.847 | 263.481 → 259.096 |
+| Client allocated bytes | 25,360,768 → 25,563,904 | 36,924,992 → 37,124,992 |
+| Client send-to-present median (ms) | 1.053 → 1.045 | 1.091 → 1.083 |
+| Client send-to-present p95 (ms) | 1.266 → 1.186 | 1.692 → 1.733 |
+| Submission-to-ack median (ms) | 1.179 → 1.164 | 1.257 → 1.251 |
+| Submission-to-ack p95 (ms) | 1.399 → 1.325 | 2.037 → 2.094 |
+
+Long blanks showed a small full-input CPU improvement: −1.6% daemon CPU,
+with both candidates below both baselines (664.789/650.173 ms versus
+671.445/665.576 ms). Client send-to-present p95 fell 6.3%, also with both
+candidates below both baselines (1.172/1.199 ms versus 1.275/1.256 ms). Median
+ranges overlap (mean −0.8%). Allocation stayed flat; the helper component's
+allocation reduction did not translate into a meaningful full-input saving.
+
+Ordinary-code results are inconclusive: daemon CPU mean −3.2% has overlapping
+ranges (before 726.193/790.720 ms, after 734.617/733.925 ms), and both median
+latency (mean −0.7%) and p95 (mean +2.4%) overlap. The p95 means must not be
+reported as an ordinary-code improvement. Client CPU means fell 1.8% and 1.7%
+on the two workloads; combined daemon/client CPU means also fell, but no
+precise general speedup follows from these two-pair comparisons. Maxima are
+noisy and do not establish a tail guarantee or physical-monitor latency.
+
+The bounded traversal is retained for its simpler amount of work on short
+queries, preserved checkpoint behavior, component evidence, and modest
+long-blank full-input gain. It does not resolve the larger costs of parsing
+characters or repeated programming-mode classification seen in the profile.
+Artifacts: `/tmp/lem-ppss-bound-{input,results}.{py,log}` and
+`/tmp/lem-ppss-bound-{long,deep}-{before,after}-{1,2}.{json,log}`.
+Long-blank roots in ABBA order: `/tmp/lem-sdl-input-rv90n16g`,
+`/tmp/lem-sdl-input-qvq96w7t`, `/tmp/lem-sdl-input-e2wfafuc`,
+`/tmp/lem-sdl-input-a_kqivwh`. Ordinary roots:
+`/tmp/lem-sdl-input-ig4kquu1`, `/tmp/lem-sdl-input-7n7otgfr`,
+`/tmp/lem-sdl-input-6ulysuh8`, `/tmp/lem-sdl-input-kojo8no0`.
