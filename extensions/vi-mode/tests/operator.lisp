@@ -32,11 +32,11 @@
 
 (deftest vi-linewise-change-keeps-boundaries
   (with-fake-interface ()
-    (dolist (case (list (list "[a]bc" "[]" #?"abc\n")
-                       (list #?"abc\nd[e]f" #?"abc\n[]" #?"def\n")
+    (dolist (case (list (list "[a]bc" #?"[]\n" #?"abc\n")
+                       (list #?"abc\nd[e]f" #?"abc\n[]\n" #?"def\n")
                        (list #?"abc\nd[e]f\nxyz" #?"abc\n[]\nxyz" #?"def\n")
-                       (list #?"abc\n[]" #?"abc\n[]" #?"\n")
-                       (list "[]" "[]" #?"\n")))
+                       (list #?"abc\n[]" #?"abc\n[]\n" #?"\n")
+                       (list "[]" #?"[]\n" #?"\n")))
       (destructuring-bind (initial expected deleted) case
         (with-vi-buffer (initial)
           (cmd "cc")
@@ -45,12 +45,12 @@
           (ok (string= (lem-vi-mode/registers:register #\") deleted)))))
     (with-vi-buffer (#?"abc\n[d]ef\nghi")
       (cmd "2ccX<Esc>")
-      (ok (buf= #?"abc\n[X]"))
+      (ok (buf= #?"abc\n[X]\n"))
       (ok (string= (lem-vi-mode/registers:register #\") #?"def\nghi\n"))
       (cmd "u")
       (ok (text= #?"abc\ndef\nghi"))
       (cmd "<C-r>")
-      (ok (text= #?"abc\nX")))))
+      (ok (text= #?"abc\nX\n")))))
 
 (deftest vi-change-undo-group
   (with-fake-interface ()
@@ -188,7 +188,8 @@
         (ok (buf= #?"[]\ndef\n")))
       (with-vi-buffer (#?"abc\nd[e]f")
         (cmd "cc")
-        (ok (buf= #?"abc\n[]"))))
+        ;; Match the configured logical-line newline policy at EOF.
+        (ok (buf= #?"abc\n[]\n"))))
     (testing "change charwise"
       (with-vi-buffer (#?"a[b]c\ndef\n")
         (cmd "cl")

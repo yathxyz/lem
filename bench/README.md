@@ -7693,10 +7693,53 @@ failure leaves both text and normal mode intact. No core undo/kernel code change
 The four focused regression tests pass within the complete Vi suite: 536 passing
 assertions and four remaining baseline failures (one undo cursor-position
 assertion and three numbered-register assertions), down from seven original
-failures. An initial test-file parenthesis error and an incorrect read-only
-condition class were corrected before the final run. Evidence:
+failures in the initial source checkpoint. An initial test-file parenthesis
+error and an incorrect read-only condition class were corrected before that run. Evidence:
 `/tmp/lem-vi-eof-tests-before-r2.log`, `/tmp/lem-vi-eof-tests-after.log`,
 `/tmp/lem-vi-eof-tests-after-r2.log` and
 `/tmp/lem-vi-eof-full-tests-after-r2.log`; driver:
 `/tmp/lem-vi-eof-tests.lisp`. Packaged validation follows this source checkpoint.
 These are correctness repairs; no typing-latency speedup is claimed.
+
+A subsequent small-deletion experiment was rejected before publication.
+Guarding `ring-push` with `unless small` made the older core numbered-register
+assertions pass, including a new private nine-entry history test, but conflicts
+with this fork's configured behavior. The integrated `lem-vi-screen-line.patch`
+explicitly changed that guard to unconditional recording; packaged screen-line
+checks require register 1 to contain the characterwise `dj`, `cj`, `D`, and `C`
+deletions even when the unnamed register is the small-delete register. The
+experiment and its new test were restored to the checkpoint source. No packaged
+expectation was weakened. The three legacy numbered-register failures therefore
+remain a policy mismatch, not evidence that this performance work broke history.
+Private evidence: `/tmp/lem-vi-small-delete-{before,final-focused,final-full}.log`
+and `/tmp/lem-vi-small-delete-rejected-registers.lisp` (the latter retains the
+rejected test file; the original runtime remains in the Git checkpoint).
+
+The remaining undo cursor assertion expects the location of the undone edit.
+The retained undo tree instead restores the destination node's saved cursor
+(`seal-buffer-undo-command` and `move-to-undo-node`). Its text restoration is
+correct. This checkpoint preserves that existing cursor policy; resolving the
+legacy assertion requires a separate behavior decision, not a change to the
+linewise repairs.
+
+Packaged validation caught an additional compatibility constraint: screen-line
+case 26 requires logical-line `cc` on empty/unterminated EOF to create a trailing
+newline. The initial source checkpoint passed 391 Org operator assertions and
+26 of 27 screen-line cases, but omitted that newline. The correction inserts a
+separator only when the replacement line is at EOF, while retaining the repaired
+insertion location and single undo group. The new focused expectations and the
+older `vi-change` EOF expectation now reflect the configured newline policy;
+none of the packaged assertions changed. The complete Vi suite still has 536
+passing assertions and the same four cursor/register policy mismatches.
+Evidence: `/tmp/lem-vi-eof-full-tests-after-r3.log` and the initial packaged run
+`/tmp/lem-vi-eof-build.log`. The Org operator script does not call logical-line
+change; its sole change command is characterwise surround replacement. Its 391
+checks passed before this final EOF-only correction.
+
+The corrected package passes all 27 screen-line cases and all 44 display,
+lifecycle, indentation-guide and Org-modern checks (16 + 9 + 19). Its 41
+selected installed source/configuration files match the checkout byte-for-byte,
+including the changed Vi files and the unchanged register implementation/tests.
+Final build and proof: `/tmp/lem-vi-eof-build-r2.{paths,log}` and
+`/tmp/lem-vi-eof-package-proof.{py,json,log}`. Candidate launcher:
+`/nix/store/0cb8mbm7rwsga9y4574fgq8l90jd7lpj-lem-yath/bin/lem`.

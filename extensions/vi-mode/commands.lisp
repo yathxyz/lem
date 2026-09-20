@@ -481,6 +481,10 @@ Move the cursor to the first non-blank character of the line."
        (character-offset end -1))
      (delete-region beg end :type type)
      (move-point (current-point) beg)
+     ;; Logical-line changes retain the configured Evil newline at EOF.
+     (when (end-buffer-p (current-point))
+       (insert-character (current-point) #\Newline)
+       (character-offset (current-point) -1))
      (indent-line (current-point)))
     ((point= beg end)
      (delete-region beg end :type type))
