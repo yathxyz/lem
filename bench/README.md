@@ -4310,3 +4310,89 @@ shutdown behavior. Validated binaries:
 Production and pixel-test files match the completed build's source byte for
 byte. Build outputs and acceptance log:
 `/tmp/lem-sdl-rect-{build.paths,native.log}`. Installed profiles are unchanged.
+
+
+### Allocate the protocol's UTF-8 string once (2026-09-20)
+
+The SDL client profile attributed 20.2% of sampled allocation to SBCL's
+`UTF8->STRING-AREF`. In the pinned SBCL 2.5.10 implementation that decoder grows
+an adjustable character string, then copies it into a simple string. Babel,
+already a core dependency and previously the non-SBCL protocol decoder, counts
+characters and allocates the result once. `decode-message` now uses that public
+API on SBCL too, with explicit `:errorp t`. The byte limit, Yason parser, object
+requirement and `protocol-error` boundary remain in place. Caller bindings that
+suppress Babel coding errors cannot allow malformed UTF-8 into the protocol.
+
+An independent decoder comparison found zero differences in 67,324 cases:
+every one- and two-byte input, structured longer malformed/truncated boundary
+sequences, and every Unicode scalar value in bounded chunks. Both decoders
+reject surrogates and out-of-range encodings and preserve noncharacters.
+Diagnostic: `/tmp/lem-utf8-equivalence.{lisp,log}`.
+
+A same-process ABBA comparison loads the complete before/after protocol source
+and calls the actual `decode-message`, including its size/object/error checks.
+Each phase warms the parser and performs a full GC before measurement. Means:
+
+| Decoding workload | CPU before → after | Lisp bytes before → after |
+| --- | ---: | ---: |
+| 10,000 input messages, 33 bytes each | 17.135 → 13.013 ms (−24.1%) | 25,595,968 → 18,139,840 (−29.1%) |
+| 10,000 one-row messages, 296 bytes each | 106.652 → 89.260 ms (−16.3%) | 137,124,096 → 89,008,704 (−35.1%) |
+| 400 full screens, 6,419 bytes each | 87.444 → 75.934 ms (−13.2%) | 98,639,360 → 73,288,512 (−25.7%) |
+| 400 Unicode screens, 15,019 bytes each | 121.925 → 98.286 ms (−19.4%) | 142,981,696 → 90,829,056 (−36.5%) |
+
+These are decoding component costs, not typing latency. Artifacts:
+`/tmp/lem-utf8-component.{lisp,log}`. The earlier exploratory comparison omitted
+some protocol checks in its Babel branch and is not used for these results.
+
+All five daemon test modules and the SDL client test module pass. New protocol
+cases cover escaped controls, UTF-8 width boundaries, Unicode keys, combining
+and astral characters, adjustable/displaced octet vectors, 44 malformed-input
+placements under a permissive Babel binding, and messages at/above the byte
+limit. Logs: `/tmp/lem-utf8-{daemon,sdl-client}.log`.
+
+All 19 packaged native display/lifecycle checks also pass. Validated binaries:
+`/nix/store/60b6xqgcigg766yvz1cmdx6ls61lxld5-lem-yath/bin/lem` and
+`/nix/store/kc5r27w2n6h597v98bjcsf1byhpwgivl-sbcl-lemclient-unstable/bin/lemclient`.
+The production and protocol-test files match the completed build's source byte
+for byte. Build outputs and acceptance log:
+`/tmp/lem-utf8-{build.paths,native.log}`. Installed profiles are unchanged.
+
+The packaged Babel dependency and Qlot's Babel match byte for byte across all
+19 source Lisp files. The complete GUI-input comparison used the previous
+configured package (`/nix/store/iyxzw0s1iyl460yccsyib2g5gg5dhk9q-lem-yath/bin/lem`)
+and the candidate above, with matching protocol overlays in the disposable
+source-loaded SDL clients. Each JSON records the actual overlay SHA256 and
+package paths. Both sides retain the preceding SDL rectangle improvement.
+
+The initial ABBA sequence was interrupted during the final baseline: its three
+completed results remain in `/tmp/lem-utf8-gui-{before,after}-*.json`, while
+`before-2` has no result JSON. No benchmark processes survived. A fresh complete
+ABBA sequence on September 20 supplies the following reported numbers; the
+interrupted sequence is not folded into its averages. Each run contains 600
+measured edits plus 20 warmup events, 25 ms pacing and the same private copy of
+the 10 MB UTF-8 fixture.
+
+| GUI-input run | Submission/ack median / p95 / max (ms) | Client send/present median / p95 / max (ms) |
+| --- | --- | --- |
+| Before 1 | 1.032 / 1.435 / 2.678 | 0.889 / 1.236 / 2.503 |
+| After 1 | 1.090 / 1.589 / 2.445 | 0.941 / 1.333 / 2.051 |
+| After 2 | 0.927 / 1.125 / 1.584 | 0.807 / 0.974 / 1.332 |
+| Before 2 | 0.985 / 1.418 / 2.416 | 0.855 / 1.195 / 2.148 |
+
+Mean client Lisp allocation fell 40,102,848 → 31,753,344 bytes (−20.8%), and
+daemon allocation fell 45,005,392 → 44,212,240 bytes (−1.8%). Whole-run client
+CPU was 492.674 → 486.326 ms (−1.3%); daemon CPU was
+385.273 → 388.132 ms (+0.7%). Client GC CPU was 3.526 → 3.362 ms; this is not
+wall-pause duration. End-to-end latency remains mixed. The reliable allocation
+reduction and isolated decoder CPU savings do not establish a universal typing
+latency improvement.
+
+These are software-rendered Xvfb endpoints, not physical monitor latency.
+Counters include warmup, idle time and instrumentation; client counters also
+include setup after initial presentation. Every published result passed full
+buffer-text, saved-byte, unchanged-fixture and clean client/daemon exit checks.
+Artifacts: `/tmp/lem-utf8-gui-r2-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-utf8-gui-r2-runs.log`; probe copies:
+`/tmp/lem-utf8-gui.py`, `/tmp/lem-utf8-client.lisp`, and
+`/tmp/lem-utf8-gui-r2-runs.py`. No core or undo behavior was changed; the previously
+documented historical undo-model verification gap remains open.

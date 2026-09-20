@@ -39,6 +39,58 @@
     (ok (string= "eval" (protocol:field decoded "type")))
     (ok (string= "(+ 20 22)" (protocol:field decoded "form")))))
 
+(deftest unicode-message-decoding
+  (let* ((text (coerce (mapcar #'code-char
+                             '(0 9 10 13 34 92 127 128 255 2047 2048
+                               #xd7ff #xe000 #xffff #x10000 #x1f600 #x10ffff))
+                       'string))
+         (message (protocol:make-object "text" text "漢字" "é😀"))
+         (octets (protocol:encode-message message)))
+    (dolist (bytes (list octets
+                        (make-array (length octets) :element-type '(unsigned-byte 8)
+                                    :adjustable t :fill-pointer (length octets)
+                                    :initial-contents octets)
+                        (let ((storage (make-array (+ 4 (length octets))
+                                                   :element-type '(unsigned-byte 8))))
+                          (replace storage octets :start1 2)
+                          (make-array (length octets) :element-type '(unsigned-byte 8)
+                                      :displaced-to storage :displaced-index-offset 2))))
+      (let ((decoded (protocol:decode-message bytes)))
+        (ok (equal text (protocol:field decoded "text"))
+            "UTF-8 boundaries and escaped controls survive decoding")
+        (ok (equal "é😀" (protocol:field decoded "漢字"))
+            "Unicode keys, combining text and astral characters survive decoding")))))
+
+(deftest malformed-utf8-messages
+  (let ((prefix (protocol:encode-message (protocol:make-object "text" "")))
+        ;; Protocol validation must not inherit a caller's replacement policy.
+        (babel-encodings:*suppress-character-coding-errors* t))
+    (dolist (invalid '((#x80) (#xbf) (#xc0 #x80) (#xc1 #xbf) (#xc2) (#xc2 #x7f)
+                       (#xdf #xc0) (#xe0 #x80 #x80) (#xe0 #x9f #xbf) (#xe1 #x80)
+                       (#xed #xa0 #x80) (#xed #xbf #xbf) (#xef #xbf)
+                       (#xf0 #x80 #x80 #x80) (#xf0 #x8f #xbf #xbf)
+                       (#xf1 #x80 #x80) (#xf4 #x90 #x80 #x80)
+                       (#xf5 #x80 #x80 #x80) (#xf8 #x88 #x80 #x80 #x80)
+                       (#xfc #x84 #x80 #x80 #x80 #x80) (#xfe) (#xff)))
+      ;; Check invalid bytes inside a string and after an otherwise valid object.
+      ;; Both locations must be validated before JSON parsing can accept input.
+      (dolist (position (list (- (length prefix) 2) (length prefix)))
+        (let ((bytes (concatenate '(vector (unsigned-byte 8))
+                                  (subseq prefix 0 position) invalid (subseq prefix position))))
+          (ok (signals (protocol:decode-message bytes) 'protocol:protocol-error)
+              "malformed UTF-8 is rejected even under a permissive Babel binding"))))))
+
+(deftest decoded-message-size-limit
+  (let ((bytes (make-array protocol:+maximum-message-bytes+
+                           :element-type '(unsigned-byte 8) :initial-element 32)))
+    (replace bytes (protocol:encode-message (protocol:make-object "x" 1)))
+    (ok (= 1 (protocol:field (protocol:decode-message bytes) "x"))
+        "a message at the byte limit still decodes")
+    (ok (signals (protocol:decode-message
+                  (concatenate '(vector (unsigned-byte 8)) bytes #(32)))
+                 'protocol:protocol-error)
+        "the size limit is enforced before decoding")))
+
 (deftest encoded-row-index-presence
   (let ((row (lem-daemon::make-cell-row 2)))
     (dolist (index '(nil 0 3))

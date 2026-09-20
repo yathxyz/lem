@@ -39,9 +39,9 @@
   (when (> (length octets) +maximum-message-bytes+)
     (fail "Message exceeds ~d bytes" +maximum-message-bytes+))
   (handler-case
-      (let* ((json #+sbcl (sb-ext:octets-to-string octets
-                                                   :external-format :utf-8)
-                   #-sbcl (babel:octets-to-string octets :encoding :utf-8))
+      ;; Babel allocates the decoded string once, avoiding SBCL's growing
+      ;; temporary string. Reject malformed UTF-8 regardless of caller bindings.
+      (let* ((json (babel:octets-to-string octets :encoding :utf-8 :errorp t))
              (object (yason:parse json :object-as :hash-table)))
         (unless (hash-table-p object)
           (fail "Protocol message must be a JSON object"))
