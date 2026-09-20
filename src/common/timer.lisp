@@ -180,7 +180,11 @@
 (defvar *idle-p* nil)
 
 (defclass idle-timer (<timer>)
-  ((last-time
+  ((redraw-on-result-p
+    :initform nil
+    :accessor timer-redraw-on-result-p
+    :type boolean)
+   (last-time
     :initform nil
     :initarg :last-time
     :accessor timer-last-time
@@ -200,8 +204,14 @@
 (defmethod inspire-timer ((timer idle-timer))
   (set-timer-expired-p nil timer))
 
-(defun make-idle-timer (function &key name handle-function)
-  (make-timer-instance 'idle-timer function name handle-function))
+(defun make-idle-timer (function &key name handle-function redraw-on-result-p)
+  "Create an idle timer. By default every invocation requests redisplay.
+With REDRAW-ON-RESULT-P, only a true primary callback value requests redisplay;
+the callback must report any display changes, including removing old content."
+  (check-type redraw-on-result-p boolean)
+  (let ((timer (make-timer-instance 'idle-timer function name handle-function)))
+    (setf (timer-redraw-on-result-p timer) redraw-on-result-p)
+    timer))
 
 (defmethod start-timer ((timer idle-timer) ms &key repeat)
   (setf (timer-ms timer) ms)
@@ -246,6 +256,7 @@
   `(call-with-idle-timers (lambda () ,@body)))
 
 (defun update-idle-timers ()
+  "Run expired idle callbacks. Return whether any ran and whether to redisplay."
   (let* ((tick-time (get-microsecond-time *timer-manager*))
          (updating-timers (remove-if-not (lambda (timer)
                                            (< (timer-next-time timer) tick-time))
@@ -270,8 +281,12 @@
     (dolist (timer updating-timers)
       (unless (timer-repeat-p timer)
         (set-timer-last-time tick-time timer)))
-    (mapc #'call-timer-function updating-timers)
-    (not (null updating-timers))))
+    (let ((redraw-p nil))
+      (dolist (timer updating-timers)
+        (let ((result (call-timer-function timer)))
+          (when (or (not (timer-redraw-on-result-p timer)) result)
+            (setf redraw-p t))))
+      (values (not (null updating-timers)) redraw-p))))
 
 (defun get-next-timer-timing-ms ()
   (when-let (timers *idle-timer-list*)

@@ -62,10 +62,11 @@ Examples:
                          (when (accept-event-p event)
                            (return-from read-event-internal event)))))
                     ((minusp ms)
-                     (when (handler-bind ((timer-error
-                                            (lambda (err)
-                                              (show-message (princ-to-string err)))))
-                             (update-idle-timers))
+                     (when (nth-value 1
+                             (handler-bind ((timer-error
+                                              (lambda (err)
+                                                (show-message (princ-to-string err)))))
+                               (update-idle-timers)))
                        (redraw-display)))
                     (t
                      ;; Timers expire strictly after their integer-ms deadline.

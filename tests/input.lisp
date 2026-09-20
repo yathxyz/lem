@@ -47,6 +47,31 @@
              (ok (eql (not repeat) (lem/common/timer:timer-expired-p timer))))
         (set-input-test-function 'redraw-display original-redraw)))))
 
+(deftest idle-callback-can-decline-redisplay
+  (dolist (changed-p '(nil t))
+    (let* ((lem/common/timer::*timer-manager*
+             (make-instance 'input-test-timer-manager :times (list 0 11 11 11)))
+           (lem/common/timer::*idle-timer-list* nil)
+           (lem/common/timer::*processed-idle-timer-list* nil)
+           (lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+           (lem-core::*routed-input-session* nil)
+           (lem-core::*deferred-routed-input-events* nil)
+           (key (make-key :sym "x"))
+           (redraws 0)
+           (original-redraw (symbol-function 'redraw-display)))
+      (unwind-protect
+           (progn
+             (set-input-test-function 'redraw-display
+               (lambda (&key force) (declare (ignore force)) (incf redraws)))
+             (lem/common/timer:start-timer
+              (lem/common/timer:make-idle-timer (lambda () (send-event key) changed-p)
+                                               :name "conditional redraw"
+                                               :redraw-on-result-p t)
+              10)
+             (ok (eq key (lem-core::read-event-internal)))
+             (ok (= redraws (if changed-p 1 0))))
+        (set-input-test-function 'redraw-display original-redraw)))))
+
 (deftest input-waits-through-idle-deadline
   ;; Before expiry, queued input takes precedence and no timer polling occurs.
   ;; Once overdue, callbacks still run before the queued key, as before.

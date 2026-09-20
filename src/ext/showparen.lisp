@@ -54,15 +54,19 @@
 
 (defun update-show-paren ()
   (when (variable-value 'enable)
-    (mapc #'delete-overlay *brackets-overlays*)
-    (setq *brackets-overlays* nil)
-    (let ((highlight-points (show-paren-at-point (current-window) (current-point))))
-      (nconcf highlight-points (mouse-hover-highlight))
-      (dolist (point highlight-points)
-        (push (make-overlay point
-                            (character-offset (copy-point point :temporary) 1)
-                            'showparen-attribute)
-              *brackets-overlays*)))))
+    (let ((removed-p (not (null *brackets-overlays*))))
+      (mapc #'delete-overlay *brackets-overlays*)
+      (setq *brackets-overlays* nil)
+      (let ((highlight-points (show-paren-at-point (current-window) (current-point))))
+        (nconcf highlight-points (mouse-hover-highlight))
+        (dolist (point highlight-points)
+          (push (make-overlay point
+                              (character-offset (copy-point point :temporary) 1)
+                              'showparen-attribute)
+                *brackets-overlays*)))
+      ;; A no-op scan needs no second full redraw after the command's redraw.
+      ;; Removing a previous match still needs a repaint, even without a new one.
+      (or removed-p (not (null *brackets-overlays*))))))
 
 (defvar *show-paren-timer* nil)
 
@@ -73,10 +77,11 @@
     (cond (enabled
            (when *show-paren-timer*
              (stop-timer *show-paren-timer*))
-           (setf *show-paren-timer*
-                 (start-timer (make-idle-timer 'update-show-paren :name "show paren timer")
-                              1
-                              :repeat t))
+            (setf *show-paren-timer*
+                  (start-timer
+                   (make-idle-timer 'update-show-paren :name "show paren timer"
+                                                      :redraw-on-result-p t)
+                   1 :repeat t))
            t)
           (t
            (when *show-paren-timer*

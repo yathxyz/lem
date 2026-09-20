@@ -95,6 +95,7 @@
                (:file "self-insert-command")
                (:file "interp")
                (:file "input")
+               (:file "showparen")
                (:file "bracketed-paste")
                (:file "osc52")
                (:file "file")
