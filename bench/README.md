@@ -5804,3 +5804,78 @@ Root `/tmp/lem-sdl-input-jinvctnc`; artifacts:
 `/tmp/lem-blank-fixture-smoke.{py,json,log}` and
 `/tmp/lem-blank-fixture-smoke-driver.log`. The short smoke timings are not used
 as performance evidence.
+
+
+### Validate blank-run spans in complete input (2026-09-20)
+
+The candidate represents each contiguous blank run as `(start-line end-line
+indentation)`, indexed in eight-line hash buckets. At most four distinct blank
+runs overlap a bucket, so lookup stays bounded as more of a buffer is viewed.
+Neighbor scans now retain only their boundary line numbers, avoiding a position
+list and a hash entry for every blank line. Cache validity still includes both
+text tick and effective tab width, and both neighboring nonblank lines still
+determine context. A format tag discards old per-position caches on live reload.
+
+All 1,716 blank-context regression cases pass, including an old-format cache
+whose numeric entry at position zero would otherwise be misread as a run bucket.
+The configured package passed all 15 indentation-guide, nine Org display and
+19 native display/lifecycle checks. No rendering feature, input pacing, cache
+invalidation condition or integrity gate was disabled.
+
+Baseline is the tab-width-corrected `869bdc452` configured editor
+`/nix/store/7h3rf58ab9b11fkd517lfr8r18vq7s0z-lem-yath/bin/lem`. Candidate:
+`/nix/store/x9qjc0kvavx5h3slfsr2n298q4a85z2m-lem-yath/bin/lem`, configuration source
+`/nix/store/r2gc4xpil63n8qv11ywj41fng8lm69kq-lem-yath`.
+`/tmp/lem-blank-span-package-proof.json` verifies packaged source bytes against
+the checkout; baseline indentation source was also compared with the preceding
+commit. Build artifacts: `/tmp/lem-blank-span-build.{log,paths}`. Exact candidate
+cache definitions: `/tmp/lem-blank-final-after.lisp`. Regression artifacts:
+`/tmp/lem-blank-final-check.{py,log}`, root `/tmp/lem-blank-runs-e56ygkdx`.
+
+Two complete X11/software ABBA comparisons used 600 measured x/backspace inputs
+plus 20 warmups, 25 ms pacing and CPUs 0–3. All eight runs verified the expected
+configured/resolved executable, modes, renderer, probe/source hashes, requested
+line/column, whole-buffer/save/source integrity and clean exits. The original
+source was reconstructed by removing the marker at its recorded byte offset.
+Means of two runs, including means of their percentiles:
+
+| Measurement | Long blank run before → after | Ordinary deep Lisp before → after |
+| --- | ---: | ---: |
+| Daemon CPU (ms) | 1,415.445 → 1,141.040 | 758.255 → 763.952 |
+| Daemon allocated bytes | 825,611,808 → 233,883,936 | 236,941,792 → 237,116,576 |
+| Client CPU (ms) | 248.558 → 244.730 | 263.409 → 260.610 |
+| Client allocated bytes | 25,358,912 → 25,557,440 | 37,402,112 → 37,172,416 |
+| Client send-to-present median (ms) | 2.061 → 1.752 | 1.112 → 1.110 |
+| Client send-to-present p95 (ms) | 3.957 → 2.872 | 1.553 → 1.542 |
+| Submission-to-ack median (ms) | 2.190 → 1.883 | 1.283 → 1.281 |
+| Submission-to-ack p95 (ms) | 4.271 → 3.197 | 1.835 → 1.826 |
+
+The long-blank workload improved daemon CPU by 19.4%, daemon allocation by
+71.7%, median client send-to-present time by 15.0% and p95 by 27.4%. Both candidate
+runs were below both baselines for each of these measures. CPU before was
+1,370.079/1,460.810 ms, after 1,179.936/1,102.144 ms; medians before
+2.050/2.072 ms, after 1.787/1.716 ms; p95 before 3.914/4.000 ms, after
+2.930/2.813 ms. This is a verified benefit for long blank sections, not a claim
+that ordinary typing is 15% faster or that physical scanout was measured.
+
+Ordinary deep Lisp was essentially flat: daemon CPU +0.8%, allocation +0.07%,
+median −0.2%, p95 −0.7%, with overlapping CPU and latency ranges. The much lower
+observed maximum is not treated as a reliable tail guarantee. The range cache
+is retained for the substantial long-run benefit while preserving normal
+workload behavior and the tab-width correctness fix.
+
+Artifacts: `/tmp/lem-blank-span-{input,results}.{py,log}`,
+`/tmp/lem-blank-span-{long,deep}-{before,after}-{1,2}.{json,log}`. Long-run roots
+in ABBA order: `/tmp/lem-sdl-input-7j6gzdg2`, `/tmp/lem-sdl-input-pzarjmtx`,
+`/tmp/lem-sdl-input-iu5tmfmd`, `/tmp/lem-sdl-input-bkuavrpe`. Deep Lisp roots:
+`/tmp/lem-sdl-input-b32oc_fx`, `/tmp/lem-sdl-input-16qhbb0e`,
+`/tmp/lem-sdl-input-sw7xrgrk`, `/tmp/lem-sdl-input-yhd53ebz`.
+The existing validated fixtures were unchanged: long blank source 10,077 bytes
+at line 1, SHA-256 `60248419aaef83f8f0f7879958a4c2314f9eda9a56831b9eab8772f76e2a1f16`;
+ordinary Lisp 524,731 bytes at line 6,514, SHA-256
+`879c5b01637e0f9d80e7377476cc22439fc42a5da7a2e5a15473dc62da0cc3f9`.
+
+The remaining neighbor scan still visits every blank line after an edit.
+`point-line-indentation` also reads tab width on every visited line, including
+empty lines and lines containing only spaces. Deferring that read until the
+first tab is a further candidate; it has not been implemented or measured here.

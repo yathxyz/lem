@@ -47,42 +47,45 @@
   (let* ((tick (buffer-modified-tick buffer))
          (tab-width (variable-value 'tab-width :default buffer))
          (cache (buffer-value buffer 'lem-yath-indent-guide-context-cache)))
-    (if (and (consp cache) (consp (cdr cache))
-             (= tick (car cache)) (eql tab-width (cadr cache)))
-        (cddr cache)
-        (let ((values (make-hash-table :test 'eql)))
+    (if (and (consp cache) (eq (car cache) :blank-runs)
+             (= tick (cadr cache)) (eql tab-width (caddr cache)))
+        (cdddr cache)
+        (let ((runs (make-hash-table :test 'eql)))
           (setf (buffer-value buffer 'lem-yath-indent-guide-context-cache)
-                (list* tick tab-width values))
-          values))))
+                (list* :blank-runs tick tab-width runs))
+          runs))))
 
 (defun nearby-nonblank-indentation (point direction)
   (with-point ((scan point))
-    (loop :with blank-positions := nil
+    (loop :with boundary := (line-number-at-point point)
           :while (line-offset scan direction)
           :do (multiple-value-bind (indentation blank-p)
                   (point-line-indentation scan)
                 (if blank-p
-                    (push (position-at-point scan) blank-positions)
-                    (return (values indentation blank-positions))))
-          :finally (return (values 0 blank-positions)))))
+                    (setf boundary (line-number-at-point scan))
+                    (return (values indentation boundary))))
+          :finally (return (values 0 boundary)))))
 
 (defun blank-line-context-indentation (point)
   "Match indent-bars' contextual blank-line behavior."
   (let* ((buffer (point-buffer point))
          (cache (indent-guide-context-cache buffer))
-         (position (position-at-point point)))
-    (multiple-value-bind (cached found-p) (gethash position cache)
-      (if found-p
-          cached
-          (multiple-value-bind (prior prior-blanks)
-              (nearby-nonblank-indentation point -1)
-            (multiple-value-bind (next next-blanks)
-                (nearby-nonblank-indentation point 1)
-              (let ((context (max prior next)))
-                (dolist (blank-position
-                         (list* position (nconc prior-blanks next-blanks)))
-                  (setf (gethash blank-position cache) context))
-                context)))))))
+         (line (line-number-at-point point)))
+    ;; At most four distinct blank runs can overlap an eight-line bucket.
+    ;; Keep lookup bounded without indexing every line of a long blank run.
+    (dolist (run (gethash (floor line 8) cache))
+      (destructuring-bind (start end indentation) run
+        (when (<= start line end)
+          (return-from blank-line-context-indentation indentation))))
+    (multiple-value-bind (prior start)
+        (nearby-nonblank-indentation point -1)
+      (multiple-value-bind (next end)
+          (nearby-nonblank-indentation point 1)
+        (let* ((context (max prior next))
+               (run (list start end context)))
+          (loop :for bucket :from (floor start 8) :to (floor end 8)
+                :do (push run (gethash bucket cache)))
+          context)))))
 
 (defun visible-indent-guide-depth (indentation spacing)
   (floor (max 0 (1- indentation)) spacing))

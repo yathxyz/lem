@@ -167,6 +167,16 @@
                    (buffer-undo edit)
                    (check)
                    (assert (string= text (buffer-text buffer))))))
+             ;; A live source reload may find the previous per-position cache.
+             ;; Its entry at position zero must not be treated as a run bucket.
+             (erase-buffer buffer)
+             (insert-string (buffer-point buffer) (format nil "~%        code"))
+             (let ((old-cache (make-hash-table :test 'eql)))
+               (setf (gethash 0 old-cache) 8
+                     (variable-value 'tab-width :buffer buffer) 4
+                     (buffer-value buffer 'lem-yath-indent-guide-context-cache)
+                     (list* (buffer-modified-tick buffer) 4 old-cache))
+               (check))
              (indent-guides-test-log
               "BLANK-RUNS cases=~d correct=yes unchanged=yes" cases)
              ;; Tab width is part of blank context even when text/tick stay fixed.
