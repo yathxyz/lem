@@ -6694,3 +6694,171 @@ changed. String roots in ABBA order: `/tmp/lem-sdl-input-c_kj4rke`,
 `/tmp/lem-sdl-input-lilgilah`. Ordinary roots:
 `/tmp/lem-sdl-input-9gx86yyw`, `/tmp/lem-sdl-input-qy9smux7`,
 `/tmp/lem-sdl-input-ug3jshn7`, `/tmp/lem-sdl-input-01auyt5e`.
+
+### Reject direct inclusive point comparison after full-input regressions (2026-09-20)
+
+The candidate `f39a22b42` was reverted by `d828b894c` after full-input
+comparisons regressed despite faster isolated comparisons. The expanded
+ordering tests remain. The following records the component evidence and the
+full-input results that determined that decision.
+
+The `779f1575c` CPU profile above attributes 48 inclusive samples (2.1% of
+2,272) to `point<=` calls from `parse-partial-sexp`. Source inspection found
+that its pair helper first checks strict order and then checks equality.
+That can reread both line numbers and columns when the first comparison fails.
+The candidate instead reads the two line numbers once and compares columns
+with `<=` only when the lines match. It retains the same complete buffer
+validation before comparison short-circuiting, supplied-argument handling,
+and variadic tail. No parser checks, compiler safety settings, or coordinate
+caches are removed or introduced.
+
+The extended `point-nondecreasing-order` test passes 49 assertions before and
+after, covering all 5,460 sequences of one through six points at four positions
+across two lines, equal positions in distinct objects, missing/invalid first
+arguments, and each invalid-argument position in arities two through six.
+The 50 equality and 66 syntax-cache assertions also pass, for 165 focused
+assertions. Artifacts: `/tmp/lem-point-order-tests.lisp` and
+`/tmp/lem-point-order-tests-{before,after}.log`.
+
+Private same-process ABBA components compile both definitions under the same
+policy. Direct calls use prebuilt argument lists, one million calls per phase,
+10,000 warmups, full GC, CPUs 0–3, and checksums against numeric ordering.
+Positions 0/1 are on the first line; 3/4/5 are on the second. CPU means of
+two phases per variant:
+
+| Positions | CPU before → candidate (ms) |
+| --- | ---: |
+| `0` | 5.501 → 5.383 |
+| `0 1` | 20.857 → 17.831 |
+| `1 0` | 28.803 → 17.458 |
+| `1 1` | 30.793 → 17.874 |
+| `0 3` | 13.395 → 11.995 |
+| `3 0` | 21.405 → 11.729 |
+| `3 3` | 29.616 → 17.944 |
+| `0 1 3` | 29.316 → 25.636 |
+| `3 1 0` | 23.144 → 13.802 |
+| `1 1 1` | 52.166 → 30.610 |
+| `0 3 1` | 29.659 → 18.862 |
+| `0 1 3 5` | 46.944 → 39.480 |
+| `0 1 5 3` | 53.859 → 38.598 |
+| `0 1 1 3 4 5` | 88.964 → 67.356 |
+| `0 1 1 3 4 3` | 97.029 → 67.228 |
+| `3 1 1 3 4 5` | 33.044 → 23.962 |
+
+Non-unary direct calls use 10–45% less CPU; unary calls do not execute the
+changed helper and their small timing difference is not an optimization gain.
+Allocation is essentially unchanged: unary through ternary calls allocate no
+argument lists; four and six arguments retain approximately 16 MB and 48 MB
+per million calls. Small residual allocations are runtime background. These
+are comparator measurements, not full-input speedups.
+
+The edit-style syntax-query component clears the cache suffix at line 6514
+and queries 39 ordinary Lisp rows, repeated 2,000 times per phase. CPU was
+1,096.228/1,099.259 ms before and 1,012.328/1,010.959 ms with the candidate:
+mean 1,097.744 → 1,011.644 ms (−7.8%). Allocation was effectively unchanged,
+39,234,880 → 39,297,472 bytes (+0.16%). All final parser states and the original
+source text match. Private daemons exited cleanly. Artifacts:
+`/tmp/lem-point-order-{before,after}.lisp`,
+`/tmp/lem-point-order-direct-component.{lisp,py,log}`,
+`/tmp/lem-point-order-ppss-component.{lisp,py,log}`;
+roots `/tmp/lem-point-order-direct-qhscdm0c` and
+`/tmp/lem-point-order-ppss-twmmi5zg`.
+
+Implementation checkpoint: `f39a22b42`. The packaged build passed all 44 checks
+(16 indentation, 9 Org, 19 native display/lifecycle). The actual packaged
+comparator also passed the 49 ordering assertions without a replacement
+function definition, and its private daemon exited cleanly. Artifacts:
+`/tmp/lem-point-order-build.{log,paths}`,
+`/tmp/lem-point-order-packaged-check.{lisp,py,log}`, and
+`/tmp/lem-point-order-packaged-ezvzm10n`.
+
+`/tmp/lem-point-order-package-proof.{py,json}` checks installed core,
+configuration, fixture and probe sources. Candidate editor:
+`/nix/store/8zagi6mglndhfpww4whw6sc6yjx1s5dj-lem-yath/bin/lem`, resolving to
+`/nix/store/s68316rl59qs5a5i5slmkd8kpmbw3hmn-lem/bin/lem`.
+Point source SHA:
+`88e370766526b8bd43bc3248b2498b0d1aeaf4e7d3172daa05c39d1801edba7f`.
+Its configuration source is unchanged from the `c8d7222f2` baseline:
+`/nix/store/fziazbsfyhlh1lj80qq2irg1za3ay6kg-lem-yath/bin/lem`.
+The intervening overlay-fusion experiment was reverted before this change;
+installed logical-line bytes match the original baseline.
+
+The full packaged comparison used ABBA for each of the ordinary Lisp and
+multiline-string fixtures, 600 measured events plus 20 warmups, 25 ms pacing,
+software X11, and CPUs 0–3. All eight runs passed exact saved-text, cursor,
+mode, renderer, source/probe provenance and clean-exit checks; the string runs
+also verified live string context. Means of two runs per variant:
+
+| Workload | Daemon CPU before → candidate (ms) | Daemon allocation before → candidate (bytes) | Client send-to-present median before → candidate (ms) | p95 before → candidate (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Multiline string | 572.409 → 576.867 | 103,719,968 → 103,720,800 | 0.913303 → 0.913010 | 1.289931 → 1.551683 |
+| Ordinary Lisp | 733.797 → 741.294 | 212,740,768 → 212,785,120 | 1.088593 → 1.080843 | 1.389384 → 1.796629 |
+
+String CPU and median differences have overlapping run ranges; allocation is
+effectively flat on both workloads. Ordinary daemon CPU rose 1.0%, with both
+candidates (743.077/739.511 ms) above both baselines (735.773/731.821 ms).
+Ordinary client CPU rose 6.6%, also with separated ranges. Its p95 rose 29.3%:
+1.462471/1.316296 ms before versus 1.800847/1.792411 ms after. The small median
+reduction has overlapping ranges and does not establish an improvement.
+String p95 rose 20.3%, but with overlapping ranges. Artifacts:
+`/tmp/lem-point-order-input.py`, `/tmp/lem-point-order-results.{py,log}`,
+and `/tmp/lem-point-order-{string,deep}-{before,after}-{1,2}.{json,log}`.
+
+A second component comparison called each actual packaged `point<=` function,
+without redefining it. Four private daemons in ABBA order repeated the same
+16 direct-call scenarios. Checksums and clean exits passed, and non-unary CPU
+still fell approximately 11–44%. Disassembly grew from 794 to 946 bytes; this
+does not establish why full typing regressed. Artifacts:
+`/tmp/lem-point-order-native-component.{lisp,py}`,
+`/tmp/lem-point-order-native-runs.{py,log}`, and
+`/tmp/lem-point-order-native-r2-{before,after}-{1,2}.log`.
+Assembly files are in `/tmp/lem-point-order-native-23di9o4g`,
+`/tmp/lem-point-order-native-71a2ozm9`,
+`/tmp/lem-point-order-native-88jv9bf3`, and
+`/tmp/lem-point-order-native-wwnulesu`. An earlier harness splice selected a
+nested form and failed with an unbound variable; it was corrected to select
+the top-level buffer setup, and that failed attempt is excluded.
+
+To control for differences between packaged images, four more ordinary-Lisp
+GUI runs used the same baseline binary, loading both comparator definitions
+under the same policy and selecting one before measurement. Each run used a
+fresh private daemon and client, in ABBA order with the same 600/20 events and
+25 ms pacing. All four integrity, provenance and clean-exit checks passed,
+including the selected variant and setup/instrumented-probe hashes.
+
+| Metric | Before mean | Candidate mean | Change |
+| --- | ---: | ---: | ---: |
+| Daemon CPU (ms) | 697.317 | 731.592 | +4.9% |
+| Daemon allocation (bytes) | 212,336,536 | 212,632,088 | +0.14% |
+| Client CPU (ms) | 248.702 | 263.966 | +6.1% |
+| Client allocation (bytes) | 37,488,768 | 36,602,560 | −2.4% |
+| Client send-to-present median (ms) | 1.021489 | 1.088437 | +6.6% |
+| Client send-to-present p95 (ms) | 1.288323 | 1.637560 | +27.1% |
+
+Both candidates exceeded both baselines for daemon CPU, client CPU, median,
+and p95. Baseline/candidate daemon CPU runs were 718.281/676.353 versus
+739.406/723.778 ms; p95 runs were 1.212070/1.364576 versus
+1.791188/1.483931 ms. Mean GC CPU rose from 9.929 to 11.308 ms; this is not a
+pause-time measurement. Maxima are noisy and no physical-monitor measurement
+was made. The cause remains unresolved: faster component calls do not prove
+that the complete input/display path performs less work or schedules better.
+
+Same-image artifacts: `/tmp/lem-point-order-same-image-setup.lisp` (SHA
+`f02584a723726ced412f59d0f3d233e9e6b1986c6c7276520206cc37999e4075`),
+`/tmp/lem-point-order-same-image.py`,
+`/tmp/lem-point-order-same-image-runs{.py,-r2.log}`,
+`/tmp/lem-point-order-same-image-results.{py,log}`, and
+`/tmp/lem-point-order-same-image-r2-{before,after}-{1,2}.{json,log}` with
+their `-instrumented.py` snapshots. Roots in ABBA order:
+`/tmp/lem-sdl-input-3g91p82w`, `/tmp/lem-sdl-input-9jbisoqj`,
+`/tmp/lem-sdl-input-4khpe8vi`, `/tmp/lem-sdl-input-avquri39`.
+The first setup attempted to read a new package symbol before loading its
+definition and failed before timing. Selection was moved into the loaded
+file; package locks and correctness gates were retained. That failed attempt
+is excluded.
+
+After the revert, `src/buffer/internal/point.lisp` matches `1ec8c5aa8` and the
+baseline package byte for byte, SHA:
+`ca0bccceb3f70c134bf6ad47477e7eb5252d2c22b46f4c15d2bb27bdd0ebb31d`.
+The next investigation should measure work across the complete input/display
+path before making further claims from individual function timings.
