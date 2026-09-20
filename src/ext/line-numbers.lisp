@@ -3,6 +3,7 @@
   (:export :*relative-line*
            :line-number-format
            :custom-current-line
+           :format-line-number
            :line-numbers-attribute
            :active-line-number-attribute
            :line-numbers
@@ -66,17 +67,27 @@ With a positive universal argument, use relative line numbers. Also obey the glo
       (let ((line (line-number-at-point point)))
         (values line (= (line-number-at-point (buffer-point buffer)) line)))))
 
-(defun get-buffer-num-format (buffer)
-  (let* ((last-line (lem/buffer/internal::point-linum (buffer-end-point buffer)))
-         (digit-count (1+ (floor (log (abs last-line) 10)))))
-    (format nil " ~~~aD " digit-count)))
+(declaim (inline line-number-width))
+(defun line-number-width (line-count)
+  ;; Integer comparisons remain exact just below powers of ten, where LOG
+  ;; can round up and introduce an unnecessary gutter column.
+  (loop :for width :from 1
+        :for limit := 10 :then (* limit 10)
+        :when (< line-count limit) :return width))
+
+(defun format-line-number (buffer number)
+  "Format NUMBER using BUFFER's custom format or its current decimal line width."
+  (let ((control (variable-value 'line-number-format :default buffer)))
+    (if control
+        (format nil control number)
+        (format nil " ~vD "
+                (line-number-width (line-number-at-point (buffer-end-point buffer)))
+                number))))
 
 (defmethod lem-core:compute-left-display-area-content ((mode line-numbers-mode) buffer point)
   (when (buffer-filename (point-buffer point))
     (multiple-value-bind (computed-line active-line-p) (compute-line buffer point)
-      (let* ((num-format (or (variable-value 'line-number-format :default buffer)
-                             (get-buffer-num-format buffer)))
-             (string (format nil num-format computed-line))
+      (let* ((string (format-line-number buffer computed-line))
              (attribute (if active-line-p
                             `((0 ,(length string) active-line-number-attribute))
                             `((0 ,(length string) line-numbers-attribute)))))

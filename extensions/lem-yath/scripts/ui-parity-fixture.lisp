@@ -333,6 +333,36 @@
                             name)
              (unless condition
                (incf failures))))
+      (let ((buffer (make-buffer "ui-line-number-formats" :temporary t))
+            (lem/line-numbers:*relative-line* t))
+        (unwind-protect
+             (progn
+               (insert-string (buffer-point buffer)
+                              (make-string 99 :initial-element #\Newline))
+               (move-to-line (buffer-point buffer) 50)
+               (setf (variable-value 'lem/line-numbers:line-number-format :buffer buffer) nil
+                     (variable-value 'lem/line-numbers:custom-current-line :buffer buffer) "->")
+               (with-point ((point (buffer-start-point buffer)))
+                 (move-to-line point 49)
+                 (loop :for expected :in '("   1 " " -> " "   1 ")
+                       :for active :in '(nil t nil)
+                       :do (let ((content (programming-line-number-content buffer point)))
+                             (check
+                              (and (string= expected (lem/buffer/line:content-string content))
+                                   (equal (list (list 0 (length expected)
+                                                      (if active
+                                                          'lem/line-numbers:active-line-number-attribute
+                                                          'lem/line-numbers:line-numbers-attribute)))
+                                          (lem/buffer/line:content-attributes content)))
+                              "relative-line-number-format-and-attribute"))
+                           (line-offset point 1)))
+               (setf (variable-value 'lem/line-numbers:line-number-format :buffer buffer)
+                     (formatter "(~A)"))
+               (check (string= "(->)"
+                               (lem/buffer/line:content-string
+                                (programming-line-number-content buffer (buffer-point buffer))))
+                      "live-custom-line-number-formatter"))
+          (delete-buffer buffer)))
       (check (evil-leader-bindings-ok-p)
              "leader-bindings-preserved")
       (check (evil-leader-help-ok-p)

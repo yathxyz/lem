@@ -119,6 +119,7 @@
                (:file "listener-mode")
                (:file "interface")
                (:file "display-cache")
+               (:file "line-numbers")
                (:file "verified-shim"))
   :perform (test-op (o c)
                     (symbol-call :rove :run c)))

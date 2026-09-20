@@ -117,11 +117,7 @@
 (defun programming-line-number-content (buffer point)
   (multiple-value-bind (computed-line active-line-p)
       (lem/line-numbers::compute-line buffer point)
-    (let* ((number-format
-             (or (variable-value 'lem/line-numbers:line-number-format
-                                 :default buffer)
-                 (lem/line-numbers::get-buffer-num-format buffer)))
-           (string (format nil number-format computed-line))
+    (let* ((string (lem/line-numbers:format-line-number buffer computed-line))
            (attribute
              (if active-line-p
                  `((0 ,(length string)
