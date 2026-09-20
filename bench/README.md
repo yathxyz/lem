@@ -5633,3 +5633,69 @@ Profile driver `/tmp/lem-depth-profile.py`, exact executed snapshot
 The private diagnostic SDL source only adds an on-demand shutdown stack handler;
 its production prefix was byte-checked. No shutdown timeout occurred, so that
 handler was not exercised. Profiled timings are not used as speedup evidence.
+
+
+### Scan indentation text without moving temporary points (2026-09-20)
+
+`point-line-indentation` now reads the existing line string directly. It retains
+the same space/tab column arithmetic and blank-line result while removing the
+point copy and per-character point traversal. No cached indentation, buffer
+mutation or display feature changes are involved.
+
+Regression checkpoint `3629490c9` keeps the original point walker as an oracle.
+All 3,590 cases pass against both implementations: widths 1/2/4/8/16, mixed tabs
+and spaces, long indentation, empty/blank/nonblank lines, Unicode and non-space
+control characters, terminated and final lines, and every point column through
+EOL. Each call preserves the supplied point, and scans preserve buffer text and
+modified tick. The configured Nix build passed all 14 indentation-guide, nine
+Org display and 19 native client display/lifecycle checks.
+
+A same-process component ABBA comparison compiled both definitions with the same
+policy. Each phase scanned 39 real fixture lines from line 6,514, 100,000 times
+(3.9 million calls), after warmup and a full collection. On CPUs 0–3, mean CPU
+was 1,994.458 → 264.084 ms (−86.8%). Allocation was 375,704,064 → 20,288 bytes;
+the small remaining value includes harness/process overhead. All indentation and
+blank results, buffer text and modified tick matched. This is a helper result,
+not an 86.8% editor speedup.
+
+Component artifacts: `/tmp/lem-indent-scan-{before,after}.lisp`,
+`/tmp/lem-indent-scan-component.{lisp,py,log}`, private root
+`/tmp/lem-indent-scan-v7xw6rgq`. Differential checks:
+`/tmp/lem-indent-scan-before-check-r2.log` and
+`/tmp/lem-indent-scan-after-check.log`; build log and output paths:
+`/tmp/lem-indent-scan-build.{log,paths}`.
+
+The complete X11/software input comparison used the formatted 524,731-byte Lisp
+fixture at line 6,514: before/after/after/before, 600 measured inputs plus 20
+warmups, 25 ms pacing, CPUs 0–3. Every run passed whole-buffer/save/original-source
+integrity, exact marker-position reconstruction, mode/renderer/probe provenance,
+and clean daemon/client exits. Means of two runs (and of their percentiles):
+
+| Measurement | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Daemon CPU (ms) | 815.291 | 800.101 | −1.9% |
+| Daemon allocated bytes | 242,206,176 | 236,826,528 | −2.2% |
+| Client CPU (ms) | 283.770 | 286.071 | +0.8% |
+| Client allocated bytes | 37,330,432 | 36,711,168 | −1.7% |
+| Client send-to-present median (ms) | 1.144 | 1.137 | −0.6% |
+| Client send-to-present p95 (ms) | 1.888 | 1.876 | −0.7% |
+| Submission-to-ack median (ms) | 1.316 | 1.313 | −0.3% |
+| Submission-to-ack p95 (ms) | 2.267 | 2.259 | −0.3% |
+
+Allocation fell in both candidate runs. CPU and latency ranges overlap: daemon
+CPU before 842.383/788.198 ms, after 815.777/784.424 ms; client send-to-present
+medians before 1.164/1.124 ms, after 1.146/1.129 ms. These measurements support
+removing helper work/allocation, but not a reliable end-to-end latency speedup.
+The simpler scan is retained; no functionality is disabled.
+
+Baseline configured editor was
+`/nix/store/jyplyd0wz66al9my1kdllsnkhwiscg88-lem-yath/bin/lem`; candidate
+`/nix/store/lb4z1zgrhjmcffp81af8d28sqgma66rr-lem-yath/bin/lem`.
+`/tmp/lem-indent-scan-package-proof.json` verifies the packaged configuration,
+fixtures, daemon implementation, SDL source and input probe against the checkout.
+Candidate configuration source is
+`/nix/store/53y6bcs5ql71m10zphzy9y64zm5ipchm-lem-yath`.
+Artifacts: `/tmp/lem-indent-scan-{input,results}.{py,log}` and
+`/tmp/lem-indent-scan-{before,after}-{1,2}.{json,log}`. Private roots in order:
+`/tmp/lem-sdl-input-_wj39dpg`, `/tmp/lem-sdl-input-5_wghvj9`,
+`/tmp/lem-sdl-input-h5pcmtno`, `/tmp/lem-sdl-input-5s4e8igl`.

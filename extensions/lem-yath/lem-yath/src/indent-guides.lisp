@@ -33,22 +33,15 @@
 
 (defun point-line-indentation (point)
   "Return visual indentation and whether POINT's line is blank."
-  (with-point ((scan point))
-    (line-start scan)
-    (let ((column 0)
-          (tab-width (variable-value 'tab-width :default scan)))
-      (loop :for character := (character-at scan)
-            :do (cond
-                  ((eql character #\Space)
-                   (incf column)
-                   (character-offset scan 1))
-                  ((eql character #\Tab)
-                   (incf column (- tab-width (mod column tab-width)))
-                   (character-offset scan 1))
-                  (t
-                   (return (values column
-                                   (or (null character)
-                                       (eql character #\Newline))))))))))
+  (let ((column 0)
+        (tab-width (variable-value 'tab-width :default point)))
+    (loop :for character :across (line-string point)
+          :do (case character
+                (#\Space (incf column))
+                (#\Tab (incf column (- tab-width (mod column tab-width))))
+                (otherwise
+                 (return (values column (eql character #\Newline)))))
+          :finally (return (values column t)))))
 
 (defun indent-guide-context-cache (buffer)
   (let* ((tick (buffer-modified-tick buffer))
