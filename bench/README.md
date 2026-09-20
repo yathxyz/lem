@@ -7438,3 +7438,43 @@ Normal artifacts: `/tmp/lem-deferred-redraw-trace.py`,
 root `/tmp/lem-sdl-input-sqj34ktq`. The source checkout revision in these probes
 is `736ca2552` with the subsequently committed `7f41cfd0e` changes present;
 package provenance checks compare their actual bytes, not just the revision.
+
+### Trace the separate command-stage stall (2026-09-20)
+
+The published `7f41cfd0e` package was traced without changing its command hooks.
+Disposable wrappers timed `call-command`, `execute`, undo boundaries, hook
+execution and all 46 named pre/post hooks on the editor thread. Calls exceeding
+10 ms retain wall time, process/thread CPU, voluntary/involuntary context
+switches, faults and one post-call backtrace per key. Hooks and original
+functions are checked and restored when recording ends. The wrappers add
+measurement overhead; this is attribution work, not a speedup comparison.
+
+A 20-input smoke and 12,000-measured/20-warmup ordinary Lisp run passed the
+source, exact-text, renderer, clean-exit, display-work and complete pipeline
+gates. Long-run client median/p95/maximum were 1.036044/1.350250/7.861786 ms;
+no timed command/hook call exceeded 10 ms. All command hooks ran 12,020 times;
+`safe-auto-revert-poll` also ran 63 times from its independent periodic timer.
+The daemon sent 12,020 screen messages/24,040 rows, with 12,082 total redraws.
+The earlier 46 ms command-stage sample was not reproduced and remains open.
+
+Source inspection identified synchronous periodic persistence as a candidate:
+the five-minute post-command save acquires an interprocess lock, merges state,
+writes a temporary file and calls `fsync` before returning. A separate private
+probe set the save interval to zero and timed those calls on every key. All
+620 saves (600 measured inputs plus warmup) and the original integrity gates
+passed. Save, lock scope, write scope and `fsync` each had a 1 ms median and
+3 ms maximum on the pipeline clock, which advances mostly in 1 ms steps.
+Client median/p95/maximum were 2.202798/2.591494/7.913743 ms, with no event over
+20 ms. This demonstrates synchronous I/O cost, but does not attribute the
+historical 46 ms delay to persistence or justify weakening durability. No
+production persistence or command-hook change was retained.
+
+Artifacts: `/tmp/lem-command-stall{.py,-scopes.lisp,-server.lisp,-results.py}`,
+`/tmp/lem-command-stall-{smoke,long}.{json,log}` and `-proof.{json,log}`, plus
+generated client/Python snapshots. Long root: `/tmp/lem-sdl-input-4syhy6qo`;
+smoke root: `/tmp/lem-sdl-input-j1ohag7q`. Targeted persistence artifacts use
+`/tmp/lem-persistence-stall` with the same script suffixes and `-before` result
+prefix; root: `/tmp/lem-sdl-input-1rjch4xz`. Each root retains `pipeline.csv`,
+`server-work.json` and `command-stalls.json`. Probe source revision was
+`6f5e04294`; configured editor was
+`/nix/store/zs87893w2blhqqj7z12qv269sp8zs8kh-lem-yath-profile/bin/lem`.
