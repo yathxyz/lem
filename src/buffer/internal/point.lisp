@@ -200,7 +200,11 @@ If `point-kind` is `:temporary` this is unnecessary."
                  (loop :for next :in more-points
                        :always (eq buffer (point-buffer next))))))
   (flet ((ordered-p (left right)
-           (or (%point< left right) (%point= left right))))
+           (let ((left-line (point-linum left))
+                 (right-line (point-linum right)))
+             (or (< left-line right-line)
+                 (and (= left-line right-line)
+                      (<= (point-charpos left) (point-charpos right)))))))
     (and (or (not second-p) (ordered-p point second))
          (or (not third-p) (ordered-p second third))
          (loop :for left := third :then right

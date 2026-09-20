@@ -28,7 +28,7 @@
            (setf points (nreverse points))
            ;; Numeric offsets independently specify order across columns and
            ;; lines. Exercise fixed arguments and the remaining variadic tail.
-           (loop :for arity :from 1 :to 5
+           (loop :for arity :from 1 :to 6
                  :do (let ((checked 0) (correct t))
                        (labels ((check-sequences (remaining offsets)
                                   (if (zerop remaining)
@@ -46,6 +46,11 @@
                          (check-sequences arity '()))
                        (ok (and correct (= checked (expt 4 arity)))
                            (format nil "all orderings of ~D points" arity))))
+           (lem:with-point ((copy (first points)))
+             (ok (lem:point<= copy (first points) copy)
+                 "distinct point objects can denote equal positions"))
+           (ok (signals (funcall (symbol-function 'lem:point<=)) 'error))
+           (ok (signals (lem:point<= nil) 'error))
            ;; A later buffer mismatch must signal even after an earlier pair
            ;; is out of order; explicitly supplied NIL is not a missing arg.
            (loop :for arity :from 2 :to 6
