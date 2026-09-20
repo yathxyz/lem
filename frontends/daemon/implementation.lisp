@@ -51,6 +51,20 @@ Only the representation is shared; character widths are always looked up live.")
   (cells #() :type simple-vector)
   (faces #() :type simple-vector))
 
+(defun cell-row-equal-p (left right)
+  "Compare displayed text and faces without folding the case of glyphs."
+  (let* ((cells (cell-row-cells left)) (other-cells (cell-row-cells right))
+         (faces (cell-row-faces left)) (other-faces (cell-row-faces right))
+         (width (length cells)))
+    (and (= width (length other-cells) (length faces) (length other-faces))
+         ;; Cached rows share most cell strings and face lists. Avoid a
+         ;; recursive comparison when their identities already match.
+         (loop :for column :below width
+               :for cell := (svref cells column) :for other-cell := (svref other-cells column)
+               :for face := (svref faces column) :for other-face := (svref other-faces column)
+               :always (and (or (eq cell other-cell) (equal cell other-cell))
+                            (or (eq face other-face) (equal face other-face)))))))
+
 (defun make-cell-row (width &optional face)
   (%make-cell-row (make-array width :initial-element " ")
                   (make-array width :initial-element face)))
@@ -381,7 +395,7 @@ Only the representation is shared; character widths are always looked up live.")
                (unless full-p
                  (let ((changed '()))
                    (dotimes (row (length rows))
-                     (unless (equalp (aref previous row) (aref rows row))
+                     (unless (cell-row-equal-p (aref previous row) (aref rows row))
                        (push (encode-screen-row (aref rows row) row)
                              changed)))
                    (coerce (nreverse changed) 'vector)))))

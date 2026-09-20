@@ -5018,3 +5018,77 @@ production behavior is identical to the measured package. Configured package:
 client: `/nix/store/iw017gpbsmkhd4cvw2q2085b8k30j6j0-sbcl-lemclient-unstable`.
 Evidence: `/tmp/lem-screen-dedup-build.paths`, `/tmp/lem-screen-dedup-native.log`.
 The installed editor profile remains unchanged.
+
+
+### Preserve case-only screen changes without slowing cached comparisons (2026-09-20)
+
+Review found an existing correctness bug in the daemon row diff: Common Lisp
+`equalp` folds string case, so changing `x` to `X` could leave the client showing
+its old row. Cursor movement or forced presentation did not repair a row whose
+text was omitted from the diff. The independent wire-reconstruction regression
+now covers ASCII case-only edits and `漢ä́` → `漢Ä́`, including wide and combining
+cells. Both assertions fail before the fix and pass afterward. The row comparator
+now checks cell text and faces case-sensitively, retaining dimension checks and
+an explicit identity fast path for the immutable strings and face lists shared
+by cached rows. There is no unsafe array access policy or implementation-specific
+memory comparison.
+
+A first case-sensitive single-pass candidate passed correctness checks but
+increased full-input daemon CPU from 309.529 to 343.340 ms (+10.9%). Its component
+benchmark lacked the representative case where both row snapshots share their
+cell/face objects. Adding that case exposed recursive comparison overhead.
+SBCL's own `equalp` array loop explicitly checks identity before descending;
+the final comparator uses the same standard `eq`-then-`equal` pattern, preserving
+case-sensitive text semantics. The slower candidate was not committed. Its
+validated full-input artifacts remain at `/tmp/lem-row-case-{before,after}-{1,2}.{json,log}`
+and `/tmp/lem-row-case-input.{py,log}`; they are excluded from final results.
+
+Final warmed component ABBA, process CPU means for 400,000 row comparisons per
+run. These common-workload cases have the same expected result under both
+comparators; the separate regression above establishes the corrected behavior.
+
+| Row pair | Original `equalp` | Final comparator |
+| --- | ---: | ---: |
+| Equal ASCII text, freshly constructed equal faces | 196.028 ms | 91.372 ms |
+| Cached cells and faces shared by both snapshots | 23.669 ms | 26.958 ms |
+| Equal Unicode text, freshly constructed equal faces | 147.921 ms | 86.943 ms |
+| Early text difference | 4.007 ms | 4.180 ms |
+| Early style difference | 16.843 ms | 4.596 ms |
+
+The cached case retains a small absolute overhead (about 8 ns per row in this
+component test); allocation remains effectively unchanged. This table is not an
+end-to-end speedup claim. Artifact: `/tmp/lem-row-case-component-r3.{lisp,log}`.
+Earlier component investigations are in `/tmp/lem-row-case-{component,component-r2,candidates,identity}.log`.
+
+The daemon suite passes, including the new regressions, integration and
+backpressure checks. Negative control: `/tmp/lem-row-case-before.log`; final
+suite: `/tmp/lem-row-case-after-r3.log`. All 19 packaged native display/lifecycle
+checks pass, and both production and regression-test sources match the built
+snapshot. Configured package: `/nix/store/wfmyi7r8w172gpxq4s2xdwglzz3hy0mg-lem-yath`;
+client: `/nix/store/g0hk4zis1h0ryafw1rn8hw9bbfspvhfj-sbcl-lemclient-unstable`.
+Evidence: `/tmp/lem-row-case-r3-build.paths`, `/tmp/lem-row-case-r3-native.log`.
+No installed-profile activation was performed.
+
+
+Final complete-input ABBA against `400061038` used software/X11, the same 10 MB
+UTF-8 `.txt` fixture, 600 measured inputs, 20 warmups and 25 ms pacing. Means:
+
+| Metric | Before case fix | Final case fix |
+| --- | ---: | ---: |
+| Daemon process CPU | 316.526 ms | 325.339 ms (+2.8%) |
+| Client process CPU | 199.043 ms | 203.422 ms (+2.2%) |
+| Daemon Lisp allocation | 41,714,576 bytes | 41,715,024 bytes |
+| Client Lisp allocation | 24,509,504 bytes | 24,247,360 bytes |
+| X11 submission-to-ack median / p95 | 0.743 / 0.949 ms | 0.752 / 0.896 ms |
+| Client send-to-present median / p95 | 0.641 / 0.816 ms | 0.640 / 0.758 ms |
+
+Daemon CPU ranges overlap, as do median timing ranges. These runs do not prove
+zero overhead, but the earlier 10.9% CPU regression was substantially reduced;
+allocation stayed effectively flat and send-to-present medians stayed near
+0.64 ms. The fix is retained for correctness without a general speedup claim.
+All four full text/save/fixture comparisons, clean exits, client-source/probe
+hashes and packaged production/test-source checks passed. Endpoints exclude
+GPU completion and physical monitor latency. This `.txt` workload also does not
+establish Lisp-mode or LSP performance. Artifacts:
+`/tmp/lem-row-case-r3-{before,after}-{1,2}.{json,log}` and
+`/tmp/lem-row-case-input-r3.{py,log}`.
