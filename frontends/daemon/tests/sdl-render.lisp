@@ -4,7 +4,7 @@
                     (:protocol :lem-daemon/protocol)))
 (in-package :lem-daemon/tests/sdl-render)
 
-;; Exercise internal rendering with a real software renderer, capturing pixels
+;; Exercise internal rendering with a real renderer, capturing pixels
 ;; BEFORE presentation: SDL does not preserve the window backbuffer afterward.
 (defun read-pixels (renderer)
   (multiple-value-bind (width height) (sdl2:get-renderer-output-size renderer)
@@ -103,6 +103,9 @@
       (gui::clear-glyphs cache))))
 
 (defun exercise-renderer (window renderer fonts)
+  (ok (equal (or (uiop:getenv "SDL_RENDER_BATCHING") "1")
+             (sdl2-ffi.functions:sdl-get-hint "SDL_RENDER_BATCHING"))
+      "batching defaults on and preserves the environment override")
   (let ((info (sdl2:get-renderer-info renderer)))
     (unwind-protect (format t "~&SDL pixel-test renderer: ~s~%" info)
       (sdl2::free-render-info info)))

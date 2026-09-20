@@ -249,7 +249,8 @@ try:
                   renderer_requested=args.renderer,
                   renderer=initial['renderer'],
                   graphics_environment={key: env.get(key) for key in
-                                        ('SDL_RENDER_DRIVER', 'EGL_PLATFORM', '__EGL_VENDOR_LIBRARY_FILENAMES')},
+                                        ('SDL_RENDER_DRIVER', 'SDL_RENDER_BATCHING', 'EGL_PLATFORM',
+                                         '__EGL_VENDOR_LIBRARY_FILENAMES')},
                   probe_sha256={name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                                 for name in ('sdl-input.py', 'sdl-input-client.lisp', 'sdl-input-events.c')},
                   editor=editor, editor_resolved=editor_resolved, client_source=str(repo),

@@ -17,6 +17,7 @@
          (plus-c:c-let ((data sdl2-ffi:sdl-renderer-info :from info))
            (let ((result (lem-daemon/protocol:make-object
                           "name" (data :name) "flags" (data :flags)
+                          "batching_hint" (sdl2-ffi.functions:sdl-get-hint "SDL_RENDER_BATCHING")
                           "video_driver" (sdl2:get-current-video-driver))))
              (when (member (data :name) '("opengl" "opengles" "opengles2") :test #'equal)
                (let ((get-string (sdl2:gl-get-proc-address "glGetString")))

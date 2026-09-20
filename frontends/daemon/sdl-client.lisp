@@ -436,6 +436,10 @@ Notify outside the lock so the consumer can immediately drain the queue."
                                            :w (* 100 (font:font-char-width fonts))
                                            :h (* 40 (font:font-char-height fonts))
                                            :flags '(:shown :resizable))
+                    ;; We draw only through SDL, so explicit renderer selection
+                    ;; need not flush after each operation. Normal hint priority
+                    ;; preserves the user's SDL_RENDER_BATCHING override.
+                    (sdl2-ffi.functions:sdl-set-hint "SDL_RENDER_BATCHING" "1")
                     (sdl2:with-renderer (renderer window :flags '(:software))
                       (graphical-event-loop connection files wait-p window renderer fonts))))
              (lem-sdl2/icon-font:clear-icon-font-cache)

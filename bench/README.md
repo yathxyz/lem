@@ -4538,3 +4538,111 @@ the checked-in probe sources. Python compilation and strict C compilation
 `/tmp/lem-sdl-event-smoke-{gpu,x11}.{json,log}`, and
 `/tmp/lem-sdl-event-smoke-negative.log`. Initial failure evidence remains in
 `/tmp/lem-sdl-event-smoke-software{,-v4}.log` and their recorded client roots.
+
+
+### Native input renderer comparison and SDL batching (2026-09-20)
+
+The complete native-input renderer ABBA ran software/OpenGL/OpenGL/software,
+each with 600 measured inputs, 20 warmup inputs, 25 ms pacing and the same
+10 MB UTF-8 fixture. Both OpenGL runs identified the AMD radeonsi device and
+Mesa 25.2.6 above; both software runs identified `software`. Means of the two
+runs per renderer:
+
+| Metric | Software | OpenGL |
+| --- | ---: | ---: |
+| Client process CPU | 758.782 ms | 377.433 ms (−50.3%) |
+| Client Lisp allocation | 30,948,416 bytes | 31,138,816 bytes (+0.6%) |
+| Pipe-to-presentation-ack median | 2.277 ms | 1.527 ms |
+| Pipe-to-presentation-ack p95 | 2.697 ms | 1.696 ms |
+| Client send-to-present median | 1.620 ms | 1.244 ms |
+| Client send-to-present p95 | 1.890 ms | 1.337 ms |
+
+Each run passed full-buffer equality, saved-byte equality, unchanged-fixture
+and clean daemon/client exit checks. Probe and client source hashes were
+verified against `a30b481f9` before the subsequent batching edit. Artifacts:
+`/tmp/lem-sdl-event-{software,opengl}-{1,2}.{json,log}`, driven by
+`/tmp/lem-sdl-event-runs.py`. Daemon CPU varied substantially (394–517 ms for
+software, 408–418 ms for OpenGL); the renderer comparison does not establish a
+daemon speedup. These endpoints exclude GPU completion and physical scanout.
+Software/offscreen timings also must not be compared directly with X11 timings
+from preceding experiments. The production renderer choice remains software.
+
+Inspection then found that SDL2-compat disables batching when a renderer is
+selected explicitly, including the client's software flag or a renderer hint.
+The previous automatic accelerated component test used a different default.
+A new component experiment explicitly set `SDL_RENDER_BATCHING` to 0/1/1/0 for
+each renderer, warming and collecting garbage before each measurement:
+
+| Workload | Unbatched → batched CPU | Unbatched → batched elapsed |
+| --- | ---: | ---: |
+| Software, 3,000 sparse updates | 1,045.620 → 1,021.704 ms (−2.3%) | 1,051.501 → 1,029.001 ms |
+| Software, 400 full repaints | 356.235 → 323.136 ms (−9.3%) | 358.500 → 325.000 ms |
+| OpenGL, 3,000 sparse updates | 191.023 → 141.133 ms (−26.1%) | 222.501 → 220.500 ms |
+| OpenGL, 400 full repaints | 963.038 → 635.070 ms (−34.1%) | 428.501 → 358.500 ms |
+
+Allocation was essentially unchanged. CPU includes native driver workers;
+GPU elapsed intervals still end at submission, not GPU completion. Script/log:
+`/tmp/lem-renderer-batching-component.{lisp,log}`. Batching addresses part of
+the full-repaint cost; OpenGL full repaints still used more process CPU than
+software in this component workload.
+
+The daemon SDL client now requests batching before renderer creation using a
+normal-priority hint, so `SDL_RENDER_BATCHING=0` remains an override. All its
+drawing uses SDL, which manages flushes at presentation, render-target changes,
+texture dependencies and pixel readback. No frame is dropped or coalesced by
+this change. The input probe now records the environment setting and the
+resolved batching hint. References: [SDL batching contract](https://wiki.libsdl.org/SDL2/SDL_HINT_RENDER_BATCHING)
+and [hint priorities](https://wiki.libsdl.org/SDL2/SDL_SetHintWithPriority).
+
+
+Offscreen input also has a backend-specific timing limit: SDL 3.2.26's
+[offscreen device](https://github.com/libsdl-org/SDL/blob/release-3.2.26/src/video/offscreen/SDL_offscreenvideo.c)
+does not provide `WaitEventTimeout`/`SendWakeupEvent`. Its
+[event loop](https://github.com/libsdl-org/SDL/blob/release-3.2.26/src/events/SDL_events.c)
+therefore takes the fallback path with a 1 ms polling interval. This supports
+using the offscreen results for matched renderer comparisons, but not treating
+their absolute latency as a lower bound on a desktop client. It does not justify
+adding polling or busy-waiting to Lem.
+
+
+A subsequent full-input ABBA compared `SDL_RENDER_BATCHING=0` with the new
+unset-environment default, separately on software/X11 and OpenGL/offscreen.
+Every run recorded the resolved hint, actual renderer, source/probe hashes,
+600 inputs, 20 warmups and the same 10 MB fixture. Means of each pair:
+
+| Backend | Client CPU, off → on | Submission-to-ack median / p95, off → on | Send-to-present median / p95, off → on |
+| --- | ---: | ---: | ---: |
+| Software/X11 | 438.978 → 432.011 ms (−1.6%) | 0.909 / 1.051 → 0.906 / 1.044 ms | 0.794 / 0.910 → 0.789 / 0.898 ms |
+| OpenGL/offscreen | 289.994 → 248.570 ms (−14.3%) | 1.427 / 1.503 → 1.389 / 1.462 ms | 1.198 / 1.232 → 1.169 / 1.194 ms |
+
+X11 typing latency is effectively unchanged; its individual run medians
+interleave. The stronger evidence is reduced rendering CPU, with a small
+OpenGL input-path reduction. Allocation varied by about 1–1.5% in these runs;
+the component experiment showed no material allocation change. No overall
+allocation or physical typing speedup is attributed to batching.
+All eight runs passed complete buffer/save/fixture comparisons and both clean
+exit checks, and their recorded source/probe hashes were verified. Artifacts:
+`/tmp/lem-batching-r2-{x11,sdl}-{off,on}-{1,2}.{json,log}`,
+`/tmp/lem-batching-input-r2.{py,log}`.
+
+The first X11 attempt mistakenly inherited the matched offscreen Mesa/EGL
+settings and hit `FLOATING-POINT-INVALID-OPERATION` inside driver context creation
+at `SDL_CreateRenderer`, before measurement. It produced no result JSON and was
+excluded. The replacement runner restores the ordinary X11 graphics environment
+and applies the private Mesa settings only to offscreen GPU runs. Evidence:
+`/tmp/lem-batching-x11-off-1.log` and its client artifact root. This driver failure
+is tracked separately from batching; it occurred with batching disabled.
+
+Pixel suites pass on dummy/software with the default enabled, dummy/software
+with the explicit disable override, and actual OpenGL/offscreen with the default
+enabled. The regression asserts hint precedence and exercises retained/full
+pixels, Unicode/styles, cursors, resize/reset, target failure and cleanup.
+Logs: `/tmp/lem-batching-{default,override,gpu}-pixels.log`.
+
+
+Packaged validation passed all 19 native display/lifecycle checks. The built
+production SDL source and pixel-test source match the checkout byte-for-byte.
+Configured package: `/nix/store/h9sjxv2l8dijamd7dpkwziyjrzr85z58-lem-yath`;
+client: `/nix/store/ibkcln47vhnskhbqq6dyfgks1kxmdcjn-sbcl-lemclient-unstable`.
+Evidence: `/tmp/lem-batching-build.paths`, `/tmp/lem-batching-native.log`.
+No installed profile was activated.
