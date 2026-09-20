@@ -7563,3 +7563,111 @@ Final exact-source differential log:
 with logs, generated client/Python snapshots and `-proof.{json,log}`. Aggregate:
 `/tmp/lem-syntax-span-strings-summary.json`. Each result names its private root
 containing `pipeline.csv` and `server-work.json`.
+
+### Linear Vi insertion recording (2026-09-20)
+
+Fresh CPU/allocation profiles of published `0d8f8f9f7` used the ordinary deep
+Lisp fixture, 2,400 measured inputs plus 20 warmups, 5 ms pacing, CPUs 0–3,
+and software X11. Exact text, mode, cursor, renderer, source/probe hashes and
+clean exits passed. The CPU report collected 1,293 samples: partial parsing
+accounted for 42 inclusive samples (3.2%), logical-line creation for 423 (32.7%),
+and programming-buffer classification for 123 (9.5%). These shares overlap.
+The allocation report collected 16,229 approximately 32 KB region samples;
+1,497 (9.2%) came from `append` in the Vi insert-state post-command hook.
+Profile timing is diagnostic, not an uninstrumented latency comparison.
+
+A private `remove-elements` experiment replaced Iterate collection with
+`push`/`nreverse`. All 4,096 differential range cases matched, but allocation
+was unchanged and component timings overlapped. It was not adopted.
+
+Vi insertion recording appended every command's keys by copying the entire
+existing recording. This allocates quadratically over an uninterrupted insert
+session. The candidate retains a tail of an owned forward list, copying only
+the newly supplied command keys. Replacing or dynamically rebinding the public
+recording is detected before appending; the supplied prefix is copied so its
+spine remains untouched. Normal-mode replacement and entering insert/replace
+clear the private references. Dot-repeat still reads the ordered key list;
+recording remains disabled during playback. A caller retaining a snapshot of
+`*last-repeat-keys*` must copy the list, as documented on that variable.
+
+Same-compiler component ABBA means, one key per recorded command, with full GC
+before each phase and output length/identity checks:
+
+| Commands | Recorder CPU before → after | Allocated bytes before → after |
+| --- | ---: | ---: |
+| 1,000 | 2.154 → 0.028 ms | 8,016,640 → 50,112 |
+| 4,000 | 24.637 → 0.048 ms | 128,068,416 → 89,024 |
+| 8,000 | 83.358 → 0.088 ms | 512,274,304 → 163,648 |
+
+These are recorder-only results. The fixed allocation overhead matters at the
+smallest counts; no whole-editor speedup follows from these numbers alone.
+
+Focused tests pass on the original and candidate implementations: key order,
+caller-list ownership, empty chunks, dynamic rebinding/restoration, replacement,
+Unicode insertion/deletion, a new insertion after playback, replace-state repeat,
+and the existing counted repeat tests. An initial test used `<BS>`, which the
+Vi test DSL turns into a literal control character; changing the fixture to
+its actual `C-h` deletion binding fixed the test on the original implementation.
+The full Vi suite retains exactly the same seven assertion failures in three
+suites on both variants: delete/change at EOF, undo cursor position, linewise
+paste at EOF and numbered registers. The final failure sections compare exactly.
+All 44 packaged checks pass: 16 indentation-guide, 9 Org-modern and 19 native
+client/display/lifecycle checks. No verified-kernel source changed.
+
+The built candidate then completed GUI ABBA comparisons on two workloads:
+ordinary Lisp with 4,000 measured inputs plus 20 warmups at 5 ms pacing, and
+a multiline-string control with 600 plus 20 at 25 ms pacing. Both used line
+6514, CPUs 0–3, software X11, and the same source-loaded SDL client. Values
+below are means of two runs, including means of per-run percentiles; CPU and
+allocation cover the entire window including warmups.
+
+| Workload | Daemon CPU before → after | Daemon allocation before → after | Client send-to-present median before → after | p95 before → after |
+| --- | ---: | ---: | ---: | ---: |
+| Ordinary Lisp, 4,000 inputs | 2,451.341 → 2,409.017 ms (−1.7%) | 873,313,408 → 739,244,096 bytes (−15.4%) | 0.842211 → 0.830690 ms (−1.4%) | 1.073875 → 1.034847 ms |
+| Multiline string, 600 inputs | 356.482 → 356.005 ms (−0.1%) | 69,256,848 → 66,200,016 bytes (−4.4%) | 0.818537 → 0.824416 ms (+0.7%) | 1.076685 → 1.081514 ms |
+
+Both ordinary candidate CPU/median/p95 values are below both baselines.
+String CPU and latency ranges overlap; that control establishes allocation
+savings, not a timing improvement. Ordinary client CPU/allocation fell 0.7%/0.6%;
+string client CPU rose 0.8% and allocation fell 1.8%. The retained benefit is
+linear recording and consistently lower daemon allocation, with a small measured
+ordinary-session timing improvement. It is not a claim of perceptibly faster
+short insertions. Ordinary candidate maxima were 5.536/6.477 ms, versus
+5.645/5.759 ms before; no tail-latency guarantee follows.
+
+All eight runs passed exact saved text, cursor/mode, renderer, source/probe
+provenance, complete ordered daemon pipeline stages, five nonnegative client
+phases summing to total latency, and clean exits. Each measured acknowledgement
+added one update/draw/present and two decoded/painted rows. Ordinary runs each
+performed 4,025 redraws/156,975 logical lines and sent 4,020 screen messages/
+8,040 rows. String runs each performed 623 redraws/24,297 logical lines and
+sent 620 messages/1,240 rows. Outside the resource window, each run also checked
+that the initially empty repeat recording contained every 4,020 or 620 input
+keys in exact alternating insertion/deletion order. No measured event exceeded
+20 ms; the prior isolated 46 ms stall remains unexplained. RenderPresent return
+is not physical-monitor presentation.
+
+Baseline: `/nix/store/83kwccca72hks3njd6ylvb5x3vi7yc3c-lem-yath-profile/bin/lem`.
+Candidate: `/nix/store/6bp8ddl85vzj9dkqwwwma0jwrhlbnpda-lem-yath/bin/lem`.
+Configuration remained `/nix/store/alkigfhipwqdckdl7hp6gkm3361jd50m-lem-yath`.
+The candidate checkout was `0d8f8f9f7` with the Vi sources/tests modified;
+36 installed source/configuration files were byte-checked, and the baseline's
+Vi sources matched `0d8f8f9f7` exactly.
+
+Profiles: `/tmp/lem-typing-span-profile{.py,-proof.json}` and
+`/tmp/lem-typing-span-profile-deep-{cpu,alloc}.{json,log}`, with reports under
+`/tmp/lem-sdl-input-tq09qgsw` and `/tmp/lem-sdl-input-bvrqfl1y`.
+Rejected experiment: `/tmp/lem-remove-elements-component.{lisp,log}`.
+Recording component: `/tmp/lem-vi-recording-component.{lisp,log}`.
+Tests: `/tmp/lem-vi-recording-tests-before-r2.log`,
+`/tmp/lem-vi-recording-tests-after-final.log` and
+`/tmp/lem-vi-recording-focused-{before,after-final}.log`.
+Build: `/tmp/lem-vi-recording-build.{paths,log}`. Package proofs:
+`/tmp/lem-vi-recording-{baseline,package}-proof.json`.
+GUI drivers/results: `/tmp/lem-vi-recording-{input,results,abba,summary}.py`,
+`/tmp/lem-vi-recording-abba.log` and `/tmp/lem-vi-recording-summary.json`.
+Each `/tmp/lem-vi-recording-input-{deep,string}-{before,after}-{1,2}` has JSON,
+log, generated client/Python snapshots and `-proof.{json,log}`. Ordinary private
+roots in ABBA order are `qyri9heg`, `2xgstq9s`, `27juwyba`, `vs40fe46`; string
+roots are `dmbwtity`, `k0kw_kz2`, `w3xu8xgk`, `vw6f592x`, all under
+`/tmp/lem-sdl-input-` and containing pipeline/resource and display-work records.

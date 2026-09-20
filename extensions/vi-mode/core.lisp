@@ -49,7 +49,9 @@
            :define-keymap))
 (in-package :lem-vi-mode/core)
 
-(defvar *last-repeat-keys* '())
+(defvar *last-repeat-keys* '()
+  "Keys for the latest repeatable command, in input order.
+Recording owns and extends this list; copy it to retain a snapshot.")
 
 (defvar *default-cursor-color*  "#ffffff")
 

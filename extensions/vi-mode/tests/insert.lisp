@@ -11,6 +11,48 @@
 
 (in-readtable :interpol-syntax)
 
+(deftest repeat-key-recording-ownership
+  ;; Exercise the recorder directly to retain the caller's key lists across
+  ;; successive commands, rebinding and replacement of the public recording.
+  (let* ((prefix (list (make-key :sym "i")))
+         (keys (list (make-key :sym "a") (make-key :sym "b")))
+         (expected (append prefix keys))
+         (lem-vi-mode/core:*last-repeat-keys* prefix))
+    (lem-vi-mode::record-repeat-keys keys)
+    (lem-vi-mode::record-repeat-keys nil)
+    (ok (equal expected lem-vi-mode/core:*last-repeat-keys*))
+    (ok (= 1 (length prefix)))
+    (ok (= 2 (length keys)))
+    (let ((saved (copy-list lem-vi-mode/core:*last-repeat-keys*)))
+      (let ((lem-vi-mode/core:*last-repeat-keys* nil))
+        (lem-vi-mode::record-repeat-keys keys)
+        (ok (equal keys lem-vi-mode/core:*last-repeat-keys*)))
+      (lem-vi-mode::record-repeat-keys keys)
+      (ok (equal (append saved keys) lem-vi-mode/core:*last-repeat-keys*)))
+    (setf lem-vi-mode/core:*last-repeat-keys* prefix)
+    (lem-vi-mode::record-repeat-keys keys)
+    (ok (equal expected lem-vi-mode/core:*last-repeat-keys*))
+    (ok (= 1 (length prefix)))
+    (ok (= 2 (length keys)))))
+
+(deftest vi-repeat-insert-recording
+  (with-fake-interface ()
+    (with-vi-buffer (#?"[f]oo\nbar\nbaz\n")
+      (cmd "Aαβ<C-h>γ<Esc>")
+      (ok (text= #?"fooαγ\nbar\nbaz\n"))
+      (let ((saved (copy-list lem-vi-mode/core:*last-repeat-keys*)))
+        (cmd "j^.")
+        (ok (text= #?"fooαγ\nbarαγ\nbaz\n"))
+        (ok (equal saved lem-vi-mode/core:*last-repeat-keys*))
+        (ok (state= :normal)))
+      (cmd "jAZ<Esc>.")
+      (ok (text= #?"fooαγ\nbarαγ\nbazZZ\n"))
+      (ok (state= :normal)))
+    (with-vi-buffer (#?"[a]bcdef\nuvwxyz\n")
+      (cmd "RXY<Esc>j^.")
+      (ok (text= #?"XYcdef\nXYwxyz\n"))
+      (ok (state= :normal)))))
+
 (deftest vi-insert-enters-insert-mode
   (with-fake-interface ()
     (with-vi-buffer (#?"[f]oo\n")

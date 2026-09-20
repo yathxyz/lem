@@ -34,8 +34,7 @@
   (:import-from :lem/kbdmacro
                 :*macro-running-p*)
   (:import-from :alexandria
-                :when-let
-                :appendf)
+                :when-let)
   (:export :vi-mode
            :define-state
            :define-motion
@@ -58,12 +57,33 @@
            :leader-key))
 (in-package :lem-vi-mode)
 
+(defvar *repeat-keys-head* nil)
+(defvar *repeat-keys-tail* nil)
+
+(defun record-repeat-keys (keys)
+  "Append KEYS without copying the accumulated insertion on every command.
+Own the list spine so recording never extends the caller's command keys.
+Rebinding or replacing *LAST-REPEAT-KEYS* starts a new owned recording."
+  (unless (eq *last-repeat-keys* *repeat-keys-head*)
+    (setf *last-repeat-keys* (copy-list *last-repeat-keys*)
+          *repeat-keys-head* *last-repeat-keys*
+          *repeat-keys-tail* (last *last-repeat-keys*)))
+  (when keys
+    (let ((new-keys (copy-list keys)))
+      (if *repeat-keys-tail*
+          (setf (cdr *repeat-keys-tail*) new-keys)
+          (setf *last-repeat-keys* new-keys
+                *repeat-keys-head* new-keys))
+      (setf *repeat-keys-tail* (last new-keys)))))
+
 (defmethod post-command-hook ((state normal))
   (when *enable-repeat-recording*
     (let ((command (this-command)))
       (when (and (typep command 'vi-command)
                  (eq (vi-command-repeat command) t))
-        (setf *last-repeat-keys* (vi-this-command-keys)))))
+        (setf *last-repeat-keys* (vi-this-command-keys)
+              *repeat-keys-head* nil
+              *repeat-keys-tail* nil))))
   (adjust-window-scroll)
   (fall-within-line (current-point)))
 
@@ -98,8 +118,7 @@
       (unless (or (and (typep command 'vi-command)
                        (eq (vi-command-repeat command) nil))
                   (eq (command-name (this-command)) 'vi-end-insert))
-        (appendf *last-repeat-keys*
-                 this-command-keys))))
+        (record-repeat-keys this-command-keys))))
   (adjust-window-scroll))
 
 (defmethod post-command-hook :after ((state visual))
@@ -107,7 +126,9 @@
 
 (defmethod buffer-state-enabled-hook ((state insert) buffer)
   (when *enable-repeat-recording*
-    (setf *last-repeat-keys* nil))
+    (setf *last-repeat-keys* nil
+          *repeat-keys-head* nil
+          *repeat-keys-tail* nil))
   (unless *macro-running-p*
     (buffer-undo-boundary buffer)
     (buffer-disable-undo-boundary buffer)))
