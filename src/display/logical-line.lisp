@@ -45,50 +45,36 @@
               attributes)))
 
 (defun overlay-attributes (under-attributes over-start over-end over-attribute)
-  ;; Split both sides in one pass. Snapshot the ranges before resolving their
-  ;; attributes, and keep absolute coordinates to avoid subtracting then
-  ;; re-adding OVER-START for every overlapping range.
-  (let ((over-attribute (ensure-attribute over-attribute))
-        (under-part-attributes '())
-        (merged-attributes '()))
-    (flet ((keep-under (start end attribute)
-             (push (list start end attribute) merged-attributes))
-           (keep-overlap (start end attribute)
-             (push (list start end attribute) under-part-attributes)))
-      (loop :for (start end attribute) :in under-attributes
-            :do (cond
-                  ((<= over-start start end over-end)
-                   (keep-overlap start end attribute))
-                  ((<= over-start start over-end end)
-                   (keep-overlap start over-end attribute)
-                   (keep-under over-end end attribute))
-                  ((<= start over-start end over-end)
-                   (keep-overlap over-start end attribute)
-                   (keep-under start over-start attribute))
-                  ((<= start over-start over-end end)
-                   (keep-overlap over-start over-end attribute)
-                   (keep-under start over-start attribute)
-                   (keep-under over-end end attribute))
-                  (t
-                   (keep-under start end attribute)))))
-    (setf under-part-attributes (nreverse under-part-attributes)
-          merged-attributes (nreverse merged-attributes))
+  ;; under-attributes := ((start-charpos end-charpos attribute) ...)
+  (let* ((over-attribute (ensure-attribute over-attribute))
+         (under-part-attributes (lem/buffer/line:subseq-elements under-attributes
+                                                               over-start
+                                                               over-end))
+         (merged-attributes (lem/buffer/line:remove-elements under-attributes
+                                                           over-start
+                                                           over-end)))
     (flet ((add-element (start end attribute)
              (when (< start end)
                (push (list start end (ensure-attribute attribute))
                      merged-attributes))))
       (if (null under-part-attributes)
           (add-element over-start over-end over-attribute)
-          (loop :for prev-under := over-start :then under-end
-                :for (under-start under-end under-attribute)
+          (loop :for prev-under := 0 :then under-end-offset
+                :for (under-start-offset under-end-offset under-attribute)
                 :in under-part-attributes
-                :do (add-element prev-under under-start over-attribute)
-                    (add-element under-start under-end
+                :do (add-element (+ over-start prev-under)
+                                 (+ over-start under-start-offset)
+                                 over-attribute)
+                    (add-element (+ over-start under-start-offset)
+                                 (+ over-start under-end-offset)
                                  (alexandria:if-let (under-attribute
                                                      (ensure-attribute under-attribute nil))
-                                   (merge-attribute under-attribute over-attribute)
+                                   (merge-attribute under-attribute
+                                                    over-attribute)
                                    over-attribute))
-                :finally (add-element under-end over-end over-attribute))))
+                :finally (add-element (+ over-start under-end-offset)
+                                      over-end
+                                      over-attribute))))
     (lem/buffer/line:normalization-elements merged-attributes)))
 
 (defun create-logical-line (point overlays active-modes &optional window)
