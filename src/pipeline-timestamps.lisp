@@ -7,10 +7,10 @@
 ;;;;
 ;;;;   t0  input arrives in-process     (frontend input thread: tty bytes
 ;;;;                                     read on ncurses, key RPC received
-;;;;                                     on lem-server/webview, SDL key
+;;;;                                     on lem-server/webview or daemon, SDL key
 ;;;;                                     event dequeued on sdl2)
 ;;;;   t1  event enqueued via send-event (frontend input thread)
-;;;;   t2  event dequeued               (editor thread, receive-event)
+;;;;   t2  event ready for dispatch     (editor thread, receive-event)
 ;;;;   t3  command dispatch returns      (editor thread, command loop)
 ;;;;   t4  redisplay done               (editor thread, redraw-display)
 ;;;;
@@ -23,11 +23,15 @@
 ;;;; the event queue (this changes no `lem-core' API: the wrapper is unwrapped
 ;;;; in `receive-event' before any consumer sees it).  t2/t3/t4 are editor-
 ;;;; thread state, touched only from the single command loop.  The ncurses,
-;;;; lem-server (webview) and sdl2 input paths wrap key events; any other queue
+;;;; lem-server (webview), daemon and sdl2 input paths wrap key events; any other queue
 ;;;; producer enqueues raw events, never sets t0/t1, and every note below is
 ;;;; guarded off for it.  On webview and sdl2, t4 is core paint done -- the
 ;;;; browser's/GPU's own present falls outside the pipeline, so keystroke
-;;;; there is not glass-to-glass.
+;;;; there is not glass-to-glass. Daemon timing ends at core redisplay too;
+;;;; socket output, client drawing and presentation happen afterward.
+;;;; Routed daemon keys keep their timing inside the session envelope. Their
+;;;; queue stage includes time deferred behind another client's synchronous
+;;;; command and preparation of the destination frame, before dispatch is safe.
 ;;;;
 ;;;; The histogram backend (`lem/metrics') is loaded after this file, so the
 ;;;; recording is reached through an installed sink function rather than a
@@ -50,7 +54,7 @@ stage deltas are meaningful."
 event queue together with its pipeline timestamps T0 (input arrived
 in-process) and T1 (enqueued).  `receive-event' unwraps it, recording the
 queue wait and retaining the stamps for the command and redisplay stages;
-the ncurses, lem-server and sdl2 key paths produce these, and every other
+the ncurses, lem-server, daemon and sdl2 key paths produce these, and every other
 queue producer enqueues raw events that pass through unchanged."
   (payload nil)
   (t0 0 :type fixnum)

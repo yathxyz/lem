@@ -4,6 +4,34 @@
                     (:transport :lem-daemon/transport)))
 (in-package :lem-daemon/tests/protocol)
 
+(deftest keyboard-input-timing-is-gated-and-keeps-routing
+  (dolist (recording-p '(nil t))
+    (let* ((lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+           (lem-core::*pipeline-recorder* (when recording-p (lambda (&rest values)
+                                                            (declare (ignore values)))))
+           (connection (make-instance 'lem-daemon::daemon-connection))
+           (implementation (make-instance 'lem-daemon:daemon-implementation)))
+      ;; No frame or writer is needed to inspect the real producer's queued
+      ;; key and encoded acceptance reply; PREPARE runs only on consumption.
+      (setf (lem-daemon::connection-negotiated-p connection) t
+            (lem-daemon::connection-implementation connection) implementation)
+      (lem-daemon::handle-message
+       connection (protocol:make-object "version" protocol:+protocol-version+
+                                        "type" "input" "id" "key-1" "sym" "x" "ctrl" t))
+      (let* ((routed (lem/common/queue:dequeue lem-core::*editor-event-queue*))
+             (event (lem-core::routed-input-event-event routed))
+             (key (if (lem-core::pipeline-event-p event)
+                      (lem-core::pipeline-event-payload event) event)))
+        (ok (eq connection (lem-core::routed-input-event-session routed)))
+        (ok (eql recording-p (lem-core::pipeline-event-p event)))
+        (ok (lem:match-key key :ctrl t :sym "x"))
+        (when (lem-core::pipeline-event-p event)
+          (ok (<= (lem-core::pipeline-event-t0 event) (lem-core::pipeline-event-t1 event)
+                  (lem:pipeline-now))))
+        (let ((reply (protocol:decode-message (car (lem-daemon::connection-write-head connection)))))
+          (ok (equal "ok" (protocol:field reply "status")))
+          (ok (equal "key-1" (protocol:field reply "id"))))))))
+
 (deftest object-construction-preserves-fields
   (dolist (count '(0 1 2 3 4 7 8 9 16 33 64))
     (let* ((fields (loop :for index :below count

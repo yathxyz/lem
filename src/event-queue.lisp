@@ -51,7 +51,9 @@
           (t
            (setf *routed-input-session* (routed-input-event-session e))
            (funcall (routed-input-event-prepare e))
-           (setf e (routed-input-event-event e)
+           ;; A peer deferred by a synchronous command must not overwrite that
+           ;; command's timestamps. Start its timing only after routing succeeds.
+           (setf e (note-event-dequeued (routed-input-event-event e))
                  routed-callback-p (or (functionp e) (symbolp e))))))
       (cond (deferred-p nil)
             ((null e) (return nil))

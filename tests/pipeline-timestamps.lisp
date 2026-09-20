@@ -150,3 +150,66 @@ Returns the unwrapped payload."
                           (lem/metrics::snapshot-commands snapshot))
                  "the command was recorded by name")))
       (set-pipeline-recorder old))))
+
+(deftest routed-timing-waits-for-session-ownership
+  (let* ((lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+         (lem-core::*routed-input-session* :first)
+         (lem-core::*deferred-routed-input-events* nil)
+         (lem-core::*pipeline-t1* 11)
+         (lem-core::*pipeline-t2* 22)
+         (lem-core::*pipeline-t3* 33)
+         (first-key (make-key :sym "a"))
+         (second-key (make-key :sym "b"))
+         (enqueued (pipeline-now))
+         (prepared nil))
+    (with-captured-stages (stages)
+      (send-event
+       (lem-core::make-routed-input-event
+        :second (lambda () (setf prepared t) (ok (null stages)))
+        (lem-core::make-pipeline-event second-key enqueued enqueued)))
+      (send-event (lem-core::make-routed-input-event :first (lambda ()) first-key))
+      (ok (eq first-key (lem-core::receive-event 0)))
+      (ok (null stages) "a deferred peer does not emit a queue sample")
+      (ng prepared)
+      (ok (equal '(11 22 33) (list lem-core::*pipeline-t1*
+                                  lem-core::*pipeline-t2* lem-core::*pipeline-t3*)))
+      (ok (= 1 (length lem-core::*deferred-routed-input-events*)))
+      (lem-core::finish-routed-input-session)
+      (ok (eq second-key (lem-core::receive-event 0)) "the consumer receives the original key")
+      (ok prepared)
+      (ok (eq :second lem-core::*routed-input-session*))
+      (ok (= enqueued lem-core::*pipeline-t1*))
+      (lem-core::note-command-done 'routed-command)
+      (lem-core::note-redisplay-done)
+      (ok (equal '(:queue-wait :command :redisplay :keystroke) (mapcar #'first stages)))
+      (ok (= (stage-value stages :keystroke)
+             (+ (stage-value stages :queue-wait) (stage-value stages :command)
+                (stage-value stages :redisplay))))
+      (lem-core::note-redisplay-done)
+      (ok (= 4 (length stages))))))
+
+(deftest routed-timing-unwrapping-and-prepare-failure
+  (dolist (recorder-p '(nil t))
+    (let* ((stages nil)
+           (lem-core::*editor-event-queue* (lem/common/queue:make-concurrent-queue))
+           (lem-core::*routed-input-session* nil)
+           (lem-core::*deferred-routed-input-events* nil)
+           (lem-core::*pipeline-t1* nil)
+           (lem-core::*pipeline-t2* nil)
+           (lem-core::*pipeline-t3* nil)
+           (lem-core::*pipeline-recorder*
+             (when recorder-p (lambda (&rest stage) (push stage stages))))
+           (key (make-key :sym "x")))
+      (send-event
+       (lem-core::make-routed-input-event
+        :stale (lambda () (error "Detached frame"))
+        (lem-core::make-pipeline-event key 0 (pipeline-now))))
+      (ok (signals (lem-core::receive-event 0) 'error))
+      (ok (null stages))
+      (ok (null lem-core::*pipeline-t1*))
+      (lem-core::finish-routed-input-session)
+      (send-event
+       (lem-core::make-routed-input-event
+        :live (lambda ()) (lem-core::make-pipeline-event key 0 (pipeline-now))))
+      (ok (eq key (lem-core::receive-event 0)) "disabling telemetry never leaks its wrapper")
+      (ok (= (if recorder-p 1 0) (length stages))))))

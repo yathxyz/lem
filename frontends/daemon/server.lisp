@@ -646,7 +646,8 @@
                     (insert-bracketed-paste (current-point) text)
                     (redraw-display :force t))))))
              (t
-              (let ((key (make-key
+              (let* ((read-time (when (pipeline-recording-p) (pipeline-now)))
+                     (key (make-key
                           :ctrl (bool-field message "ctrl")
                           :meta (bool-field message "meta")
                           :super (bool-field message "super")
@@ -657,7 +658,11 @@
                  (lem-core::make-routed-input-event
                   connection
                   (lambda () (prepare-client-input connection implementation))
-                  key)))))
+                  ;; Keep the internal timing wrapper inside session routing:
+                  ;; the core must defer its sample along with the client's key.
+                  (if read-time
+                      (lem-core::make-pipeline-event key read-time (pipeline-now))
+                      key))))))
            (response-ok connection id "accepted")))
         ((string= type "resize")
          (let ((implementation (or (connection-implementation connection)
