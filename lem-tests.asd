@@ -22,7 +22,8 @@
   :pathname "tests"
   :components ((:file "utilities")
                (:module "buffer"
-                :components ((:file "internal")))
+                :components ((:file "internal")
+                             (:file "line")))
                (:module "common"
                 :components ((:file "color")
                              (:file "ring")

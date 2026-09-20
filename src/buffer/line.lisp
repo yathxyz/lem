@@ -160,11 +160,12 @@ call it from code that participates in normal editing.")
     ((null elements) nil)
     ((null (cdr elements)) elements)
     (t
-     ;; Check if already sorted to avoid unnecessary sorting
-     (unless (sorted-elements-p elements)
-       (setf elements (sort (copy-list elements) #'< :key #'first)))
-     ;; Optimized merge loop using direct list manipulation
-     (normalize-sorted-elements elements))))
+     (if (sorted-elements-p elements)
+         (normalize-sorted-elements elements)
+         ;; SORT owns this copied spine; merging can reuse it without changing
+         ;; the caller's list or allocating a second output spine.
+         (normalize-owned-sorted-elements
+          (sort (copy-list elements) #'< :key #'first))))))
 
 (defun sorted-elements-p (elements)
   "Check if elements are already sorted by start position"
@@ -191,6 +192,23 @@ call it from code that participates in normal editing.")
                  (setf current next)))
         finally (push current result)
                 (return (nreverse result))))
+
+(defun normalize-owned-sorted-elements (elements)
+  "Merge adjacent ranges in a privately owned sorted list spine.
+Range cells may still belong to the caller, so replace merged ranges rather
+than changing their bounds in place."
+  (declare (optimize (speed 3) (safety 1)))
+  (loop :with cell := elements
+        :while (cdr cell)
+        :for next-cell := (cdr cell)
+        :for current := (car cell)
+        :for next := (car next-cell)
+        :do (if (and (eql (second current) (first next))
+                     (equal (third current) (third next)))
+                (setf (car cell) (list (first current) (second next) (third current))
+                      (cdr cell) (cdr next-cell))
+                (setf cell next-cell)))
+  elements)
 
 (defun subseq-elements (elements start end)
   (iter:iter (iter:for (start1 end1 value1) iter:in elements)
