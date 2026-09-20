@@ -4396,3 +4396,80 @@ Artifacts: `/tmp/lem-utf8-gui-r2-{before,after}-{1,2}.{json,log}` and
 `/tmp/lem-utf8-gui.py`, `/tmp/lem-utf8-client.lisp`, and
 `/tmp/lem-utf8-gui-r2-runs.py`. No core or undo behavior was changed; the previously
 documented historical undo-model verification gap remains open.
+
+
+### Diagnose and exercise an actual GPU renderer (2026-09-20)
+
+The daemon SDL client still explicitly requests `:software`; the standalone
+SDL frontend requests acceleration. Before changing that policy, the new
+`scripts/bench/diagnostics/sdl-renderer.lisp` probe reports the Lisp/libc/SDL
+versions, selected video backend, actual renderer information and, for OpenGL,
+the GL device/version strings. It creates hidden windows, defaults to the
+offscreen video driver, and reports renderer failures without treating a
+successful allocation as proof of hardware acceleration. Run from the repo:
+
+```sh
+nix develop --command sbcl --noinform --no-sysinit --no-userinit \
+  --non-interactive --load .qlot/setup.lisp \
+  --load scripts/bench/diagnostics/sdl-renderer.lisp
+```
+
+On this host the pinned SBCL 2.5.10 process uses glibc 2.40, while the host Mesa
+26.2.2 library needs `GLIBC_ABI_GNU2_TLS`. Direct loading fails with that missing
+symbol. With the ordinary environment, both software and accelerated requests
+therefore reported an actual **software** renderer. The installed SDL2 API is
+sdl2-compat 2.32.58 over SDL3 3.2.26. Its `SDL_CreateRenderer` delegates default
+selection to SDL3, and its subsequent property lookup overwrites the original
+creation error on failure. An explicit OpenGL request consequently produced
+only `Parameter 'renderer' is invalid`; a direct SDL3 probe recovered the
+backend error. Evidence: `/tmp/lem-renderer-diagnostic.log`,
+`/tmp/lem-renderer-explicit.log`, `/tmp/lem-sdl3-gl-vendor.log`.
+
+This is a runtime compatibility obstacle, not a demonstrated editor algorithm
+limit. Fetching Mesa **25.2.6 from the existing repository Nix pin** (39.1 MiB,
+no build or host activation) enabled the same SBCL process to create an actual
+OpenGL renderer with flags 10 (accelerated + target texture). The GL renderer
+identified the AMD integrated GPU's `radeonsi, raphael_mendocino` driver and
+OpenGL 4.6 / Mesa 25.2.6. The host driver remains installed and still fails its
+separate loader check. The process-local test environment was:
+
+```sh
+SDL_VIDEODRIVER=offscreen EGL_PLATFORM=surfaceless \
+__EGL_VENDOR_LIBRARY_FILENAMES=/nix/store/72h0721w18pc8103hqsi2iaywji795hq-mesa-25.2.6/share/glvnd/egl_vendor.d/50_mesa.json \
+XDG_CACHE_HOME=/tmp/lem-renderer-driver-cache \
+nix develop --command sbcl --noinform --no-sysinit --no-userinit \
+  --non-interactive --load .qlot/setup.lisp \
+  --load scripts/bench/diagnostics/sdl-renderer.lisp
+```
+
+That store path is the measured Linux package, not a portable driver setting.
+Artifacts: `/tmp/lem-mesa-pinned-{dry-run.log,build.log}`, and
+`/tmp/lem-renderer-pinned-mesa.log`. The new pixel-test support accepts the
+isolated `offscreen` backend and prints actual renderer identity. With the
+same environment plus `SDL_RENDER_DRIVER=opengl`, the full pixel suite passes
+on the actual OpenGL renderer, including retained/full repaint equivalence,
+Unicode/styles, cursors, resizing, target failure and rectangle cleanup. The
+normal dummy/software suite also passes. Logs:
+`/tmp/lem-renderer-{gpu,software}-pixels.log`.
+
+An offscreen same-process ABBA component comparison kept current editor code
+and varied only renderer selection. Each phase warmed glyphs and performed a
+full GC. The 40-row styled Unicode screen moved a box cursor; sparse updates
+used the retained target, and full updates repainted directly. Means:
+
+| Workload | Software → OpenGL process CPU | Software → OpenGL elapsed |
+| --- | ---: | ---: |
+| 3,000 sparse updates | 1,054.674 → 139.130 ms (−86.8%) | 1,058.504 → 222.502 ms (−79.0%) |
+| 400 full repaints | 337.275 → 593.391 ms (+75.9%) | 339.003 → 336.001 ms (−0.9%) |
+
+Lisp allocation was similar (sparse 6,265,984 → 6,198,272 bytes; full
+19,526,144 → 19,526,016). CPU includes native driver threads. These are
+render-submission component costs ending at `SDL_RenderPresent` return,
+not GPU-completion, GUI-input or physical monitor timings. The full-repaint CPU
+increase and missing full GPU-input comparison prevent a general speedup claim.
+Script/log: `/tmp/lem-renderer-component.{lisp,log}`. Automatic renderer selection
+and installed profiles are unchanged pending that comparison.
+
+API references: [SDL renderer creation](https://wiki.libsdl.org/SDL2/SDL_CreateRenderer),
+[renderer flags](https://wiki.libsdl.org/SDL2/SDL_RendererFlags), and
+[the pinned compatibility implementation](https://github.com/libsdl-org/sdl2-compat/blob/release-2.32.58/src/sdl2_compat.c).

@@ -103,6 +103,9 @@
       (gui::clear-glyphs cache))))
 
 (defun exercise-renderer (window renderer fonts)
+  (let ((info (sdl2:get-renderer-info renderer)))
+    (unwind-protect (format t "~&SDL pixel-test renderer: ~s~%" info)
+      (sdl2::free-render-info info)))
   (let ((screen (gui::make-graphical-screen)) (frame (gui::make-frame-cache))
         (reference-cache (make-hash-table :test 'equal))
         (candidate-cache (make-hash-table :test 'equal))
@@ -133,7 +136,7 @@
                         (ok (zerop glyphs) "an unchanged frame performs no glyph draws")))))
              (sdl2:set-window-size window 420 240)
              (check-frame "initial styled Unicode frame" (screen-message :full t :cursor (cursor 0 0 "box")))
-             (ok (gui::frame-cache-texture frame) "the software renderer exercises the retained target")
+             (ok (gui::frame-cache-texture frame) "the renderer exercises the retained target")
              (check-frame "unchanged frame" (screen-message :cursor (cursor 0 0 "box")) :unchanged t)
              (check-frame "cursor moves to another row" (screen-message :cursor (cursor 4 2 "box")))
              (check-frame "cursor becomes a bar" (screen-message :cursor (cursor 5 3 "bar" "#FF00FF")))
@@ -185,8 +188,8 @@
       (gui::clear-glyphs candidate-cache))))
 
 (deftest retained-frame-matches-full-repaint
-  (unless (member (uiop:getenv "SDL_VIDEODRIVER") '("dummy" "x11") :test #'equal)
-    (error "Use SDL_VIDEODRIVER=dummy, or x11 with a private Xvfb display"))
+  (unless (member (uiop:getenv "SDL_VIDEODRIVER") '("dummy" "offscreen" "x11") :test #'equal)
+    (error "Use SDL_VIDEODRIVER=dummy/offscreen, or x11 with a private Xvfb display"))
   (let ((original (symbol-function 'gui::graphical-event-loop)))
     (unwind-protect
          (progn
