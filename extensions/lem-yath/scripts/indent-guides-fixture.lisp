@@ -195,8 +195,89 @@
                   (if (= tick (buffer-modified-tick buffer)) "yes" "no")))))
         (delete-buffer buffer)))))
 
+(defun indent-guides-reference-string-limit (point indentation spacing)
+  "Avoid descending through a multiline string beyond its opening context."
+  ;; The opening-context limit is at least SPACING + 1, even for an
+  ;; unindented opener. Parsing cannot reduce an indentation below that bound.
+  (when (<= indentation (1+ spacing))
+    (return-from indent-guides-reference-string-limit indentation))
+  (with-point ((scan point))
+    (line-start scan)
+    (if (not (in-string-p scan))
+        indentation
+        (with-point ((opener scan))
+          (if (not (maybe-beginning-of-string opener))
+              indentation
+              (multiple-value-bind (opener-indentation blank-p)
+                  (point-line-indentation opener)
+                (declare (ignore blank-p))
+                (min indentation
+                     (1+ (* spacing
+                            (1+ (visible-indent-guide-depth
+                                 opener-indentation spacing)))))))))))
+
+(defun indent-guides-test-string-equivalence (python-buffer)
+  (let ((correct t) (unchanged t) (cases 0))
+    (dolist (sample (list (cons lem-lisp-syntax:*syntax-table* "(defun sample ()
+    \"opening
+            multiline \\\"quoted\\\" 漢字
+		more string text
+    close\"
+    #| outer
+        \"inside comment\"
+        #| nested |#
+    |#
+    |fenced
+            symbol|
+    (values))
+")
+                         (cons (buffer-syntax-table python-buffer) "def sample():
+    text = \"\"\"opening
+            triple quoted 漢字
+		more string text
+    close\"\"\"
+    # \"a comment\"
+    value = 'opening
+            ordinary string
+    close'
+    return value
+")))
+      (let* ((text (cdr sample))
+             (buffer (make-buffer "string-limit-equivalence" :temporary t
+                                  :syntax-table (car sample))))
+        (unwind-protect
+             (progn
+               (insert-string (buffer-point buffer) text)
+               (let ((tick (buffer-modified-tick buffer)))
+                 (dolist (width '(1 4 8))
+                   (setf (variable-value 'tab-width :buffer buffer) width)
+                   (with-point ((point (buffer-start-point buffer)))
+                     (loop
+                       (let ((line (point-line point))
+                             (length (length (line-string point))))
+                         (dolist (column (remove-duplicates (list 0 (floor length 2) length)))
+                           (line-offset point 0 column)
+                           (dolist (spacing '(1 2 3 4 8 16))
+                             (loop :for indentation :from 0 :to 33
+                                   :do (incf cases)
+                                       (unless (= (indent-guides-reference-string-limit
+                                                   point indentation spacing)
+                                                  (string-limited-indentation
+                                                   point indentation spacing))
+                                         (setf correct nil))
+                                       (unless (and (eq line (point-line point))
+                                                    (= column (point-charpos point)))
+                                         (setf unchanged nil))))))
+                       (unless (line-offset point 1) (return)))))
+                 (unless (and (= tick (buffer-modified-tick buffer))
+                              (string= text (buffer-text buffer)))
+                   (setf unchanged nil))))
+          (delete-buffer buffer))))
+    (indent-guides-test-log "STRING-LIMITS cases=~d correct=~a unchanged=~a"
+                            cases (if correct "yes" "no") (if unchanged "yes" "no"))))
+
 (defun indent-guides-test-string-limits (buffer)
-  (let ((original (symbol-function 'in-string-p))
+  (let ((original (symbol-function 'syntax-ppss))
         (queries 0)
         (unchanged t)
         (text (buffer-text buffer))
@@ -204,7 +285,7 @@
     (unwind-protect
          (with-point ((point (buffer-start-point buffer)))
            (sb-ext:without-package-locks
-             (setf (symbol-function 'in-string-p)
+             (setf (symbol-function 'syntax-ppss)
                    (lambda (point)
                      (incf queries)
                      (funcall original point))))
@@ -235,12 +316,13 @@
              (unless (= 20 (string-limited-indentation point 20 4))
                (setf correct nil))
              (indent-guides-test-log
-              "DEEP-LIMITS correct=~a unchanged=~a"
+              "DEEP-LIMITS correct=~a unchanged=~a queries=~d"
               (if correct "yes" "no")
               (if (and (= tick (buffer-modified-tick buffer))
-                       (string= text (buffer-text buffer))) "yes" "no"))))
+                       (string= text (buffer-text buffer))) "yes" "no")
+              queries)))
       (sb-ext:without-package-locks
-        (setf (symbol-function 'in-string-p) original)))))
+        (setf (symbol-function 'syntax-ppss) original)))))
 
 (defun indent-guides-test-record-code ()
   (let ((buffer (indent-guides-test-open *indent-guides-test-code*)))
@@ -349,6 +431,7 @@
         (variable-value 'lem/language-mode:indent-size :buffer buffer) 4)
   (indent-guides-test-line-indentation)
   (indent-guides-test-blank-runs)
+  (indent-guides-test-string-equivalence buffer)
   (indent-guides-test-string-limits buffer)
   (indent-guides-test-record-code)
   (move-point (current-point) (buffer-start-point buffer))

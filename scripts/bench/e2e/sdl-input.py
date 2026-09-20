@@ -46,6 +46,8 @@ parser.add_argument('--document-name', default='bench.txt',
                     help='Private document filename; its extension selects the editing mode')
 parser.add_argument('--expect-major-mode',
                     help='Require this exact major-mode symbol name, for example LISP-MODE')
+parser.add_argument('--expect-in-string', action='store_true',
+                    help='Require the input target to parse inside a string before timing')
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--input-method', choices=('x11', 'sdl'), default='x11')
 parser.add_argument('--renderer', choices=('software', 'opengl'))
@@ -258,6 +260,9 @@ try:
     assert editing['line_number'] == args.target_line and editing['column_number'] == 0, editing
     if args.expect_major_mode:
         assert editing['major_mode'] == args.expect_major_mode, editing
+    if args.expect_in_string:
+        assert evaluate('(not (null (lem:in-string-p (lem:current-point))))', gui=True) == 'T', \
+            'Input target is not inside a string'
     if args.input_method == 'x11':
         windows = subprocess.check_output(['xdotool', 'search', '--name', '^Lem client$'],
                                           env=env, text=True, timeout=10).split()
@@ -315,6 +320,7 @@ try:
                   target_line=args.target_line, target_byte_offset=target_offset,
                   document_name=args.document_name, editing=editing,
                   expected_major_mode=args.expect_major_mode,
+                  in_string_verified=args.expect_in_string,
                   fixture_bytes=len(document_bytes), fixture_sha256=hashlib.sha256(document_bytes).hexdigest())
     first, last = [list(map(int, value.strip('()').split())) for value in (start_resources, stop_resources)]
     assert first[3] == last[3] == initial['units'] == reply['units']

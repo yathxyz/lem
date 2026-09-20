@@ -105,20 +105,17 @@
   ;; unindented opener. Parsing cannot reduce an indentation below that bound.
   (when (<= indentation (1+ spacing))
     (return-from string-limited-indentation indentation))
-  (with-point ((scan point))
-    (line-start scan)
-    (if (not (in-string-p scan))
+  (with-point ((opener point))
+    (line-start opener)
+    (if (not (maybe-beginning-of-string opener))
         indentation
-        (with-point ((opener scan))
-          (if (not (maybe-beginning-of-string opener))
-              indentation
-              (multiple-value-bind (opener-indentation blank-p)
-                  (point-line-indentation opener)
-                (declare (ignore blank-p))
-                (min indentation
-                     (1+ (* spacing
-                            (1+ (visible-indent-guide-depth
-                                 opener-indentation spacing)))))))))))
+        (multiple-value-bind (opener-indentation blank-p)
+            (point-line-indentation opener)
+          (declare (ignore blank-p))
+          (min indentation
+               (1+ (* spacing
+                      (1+ (visible-indent-guide-depth
+                           opener-indentation spacing)))))))))
 
 (defun cursor-attribute-at-index-p (attributes index)
   (loop :for (start end attribute) :in attributes
