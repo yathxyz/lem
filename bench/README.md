@@ -5966,3 +5966,68 @@ roots in ABBA order: `/tmp/lem-sdl-input-q8g9mf5g`, `/tmp/lem-sdl-input-xqtkaoa_
 `/tmp/lem-sdl-input-u_321ab_`, `/tmp/lem-sdl-input-48d5azbm`. Deep Lisp roots:
 `/tmp/lem-sdl-input-tquydh8k`, `/tmp/lem-sdl-input-3y3lzpjd`,
 `/tmp/lem-sdl-input-cwtqt3kc`, `/tmp/lem-sdl-input-idhcpolw`.
+
+
+### Refresh profiles after the indentation improvements (2026-09-20)
+
+The current `0e56d8fc6` configured editor was profiled again on ordinary deep Lisp
+and the long-blank fixture. Both X11/software diagnostics used 2,400 measured
+inputs plus 20 warmups, 5 ms pacing, CPUs 0–3 and SB-SPROF CPU sampling at 1 ms
+across all daemon threads. Full text/save/source integrity, cursor location,
+mode/renderer/executable/probe hashes and clean exits all passed. Profiled
+timings are not speedup evidence.
+
+The ordinary deep profile produced 2,414 samples. Inclusive costs include
+`syntax-ppss` 379 (15.7%), `string-limited-indentation` 355 (14.7%, overlapping
+with syntax parsing), `overlay-cells` 130 (5.4%), and `%move-to-position` 67
+(2.8%). `point-line-indentation` and `nearby-nonblank-indentation` each account
+for only four samples (0.2%). Some compiled functions have unresolved profiler
+names, so they have not been attributed by guesswork.
+
+The long-blank profile produced 2,876 samples. `line-offset` accounts for 763
+inclusive samples (26.5%), including 486 (16.9%) in `%move-to-position`. This
+justifies removing temporary point movement from the neighbor scan. The buffer
+already exports `point-line`, `line-next`, `line-previous` and `line-string`
+for direct read-only traversal. No core point-movement change is needed.
+
+Artifacts: `/tmp/lem-current-profile.py`,
+`/tmp/lem-current-profile-{deep,long}-instrumented.py`,
+`/tmp/lem-current-profile-{deep,long}.{json,log}`. Deep root/profile:
+`/tmp/lem-sdl-input-2iqcjx3l/server-profile.txt`; long blank:
+`/tmp/lem-sdl-input-fwbize8l/server-profile.txt`. Both retain the optional shutdown
+stack diagnostic whose SDL production prefix was byte-checked; neither timed
+out, so the handler was not exercised. The earlier isolated shutdown timeout
+remains unreproduced rather than fixed by these successful runs.
+
+### Prototype direct neighbor-line traversal (2026-09-20)
+
+The candidate passes an optional raw line to `point-line-indentation`; its point
+argument continues to supply buffer-local settings. The neighbor helper walks
+exported next/previous line links and updates an integer boundary, preserving
+its existing adjacent-line scan behavior without copying or moving points.
+All 3,590 original point-walker indentation cases, 1,716 blank-context cases,
+source/point/tick invariants and live tab-width changes pass in a private editor.
+
+Same-process component ABBA probes on CPUs 0–3 retain the current tagged span
+cache, reset it between iterations and compile both function pairs under the
+same policy. Full GC precedes each phase. Means of two phases:
+
+| Component workload | CPU before → after (ms) | Allocation before → after (bytes) |
+| --- | ---: | ---: |
+| 10 blank lines, 10,000 iterations | 19.005 → 14.450 | 6,897,664 → 4,951,040 |
+| 10,000 blank lines, 250 iterations | 97.537 → 25.724 | 38,411,008 → 38,366,464 |
+| 39 separate runs, 2,000 iterations | 29.043 → 18.080 | 21,573,952 → 6,565,376 |
+| 2,000 separate runs, 50 iterations | 34.860 → 21.577 | 28,844,224 → 10,059,968 |
+
+Both candidate phases use less CPU than both baselines in every workload. The
+long-run case queries 39 visible lines; scattered cases query every listed run.
+The allocation benefit for scattered runs follows removal of two temporary
+points per context scan. Full GUI typing remains the next validation gate.
+Exact compared definitions: `/tmp/lem-raw-neighbor-{before,after}.lisp`.
+Artifacts: `/tmp/lem-raw-neighbor-component.{lisp,py,log}`,
+`/tmp/lem-raw-neighbor-scattered-component.{lisp,py,log}`,
+`/tmp/lem-raw-neighbor-check-r2.{py,log}`. Roots: component
+`/tmp/lem-raw-neighbor-zywkxdgo`, scattered `/tmp/lem-raw-neighbor-da161sta`,
+regression `/tmp/lem-raw-neighbor-rfzprq_3`. The first private regression harness
+omitted one test function from its extracted source; no candidate result was
+claimed until the corrected harness loaded and passed both test groups.
