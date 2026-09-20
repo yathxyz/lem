@@ -86,6 +86,52 @@
            (ok (cached-syntax-matches-fresh-parse-p buffer)))
       (lem:delete-buffer buffer))))
 
+(deftest syntax-checkpoint-boundaries
+  (let ((buffer (lem:make-buffer nil :temporary t
+                                    :syntax-table lem-lisp-syntax:*syntax-table*)))
+    (unwind-protect
+         (progn
+           (lem:insert-string (lem:buffer-point buffer)
+                              (with-output-to-string (out)
+                                (dotimes (i 140) (write-line "()" out))))
+           ;; A checkpoint exactly on TO's line is intermediate only when TO
+           ;; is past column zero. Also cover nonzero FROM columns and EOF.
+           (dolist (case '((1 0 1 0 ((1 0)))
+                           (1 0 1 1 ((1 1)))
+                           (1 0 64 0 ((64 0)))
+                           (1 0 65 0 ((65 0)))
+                           (1 0 65 1 ((65 1) (65 0)))
+                           (1 0 66 1 ((66 1) (65 0)))
+                           (3 1 67 0 ((67 0)))
+                           (3 1 67 1 ((67 1) (67 0)))
+                           (3 1 131 0 ((131 0) (67 0)))
+                           (3 1 132 1 ((132 1) (131 0) (67 0)))
+                           (135 1 140 2 ((140 2)))
+                           (135 1 141 0 ((141 0)))))
+             (destructuring-bind (from-line from-column to-line to-column expected) case
+               (lem:with-point ((from (lem:buffer-start-point buffer))
+                                (to (lem:buffer-start-point buffer))
+                                (cursor (lem:buffer-start-point buffer)))
+                 (lem:line-offset from (1- from-line) from-column)
+                 (lem:line-offset to (1- to-line) to-column)
+                 (let* ((state (lem:parse-partial-sexp cursor from))
+                        (tail (list (cons (lem:copy-point from :temporary) state))))
+                   (multiple-value-bind (actual checkpoints)
+                       (lem/buffer/internal::parse-with-ppss-checkpoints from to state tail)
+                     (lem:buffer-start cursor)
+                     (ok (equal (parse-state-description (lem:parse-partial-sexp cursor to))
+                                (parse-state-description actual)))
+                     (ok (equal expected
+                                (loop :for rest :on checkpoints :until (eq rest tail)
+                                      :for point := (caar rest)
+                                      :collect (list (lem:line-number-at-point point)
+                                                     (lem:point-charpos point)))))
+                     (ok (eq tail (nthcdr (length expected) checkpoints)))
+                     (ok (equal (list from-line from-column to-line to-column)
+                                (list (lem:line-number-at-point from) (lem:point-charpos from)
+                                      (lem:line-number-at-point to) (lem:point-charpos to))))))))))
+      (lem:delete-buffer buffer))))
+
 (deftest form-offset
   (let ((lem-lisp-mode/test-api:*disable-self-connect* t))
     (testing "skip comment"

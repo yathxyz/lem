@@ -154,7 +154,12 @@
 Backward queries can then resume nearby instead of reparsing the whole prefix."
   (with-point ((cursor from) (boundary from))
     (loop
-      (unless (and (line-offset boundary 64 0) (point< boundary to))
+      ;; Short queries need no intermediate checkpoint. Avoid walking 64
+      ;; lines only to move back to TO, while retaining exact-line boundaries.
+      (unless (and (<= (+ (line-number-at-point boundary) 64)
+                       (line-number-at-point to))
+                   (line-offset boundary 64 0)
+                   (point< boundary to))
         (move-point boundary to))
       (setf state (parse-partial-sexp cursor boundary
                                       (and state (copy-pps-state state))))
