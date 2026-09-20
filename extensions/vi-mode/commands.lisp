@@ -424,8 +424,9 @@ Move the cursor to the first non-blank character of the line."
         (character-offset end -1)
         (return-from vi-delete))))
   (let ((pos (point-charpos (current-point)))
-        (ends-with-newline (and (character-at end -1)
-                                (char= (character-at end -1) #\Newline)))
+        ;; An empty final line still needs its preceding separator removed.
+        (ends-with-newline (and (point/= start end)
+                                (eql (character-at end -1) #\Newline)))
         (column-start (point-column start))
         (column-end (point-column end)))
     (delete-region start end :type type)
@@ -471,29 +472,23 @@ Move the cursor to the first non-blank character of the line."
 
 (define-operator vi-change (beg end type) ("<R>")
     (:move-point nil)
-  (when (point= beg end)
-    (delete-region beg end :type type)
-    (when (eq type :line)
-      (insert-character (current-point) #\Newline)
-      (character-offset (current-point) -1))
-    (setf (buffer-state) 'insert)
-    (return-from vi-change))
-  (let ((end-with-newline (char= (character-at end -1) #\Newline)))
-    (case type
-      (:line
-       (vi-delete beg end type)
-       (cond
-         (end-with-newline
-          (insert-character (current-point) #\Newline)
-          (character-offset (current-point) -1))
-         (t
-          (insert-character (current-point) #\Newline)
-          (character-offset (current-point) -1)))
-       (indent-line (current-point)))
-      (t (unless (or end-with-newline
-                     (eql (character-at (current-point)) #\Space))
-           (skip-whitespace-backward end))
-         (vi-delete beg end type))))
+  (cond
+    ((eq type :line)
+     ;; Keep the changed line's separator in place. Deleting the whole line
+     ;; first would join an unterminated last line to the preceding one.
+     (when (and (point< beg end)
+                (eql (character-at end -1) #\Newline))
+       (character-offset end -1))
+     (delete-region beg end :type type)
+     (move-point (current-point) beg)
+     (indent-line (current-point)))
+    ((point= beg end)
+     (delete-region beg end :type type))
+    (t
+     (unless (or (eql (character-at end -1) #\Newline)
+                 (eql (character-at (current-point)) #\Space))
+       (skip-whitespace-backward end))
+     (vi-delete beg end type)))
   (setf (buffer-state) 'insert))
 
 (define-operator vi-change-whole-line (beg end) ("<r>")
@@ -626,11 +621,7 @@ Move the cursor to the first non-blank character of the line."
            (insert-character (current-point) #\Newline)))
         (t
          (when (eq type :line)
-           (if (last-line-p (current-point))
-               (progn
-                 (line-start (current-point))
-                 (open-line 1))
-               (line-start (current-point))))))
+           (line-start (current-point)))))
       (paste-yank string type :before))))
 
 (defun read-key-to-replace ()

@@ -7671,3 +7671,32 @@ log, generated client/Python snapshots and `-proof.{json,log}`. Ordinary private
 roots in ABBA order are `qyri9heg`, `2xgstq9s`, `27juwyba`, `vs40fe46`; string
 roots are `dmbwtity`, `k0kw_kz2`, `w3xu8xgk`, `vw6f592x`, all under
 `/tmp/lem-sdl-input-` and containing pipeline/resource and display-work records.
+
+### Repair Vi linewise EOF editing and change undo groups (2026-09-20)
+
+The full Vi suite run during insertion-recording work exposed three linewise
+boundary failures. They reproduce on `456144032`: `dd` does not remove the
+final empty line, `cc` on an unterminated last line leaves the insertion point
+on the preceding line, and `P` before the last line inserts an extra blank line.
+New cases also cover an empty buffer, multiple trailing empty lines, counted
+change/paste, repeat, normalized linewise register contents and undo/redo.
+
+An empty deletion range no longer counts as ending with a newline merely because
+its preceding character is a newline. Linewise change keeps its final separator
+in place and deletes only the selected contents, avoiding deletion/reinsertion
+of line breaks and preserving the insertion location at EOF. Paste-before uses
+the newline already present in a linewise yank. Entering insert mode from a
+change/substitute operator no longer seals that command's deletion separately
+from its subsequent typing; one undo now restores the complete change. Read-only
+failure leaves both text and normal mode intact. No core undo/kernel code changed.
+
+The four focused regression tests pass within the complete Vi suite: 536 passing
+assertions and four remaining baseline failures (one undo cursor-position
+assertion and three numbered-register assertions), down from seven original
+failures. An initial test-file parenthesis error and an incorrect read-only
+condition class were corrected before the final run. Evidence:
+`/tmp/lem-vi-eof-tests-before-r2.log`, `/tmp/lem-vi-eof-tests-after.log`,
+`/tmp/lem-vi-eof-tests-after-r2.log` and
+`/tmp/lem-vi-eof-full-tests-after-r2.log`; driver:
+`/tmp/lem-vi-eof-tests.lisp`. Packaged validation follows this source checkpoint.
+These are correctness repairs; no typing-latency speedup is claimed.

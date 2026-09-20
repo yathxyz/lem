@@ -11,6 +11,23 @@
 
 (in-readtable :interpol-syntax)
 
+(deftest vi-linewise-paste-before-eof
+  (with-fake-interface ()
+    (with-vi-buffer ("[a]bc")
+      (cmd "yyP")
+      (ok (buf= #?"[a]bc\nabc"))
+      (cmd "u")
+      (ok (text= "abc")))
+    (with-vi-buffer ("[a]bc")
+      (cmd "yy2P")
+      (ok (buf= #?"[a]bc\nabc\nabc")))
+    (with-vi-buffer (#?"[a]bc\n")
+      (cmd "yyjP")
+      (ok (buf= #?"abc\n[a]bc\n")))
+    (with-vi-buffer ("[]")
+      (cmd "yyP")
+      (ok (buf= #?"[]\n")))))
+
 (deftest vi-undo
   (with-fake-interface ()
     (with-vi-buffer (#?"[1]\n2\n3\n")

@@ -130,7 +130,10 @@ Rebinding or replacing *LAST-REPEAT-KEYS* starts a new owned recording."
           *repeat-keys-head* nil
           *repeat-keys-tail* nil))
   (unless *macro-running-p*
-    (buffer-undo-boundary buffer)
+    ;; A change/substitute operator has already deleted text in this command.
+    ;; Keep that deletion and the following insertion in one undo group.
+    (unless (typep (this-command) 'vi-operator)
+      (buffer-undo-boundary buffer))
     (buffer-disable-undo-boundary buffer)))
 
 (defmethod buffer-state-disabled-hook ((state insert) buffer)
