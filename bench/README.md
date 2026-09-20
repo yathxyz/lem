@@ -7036,3 +7036,110 @@ Follow-up artifacts: `/tmp/lem-idle-redraw-tail{.py,-runs.py,-runs.log}`,
 Python snapshots. Roots in ABBA order: `/tmp/lem-sdl-input-rfydom5z`,
 `/tmp/lem-sdl-input-5ralujhi`, `/tmp/lem-sdl-input-e7yfbabg`,
 `/tmp/lem-sdl-input-vb41omzt`.
+
+### Restore routed daemon input timing (2026-09-20)
+
+The full GUI work-count diagnostic found zero core pipeline samples even though
+all keys reached the document. The daemon enqueued raw keys inside session
+routing, and the core only unwrapped timing at the outer queue boundary.
+Checkpoint `0b643241b` makes daemon keyboard input use the existing timing envelope inside the routed
+event. The core records dequeue/dispatch readiness only after session ownership
+and frame preparation succeed. A deferred peer therefore cannot overwrite an
+active synchronous prompt's timestamps. Disabled recording still enqueues a raw
+key. Mouse, paste and acceptance responses retain their existing behavior.
+
+This restores diagnostic functionality; it is not a typing-speed optimization.
+The queue stage includes session deferral and frame preparation. The endpoint
+is core redisplay completion, excluding completion of the asynchronous socket
+writer and client presentation. Existing command-loop semantics still apply:
+these simple alternating-key runs do not establish one complete sample for
+every prefix key, recursive prompt or coalesced redraw in arbitrary workloads.
+
+Three new regression tests failed before the implementation and passed after.
+All nine focused pipeline/producer tests passed 52 assertions. The daemon suite
+passed 715 assertions, and all 44 packaged indentation/Org/native display checks
+passed, including multi-client prompt routing, isolation and lifecycle behavior.
+The package's production source, tests and configuration were compared with the
+checkout. Baseline source was compared with published `b2d39109c`.
+
+Eight standard input runs used ABBA separately for multiline strings and
+ordinary Lisp: 600 measured plus 20 warmup events, 25 ms pacing, software X11,
+CPUs 0–3. The packaged daemon changed; the source-loaded client and Lisp probe
+were identical. Python additionally retained the acknowledgement's existing
+client resource counters. All saved-text, cursor, active-mode, renderer,
+source/probe, string-context and clean-exit gates passed. Means of two runs:
+
+| Workload | Daemon CPU before → after (ms) | Daemon allocation before → after (bytes) | Client send-to-present median before → after (ms) | p95 before → after (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Multiline string | 360.444 → 371.727 | 68,976,912 → 69,058,512 | 0.812520 → 0.841575 | 0.992471 → 1.049419 |
+| Ordinary Lisp | 461.861 → 461.164 | 124,156,496 → 124,110,480 | 0.950728 → 0.946092 | 1.186777 → 1.162968 |
+
+String CPU rose 3.1% and p95 rose 5.7% (57 microseconds), with separated ranges.
+Its median rose 3.6% (29 microseconds), with marginally overlapping ranges.
+Ordinary CPU and median ranges overlap; its p95 fell 2.0% (24 microseconds).
+Allocation differences are below 0.2%. These mixed results do not establish
+zero instrumentation cost. Enabling the missing producer necessarily restores
+its envelope and histogram work, and this trade is recorded explicitly.
+String maxima were 2.242/2.002 ms before and 1.991/2.436 ms after. Ordinary
+maxima were 6.676/5.593 ms before and 2.335/5.423 ms after.
+
+Separate resource captures used the actual candidate package, with 1,200
+measured plus 20 warmup events per fixture. The existing preallocated pipeline
+capture chained the normal histogram sink; no production functions were
+redefined. Each capture contains exactly 1,220 ordered groups of all four
+stages, every stage sum equals its keystroke total, no samples were dropped or
+replaced, and resource counters are monotonic. Both retain the full input
+integrity checks and clean exits.
+
+The slowest measured string event (sample 900, zero-based) took 5.473 ms at the
+client. Its core redisplay measured 5,000 microseconds and the process GC CPU
+counter increased 11,781 microseconds during that stage. The slowest ordinary
+event (sample 512) took 5.641 ms, with 5,000 microseconds in core redisplay and
+11,220 microseconds of GC CPU. Process CPU includes other threads and parallel
+GC; these are not GC wall-pause measurements. The stage clock mostly advances
+in 1 ms steps, despite its microsecond units, and cannot reliably partition
+ordinary sub-millisecond events. The earlier 102 ms outlier did not recur here;
+its cause remains unresolved. These captures support further redraw-allocation
+work, not a claim that all latency tails are GC or that a stall has been fixed.
+
+Candidate: `/nix/store/3vgc1qsy46mr97psngriybk3w5xy5qbf-lem-yath/bin/lem`.
+Published baseline:
+`/nix/store/zgwba8sjzdgf0ww0d3i8gz88c68zh5f6-lem-yath-profile/bin/lem`.
+Both use configuration source
+`/nix/store/alkigfhipwqdckdl7hp6gkm3361jd50m-lem-yath`.
+Validation artifacts: `/tmp/lem-routed-timing-tests-{before,after}.log`,
+`/tmp/lem-routed-timing-all-tests.{lisp,log}`,
+`/tmp/lem-routed-timing-daemon-tests.log`,
+`/tmp/lem-routed-timing-build.{paths,log}`,
+`/tmp/lem-routed-timing-package-proof.{py,json,log}`, and
+`/tmp/lem-routed-timing-baseline-proof.json`.
+Comparison artifacts: `/tmp/lem-routed-timing-input{.py,-runs.py,-runs.log}`,
+`/tmp/lem-routed-timing-results.{py,log}`, and
+`/tmp/lem-routed-timing-{string,deep}-{before,after}-{1,2}.{json,log}` with
+instrumented Python snapshots. String roots in ABBA order:
+`/tmp/lem-sdl-input-x9x6_btx`, `/tmp/lem-sdl-input-4lzvr66j`,
+`/tmp/lem-sdl-input-roceemc8`, `/tmp/lem-sdl-input-ui7x32do`.
+Ordinary roots: `/tmp/lem-sdl-input-0iew7lnw`, `/tmp/lem-sdl-input-au6e0esr`,
+`/tmp/lem-sdl-input-lso0c7rc`, `/tmp/lem-sdl-input-vslxdiq9`.
+Capture artifacts: `/tmp/lem-routed-timing-{string,deep}-capture.{json,log}`
+and snapshots, `/tmp/lem-routed-timing-capture-results.{py,json,log}`; CSV
+paths and private roots are recorded in those JSON files.
+
+Four further string runs used the same candidate image in off/on/on/off order,
+with 1,200 measured plus 20 warmup events. Only the pipeline sink was disabled
+for the off group; other telemetry remained enabled, production functions were
+not redefined, and the recording state was asserted before timing. All four
+input-integrity and provenance checks passed. Means, off → on: daemon CPU
+732.118 → 703.772 ms; allocation 140,322,176 → 140,197,312 bytes; client median
+0.833425 → 0.798986 ms; p95 1.089409 → 0.994059 ms. CPU/latency ranges are
+separated in the opposite direction from the first string comparison. The
+original slowdown is therefore not reproducible as an isolated recorder cost;
+this does not establish that enabling telemetry speeds up typing or has no
+cost. The fix is retained for correct diagnostics, with both comparisons
+reported. The broader responsiveness goal remains open.
+
+Same-image artifacts: `/tmp/lem-routed-timing-toggle{.py,-runs.py,-runs.log}`,
+`/tmp/lem-routed-timing-toggle-results.{py,log}`, and
+`/tmp/lem-routed-timing-toggle-string-{before,after}-{1,2}.{json,log}` with
+instrumented Python snapshots. Here `before` means recording off and `after`
+means recording on; both use the candidate package.
