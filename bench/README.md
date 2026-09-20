@@ -4156,8 +4156,8 @@ LEM_BIN=/absolute/path/to/configured/lem nix develop --command \
   --fixture /path/to/utf8-lf.txt --output /tmp/new-sdl-result.json
 ```
 
-Outputs must be new files. Fixture text is copied into a private `.txt` file
-with a marker prefix; final text, saved bytes and original fixture bytes must
+Outputs must be new files. Fixture text is copied into a private file (default
+`bench.txt`, selectable with `--document-name`) with a marker prefix; final text, saved bytes and original fixture bytes must
 match before clean client/daemon exits and result publication. The development
 shell now supplies Python, Xvfb, xdotool and loadable X11/XTest libraries.
 
@@ -5092,3 +5092,65 @@ GPU completion and physical monitor latency. This `.txt` workload also does not
 establish Lisp-mode or LSP performance. Artifacts:
 `/tmp/lem-row-case-r3-{before,after}-{1,2}.{json,log}` and
 `/tmp/lem-row-case-input-r3.{py,log}`.
+
+
+### Measure configured Lisp-mode input, including editing hooks (2026-09-20)
+
+The SDL input probe now accepts `--document-name` and `--expect-major-mode`.
+Normal filename-based mode selection activates the configured editing hooks;
+the probe records the actual major mode, active modes and syntax-highlighting
+state before timing. A mismatched expected mode aborts the run. Document names
+must be single filenames, and documents live in a private subdirectory so they
+cannot collide with probe logs. The default remains `bench.txt`.
+
+The pinned `lisp-500k-5cd018a9.lisp` corpus triggered normal format-on-save
+indentation changes. The initial smoke run correctly rejected the saved-byte
+mismatch (`/tmp/lem-lisp-mode-smoke.log`); the original corpus was not modified.
+The prepared fixture `/tmp/lem-lisp-500k-formatted.lisp` is the saved private
+copy from `/tmp/lem-sdl-input-nvdwe1ro/document/bench.lisp`, with exactly the
+leading `BENCH_TARGET\n` marker removed. It has 524,731 bytes and SHA-256
+`879c5b01637e0f9d80e7377476cc22439fc42a5da7a2e5a15473dc62da0cc3f9`.
+A second smoke run passed the original strict text/save/fixture checks, proving
+save stability for this workload. Formatting and other mode hooks stay enabled.
+
+```sh
+LEM_BIN=/absolute/path/to/configured/lem nix develop --command \
+  python3 scripts/bench/e2e/sdl-input.py --renderer software --count 600 \
+  --fixture /tmp/lem-lisp-500k-formatted.lisp --document-name bench.lisp \
+  --expect-major-mode LISP-MODE --output /tmp/new-lisp-input.json
+```
+
+The Lisp workload reports `LISP-MODE`, `PAREDIT-MODE`, `LINK-MODE`, configured
+lint, debugger and Git gutter modes, plus the usual snippet, line-number,
+direnv, which-key and Vi modes. Syntax highlighting is enabled. The plain-text
+comparison uses identical bytes under `bench.txt` and verifies
+`FUNDAMENTAL-MODE`, with highlighting disabled by normal mode selection.
+This is ordinary x/backspace input at the first line; it does not establish
+REPL evaluation, completion, structural-command or deep-file editing latency.
+Seven invalid/empty/path-traversing names were rejected before startup, and
+Python syntax compilation passed without writing bytecode into the checkout.
+
+A sequential text/Lisp/Lisp/text comparison used configured daemon
+`/nix/store/wfmyi7r8w172gpxq4s2xdwglzz3hy0mg-lem-yath/bin/lem` and client source
+`9e5a54632`, software/X11, 600 measured inputs plus 20 warmups, 25 ms pacing.
+Means of two runs per mode:
+
+| Metric | Plain text | Configured Lisp |
+| --- | ---: | ---: |
+| Daemon process CPU | 378.362 ms | 1,109.549 ms |
+| Daemon Lisp allocation | 42,670,736 bytes | 332,662,096 bytes |
+| Daemon GC CPU | 0.000 ms | 16.883 ms |
+| Client process CPU | 262.390 ms | 289.986 ms |
+| Client Lisp allocation | 24,530,112 bytes | 25,438,144 bytes |
+| X11 submission-to-ack median / p95 | 0.892 / 1.325 ms | 1.571 / 2.252 ms |
+| Client send-to-present median / p95 | 0.758 / 1.112 ms | 1.435 / 2.030 ms |
+
+Both Lisp runs used substantially more CPU and allocation than either plain
+text run. This comparison establishes workload cost, not an optimization gain
+or the cost of any individual mode. All four full text/save/source-fixture
+checks, clean exits and source/probe hashes passed. The prepared private
+marker-prefixed document is 524,744 bytes with SHA-256
+`db91818695a059eebc6a2f884ebd8fcb9cf53e1bdf6f9b90b9cd0bdb7291bc01`.
+Artifacts: `/tmp/lem-language-{text,lisp}-{1,2}.{json,log}` and
+`/tmp/lem-language-input.{py,log}`. GC CPU is not a pause measurement, and the
+presentation endpoint excludes GPU completion and physical monitor latency.

@@ -12,6 +12,9 @@ Client counters span initial fixture presentation through the last measured
 presentation, including setup, warmup and instrumentation. Server counters span
 resource evaluations before warmup and after the final pacing interval. GC CPU
 is not a wall pause. Results are written only after full text/byte checks and clean exits.
+The private document filename selects its mode normally; active modes and
+syntax highlighting are recorded before timing. Inputs alternate x/backspace
+at the first line, without evaluating code or exercising structural commands.
 """
 import argparse
 import ctypes
@@ -36,6 +39,10 @@ parser.add_argument('--count', type=int, default=200)
 parser.add_argument('--warmup', type=int, default=20)
 parser.add_argument('--pace', type=float, default=0.025)
 parser.add_argument('--fixture', type=Path)
+parser.add_argument('--document-name', default='bench.txt',
+                    help='Private document filename; its extension selects the editing mode')
+parser.add_argument('--expect-major-mode',
+                    help='Require this exact major-mode symbol name, for example LISP-MODE')
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--input-method', choices=('x11', 'sdl'), default='x11')
 parser.add_argument('--renderer', choices=('software', 'opengl'))
@@ -46,6 +53,9 @@ if args.count <= 0 or args.count % 2 or args.warmup < 0 or args.warmup % 2 or no
     parser.error('count must be positive/even, warmup nonnegative/even, pace nonnegative')
 if args.output.exists() or not args.output.parent.is_dir():
     parser.error('output must be a new file in an existing directory')
+if (not args.document_name or Path(args.document_name).name != args.document_name
+        or args.document_name in ('.', '..') or '\\' in args.document_name or '\0' in args.document_name):
+    parser.error('document-name must be a single filename')
 repo = Path(__file__).resolve().parents[3]
 fixture = args.fixture.resolve(strict=True) if args.fixture else None
 original = fixture.read_bytes() if fixture else b''.join(
@@ -92,7 +102,9 @@ for key in ('HOME', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME',
     directory = root / key
     directory.mkdir(mode=0o700)
     env[key] = str(directory)
-document = root / 'bench.txt'
+document_directory = root / 'document'
+document_directory.mkdir()
+document = document_directory / args.document_name
 document.write_bytes(document_bytes)
 processes, descriptors, logs = [], [], []
 peer = display = None
@@ -213,6 +225,19 @@ try:
     assert evaluate('(progn (assert (eq (lem:current-buffer) (lem:get-file-buffer '
                     + quote(document) + '))) (lem:buffer-start (lem:current-point)) '
                     '(lem-vi-mode/commands:vi-insert) (lem:redraw-display :force t) t)', gui=True) == 'T'
+    # Yason produces JSON without literal control characters, so its printed
+    # Lisp string can be unquoted as JSON before decoding the enclosed object.
+    editing = json.loads(json.loads(evaluate(
+        '(with-output-to-string (stream) '
+        '(yason:encode (lem-daemon/protocol:make-object '
+        '"major_mode" (symbol-name (lem:buffer-major-mode (lem:current-buffer))) '
+        '"active_modes" (map \'vector (lambda (mode) (symbol-name (type-of mode))) '
+        '(lem:all-active-modes (lem:current-buffer))) '
+        '"syntax_highlight" (if (lem:enable-syntax-highlight-p (lem:current-buffer)) '
+        '\'yason:true \'yason:false)) stream))', gui=True)))
+    print('EDITING: ' + json.dumps(editing), flush=True)
+    if args.expect_major_mode:
+        assert editing['major_mode'] == args.expect_major_mode, editing
     if args.input_method == 'x11':
         windows = subprocess.check_output(['xdotool', 'search', '--name', '^Lem client$'],
                                           env=env, text=True, timeout=10).split()
@@ -264,6 +289,8 @@ try:
                   client_revision=revision, client_sdl_source=str(client_source), client_sdl_sha256=source_sha256,
                   client_runtime="source-loaded SBCL after full GC", root=str(root), samples=records,
                   warmup=args.warmup, pace_seconds=args.pace, fixture_source=str(fixture) if fixture else None,
+                  document_name=args.document_name, editing=editing,
+                  expected_major_mode=args.expect_major_mode,
                   fixture_bytes=len(document_bytes), fixture_sha256=hashlib.sha256(document_bytes).hexdigest())
     first, last = [list(map(int, value.strip('()').split())) for value in (start_resources, stop_resources)]
     assert first[3] == last[3] == initial['units'] == reply['units']
