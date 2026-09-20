@@ -188,6 +188,13 @@
                                           (vector (protocol:make-object "row" 2 "text" "" "runs" #()))))
              (check-frame "theme foreground and background invalidate unchanged rows"
                           (screen-message :foreground "#00FFFF" :background "#202040"))
+             (loop :for x :in '(3 4 5)
+                   :for label :in '("non-primary colors in the direct theme repaint"
+                                    "non-primary colors when rebuilding the target"
+                                    "non-primary colors in a sparse cursor repaint")
+                   :do (check-frame label
+                                    (screen-message :foreground "#CDA873" :background "#123456"
+                                                    :cursor (cursor x 2 "box" "#97531B"))))
              (check-frame "fewer rows clear the removed bottom rows" (screen-message :full t :height 5))
              (check-frame "rows beyond the window are clipped" (screen-message :full t :height 15))
              (ok (not (gui::frame-cache-valid-p frame)) "dense updates use direct repaint")

@@ -4883,3 +4883,74 @@ Configured package: `/nix/store/4sqyk13qg9v1sbk1c1zq752di11z1mqk-lem-yath`;
 native client: `/nix/store/ylp6rb43xhivmxbq324sgalnza9vdcza-sbcl-lemclient-unstable`.
 Evidence: `/tmp/lem-frame-clear-build.paths`, `/tmp/lem-frame-clear-native.log`.
 The installed editor profile remains unchanged.
+
+
+### Keep ARGB8888 after testing the preferred frame format (2026-09-20)
+
+A fresh native profile at `3923d4515`, after removing the redundant clear,
+attributed 52.22% of sampled user-space cycles to SDL3. Pixel conversion
+(`Blit8888to8888PixelSwizzleAVX2`) accounted for 41.67%, while
+`SDL_FillSurfaceRect4SSE` fell to 3.55%. The 2,400-input, 20-warmup X11/software
+capture had 676 samples and no lost samples. Source/probe hashes, document/save
+checks and clean exits passed. Artifacts: `/tmp/lem-no-clear-native.{lisp,json,log,perf.data}`,
+`/tmp/lem-no-clear-native-{dso,symbols}.txt`. These are profiling observations,
+not latency measurements; instrumentation and perfmap setup alter the run.
+
+The candidate selected the renderer's first texture format when it was a
+packed 32-bit layout with eight bits per RGB channel, otherwise retaining
+ARGB8888. It queried once per target allocation, freed renderer information
+on success/error, and kept the existing direct-repaint failure path. Here the
+preferred software format was RGB888 (SDL3 XRGB8888), matching the window.
+This eliminated conversion but **regressed performance**, so it was removed.
+
+Warmed offscreen component ABBA, means of two runs per source:
+
+| Workload | Process CPU, ARGB8888 → preferred format | Elapsed, ARGB8888 → preferred format |
+| --- | ---: | ---: |
+| Software, 3,000 sparse updates | 604.152 → 899.568 ms (+48.9%) | 634.500 → 897.501 ms |
+| Software, 400 full repaints | 320.454 → 303.355 ms | 322.000 → 304.000 ms |
+| OpenGL, 3,000 sparse updates | 133.235 → 132.614 ms | 216.000 → 215.000 ms |
+| OpenGL, 400 full repaints | 631.000 → 615.813 ms | 357.500 → 349.500 ms |
+
+Full repaints bypass the target and are unchanged; their variation is not a
+format-selection gain. The complete X11/software input ABBA used the same
+configured daemon, 10 MB UTF-8 document, 600 measured inputs, 20 warmups and
+25 ms pacing. Means:
+
+| Metric | ARGB8888 | Preferred format |
+| --- | ---: | ---: |
+| Client process CPU | 289.834 ms | 354.211 ms (+22.2%) |
+| Client Lisp allocation | 29,514,048 bytes | 29,398,784 bytes |
+| X11 submission-to-ack median / p95 | 0.759 / 1.068 ms | 0.871 / 1.082 ms |
+| Client send-to-present median / p95 | 0.643 / 0.881 ms | 0.752 / 0.935 ms |
+
+Both candidate medians exceeded both baseline medians. Mean send-to-present
+median regressed 17.0%. The worst samples were lower for the candidate, so this
+is a CPU/median regression, not a claim that every latency statistic worsened.
+Daemon CPU stayed similar (344.555 → 341.697 ms). All four runs passed complete
+text, save bytes, unchanged source fixture and clean exits; selected source and
+probe hashes were checked. Endpoints exclude GPU completion and monitor scanout.
+Artifacts: `/tmp/lem-frame-format-{before,after}-{1,2}.{json,log}`,
+`/tmp/lem-frame-format-input.{py,log}`, `/tmp/lem-frame-format-component.{lisp,log}`
+and `/tmp/lem-frame-format-{before,after}.lisp`.
+
+The pinned [SDL3 copy implementation](https://github.com/libsdl-org/SDL/blob/release-3.2.26/src/video/SDL_blit_copy.c)
+uses SSE streaming stores for aligned same-format copies. A separate warmed
+30,000-sparse-frame candidate profile attributed 35.09% of sampled cycles to
+`SDL_BlitCopy`, 47.86% to libc's `__memmove_avx512_unaligned_erms`, and only 1.70%
+to the remaining alpha pixel conversion. It had 8,909 samples, none lost.
+This confirms that different copy routines dominate; attributing the whole
+regression specifically to streaming-store/cache behavior remains an inference.
+Its counters are not used as a before/after benchmark. Artifacts:
+`/tmp/lem-frame-format-component-native.{lisp,log,perf.data}`,
+`/tmp/lem-frame-format-component-native-symbols.txt` and its `-perf.log`.
+
+The candidate passed software/OpenGL pixel equivalence and synthetic preferred
+format/fallback/cleanup checks, but correctness alone did not justify shipping
+it. The production rendering behavior remains at `3923d4515`. Non-primary
+foreground/background/cursor comparisons are retained for direct repaint,
+target reconstruction and subsequent sparse cursor repaint;
+final software and OpenGL tests pass against the retained production behavior.
+Logs: `/tmp/lem-frame-format-final-{software,gpu}-pixels-r2.log`. Existing packaged
+checks above still describe that production implementation; no new package or
+installed-profile activation is claimed for this rejected experiment.

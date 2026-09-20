@@ -175,6 +175,8 @@
         ;; path. Retry only after resize/reset, not on every typed character.
         (handler-case
             (setf (frame-cache-texture frame)
+                  ;; A preferred-format target selected a slower software copy
+                  ;; path in measured input tests; see bench/README.md.
                   (sdl2:create-texture renderer :argb8888 :target width height))
           (sdl2::sdl-error () nil))))
     (let* ((texture (and frame (frame-cache-texture frame)))
