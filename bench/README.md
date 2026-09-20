@@ -6558,3 +6558,139 @@ String roots in ABBA order: `/tmp/lem-sdl-input-z15swfaf`,
 `/tmp/lem-sdl-input-_bf1ybsp`. Ordinary roots:
 `/tmp/lem-sdl-input-d3kbpkr9`, `/tmp/lem-sdl-input-0ip80hzw`,
 `/tmp/lem-sdl-input-5bebyo2r`, `/tmp/lem-sdl-input-ujk3gu9e`.
+
+### Reject overlay range fusion after full typing comparison (2026-09-20)
+
+The implementation experiment was reverted by `623287e4c`; regression tests
+from `85add7b67` remain. Full typing results below did not justify retaining
+the additional range-classification code.
+
+A fresh ordinary Lisp typing CPU profile of `c8d7222f2` (documentation
+checkpoint `779f1575c`) passed all 2,400-input, mode, exact saved-text,
+source/probe provenance, and clean-exit checks. It uses 20 warmups, 5 ms
+pacing, CPUs 0–3, software X11, and the same diagnostic SDL source whose
+production prefix is verified. The report has 2,272 samples:
+`create-logical-line` accounts for 1,182 inclusive samples (52.0%),
+`overlay-attributes` for 188 (8.3%), and `parse-partial-sexp` for 243 (10.7%).
+These shares overlap and are diagnostic, not speedup measurements.
+Of the overlay samples, `remove-elements` accounts for 70 and
+`subseq-elements` for 61. The two helpers independently traverse and classify
+the same underlying ranges; subsection offsets are then added back during
+attribute composition.
+
+Profile artifacts: `/tmp/lem-current-profile-point-equal-deep.{json,log}`,
+`/tmp/lem-current-profile-point-equal-deep-instrumented.py`,
+`/tmp/lem-current-profile-point-equal-proof.{py,log}`, and
+`/tmp/lem-sdl-input-a34es5ib/server-profile.txt`.
+Instrumented probe SHA:
+`0dda1cd1da9644f2a6af74a0e46138cda5ff1bf3d27555666829c36abb90ff87`.
+The profile verifier also compares installed logical-line, point, mode
+classification, and guide sources against `779f1575c`.
+
+Experimental commit `1861bf4a2` classifies each range once, collecting the uncovered and
+intersecting pieces together. Intersections retain absolute positions.
+It keeps the existing boundary cases, list ordering, fresh interval cells,
+attribute merge, and normalization. All ranges are captured before any
+underlying attribute provider is called: those providers are functions and
+may mutate the original input list. No display feature or compiler safety
+setting changes.
+
+Private same-compiler comparisons matched all 30,633 cases, covering empty,
+touching, reversed, overlapping and unsorted integer intervals, missing and
+named attributes, object attributes, flags and property-list ordering.
+Inputs remained unchanged. A separate provider-mutation case verifies the
+snapshot behavior. Permanent tests in `tests/display-attributes.lisp`
+(checkpoint `85add7b67`) use an independent per-cell composition oracle for
+964 ordered range cases, plus interval ownership and provider snapshots.
+All seven assertions pass on both production baseline and candidate. The
+first baseline runner used an unqualified private plist accessor; correcting
+the test namespace fixed that harness error without changing production.
+Artifacts: `/tmp/lem-overlay-ranges-tests.lisp`,
+`/tmp/lem-overlay-ranges-tests-before{,-r2}.log`, and
+`/tmp/lem-overlay-ranges-tests-after.log`.
+
+Same-process component ABBA uses 40,000 merges per phase, 1,000 warmups,
+full GC, CPUs 0–3, and checksum verification. Means of two phases:
+
+| Ranges | CPU before → after (ms) | Allocated bytes before → after |
+| --- | ---: | ---: |
+| Empty | 1.207 → 1.183 | 2,575,744 → 2,564,224 |
+| Two sparse ranges | 4.605 → 3.635 | 11,541,824 → 11,542,208 |
+| One range split by overlay | 7.126 → 6.400 | 19,964,928 → 19,964,992 |
+| Twelve ranges, one-cell overlay | 29.028 → 23.282 | 58,384,832 → 58,368,576 |
+| Twenty-four ranges, wide overlay | 128.331 → 116.022 | 315,486,336 → 315,420,800 |
+
+Nonempty components use 10–21% less CPU; allocation is essentially unchanged.
+The empty case is too short for a meaningful timing claim. These are merge
+component results, not typing-latency gains. Artifacts:
+`/tmp/lem-overlay-ranges-{before,after}.lisp`,
+`/tmp/lem-overlay-ranges-component.{lisp,py,log}`, and private root
+`/tmp/lem-overlay-ranges-i4l7rd_d`.
+
+The packaged build passed all 44 checks: 16 indentation-guide, 9 Org-modern,
+and 19 native display/lifecycle checks. The seven new assertions, including
+all 964 range cases, also passed against the actual packaged function without
+loading a replacement definition; that private daemon exited cleanly.
+Artifacts: `/tmp/lem-overlay-ranges-build.{log,paths}`,
+`/tmp/lem-overlay-ranges-packaged-check.{lisp,py,log}`, and
+`/tmp/lem-overlay-ranges-packaged-hb6y8ksz`.
+
+Installed-source proof `/tmp/lem-overlay-ranges-package-proof.{py,json}`
+records equality with the candidate checkout at build time for the changed
+logical-line source and tests along with the active
+configuration, daemon, SDL and probe sources. Candidate editor:
+`/nix/store/7zp2vzn55z1wjp42j4aqqsmv3vng1mxh-lem-yath/bin/lem`, resolving to
+`/nix/store/0bqiwfb76d8z7in0vg71aid29z598djm-lem/bin/lem`.
+Logical-line source SHA:
+`089786dc9fb3eef4240de0c7a195053e486dc939ac1ab35b148af548619657c4`.
+The configured source is unchanged from the `c8d7222f2` baseline:
+`/nix/store/fziazbsfyhlh1lj80qq2irg1za3ay6kg-lem-yath/bin/lem`.
+
+Full GUI ABBA comparisons used both fixtures at line 6514, 600 measured events
+plus 20 warmups, 25 ms pacing, software X11, and CPUs 0–3. All eight runs passed
+exact saved-text, cursor, active-mode, renderer, source/probe provenance and
+clean-exit checks. The string runs also verified live string context. Both
+variants used the same source client with their respective packaged daemons.
+Means of two runs per variant:
+
+| Workload | Daemon CPU before → candidate (ms) | Daemon allocation before → candidate (bytes) | Client send-to-present median before → candidate (ms) | p95 before → candidate (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Multiline string | 590.007 → 588.490 | 103,722,080 → 103,723,168 | 0.924163 → 0.922680 | 1.596122 → 1.591328 |
+| Ordinary Lisp | 731.995 → 726.511 | 212,846,368 → 212,669,792 | 1.077184 → 1.082363 | 1.755431 → 1.746064 |
+
+The string means are effectively flat: daemon CPU −0.3%, median −0.2%, p95
+−0.3%, with overlapping run ranges. Ordinary daemon CPU mean fell 0.7%, but
+before runs were 740.203/723.786 ms and candidates 724.149/728.873 ms. Median
+latency rose 0.5% and p95 fell 0.5%, also with overlapping ranges. No reliable
+full-input CPU or latency improvement is established. Allocation at the daemon
+is essentially unchanged on both workloads.
+
+Ordinary client allocation rose 3.2%, from 36,634,624 to 37,808,832 bytes;
+both candidate runs (37,983,872/37,633,792) exceeded both baselines
+(36,583,808/36,685,440). Client code was identical across variants; these runs
+do not establish the cause of that difference. Ordinary client CPU mean rose
+1.2% with overlapping ranges. String client allocation was +0.7% with overlap.
+String client send-to-present maxima also rose from 1.741/1.761 ms to
+1.808/2.198 ms; ordinary maxima were variable, 2.227/6.296 ms before and
+5.213/5.256 ms with the candidate. None of these maxima is a general latency
+bound, and no physical-monitor measurement was made.
+
+The component improvement alone is insufficient to retain this extra code,
+particularly with the unexplained client allocation increase. After the revert,
+`src/display/logical-line.lisp` was compared byte for byte against both
+`779f1575c` and its packaged source; SHA:
+`bffce77fee81c5553dc2658ee4976ce4c6eb83477ccc3a629225b079a25ea384`.
+The original implementation remains active, with the new regression coverage.
+
+Artifacts: `/tmp/lem-overlay-ranges-input.{py,log}`,
+`/tmp/lem-overlay-ranges-results.py`,
+`/tmp/lem-overlay-ranges-results{,-r2}.log`, and
+`/tmp/lem-overlay-ranges-{string,deep}-{before,after}-{1,2}.{json,log}`.
+The first summary attempt divided by the string workload's zero GC CPU
+baseline. The corrected summary reports no percentage for zero baselines and
+verified all eight existing input runs; no input run or correctness gate was
+changed. String roots in ABBA order: `/tmp/lem-sdl-input-c_kj4rke`,
+`/tmp/lem-sdl-input-70w7sw5k`, `/tmp/lem-sdl-input-lloyfxia`,
+`/tmp/lem-sdl-input-lilgilah`. Ordinary roots:
+`/tmp/lem-sdl-input-9gx86yyw`, `/tmp/lem-sdl-input-qy9smux7`,
+`/tmp/lem-sdl-input-ug3jshn7`, `/tmp/lem-sdl-input-01auyt5e`.
