@@ -9,12 +9,53 @@
   paren-stack
   (paren-depth 0))
 
+(defun parse-ordinary-delimiters ()
+  "Characters that can change partial-parse state outside strings and comments."
+  (let* ((syntax (current-syntax))
+         (delimiters (append (syntax-table-escape-chars syntax)
+                             (syntax-table-string-quote-chars syntax)
+                             (syntax-table-fence-chars syntax))))
+    (dolist (pair (syntax-table-paren-pairs syntax))
+      (push (car pair) delimiters)
+      (push (cdr pair) delimiters))
+    (dolist (pair (append (syntax-table-block-string-pairs syntax)
+                         (syntax-table-block-comment-pairs syntax)))
+      (when (zerop (length (car pair)))
+        (return-from parse-ordinary-delimiters :disabled))
+      (push (char (car pair) 0) delimiters))
+    (let ((comment (syntax-table-line-comment-string syntax)))
+      (when (and (stringp comment) (zerop (length comment)))
+        (return-from parse-ordinary-delimiters :disabled))
+      (when (plusp (length comment))
+        (push (char comment 0) delimiters)))
+    delimiters))
+
+(defun skip-parse-span (point to delimiters)
+  "Advance within one line, stopping at TO or a possible syntax delimiter."
+  (unless (eq delimiters :disabled)
+    (let* ((line (point-line point))
+           (string (line:line-string line))
+           (start (point-charpos point))
+           (end (if (eq line (point-line to))
+                    (point-charpos to)
+                    (length string)))
+           (stop (loop :for position :from start :below end
+                       :when (member (char string position) delimiters)
+                         :return position
+                       :finally (return end))))
+      (when (< start stop)
+        (character-offset point (- stop start))))))
+
 (defun parse-partial-sexp (from to &optional state comment-stop)
   (assert (eq (point-buffer from)
               (point-buffer to)))
   (unless state (setf state (make-pps-state)))
   (with-point-syntax from
-    (let ((p from)
+    ;; Normal code collects every possible opener; strings need only their
+    ;; closing character and escapes. Rebuild these per parse so changed syntax
+    ;; tables take effect without a persistent cache.
+    (let ((ordinary-delimiters :uninitialized)
+          (p from)
           (type (pps-state-type state))
           (token-start-point (pps-state-token-start-point state))
           (end-char (pps-state-end-char state))
@@ -40,18 +81,23 @@
                   (move-point p to)
                   (return-from outer))))
               ((:string :fence)
-               (loop
-                 (when (point<= to p)
-                   (return-from outer))
-                 (let ((c (character-at p)))
-                   (cond ((syntax-escape-char-p c)
-                          (character-offset p 1))
-                         ((char= c end-char)
-                          (setf end-char nil)
-                          (setf type nil)
-                          (setf token-start-point nil)
-                          (return (character-offset p 1))))
-                   (character-offset p 1))))
+               (let ((delimiters
+                       (cons end-char (syntax-table-escape-chars (current-syntax)))))
+                 (loop
+                   (when (point<= to p)
+                     (return-from outer))
+                   (when (skip-parse-span p to delimiters)
+                     (when (point<= to p)
+                       (return-from outer)))
+                   (let ((c (character-at p)))
+                     (cond ((syntax-escape-char-p c)
+                            (character-offset p 1))
+                           ((char= c end-char)
+                            (setf end-char nil)
+                            (setf type nil)
+                            (setf token-start-point nil)
+                            (return (character-offset p 1))))
+                     (character-offset p 1)))))
               (:block-comment
                (let ((regex (%create-pair-regex block-pair)))
                  (loop
@@ -88,6 +134,11 @@
                (loop
                  (when (point<= to p)
                    (return-from outer))
+                 (when (eq ordinary-delimiters :uninitialized)
+                   (setf ordinary-delimiters (parse-ordinary-delimiters)))
+                 (when (skip-parse-span p to ordinary-delimiters)
+                   (when (point<= to p)
+                     (return-from outer)))
                  (let ((c (character-at p)))
                    (cond
                      ((syntax-escape-char-p c)

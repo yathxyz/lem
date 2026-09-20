@@ -97,6 +97,35 @@
                  "ordinary spans preserve every requested endpoint, including newlines and EOF")))
       (lem:delete-buffer buffer))))
 
+
+(deftest partial-parse-string-span-boundaries
+  (dolist (delimiter '(#\" #\|))
+    (let* ((text (format nil "~c0123456789漢字😀~%ab\\~ccd~%0123456789~c"
+                         delimiter delimiter delimiter))
+           (escape (position #\\ text))
+           (table (lem/buffer/syntax-table:make-syntax-table :fence-chars '(#\|)))
+           (buffer (lem:make-buffer nil :temporary t :syntax-table table)))
+      (unwind-protect
+           (progn
+             (lem:insert-string (lem:buffer-point buffer) text)
+             (lem:with-point ((from (lem:buffer-start-point buffer))
+                              (to (lem:buffer-start-point buffer)))
+               (ok (loop :for end :from 0 :to (length text)
+                         :always (progn
+                                   (lem:buffer-start from)
+                                   (lem:move-to-position to (1+ end))
+                                   (let* ((state (lem:parse-partial-sexp from to))
+                                          (inside (< 0 end (length text)))
+                                          (token (lem:pps-state-token-start-point state)))
+                                     (and (= (lem:position-at-point from)
+                                             (+ 1 end (if (= end (1+ escape)) 1 0)))
+                                          (eq (lem:pps-state-type state)
+                                              (when inside (if (char= delimiter #\") :string :fence)))
+                                          (eql (and token (lem:position-at-point token))
+                                               (when inside 1))))))
+                   "span scanning preserves string/fence state and escape overshoot at every endpoint")))
+        (lem:delete-buffer buffer)))))
+
 (deftest partial-parse-empty-openers
   (dolist (kind '(:line :block-comment :block-string))
     (let* ((table (apply #'lem/buffer/syntax-table:make-syntax-table

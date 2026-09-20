@@ -7478,3 +7478,88 @@ prefix; root: `/tmp/lem-sdl-input-1rjch4xz`. Each root retains `pipeline.csv`,
 `server-work.json` and `command-stalls.json`. Probe source revision was
 `6f5e04294`; configured editor was
 `/nix/store/zs87893w2blhqqj7z12qv269sp8zs8kh-lem-yath-profile/bin/lem`.
+
+### Advance over parse spans without delimiters (2026-09-20)
+
+Fresh configured GUI profiles of published `37cdd0572` used ordinary deep Lisp,
+2,400 measured inputs plus 20 warmups, 5 ms pacing, CPUs 0–3 and software X11.
+Both passed exact saved-text, cursor/mode, renderer, source/probe and clean-exit
+checks. The CPU report collected 1,593 samples: `create-logical-line` accounted
+for 659 inclusive samples (41.4%), indentation guides for 482 (30.3%), and
+`parse-partial-sexp` for 264 (16.6%). These shares overlap. The allocation
+profile collected 16,079 approximately 32 KB region samples. Profiles attribute
+cost; their instrumented timings are not before/after latency measurements.
+
+A private inlining experiment was rejected: same-compiler parser ABBA CPU was
+206.556 → 203.411 ms for ordinary code and 131.871 → 133.503 ms for strings.
+Instead, this checkpoint skips runs whose characters cannot change parse state.
+Normal code collects escapes, quotes, fences, parentheses and the first character
+of each comment/block-string opener from the current syntax table. Strings and
+fences stop at their closing character or an escape. Runs stay on one line and
+stop at the requested endpoint. The existing scanner handles delimiters,
+escapes, comments and line transitions, including escape overshoot past an
+endpoint. There is no persistent syntax-table cache or compiler-safety change.
+
+The initial ordinary-code-only prototype improved ordinary daemon CPU by 5.2%
+and median latency by 3.0%, but regressed the string control by 4.2% CPU and
+3.2% median latency. It was superseded by the version that also scans string
+and fence spans. In the final same-compiler component ABBA, ordinary parsing
+used 207.825 → 38.069 ms CPU (−81.7%) and string parsing 135.913 → 22.282 ms
+(−83.6%). Allocation increased by about 212/185 bytes per parse. These are
+component results, not editor-wide speedups.
+
+The final parser matched the original in 122,104 deterministic differential
+cases (seed `912713`) across Lisp, fundamental and custom syntax tables,
+including letter/Unicode delimiters, every tested start/end range, supplied
+parse states and comment stopping. The full syntax suite passes all ten tests
+on both the original and candidate parser, including independent string/fence
+endpoint checks, cached-vs-fresh parsing, edits and undo. An early empty block-
+comment fixture entered a non-advancing scanner path and was terminated; the
+final regression tests recognition with `comment-stop` instead. An initially
+incorrect expected state for an empty block-string opener was corrected and
+verified against the original parser. Neither fixture failure is a passing run.
+All 44 packaged checks passed: 16 indentation-guide, 9 Org-modern and 19 native
+client/display/lifecycle checks. No verified-kernel source or proof changed.
+
+The final built editor then completed ABBA comparisons on ordinary deep Lisp
+and a multiline string, each with 600 measured inputs plus 20 warmups, 25 ms
+pacing, CPUs 0–3 and software X11. Values below are means of two runs, including
+means of per-run percentiles. CPU/allocation cover the entire 620-input window.
+
+| Workload | Daemon CPU before → after | Daemon allocation before → after | Client send-to-present median before → after | p95 before → after |
+| --- | ---: | ---: | ---: | ---: |
+| Ordinary Lisp | 478.560 → 430.056 ms (−10.1%) | 116,847,760 → 117,782,736 bytes (+0.80%) | 1.004594 → 0.917489 ms (−8.7%) | 1.240158 → 1.174344 ms |
+| Multiline string | 379.371 → 340.013 ms (−10.4%) | 69,049,040 → 69,179,600 bytes (+0.19%) | 0.870372 → 0.793613 ms (−8.8%) | 1.119832 → 0.976517 ms |
+
+Both candidate CPU and median values are below both corresponding baselines
+in each workload. Ordinary p95 ranges overlap. Client CPU was 259.296 →
+258.243 ms for ordinary code and 265.275 → 250.648 ms for strings; client
+allocation was 41,069,312 → 40,984,896 and 40,996,416 → 40,723,840 bytes.
+All eight runs passed exact text, complete ordered pipeline stages, five
+nonnegative client phases summing to total latency, provenance, and clean exits.
+Every run sent 620 screen messages/1,240 rows and each successive measured
+acknowledgement added one update/draw/present and two decoded/painted rows.
+Daemon redraw counts were 623 except one candidate string run with 622, owing
+to one fewer background redraw without screen output. No measured event exceeded
+20 ms. This does not establish a tail guarantee or diagnose the earlier 46 ms
+command stall, and RenderPresent return is not physical-monitor presentation.
+
+Baseline: `/nix/store/14xycnaprgs4mlkgnkkbqf15l39fq7bj-lem-yath-profile/bin/lem`.
+Candidate: `/nix/store/k6pgqws974r5b0k9mniq6k4h44p7r1kn-lem-yath/bin/lem`.
+Configuration remained `/nix/store/alkigfhipwqdckdl7hp6gkm3361jd50m-lem-yath`.
+The source checkout was `b4e22bc67` with the parser and string-endpoint test
+changes present; 33 installed source/configuration files were byte-checked.
+
+Artifacts: `/tmp/lem-typing-current-profile{.py,-proof.json}` and
+`/tmp/lem-typing-current-profile-deep-{cpu,alloc}.{json,log}` with snapshots;
+reports at `/tmp/lem-sdl-input-obtu6bfh/server-profile.txt` and
+`/tmp/lem-sdl-input-pgoazrnu/server-profile.txt`. Rejected inlining:
+`/tmp/lem-syntax-inline-component.{lisp,log}`. Ordinary-only prototype artifacts
+use `/tmp/lem-syntax-span-`; final component, fuzz, tests, build, package proof,
+input drivers, ABBA and summary artifacts use `/tmp/lem-syntax-span-strings-`.
+Final exact-source differential log:
+`/tmp/lem-syntax-span-strings-final-fuzz.log`. Final input results:
+`/tmp/lem-syntax-span-strings-input-{deep,string}-{before,after}-{1,2}.json`,
+with logs, generated client/Python snapshots and `-proof.{json,log}`. Aggregate:
+`/tmp/lem-syntax-span-strings-summary.json`. Each result names its private root
+containing `pipeline.csv` and `server-work.json`.
