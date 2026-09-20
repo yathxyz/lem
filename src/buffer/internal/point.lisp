@@ -162,11 +162,17 @@ If `point-kind` is `:temporary` this is unnecessary."
       (and (= (point-linum point1) (point-linum point2))
            (< (point-charpos point1) (point-charpos point2)))))
 
-(defun point= (point &rest more-points)
+(defun point= (point &optional (second nil second-p) &rest more-points)
   "Return T if all of its argument points have same line and point, NIL otherwise."
-  (assert (%always-same-buffer point more-points))
-  (loop :for point2 :in more-points
-        :always (%point= point point2)))
+  ;; Avoid an argument list for the common pair, but validate every buffer
+  ;; before an unequal pair can short-circuit the comparison.
+  (assert (let ((buffer (point-buffer point)))
+            (and (or (not second-p) (eq buffer (point-buffer second)))
+                 (loop :for next :in more-points
+                       :always (eq buffer (point-buffer next))))))
+  (and (or (not second-p) (%point= point second))
+       (loop :for next :in more-points
+             :always (%point= point next))))
 
 (defun point/= (point &rest more-points)
   "Return T if no two of its argument points have same line and point, NIL otherwise."

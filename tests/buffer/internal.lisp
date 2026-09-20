@@ -59,6 +59,63 @@
       (lem:delete-buffer buffer)
       (lem:delete-buffer other))))
 
+(deftest point-equality
+  (let ((buffer (lem:make-buffer "point-equality" :temporary t))
+        (other (lem:make-buffer "point-equality-other" :temporary t))
+        (points '())
+        (conditions '()))
+    (unwind-protect
+         (progn
+           (lem:insert-string (lem:buffer-point buffer) (format nil "ab~%cd"))
+           (lem:with-point ((point (lem:buffer-start-point buffer)))
+             (dotimes (offset 6)
+               (push (lem:copy-point point :temporary) points)
+               (lem:character-offset point 1)))
+           (setf points (nreverse points))
+           (loop :for arity :from 1 :to 6
+                 :do (let ((checked 0) (correct t))
+                       (labels ((check-sequences (remaining offsets)
+                                  (if (zerop remaining)
+                                      (progn
+                                        (incf checked)
+                                        (unless (eq (apply #'= offsets)
+                                                    (apply #'lem:point=
+                                                           (mapcar (lambda (offset)
+                                                                     (nth offset points))
+                                                                   offsets)))
+                                          (setf correct nil)))
+                                      (dolist (offset '(0 1 3 5))
+                                        (check-sequences (1- remaining)
+                                                         (cons offset offsets))))))
+                         (check-sequences arity '()))
+                       (ok (and correct (= checked (expt 4 arity)))
+                           (format nil "all equalities of ~D points" arity))))
+           (lem:with-point ((copy (first points)))
+             (ok (lem:point= copy (first points))
+                 "distinct point objects can denote the same position"))
+           (ok (signals (funcall (symbol-function 'lem:point=)) 'error))
+           (ok (signals (lem:point= nil) 'error))
+           ;; Validate the complete argument list even when earlier points
+           ;; differ. Supplied NIL must not be treated as an omitted point.
+           (loop :for arity :from 2 :to 6
+                 :do (dotimes (index arity)
+                       (dolist (invalid (list nil (lem:buffer-point other)))
+                         (let ((arguments (loop :for i :below arity
+                                                :collect (nth (mod i 6) points))))
+                           (setf (nth index arguments) invalid)
+                           (let ((condition (handler-case (progn (apply #'lem:point= arguments) nil)
+                                              (error (condition) condition))))
+                             (ok (typep condition 'error))
+                             (when condition (push condition conditions)))))))
+           ;; An assertion condition may retain its arguments after unwinding.
+           ;; They must remain safe to print after the comparator has returned.
+           #+sbcl (sb-ext:gc :full t)
+           (ok (every (lambda (condition)
+                        (plusp (length (princ-to-string condition))))
+                      conditions)))
+      (lem:delete-buffer buffer)
+      (lem:delete-buffer other))))
+
 (deftest edit-modification-generation
   (let* ((buffer (lem:make-buffer "edit-generation" :temporary t :enable-undo-p nil))
          (point (lem:buffer-point buffer)))
