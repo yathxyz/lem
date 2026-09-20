@@ -450,10 +450,14 @@ Notify outside the lock so the consumer can immediately drain the queue."
   "Render a remote frame; never start an editor thread in this process."
   ;; A Linux client has one UI thread. Keep initialization, input, rendering,
   ;; teardown and CLI error handling on it, including display-open failures.
-  (let ((sdl2::*main-thread* (bt2:current-thread))
-        (sdl2::*event-loop* nil))
-    (unless (zerop (sdl2:init* '(:video)))
-      (error "Cannot initialize graphical display: ~a"
-             (cffi:foreign-funcall "SDL_GetError" :string)))
-    (unwind-protect (call-with-graphical-window connection files wait-p)
-      (sdl2:quit*))))
+  ;; Reuse cl-sdl2's internal SDL-MAIN-THREAD policy at this low-level entry
+  ;; point: native graphics drivers expect masked floating-point exceptions.
+  ;; The macro restores the caller's traps even when initialization fails.
+  (sdl2::without-fp-traps
+    (let ((sdl2::*main-thread* (bt2:current-thread))
+          (sdl2::*event-loop* nil))
+      (unless (zerop (sdl2:init* '(:video)))
+        (error "Cannot initialize graphical display: ~a"
+               (cffi:foreign-funcall "SDL_GetError" :string)))
+      (unwind-protect (call-with-graphical-window connection files wait-p)
+        (sdl2:quit*)))))

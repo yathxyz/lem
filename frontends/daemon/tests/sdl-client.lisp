@@ -118,3 +118,54 @@
       (setf (uiop:getenv "XDG_RUNTIME_DIR") old-runtime)
       (when (uiop:directory-exists-p root)
         (uiop:delete-directory-tree root :validate t)))))
+
+
+#+sbcl
+(deftest graphical-runtime-restores-native-float-traps
+  (let ((original-init (symbol-function 'sdl2:init*))
+        (original-window (symbol-function 'gui::call-with-graphical-window))
+        (original-quit (symbol-function 'sdl2:quit*))
+        (original-modes (sb-int:get-floating-point-modes)))
+    (unwind-protect
+         (dolist (failure '(nil :initialization :window :cleanup))
+           (sb-int:set-floating-point-modes :traps '(:invalid :overflow :divide-by-zero))
+           (let ((traps (getf (sb-int:get-floating-point-modes) :traps))
+                 (expected (when failure
+                             (make-condition 'simple-error :format-control "Injected ~a failure"
+                                                           :format-arguments (list failure))))
+                 (calls nil) (result nil) (condition nil))
+             (flet ((native-call (phase)
+                      (push phase calls)
+                      ;; Native graphics libraries expect IEEE NaNs, not a
+                      ;; Lisp condition, when their calculations raise invalid.
+                      (ok (sb-ext:float-nan-p
+                           (cffi:foreign-funcall "sqrt" :double -1d0 :double))
+                          "native floating-point exceptions are masked")
+                      (when (eq phase failure) (error expected))))
+               (setf (symbol-function 'sdl2:init*)
+                     (lambda (flags) (declare (ignore flags)) (native-call :initialization) 0)
+                     (symbol-function 'gui::call-with-graphical-window)
+                     (lambda (&rest arguments)
+                       (declare (ignore arguments))
+                       (native-call :window)
+                       (values 37 :second-value))
+                     (symbol-function 'sdl2:quit*)
+                     (lambda () (native-call :cleanup)))
+               (handler-case
+                   (setf result (multiple-value-list (gui:run-graphical nil nil nil)))
+                 (error (error) (setf condition error))))
+             (if failure
+                 (ok (eq condition expected) "the original SDL failure propagates")
+                 (ok (and (null condition) (equal result '(37 :second-value)))
+                     "normal return preserves all values"))
+             (ok (equal (reverse calls)
+                        (if (eq failure :initialization)
+                            '(:initialization)
+                            '(:initialization :window :cleanup)))
+                 "cleanup runs only after successful initialization")
+             (ok (equal traps (getf (sb-int:get-floating-point-modes) :traps))
+                 "caller traps are restored on normal and exceptional exits")))
+      (setf (symbol-function 'sdl2:init*) original-init
+            (symbol-function 'gui::call-with-graphical-window) original-window
+            (symbol-function 'sdl2:quit*) original-quit)
+      (apply #'sb-int:set-floating-point-modes original-modes))))

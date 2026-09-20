@@ -4646,3 +4646,49 @@ Configured package: `/nix/store/h9sjxv2l8dijamd7dpkwziyjrzr85z58-lem-yath`;
 client: `/nix/store/ibkcln47vhnskhbqq6dyfgks1kxmdcjn-sbcl-lemclient-unstable`.
 Evidence: `/tmp/lem-batching-build.paths`, `/tmp/lem-batching-native.log`.
 No installed profile was activated.
+
+
+### Restore native floating-point behavior in the SDL client (2026-09-20)
+
+The Mesa/X11 startup failure above exposed a missing part of cl-sdl2's normal
+thread setup. The daemon client deliberately uses one calling thread and
+low-level `init*`/`quit*`, bypassing `SDL-MAIN-THREAD`, which normally masks
+floating-point traps around native graphics calls. Under SBCL's default traps,
+the matched Mesa runtime raised `FLOATING-POINT-INVALID-OPERATION` while creating
+a renderer. Even the requested software renderer reached graphics context
+creation through SDL's window framebuffer path.
+
+`run-graphical` now reuses cl-sdl2's existing internal `without-fp-traps` macro
+around initialization, the event loop and teardown. It retains the single UI
+thread and restores the caller's traps on exit, including failed initialization.
+The source comment records why the library's internal macro is used. No daemon
+editor behavior or renderer selection changes.
+
+A new SBCL regression exercises a real native `sqrt(-1)` call from substituted
+initialization, window handling and cleanup functions. Before the fix, it
+reproduced invalid-operation conditions and failed. Afterward, native calls
+return IEEE NaNs as expected. The test covers normal multiple-value return and
+injected failures at all three phases, verifies exact condition identity,
+checks cleanup ordering and confirms the caller's trap settings are restored.
+The final SDL client test suite passes. Evidence:
+`/tmp/lem-native-float-before-tests.log`,
+`/tmp/lem-native-float-after-tests.log`, `/tmp/lem-native-float-client.log`.
+
+The source-loaded client also passes a four-input smoke with the exact graphics
+settings that previously crashed: private X11, software renderer, batching
+explicitly disabled, `EGL_PLATFORM=surfaceless` and matched Mesa 25.2.6. It
+verifies full text, saved bytes and clean daemon/client exits. The same DRI3
+warnings remain, but there is no floating-point exception. Artifact:
+`/tmp/lem-native-float-x11-smoke.{json,log}`. This is a startup/correctness check,
+not a timing comparison or proof of host GPU compatibility; the host-driver
+GLIBC ABI mismatch remains a separate issue.
+
+
+Final validation passes the SDL client suite, software and actual OpenGL pixel
+suites, and all 19 packaged native display/lifecycle checks. Built production
+SDL and both SDL test files match the checkout byte-for-byte. Configured package:
+`/nix/store/sgzg162yqal3cqm5z7nbda9z52vqbccc-lem-yath`; native client:
+`/nix/store/j2hi362gj94al6dd4wb8ki7zqm68w0km-sbcl-lemclient-unstable`.
+Logs: `/tmp/lem-native-float-{software,gpu}-pixels.log`,
+`/tmp/lem-native-float-build.paths`, `/tmp/lem-native-float-native.log`.
+No installed profile was activated.
