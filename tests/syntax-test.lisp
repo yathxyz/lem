@@ -36,6 +36,89 @@
       (unless (lem:line-offset point -1 0)
         (return t)))))
 
+
+(deftest partial-parse-custom-delimiters
+  ;; Letters and non-ASCII characters can carry syntax too. Ordinary-run
+  ;; scanning must stop at the first character of each multi-character opener.
+  (let* ((table (lem/buffer/syntax-table:make-syntax-table
+                 :paren-pairs '((#\a . #\z) (#\λ . #\ω))
+                 :string-quote-chars '(#\q) :escape-chars '(#\e)
+                 :fence-chars '(#\f) :line-comment-string "cc"
+                 :block-comment-pairs '(("bb" . "dd"))
+                 :block-string-pairs '(("ss" . "tt"))))
+         (buffer (lem:make-buffer nil :temporary t :syntax-table table)))
+    (unwind-protect
+         (dolist (case '(("word a word" nil 1 nil)
+                         ("word a word z" nil 0 nil)
+                         ("word λ word" nil 1 nil)
+                         ("word λ word ω" nil 0 nil)
+                         ("wordqrest" :string 0 4)
+                         ("wordfrest" :fence 0 4)
+                         ("wordeqrest" nil 0 nil)
+                         ("wordssrest" :block-string 0 4)
+                         ("wordssresttt" nil 0 nil)
+                         ("wordbbrest" :block-comment 0 4)
+                         ("wordbbrestdd" nil 0 nil)
+                         ("word cc rest" :line-comment 0 5)))
+           (destructuring-bind (text type depth token-column) case
+             (lem:erase-buffer buffer)
+             (lem:insert-string (lem:buffer-point buffer) text)
+             (dolist (comment-stop '(nil t))
+               (lem:with-point ((from (lem:buffer-start-point buffer))
+                                (to (lem:buffer-end-point buffer)))
+                 (let* ((state (lem:parse-partial-sexp from to nil comment-stop))
+                        (stopped (and comment-stop (or (search "bb" text) (search "cc" text))))
+                        (token (lem:pps-state-token-start-point state)))
+                   (ok (eq (if stopped nil type) (lem:pps-state-type state)))
+                   (ok (= depth (lem:pps-state-paren-depth state)))
+                   (ok (eql (unless stopped token-column)
+                            (and token (lem:point-charpos token))))
+                   (when stopped
+                     (ok (= stopped (lem:point-charpos from)))))))))
+      (lem:delete-buffer buffer))))
+
+(deftest partial-parse-ordinary-span-boundaries
+  (let* ((text (format nil "0123456789漢字😀~%0123456789~%0123456789"))
+         (buffer (lem:make-buffer nil :temporary t :syntax-table lem-lisp-syntax:*syntax-table*)))
+    (unwind-protect
+         (progn
+           (lem:insert-string (lem:buffer-point buffer) text)
+           (lem:with-point ((from (lem:buffer-start-point buffer))
+                            (to (lem:buffer-start-point buffer)))
+             (ok (loop :for start :from 0 :to (length text)
+                       :always (loop :for end :from start :to (length text)
+                                     :always (progn
+                                               (lem:move-to-position from (1+ start))
+                                               (lem:move-to-position to (1+ end))
+                                               (let ((state (lem:parse-partial-sexp from to)))
+                                                 (and (lem:point= from to)
+                                                      (null (lem:pps-state-type state))
+                                                      (zerop (lem:pps-state-paren-depth state)))))))
+                 "ordinary spans preserve every requested endpoint, including newlines and EOF")))
+      (lem:delete-buffer buffer))))
+
+(deftest partial-parse-empty-openers
+  (dolist (kind '(:line :block-comment :block-string))
+    (let* ((table (apply #'lem/buffer/syntax-table:make-syntax-table
+                         (ecase kind
+                           (:line (list :line-comment-string ""))
+                           (:block-comment (list :block-comment-pairs '(("" . "END"))))
+                           (:block-string (list :block-string-pairs '(("" . "END")))))))
+           (buffer (lem:make-buffer nil :temporary t :syntax-table table)))
+      (unwind-protect
+           (progn
+             (lem:insert-string (lem:buffer-point buffer) "WORDEND")
+             (lem:with-point ((from (lem:buffer-start-point buffer))
+                              (to (lem:buffer-end-point buffer)))
+               ;; Stop before an empty block-comment opener: entering that
+               ;; pre-existing scanner cannot advance past its empty token.
+               (let ((state (lem:parse-partial-sexp from to nil (eq kind :block-comment))))
+                 (ok (eq (ecase kind (:line :line-comment) (:block-comment nil)
+                             (:block-string :block-string))
+                         (lem:pps-state-type state)))
+                 (ok (= (if (member kind '(:line :block-comment)) 0 7) (lem:point-charpos from))))))
+        (lem:delete-buffer buffer)))))
+
 (deftest syntax-cache-incomplete-tokens
   (dolist (text '("#|x|#" "\"a\\\"b\""))
     (let* ((buffer (lem:make-buffer nil :temporary t
