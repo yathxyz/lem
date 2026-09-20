@@ -7,6 +7,8 @@
 (defun get-git-hash ()
   "Return lem's git hash."
   ;; Skip git operations during Nix build
+  #+nix-build
+  nil
   #-nix-build
   (let ((path (asdf:system-relative-pathname :lem ".git/")))
     (when (uiop:directory-exists-p path)
