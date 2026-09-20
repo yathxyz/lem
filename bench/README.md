@@ -7260,3 +7260,99 @@ tier has a committed Nova baseline; their median-band gates therefore remain
 unavailable. Existing EX44 baselines were not changed. Log:
 `/tmp/lem-range-normalization-tier-bench.log`; results:
 `bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t{1,2}-20260920194132.json`.
+
+### Attribute the recurring 103 ms input stalls (2026-09-20)
+
+A private diagnostic retained the published `f9d3569cb` daemon and unchanged
+production SDL client. It added five client phases: input-send entry to decoded
+screen receipt; receipt to screen update; update; update to draw; draw through
+presentation. Receipt is stamped before publishing the message under the queue
+lock. The send call's duration is recorded separately because socket receipt
+can overlap its completion. All wrappers are confined to the disposable probe.
+The existing daemon pipeline sink is chained, with a 65,536-sample capacity and
+process resource counters; display-work counters remain enabled.
+
+After a 20-measured/20-warmup smoke check, 12,000 measured inputs plus 20 warmups
+used the ordinary 524 KB Lisp fixture, line 6,514, 25 ms pacing, software X11
+and CPUs 0–3. Exact saved text, source-fixture/probe hashes, cursor/modes,
+renderer and clean client/daemon exits passed. All 12,020 daemon events contain
+four ordered stages with exact stage sums and no lost/replaced samples. Every
+measured client phase is nonnegative and their sum matches send-to-present.
+Every successive acknowledgement adds one update, draw and present, decoding
+and painting two rows. The daemon sent 12,020 screen messages and 24,040 rows;
+its 12,083 redraws include 63 background redraws without screen output.
+
+Two measured events exceeded 20 ms; both were backspaces. Indices are zero-based
+and exclude warmup:
+
+| Sample | Client total (ms) | Send to decoded receipt (ms) | Receipt to update (ms) | Daemon queue / command / redisplay (ms) | Daemon redisplay CPU (ms) |
+| --- | ---: | ---: | ---: | --- | ---: |
+| 3,141 | 103.462376 | 102.953639 | 0.041257 | 0 / 1 / 102 | 1.180 |
+| 7,503 | 103.082281 | 102.660938 | 0.046317 | 0 / 1 / 102 | 1.269 |
+
+Neither event increased the daemon GC CPU counter during its command/redisplay
+stages or the client GC counter between acknowledgements. Client CPU increased
+0.547/0.545 ms. Adjacent input latencies were 0.920/1.084 and 0.973/1.204 ms.
+This locates these two stalls in the daemon interval from command completion
+to core redisplay completion, before client receipt. It does not yet identify
+the blocking call or establish the cause of earlier uninstrumented outliers.
+The pipeline clock advances mostly in 1 ms steps; its units do not imply
+microsecond resolution. CPU counters include other threads.
+
+The next-largest event was 6.029 ms, with a 6 ms redisplay stage and 12.844 ms
+of process GC CPU during that stage. This is distinct evidence from the two
+103 ms stalls; process GC CPU is not a wall-pause measurement. The diagnostic
+client median was 1.025464 ms and p95 1.398961 ms. These instrumented results are
+not a speedup comparison or a physical-monitor measurement. Production behavior
+has not been changed by this investigation.
+
+Published profile:
+`/nix/store/lw762fmkdg260g4zxyzgwqyz6g9piww3-lem-yath-profile/bin/lem`.
+Artifacts: `/tmp/lem-stall-trace.py`, `/tmp/lem-stall-trace-server.lisp`,
+`/tmp/lem-stall-trace-results.py`, and
+`/tmp/lem-stall-trace-{smoke,x11-long}.{json,log}` with generated client/Python
+snapshots. Long-run validation: `/tmp/lem-stall-trace-x11-long-proof.{json,log}`.
+Private root: `/tmp/lem-sdl-input-x7hqka4e`, containing `pipeline.csv` and
+`server-work.json`. The smoke root is `/tmp/lem-sdl-input-69h83pn1`.
+
+A second 12,000-input run additionally timed eleven redraw functions, retaining
+only calls over 10 ms on the editor thread. All original integrity, provenance,
+work-count and complete-stage checks passed again. It captured a 103.318665 ms
+insertion at sample 4,464, with 102.001 ms in the command-to-redisplay interval,
+1.145 ms of process CPU in that interval and no GC. None of the timed calls,
+including `redraw-display`, exceeded 10 ms anywhere in the run. The delay is
+therefore before the actual redraw call, rather than a slow drawing operation.
+A separate 46.949670 ms insertion at sample 10,364 spent 46 ms in the command
+stage with 0.634 ms of process CPU and no GC; its cause remains open. Do not
+conflate it with the deferred-redraw stall.
+
+Inspection found that `command-loop-body` skips redisplay for any nonempty
+event queue. `receive-event` can then consume a background callback and block
+again without requesting that skipped redraw. An unchanged show-paren callback
+now correctly declines its own redraw, exposing reliance on another idle timer
+for the completed command's pending display. The configured lint idle timer
+runs after 100 ms and retains the historical unconditional redraw request.
+
+A controlled reproduction wrapped `note-command-done` in the private daemon to
+queue one no-op callback after each timestamped command. Forty callbacks were
+queued for 20 warmup plus 20 measured inputs. All measured inputs exceeded
+20 ms: client median 103.002687 ms, p95 104.090096 ms, maximum 104.479148 ms.
+Every stage/text/work/source/clean-exit gate passed; no timed redraw call
+exceeded 10 ms and neither process recorded GC during the run. This confirms
+that the queued-callback scheduling path can produce the observed 103 ms stall.
+The naturally captured callback identity is not yet recorded. This finding
+requires preserving a pending redisplay until the editor is about to wait,
+without defeating coalescing of queued user input or tying behavior to metrics.
+No production fix is claimed in this checkpoint.
+
+Scope artifacts: `/tmp/lem-stall-scopes{.lisp,.py,-server.lisp,-results.py}`,
+`/tmp/lem-stall-scopes-{smoke-r2,x11-long}.{json,log}`, generated client/Python
+snapshots and `-proof.{json,log}`. Long root:
+`/tmp/lem-sdl-input-d3y85ead`, including `slow-scopes.sexp` (`:KEYS 12020`,
+`:SCOPES NIL`). The first scope smoke was rejected at setup for an unmatched
+parenthesis in the private diagnostic; the corrected smoke passed all gates.
+Forced reproduction: `/tmp/lem-stall-force-callback.lisp`,
+`/tmp/lem-stall-forced{.py,-server.lisp,-results.py}`,
+`/tmp/lem-stall-forced-before.{json,log}` and `-proof.{json,log}` with generated
+snapshots; root `/tmp/lem-sdl-input-a_zdmer1` retains the 40-callback count and
+empty slow-call record. These diagnostic scripts do not enter a packaged editor.
