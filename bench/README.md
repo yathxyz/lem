@@ -7143,3 +7143,120 @@ Same-image artifacts: `/tmp/lem-routed-timing-toggle{.py,-runs.py,-runs.log}`,
 `/tmp/lem-routed-timing-toggle-string-{before,after}-{1,2}.{json,log}` with
 instrumented Python snapshots. Here `before` means recording off and `after`
 means recording on; both use the candidate package.
+
+### Reuse privately sorted attribute-range lists (2026-09-20)
+
+Fresh full GUI profiles of published `b678d5a56` used ordinary Lisp, 2,400
+measured plus 20 warmup inputs, 5 ms pacing, software X11 and CPUs 0–3.
+Both retained exact saved text, cursor/modes, source/probe hashes and clean
+exits. The CPU profile collected 1,549 samples: logical-line creation accounted
+for 42.2% including callees. The allocation profile collected 17,210 region
+samples (approximately 32 KB per region); indentation-guide transformation
+accounted for 46.6%. Sorting-copy and sorted-normalization helpers accounted
+for approximately 11.2% of allocation samples. These are sampled attribution,
+not exact per-function byte counters, and profiled timings are not latency
+comparison results.
+
+Checkpoint `2e4425131` removes one redundant list allocation from the unsorted
+normalization path. Sorting already owns a copied list spine; adjacent-range
+merging now reuses its cells. Merged interval records are still newly allocated,
+so their original bounds and values cannot be mutated. Empty, singleton and
+already-sorted inputs keep the existing path. Attribute-provider evaluation,
+overlay splitting, sorting and equality rules are unchanged.
+
+Focused tests passed all 27,000 three-range combinations plus pair/singleton,
+merge-chain, zero-width, overlap, gap, duplicate-key, NIL, extra-field and
+numeric-type cases. They compare the prior behavior and verify list/range
+ownership and left-value identity. Existing overlay boundary and executable
+provider-snapshot tests also pass. All 44 packaged indentation/Org/native
+checks passed. The full core suite was run and remains red in the documented
+historical kernel undo model. Controls using the original and candidate
+normalizers, both with seed `256748266397359129`, reproduce the same
+content/point-equal tick divergence (`2/0` after undo). This is not a claim
+that the full suite passed.
+
+A component ABBA comparison used five measured repetitions per visit after
+warmup, 100,000 calls per repetition, with full GC before each sample. Medians
+across ten samples per variant:
+
+| Case | CPU before → after (microseconds/call) | Allocation before → after (bytes/call) |
+| --- | ---: | ---: |
+| Sorted, separate ranges | 0.080160 → 0.080005 | 192.221 → 192.219 |
+| Reversed, separate ranges | 0.210875 → 0.193135 | 384.238 → 192.218 |
+| One new unsorted range | 0.215335 → 0.196420 | 416.023 → 208.276 |
+| Reversed, all merged | 0.290170 → 0.291505 | 743.585 → 727.199 |
+
+The full GUI comparison used ABBA separately for both fixtures: 600 measured
+plus 20 warmup events, 25 ms pacing, software X11 and CPUs 0–3. Both packages
+use the same configuration source and source-loaded client. All input-integrity,
+context, provenance and clean-exit checks passed. Means of two runs:
+
+| Workload | Daemon CPU before → after (ms) | Daemon allocation before → after (bytes) | Client send-to-present median before → after (ms) | p95 before → after (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Multiline string | 371.506 → 370.832 | 69,023,568 → 69,037,072 | 0.834064 → 0.832891 | 1.149878 → 1.055816 |
+| Ordinary Lisp | 487.424 → 489.314 | 124,086,800 → 116,696,976 | 1.001353 → 0.995209 | 1.350055 → 1.330808 |
+
+Ordinary daemon allocation fell 5.96%, with separated ranges. String allocation
+is unchanged within 0.02%. CPU, median and p95 ranges overlap in both workloads;
+this establishes an allocation saving, not a reliable latency improvement.
+One ordinary candidate recorded a 103.186 ms client send-to-present stall at
+sample 327 (zero-based, backspace), with 103.372 ms submission acknowledgement.
+Its neighbors were 0.958/1.223 ms. That interval consumed 504 microseconds of
+client CPU and 53,120 client bytes, with no client GC-counter increase. Per-event
+daemon counters were not captured in that comparison, so its cause remains
+unresolved. Other ordinary maxima were 5.364/6.006 ms before and 6.346 ms in
+the second candidate. The earlier 102 ms stall predates this normalizer change;
+matching duration does not prove a shared cause.
+
+String client allocation initially rose 3.84%, with separated ranges. It also
+rose across just the 599 intervals between measured acknowledgements, so startup
+and warmup do not explain that observation. Four further instrumented string
+runs used ABBA to compare display work. Every run recorded 623 daemon redraws,
+24,297 logical lines, 620 screen messages, zero full screens and 1,240 encoded
+rows. Every measured client transition consumed one update/draw/present and
+two decoded/painted rows. Each capture contains all 620 ordered four-stage
+pipeline groups with exact stage sums and no dropped/replaced samples; added
+client update/draw stage deltas also sum to client latency.
+
+In this repeat, client allocation was 40,197,696 → 40,414,976 bytes (+0.54%),
+with overlapping ranges. Across the 599 measured intervals it was
+38,550,144 → 38,773,120 (+0.58%), also overlapping. The larger original increase
+did not reproduce, and no extra display work was found. Instrumented median
+latency moved 0.858332 → 0.833548 ms while p95 moved 1.012975 → 1.056933 ms;
+these are separate instrumented results and not substituted for the original
+comparison. The approximately 100 ms event did not recur in these 2,400
+additional measurements. The change is retained for the repeatable ordinary
+allocation reduction; the latency tails and original client-allocation variation
+remain explicit limits of the evidence.
+
+Baseline: `/nix/store/wp26yj17895mr7di78255qixqqnf5fnf-lem-yath-profile/bin/lem`.
+Candidate: `/nix/store/xxpdf8s7mw18qwj4b807gah1162mlgs4-lem-yath/bin/lem`.
+Both use configuration `/nix/store/alkigfhipwqdckdl7hp6gkm3361jd50m-lem-yath`.
+Profile artifacts: `/tmp/lem-redraw-allocation-profile{.py,-proof.json}` and
+`/tmp/lem-redraw-allocation-profile-deep-{cpu,alloc}.{json,log}` with Python
+snapshots. Reports: `/tmp/lem-sdl-input-0hrp84y3/server-profile.txt` (CPU) and
+`/tmp/lem-sdl-input-irbjaj2z/server-profile.txt` (allocation).
+Validation: `/tmp/lem-range-normalization-{tests,bench}.{lisp,log}`,
+`/tmp/lem-range-normalization-full-tests.log`,
+`/tmp/lem-range-normalization-undo-control.lisp`,
+`/tmp/lem-range-normalization-undo-{before,after}.log`, and
+`/tmp/lem-range-normalization-build.{paths,log}`. Provenance:
+`/tmp/lem-range-normalization-package-proof.{py,json,log}` and
+`/tmp/lem-range-normalization-baseline-proof.json`.
+Input evidence: `/tmp/lem-range-normalization-input{.py,-runs.py,-runs.log}`,
+`/tmp/lem-range-normalization-results.{py,log}`, and
+`/tmp/lem-range-normalization-{string,deep}-{before,after}-{1,2}.{json,log}`.
+Display-work evidence: `/tmp/lem-range-normalization-work{.py,-runs.py,-runs.log}`,
+`/tmp/lem-range-normalization-work-results.{py,log}`, and
+`/tmp/lem-range-normalization-work-{before,after}-{1,2}.{json,log}` with private
+Python/client snapshots. Each JSON records its temporary root and source hashes;
+the work roots also retain `pipeline.csv` and `server-work.json`.
+
+The repository runner `scripts/run-bench.sh all` completed all 24 T1 and seven
+T2 entries against this checkout (`2e4425131`); its Qlot source resolution was
+checked first. The telemetry primitive reported 0.00076 microseconds/op and
+zero bytes/op, within its hard budget. The runner exited 2 because neither
+tier has a committed Nova baseline; their median-band gates therefore remain
+unavailable. Existing EX44 baselines were not changed. Log:
+`/tmp/lem-range-normalization-tier-bench.log`; results:
+`bench/results/nova-AMD-Ryzen-9-9950X3D-16-Core-Processor-32c-t{1,2}-20260920194132.json`.
