@@ -6031,3 +6031,60 @@ Artifacts: `/tmp/lem-raw-neighbor-component.{lisp,py,log}`,
 regression `/tmp/lem-raw-neighbor-rfzprq_3`. The first private regression harness
 omitted one test function from its extracted source; no candidate result was
 claimed until the corrected harness loaded and passed both test groups.
+
+The direct-traversal candidate passed the configured Nix build and all 43
+packaged checks (15 indentation-guide, nine Org display, 19 native display and
+lifecycle). Baseline is the `0e56d8fc6` configured editor
+`/nix/store/5721vzwxbdj08jyq4yvdmcm1mycm6i55-lem-yath/bin/lem`; candidate
+`/nix/store/d3f6rgqx5z82dw3cc15frb32vi373r93-lem-yath/bin/lem`, configuration source
+`/nix/store/s1hdi94nkypkf56a0cr7r42lws5sb53l-lem-yath`. Exact package/source/fixture
+and probe comparisons are recorded in `/tmp/lem-raw-neighbor-package-proof.json`;
+build artifacts are `/tmp/lem-raw-neighbor-build.{log,paths}`.
+
+Full X11/software input comparisons used the same long-blank and ordinary deep
+Lisp fixtures, each in before/after/after/before order: 600 measured inputs plus
+20 warmups, 25 ms pacing, CPUs 0–3. All eight runs verified executable, modes,
+renderer, source/probe hashes, cursor line/column, complete buffer/save/source
+integrity and clean exits. Means of two runs and their percentiles:
+
+| Measurement | Long blank run before → after | Ordinary deep Lisp before → after |
+| --- | ---: | ---: |
+| Daemon CPU (ms) | 900.183 → 723.803 | 771.992 → 753.825 |
+| Daemon allocated bytes | 233,432,096 → 233,730,144 | 236,772,512 → 236,452,000 |
+| Client CPU (ms) | 229.564 → 238.842 | 265.424 → 271.392 |
+| Client allocated bytes | 25,382,656 → 25,609,216 | 36,892,928 → 37,073,024 |
+| Client send-to-present median (ms) | 1.398 → 1.087 | 1.117 → 1.106 |
+| Client send-to-present p95 (ms) | 2.038 → 1.733 | 1.808 → 1.788 |
+| Submission-to-ack median (ms) | 1.525 → 1.214 | 1.291 → 1.281 |
+| Submission-to-ack p95 (ms) | 2.272 → 1.967 | 2.167 → 2.152 |
+
+The long-blank workload improved daemon CPU by 19.6% and median client
+send-to-present time by 22.3%; both candidate runs beat both baselines on these
+measures. CPU before was 910.049/890.316 ms, after 753.892/693.714 ms; medians
+before 1.407/1.389 ms, after 1.094/1.079 ms. The mean p95 improved 15.0%, but
+its ranges overlap (before 2.526/1.551 ms, after 2.255/1.212 ms), so no precise
+tail guarantee is inferred. Full-input allocation stayed essentially flat,
+unlike the larger allocation savings in the scattered-run helper component.
+
+Ordinary Lisp showed no clear regression: daemon CPU mean −2.4%, median −0.9%,
+p95 −1.1%, with overlapping run ranges. Client CPU means rose 4.0% on long
+blanks and 2.2% on ordinary code, also with overlapping ranges; both workloads'
+combined daemon/client CPU means fell. The lower observed maxima are not used
+as a general speedup claim. The direct scan is retained with all editing and
+rendering behavior intact; only the private neighbor traversal changed.
+
+Artifacts: `/tmp/lem-raw-neighbor-{input,results}.{py,log}`,
+`/tmp/lem-raw-neighbor-{long,deep}-{before,after}-{1,2}.{json,log}`. Long-run
+roots in ABBA order: `/tmp/lem-sdl-input-uhri55zb`, `/tmp/lem-sdl-input-z88gcs16`,
+`/tmp/lem-sdl-input-7b0qc5pk`, `/tmp/lem-sdl-input-aqk75nn3`. Ordinary roots:
+`/tmp/lem-sdl-input-xl4d6mcv`, `/tmp/lem-sdl-input-9whmlgf2`,
+`/tmp/lem-sdl-input-ezap5rck`, `/tmp/lem-sdl-input-qjj6gaxb`.
+
+A separate source-inspection lead remains in line-number formatting:
+`programming-line-number-content` in the configuration and the upstream
+line-number method both construct a default format-control string per row,
+then pass it to `format`. A constant control with a dynamic width may avoid
+that construction/parsing, but has not been implemented or measured here.
+The profile's 11.2% line-number around-method share includes other gutter
+providers and programming-mode classification; it must not be presented as
+time spent solely formatting numbers.

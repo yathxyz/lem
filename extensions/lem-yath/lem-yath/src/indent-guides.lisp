@@ -31,11 +31,11 @@
               4)))
     (if (and (integerp spacing) (plusp spacing)) spacing 4)))
 
-(defun point-line-indentation (point)
-  "Return visual indentation and whether POINT's line is blank."
+(defun point-line-indentation (point &optional (line (point-line point)))
+  "Return visual indentation and blankness of LINE using POINT's buffer settings."
   (let ((column 0)
         (tab-width nil))
-    (loop :for character :across (line-string point)
+    (loop :for character :across (lem/buffer/line:line-string line)
           :do (case character
                 (#\Space (incf column))
                 (#\Tab
@@ -59,15 +59,21 @@
           runs))))
 
 (defun nearby-nonblank-indentation (point direction)
-  (with-point ((scan point))
-    (loop :with boundary := (line-number-at-point point)
-          :while (line-offset scan direction)
-          :do (multiple-value-bind (indentation blank-p)
-                  (point-line-indentation scan)
-                (if blank-p
-                    (setf boundary (line-number-at-point scan))
-                    (return (values indentation boundary))))
-          :finally (return (values 0 boundary)))))
+  ;; Only buffer settings depend on POINT; inspecting neighbors does not need
+  ;; to copy it or update its line/column on every step.
+  (loop :with boundary := (line-number-at-point point)
+        :with next-line := (ecase direction
+                            (-1 #'lem/buffer/line:line-previous)
+                            (1 #'lem/buffer/line:line-next))
+        :for line := (funcall next-line (point-line point))
+          :then (funcall next-line line)
+        :while line
+        :do (multiple-value-bind (indentation blank-p)
+                (point-line-indentation point line)
+              (if blank-p
+                  (incf boundary direction)
+                  (return (values indentation boundary))))
+        :finally (return (values 0 boundary))))
 
 (defun blank-line-context-indentation (point)
   "Match indent-bars' contextual blank-line behavior."
