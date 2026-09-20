@@ -6307,3 +6307,135 @@ Long-blank roots in ABBA order: `/tmp/lem-sdl-input-rv90n16g`,
 `/tmp/lem-sdl-input-a_kqivwh`. Ordinary roots:
 `/tmp/lem-sdl-input-ig4kquu1`, `/tmp/lem-sdl-input-7n7otgfr`,
 `/tmp/lem-sdl-input-6ulysuh8`, `/tmp/lem-sdl-input-kojo8no0`.
+
+### Reuse the string-opener query in indentation guides (2026-09-20)
+
+`string-limited-indentation` previously called `in-string-p` at line start,
+then copied another temporary point and called `maybe-beginning-of-string`
+at that same position. Both helpers query `syntax-ppss` and accept exactly
+`:string` or `:block-string` states. Commit `14958d622` uses the opener lookup
+for both jobs and retains the existing indentation formula and shallow-depth
+fast path. Only its private temporary point moves to the opener; the caller's
+point and buffer text remain unchanged.
+
+The original limiter remains a test oracle. All 41,616 differential cases
+passed before and after the change, covering Lisp strings and fenced symbols,
+Python ordinary and triple-quoted strings, comments, nested Lisp comments,
+Unicode, tab widths 1/4/8, six guide spacings, indentation 0–33, and three
+representative columns per nonempty line. Source text, modification ticks,
+and caller points are checked. The existing shallow-limit cases still make
+zero syntax queries. Six deeper-string cases plus one code case now make
+seven queries instead of thirteen. The instrumentation wraps `syntax-ppss`
+itself so this check remains meaningful after removing `in-string-p`.
+
+Private checks: `/tmp/lem-string-query-check.py` and
+`/tmp/lem-string-query-check-{before,after}.log`, with roots
+`/tmp/lem-string-query-j5rndowz` and `/tmp/lem-string-query-cswdmym8`.
+All 44 packaged checks passed: 16 indentation, 9 Org, and 19 native-client
+checks. Build logs/output: `/tmp/lem-string-query-build.{log,paths}`.
+
+Three same-process ABBA components compare 39 rows, identical compiler policy,
+full GC between phases, and CPUs 0–3. Outputs, source text, modification tick,
+and caller points are preserved. The cached-query case performs 10,000 passes
+per phase; the two edit-style cases perform 2,000 and invalidate the syntax
+cache suffix at the start of each pass:
+
+| Component | CPU before → after (ms) | Allocated bytes before → after |
+| --- | --- | --- |
+| Cached multiline-string queries | 565.697 → 300.185 | 562,618,304 → 281,252,224 |
+| Multiline string with edit-style invalidation | 400.772 → 386.923 | 54,013,440 → 45,270,144 |
+| Ordinary code with edit-style invalidation | 1,090.101 → 1,088.313 | 51,615,936 → 50,519,744 |
+
+The cached-query result is −46.9% CPU and −50.0% allocation, but that is not a
+keystroke workload. With edit-style invalidation, the string component improves
+3.5% in CPU and 16.2% in allocation, with both candidate phases below both
+baselines. Ordinary-code CPU overlaps (mean −0.2%); its allocation falls 2.1%.
+These components do not replace the full typing comparison below.
+Artifacts: `/tmp/lem-string-query-{before,after}.lisp`,
+`/tmp/lem-string-query-component.{lisp,py,log}`,
+`/tmp/lem-string-query-edit-component.{lisp,py,log}`, and
+`/tmp/lem-string-query-code-component.{lisp,py,log}`. Roots in that order:
+`/tmp/lem-string-query-fikknxi5`, `/tmp/lem-string-query-_goa49oq`,
+`/tmp/lem-string-query-rvpe_z2s`.
+
+The new full-input fixture `/tmp/lem-lisp-multiline-string.lisp` contains 13,000
+indented payload lines inside one Lisp documentation string (429,091 bytes).
+The target is line 6514, byte offset 214,934. Original SHA-256:
+`99adfcf92badb8ded2ba39664d20d0cf6d00c7af4934c02068d22cedcc9c57cc`;
+with the inserted input marker:
+`34b9fe73986687170be0d99395916999ebcab11264845d67c26433ea1501ee07`.
+It is reproducible with:
+
+```python
+from pathlib import Path
+text = '(defun multiline-guide-fixture ()\n  "A multiline documentation string.\n'
+text += ''.join(f'            payload {i:05d} 漢字\n' for i in range(13000))
+text += '  end."\n  (values))\n'
+Path('/tmp/lem-lisp-multiline-string.lisp').write_text(text, encoding='utf-8')
+```
+
+The input probe gains `--expect-in-string`: it verifies the live parser state
+before timing and records `in_string_verified`. Without the flag, that field
+is false (unchecked), not a claim that the target is outside a string. A
+20-event/2-warmup smoke run proved whole-document save equality and clean
+exits. A negative control at line 1 failed with the expected outside-string
+assertion and published no result JSON. Artifacts:
+`/tmp/lem-string-query-fixture.{py,log}` and
+`/tmp/lem-string-query-fixture-{positive,negative}.log`; the positive JSON is
+`/tmp/lem-string-query-fixture-positive.json`, root
+`/tmp/lem-sdl-input-n3mae8nb`. New Python probe SHA:
+`898577627b25dcb6e5627e23a2dfda67b8b7699cd46fa335c2aab9c11dbc5947`.
+The SDL client and other probe sources are unchanged.
+
+The verified candidate is
+`/nix/store/0hbx2r7n27mdc0jpi3n5fq83q5zr70ar-lem-yath/bin/lem`, resolving to
+`/nix/store/v07i0pa67jlz5rgnam25j4p5bmk4l846-lem/bin/lem`.
+`/tmp/lem-string-query-package-proof.{py,json}` compares installed core,
+configuration, fixtures and probe bytes. Indentation source SHA:
+`4da8cac54f092e3c2e0143f2f6425faf5590f750602c6787ba01f8b799b91b04`.
+The baseline is `c65b99685` (documentation checkpoint `bd3feb2bb`), packaged as
+`/nix/store/rl4pyljnvaj3852czshcd312l47sqnij-lem-yath/bin/lem`.
+
+Full GUI runs used ABBA order for the verified string fixture and the existing
+ordinary Lisp fixture, both at line 6514: 600 measured events plus 20 warmups,
+25 ms pacing, CPUs 0–3, and software X11 rendering. Both variants use the same
+new probe. Every string run passed the live string-state assertion. All eight
+runs passed exact executable/configuration/mode/renderer provenance, probe and
+client hashes, marker and byte-offset checks, source reconstruction,
+whole-text and saved-document equality, and clean daemon/client exits. Values
+are means of two runs per variant, including means of each run's percentile:
+
+| Measure | Multiline string: before → after | Ordinary Lisp: before → after |
+| --- | --- | --- |
+| Daemon CPU (ms) | 646.242 → 603.575 | 759.740 → 767.105 |
+| Daemon allocated bytes | 138,369,184 → 114,664,672 | 220,089,952 → 220,152,288 |
+| Client CPU (ms) | 262.460 → 257.740 | 265.594 → 264.824 |
+| Client allocated bytes | 37,477,440 → 36,883,712 | 36,458,688 → 36,666,752 |
+| Client send-to-present median (ms) | 0.935 → 0.915 | 1.086 → 1.092 |
+| Client send-to-present p95 (ms) | 1.606 → 1.323 | 1.774 → 1.780 |
+| Submission-to-ack median (ms) | 1.104 → 1.084 | 1.257 → 1.260 |
+| Submission-to-ack p95 (ms) | 1.980 → 1.618 | 2.147 → 2.148 |
+
+Multiline-string daemon CPU fell 6.6%, allocation 17.1%, and median client
+send-to-present time 2.1%, with both candidates below both baselines on each
+measure. CPU was 651.575/640.908 ms before and 601.483/605.668 ms after;
+medians were 0.932/0.938 ms before and 0.913/0.917 ms after. The p95 mean fell
+17.6%, but candidate p95 varied widely (1.074/1.572 ms) and one candidate's
+maximum rose to 5.094 ms versus baseline maxima of 1.749/2.131 ms. These data
+do not establish a general tail-latency guarantee or physical-monitor gain.
+
+Ordinary-code results overlap: daemon CPU mean +1.0% (before
+753.967/765.514 ms, after 784.573/749.637 ms), median +0.6%, and p95 +0.3%.
+Allocation is flat (+0.03%). Client CPU means fell 1.8% on the string workload
+and 0.3% on ordinary code; the ordinary ranges also overlap. The cached-query
+component's 47% CPU gain must not be substituted for either full-input result.
+The simpler single-query limiter is retained for its verified string-workload
+improvement and preserved behavior; no ordinary-code speedup is claimed.
+
+Artifacts: `/tmp/lem-string-query-{input,results}.{py,log}` and
+`/tmp/lem-string-query-{string,deep}-{before,after}-{1,2}.{json,log}`.
+String roots in ABBA order: `/tmp/lem-sdl-input-nv464swk`,
+`/tmp/lem-sdl-input-ldj5u8zo`, `/tmp/lem-sdl-input-g5mpls41`,
+`/tmp/lem-sdl-input-2qx0qnfn`. Ordinary roots:
+`/tmp/lem-sdl-input-75yx88yq`, `/tmp/lem-sdl-input-8n7bserb`,
+`/tmp/lem-sdl-input-wc_y5dft`, `/tmp/lem-sdl-input-rhbx099g`.
