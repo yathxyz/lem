@@ -5574,3 +5574,62 @@ Artifacts: `/tmp/lem-target-smoke.{py,log}` and
 `/tmp/lem-target-{first,deep}-smoke.{json,log}`. The formatted source is still
 `/tmp/lem-lisp-500k-formatted.lisp`, SHA-256
 `879c5b01637e0f9d80e7377476cc22439fc42a5da7a2e5a15473dc62da0cc3f9`.
+
+
+### Profile the deeper Lisp editing workload (2026-09-20)
+
+The current `41c2dff49` editor was measured at lines 1 and 6,514 using the same
+formatted 524,731-byte Lisp fixture. A first/deep/deep/first sequence used 600
+measured x/backspace inputs, 20 warmups, 25 ms pacing and CPUs 0–3 with X11/software
+rendering. All four runs verified the requested and actual line, column zero,
+source reconstruction by removing the marker at its recorded byte offset,
+complete text/save/source hashes, identical modes/renderer/probes and clean exits.
+
+This compares two workloads in the same build, not an optimization. The visible
+source differs, so higher costs cannot be attributed to file position alone.
+Means of two runs, including means of each run's percentiles:
+
+| Measurement | Line 1 | Line 6,514 |
+| --- | ---: | ---: |
+| Daemon CPU (ms) | 502.806 | 730.265 |
+| Daemon allocated bytes | 117,235,536 | 241,818,768 |
+| Client CPU (ms) | 228.070 | 257.394 |
+| Client allocated bytes | 25,461,824 | 37,192,896 |
+| Client send-to-present median (ms) | 0.807 | 1.041 |
+| Client send-to-present p95 (ms) | 1.030 | 1.483 |
+| Submission-to-ack median (ms) | 0.922 | 1.196 |
+| Submission-to-ack p95 (ms) | 1.165 | 1.698 |
+
+The deeper viewport used 45.2% more daemon CPU and 106.3% more Lisp allocation;
+its median client send-to-present time was 29.0% higher. This justified a fresh
+CPU profile at the deeper location, not a claim of an O(file-position) cost.
+The diagnostic used 2,400 measured inputs plus 20 warmups at 5 ms pacing and
+SB-SPROF at 1 ms across all daemon threads, retaining every integrity/exit gate.
+It completed normally and produced 2,439 samples. Inclusive shares include:
+
+- `string-limited-indentation`: 334 samples, 13.7%; its syntax-context work is
+  part of the 350 samples (14.4%) under `syntax-ppss`, not an additional cost.
+- `programming-buffer-p`: 293 samples, 12.0%; its mode lookup helper accounts for
+  222 samples, 9.1%.
+- `point-line-indentation`: 89 samples, 3.6%.
+- `implementation-screen`: 144 samples, 5.9%, including 104 (4.3%) under
+  `overlay-cells` after the previous composition optimization.
+
+The indentation helper currently copies a point and walks it one character at
+a time through spaces and tabs. Buffer-variable lookup resolves by buffer, not
+point column, so a direct line-string scan is a candidate for removing that
+point movement while preserving the tab-stop arithmetic. It has not yet been
+implemented or measured. Syntax-context parsing and mode classification remain
+larger targets; no feature has been disabled to improve these results.
+
+Artifacts: `/tmp/lem-depth-input.{py,log}`, `/tmp/lem-depth-results.log`,
+`/tmp/lem-depth-{first,deep}-{1,2}.{json,log}`. Roots in sequence:
+`/tmp/lem-sdl-input-qygawfrd`, `/tmp/lem-sdl-input-c_ayjshr`,
+`/tmp/lem-sdl-input-fu8pnybr`, `/tmp/lem-sdl-input-ac41dipl`.
+Profile driver `/tmp/lem-depth-profile.py`, exact executed snapshot
+`/tmp/lem-depth-profile-deep-instrumented.py`, and
+`/tmp/lem-depth-profile-deep.{json,log}`; profile itself:
+`/tmp/lem-sdl-input-0_7iwu6j/server-profile.txt`.
+The private diagnostic SDL source only adds an on-demand shutdown stack handler;
+its production prefix was byte-checked. No shutdown timeout occurred, so that
+handler was not exercised. Profiled timings are not used as speedup evidence.
