@@ -6439,3 +6439,122 @@ String roots in ABBA order: `/tmp/lem-sdl-input-nv464swk`,
 `/tmp/lem-sdl-input-2qx0qnfn`. Ordinary roots:
 `/tmp/lem-sdl-input-75yx88yq`, `/tmp/lem-sdl-input-8n7bserb`,
 `/tmp/lem-sdl-input-wc_y5dft`, `/tmp/lem-sdl-input-rhbx099g`.
+
+### Avoid the two-point equality argument list (2026-09-20)
+
+Source inspection of the remaining parser work found another short-comparison
+allocation: `syntax-ppss` and checkpoint code repeatedly call `point=` with
+two points, while its `&rest` parameter builds a list. The preceding ordinary
+Lisp profile attributed 30 inclusive samples (1.3% of 2,275) to `point=`;
+that profile predates the two intervening changes and is a lead, not an
+estimate of this change's final CPU benefit.
+
+A `dynamic-extent` declaration was considered but not applied. The installed
+SBCL 2.5.10 `ASSERT` macro in `src/code/macros.lisp` includes a function-call
+test's evaluated arguments in its failure report. The old assertion calls
+`%always-same-buffer` with the rest list, so a caught condition may retain
+that list after the comparison returns. Promising a shorter lifetime would
+be unsafe. The retained implementation instead accepts a supplied second
+point explicitly, like the earlier `point<=` change. Longer calls keep the
+ordinary rest list. No lifetime declaration or compiler safety change is used.
+
+Commit `c8d7222f2` preserves equality by position, one-point calls, arbitrary
+arity, supplied-NIL errors, and buffer validation before comparison
+short-circuiting. The 50 equality assertions pass before and after: all 5,460
+sequences of one through six points drawn from four distinct positions, equal
+positions held by different objects, missing/invalid arguments, and every
+invalid-argument position in two- through six-point calls. Captured conditions
+remain printable after unwinding and a full GC. The existing 66 syntax-cache
+assertions also pass with the candidate, for 116 focused assertions total.
+The first baseline runner was missing the test module's `cl-ansi-text`
+dependency; its corrected run passed. Artifacts:
+`/tmp/lem-point-equal-tests{,-after}.lisp`,
+`/tmp/lem-point-equal-tests-before{,-r2}.log`, and
+`/tmp/lem-point-equal-tests-after.log`.
+
+Same-process ABBA direct-call components use prebuilt arguments, one million
+calls per phase, 10,000 warmups, full GC, CPUs 0–3, identical compiler policy,
+and result checksums. Means of two runs per variant:
+
+| Arity | Equal positions | CPU before → after (ms) | Allocated bytes before → after |
+| ---: | --- | --- | --- |
+| 1 | yes | 5.638 → 4.728 | 10,304 → 0 |
+| 2 | yes | 18.938 → 15.450 | 16,013,248 → 0 |
+| 2 | no | 14.527 → 11.250 | 16,013,184 → 0 |
+| 3 | yes | 30.880 → 28.005 | 32,003,776 → 16,039,488 |
+| 3 | no | 17.572 → 14.692 | 32,003,712 → 16,022,784 |
+| 4 | yes | 42.840 → 40.184 | 48,027,328 → 32,003,584 |
+| 4 | no | 20.638 → 17.925 | 48,027,200 → 32,003,584 |
+| 6 | yes | 66.988 → 65.465 | 80,008,704 → 64,017,920 |
+| 6 | no | 26.805 → 25.096 | 80,008,704 → 64,017,920 |
+
+Binary calls remove roughly 16 MB per million calls and improve direct-call
+CPU by 18–23%. Longer calls save one cons cell each. The small unary allocation
+count is runtime background, not an inherent per-call list: both implementations
+already have an empty rest list for that case. These tiny direct-call times
+are not an editor-level speedup claim.
+
+A syntax-cache component invalidates the suffix at line 6514 and queries
+39 ordinary Lisp rows, repeated 2,000 times per phase. CPU mean was
+1,103.456 → 1,083.495 ms (−1.8%), and allocation
+42,990,528 → 39,299,072 bytes (−8.6%). Both candidate CPU phases were below
+both baselines, though the gap to the faster baseline was small. All 39 final
+parser states and the original text match. Artifacts:
+`/tmp/lem-point-equal-{before,after}.lisp`,
+`/tmp/lem-point-equal-direct-component.{lisp,py,log}`, and
+`/tmp/lem-point-equal-ppss-component.{lisp,py,log}`. The syntax-cache component
+root is `/tmp/lem-point-equal-ppss-gfs4zi0b`.
+
+The packaged build passed all 44 checks (16 indentation, 9 Org, 19 native
+client). `/tmp/lem-point-equal-build.{log,paths}` records the build;
+`/tmp/lem-point-equal-package-proof.{py,json}` checks installed source bytes.
+Candidate editor:
+`/nix/store/fziazbsfyhlh1lj80qq2irg1za3ay6kg-lem-yath/bin/lem`, resolving to
+`/nix/store/80p9k022ba0li2yyyx8ipgj05qmr3sh4-lem/bin/lem`.
+Point source SHA:
+`ca0bccceb3f70c134bf6ad47477e7eb5252d2c22b46f4c15d2bb27bdd0ebb31d`.
+Its configuration is byte-identical to the baseline `14958d622` package
+(documentation checkpoint `745857e68`):
+`/nix/store/0hbx2r7n27mdc0jpi3n5fq83q5zr70ar-lem-yath/bin/lem`.
+
+The same 50 equality assertions also pass against the actual packaged
+`point=` function, without loading a replacement definition. That private
+daemon exited cleanly. Artifacts:
+`/tmp/lem-point-equal-packaged-check.{lisp,py,log}` and
+`/tmp/lem-point-equal-packaged-lmkb3ih7`.
+
+Full GUI comparisons ran ABBA on both the multiline-string fixture and the
+525 KB ordinary Lisp fixture, at line 6514, with 600 measured events plus
+20 warmups, 25 ms pacing, software X11, and CPUs 0–3. All eight runs passed
+exact saved-text, cursor, active-mode, renderer, probe/source provenance, and
+clean daemon/client exit checks. String runs additionally verified live
+`in-string-p` before timing. The same current source client ran against both
+packaged daemons; this isolates the daemon change and does not compare old
+and new client binaries. Means of two runs per variant:
+
+| Workload | Daemon CPU before → after (ms) | Daemon allocation before → after (bytes) | Client send-to-present median before → after (ms) | p95 before → after (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Multiline string | 613.455 → 612.311 | 114,454,304 → 103,689,824 | 0.930052 → 0.929511 | 1.601878 → 1.630737 |
+| Ordinary Lisp | 765.750 → 757.936 | 220,153,632 → 212,786,464 | 1.105705 → 1.105694 | 1.810526 → 1.808081 |
+
+Daemon allocation fell consistently by 9.4% for strings and 3.3% for ordinary
+Lisp. String CPU was 603.678/623.232 ms before and 600.669/623.953 ms after;
+ordinary CPU was 741.019/790.482 ms before and 757.381/758.491 ms after.
+Those overlapping ranges do not establish an editor-level CPU improvement.
+Median latency was essentially unchanged on both workloads. String p95 mean
+rose 1.8%, with overlapping ranges (1.560/1.643 ms before, 1.599/1.663 ms
+after); ordinary p95 was also flat with overlapping ranges. One ordinary
+candidate maximum was 6.072 ms versus baseline maxima 5.726/5.338 ms, so no
+tail-latency guarantee follows from the allocation reduction. String GC CPU
+was 11.378 → 0 ms, but that is collector CPU in these runs, not a measured
+pause duration. The retained benefit is lower allocation with tested equality
+and error behavior; neither perceptible typing speed nor physical-monitor
+latency is inferred from the component result.
+
+Artifacts: `/tmp/lem-point-equal-{input,results}.{py,log}` and
+`/tmp/lem-point-equal-{string,deep}-{before,after}-{1,2}.{json,log}`.
+String roots in ABBA order: `/tmp/lem-sdl-input-z15swfaf`,
+`/tmp/lem-sdl-input-pp1x_l1q`, `/tmp/lem-sdl-input-tn98mx6h`,
+`/tmp/lem-sdl-input-_bf1ybsp`. Ordinary roots:
+`/tmp/lem-sdl-input-d3kbpkr9`, `/tmp/lem-sdl-input-0ip80hzw`,
+`/tmp/lem-sdl-input-5bebyo2r`, `/tmp/lem-sdl-input-ujk3gu9e`.
