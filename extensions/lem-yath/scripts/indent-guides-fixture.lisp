@@ -51,6 +51,53 @@
   (find-file filename)
   (current-buffer))
 
+(defun indent-guides-test-string-limits (buffer)
+  (let ((original (symbol-function 'in-string-p))
+        (queries 0)
+        (unchanged t)
+        (text (buffer-text buffer))
+        (tick (buffer-modified-tick buffer)))
+    (unwind-protect
+         (with-point ((point (buffer-start-point buffer)))
+           (sb-ext:without-package-locks
+             (setf (symbol-function 'in-string-p)
+                   (lambda (point)
+                     (incf queries)
+                     (funcall original point))))
+           ;; Exercise code, blank context and a multiline string with the
+           ;; actual buffer syntax, including the exact fast-path boundary.
+           (dolist (line '(2 5 10))
+             (move-to-line point line)
+             (dolist (spacing '(1 2 3 4 8 16))
+               (loop :for indentation :from 0 :to (1+ spacing)
+                     :do (unless (= indentation
+                                    (string-limited-indentation
+                                     point indentation spacing))
+                           (setf unchanged nil)))))
+           (indent-guides-test-log
+            "SMALL-LIMITS unchanged=~a queries=~d"
+            (if unchanged "yes" "no") queries)
+           ;; The original fixture opens its string at column four. Deeper
+           ;; indentation must still stop at that opening context.
+           (let ((correct t))
+             (move-to-line point 10)
+             (dolist (case '((1 20 5) (2 20 5) (4 6 5) (4 20 5)
+                             (8 20 9) (16 20 17)))
+               (destructuring-bind (spacing indentation expected) case
+                 (unless (= expected
+                            (string-limited-indentation point indentation spacing))
+                   (setf correct nil))))
+             (move-to-line point 2)
+             (unless (= 20 (string-limited-indentation point 20 4))
+               (setf correct nil))
+             (indent-guides-test-log
+              "DEEP-LIMITS correct=~a unchanged=~a"
+              (if correct "yes" "no")
+              (if (and (= tick (buffer-modified-tick buffer))
+                       (string= text (buffer-text buffer))) "yes" "no"))))
+      (sb-ext:without-package-locks
+        (setf (symbol-function 'in-string-p) original)))))
+
 (defun indent-guides-test-record-code ()
   (let ((buffer (indent-guides-test-open *indent-guides-test-code*)))
     (setf (variable-value 'lem/language-mode:indent-size :buffer buffer) 4)
@@ -156,6 +203,7 @@
 (let ((buffer (indent-guides-test-open *indent-guides-test-code*)))
   (setf *indent-guides-test-original-text* (buffer-text buffer)
         (variable-value 'lem/language-mode:indent-size :buffer buffer) 4)
+  (indent-guides-test-string-limits buffer)
   (indent-guides-test-record-code)
   (move-point (current-point) (buffer-start-point buffer))
   (line-offset (current-point) 3)

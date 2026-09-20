@@ -94,6 +94,10 @@
 
 (defun string-limited-indentation (point indentation spacing)
   "Avoid descending through a multiline string beyond its opening context."
+  ;; The opening-context limit is at least SPACING + 1, even for an
+  ;; unindented opener. Parsing cannot reduce an indentation below that bound.
+  (when (<= indentation (1+ spacing))
+    (return-from string-limited-indentation indentation))
   (with-point ((scan point))
     (line-start scan)
     (if (not (in-string-p scan))

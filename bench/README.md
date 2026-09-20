@@ -5220,3 +5220,76 @@ completion or physical monitor latency. Artifacts:
 `/tmp/lem-dap-gutter-{before,after}-{1,2}.{json,log}`,
 `/tmp/lem-dap-gutter-input.{py,log}`, and
 `/tmp/lem-dap-gutter-results.{py,log}`.
+
+
+### Avoid unnecessary indentation-guide string parsing (2026-09-20)
+
+`string-limited-indentation` parsed the string state of every displayed
+programming line, including lines whose indentation could not be reduced.
+Its opening-context limit is at least `spacing + 1`, because the opening guide
+depth is nonnegative. The function now returns immediately for indentation at
+or below that bound. Deeper indentation still uses the original parser and
+opening-context calculation; blank-line synthesis and guide painting are
+unchanged. No parser cache is added or retained across edits.
+
+The preceding daemon CPU profile placed 565 of 3,925 samples (14.4%, including
+callees) in this function. That older profile predates the debugger-gutter fix
+and had the documented shutdown timeout, so it is used only to select work,
+not as a performance comparison for this change.
+
+A focused configured-runtime fixture exercises code, blank context and a
+multiline string at six guide spacings, including the exact early-return
+boundary. It made 138 string-state queries before and zero after, with every
+result unchanged. Explicit deeper-string cases still clamp to columns 5, 9
+and 17 as appropriate; ordinary code remains unclamped. Source text and
+modified ticks stay intact. Logs:
+`/tmp/lem-indent-limit-{before,after}.log`; driver:
+`/tmp/lem-indent-limit-check.py`.
+
+Packaged checks pass: 13 indentation-guide checks (including actual ncurses
+rendering, blank-line cursor placement, tabs, toggle/reload and nonmutation),
+nine Org rendering checks for the composed transformer, and all 19 native
+client display/lifecycle checks. Production source, fixture and shell check
+match `/nix/store/dn5grhz6m47f5x92sdihaqz3mxc84nhk-lem-yath` byte-for-byte.
+Built daemon: `/nix/store/iki8wg9zj1c5wd25xzmzwh9mxsnv6s2j-lem-yath/bin/lem`.
+Build/check artifacts: `/tmp/lem-indent-limit-build.{paths,log}`.
+No installed profile or user editor session was changed.
+
+The complete-input ABBA compared `71cba88ec` with the candidate, using identical
+client/probe hashes, active modes, prepared 524 KB Lisp fixture, software/X11,
+600 measured inputs, 20 warmups and 25 ms pacing. Means of two runs per version:
+
+| Metric | Before | Shallow-indentation fix |
+| --- | ---: | ---: |
+| Daemon process CPU | 835.567 ms | 624.500 ms |
+| Daemon Lisp allocation | 162,440,792 bytes | 117,260,240 bytes (−27.8%) |
+| Client process CPU | 329.744 ms | 296.117 ms |
+| Client Lisp allocation | 25,507,584 bytes | 25,702,080 bytes |
+| X11 submission-to-ack median / p95 | 1.624 / 2.095 ms | 1.244 / 1.799 ms |
+| Client send-to-present median / p95 | 1.435 / 1.840 ms | 1.081 / 1.568 ms |
+
+Allocation stayed consistent within each version, but CPU and latency varied
+substantially: baseline daemon CPU was 692.878 and 978.255 ms, versus 532.006 and
+716.993 ms for the candidate. Baseline client CPU more than doubled between
+repetitions despite unchanged client code. Timing ranges overlap, and the
+candidate's worst single send-to-present event was 10.171 ms versus 8.793 ms
+before. These runs support the allocation improvement more clearly than a
+precise typing-latency gain; no general latency percentage is claimed.
+All four full text/save/source-fixture checks, clean exits and source/probe
+hash checks passed. Software presentation endpoints exclude GPU completion
+and physical monitor latency. Artifacts:
+`/tmp/lem-indent-limit-{before,after}-{1,2}.{json,log}`,
+`/tmp/lem-indent-limit-input.{py,log}`, and
+`/tmp/lem-indent-limit-results.{py,log}`.
+
+A separate same-process component ABBA compiled both function bodies under the
+same policy and calculated guide limits for the first 39 physical fixture lines
+2,000 times per phase. It cleared syntax and blank-context caches per iteration
+to represent invalidation by an edit at the beginning, warmed both variants,
+and performed full GC before each measured phase. Mean process CPU fell from
+326.694 to 22.047 ms (−93.3%); Lisp allocation fell from 64,479,040 to 10,979,072
+bytes (−83.0%). Every per-line result and the complete source text matched.
+This measures the component with surrounding indentation/context lookup, not
+complete input or rendering. Artifacts:
+`/tmp/lem-indent-limit-component.{lisp,py}` and
+`/tmp/lem-indent-limit-component-r2.log`.

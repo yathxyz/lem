@@ -97,6 +97,13 @@ else
   fail nonmutation 'guide rendering mutated source state or was not active'
 fi
 
+if wait_report '^SMALL-LIMITS unchanged=yes queries=0$' &&
+   wait_report '^DEEP-LIMITS correct=yes unchanged=yes$'; then
+  pass string-limit-boundary 'shallow indentation avoids parsing; deeper string limits and source state stay intact'
+else
+  fail string-limit-boundary 'string-scope fast path or deeper indentation limits differed'
+fi
+
 sleep 0.5
 if lem_capture "$session" | grep -q '│'; then
   pass ncurses-render 'the terminal screen contains real vertical guide glyphs'
