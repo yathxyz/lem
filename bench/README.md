@@ -7356,3 +7356,85 @@ Forced reproduction: `/tmp/lem-stall-force-callback.lisp`,
 `/tmp/lem-stall-forced-before.{json,log}` and `-proof.{json,log}` with generated
 snapshots; root `/tmp/lem-sdl-input-a_zdmer1` retains the 40-callback count and
 empty slow-call record. These diagnostic scripts do not enter a packaged editor.
+
+### Fulfil deferred redisplay before blocking for input (2026-09-20)
+
+Checkpoint `7f41cfd0e` retains the command loop's redraw callback while queued
+input is being consumed. If the queue drains through callbacks rather than a
+new command, `receive-event` runs that redraw before waiting. Ready routed
+input still takes precedence. The callback is dynamically scoped to its command
+loop and cleared before invocation so recursive input cannot re-enter it;
+explicit redisplay also clears it. This does not depend on enabled metrics and
+does not restore redundant show-paren idle redraws.
+
+A regression drives the real command loop with telemetry off: a queued no-op
+callback must not strand output, and a callback followed by a queued key must
+still coalesce. The original event queue/command loop fails the two empty-queue
+assertions while passing the two queued-key assertions. The candidate passes
+all four. The old-code run also encounters the already observed Rove failed-
+assertion summary error after reporting those failures; its nonzero exit is
+not treated as successful validation. Three more tests cover chained callbacks,
+recursive input, ready routed peers, and explicit redisplay avoiding duplicate
+work. All 41 focused tests passed 190 assertions, including the existing input,
+show-paren, pipeline, timer and queue-model suites. The threaded stress completed
+eight runs with no lost/duplicated/reordered events or timeouts. All 714 daemon
+assertions and all 44 packaged indentation/Org/native display checks passed,
+including multi-client prompt/operator routing and shutdown.
+
+The actual Nix-built candidate was compared with the published package using
+identical private no-op injection after every timestamped command. Each run
+used 20 warmup and 20 measured inputs. All exact-text, cursor/mode, source,
+renderer, complete pipeline and clean-exit gates passed. The injection counted
+40 callbacks in each; each daemon sent exactly 40 screen messages/80 rows and
+performed 40 redraws. Client send-to-present:
+
+| | Published before | Candidate after |
+| --- | ---: | ---: |
+| Median | 103.002687 ms | 1.029020 ms |
+| p95 | 104.090096 ms | 1.118063 ms |
+| Maximum | 104.479148 ms | 1.134935 ms |
+| Measured events over 20 ms | 20 | 0 |
+
+This is a controlled reproduction of the callback/redisplay race, not a claim
+that ordinary typing is 100 times faster. Neither run recorded GC during its
+measurement window. No rendering functionality or timer callbacks were removed.
+The source-loaded client's production SDL file and probe files are byte-identical;
+the after run's source checkout also contains the core fix, whose event-consumer
+path is exercised in the packaged daemon. The daemon package/configuration
+source and changed core/test files were checked against the checkout.
+
+Candidate: `/nix/store/8jcpvqd9ndx0i5ykq3pl658nijjp69xw-lem-yath/bin/lem`;
+configuration: `/nix/store/alkigfhipwqdckdl7hp6gkm3361jd50m-lem-yath`.
+Validation artifacts: `/tmp/lem-deferred-redraw-test-{before,after}.{lisp,log}`,
+`/tmp/lem-deferred-redraw-{focused-tests,daemon-tests}.{lisp,log}`,
+`/tmp/lem-deferred-redraw-build.{paths,log}` and
+`/tmp/lem-deferred-redraw-package-proof.{py,json,log}`. Forced after artifacts:
+`/tmp/lem-deferred-redraw-forced.py`,
+`/tmp/lem-deferred-redraw-forced-after.{json,log}`, generated snapshots and
+`/tmp/lem-deferred-redraw-forced-after-proof.{json,log}`; private root
+`/tmp/lem-sdl-input-b7sg54gb`. The before artifacts are recorded in the preceding
+section. `/tmp/lem-deferred-redraw-results.py` checks both client and daemon
+phases, work counts, resources and provenance.
+
+A normal 12,000-measured/20-warmup run then used the same five-phase client
+trace as the original long capture, without callback injection or slow-call
+wrappers. Every integrity/provenance and complete-stage check passed. Both
+versions performed exactly 12,083 redraws/471,237 logical lines and sent 12,020
+screen messages/24,040 rows. Client median before → after was 1.025464 →
+1.021436 ms, p95 1.398961 → 1.415842 ms; these single diagnostic runs do not
+establish a change in ordinary central latency. Maximum fell from 103.462376
+to 5.564074 ms, and events over 20 ms fell from two to zero. Daemon CPU was
+9,167.342 → 9,295.626 ms and allocation 3,385,867,200 → 3,388,565,440 bytes;
+this is not evidence of a CPU speedup or a meaningful allocation change.
+
+The slowest candidate event, insertion sample 526, recorded 5 ms in redisplay
+and 11.406 ms of process GC CPU in that stage. The separate earlier 46 ms command
+stall was not reproduced or diagnosed by this run. Absence in a finite run is
+not proof that every source of tail latency has been removed; the controlled
+callback reproduction provides the causal evidence for the retained fix.
+Normal artifacts: `/tmp/lem-deferred-redraw-trace.py`,
+`/tmp/lem-deferred-redraw-trace-after-long.{json,log}` and
+`/tmp/lem-deferred-redraw-trace-after-long-proof.{json,log}`, with snapshots;
+root `/tmp/lem-sdl-input-sqj34ktq`. The source checkout revision in these probes
+is `736ca2552` with the subsequently committed `7f41cfd0e` changes present;
+package provenance checks compare their actual bytes, not just the revision.
