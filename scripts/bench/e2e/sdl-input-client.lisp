@@ -150,7 +150,9 @@
                        (report-frame *drawing-screen* (sdl2:get-performance-counter)))))
              (assert (zerop (gui:run-graphical
                             (client::connect-client "sdl-input-bench")
-                            (list (uiop:getenv "LEM_SDL_DOCUMENT")) nil)))
+                            (list (format nil "+~d" (parse-integer
+                                                     (or (uiop:getenv "LEM_SDL_TARGET_LINE") "1")))
+                                  (uiop:getenv "LEM_SDL_DOCUMENT")) nil)))
              (assert (not pending)))
         (setf (symbol-function 'client::send-input) original-send
               (symbol-function 'gui::draw-screen) original-draw

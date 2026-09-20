@@ -5533,3 +5533,44 @@ Artifacts:
   Roots in ABBA order: `/tmp/lem-sdl-input-ej121hd6`,
   `/tmp/lem-sdl-input-c1n3uxcv`, `/tmp/lem-sdl-input-c6pum53m`,
   `/tmp/lem-sdl-input-j08la476`.
+
+
+### Measure SDL typing at an explicit file line (2026-09-20)
+
+`sdl-input.py --target-line N` inserts its marker immediately before the
+one-based fixture line N and opens the GUI at that marker through the existing
+`+LINE` visit protocol. The default remains line 1. It verifies the actual
+starting line/column and marker, plus the final line/column after all paired
+inputs. Existing per-input presentation acknowledgements, whole-buffer text,
+exact save bytes, unchanged source-fixture bytes and clean-exit checks remain.
+
+Results record `target_line`, `target_byte_offset`, `fixture_source_bytes`,
+`fixture_source_sha256`, and actual `editing.line_number` / `column_number`.
+This separates source provenance from the marker-containing document hash when
+comparing different positions. Input files containing the reserved
+`BENCH_TARGET` marker are rejected to prevent ambiguous presentation matches.
+Line insertion counts only LF, preserving UTF-8 and other control characters.
+The original source file is never rewritten. For programming modes the selected
+marker location must also survive the normal save/format hooks unchanged.
+
+Python compilation and 12 preparation checks passed: invalid/nonpositive and
+out-of-file lines, duplicate markers, empty input, no final newline, an empty
+final line, UTF-8 byte offsets, and vertical-tab/form-feed characters that must
+not be treated as line separators. Preparation artifacts are under
+`/tmp/lem-target-validation-p99lbk8f`.
+
+Two real software/X11 GUI smoke runs used the current `41c2dff49` configured
+editor, `/nix/store/jyplyd0wz66al9my1kdllsnkhwiscg88-lem-yath/bin/lem`, with
+20 measured inputs plus two warmups at 25 ms pacing on CPUs 0–3:
+
+- Line 1, byte offset 0, private root `/tmp/lem-sdl-input-qdj9gym3`.
+- Line 6,514, byte offset 263,301, root `/tmp/lem-sdl-input-vheopesx`.
+
+Both confirmed LISP-MODE with highlighting and the configured editing modes,
+passed text/save/source integrity, probe hashes and clean exits. Removing exactly
+the marker at the recorded offset reconstructs the original 524,731-byte source
+in both runs. These short runs validate the probe, not a performance conclusion.
+Artifacts: `/tmp/lem-target-smoke.{py,log}` and
+`/tmp/lem-target-{first,deep}-smoke.{json,log}`. The formatted source is still
+`/tmp/lem-lisp-500k-formatted.lisp`, SHA-256
+`879c5b01637e0f9d80e7377476cc22439fc42a5da7a2e5a15473dc62da0cc3f9`.

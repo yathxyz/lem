@@ -14,7 +14,8 @@ resource evaluations before warmup and after the final pacing interval. GC CPU
 is not a wall pause. Results are written only after full text/byte checks and clean exits.
 The private document filename selects its mode normally; active modes and
 syntax highlighting are recorded before timing. Inputs alternate x/backspace
-at the first line, without evaluating code or exercising structural commands.
+at a marker inserted before --target-line (default 1), without evaluating code
+or exercising structural commands. The fixture must not contain BENCH_TARGET.
 """
 import argparse
 import ctypes
@@ -39,6 +40,8 @@ parser.add_argument('--count', type=int, default=200)
 parser.add_argument('--warmup', type=int, default=20)
 parser.add_argument('--pace', type=float, default=0.025)
 parser.add_argument('--fixture', type=Path)
+parser.add_argument('--target-line', type=int, default=1,
+                    help='One-based fixture line before which to insert the input marker')
 parser.add_argument('--document-name', default='bench.txt',
                     help='Private document filename; its extension selects the editing mode')
 parser.add_argument('--expect-major-mode',
@@ -51,6 +54,8 @@ parser.add_argument('--client-sdl-source', type=Path,
 args = parser.parse_args()
 if args.count <= 0 or args.count % 2 or args.warmup < 0 or args.warmup % 2 or not math.isfinite(args.pace) or args.pace < 0:
     parser.error('count must be positive/even, warmup nonnegative/even, pace nonnegative')
+if args.target_line < 1:
+    parser.error('target-line must be positive')
 if args.output.exists() or not args.output.parent.is_dir():
     parser.error('output must be a new file in an existing directory')
 if (not args.document_name or Path(args.document_name).name != args.document_name
@@ -66,7 +71,15 @@ except UnicodeDecodeError:
     parser.error('fixture must be UTF-8 text')
 if '\r' in text:
     parser.error('fixture must use UTF-8 and LF line endings')
-document_bytes = b'BENCH_TARGET\n' + original
+if b'BENCH_TARGET' in original:
+    parser.error('fixture must not contain the reserved BENCH_TARGET marker')
+target_offset = 0
+for _ in range(args.target_line - 1):
+    newline = original.find(b'\n', target_offset)
+    if newline < 0:
+        parser.error('target-line is beyond the final fixture line')
+    target_offset = newline + 1
+document_bytes = original[:target_offset] + b'BENCH_TARGET\n' + original[target_offset:]
 editor = str(Path(os.environ['LEM_BIN']).absolute())
 editor_resolved = str(Path(editor).resolve(strict=True))
 revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
@@ -208,7 +221,8 @@ try:
     assert evaluate('(lem-yath:boot-ok-p)') == 'T'
     ackfd, writefd = os.pipe()
     descriptors.extend((ackfd, writefd))
-    env.update(LEM_SDL_ACK_FD=str(writefd), LEM_SDL_DOCUMENT=str(document), LEM_SDL_REPO=str(repo))
+    env.update(LEM_SDL_ACK_FD=str(writefd), LEM_SDL_DOCUMENT=str(document),
+               LEM_SDL_TARGET_LINE=str(args.target_line), LEM_SDL_REPO=str(repo))
     client = start(['sbcl', '--noinform', '--no-sysinit', '--no-userinit',
                     '--load', str(repo / '.qlot/setup.lisp'), '--script',
                     str(Path(__file__).with_name('sdl-input-client.lisp'))],
@@ -223,7 +237,10 @@ try:
     if args.renderer:
         assert initial['renderer']['name'] == args.renderer, initial['renderer']
     assert evaluate('(progn (assert (eq (lem:current-buffer) (lem:get-file-buffer '
-                    + quote(document) + '))) (lem:buffer-start (lem:current-point)) '
+                    + quote(document) + '))) '
+                    '(lem:move-to-line (lem:current-point) ' + str(args.target_line) + ') '
+                    '(lem:line-start (lem:current-point)) '
+                    '(assert (string= "BENCH_TARGET" (lem:line-string (lem:current-point)))) '
                     '(lem-vi-mode/commands:vi-insert) (lem:redraw-display :force t) t)', gui=True) == 'T'
     # Yason produces JSON without literal control characters, so its printed
     # Lisp string can be unquoted as JSON before decoding the enclosed object.
@@ -231,11 +248,14 @@ try:
         '(with-output-to-string (stream) '
         '(yason:encode (lem-daemon/protocol:make-object '
         '"major_mode" (symbol-name (lem:buffer-major-mode (lem:current-buffer))) '
+        '"line_number" (lem:line-number-at-point (lem:current-point)) '
+        '"column_number" (lem:point-charpos (lem:current-point)) '
         '"active_modes" (map \'vector (lambda (mode) (symbol-name (type-of mode))) '
         '(lem:all-active-modes (lem:current-buffer))) '
         '"syntax_highlight" (if (lem:enable-syntax-highlight-p (lem:current-buffer)) '
         '\'yason:true \'yason:false)) stream))', gui=True)))
     print('EDITING: ' + json.dumps(editing), flush=True)
+    assert editing['line_number'] == args.target_line and editing['column_number'] == 0, editing
     if args.expect_major_mode:
         assert editing['major_mode'] == args.expect_major_mode, editing
     if args.input_method == 'x11':
@@ -268,8 +288,10 @@ try:
                                 client_send_to_present_ms=reply['client_send_to_present_ms']))
         time.sleep(args.pace)
     stop_resources = evaluate(resources, gui=True)
-    assert evaluate('(string= (lem:buffer-text (lem:current-buffer)) '
-                    '(uiop:read-file-string ' + quote(document) + '))', gui=True) == 'T'
+    assert evaluate('(and (= ' + str(args.target_line) + ' (lem:line-number-at-point (lem:current-point))) '
+                    '(zerop (lem:point-charpos (lem:current-point))) '
+                    '(string= (lem:buffer-text (lem:current-buffer)) '
+                    '(uiop:read-file-string ' + quote(document) + ')))', gui=True) == 'T'
     assert evaluate('(progn (lem:save-buffer (lem:current-buffer)) '
                     '(not (lem:buffer-modified-p (lem:current-buffer))))', gui=True) == 'T'
     assert document.read_bytes() == document_bytes
@@ -289,6 +311,8 @@ try:
                   client_revision=revision, client_sdl_source=str(client_source), client_sdl_sha256=source_sha256,
                   client_runtime="source-loaded SBCL after full GC", root=str(root), samples=records,
                   warmup=args.warmup, pace_seconds=args.pace, fixture_source=str(fixture) if fixture else None,
+                  fixture_source_bytes=len(original), fixture_source_sha256=hashlib.sha256(original).hexdigest(),
+                  target_line=args.target_line, target_byte_offset=target_offset,
                   document_name=args.document_name, editing=editing,
                   expected_major_mode=args.expect_major_mode,
                   fixture_bytes=len(document_bytes), fixture_sha256=hashlib.sha256(document_bytes).hexdigest())
