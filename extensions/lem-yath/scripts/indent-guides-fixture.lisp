@@ -51,6 +51,63 @@
   (find-file filename)
   (current-buffer))
 
+(defun indent-guides-test-line-indentation ()
+  ;; Keep the original point-walking implementation as a differential oracle.
+  (flet ((reference (point)
+           (with-point ((scan point))
+             (line-start scan)
+             (let ((column 0)
+                   (width (variable-value 'tab-width :default scan)))
+               (loop :for character := (character-at scan)
+                     :do (case character
+                           (#\Space (incf column) (character-offset scan 1))
+                           (#\Tab
+                            (incf column (- width (mod column width)))
+                            (character-offset scan 1))
+                           (otherwise
+                            (return (values column
+                                            (or (null character)
+                                                (eql character #\Newline)))))))))))
+    (let ((buffer (make-buffer "indentation-scan-test" :temporary t))
+          (cases 0))
+      (unwind-protect
+           (progn
+             (dolist (prefix (list "" "  " (string #\Tab)
+                                   (format nil " ~c" #\Tab)
+                                   (format nil "~c " #\Tab)
+                                   (format nil "~c~c " #\Tab #\Tab)
+                                   (make-string 37 :initial-element #\Space)))
+               (dolist (suffix (list "" "x" "λ" (string #\Page)
+                                     (string #\Return) (string (code-char 160))))
+                 (dolist (terminated '(nil t))
+                   (let ((text (concatenate 'string (format nil "before~%")
+                                            prefix suffix
+                                            (if terminated
+                                                (format nil "~%after") ""))))
+                     (erase-buffer buffer)
+                     (insert-string (buffer-point buffer) text)
+                     (let ((tick (buffer-modified-tick buffer)))
+                       (dolist (width '(1 2 4 8 16))
+                         (setf (variable-value 'tab-width :buffer buffer) width)
+                         (with-point ((point (buffer-start-point buffer)))
+                           (move-to-line point 2)
+                           ;; Every column includes BOL, the indentation boundary
+                           ;; and EOL; buffer-local width changes between scans.
+                           (dotimes (column (1+ (+ (length prefix) (length suffix))))
+                             (let ((position (position-at-point point)))
+                               (assert (equal (multiple-value-list (reference point))
+                                              (multiple-value-list
+                                               (point-line-indentation point))))
+                               (assert (= position (position-at-point point)))
+                               (incf cases))
+                             (when (< column (+ (length prefix) (length suffix)))
+                               (character-offset point 1)))))
+                       (assert (= tick (buffer-modified-tick buffer)))
+                       (assert (string= text (buffer-text buffer))))))))
+             (indent-guides-test-log
+              "LINE-INDENTATION cases=~d correct=yes unchanged=yes" cases))
+        (delete-buffer buffer)))))
+
 (defun indent-guides-test-string-limits (buffer)
   (let ((original (symbol-function 'in-string-p))
         (queries 0)
@@ -203,6 +260,7 @@
 (let ((buffer (indent-guides-test-open *indent-guides-test-code*)))
   (setf *indent-guides-test-original-text* (buffer-text buffer)
         (variable-value 'lem/language-mode:indent-size :buffer buffer) 4)
+  (indent-guides-test-line-indentation)
   (indent-guides-test-string-limits buffer)
   (indent-guides-test-record-code)
   (move-point (current-point) (buffer-start-point buffer))
