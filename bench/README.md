@@ -5337,3 +5337,95 @@ That predicate still resolves each excluded package/symbol/class on every row;
 it also repeats class resolution when passing the symbol to `typep` after
 already calling `find-class`. This is the next measured optimization candidate.
 The capture is `/tmp/lem-sdl-input-z0errabp/server-profile.txt`.
+
+
+### Reject mode lookup and display-string copy candidates (2026-09-20)
+
+The latest daemon profile suggested two experiments. Neither was adopted;
+production remains at the `656f9c9e7` indentation-guide implementation.
+
+First, `mode-object-typep` was compiled with its already-resolved class passed
+to `typep`, instead of passing the symbol and resolving the class again. A
+same-process ABBA of 100,000 sweeps over Lisp and all seven excluded mode classes
+saved only 2.0% of predicate CPU (294.648 versus 288.824 ms). Results agreed for
+all modes. This component result does not establish a useful full-editor gain.
+The production helper still performs fresh package/symbol/class lookup.
+Artifacts: `/tmp/lem-mode-class-component.{lisp,py,log}` and private root
+`/tmp/lem-mode-class-le5s2u77`.
+
+Second, `transform-indent-guide-line` copied every programming-language display
+string even when it painted no guide. The candidate added this guard immediately
+after blank-line extension and before `copy-seq`:
+
+```lisp
+(when (<= (min indentation
+               (length (lem-core::logical-line-string logical-line)))
+          spacing)
+  (return-from transform-indent-guide-line
+    (lem-core::logical-line-attributes logical-line)))
+```
+
+The candidate preserved string ownership when painting and blank-line EOL cursor
+anchoring. Its fixture covered zero/one-level indentation, empty/shortened display
+strings, a cursor at a painted guide, and a blank context shallower than guide
+spacing. All four unpainted strings were reused instead of copied. Text,
+attributes, cursors and buffer modification ticks matched. All packaged checks
+passed: 14 indentation-guide, 9 Org-modern and 19 native client/display/lifecycle
+checks. Production and fixture bytes matched the built configuration source.
+
+A same-process component ABBA compiled both function bodies under the same policy,
+retaining declarations and named blocks. It transformed the first 39 physical
+lines of the formatted Lisp fixture 2,000 times per phase, resetting input strings,
+attributes and syntax/context caches each iteration. After warming both variants
+and full GC before each phase, mean allocation fell from 23,747,520 to 11,204,160
+bytes (52.8%). CPU was 88.133 versus 86.193 ms (2.2% lower). Every final string,
+attribute and the complete source text matched.
+
+Full typing results did not support keeping it. Each ABBA used the formatted
+524 KB Lisp fixture, 600 measured inputs, 20 warmups, 25 ms pacing, X11/software
+rendering and all configured language modes/highlighting. The first set used
+ordinary scheduling. Because both candidate runs were slower, a second set
+restricted the private benchmark and its descendants to CPUs 0–3 (four physical
+cores sharing an L3 cache); no system scheduling settings were changed.
+Numbers below are means of two runs, including means of per-run percentiles:
+
+| Measurement | Ordinary baseline | Ordinary candidate | CPUs 0–3 baseline | CPUs 0–3 candidate |
+| --- | ---: | ---: | ---: | ---: |
+| Daemon CPU (ms) | 662.111 | 775.746 | 601.102 | 604.744 |
+| Daemon allocated bytes | 117,592,864 | 112,570,200 | 117,457,176 | 112,486,680 |
+| Client CPU (ms) | 324.386 | 413.858 | 268.442 | 276.539 |
+| Client send-to-present median (ms) | 1.086 | 1.482 | 0.980 | 0.999 |
+| Client send-to-present p95 (ms) | 1.754 | 2.006 | 1.278 | 1.416 |
+| Submission-to-ack median (ms) | 1.226 | 1.730 | 1.113 | 1.136 |
+| Submission-to-ack p95 (ms) | 2.032 | 2.327 | 1.436 | 1.596 |
+
+The full allocation reduction reproduced (4.27% ordinary, 4.23% with affinity).
+With affinity, mean daemon CPU was almost flat (+0.61%) and median latency ranges
+overlapped, but both candidate p95 values (1.432/1.400 ms) exceeded both baseline
+values (1.344/1.212 ms). Mean p95 rose 10.8%. This does not identify the cause of
+the timing difference, and the unchanged client also varied, but it provides no
+responsiveness win to justify retaining the candidate. The production change and
+its candidate-only fixtures were removed. RenderPresent return is not physical
+monitor latency; GC CPU is not a measured pause.
+
+All eight full-input runs passed complete text/save/source-fixture integrity,
+mode/renderer/probe/source hash checks and clean client/daemon exits. Baseline:
+`/nix/store/iki8wg9zj1c5wd25xzmzwh9mxsnv6s2j-lem-yath/bin/lem`.
+Rejected candidate: `/nix/store/scvncabmpwh95ph43azfmdnx094w7n1z-lem-yath/bin/lem`,
+resolved editor `/nix/store/0x8f64nk03cy1sjgbyg1a0qfnir8c0q3-lem/bin/lem`,
+configuration `/nix/store/gma7i9jwmcsr68mwcxhh06qfh0dzxywd-lem-yath`.
+
+Artifacts: `/tmp/lem-indent-copy-rejected.patch`,
+`/tmp/lem-indent-copy-check.py`, `/tmp/lem-indent-copy-{before,after}.log`,
+`/tmp/lem-indent-copy-component.{lisp,py}`, successful component log
+`/tmp/lem-indent-copy-component-r2.log`, `/tmp/lem-indent-copy-build.{paths,log}`,
+`/tmp/lem-indent-copy-{before,after}-{1,2}.{json,log}`, and
+`/tmp/lem-indent-copy-affinity-{before,after}-{1,2}.{json,log}`.
+Drivers/verifiers and aggregate reports:
+`/tmp/lem-indent-copy-{input,results}.{py,log}` and
+`/tmp/lem-indent-copy-affinity-{input,results}.{py,log}`.
+Ordinary run roots, in ABBA order: `wrcsbulq`, `mxe2zx_7`, `ij59r0pv`, `_lmp0gk9`;
+affinity run roots: `xttav4ab`, `73p4mvam`, `ee_iv_3h`, `7vbd2mzs` (each prefixed
+`/tmp/lem-sdl-input-`). Focused roots:
+`/tmp/lem-indent-copy-o97fdt4d`, `/tmp/lem-indent-copy-t53ovde3`; successful component
+root: `/tmp/lem-indent-copy-component-me4k6ui7`.
