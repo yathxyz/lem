@@ -5293,3 +5293,47 @@ This measures the component with surrounding indentation/context lookup, not
 complete input or rendering. Artifacts:
 `/tmp/lem-indent-limit-component.{lisp,py}` and
 `/tmp/lem-indent-limit-component-r2.log`.
+
+
+### Investigate the isolated profiling shutdown timeout (2026-09-20)
+
+The earlier 2,400-input CPU profile reached all input and save checks but its
+SDL client did not exit within 20 seconds. Three new diagnostic runs retained
+the same 524 KB Lisp fixture, 2,400 measured inputs, 20 warmups, 5 ms pacing and
+software/X11 event path:
+
+- Original `9e5a54632` daemon, without profiling: clean client/daemon exits.
+- Original daemon, with the same SB-SPROF CPU settings and report generation:
+  clean client/daemon exits.
+- Current `656f9c9e7` daemon, with CPU profiling: clean exits, followed by 20
+  additional fresh SDL client attachments and clean closures against that
+  daemon. Each client reached its initial matching fixture presentation first.
+
+Every run passed text/save/source-fixture checks and source/probe hash checks.
+The current run used `/nix/store/iki8wg9zj1c5wd25xzmzwh9mxsnv6s2j-lem-yath/bin/lem`.
+A disposable SDL source copy installs a SIGUSR1 handler for thread traces; the
+Python driver would collect client/daemon process wait states and thread
+stacks on a close timeout before retaining the original failure. No timeout
+occurred, so that diagnostic collection path was not exercised. These runs do
+not identify the earlier failure's cause or prove it fixed. No production
+shutdown behavior was changed, and profiled timing is not used as a speedup
+measurement.
+
+Artifacts: `/tmp/lem-shutdown-diagnostic.py`,
+`/tmp/lem-shutdown-debug-sdl.lisp`,
+`/tmp/lem-shutdown-{plain-old,cpu-old,cpu-current}.json`, corresponding
+`-instrumented.py` snapshots, and logs
+`/tmp/lem-shutdown-plain-old-r2.log`, `/tmp/lem-shutdown-cpu-old.log`,
+`/tmp/lem-shutdown-cpu-current.log`. Private roots are respectively
+`/tmp/lem-sdl-input-oblnyh7c`, `/tmp/lem-sdl-input-8we1hpvf`, and
+`/tmp/lem-sdl-input-z0errabp`.
+
+The successful current CPU capture contains 2,190 samples. The largest named
+self hotspot is `overlay-cells` (133 samples, 6.1% self, 7.2% including callees).
+`programming-buffer-p` accounts for 275 samples (12.6% including callees), split
+mainly between line-number and indentation-guide rendering. Its class lookup
+helper, `mode-object-typep`, accounts for 202 samples (9.2% including callees).
+That predicate still resolves each excluded package/symbol/class on every row;
+it also repeats class resolution when passing the symbol to `typep` after
+already calling `find-class`. This is the next measured optimization candidate.
+The capture is `/tmp/lem-sdl-input-z0errabp/server-profile.txt`.
